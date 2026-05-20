@@ -3,9 +3,14 @@ name = "clear-ui"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "clear_ui"
+path = "src/lib.rs"
+
 [dependencies]
 winit = "0.30"
 wgpu = "24"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
-taffy = "0.10.1"
+glyphon = "0.8"
+tokio = { version = "1", features = ["full"] }

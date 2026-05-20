@@ -4,7 +4,13 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowAttributes};
-use taffy::prelude::TaffyMaxContent;
+
+use clear_ui::widget::{Button, Checkbox, ContentBg, Header, Panel, ProgressBar, Sidebar, Slider, Spinbox, StatusBar, Toggle, Widget};
+
+use glyphon::{
+    Attrs, Buffer, Cache, FontSystem, Metrics, Resolution, SwashCache, TextArea, TextAtlas,
+    TextBounds, TextRenderer, Viewport,
+};
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -48,658 +54,17 @@ fn quad_vertices(
     ]
 }
 
-mod colors {
-    pub const HEADER_BG: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
-    pub const HEADER_ACCENT: [f32; 4] = [0.60, 0.40, 0.20, 1.0];
-    pub const SIDEBAR_BG: [f32; 4] = [0.10, 0.10, 0.13, 1.0];
-    pub const CONTENT_BG: [f32; 4] = [0.13, 0.13, 0.16, 1.0];
-    pub const PANEL_IDLE: [f32; 4] = [0.14, 0.70, 0.38, 1.0];
-    pub const PANEL_DRAG: [f32; 4] = [0.24, 0.85, 0.50, 1.0];
-    pub const BUTTON_IDLE: [f32; 4] = [0.20, 0.40, 0.65, 1.0];
-    pub const BUTTON_HOVER: [f32; 4] = [0.30, 0.52, 0.78, 1.0];
-    pub const BUTTON_PRESS: [f32; 4] = [0.12, 0.28, 0.50, 1.0];
-    pub const STATUS_BG: [f32; 4] = [0.06, 0.06, 0.10, 1.0];
-    pub const STATUS_ACCENT: [f32; 4] = [0.20, 0.20, 0.25, 1.0];
-    pub const RESET_BTN_IDLE: [f32; 4] = [0.55, 0.20, 0.20, 1.0];
-    pub const RESET_BTN_HOVER: [f32; 4] = [0.70, 0.30, 0.30, 1.0];
-    pub const RESET_BTN_PRESS: [f32; 4] = [0.40, 0.12, 0.12, 1.0];
-    pub const CHECKBOX_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
-    pub const CHECKBOX_CHECKED: [f32; 4] = [0.20, 0.50, 0.75, 1.0];
-    pub const CHECKBOX_HOVER: [f32; 4] = [0.25, 0.25, 0.30, 1.0];
-    pub const TOGGLE_OFF: [f32; 4] = [0.25, 0.25, 0.30, 1.0];
-    pub const TOGGLE_ON: [f32; 4] = [0.14, 0.70, 0.38, 1.0];
-    pub const TOGGLE_HOVER: [f32; 4] = [0.30, 0.30, 0.35, 1.0];
-    pub const SLIDER_TRACK: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
-    pub const SLIDER_THUMB: [f32; 4] = [0.60, 0.60, 0.65, 1.0];
-    pub const SLIDER_THUMB_DRAG: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
-    pub const PROGRESS_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
-    pub const PROGRESS_FILL: [f32; 4] = [0.20, 0.50, 0.75, 1.0];
+fn widget_vertices(w: &dyn Widget, sw: f32, sh: f32) -> Vec<Vertex> {
+    let (x, y, ww, h) = w.rect();
+    quad_vertices(x, y, ww, h, sw, sh, w.color()).to_vec()
 }
 
-trait Widget {
-    fn rect(&self) -> (f32, f32, f32, f32);
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32);
-
-    fn hit_test(&self, px: f32, py: f32) -> bool {
-        let (x, y, w, h) = self.rect();
-        px >= x && px <= x + w && py >= y && py <= y + h
-    }
-
-    fn cursor_moved(&mut self, _px: f32, _py: f32) -> bool { false }
-    fn mouse_input(&mut self, _button: MouseButton, _state: ElementState, _px: f32, _py: f32) -> bool { false }
-
-    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
-        let (x, y, w, h) = self.rect();
-        quad_vertices(x, y, w, h, sw, sh, self.color()).to_vec()
-    }
-
-    fn color(&self) -> [f32; 4];
-
-    fn is_dragging(&self) -> bool { false }
-    fn drag_update(&mut self, _px: f32, _py: f32) -> bool { false }
-    fn drag_begin(&mut self, _px: f32, _py: f32) {}
-    fn drag_end(&mut self) {}
-    fn take_click(&mut self) -> bool { false }
-    fn draggable(&self) -> bool { false }
-}
-
-struct Header {
-    x: f32, y: f32, w: f32, h: f32,
-}
-
-impl Header {
-    fn new() -> Self { Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0 } }
-}
-
-impl Widget for Header {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::HEADER_BG }
-
-    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
-        let (x, y, w, h) = self.rect();
-        let mut verts = Vec::new();
-        verts.extend(quad_vertices(x, y, w, h, sw, sh, colors::HEADER_BG));
-        verts.extend(quad_vertices(x, y + h - 2.0, w, 2.0, sw, sh, colors::HEADER_ACCENT));
-        verts
-    }
-}
-
-struct StatusBar {
-    x: f32, y: f32, w: f32, h: f32,
-}
-
-impl StatusBar {
-    fn new() -> Self { Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0 } }
-}
-
-impl Widget for StatusBar {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::STATUS_BG }
-
-    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
-        let (x, y, w, h) = self.rect();
-        let mut verts = Vec::new();
-        verts.extend(quad_vertices(x, y, w, h, sw, sh, colors::STATUS_BG));
-        verts.extend(quad_vertices(x, y, w, 2.0, sw, sh, colors::STATUS_ACCENT));
-        verts
-    }
-}
-
-struct Panel {
-    x: f32, y: f32, w: f32, h: f32,
-    dragging: bool,
-    drag_ox: f32, drag_oy: f32,
-    drag_start_x: f32, drag_start_y: f32,
-}
-
-impl Panel {
-    fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, dragging: false, drag_ox: 0.0, drag_oy: 0.0, drag_start_x: 0.0, drag_start_y: 0.0 }
-    }
-}
-
-impl Widget for Panel {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { if self.dragging { colors::PANEL_DRAG } else { colors::PANEL_IDLE } }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {
-                if self.hit_test(px, py) {
-                    self.drag_begin(px, py);
-                    return true;
-                }
-            }
-            ElementState::Released => {
-                if self.dragging { self.drag_end(); return true; }
-            }
-        }
-        false
-    }
-
-    fn is_dragging(&self) -> bool { self.dragging }
-    fn draggable(&self) -> bool { true }
-
-    fn drag_update(&mut self, px: f32, py: f32) -> bool {
-        let nx = px - self.drag_ox;
-        let ny = py - self.drag_oy;
-        if (nx - self.x).abs() > 0.01 || (ny - self.y).abs() > 0.01 {
-            self.x = nx;
-            self.y = ny;
-            return true;
-        }
-        false
-    }
-
-    fn drag_begin(&mut self, px: f32, py: f32) {
-        self.dragging = true;
-        self.drag_ox = px - self.x;
-        self.drag_oy = py - self.y;
-        self.drag_start_x = self.x;
-        self.drag_start_y = self.y;
-    }
-
-    fn drag_end(&mut self) { self.dragging = false; }
-}
-
-enum ButtonKind {
-    Primary,
-    Reset,
-}
-
-struct Button {
-    x: f32, y: f32, w: f32, h: f32,
-    hovering: bool,
-    pressed: bool,
-    just_clicked: bool,
-    kind: ButtonKind,
-}
-
-impl Button {
-    fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Primary }
-    }
-
-    fn new_reset(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Reset }
-    }
-}
-
-impl Widget for Button {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] {
-        match self.kind {
-            ButtonKind::Primary => {
-                if self.pressed { colors::BUTTON_PRESS }
-                else if self.hovering { colors::BUTTON_HOVER }
-                else { colors::BUTTON_IDLE }
-            }
-            ButtonKind::Reset => {
-                if self.pressed { colors::RESET_BTN_PRESS }
-                else if self.hovering { colors::RESET_BTN_HOVER }
-                else { colors::RESET_BTN_IDLE }
-            }
-        }
-    }
-
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovering;
-        self.hovering = self.hit_test(px, py);
-        was != self.hovering
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {
-                if self.hit_test(px, py) {
-                    self.pressed = true;
-                    return true;
-                }
-            }
-            ElementState::Released => {
-                if self.pressed && self.hit_test(px, py) {
-                    self.just_clicked = true;
-                }
-                let was = self.pressed;
-                self.pressed = false;
-                return was;
-            }
-        }
-        false
-    }
-
-    fn take_click(&mut self) -> bool {
-        if self.just_clicked { self.just_clicked = false; true } else { false }
-    }
-}
-
-struct Sidebar {
-    x: f32, y: f32, w: f32, h: f32,
-}
-
-impl Sidebar {
-    fn new(w: f32) -> Self { Self { x: 0.0, y: 0.0, w, h: 0.0 } }
-}
-
-impl Widget for Sidebar {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::SIDEBAR_BG }
-}
-
-struct ContentBg {
-    x: f32, y: f32, w: f32, h: f32,
-}
-
-impl ContentBg {
-    fn new() -> Self { Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0 } }
-}
-
-impl Widget for ContentBg {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::CONTENT_BG }
-}
-
-struct Checkbox {
-    x: f32, y: f32, w: f32, h: f32,
-    hovering: bool,
-    checked: bool,
-    just_clicked: bool,
-}
-
-impl Checkbox {
-    fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovering: false, checked: false, just_clicked: false }
-    }
-}
-
-impl Widget for Checkbox {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::CHECKBOX_BG }
-
-    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
-        let (x, y, w, h) = self.rect();
-        let mut verts = Vec::new();
-        let bg = if self.hovering { colors::CHECKBOX_HOVER } else { colors::CHECKBOX_BG };
-        verts.extend(quad_vertices(x, y, w, h, sw, sh, bg));
-        if self.checked {
-            let inset = w * 0.2;
-            verts.extend(quad_vertices(x + inset, y + inset, w - inset * 2.0, h - inset * 2.0, sw, sh, colors::CHECKBOX_CHECKED));
-        }
-        verts
-    }
-
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovering;
-        self.hovering = self.hit_test(px, py);
-        was != self.hovering
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {}
-            ElementState::Released => {
-                if self.hit_test(px, py) {
-                    self.checked = !self.checked;
-                    self.just_clicked = true;
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn take_click(&mut self) -> bool {
-        if self.just_clicked { self.just_clicked = false; true } else { false }
-    }
-}
-
-struct Toggle {
-    x: f32, y: f32, w: f32, h: f32,
-    hovering: bool,
-    toggled: bool,
-    just_toggled: bool,
-}
-
-impl Toggle {
-    fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovering: false, toggled: false, just_toggled: false }
-    }
-}
-
-impl Widget for Toggle {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { if self.toggled { colors::TOGGLE_ON } else { colors::TOGGLE_OFF } }
-
-    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
-        let (x, y, w, h) = self.rect();
-        let mut verts = Vec::new();
-        let bg = if self.toggled { colors::TOGGLE_ON } else if self.hovering { colors::TOGGLE_HOVER } else { colors::TOGGLE_OFF };
-        verts.extend(quad_vertices(x, y, w, h, sw, sh, bg));
-        let thumb_size = h * 0.7;
-        let thumb_y = y + (h - thumb_size) * 0.5;
-        let thumb_x = if self.toggled { x + w - thumb_size - (h * 0.15) } else { x + (h * 0.15) };
-        verts.extend(quad_vertices(thumb_x, thumb_y, thumb_size, thumb_size, sw, sh, [0.95, 0.95, 0.97, 1.0]));
-        verts
-    }
-
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovering;
-        self.hovering = self.hit_test(px, py);
-        was != self.hovering
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {}
-            ElementState::Released => {
-                if self.hit_test(px, py) {
-                    self.toggled = !self.toggled;
-                    self.just_toggled = true;
-                    return true;
-                }
-            }
-        }
-        false
-    }
-}
-
-struct Slider {
-    x: f32, y: f32, w: f32, h: f32,
-    dragging: bool,
-    value: f32,
-    drag_offset: f32,
-}
-
-impl Slider {
-    fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, dragging: false, value: 0.5, drag_offset: 0.0 }
-    }
-}
-
-impl Widget for Slider {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::SLIDER_TRACK }
-
-    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
-        let (x, y, w, h) = self.rect();
-        let mut verts = Vec::new();
-        let track_h = h * 0.3;
-        let track_y = y + (h - track_h) * 0.5;
-        verts.extend(quad_vertices(x, track_y, w, track_h, sw, sh, colors::SLIDER_TRACK));
-
-        let thumb_size = h * 0.9;
-        let range = w - thumb_size;
-        let thumb_x = x + self.value * range;
-        let thumb_y = y + (h - thumb_size) * 0.5;
-        let thumb_color = if self.dragging { colors::SLIDER_THUMB_DRAG } else { colors::SLIDER_THUMB };
-        verts.extend(quad_vertices(thumb_x, thumb_y, thumb_size, thumb_size, sw, sh, thumb_color));
-        verts
-    }
-
-    fn draggable(&self) -> bool { true }
-    fn is_dragging(&self) -> bool { self.dragging }
-
-    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
-        let (sx, _, sw, _) = self.rect();
-        let thumb_size = self.h * 0.9;
-        let range = sw - thumb_size;
-        let raw = (px - self.drag_offset - sx) / range;
-        let new_val = raw.clamp(0.0, 1.0);
-        if (new_val - self.value).abs() > 0.001 {
-            self.value = new_val;
-            return true;
-        }
-        false
-    }
-
-    fn drag_begin(&mut self, px: f32, _py: f32) {
-        self.dragging = true;
-        let thumb_size = self.h * 0.9;
-        let thumb_x = self.x + self.value * (self.w - thumb_size);
-        self.drag_offset = px - thumb_x;
-    }
-
-    fn drag_end(&mut self) { self.dragging = false; }
-}
-
-struct ProgressBar {
-    x: f32, y: f32, w: f32, h: f32,
-    value: f32,
-}
-
-impl ProgressBar {
-    fn new(value: f32) -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, value }
-    }
-}
-
-impl Widget for ProgressBar {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::PROGRESS_BG }
-
-    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
-        let (x, y, w, h) = self.rect();
-        let mut verts = Vec::new();
-        verts.extend(quad_vertices(x, y, w, h, sw, sh, colors::PROGRESS_BG));
-        let fill_w = w * self.value;
-        if fill_w > 0.0 {
-            verts.extend(quad_vertices(x, y, fill_w, h, sw, sh, colors::PROGRESS_FILL));
-        }
-        verts
-    }
-}
-
-use taffy::geometry::{Rect, Size};
-use taffy::style::{Dimension, FlexDirection, LengthPercentage, Style};
-
-struct Layout {
-    tree: taffy::TaffyTree<()>,
-    root: taffy::NodeId,
-    widget_nodes: Vec<taffy::NodeId>,
-}
-
-impl Layout {
-    fn new(width: f32, height: f32) -> Self {
-        let mut tree = taffy::TaffyTree::new();
-
-        let header = tree.new_leaf(Style {
-            size: Size { width: Dimension::percent(1.0), height: Dimension::length(40.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let sidebar = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(60.0), height: Dimension::percent(1.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let content_bg = tree.new_leaf(Style {
-            flex_grow: 1.0,
-            size: Size { width: Dimension::percent(1.0), height: Dimension::percent(1.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let btn_a = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(140.0), height: Dimension::length(40.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let btn_b = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(140.0), height: Dimension::length(40.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let btn_c = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(140.0), height: Dimension::length(40.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let panel = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(400.0), height: Dimension::length(250.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let click_me = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(140.0), height: Dimension::length(40.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let reset = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(140.0), height: Dimension::length(40.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let checkbox = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(24.0), height: Dimension::length(24.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let toggle = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(48.0), height: Dimension::length(24.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let progress_bar = tree.new_leaf(Style {
-            flex_grow: 1.0,
-            size: Size { width: Dimension::length(160.0), height: Dimension::length(24.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let slider = tree.new_leaf(Style {
-            size: Size { width: Dimension::length(300.0), height: Dimension::length(32.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let status_bar = tree.new_leaf(Style {
-            size: Size { width: Dimension::percent(1.0), height: Dimension::length(28.0) },
-            ..Default::default()
-        }).unwrap();
-
-        let btn_row_1 = tree.new_with_children(
-            Style {
-                display: taffy::style::Display::Flex,
-                flex_direction: FlexDirection::Row,
-                gap: Size { width: LengthPercentage::length(10.0), height: LengthPercentage::length(0.0) },
-                ..Default::default()
-            },
-            &[btn_a, btn_b, btn_c],
-        ).unwrap();
-
-        let btn_row_2 = tree.new_with_children(
-            Style {
-                display: taffy::style::Display::Flex,
-                flex_direction: FlexDirection::Row,
-                gap: Size { width: LengthPercentage::length(10.0), height: LengthPercentage::length(0.0) },
-                ..Default::default()
-            },
-            &[click_me, reset],
-        ).unwrap();
-
-        let controls_row = tree.new_with_children(
-            Style {
-                display: taffy::style::Display::Flex,
-                flex_direction: FlexDirection::Row,
-                align_items: Some(taffy::style::AlignItems::Center),
-                gap: Size { width: LengthPercentage::length(16.0), height: LengthPercentage::length(0.0) },
-                ..Default::default()
-            },
-            &[checkbox, toggle, progress_bar],
-        ).unwrap();
-
-        let _content = tree.new_with_children(
-            Style {
-                display: taffy::style::Display::Flex,
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                padding: Rect {
-                    top: LengthPercentage::length(20.0),
-                    left: LengthPercentage::length(20.0),
-                    bottom: LengthPercentage::length(20.0),
-                    right: LengthPercentage::length(20.0),
-                },
-                gap: Size { width: LengthPercentage::length(0.0), height: LengthPercentage::length(12.0) },
-                ..Default::default()
-            },
-            &[btn_row_1, panel, btn_row_2, controls_row, slider],
-        ).unwrap();
-
-        let body = tree.new_with_children(
-            Style {
-                display: taffy::style::Display::Flex,
-                flex_direction: FlexDirection::Row,
-                flex_grow: 1.0,
-                size: Size { width: Dimension::percent(1.0), height: Dimension::auto() },
-                ..Default::default()
-            },
-            &[sidebar, content_bg],
-        ).unwrap();
-
-        let root = tree.new_with_children(
-            Style {
-                display: taffy::style::Display::Flex,
-                flex_direction: FlexDirection::Column,
-                size: Size { width: Dimension::length(width), height: Dimension::length(height) },
-                ..Default::default()
-            },
-            &[header, body, status_bar],
-        ).unwrap();
-
-        let widget_nodes = vec![
-            header,
-            sidebar,
-            content_bg,
-            btn_a,
-            btn_b,
-            btn_c,
-            panel,
-            click_me,
-            reset,
-            checkbox,
-            toggle,
-            progress_bar,
-            slider,
-            status_bar,
-        ];
-
-        let mut layout = Self { tree, root, widget_nodes };
-        layout.compute(width, height);
-        layout
-    }
-
-    fn compute(&mut self, width: f32, height: f32) {
-        self.tree.set_style(self.root, Style {
-            size: Size { width: Dimension::length(width), height: Dimension::length(height) },
-            ..Default::default()
-        }).unwrap();
-
-        self.tree.compute_layout(self.root, Size::MAX_CONTENT).unwrap();
-    }
-
-    fn widget_rect(&self, node_id: taffy::NodeId) -> (f32, f32, f32, f32) {
-        let layout = self.tree.layout(node_id).unwrap();
-        let x = layout.location.x;
-        let y = layout.location.y;
-        let w = layout.size.width;
-        let h = layout.size.height;
-        (x, y, w, h)
-    }
-
-    fn resize(&mut self, width: f32, height: f32) {
-        self.compute(width, height);
-    }
+fn make_text_buffer(font_system: &mut FontSystem, text: &str, size: f32) -> Buffer {
+    let metrics = Metrics::new(size, size * 1.4);
+    let mut buffer = Buffer::new(font_system, metrics);
+    buffer.set_text(font_system, text, Attrs::new(), glyphon::Shaping::Advanced);
+    buffer.shape_until_scroll(font_system, true);
+    buffer
 }
 
 struct State {
@@ -713,23 +78,41 @@ struct State {
     vertex_count: u32,
 
     widgets: Vec<Box<dyn Widget>>,
-    layout: Layout,
+    positions: Vec<(f32, f32, f32, f32)>,
+
+    font_system: FontSystem,
+    swash_cache: SwashCache,
+    text_atlas: TextAtlas,
+    text_renderer: TextRenderer,
+    text_viewport: Viewport,
+
+    label_buffer: Buffer,
+    status_buffer: Buffer,
 
     drag_widget: Option<usize>,
+    focused_widget: Option<usize>,
     click_count: u32,
 
     cursor_x: f32,
     cursor_y: f32,
 
-    width: u32,
-    height: u32,
+    width: f32,
+    height: f32,
+    physical_width: u32,
+    physical_height: u32,
+    scale: f64,
 }
 
 impl State {
     async fn new(window: Arc<Window>) -> Self {
-        let size = window.inner_size();
-        let sw = size.width as f32;
-        let sh = size.height as f32;
+        let scale = window.scale_factor();
+        let physical_size = window.inner_size();
+        let pw = physical_size.width.max(1);
+        let ph = physical_size.height.max(1);
+        let lw = pw as f32 / scale as f32;
+        let lh = ph as f32 / scale as f32;
+        let sw = lw;
+        let sh = lh;
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
@@ -764,7 +147,7 @@ impl State {
             .expect("Failed to create device");
 
         let config = surface
-            .get_default_config(&adapter, size.width.max(1), size.height.max(1))
+            .get_default_config(&adapter, pw, ph)
             .expect("Failed to get surface config");
         surface.configure(&device, &config);
 
@@ -817,24 +200,38 @@ impl State {
             cache: None,
         });
 
-        let layout = Layout::new(sw, sh);
+        // Initialize text rendering
+        let mut font_system = FontSystem::new();
+        let swash_cache = SwashCache::new();
+        let cache = Cache::new(&device);
+        let mut text_atlas = TextAtlas::new(&device, &queue, &cache, config.format);
+        let text_renderer = TextRenderer::new(&mut text_atlas, &device, wgpu::MultisampleState::default(), None);
+
+        let mut text_viewport = Viewport::new(&device, &cache);
+        text_viewport.update(&queue, Resolution { width: pw, height: ph });
+
+        let label_buffer = make_text_buffer(&mut font_system, "Hello, Clear UI!", 16.0);
+        let status_buffer = make_text_buffer(&mut font_system, "Click a button to interact", 12.0);
 
         let widgets: Vec<Box<dyn Widget>> = vec![
-            Box::new(Header::new()),                        // 0
-            Box::new(Sidebar::new(60.0)),                   // 1
-            Box::new(ContentBg::new()),                     // 2
-            Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),  // 3
-            Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),  // 4
-            Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),  // 5
-            Box::new(Panel::new(0.0, 0.0, 400.0, 250.0)),  // 6
-            Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),  // 7
-            Box::new(Button::new_reset(0.0, 0.0, 140.0, 40.0)), // 8
-            Box::new(Checkbox::new()),                       // 9
-            Box::new(Toggle::new()),                         // 10
-            Box::new(ProgressBar::new(0.65)),                // 11
-            Box::new(Slider::new()),                         // 12
-            Box::new(StatusBar::new()),                      // 13
+            Box::new(Header::new()),
+            Box::new(Sidebar::new(60.0)),
+            Box::new(ContentBg::new()),
+            Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),
+            Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),
+            Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),
+            Box::new(Panel::new(0.0, 0.0, 400.0, 250.0)),
+            Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),
+            Box::new(Button::new_reset(0.0, 0.0, 140.0, 40.0)),
+            Box::new(Checkbox::new()),
+            Box::new(Toggle::new()),
+            Box::new(ProgressBar::new(0.65)),
+            Box::new(Slider::new()),
+            Box::new(StatusBar::new()),
+            Box::new(Spinbox::new(0, -10, 10, 1)),
         ];
+
+        let positions = demo_positions(sw, sh);
 
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Vertex Buffer"),
@@ -853,13 +250,24 @@ impl State {
             vertex_buffer,
             vertex_count: 0,
             widgets,
-            layout,
+            positions,
+            font_system,
+            swash_cache,
+            text_atlas,
+            text_renderer,
+            text_viewport,
+            label_buffer,
+            status_buffer,
             drag_widget: None,
+            focused_widget: None,
             click_count: 0,
             cursor_x: 0.0,
             cursor_y: 0.0,
-            width: size.width,
-            height: size.height,
+            width: lw,
+            height: lh,
+            physical_width: pw,
+            physical_height: ph,
+            scale,
         };
 
         state.apply_layout();
@@ -868,23 +276,26 @@ impl State {
     }
 
     fn apply_layout(&mut self) {
-        for (i, node_id) in self.layout.widget_nodes.iter().enumerate() {
+        for (i, pos) in self.positions.iter().enumerate() {
             if let Some(widget) = self.widgets.get_mut(i) {
                 if widget.is_dragging() {
                     continue;
                 }
-                let (x, y, w, h) = self.layout.widget_rect(*node_id);
+                let (x, y, w, h) = *pos;
                 widget.set_rect(x, y, w, h);
             }
         }
     }
 
     fn collect_vertices(&self) -> Vec<Vertex> {
-        let sw = self.width as f32;
-        let sh = self.height as f32;
+        let sw = self.width;
+        let sh = self.height;
         let mut verts = Vec::new();
         for w in &self.widgets {
-            verts.extend(w.vertices(sw, sh));
+            verts.extend(widget_vertices(w.as_ref(), sw, sh));
+            for (qx, qy, qw, qh, qc) in w.extra_quads() {
+                verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
+            }
         }
         verts
     }
@@ -905,14 +316,104 @@ impl State {
         self.queue.write_buffer(&self.vertex_buffer, 0, data);
     }
 
+    fn update_status_text(&mut self, text: &str) {
+        self.status_buffer = make_text_buffer(&mut self.font_system, text, 12.0);
+    }
+
+    fn prepare_text(&mut self) {
+        let Self {
+            ref mut text_renderer,
+            ref device,
+            ref queue,
+            ref mut font_system,
+            ref mut text_atlas,
+            ref mut text_viewport,
+            ref mut swash_cache,
+            ref label_buffer,
+            ref status_buffer,
+            physical_width,
+            physical_height,
+            scale,
+            ..
+        } = self;
+
+        let viewport = Resolution { width: *physical_width, height: *physical_height };
+        text_viewport.update(queue, viewport);
+
+        let scale_f32 = *scale as f32;
+
+        let mut areas: Vec<TextArea> = vec![
+            TextArea {
+                buffer: label_buffer,
+                left: 80.0 * scale_f32,
+                top: 12.0 * scale_f32,
+                scale: scale_f32,
+                bounds: TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: *physical_width as i32,
+                    bottom: *physical_height as i32,
+                },
+                default_color: glyphon::Color::rgb(0xcc, 0xcc, 0xd4),
+                custom_glyphs: &[],
+            },
+            TextArea {
+                buffer: status_buffer,
+                left: 12.0 * scale_f32,
+                top: *physical_height as f32 - 24.0 * scale_f32,
+                scale: scale_f32,
+                bounds: TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: *physical_width as i32,
+                    bottom: *physical_height as i32,
+                },
+                default_color: glyphon::Color::rgb(0x55, 0x55, 0x66),
+                custom_glyphs: &[],
+            },
+        ];
+
+        let mut widget_buffers: Vec<Buffer> = Vec::new();
+        let mut widget_labels: Vec<TextLabel> = Vec::new();
+        for w in self.widgets.iter() {
+            for label in w.text_labels() {
+                widget_buffers.push(make_text_buffer(font_system, &label.text, label.font_size));
+                widget_labels.push(label);
+            }
+        }
+
+        for (buf, label) in widget_buffers.iter().zip(widget_labels.iter()) {
+            areas.push(TextArea {
+                buffer: buf,
+                left: label.x * scale_f32,
+                top: label.y * scale_f32,
+                scale: scale_f32,
+                bounds: TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: *physical_width as i32,
+                    bottom: *physical_height as i32,
+                },
+                default_color: glyphon::Color::rgb(label.color[0], label.color[1], label.color[2]),
+                custom_glyphs: &[],
+            });
+        }
+
+        text_renderer
+            .prepare(device, queue, font_system, text_atlas, text_viewport, areas, swash_cache)
+            .unwrap();
+    }
+
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
-            self.width = new_size.width;
-            self.height = new_size.height;
+            self.physical_width = new_size.width;
+            self.physical_height = new_size.height;
+            self.width = new_size.width as f32 / self.scale as f32;
+            self.height = new_size.height as f32 / self.scale as f32;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
-            self.layout.resize(new_size.width as f32, new_size.height as f32);
+            self.positions = demo_positions(self.width, self.height);
             self.apply_layout();
             self.upload_vertices();
         }
@@ -921,8 +422,8 @@ impl State {
     fn handle_event(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
-                self.cursor_x = position.x as f32;
-                self.cursor_y = position.y as f32;
+                self.cursor_x = position.x as f32 / self.scale as f32;
+                self.cursor_y = position.y as f32 / self.scale as f32;
                 let mut changed = false;
 
                 if let Some(idx) = self.drag_widget {
@@ -946,6 +447,9 @@ impl State {
 
                 match btn_state {
                     ElementState::Pressed => {
+                        if let Some(old) = self.focused_widget.take() {
+                            self.widgets[old].unfocus();
+                        }
                         for i in (0..self.widgets.len()).rev() {
                             if self.widgets[i].hit_test(self.cursor_x, self.cursor_y) {
                                 if self.widgets[i].mouse_input(*button, *btn_state, self.cursor_x, self.cursor_y) {
@@ -955,6 +459,8 @@ impl State {
                                     self.widgets[i].drag_begin(self.cursor_x, self.cursor_y);
                                     self.drag_widget = Some(i);
                                 }
+                                self.widgets[i].focus();
+                                self.focused_widget = Some(i);
                                 break;
                             }
                         }
@@ -970,20 +476,40 @@ impl State {
                                 changed = true;
                             }
                         }
+                        let mut clicked = false;
                         for w in &mut self.widgets {
                             if w.take_click() {
-                                self.click_count += 1;
+                                clicked = true;
                             }
+                        }
+                        if clicked {
+                            self.click_count += 1;
+                            self.update_status_text(&format!("Clicks: {}", self.click_count));
                         }
                     }
                 }
                 changed
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(idx) = self.focused_widget {
+                    let val = self.widgets[idx].value();
+                    let changed = self.widgets[idx].keyboard_input(event);
+                    if self.widgets[idx].value() != val {
+                        changed || true
+                    } else {
+                        changed
+                    }
+                } else {
+                    false
+                }
             }
             _ => false,
         }
     }
 
     fn render(&mut self) {
+        self.prepare_text();
+
         let output = match self.surface.get_current_texture() {
             Ok(t) => t,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
@@ -1021,9 +547,13 @@ impl State {
                 occlusion_query_set: None,
             });
 
+            // Draw colored quads
             pass.set_pipeline(&self.render_pipeline);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pass.draw(0..self.vertex_count, 0..1);
+
+            // Draw text
+            self.text_renderer.render(&self.text_atlas, &self.text_viewport, &mut pass).unwrap();
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -1083,6 +613,19 @@ impl ApplicationHandler for App {
                 }
                 true
             }
+            WindowEvent::ScaleFactorChanged { scale_factor, mut inner_size_writer } => {
+                if let Some(state) = &mut self.state {
+                    let new_physical = winit::dpi::PhysicalSize::new(
+                        (state.width as f64 * scale_factor) as u32,
+                        (state.height as f64 * scale_factor) as u32,
+                    );
+                    let _ = inner_size_writer.request_inner_size(new_physical);
+                    state.scale = scale_factor;
+                    state.resize(new_physical);
+                    state.window.request_redraw();
+                }
+                true
+            }
             _ => {
                 if let Some(state) = &mut self.state {
                     let prev = state.click_count;
@@ -1108,6 +651,26 @@ impl ApplicationHandler for App {
             }
         }
     }
+}
+
+fn demo_positions(sw: f32, sh: f32) -> Vec<(f32, f32, f32, f32)> {
+    vec![
+        (0.0, 0.0, sw, 40.0),                        // 0 header
+        (0.0, 40.0, 60.0, sh - 68.0),                // 1 sidebar
+        (60.0, 40.0, sw - 60.0, sh - 68.0),          // 2 content_bg
+        (70.0, 50.0, 140.0, 40.0),                   // 3 btn_a
+        (220.0, 50.0, 140.0, 40.0),                  // 4 btn_b
+        (370.0, 50.0, 140.0, 40.0),                  // 5 btn_c
+        (70.0, 100.0, 400.0, 250.0),                 // 6 panel
+        (70.0, 360.0, 140.0, 40.0),                  // 7 click_me
+        (220.0, 360.0, 140.0, 40.0),                 // 8 reset
+        (70.0, 410.0, 24.0, 24.0),                   // 9 checkbox
+        (104.0, 410.0, 48.0, 24.0),                  // 10 toggle
+        (162.0, 410.0, 160.0, 24.0),                 // 11 progress_bar
+        (70.0, 444.0, 300.0, 32.0),                  // 12 slider
+        (70.0, 486.0, 120.0, 32.0),                  // 13 spinbox
+        (0.0, sh - 28.0, sw, 28.0),                  // 14 status_bar
+    ]
 }
 
 fn main() {
