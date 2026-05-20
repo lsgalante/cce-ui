@@ -63,6 +63,17 @@ mod colors {
     pub const RESET_BTN_IDLE: [f32; 4] = [0.55, 0.20, 0.20, 1.0];
     pub const RESET_BTN_HOVER: [f32; 4] = [0.70, 0.30, 0.30, 1.0];
     pub const RESET_BTN_PRESS: [f32; 4] = [0.40, 0.12, 0.12, 1.0];
+    pub const CHECKBOX_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
+    pub const CHECKBOX_CHECKED: [f32; 4] = [0.20, 0.50, 0.75, 1.0];
+    pub const CHECKBOX_HOVER: [f32; 4] = [0.25, 0.25, 0.30, 1.0];
+    pub const TOGGLE_OFF: [f32; 4] = [0.25, 0.25, 0.30, 1.0];
+    pub const TOGGLE_ON: [f32; 4] = [0.14, 0.70, 0.38, 1.0];
+    pub const TOGGLE_HOVER: [f32; 4] = [0.30, 0.30, 0.35, 1.0];
+    pub const SLIDER_TRACK: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
+    pub const SLIDER_THUMB: [f32; 4] = [0.60, 0.60, 0.65, 1.0];
+    pub const SLIDER_THUMB_DRAG: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
+    pub const PROGRESS_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
+    pub const PROGRESS_FILL: [f32; 4] = [0.20, 0.50, 0.75, 1.0];
 }
 
 trait Widget {
@@ -296,6 +307,202 @@ impl Widget for ContentBg {
     fn color(&self) -> [f32; 4] { colors::CONTENT_BG }
 }
 
+struct Checkbox {
+    x: f32, y: f32, w: f32, h: f32,
+    hovering: bool,
+    checked: bool,
+    just_clicked: bool,
+}
+
+impl Checkbox {
+    fn new() -> Self {
+        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovering: false, checked: false, just_clicked: false }
+    }
+}
+
+impl Widget for Checkbox {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn color(&self) -> [f32; 4] { colors::CHECKBOX_BG }
+
+    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
+        let (x, y, w, h) = self.rect();
+        let mut verts = Vec::new();
+        let bg = if self.hovering { colors::CHECKBOX_HOVER } else { colors::CHECKBOX_BG };
+        verts.extend(quad_vertices(x, y, w, h, sw, sh, bg));
+        if self.checked {
+            let inset = w * 0.2;
+            verts.extend(quad_vertices(x + inset, y + inset, w - inset * 2.0, h - inset * 2.0, sw, sh, colors::CHECKBOX_CHECKED));
+        }
+        verts
+    }
+
+    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        let was = self.hovering;
+        self.hovering = self.hit_test(px, py);
+        was != self.hovering
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if button != MouseButton::Left { return false; }
+        match state {
+            ElementState::Pressed => {}
+            ElementState::Released => {
+                if self.hit_test(px, py) {
+                    self.checked = !self.checked;
+                    self.just_clicked = true;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn take_click(&mut self) -> bool {
+        if self.just_clicked { self.just_clicked = false; true } else { false }
+    }
+}
+
+struct Toggle {
+    x: f32, y: f32, w: f32, h: f32,
+    hovering: bool,
+    toggled: bool,
+    just_toggled: bool,
+}
+
+impl Toggle {
+    fn new() -> Self {
+        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovering: false, toggled: false, just_toggled: false }
+    }
+}
+
+impl Widget for Toggle {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn color(&self) -> [f32; 4] { if self.toggled { colors::TOGGLE_ON } else { colors::TOGGLE_OFF } }
+
+    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
+        let (x, y, w, h) = self.rect();
+        let mut verts = Vec::new();
+        let bg = if self.toggled { colors::TOGGLE_ON } else if self.hovering { colors::TOGGLE_HOVER } else { colors::TOGGLE_OFF };
+        verts.extend(quad_vertices(x, y, w, h, sw, sh, bg));
+        let thumb_size = h * 0.7;
+        let thumb_y = y + (h - thumb_size) * 0.5;
+        let thumb_x = if self.toggled { x + w - thumb_size - (h * 0.15) } else { x + (h * 0.15) };
+        verts.extend(quad_vertices(thumb_x, thumb_y, thumb_size, thumb_size, sw, sh, [0.95, 0.95, 0.97, 1.0]));
+        verts
+    }
+
+    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        let was = self.hovering;
+        self.hovering = self.hit_test(px, py);
+        was != self.hovering
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if button != MouseButton::Left { return false; }
+        match state {
+            ElementState::Pressed => {}
+            ElementState::Released => {
+                if self.hit_test(px, py) {
+                    self.toggled = !self.toggled;
+                    self.just_toggled = true;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+struct Slider {
+    x: f32, y: f32, w: f32, h: f32,
+    dragging: bool,
+    value: f32,
+    drag_offset: f32,
+}
+
+impl Slider {
+    fn new() -> Self {
+        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, dragging: false, value: 0.5, drag_offset: 0.0 }
+    }
+}
+
+impl Widget for Slider {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn color(&self) -> [f32; 4] { colors::SLIDER_TRACK }
+
+    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
+        let (x, y, w, h) = self.rect();
+        let mut verts = Vec::new();
+        let track_h = h * 0.3;
+        let track_y = y + (h - track_h) * 0.5;
+        verts.extend(quad_vertices(x, track_y, w, track_h, sw, sh, colors::SLIDER_TRACK));
+
+        let thumb_size = h * 0.9;
+        let range = w - thumb_size;
+        let thumb_x = x + self.value * range;
+        let thumb_y = y + (h - thumb_size) * 0.5;
+        let thumb_color = if self.dragging { colors::SLIDER_THUMB_DRAG } else { colors::SLIDER_THUMB };
+        verts.extend(quad_vertices(thumb_x, thumb_y, thumb_size, thumb_size, sw, sh, thumb_color));
+        verts
+    }
+
+    fn draggable(&self) -> bool { true }
+    fn is_dragging(&self) -> bool { self.dragging }
+
+    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
+        let (sx, _, sw, _) = self.rect();
+        let thumb_size = self.h * 0.9;
+        let range = sw - thumb_size;
+        let raw = (px - self.drag_offset - sx) / range;
+        let new_val = raw.clamp(0.0, 1.0);
+        if (new_val - self.value).abs() > 0.001 {
+            self.value = new_val;
+            return true;
+        }
+        false
+    }
+
+    fn drag_begin(&mut self, px: f32, _py: f32) {
+        self.dragging = true;
+        let thumb_size = self.h * 0.9;
+        let thumb_x = self.x + self.value * (self.w - thumb_size);
+        self.drag_offset = px - thumb_x;
+    }
+
+    fn drag_end(&mut self) { self.dragging = false; }
+}
+
+struct ProgressBar {
+    x: f32, y: f32, w: f32, h: f32,
+    value: f32,
+}
+
+impl ProgressBar {
+    fn new(value: f32) -> Self {
+        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, value }
+    }
+}
+
+impl Widget for ProgressBar {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn color(&self) -> [f32; 4] { colors::PROGRESS_BG }
+
+    fn vertices(&self, sw: f32, sh: f32) -> Vec<Vertex> {
+        let (x, y, w, h) = self.rect();
+        let mut verts = Vec::new();
+        verts.extend(quad_vertices(x, y, w, h, sw, sh, colors::PROGRESS_BG));
+        let fill_w = w * self.value;
+        if fill_w > 0.0 {
+            verts.extend(quad_vertices(x, y, fill_w, h, sw, sh, colors::PROGRESS_FILL));
+        }
+        verts
+    }
+}
+
 use taffy::geometry::{Rect, Size};
 use taffy::style::{Dimension, FlexDirection, LengthPercentage, Style};
 
@@ -355,6 +562,27 @@ impl Layout {
             ..Default::default()
         }).unwrap();
 
+        let checkbox = tree.new_leaf(Style {
+            size: Size { width: Dimension::length(24.0), height: Dimension::length(24.0) },
+            ..Default::default()
+        }).unwrap();
+
+        let toggle = tree.new_leaf(Style {
+            size: Size { width: Dimension::length(48.0), height: Dimension::length(24.0) },
+            ..Default::default()
+        }).unwrap();
+
+        let progress_bar = tree.new_leaf(Style {
+            flex_grow: 1.0,
+            size: Size { width: Dimension::length(160.0), height: Dimension::length(24.0) },
+            ..Default::default()
+        }).unwrap();
+
+        let slider = tree.new_leaf(Style {
+            size: Size { width: Dimension::length(300.0), height: Dimension::length(32.0) },
+            ..Default::default()
+        }).unwrap();
+
         let status_bar = tree.new_leaf(Style {
             size: Size { width: Dimension::percent(1.0), height: Dimension::length(28.0) },
             ..Default::default()
@@ -380,6 +608,17 @@ impl Layout {
             &[click_me, reset],
         ).unwrap();
 
+        let controls_row = tree.new_with_children(
+            Style {
+                display: taffy::style::Display::Flex,
+                flex_direction: FlexDirection::Row,
+                align_items: Some(taffy::style::AlignItems::Center),
+                gap: Size { width: LengthPercentage::length(16.0), height: LengthPercentage::length(0.0) },
+                ..Default::default()
+            },
+            &[checkbox, toggle, progress_bar],
+        ).unwrap();
+
         let _content = tree.new_with_children(
             Style {
                 display: taffy::style::Display::Flex,
@@ -388,13 +627,13 @@ impl Layout {
                 padding: Rect {
                     top: LengthPercentage::length(20.0),
                     left: LengthPercentage::length(20.0),
-                    bottom: LengthPercentage::length(0.0),
-                    right: LengthPercentage::length(0.0),
+                    bottom: LengthPercentage::length(20.0),
+                    right: LengthPercentage::length(20.0),
                 },
                 gap: Size { width: LengthPercentage::length(0.0), height: LengthPercentage::length(12.0) },
                 ..Default::default()
             },
-            &[btn_row_1, panel, btn_row_2],
+            &[btn_row_1, panel, btn_row_2, controls_row, slider],
         ).unwrap();
 
         let body = tree.new_with_children(
@@ -428,6 +667,10 @@ impl Layout {
             panel,
             click_me,
             reset,
+            checkbox,
+            toggle,
+            progress_bar,
+            slider,
             status_bar,
         ];
 
@@ -586,7 +829,11 @@ impl State {
             Box::new(Panel::new(0.0, 0.0, 400.0, 250.0)),  // 6
             Box::new(Button::new(0.0, 0.0, 140.0, 40.0)),  // 7
             Box::new(Button::new_reset(0.0, 0.0, 140.0, 40.0)), // 8
-            Box::new(StatusBar::new()),                     // 9
+            Box::new(Checkbox::new()),                       // 9
+            Box::new(Toggle::new()),                         // 10
+            Box::new(ProgressBar::new(0.65)),                // 11
+            Box::new(Slider::new()),                         // 12
+            Box::new(StatusBar::new()),                      // 13
         ];
 
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -801,7 +1048,7 @@ impl ApplicationHandler for App {
             event_loop
                 .create_window(
                     WindowAttributes::default()
-                        .with_title("UI Framework - Test Window")
+                        .with_title("Clear UI - Test Window")
                         .with_inner_size(winit::dpi::LogicalSize::new(1024, 768)),
                 )
                 .unwrap(),
@@ -846,7 +1093,7 @@ impl ApplicationHandler for App {
                     if state.click_count != prev {
                         let clicks = state.click_count;
                         state.window.set_title(&format!(
-                            "UI Framework - Test Window  |  clicks: {}", clicks
+                            "Clear UI - Test Window  |  clicks: {}", clicks
                         ));
                     }
                     changed
