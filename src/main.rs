@@ -5,7 +5,7 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowAttributes};
 
-use clear_ui::widget::{Button, Checkbox, ContentBg, Header, Panel, ProgressBar, Sidebar, Slider, Spinbox, StatusBar, Toggle, Widget};
+use clear_ui::widget::{Button, Checkbox, ContentBg, Header, Panel, ProgressBar, Sidebar, Slider, Spinbox, StatusBar, TextLabel, Toggle, Widget};
 
 use glyphon::{
     Attrs, Buffer, Cache, FontSystem, Metrics, Resolution, SwashCache, TextArea, TextAtlas,
