@@ -421,6 +421,15 @@ impl State {
 
     fn handle_event(&mut self, event: &WindowEvent) -> bool {
         match event {
+            WindowEvent::MouseWheel { delta, .. } => {
+                let mut changed = false;
+                for w in &mut self.widgets {
+                    if w.mouse_wheel(delta, self.cursor_x, self.cursor_y) {
+                        changed = true;
+                    }
+                }
+                changed
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_x = position.x as f32 / self.scale as f32;
                 self.cursor_y = position.y as f32 / self.scale as f32;

@@ -1,4 +1,4 @@
-use winit::event::{ElementState, KeyEvent, MouseButton};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{Key, NamedKey};
 
 use crate::colors;
@@ -22,6 +22,7 @@ pub trait Widget {
 
     fn cursor_moved(&mut self, _px: f32, _py: f32) -> bool { false }
     fn mouse_input(&mut self, _button: MouseButton, _state: ElementState, _px: f32, _py: f32) -> bool { false }
+    fn mouse_wheel(&mut self, _delta: &MouseScrollDelta, _px: f32, _py: f32) -> bool { false }
 
     fn set_hovered(&mut self, _hovered: bool) {}
     fn hovered(&self) -> bool { false }
@@ -305,6 +306,32 @@ impl Widget for ParametersBg {
 
     fn drag_end(&mut self) {
         self.dragging_param = None;
+    }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+        let mut changed = false;
+        for (i, p) in self.display_params.iter_mut().enumerate() {
+            if p.2.starts_with("slider") {
+                let row_y = self.y + 30.0 + (i as f32) * 20.0;
+                if py >= row_y - 2.0 && py <= row_y + 18.0 && px >= self.x && px <= self.x + self.w {
+                    let val = p.1.parse::<f32>().unwrap_or(0.0);
+                    let (min, max) = parse_slider_range(&p.2);
+                    let scroll_amount = match delta {
+                        MouseScrollDelta::LineDelta(_x, y) => *y,
+                        MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
+                    };
+                    let step = (max - min) * 0.02;
+                    let new_val = (val + scroll_amount * step).clamp(min, max);
+                    let old_val = &p.1;
+                    let new_val_str = format!("{:.2}", new_val);
+                    if *old_val != new_val_str {
+                        p.1 = new_val_str;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        changed
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -1293,6 +1320,23 @@ impl Widget for Slider {
     }
 
     fn drag_end(&mut self) { self.dragging = false; }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+        let (sx, sy, sw, sh) = self.rect();
+        if px >= sx && px <= sx + sw && py >= sy && py <= sy + sh {
+            let scroll_amount = match delta {
+                MouseScrollDelta::LineDelta(_x, y) => *y,
+                MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
+            };
+            let step = 0.02;
+            let new_val = (self.value + scroll_amount * step).clamp(0.0, 1.0);
+            if (new_val - self.value).abs() > 0.0001 {
+                self.value = new_val;
+                return true;
+            }
+        }
+        false
+    }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let thumb_size = self.h * 0.9;
