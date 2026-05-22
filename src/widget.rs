@@ -58,8 +58,8 @@ pub trait Widget {
     fn set_path(&mut self, _segments: &[String]) {}
     fn path_click(&mut self) -> Option<usize> { None }
 
-    fn node_params(&self) -> Vec<(String, String)> { vec![] }
-    fn set_display_params(&mut self, _params: &[(String, String)]) {}
+    fn node_params(&self) -> Vec<(String, String, String)> { vec![] }
+    fn set_display_params(&mut self, _params: &[(String, String, String)]) {}
 
     fn set_config_toggle(&mut self, _id: usize, _val: bool) {}
     fn take_config_toggle(&mut self) -> Option<(usize, bool)> { None }
@@ -68,6 +68,7 @@ pub trait Widget {
     fn take_config_spin(&mut self) -> Option<(usize, f32)> { None }
     fn set_grid_sizes(&mut self, _gx: f32, _gy: f32) {}
     fn set_grid_origin(&mut self, _ox: f32, _oy: f32) {}
+    fn set_skipped_sizes(&mut self, _row_h: f32, _col_w: f32) {}
     fn set_palette_state(&mut self, _visible: bool, _query: &str, _items: &[String], _selected: usize) {}
 
     fn set_geom_visible(&mut self, _visible: bool) {}
@@ -100,11 +101,13 @@ pub struct ContentBg {
     grid_size_y: f32,
     grid_origin_x: f32,
     grid_origin_y: f32,
+    skipped_row_h: f32,
+    skipped_col_w: f32,
 }
 
 impl ContentBg {
     pub fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovered: false, show_network_grid: false, grid_size_x: 75.0, grid_size_y: 75.0, grid_origin_x: 0.0, grid_origin_y: 0.0 }
+        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovered: false, show_network_grid: false, grid_size_x: 150.0, grid_size_y: 75.0, grid_origin_x: 0.0, grid_origin_y: 0.0, skipped_row_h: 37.5, skipped_col_w: 37.5 }
     }
 }
 
@@ -119,6 +122,7 @@ impl Widget for ContentBg {
     fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
     fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
     fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
+    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.show_network_grid || self.grid_size_x <= 0.0 || self.grid_size_y <= 0.0 {
@@ -127,26 +131,40 @@ impl Widget for ContentBg {
         let mut quads = Vec::new();
         let grid_color = [0.25, 0.25, 0.32, 1.0];
 
-        let start_y = self.y;
-        let diff_y = start_y - self.grid_origin_y;
-        let k_y = (diff_y / self.grid_size_y).floor();
-        let mut y = self.grid_origin_y + k_y * self.grid_size_y;
-        while y < self.y + self.h {
-            if y >= self.y {
-                quads.push((self.x, y, self.w, 1.0, grid_color));
+        let step_y = self.grid_size_y + self.skipped_row_h;
+        let diff_y = self.y - self.grid_origin_y;
+        let mut k = (diff_y / step_y).floor() - 1.0;
+        loop {
+            let y1 = self.grid_origin_y + k * step_y;
+            let y2 = y1 + self.grid_size_y;
+            if y1 >= self.y + self.h {
+                break;
             }
-            y += self.grid_size_y;
+            if y1 >= self.y {
+                quads.push((self.x, y1, self.w, 1.0, grid_color));
+            }
+            if y2 >= self.y && y2 < self.y + self.h {
+                quads.push((self.x, y2, self.w, 1.0, grid_color));
+            }
+            k += 1.0;
         }
 
-        let start_x = self.x;
-        let diff_x = start_x - self.grid_origin_x;
-        let k_x = (diff_x / self.grid_size_x).floor();
-        let mut x = self.grid_origin_x + k_x * self.grid_size_x;
-        while x < self.x + self.w {
-            if x >= self.x {
-                quads.push((x, self.y, 1.0, self.h, grid_color));
+        let step_x = self.grid_size_x + self.skipped_col_w;
+        let diff_x = self.x - self.grid_origin_x;
+        let mut k_x = (diff_x / step_x).floor() - 1.0;
+        loop {
+            let x1 = self.grid_origin_x + k_x * step_x;
+            let x2 = x1 + self.grid_size_x;
+            if x1 >= self.x + self.w {
+                break;
             }
-            x += self.grid_size_x;
+            if x1 >= self.x {
+                quads.push((x1, self.y, 1.0, self.h, grid_color));
+            }
+            if x2 >= self.x && x2 < self.x + self.w {
+                quads.push((x2, self.y, 1.0, self.h, grid_color));
+            }
+            k_x += 1.0;
         }
         quads
     }
@@ -173,11 +191,23 @@ impl Widget for ViewportBg {
 pub struct ParametersBg {
     x: f32, y: f32, w: f32, h: f32,
     hovered: bool,
-    display_params: Vec<(String, String)>,
+    display_params: Vec<(String, String, String)>,
+    dragging_param: Option<usize>,
+    drag_offset: f32,
 }
 
 impl ParametersBg {
-    pub fn new() -> Self { Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovered: false, display_params: Vec::new() }
+    pub fn new() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+            hovered: false,
+            display_params: Vec::new(),
+            dragging_param: None,
+            drag_offset: 0.0,
+        }
     }
 }
 
@@ -187,16 +217,114 @@ impl Widget for ParametersBg {
     fn color(&self) -> [f32; 4] { colors::PARAM_BG }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
-    fn hit_test(&self, _px: f32, _py: f32) -> bool { false }
+    fn hit_test(&self, px: f32, py: f32) -> bool {
+        px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h
+    }
 
-    fn set_display_params(&mut self, params: &[(String, String)]) {
+    fn set_display_params(&mut self, params: &[(String, String, String)]) {
         self.display_params = params.to_vec();
     }
 
+    fn node_params(&self) -> Vec<(String, String, String)> {
+        self.display_params.clone()
+    }
+
+    fn draggable(&self) -> bool {
+        self.display_params.iter().any(|p| p.2 == "slider")
+    }
+
+    fn is_dragging(&self) -> bool {
+        self.dragging_param.is_some()
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32) {
+        for (i, p) in self.display_params.iter().enumerate() {
+            if p.2 == "slider" {
+                let row_y = self.y + 30.0 + (i as f32) * 20.0;
+                if py >= row_y - 2.0 && py <= row_y + 18.0 {
+                    let val = p.1.parse::<f32>().unwrap_or(0.0);
+                    let t = (val / 2.0).clamp(0.0, 1.0);
+                    let track_x = self.x + 100.0;
+                    let track_w = (self.w - 100.0 - 20.0).max(10.0);
+                    let thumb_size = 10.0;
+                    let thumb_x = track_x + t * (track_w - thumb_size);
+
+                    let click_offset = px - thumb_x;
+                    if click_offset >= 0.0 && click_offset <= thumb_size {
+                        self.drag_offset = click_offset;
+                    } else {
+                        self.drag_offset = thumb_size / 2.0;
+                    }
+                    self.dragging_param = Some(i);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
+        if let Some(i) = self.dragging_param {
+            let track_x = self.x + 100.0;
+            let track_w = (self.w - 100.0 - 20.0).max(10.0);
+            let thumb_size = 10.0;
+            let range = track_w - thumb_size;
+            if range > 0.0 {
+                let raw = (px - self.drag_offset - track_x) / range;
+                let t = raw.clamp(0.0, 1.0);
+                let new_val = t * 2.0;
+                let old_val = &self.display_params[i].1;
+                let new_val_str = format!("{:.2}", new_val);
+                if *old_val != new_val_str {
+                    self.display_params[i].1 = new_val_str;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn drag_end(&mut self) {
+        self.dragging_param = None;
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if p.2 == "slider" {
+                let val = p.1.parse::<f32>().unwrap_or(0.0);
+                let t = (val / 2.0).clamp(0.0, 1.0);
+                let track_x = self.x + 100.0;
+                let track_w = (self.w - 100.0 - 20.0).max(10.0);
+                let track_y = self.y + 30.0 + (i as f32) * 20.0 + 6.0;
+                let track_h = 4.0;
+
+                let thumb_size = 10.0;
+                let thumb_x = track_x + t * (track_w - thumb_size);
+                let thumb_y = self.y + 30.0 + (i as f32) * 20.0 + 3.0;
+
+                quads.push((track_x, track_y, track_w, track_h, colors::SLIDER_TRACK));
+
+                let thumb_color = if self.dragging_param == Some(i) {
+                    colors::SLIDER_THUMB_DRAG
+                } else {
+                    colors::SLIDER_THUMB
+                };
+                quads.push((thumb_x, thumb_y, thumb_size, thumb_size, thumb_color));
+            }
+        }
+        quads
+    }
+
     fn text_labels(&self) -> Vec<TextLabel> {
-        self.display_params.iter().enumerate().map(|(i, (name, value))| {
+        self.display_params.iter().enumerate().map(|(i, (name, value, ptype))| {
+            let text = if ptype == "slider" {
+                let val = value.parse::<f32>().unwrap_or(0.0);
+                format!("{}: {:.2}", name, val)
+            } else {
+                format!("{}: {}", name, value)
+            };
             TextLabel {
-                text: format!("{}: {}", name, value),
+                text,
                 x: self.x + 8.0,
                 y: self.y + 30.0 + (i as f32) * 20.0,
                 font_size: 12.0,
@@ -771,7 +899,7 @@ pub struct Node {
     grid_origin_x: f32,
     grid_origin_y: f32,
     name: String,
-    pub parameters: Vec<(String, String)>,
+    pub parameters: Vec<(String, String, String)>,
     geom_visible: bool,
     geom_toggled: bool,
     toggle_hovered: bool,
@@ -790,7 +918,7 @@ impl Node {
     }
 
     pub fn with_params(mut self, params: &[(&str, &str)]) -> Self {
-        self.parameters = params.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        self.parameters = params.iter().map(|(k, v)| (k.to_string(), v.to_string(), "string".to_string())).collect();
         self
     }
 
@@ -819,7 +947,10 @@ impl Widget for Node {
     fn focus(&mut self) { self.selected = true; }
     fn unfocus(&mut self) { self.selected = false; }
 
-    fn node_params(&self) -> Vec<(String, String)> { self.parameters.clone() }
+    fn node_params(&self) -> Vec<(String, String, String)> { self.parameters.clone() }
+    fn set_display_params(&mut self, params: &[(String, String, String)]) {
+        self.parameters = params.to_vec();
+    }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         vec![TextLabel {
@@ -1127,6 +1258,18 @@ impl Widget for Slider {
     }
 
     fn drag_end(&mut self) { self.dragging = false; }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let thumb_size = self.h * 0.9;
+        let thumb_x = self.x + self.value * (self.w - thumb_size);
+        let thumb_y = self.y + (self.h - thumb_size) / 2.0;
+        let thumb_color = if self.dragging {
+            colors::SLIDER_THUMB_DRAG
+        } else {
+            colors::SLIDER_THUMB
+        };
+        vec![(thumb_x, thumb_y, thumb_size, thumb_size, thumb_color)]
+    }
 }
 
 pub struct ProgressBar {
