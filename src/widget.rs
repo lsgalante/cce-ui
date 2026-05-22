@@ -590,7 +590,8 @@ impl Widget for MenuBar {
                     let iy = self.item_y_vertical(i);
                     let ih = self.item_h_vertical();
                     if ly >= iy && ly < iy + ih {
-                        if self.was_open == Some(i) {
+                        if self.was_open == Some(i) || self.open_menu == Some(i) {
+                            self.open_menu = None;
                             self.was_open = None;
                         } else {
                             self.open_menu = Some(i);
@@ -609,7 +610,8 @@ impl Widget for MenuBar {
                 for i in 0..self.menu_items.len() {
                     let ix = menu_item_x(&self.title, &self.menu_items, i);
                     if lx >= ix && lx < ix + menu_item_w(&self.menu_items, i) {
-                        if self.was_open == Some(i) {
+                        if self.was_open == Some(i) || self.open_menu == Some(i) {
+                            self.open_menu = None;
                             self.was_open = None;
                         } else {
                             self.open_menu = Some(i);
