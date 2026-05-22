@@ -53,6 +53,8 @@ pub trait Widget {
     fn menu_click(&mut self) -> Option<(usize, usize)> { None }
     fn set_item_checked(&mut self, _menu_idx: usize, _item_idx: usize, _checked: bool) {}
     fn set_menu_items(&mut self, _menu_idx: usize, _items: &[String]) {}
+    fn is_menu_bar(&self) -> bool { false }
+    fn is_menu_open(&self) -> bool { false }
     fn set_grid_snap(&mut self, _gx: f32, _gy: f32) {}
     fn set_node_name(&mut self, _name: &str) {}
     fn set_visible(&mut self, _visible: bool) {}
@@ -76,6 +78,8 @@ pub trait Widget {
     fn set_geom_visible(&mut self, _visible: bool) {}
     fn geom_visible(&self) -> bool { true }
     fn take_geom_toggle(&mut self) -> bool { false }
+    fn set_spreadsheet_data(&mut self, _headers: Vec<String>, _rows: Vec<Vec<String>>) {}
+    fn tick(&mut self, _dt: f32) -> bool { false }
 }
 
 pub struct Header {
@@ -116,7 +120,13 @@ impl ContentBg {
 impl Widget for ContentBg {
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::CONTENT_BG }
+    fn color(&self) -> [f32; 4] {
+        if self.show_network_grid {
+            [0.0, 0.0, 0.0, 0.0]
+        } else {
+            colors::CONTENT_BG
+        }
+    }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
     fn hit_test(&self, _px: f32, _py: f32) -> bool { false }
@@ -131,42 +141,193 @@ impl Widget for ContentBg {
             return vec![];
         }
         let mut quads = Vec::new();
-        let grid_color = [0.25, 0.25, 0.32, 1.0];
+        let grid_color = [0.0, 0.0, 0.0, 0.0];
+        let max_alpha = colors::CONTENT_BG[3]; // Peak opacity in the middle of gradient cells matches non-gradient cells
+        let steps = 20; // Silky-smooth gradient transition
 
         let step_y = self.grid_size_y + self.skipped_row_h;
-        let diff_y = self.y - self.grid_origin_y;
-        let mut k = (diff_y / step_y).floor() - 1.0;
-        loop {
-            let y1 = self.grid_origin_y + k * step_y;
-            let y2 = y1 + self.grid_size_y;
-            if y1 >= self.y + self.h {
-                break;
+        let step_x = self.grid_size_x + self.skipped_col_w;
+
+        if step_y >= 4.0 && step_x >= 4.0 {
+            let ry_start = ((self.y - self.grid_origin_y) / step_y).floor() as i32 - 1;
+            let ry_end = ((self.y + self.h - self.grid_origin_y) / step_y).ceil() as i32 + 1;
+            let ry_start = ry_start.max(-100_000);
+            let ry_end = ry_end.min(100_000);
+
+            let cx_start = ((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1;
+            let cx_end = ((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1;
+            let cx_start = cx_start.max(-100_000);
+            let cx_end = cx_end.min(100_000);
+
+            // Draw individual cell backgrounds to avoid stacking with gradients
+            for ry in ry_start..=ry_end {
+                let y1 = self.grid_origin_y + (ry as f32) * step_y;
+                let draw_start_y = y1.max(self.y);
+                let draw_end_y = (y1 + self.grid_size_y).min(self.y + self.h);
+                if draw_start_y < draw_end_y {
+                    for cx in cx_start..=cx_end {
+                        let x1 = self.grid_origin_x + (cx as f32) * step_x;
+                        let draw_start_x = x1.max(self.x);
+                        let draw_end_x = (x1 + self.grid_size_x).min(self.x + self.w);
+                        if draw_start_x < draw_end_x {
+                            quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, colors::CONTENT_BG));
+                        }
+                    }
+                }
             }
-            if y1 >= self.y {
-                quads.push((self.x, y1, self.w, 1.0, grid_color));
+        }
+
+        // Draw interstitial row gradients (horizontal bands fading to 0 alpha at left and right sides)
+        if self.skipped_row_h > 0.0 {
+            let step_y = self.grid_size_y + self.skipped_row_h;
+            let step_x = self.grid_size_x + self.skipped_col_w;
+            if step_y >= 4.0 && step_x >= 4.0 {
+                let k_start = ((self.y - self.grid_origin_y) / step_y).floor() as i32 - 1;
+                let k_end = ((self.y + self.h - self.grid_origin_y) / step_y).ceil() as i32 + 1;
+                let k_start = k_start.max(-100_000);
+                let k_end = k_end.min(100_000);
+
+                let cx_start = ((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1;
+                let cx_end = ((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1;
+                let cx_start = cx_start.max(-100_000);
+                let cx_end = cx_end.min(100_000);
+
+                for k in k_start..=k_end {
+                    let y1 = self.grid_origin_y + (k as f32) * step_y;
+                    let y2 = y1 + self.grid_size_y;
+                    if y1 >= self.y + self.h {
+                        continue;
+                    }
+                    let draw_start_y = y2.max(self.y);
+                    let draw_end_y = (y2 + self.skipped_row_h).min(self.y + self.h);
+                    if draw_start_y >= draw_end_y {
+                        continue;
+                    }
+
+                    for cx in cx_start..=cx_end {
+                        let x1 = self.grid_origin_x + (cx as f32) * step_x;
+                        let x_mid = x1 + self.grid_size_x / 2.0;
+                        let w_total = self.grid_size_x;
+                        let sub_w = w_total / steps as f32;
+
+                        for i in 0..steps {
+                            let sx_start = x1 + i as f32 * sub_w;
+                            let sx_end = sx_start + sub_w;
+                            let draw_start_x = sx_start.max(self.x);
+                            let draw_end_x = sx_end.min(self.x + self.w);
+                            if draw_start_x < draw_end_x {
+                                let sx_mid = (sx_start + sx_end) / 2.0;
+                                let dist = (sx_mid - x_mid).abs();
+                                let d = (dist / (w_total / 2.0)).min(1.0);
+                                
+                                // Fade the cell background color from max_alpha in the middle to transparent at the edges
+                                let alpha = max_alpha * (1.0 - d);
+                                if alpha > 0.001 {
+                                    quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, [colors::CONTENT_BG[0], colors::CONTENT_BG[1], colors::CONTENT_BG[2], alpha]));
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            if y2 >= self.y && y2 < self.y + self.h {
-                quads.push((self.x, y2, self.w, 1.0, grid_color));
+        }
+
+        // Draw interstitial column gradients (vertical bands fading to 0 alpha at top and bottom)
+        if self.skipped_col_w > 0.0 {
+            let step_y = self.grid_size_y + self.skipped_row_h;
+            let step_x = self.grid_size_x + self.skipped_col_w;
+            if step_y >= 4.0 && step_x >= 4.0 {
+                let k_start = ((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1;
+                let k_end = ((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1;
+                let k_start = k_start.max(-100_000);
+                let k_end = k_end.min(100_000);
+
+                let ry_start = ((self.y - self.grid_origin_y) / step_y).floor() as i32 - 1;
+                let ry_end = ((self.y + self.h - self.grid_origin_y) / step_y).ceil() as i32 + 1;
+                let ry_start = ry_start.max(-100_000);
+                let ry_end = ry_end.min(100_000);
+
+                for k in k_start..=k_end {
+                    let x1 = self.grid_origin_x + (k as f32) * step_x;
+                    let x2 = x1 + self.grid_size_x;
+                    if x1 >= self.x + self.w {
+                        continue;
+                    }
+                    let draw_start_x = x2.max(self.x);
+                    let draw_end_x = (x2 + self.skipped_col_w).min(self.x + self.w);
+                    if draw_start_x >= draw_end_x {
+                        continue;
+                    }
+
+                    for ry in ry_start..=ry_end {
+                        let y1 = self.grid_origin_y + (ry as f32) * step_y;
+                        let y_mid = y1 + self.grid_size_y / 2.0;
+                        let h_total = self.grid_size_y;
+                        let sub_h = h_total / steps as f32;
+
+                        for i in 0..steps {
+                            let sy_start = y1 + i as f32 * sub_h;
+                            let sy_end = sy_start + sub_h;
+                            let draw_start_y = sy_start.max(self.y);
+                            let draw_end_y = sy_end.min(self.y + self.h);
+                            if draw_start_y < draw_end_y {
+                                let sy_mid = (sy_start + sy_end) / 2.0;
+                                let dist = (sy_mid - y_mid).abs();
+                                let d = (dist / (h_total / 2.0)).min(1.0);
+                                
+                                // Fade the cell background color from max_alpha in the middle to transparent at the edges
+                                let alpha = max_alpha * (1.0 - d);
+                                if alpha > 0.001 {
+                                    quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, [colors::CONTENT_BG[0], colors::CONTENT_BG[1], colors::CONTENT_BG[2], alpha]));
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            k += 1.0;
+        }
+
+        // Draw the grid borders
+        let step_y = self.grid_size_y + self.skipped_row_h;
+        if step_y >= 4.0 {
+            let k_start = ((self.y - self.grid_origin_y) / step_y).floor() as i32 - 1;
+            let k_end = ((self.y + self.h - self.grid_origin_y) / step_y).ceil() as i32 + 1;
+            let k_start = k_start.max(-100_000);
+            let k_end = k_end.min(100_000);
+            for k in k_start..=k_end {
+                let y1 = self.grid_origin_y + (k as f32) * step_y;
+                let y2 = y1 + self.grid_size_y;
+                if y1 >= self.y + self.h {
+                    continue;
+                }
+                if y1 >= self.y {
+                    quads.push((self.x, y1, self.w, 1.0, grid_color));
+                }
+                if y2 >= self.y && y2 < self.y + self.h {
+                    quads.push((self.x, y2, self.w, 1.0, grid_color));
+                }
+            }
         }
 
         let step_x = self.grid_size_x + self.skipped_col_w;
-        let diff_x = self.x - self.grid_origin_x;
-        let mut k_x = (diff_x / step_x).floor() - 1.0;
-        loop {
-            let x1 = self.grid_origin_x + k_x * step_x;
-            let x2 = x1 + self.grid_size_x;
-            if x1 >= self.x + self.w {
-                break;
+        if step_x >= 4.0 {
+            let k_start = ((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1;
+            let k_end = ((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1;
+            let k_start = k_start.max(-100_000);
+            let k_end = k_end.min(100_000);
+            for k in k_start..=k_end {
+                let x1 = self.grid_origin_x + (k as f32) * step_x;
+                let x2 = x1 + self.grid_size_x;
+                if x1 >= self.x + self.w {
+                    continue;
+                }
+                if x1 >= self.x {
+                    quads.push((x1, self.y, 1.0, self.h, grid_color));
+                }
+                if x2 >= self.x && x2 < self.x + self.w {
+                    quads.push((x2, self.y, 1.0, self.h, grid_color));
+                }
             }
-            if x1 >= self.x {
-                quads.push((x1, self.y, 1.0, self.h, grid_color));
-            }
-            if x2 >= self.x && x2 < self.x + self.w {
-                quads.push((x2, self.y, 1.0, self.h, grid_color));
-            }
-            k_x += 1.0;
         }
         quads
     }
@@ -422,6 +583,7 @@ pub struct MenuBar {
     clicked_dropdown: Option<(usize, usize)>,
     was_open: Option<usize>,
     pub vertical: bool,
+    pub visible: bool,
 }
 
 impl MenuBar {
@@ -439,8 +601,10 @@ impl MenuBar {
             clicked_dropdown: None,
             was_open: None,
             vertical: false,
+            visible: true,
         }
     }
+
 
     pub fn with_title(mut self, title: &str) -> Self {
         self.title = title.to_string();
@@ -525,6 +689,9 @@ impl MenuBar {
 }
 impl Widget for MenuBar {
     fn rect(&self) -> (f32, f32, f32, f32) {
+        if !self.visible {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
         if self.vertical {
             let total_h = if self.menu_items.is_empty() {
                 self.h
@@ -538,11 +705,20 @@ impl Widget for MenuBar {
         }
     }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::PANEL_MENU_BG }
+    fn color(&self) -> [f32; 4] {
+        if !self.visible {
+            [0.0, 0.0, 0.0, 0.0]
+        } else {
+            colors::PANEL_MENU_BG
+        }
+    }
     fn set_hovered(&mut self, v: bool) { self.hovering = v; }
     fn hovered(&self) -> bool { self.hovering }
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
         let (rx, ry, rw, rh) = self.rect();
         if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
             return true;
@@ -557,6 +733,9 @@ impl Widget for MenuBar {
     }
 
     fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
         self.was_open = None;
         let was = self.hovering;
         self.hovering = self.hit_test(px, py);
@@ -607,6 +786,9 @@ impl Widget for MenuBar {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
         if button != MouseButton::Left || state != ElementState::Pressed { return false; }
         if !self.hit_test(px, py) { return false; }
 
@@ -693,7 +875,13 @@ impl Widget for MenuBar {
         }
     }
 
+    fn is_menu_bar(&self) -> bool { self.visible }
+    fn is_menu_open(&self) -> bool { self.visible && self.open_menu.is_some() }
+
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
         let mut quads = Vec::new();
         if let Some(idx) = self.hovered_menu {
             if self.vertical {
@@ -718,6 +906,9 @@ impl Widget for MenuBar {
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
+        if !self.visible {
+            return Vec::new();
+        }
         let mut labels = Vec::new();
         if !self.title.is_empty() {
             labels.push(TextLabel {
@@ -773,6 +964,13 @@ impl Widget for MenuBar {
             }
         }
         labels
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+    fn visible(&self) -> bool {
+        self.visible
     }
 }
 
@@ -1929,6 +2127,397 @@ fn parse_hex(s: &str) -> Option<[u8; 3]> {
     Some([r, g, b])
 }
 
+pub struct Spreadsheet {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    hovered: bool,
+    visible: bool,
+    headers: Vec<String>,
+    rows: Vec<Vec<String>>,
+    scroll_y: f32,
+    scroll_velocity: f32,
+    dragging_scrollbar: bool,
+    drag_offset_y: f32,
+    scrollbar_hovered: bool,
+    scrollbar_thumb_hovered: bool,
+}
+
+impl Spreadsheet {
+    pub fn new() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+            hovered: false,
+            visible: false,
+            headers: Vec::new(),
+            rows: Vec::new(),
+            scroll_y: 0.0,
+            scroll_velocity: 0.0,
+            dragging_scrollbar: false,
+            drag_offset_y: 0.0,
+            scrollbar_hovered: false,
+            scrollbar_thumb_hovered: false,
+        }
+    }
+}
+
+impl Widget for Spreadsheet {
+    fn rect(&self) -> (f32, f32, f32, f32) {
+        if !self.visible {
+            (0.0, 0.0, 0.0, 0.0)
+        } else {
+            (self.x, self.y, self.w, self.h)
+        }
+    }
+
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.x = x;
+        self.y = y;
+        self.w = w;
+        self.h = h;
+    }
+
+    fn color(&self) -> [f32; 4] {
+        if !self.visible {
+            [0.0, 0.0, 0.0, 0.0]
+        } else {
+            [0.08, 0.08, 0.12, 1.0]
+        }
+    }
+
+    fn set_hovered(&mut self, v: bool) {
+        self.hovered = v;
+    }
+
+    fn hovered(&self) -> bool {
+        self.hovered
+    }
+
+    fn hit_test(&self, px: f32, py: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
+        let (rx, ry, rw, rh) = self.rect();
+        px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    fn visible(&self) -> bool {
+        self.visible
+    }
+
+    fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>) {
+        self.headers = headers;
+        self.rows = rows;
+        
+        // Clamp scroll_y to new bounds
+        let content_h = self.rows.len() as f32 * 24.0;
+        let visible_h = (self.h - 24.0).max(0.0);
+        let max_scroll_y = (content_h - visible_h).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll_y);
+    }
+
+    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        let was_hovered = self.hovered;
+        self.hovered = self.hit_test(px, py);
+
+        let was_sb_hovered = self.scrollbar_hovered;
+        let was_thumb_hovered = self.scrollbar_thumb_hovered;
+
+        let content_h = self.rows.len() as f32 * 24.0;
+        let visible_h = (self.h - 24.0).max(0.0);
+        if visible_h > 0.0 && content_h > visible_h {
+            let scrollbar_w = 6.0;
+            let scrollbar_padding = 2.0;
+            let scrollbar_x = self.x + self.w - scrollbar_w - scrollbar_padding;
+            let track_y = self.y + 24.0;
+
+            self.scrollbar_hovered = px >= scrollbar_x - 2.0 && px <= self.x + self.w
+                && py >= track_y && py <= self.y + self.h;
+
+            let thumb_h = ((visible_h / content_h) * visible_h).clamp(15.0_f32.min(visible_h), visible_h);
+            let max_scroll_y = content_h - visible_h;
+            let scroll_ratio = self.scroll_y / max_scroll_y;
+            let track_scroll_range = visible_h - thumb_h;
+            let thumb_y = track_y + scroll_ratio * track_scroll_range;
+
+            self.scrollbar_thumb_hovered = px >= scrollbar_x - 2.0 && px <= self.x + self.w
+                && py >= thumb_y && py <= thumb_y + thumb_h;
+        } else {
+            self.scrollbar_hovered = false;
+            self.scrollbar_thumb_hovered = false;
+        }
+
+        was_hovered != self.hovered
+            || was_sb_hovered != self.scrollbar_hovered
+            || was_thumb_hovered != self.scrollbar_thumb_hovered
+    }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
+        if self.hit_test(px, py) {
+            let content_h = self.rows.len() as f32 * 24.0;
+            let visible_h = (self.h - 24.0).max(0.0);
+            if visible_h > 0.0 && content_h > visible_h {
+                let scroll_amount = match delta {
+                    MouseScrollDelta::LineDelta(_x, y) => *y * 24.0,
+                    MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                };
+                self.scroll_velocity += scroll_amount * 12.0;
+                return true;
+            }
+        }
+        false
+    }
+
+    fn draggable(&self) -> bool {
+        if !self.visible {
+            return false;
+        }
+        let content_h = self.rows.len() as f32 * 24.0;
+        let visible_h = (self.h - 24.0).max(0.0);
+        visible_h > 0.0 && content_h > visible_h
+    }
+
+    fn is_dragging(&self) -> bool {
+        self.dragging_scrollbar
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32) {
+        self.scroll_velocity = 0.0;
+        let content_h = self.rows.len() as f32 * 24.0;
+        let visible_h = (self.h - 24.0).max(0.0);
+        if visible_h > 0.0 && content_h > visible_h {
+            let scrollbar_w = 6.0;
+            let scrollbar_padding = 2.0;
+            let scrollbar_x = self.x + self.w - scrollbar_w - scrollbar_padding;
+            let track_y = self.y + 24.0;
+
+            if px >= scrollbar_x - 4.0 && px <= self.x + self.w
+                && py >= track_y && py <= self.y + self.h
+            {
+                self.dragging_scrollbar = true;
+
+                let thumb_h = ((visible_h / content_h) * visible_h).clamp(15.0_f32.min(visible_h), visible_h);
+                let max_scroll_y = content_h - visible_h;
+                let scroll_ratio = self.scroll_y / max_scroll_y;
+                let track_scroll_range = visible_h - thumb_h;
+                let thumb_y = track_y + scroll_ratio * track_scroll_range;
+
+                if py >= thumb_y && py <= thumb_y + thumb_h {
+                    self.drag_offset_y = py - thumb_y;
+                } else {
+                    self.drag_offset_y = thumb_h / 2.0;
+                    let new_thumb_y = py - self.drag_offset_y;
+                    let scroll_ratio = if track_scroll_range > 0.0 {
+                        ((new_thumb_y - track_y) / track_scroll_range).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    self.scroll_y = scroll_ratio * max_scroll_y;
+                }
+            }
+        }
+    }
+
+    fn drag_update(&mut self, _px: f32, py: f32) -> bool {
+        if self.dragging_scrollbar {
+            self.scroll_velocity = 0.0;
+            let content_h = self.rows.len() as f32 * 24.0;
+            let visible_h = (self.h - 24.0).max(0.0);
+            if visible_h > 0.0 && content_h > visible_h {
+                let thumb_h = ((visible_h / content_h) * visible_h).clamp(15.0_f32.min(visible_h), visible_h);
+                let max_scroll_y = content_h - visible_h;
+                let track_y = self.y + 24.0;
+                let track_scroll_range = visible_h - thumb_h;
+
+                let new_thumb_y = py - self.drag_offset_y;
+                let scroll_ratio = if track_scroll_range > 0.0 {
+                    ((new_thumb_y - track_y) / track_scroll_range).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let old_scroll_y = self.scroll_y;
+                self.scroll_y = scroll_ratio * max_scroll_y;
+
+                return (self.scroll_y - old_scroll_y).abs() > 0.01;
+            }
+        }
+        false
+    }
+
+    fn drag_end(&mut self) {
+        self.dragging_scrollbar = false;
+        self.scroll_velocity = 0.0;
+    }
+
+    fn tick(&mut self, dt: f32) -> bool {
+        if self.scroll_velocity.abs() > 0.01 {
+            let content_h = self.rows.len() as f32 * 24.0;
+            let visible_h = (self.h - 24.0).max(0.0);
+            let max_scroll_y = (content_h - visible_h).max(0.0);
+            let old_scroll_y = self.scroll_y;
+
+            self.scroll_y = (self.scroll_y + self.scroll_velocity * dt).clamp(0.0, max_scroll_y);
+
+            // Decelerate with friction (exponential decay)
+            let friction = 8.0;
+            self.scroll_velocity *= (-friction * dt).exp();
+
+            if self.scroll_y == 0.0 || self.scroll_y == max_scroll_y {
+                self.scroll_velocity = 0.0;
+            }
+
+            if self.scroll_velocity.abs() < 5.0 {
+                self.scroll_velocity = 0.0;
+            }
+
+            (self.scroll_y - old_scroll_y).abs() > 0.01
+        } else {
+            false
+        }
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut quads = Vec::new();
+        
+        // Header bg
+        quads.push((self.x, self.y, self.w, 24.0, [0.12, 0.12, 0.16, 1.0]));
+
+        // Zebra rows
+        let row_h = 24.0;
+        let body_top = self.y + 24.0;
+        let body_bottom = self.y + self.h;
+        for i in 0..self.rows.len() {
+            let ry = self.y + 24.0 + i as f32 * row_h - self.scroll_y;
+            if ry + row_h <= body_top || ry >= body_bottom {
+                continue;
+            }
+            let draw_y = ry.max(body_top);
+            let draw_h = (ry + row_h).min(body_bottom) - draw_y;
+            if draw_h > 0.0 {
+                let row_color = if i % 2 == 0 {
+                    [0.10, 0.10, 0.13, 0.9]
+                } else {
+                    [0.08, 0.08, 0.11, 0.9]
+                };
+                quads.push((self.x, draw_y, self.w, draw_h, row_color));
+
+                // Horizontal row separator
+                let sep_y = ry + row_h;
+                if sep_y >= body_top && sep_y < body_bottom {
+                    quads.push((self.x, sep_y, self.w, 1.0, [0.20, 0.20, 0.25, 0.3]));
+                }
+            }
+        }
+
+        // Header separator
+        quads.push((self.x, self.y + 24.0, self.w, 1.0, [0.20, 0.20, 0.25, 0.5]));
+
+        // Vertical separators
+        let divider_h = self.h;
+        if divider_h > 0.0 && !self.headers.is_empty() {
+            let n_cols = self.headers.len();
+            for i in 1..n_cols {
+                let r = i as f32 / n_cols as f32;
+                quads.push((self.x + self.w * r, self.y, 1.0, divider_h, [0.20, 0.20, 0.25, 0.3]));
+            }
+        }
+
+        // Scrollbar track & thumb
+        let content_h = self.rows.len() as f32 * row_h;
+        let visible_h = (self.h - 24.0).max(0.0);
+        if visible_h > 0.0 && content_h > visible_h {
+            let scrollbar_w = 6.0;
+            let scrollbar_padding = 2.0;
+            let scrollbar_x = self.x + self.w - scrollbar_w - scrollbar_padding;
+            let track_y = self.y + 24.0;
+            let track_h = visible_h;
+
+            // Track BG
+            quads.push((scrollbar_x, track_y, scrollbar_w, track_h, [0.05, 0.05, 0.08, 0.4]));
+
+            // Thumb
+            let thumb_h = ((visible_h / content_h) * visible_h).clamp(15.0_f32.min(visible_h), visible_h);
+            let max_scroll_y = content_h - visible_h;
+            let scroll_ratio = self.scroll_y / max_scroll_y;
+            let track_scroll_range = visible_h - thumb_h;
+            let thumb_y = track_y + scroll_ratio * track_scroll_range;
+
+            let thumb_color = if self.dragging_scrollbar {
+                [0.40, 0.40, 0.48, 1.0]
+            } else if self.scrollbar_thumb_hovered {
+                [0.32, 0.32, 0.38, 1.0]
+            } else if self.scrollbar_hovered {
+                [0.24, 0.24, 0.30, 0.9]
+            } else {
+                [0.18, 0.18, 0.24, 0.7]
+            };
+
+            quads.push((scrollbar_x, thumb_y, scrollbar_w, thumb_h, thumb_color));
+        }
+
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut labels = Vec::new();
+        if self.headers.is_empty() {
+            return labels;
+        }
+
+        let n_cols = self.headers.len();
+        for (i, header) in self.headers.iter().enumerate() {
+            let cx = self.x + self.w * (i as f32 / n_cols as f32) + 8.0;
+            labels.push(TextLabel {
+                text: header.clone(),
+                x: cx,
+                y: self.y + 6.0,
+                font_size: 12.0,
+                color: [0xdd, 0xdd, 0xee],
+            });
+        }
+
+        let row_h = 24.0;
+        let body_top = self.y + 24.0;
+        let body_bottom = self.y + self.h;
+        for (i, row) in self.rows.iter().enumerate() {
+            let ry = self.y + 24.0 + i as f32 * row_h - self.scroll_y;
+            // Only show text if the row is fully inside the spreadsheet body
+            if ry < body_top || ry + row_h > body_bottom {
+                continue;
+            }
+
+            for (col_idx, val) in row.iter().enumerate().take(n_cols) {
+                let cx = self.x + self.w * (col_idx as f32 / n_cols as f32) + 8.0;
+                labels.push(TextLabel {
+                    text: val.clone(),
+                    x: cx,
+                    y: ry + 6.0,
+                    font_size: 12.0,
+                    color: [0xbb, 0xbb, 0xcc],
+                });
+            }
+        }
+        labels
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2016,5 +2605,163 @@ mod tests {
         // Move cursor inside "FileV" bounds
         menubar_v.cursor_moved(20.0, iy + ih / 2.0);
         assert_eq!(menubar_v.hovered_menu, Some(0));
+    }
+
+    #[test]
+    fn test_spreadsheet_dynamic() {
+        let mut spreadsheet = Spreadsheet::new();
+        spreadsheet.set_rect(10.0, 10.0, 100.0, 200.0);
+        spreadsheet.set_visible(true);
+
+        // Initially empty
+        assert!(spreadsheet.headers.is_empty());
+        assert!(spreadsheet.rows.is_empty());
+        assert!(spreadsheet.text_labels().is_empty());
+
+        // Set dynamic headers and rows
+        let headers = vec!["ColA".to_string(), "ColB".to_string()];
+        let rows = vec![
+            vec!["Val1".to_string(), "Val2".to_string()],
+            vec!["Val3".to_string(), "Val4".to_string()],
+        ];
+        spreadsheet.set_spreadsheet_data(headers, rows);
+
+        assert_eq!(spreadsheet.headers.len(), 2);
+        assert_eq!(spreadsheet.rows.len(), 2);
+
+        // Verify labels generated
+        let labels = spreadsheet.text_labels();
+        // 2 headers + 4 cell values = 6 labels total
+        assert_eq!(labels.len(), 6);
+        assert_eq!(labels[0].text, "ColA");
+        assert_eq!(labels[1].text, "ColB");
+        assert_eq!(labels[2].text, "Val1");
+        assert_eq!(labels[3].text, "Val2");
+        assert_eq!(labels[4].text, "Val3");
+        assert_eq!(labels[5].text, "Val4");
+
+        // Verify positions are correct (col 0 starts at x = 10.0 + 8.0 = 18.0)
+        assert_eq!(labels[0].x, 18.0);
+        // Col 1 starts at x = 10.0 + 100.0 * 0.5 + 8.0 = 68.0
+        assert_eq!(labels[1].x, 68.0);
+        assert_eq!(labels[2].x, 18.0);
+        assert_eq!(labels[3].x, 68.0);
+    }
+
+    #[test]
+    fn test_spreadsheet_scrolling() {
+        let mut spreadsheet = Spreadsheet::new();
+        // Visible height is 100px. Header is 24px, so body is 76px.
+        spreadsheet.set_rect(0.0, 0.0, 100.0, 100.0);
+        spreadsheet.set_visible(true);
+
+        let headers = vec!["ColA".to_string()];
+        // Each row is 24px. With 10 rows, content_h = 240px.
+        let mut rows = Vec::new();
+        for i in 0..10 {
+            rows.push(vec![format!("Row{}", i)]);
+        }
+        spreadsheet.set_spreadsheet_data(headers, rows);
+
+        // Content height is 240px, visible height is 100px (body is 76px).
+        // Since content height > visible body height, it should be draggable.
+        assert!(spreadsheet.draggable());
+
+        // Max scroll height = 240.0 - 76.0 = 164.0
+        
+        // Initial scroll position should be 0.0
+        assert_eq!(spreadsheet.scroll_y, 0.0);
+
+        // Scroll down via mouse wheel (positive delta scrolls content down, scroll_y increases via tick)
+        let delta = MouseScrollDelta::LineDelta(0.0, 2.0);
+        // Mouse over spreadsheet (50, 50)
+        let changed = spreadsheet.mouse_wheel(&delta, 50.0, 50.0);
+        assert!(changed);
+        assert_eq!(spreadsheet.scroll_y, 0.0);
+        assert!(spreadsheet.scroll_velocity > 0.0);
+
+        // Tick to apply velocity
+        let mut ticked_change = false;
+        for _ in 0..100 {
+            if spreadsheet.tick(0.016) {
+                ticked_change = true;
+            }
+        }
+        assert!(ticked_change);
+        assert!(spreadsheet.scroll_y > 0.0);
+        assert_eq!(spreadsheet.scroll_velocity, 0.0);
+
+        // Scroll back to top
+        let delta_up = MouseScrollDelta::LineDelta(0.0, -10.0);
+        spreadsheet.mouse_wheel(&delta_up, 50.0, 50.0);
+        assert!(spreadsheet.scroll_velocity < 0.0);
+
+        // Tick back to top
+        for _ in 0..100 {
+            spreadsheet.tick(0.016);
+        }
+        assert_eq!(spreadsheet.scroll_y, 0.0);
+        assert_eq!(spreadsheet.scroll_velocity, 0.0);
+
+        // Drag test
+        // Scrollbar width is 6px. Padding is 2px. Width is 100px.
+        // Scrollbar track x is from 92px to 98px.
+        // Let's drag. Click at (94, 50).
+        spreadsheet.drag_begin(94.0, 50.0);
+        assert!(spreadsheet.is_dragging());
+
+        // Update drag to y = 80
+        let changed_drag = spreadsheet.drag_update(94.0, 80.0);
+        assert!(changed_drag);
+        assert!(spreadsheet.scroll_y > 0.0);
+
+        // End drag
+        spreadsheet.drag_end();
+        assert!(!spreadsheet.is_dragging());
+    }
+
+    #[test]
+    fn test_spreadsheet_zero_height_no_panic() {
+        let mut spreadsheet = Spreadsheet::new();
+        // Visible height is set to 0.0
+        spreadsheet.set_rect(0.0, 0.0, 100.0, 0.0);
+        spreadsheet.set_visible(true);
+
+        let headers = vec!["ColA".to_string()];
+        let mut rows = Vec::new();
+        for i in 0..10 {
+            rows.push(vec![format!("Row{}", i)]);
+        }
+        // This should not panic
+        spreadsheet.set_spreadsheet_data(headers, rows);
+
+        // This should not panic
+        spreadsheet.cursor_moved(50.0, 50.0);
+        
+        let delta = MouseScrollDelta::LineDelta(0.0, -2.0);
+        // This should not panic
+        spreadsheet.mouse_wheel(&delta, 50.0, 50.0);
+
+        // This should not panic
+        assert!(!spreadsheet.draggable());
+
+        // This should not panic
+        spreadsheet.drag_begin(94.0, 50.0);
+        spreadsheet.drag_update(94.0, 80.0);
+        spreadsheet.drag_end();
+
+        // This should not panic and return empty quads for scrollbar
+        let _quads = spreadsheet.extra_quads();
+        // The header quad and divider (if any) are drawn, but scrollbar is not
+        // Let's verify that the scrollbar was not drawn
+        // (the last quad would be the scrollbar thumb with thumb_color if drawn,
+        // but here scrollbar track & thumb shouldn't be added)
+        assert_eq!(spreadsheet.scroll_y, 0.0);
+        
+        // Let's check text labels (should be empty because self.h is 0)
+        let labels = spreadsheet.text_labels();
+        // Headers labels are still generated since they don't depend on scroll/height,
+        // but rows shouldn't be
+        assert_eq!(labels.len(), 1); // Only header ColA
     }
 }
