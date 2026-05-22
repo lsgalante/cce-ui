@@ -51,6 +51,7 @@ pub trait Widget {
 
     fn menu_click(&mut self) -> Option<(usize, usize)> { None }
     fn set_item_checked(&mut self, _menu_idx: usize, _item_idx: usize, _checked: bool) {}
+    fn set_menu_items(&mut self, _menu_idx: usize, _items: &[String]) {}
     fn set_grid_snap(&mut self, _gx: f32, _gy: f32) {}
     fn set_node_name(&mut self, _name: &str) {}
     fn set_visible(&mut self, _visible: bool) {}
@@ -211,6 +212,18 @@ impl ParametersBg {
     }
 }
 
+fn parse_slider_range(ptype: &str) -> (f32, f32) {
+    if ptype.starts_with("slider:") {
+        let parts: Vec<&str> = ptype.split(':').collect();
+        if parts.len() >= 3 {
+            if let (Ok(min), Ok(max)) = (parts[1].parse::<f32>(), parts[2].parse::<f32>()) {
+                return (min, max);
+            }
+        }
+    }
+    (0.0, 2.0)
+}
+
 impl Widget for ParametersBg {
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
@@ -230,7 +243,7 @@ impl Widget for ParametersBg {
     }
 
     fn draggable(&self) -> bool {
-        self.display_params.iter().any(|p| p.2 == "slider")
+        self.display_params.iter().any(|p| p.2.starts_with("slider"))
     }
 
     fn is_dragging(&self) -> bool {
@@ -239,11 +252,17 @@ impl Widget for ParametersBg {
 
     fn drag_begin(&mut self, px: f32, py: f32) {
         for (i, p) in self.display_params.iter().enumerate() {
-            if p.2 == "slider" {
+            if p.2.starts_with("slider") {
                 let row_y = self.y + 30.0 + (i as f32) * 20.0;
                 if py >= row_y - 2.0 && py <= row_y + 18.0 {
                     let val = p.1.parse::<f32>().unwrap_or(0.0);
-                    let t = (val / 2.0).clamp(0.0, 1.0);
+                    let (min, max) = parse_slider_range(&p.2);
+                    let denom = max - min;
+                    let t = if denom != 0.0 {
+                        ((val - min) / denom).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
                     let track_x = self.x + 100.0;
                     let track_w = (self.w - 100.0 - 20.0).max(10.0);
                     let thumb_size = 10.0;
@@ -271,7 +290,8 @@ impl Widget for ParametersBg {
             if range > 0.0 {
                 let raw = (px - self.drag_offset - track_x) / range;
                 let t = raw.clamp(0.0, 1.0);
-                let new_val = t * 2.0;
+                let (min, max) = parse_slider_range(&self.display_params[i].2);
+                let new_val = min + t * (max - min);
                 let old_val = &self.display_params[i].1;
                 let new_val_str = format!("{:.2}", new_val);
                 if *old_val != new_val_str {
@@ -290,9 +310,15 @@ impl Widget for ParametersBg {
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
         for (i, p) in self.display_params.iter().enumerate() {
-            if p.2 == "slider" {
+            if p.2.starts_with("slider") {
                 let val = p.1.parse::<f32>().unwrap_or(0.0);
-                let t = (val / 2.0).clamp(0.0, 1.0);
+                let (min, max) = parse_slider_range(&p.2);
+                let denom = max - min;
+                let t = if denom != 0.0 {
+                    ((val - min) / denom).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 let track_x = self.x + 100.0;
                 let track_w = (self.w - 100.0 - 20.0).max(10.0);
                 let track_y = self.y + 30.0 + (i as f32) * 20.0 + 6.0;
@@ -317,7 +343,7 @@ impl Widget for ParametersBg {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         self.display_params.iter().enumerate().map(|(i, (name, value, ptype))| {
-            let text = if ptype == "slider" {
+            let text = if ptype.starts_with("slider") {
                 let val = value.parse::<f32>().unwrap_or(0.0);
                 format!("{}: {:.2}", name, val)
             } else {
@@ -628,6 +654,13 @@ impl Widget for MenuBar {
             if item_idx < menu.len() {
                 menu[item_idx] = Some(checked);
             }
+        }
+    }
+
+    fn set_menu_items(&mut self, menu_idx: usize, items: &[String]) {
+        if menu_idx < self.menu_dropdowns.len() {
+            self.menu_dropdowns[menu_idx] = items.to_vec();
+            self.menu_dropdown_checked[menu_idx] = vec![Some(false); items.len()];
         }
     }
 
