@@ -87,6 +87,7 @@ impl Column {
     pub fn widget<T: Widget>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
         let x = self.ax(x_off);
         let y = self.ay();
+        w.set_row_rect(self.ox + self.cx + 8.0, self.cw - 16.0);
         render_widget(pc, w, x, y, ww, wh);
         self.y += wh + w.top_room();
     }
@@ -145,6 +146,7 @@ impl Section {
     }
 
     pub fn widget<T: Widget>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
+        w.set_row_rect(self.left + 8.0, self.cw - 16.0);
         render_widget(pc, w, self.ax(x_off), self.ay(), ww, wh);
         self.content_y += wh + w.top_room();
     }
