@@ -2185,7 +2185,7 @@ impl Widget for Spreadsheet {
         if !self.visible {
             [0.0, 0.0, 0.0, 0.0]
         } else {
-            [0.08, 0.08, 0.12, 1.0]
+            colors::PARAM_BG
         }
     }
 
@@ -2394,7 +2394,7 @@ impl Widget for Spreadsheet {
         let mut quads = Vec::new();
         
         // Header bg
-        quads.push((self.x, self.y, self.w, 24.0, [0.12, 0.12, 0.16, 1.0]));
+        quads.push((self.x, self.y, self.w, 24.0, [0.12, 0.12, 0.16, 0.4]));
 
         // Zebra rows
         let row_h = 24.0;
@@ -2409,22 +2409,22 @@ impl Widget for Spreadsheet {
             let draw_h = (ry + row_h).min(body_bottom) - draw_y;
             if draw_h > 0.0 {
                 let row_color = if i % 2 == 0 {
-                    [0.10, 0.10, 0.13, 0.9]
+                    [0.10, 0.10, 0.13, 0.15]
                 } else {
-                    [0.08, 0.08, 0.11, 0.9]
+                    [0.08, 0.08, 0.11, 0.05]
                 };
                 quads.push((self.x, draw_y, self.w, draw_h, row_color));
 
                 // Horizontal row separator
                 let sep_y = ry + row_h;
                 if sep_y >= body_top && sep_y < body_bottom {
-                    quads.push((self.x, sep_y, self.w, 1.0, [0.20, 0.20, 0.25, 0.3]));
+                    quads.push((self.x, sep_y, self.w, 1.0, [0.20, 0.20, 0.25, 0.15]));
                 }
             }
         }
 
         // Header separator
-        quads.push((self.x, self.y + 24.0, self.w, 1.0, [0.20, 0.20, 0.25, 0.5]));
+        quads.push((self.x, self.y + 24.0, self.w, 1.0, [0.20, 0.20, 0.25, 0.25]));
 
         // Vertical separators
         let divider_h = self.h;
@@ -2432,7 +2432,7 @@ impl Widget for Spreadsheet {
             let n_cols = self.headers.len();
             for i in 1..n_cols {
                 let r = i as f32 / n_cols as f32;
-                quads.push((self.x + self.w * r, self.y, 1.0, divider_h, [0.20, 0.20, 0.25, 0.3]));
+                quads.push((self.x + self.w * r, self.y, 1.0, divider_h, [0.20, 0.20, 0.25, 0.15]));
             }
         }
 
@@ -2447,7 +2447,7 @@ impl Widget for Spreadsheet {
             let track_h = visible_h;
 
             // Track BG
-            quads.push((scrollbar_x, track_y, scrollbar_w, track_h, [0.05, 0.05, 0.08, 0.4]));
+            quads.push((scrollbar_x, track_y, scrollbar_w, track_h, [0.05, 0.05, 0.08, 0.15]));
 
             // Thumb
             let thumb_h = ((visible_h / content_h) * visible_h).clamp(15.0_f32.min(visible_h), visible_h);

@@ -33,7 +33,7 @@ pub const SPINBOX_BUTTON_HOVER: [f32; 4] = [0.35, 0.35, 0.42, 1.0];
 pub const SPINBOX_DISPLAY: [f32; 4] = [0.12, 0.12, 0.16, 1.0];
 
 pub const CANVAS_BG: [f32; 4] = [0.05, 0.05, 0.10, 1.0];
-pub const VIEWPORT_BG: [f32; 4] = [0.08, 0.08, 0.12, 0.25];
+pub const VIEWPORT_BG: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 pub const PARAM_BG: [f32; 4] = [0.10, 0.10, 0.14, 0.25];
 
 pub const PANEL_MENU_BG: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
