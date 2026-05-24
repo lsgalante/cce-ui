@@ -163,6 +163,33 @@ impl Section {
         self.content_y += h;
     }
 
+    pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
+        let usable_w = self.cw - 24.0; // 12.0 padding on left and right inside outer bounds
+        if count == 0 {
+            return Vec::new();
+        }
+        let total_gap = gap * (count - 1) as f32;
+        let col_w = (usable_w - total_gap).max(0.0) / count as f32;
+
+        let mut cols = Vec::with_capacity(count);
+        for i in 0..count {
+            let x = self.left + 12.0 + i as f32 * (col_w + gap);
+            cols.push((x, col_w));
+        }
+        cols
+    }
+
+    pub fn row<F>(&mut self, count: usize, gap: f32, h: f32, mut f: F)
+    where
+        F: FnMut(usize, f32, f32),
+    {
+        let cols = self.row_layout(count, gap);
+        for (i, &(x, w)) in cols.iter().enumerate() {
+            f(i, x, w);
+        }
+        self.content_y += h;
+    }
+
     pub fn finish(&mut self, pc: &mut dyn RenderTarget) -> f32 {
         let border: [f32; 4] = [0.25, 0.25, 0.35, 1.0];
         let x = self.left + 8.0;
