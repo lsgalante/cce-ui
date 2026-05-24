@@ -38,6 +38,7 @@ pub const PARAM_BG: [f32; 4] = [0.10, 0.10, 0.14, 0.25];
 
 pub const PANEL_MENU_BG: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
 pub const PANEL_MENU_HOVER: [f32; 4] = [0.18, 0.18, 0.25, 1.0];
+pub const PANEL_MENU_FOCUSED: [f32; 4] = [0.08, 0.16, 0.28, 1.0];
 
 pub const SPLITTER_IDLE: [f32; 4] = [0.20, 0.20, 0.27, 1.0];
 pub const SPLITTER_HOVER: [f32; 4] = [0.40, 0.40, 0.50, 1.0];

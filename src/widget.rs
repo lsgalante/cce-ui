@@ -683,6 +683,7 @@ pub struct MenuBar {
     was_open: Option<usize>,
     pub vertical: bool,
     pub visible: bool,
+    pub focused: bool,
 }
 
 impl MenuBar {
@@ -701,6 +702,7 @@ impl MenuBar {
             was_open: None,
             vertical: false,
             visible: true,
+            focused: false,
         }
     }
 
@@ -807,6 +809,8 @@ impl Widget for MenuBar {
     fn color(&self) -> [f32; 4] {
         if !self.visible {
             [0.0, 0.0, 0.0, 0.0]
+        } else if self.focused {
+            colors::PANEL_MENU_FOCUSED
         } else {
             colors::PANEL_MENU_BG
         }
@@ -951,7 +955,12 @@ impl Widget for MenuBar {
         false
     }
 
+    fn focus(&mut self) {
+        self.focused = true;
+    }
+
     fn unfocus(&mut self) {
+        self.focused = false;
         self.was_open = self.open_menu.take();
     }
 
@@ -1033,7 +1042,7 @@ impl Widget for MenuBar {
             for (i, item) in self.menu_items.iter().enumerate() {
                 labels.push(TextLabel {
                     text: item.clone(),
-                    x: self.x + menu_item_x(&self.title, &self.menu_items, i),
+                    x: self.x + menu_item_x(&self.title, &self.menu_items, i) + 8.0,
                     y: self.y + 7.0,
                     font_size: 12.0,
                     color: [0xcc, 0xcc, 0xd4],
@@ -1084,15 +1093,21 @@ pub struct Button {
     pressed: bool,
     just_clicked: bool,
     kind: ButtonKind,
+    label: Option<String>,
 }
 
 impl Button {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Primary }
+        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Primary, label: None }
     }
 
     pub fn new_reset(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Reset }
+        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Reset, label: None }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.label = Some(label.to_string());
+        self
     }
 }
 
@@ -1145,6 +1160,22 @@ impl Widget for Button {
 
     fn take_click(&mut self) -> bool {
         if self.just_clicked { self.just_clicked = false; true } else { false }
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        if let Some(ref label) = self.label {
+            let font_size = 12.0;
+            let est_w = label.len() as f32 * 6.5;
+            labels.push(TextLabel {
+                text: label.clone(),
+                x: self.x + (self.w - est_w) / 2.0,
+                y: self.y + (self.h - font_size) / 2.0 - 1.0,
+                font_size,
+                color: [0xcc, 0xcc, 0xd4],
+            });
+        }
+        labels
     }
 }
 
@@ -1513,6 +1544,10 @@ impl Toggle {
     pub fn set_toggled(&mut self, v: bool) {
         self.toggled = v;
     }
+
+    pub fn toggled(&self) -> bool {
+        self.toggled
+    }
 }
 
 impl Widget for Toggle {
@@ -1527,10 +1562,15 @@ impl Widget for Toggle {
         let (x, y, w, h) = self.rect();
         let hx = if self.row_w > 0.0 { self.row_x } else { x };
         let hw = if self.row_w > 0.0 { self.row_w } else { w };
-        px >= hx && px <= hx + hw && py >= y && py <= y + h
+        let (hy, hh) = if self.label.is_some() {
+            (y - 18.0, h + 18.0)
+        } else {
+            (y, h)
+        };
+        px >= hx && px <= hx + hw && py >= hy && py <= hy + hh
     }
 
-    fn top_room(&self) -> f32 { 0.0 }
+    fn top_room(&self) -> f32 { if self.label.is_some() { 18.0 } else { 0.0 } }
 
     fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was = self.hovering;
@@ -1558,9 +1598,14 @@ impl Widget for Toggle {
         let bg = if self.toggled { colors::TOGGLE_ON } else { colors::TOGGLE_OFF };
         quads.push((self.x, self.y, self.w, self.h, bg));
         if self.hovering {
-            let hx = if self.row_w > 0.0 { self.row_x } else { self.x - 87.0 };
-            let hw = if self.row_w > 0.0 { self.row_w } else { 87.0 + self.w };
-            quads.push((hx, self.y, hw, self.h, [1.0, 1.0, 1.0, 0.06]));
+            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
+            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
+            let (hy, hh) = if self.label.is_some() {
+                (self.y - 18.0, self.h + 18.0)
+            } else {
+                (self.y, self.h)
+            };
+            quads.push((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.06]));
         }
         quads
     }
@@ -1573,8 +1618,8 @@ impl Widget for Toggle {
         if let Some(ref label) = self.label {
             vec![TextLabel {
                 text: label.clone(),
-                x: self.x - 85.0,
-                y: self.y + (self.h - 12.0) / 2.0,
+                x: self.x,
+                y: self.y - 18.0,
                 font_size: 12.0,
                 color: [0x83, 0x83, 0x8a],
             }]
@@ -1584,17 +1629,112 @@ impl Widget for Toggle {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Label {
+    x: f32, y: f32, w: f32, h: f32,
+    text: String,
+    font_size: f32,
+    color: [u8; 3],
+    hovered: bool,
+    row_x: f32,
+    row_w: f32,
+}
+
+impl Label {
+    pub fn new(text: &str) -> Self {
+        Self {
+            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            text: text.to_string(),
+            font_size: 12.0,
+            color: [0x83, 0x83, 0x8a],
+            hovered: false,
+            row_x: 0.0,
+            row_w: 0.0,
+        }
+    }
+
+    pub fn with_font_size(mut self, size: f32) -> Self {
+        self.font_size = size;
+        self
+    }
+
+    pub fn with_color(mut self, color: [u8; 3]) -> Self {
+        self.color = color;
+        self
+    }
+
+    pub fn set_text(&mut self, text: &str) {
+        self.text = text.to_string();
+    }
+
+    pub fn set_color(&mut self, color: [u8; 3]) {
+        self.color = color;
+    }
+}
+
+impl Widget for Label {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn set_row_rect(&mut self, x: f32, w: f32) { self.row_x = x; self.row_w = w; }
+    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
+    fn hovered(&self) -> bool { self.hovered }
+
+    fn hit_test(&self, px: f32, py: f32) -> bool {
+        let (x, y, w, h) = self.rect();
+        let hx = if self.row_w > 0.0 { self.row_x } else { x };
+        let hw = if self.row_w > 0.0 { self.row_w } else { w };
+        px >= hx && px <= hx + hw && py >= y && py <= y + h
+    }
+
+    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        let was = self.hovered;
+        self.hovered = self.hit_test(px, py);
+        was != self.hovered
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        if self.hovered {
+            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
+            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
+            quads.push((hx, self.y, hw, self.h, [1.0, 1.0, 1.0, 0.06]));
+        }
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        vec![TextLabel {
+            text: self.text.clone(),
+            x: self.x,
+            y: self.y + (self.h - self.font_size) / 2.0,
+            font_size: self.font_size,
+            color: self.color,
+        }]
+    }
+}
+
 pub struct Slider {
     x: f32, y: f32, w: f32, h: f32,
     hovered: bool,
     dragging: bool,
     value: f32,
     drag_offset: f32,
+    scroll_enabled: bool,
 }
 
 impl Slider {
     pub fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovered: false, dragging: false, value: 0.5, drag_offset: 0.0 }
+        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovered: false, dragging: false, value: 0.5, drag_offset: 0.0, scroll_enabled: false }
+    }
+
+    pub fn with_scroll(mut self, enabled: bool) -> Self {
+        self.scroll_enabled = enabled;
+        self
+    }
+
+    pub fn set_scroll(&mut self, enabled: bool) {
+        self.scroll_enabled = enabled;
     }
 }
 
@@ -1631,6 +1771,9 @@ impl Widget for Slider {
     fn drag_end(&mut self) { self.dragging = false; }
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+        if !self.scroll_enabled {
+            return false;
+        }
         let (sx, sy, sw, sh) = self.rect();
         if px >= sx && px <= sx + sw && py >= sy && py <= sy + sh {
             let scroll_amount = match delta {
@@ -1638,7 +1781,7 @@ impl Widget for Slider {
                 MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
             };
             let step = 0.02;
-            let new_val = (self.value + scroll_amount * step).clamp(0.0, 1.0);
+            let new_val = (self.value - scroll_amount * step).clamp(0.0, 1.0);
             if (new_val - self.value).abs() > 0.0001 {
                 self.value = new_val;
                 return true;
@@ -1777,11 +1920,12 @@ pub struct Spinbox {
     unit: Option<String>,
     row_x: f32,
     row_w: f32,
+    pub decimals: u32,
 }
 
 impl Spinbox {
     pub fn new(value: i32, min: i32, max: i32, step: i32) -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, value, min, max, step, editing: false, edit_buffer: String::new(), hovered: false, hover_dec: false, hover_inc: false, label: None, unit: None, row_x: 0.0, row_w: 0.0 }
+        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, value, min, max, step, editing: false, edit_buffer: String::new(), hovered: false, hover_dec: false, hover_inc: false, label: None, unit: None, row_x: 0.0, row_w: 0.0, decimals: 0 }
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
@@ -1800,6 +1944,11 @@ impl Spinbox {
 
     pub fn set_unit(&mut self, unit: &str) {
         self.unit = Some(unit.to_string());
+    }
+
+    pub fn with_decimals(mut self, decimals: u32) -> Self {
+        self.decimals = decimals;
+        self
     }
 }
 
@@ -1872,14 +2021,27 @@ impl Widget for Spinbox {
 
     fn focus(&mut self) {
         self.editing = true;
-        self.edit_buffer = self.value.to_string();
+        if self.decimals > 0 {
+            let divisor = 10.0f32.powi(self.decimals as i32);
+            self.edit_buffer = format!("{:.width$}", self.value as f32 / divisor, width = self.decimals as usize);
+        } else {
+            self.edit_buffer = self.value.to_string();
+        }
     }
 
     fn unfocus(&mut self) {
         if self.editing {
             self.editing = false;
-            if let Ok(val) = self.edit_buffer.parse::<i32>() {
-                self.value = val.clamp(self.min, self.max);
+            if self.decimals > 0 {
+                if let Ok(val_f) = self.edit_buffer.parse::<f32>() {
+                    let divisor = 10.0f32.powi(self.decimals as i32);
+                    self.value = (val_f * divisor).round() as i32;
+                    self.value = self.value.clamp(self.min, self.max);
+                }
+            } else {
+                if let Ok(val) = self.edit_buffer.parse::<i32>() {
+                    self.value = val.clamp(self.min, self.max);
+                }
             }
         }
     }
@@ -1893,8 +2055,16 @@ impl Widget for Spinbox {
                 true
             }
             Key::Named(NamedKey::Enter) => {
-                if let Ok(val) = self.edit_buffer.parse::<i32>() {
-                    self.value = val.clamp(self.min, self.max);
+                if self.decimals > 0 {
+                    if let Ok(val_f) = self.edit_buffer.parse::<f32>() {
+                        let divisor = 10.0f32.powi(self.decimals as i32);
+                        self.value = (val_f * divisor).round() as i32;
+                        self.value = self.value.clamp(self.min, self.max);
+                    }
+                } else {
+                    if let Ok(val) = self.edit_buffer.parse::<i32>() {
+                        self.value = val.clamp(self.min, self.max);
+                    }
                 }
                 self.editing = false;
                 true
@@ -1909,6 +2079,7 @@ impl Widget for Spinbox {
                         for ch in text.chars() {
                             match ch {
                                 '-' if self.edit_buffer.is_empty() => self.edit_buffer.push('-'),
+                                '.' if self.decimals > 0 && !self.edit_buffer.contains('.') => self.edit_buffer.push('.'),
                                 '0'..='9' => self.edit_buffer.push(ch),
                                 _ => {}
                             }
@@ -1940,9 +2111,37 @@ impl Widget for Spinbox {
         let btn_w = self.w * 0.225;
         let inc_col = if self.hover_inc { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
         let dec_col = if self.hover_dec { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
-        quads.push((self.x, self.y, self.w * 0.55, self.h, colors::SPINBOX_DISPLAY));
+        
+        let display_bg = if self.editing {
+            [0.06, 0.10, 0.18, 1.0] // Focused dark-blue input field look
+        } else {
+            colors::SPINBOX_DISPLAY
+        };
+        
+        quads.push((self.x, self.y, self.w * 0.55, self.h, display_bg));
         quads.push((split, self.y, btn_w, self.h, dec_col));
         quads.push((split + btn_w, self.y, btn_w, self.h, inc_col));
+        
+        if self.editing {
+            let border_color = [0.20, 0.50, 0.85, 1.0]; // Bright focused blue border
+            // Top border
+            quads.push((self.x, self.y, self.w * 0.55, 1.0, border_color));
+            // Bottom border
+            quads.push((self.x, self.y + self.h - 1.0, self.w * 0.55, 1.0, border_color));
+            // Left border
+            quads.push((self.x, self.y, 1.0, self.h, border_color));
+            // Right border
+            quads.push((self.x + self.w * 0.55 - 1.0, self.y, 1.0, self.h, border_color));
+
+            // Caret cursor
+            let char_width = 8.0;
+            let cursor_x = self.x + 6.0 + (self.edit_buffer.len() as f32 * char_width);
+            let max_cursor_x = split - 4.0;
+            let final_cursor_x = cursor_x.min(max_cursor_x);
+            let cursor_y = self.y + (self.h - 14.0) / 2.0;
+            quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
+        }
+        
         quads
     }
 
@@ -1957,7 +2156,14 @@ impl Widget for Spinbox {
                 color: [0x83, 0x83, 0x8a],
             });
         }
-        let value_text = if self.editing { self.edit_buffer.clone() } else { self.value.to_string() };
+        let value_text = if self.editing {
+            self.edit_buffer.clone()
+        } else if self.decimals > 0 {
+            let divisor = 10.0f32.powi(self.decimals as i32);
+            format!("{:.width$}", self.value as f32 / divisor, width = self.decimals as usize)
+        } else {
+            self.value.to_string()
+        };
         labels.push(TextLabel {
             text: value_text,
             x: self.x + 4.0,
@@ -2003,15 +2209,32 @@ pub struct ColorSelector {
     label: Option<String>,
     row_x: f32,
     row_w: f32,
+    pub command: String,
 }
 
 impl ColorSelector {
     pub fn new(color: [u8; 3]) -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, color, just_clicked: false, hovered: false, editing: false, edit_buffer: String::new(), label: None, row_x: 0.0, row_w: 0.0 }
+        Self {
+            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            color,
+            just_clicked: false,
+            hovered: false,
+            editing: false,
+            edit_buffer: String::new(),
+            label: None,
+            row_x: 0.0,
+            row_w: 0.0,
+            command: "clear-color-interface".to_string(),
+        }
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
         self.label = Some(label.to_string());
+        self
+    }
+
+    pub fn with_command(mut self, command: &str) -> Self {
+        self.command = command.to_string();
         self
     }
 }
@@ -2053,6 +2276,18 @@ impl Widget for ColorSelector {
         if !self.hit_test(px, py) { return false; }
         if px >= self.x + self.w * 0.65 {
             self.just_clicked = true;
+            let hex = format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]);
+            if let Ok(output) = std::process::Command::new(&self.command)
+                .arg(&hex)
+                .output()
+            {
+                if output.status.success() {
+                    let stdout_str = String::from_utf8_lossy(&output.stdout);
+                    if let Some(new_color) = parse_hex(stdout_str.trim()) {
+                        self.color = new_color;
+                    }
+                }
+            }
             return true;
         }
         self.focus();
