@@ -1,16 +1,41 @@
-use std::sync::Arc;
-
-use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::window::{Window, WindowAttributes};
-
-use clear_ui::widget::{Button, Checkbox, ContentBg, Header, Panel, ProgressBar, Sidebar, Slider, Spinbox, StatusBar, TextLabel, Toggle, Widget};
+use clear_ui::widget::{
+    Button, Checkbox, ContentBg, Header, Panel, ProgressBar, Sidebar, Slider, Spinbox, StatusBar,
+    TextLabel, Toggle, Widget,
+};
 
 use glyphon::{
     Attrs, Buffer, Cache, FontSystem, Metrics, Resolution, SwashCache, TextArea, TextAtlas,
     TextBounds, TextRenderer, Viewport,
 };
+
+use smithay_client_toolkit::{
+    compositor::{CompositorHandler, CompositorState},
+    delegate_compositor, delegate_keyboard, delegate_pointer, delegate_registry,
+    delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window, delegate_output,
+    registry::{ProvidesRegistryState, RegistryState},
+    registry_handlers,
+    output::{OutputHandler, OutputState},
+    seat::{
+        keyboard::KeyboardHandler,
+        pointer::PointerHandler,
+        Capability, SeatHandler, SeatState,
+    },
+    shell::{
+        xdg::{
+            window::{Window as XdgWindow, WindowConfigure, WindowHandler, WindowDecorations},
+            XdgShell,
+        },
+        WaylandSurface,
+    },
+    shm::{Shm, ShmHandler},
+};
+use wayland_client::{
+    globals::registry_queue_init,
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+    Connection, QueueHandle, Proxy,
+};
+use calloop::EventLoop;
+use calloop_wayland_source::WaylandSource;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -68,7 +93,6 @@ fn make_text_buffer(font_system: &mut FontSystem, text: &str, size: f32) -> Buff
 }
 
 struct State {
-    window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -104,11 +128,8 @@ struct State {
 }
 
 impl State {
-    async fn new(window: Arc<Window>) -> Self {
-        let scale = window.scale_factor();
-        let physical_size = window.inner_size();
-        let pw = physical_size.width.max(1);
-        let ph = physical_size.height.max(1);
+    async fn new(wayland_handle: &'static clear_ui::wayland::WaylandSurfaceHandle, pw: u32, ph: u32) -> Self {
+        let scale = 1.0f64;
         let lw = pw as f32 / scale as f32;
         let lh = ph as f32 / scale as f32;
         let sw = lw;
@@ -120,7 +141,7 @@ impl State {
         });
 
         let surface = instance
-            .create_surface(window.clone())
+            .create_surface(wayland_handle)
             .expect("Failed to create surface");
 
         let adapter = instance
@@ -146,14 +167,15 @@ impl State {
             .await
             .expect("Failed to create device");
 
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, pw, ph)
             .expect("Failed to get surface config");
+        config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(clear_ui::SHADER.into()),
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -241,7 +263,6 @@ impl State {
         });
 
         let mut state = Self {
-            window,
             surface,
             device,
             queue,
@@ -303,6 +324,9 @@ impl State {
     fn upload_vertices(&mut self) {
         let verts = self.collect_vertices();
         self.vertex_count = verts.len() as u32;
+        if self.vertex_count == 0 {
+            return;
+        }
         let data = bytemuck::cast_slice(&verts);
         let needed = data.len() as wgpu::BufferAddress;
         if needed > self.vertex_buffer.size() {
@@ -404,115 +428,18 @@ impl State {
             .unwrap();
     }
 
-    fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            self.physical_width = new_size.width;
-            self.physical_height = new_size.height;
-            self.width = new_size.width as f32 / self.scale as f32;
-            self.height = new_size.height as f32 / self.scale as f32;
-            self.config.width = new_size.width;
-            self.config.height = new_size.height;
+    fn resize(&mut self, width: u32, height: u32) {
+        if width > 0 && height > 0 {
+            self.physical_width = width;
+            self.physical_height = height;
+            self.width = width as f32 / self.scale as f32;
+            self.height = height as f32 / self.scale as f32;
+            self.config.width = width;
+            self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.positions = demo_positions(self.width, self.height);
             self.apply_layout();
             self.upload_vertices();
-        }
-    }
-
-    fn handle_event(&mut self, event: &WindowEvent) -> bool {
-        match event {
-            WindowEvent::MouseWheel { delta, .. } => {
-                let mut changed = false;
-                for w in &mut self.widgets {
-                    if w.mouse_wheel(delta, self.cursor_x, self.cursor_y) {
-                        changed = true;
-                    }
-                }
-                changed
-            }
-            WindowEvent::CursorMoved { position, .. } => {
-                self.cursor_x = position.x as f32 / self.scale as f32;
-                self.cursor_y = position.y as f32 / self.scale as f32;
-                let mut changed = false;
-
-                if let Some(idx) = self.drag_widget {
-                    if self.widgets[idx].drag_update(self.cursor_x, self.cursor_y) {
-                        changed = true;
-                    }
-                }
-
-                if self.drag_widget.is_none() {
-                    for w in &mut self.widgets {
-                        if w.cursor_moved(self.cursor_x, self.cursor_y) {
-                            changed = true;
-                        }
-                    }
-                }
-                changed
-            }
-            WindowEvent::MouseInput { state: btn_state, button, .. } => {
-                if *button != MouseButton::Left { return false; }
-                let mut changed = false;
-
-                match btn_state {
-                    ElementState::Pressed => {
-                        if let Some(old) = self.focused_widget.take() {
-                            self.widgets[old].unfocus();
-                        }
-                        for i in (0..self.widgets.len()).rev() {
-                            if self.widgets[i].hit_test(self.cursor_x, self.cursor_y) {
-                                if self.widgets[i].mouse_input(*button, *btn_state, self.cursor_x, self.cursor_y) {
-                                    changed = true;
-                                }
-                                if self.widgets[i].draggable() {
-                                    self.widgets[i].drag_begin(self.cursor_x, self.cursor_y);
-                                    self.drag_widget = Some(i);
-                                }
-                                self.widgets[i].focus();
-                                self.focused_widget = Some(i);
-                                break;
-                            }
-                        }
-                    }
-                    ElementState::Released => {
-                        if let Some(idx) = self.drag_widget {
-                            self.widgets[idx].drag_end();
-                            self.drag_widget = None;
-                            changed = true;
-                        }
-                        for w in &mut self.widgets {
-                            if w.mouse_input(*button, *btn_state, self.cursor_x, self.cursor_y) {
-                                changed = true;
-                            }
-                        }
-                        let mut clicked = false;
-                        for w in &mut self.widgets {
-                            if w.take_click() {
-                                clicked = true;
-                            }
-                        }
-                        if clicked {
-                            self.click_count += 1;
-                            self.update_status_text(&format!("Clicks: {}", self.click_count));
-                        }
-                    }
-                }
-                changed
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let Some(idx) = self.focused_widget {
-                    let val = self.widgets[idx].value();
-                    let changed = self.widgets[idx].keyboard_input(event);
-                    if self.widgets[idx].value() != val {
-                        changed || true
-                    } else {
-                        changed
-                    }
-                } else {
-                    false
-                }
-            }
-            _ => false,
         }
     }
 
@@ -546,7 +473,10 @@ impl State {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.06, g: 0.06, b: 0.08, a: 1.0,
+                            r: 0.05,
+                            g: 0.05,
+                            b: 0.08,
+                            a: 0.92,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -556,136 +486,530 @@ impl State {
                 occlusion_query_set: None,
             });
 
-            // Draw colored quads
-            pass.set_pipeline(&self.render_pipeline);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..self.vertex_count, 0..1);
+            if self.vertex_count > 0 {
+                pass.set_pipeline(&self.render_pipeline);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.draw(0..self.vertex_count, 0..1);
+            }
 
-            // Draw text
-            self.text_renderer.render(&self.text_atlas, &self.text_viewport, &mut pass).unwrap();
+            self.text_renderer
+                .render(&self.text_atlas, &self.text_viewport, &mut pass)
+                .unwrap();
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        self.window.pre_present_notify();
         output.present();
-    }
-}
-
-struct App {
-    state: Option<State>,
-}
-
-impl App {
-    fn new() -> Self { Self { state: None } }
-}
-
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.state.is_some() { return; }
-
-        let window = Arc::new(
-            event_loop
-                .create_window(
-                    WindowAttributes::default()
-                        .with_title("Clear UI - Test Window")
-                        .with_inner_size(winit::dpi::LogicalSize::new(1024, 768)),
-                )
-                .unwrap(),
-        );
-
-        let state = pollster::block_on(State::new(window));
-        self.state = Some(state);
-        self.state.as_ref().unwrap().window.request_redraw();
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _window_id: winit::window::WindowId,
-        event: WindowEvent,
-    ) {
-        let needs_redraw = match event {
-            WindowEvent::CloseRequested => {
-                event_loop.exit();
-                true
-            }
-            WindowEvent::Resized(size) => {
-                if let Some(state) = &mut self.state {
-                    state.resize(size);
-                }
-                true
-            }
-            WindowEvent::RedrawRequested => {
-                if let Some(state) = &mut self.state {
-                    state.render();
-                    state.window.request_redraw();
-                }
-                true
-            }
-            WindowEvent::ScaleFactorChanged { scale_factor, mut inner_size_writer } => {
-                if let Some(state) = &mut self.state {
-                    let new_physical = winit::dpi::PhysicalSize::new(
-                        (state.width as f64 * scale_factor) as u32,
-                        (state.height as f64 * scale_factor) as u32,
-                    );
-                    let _ = inner_size_writer.request_inner_size(new_physical);
-                    state.scale = scale_factor;
-                    state.resize(new_physical);
-                    state.window.request_redraw();
-                }
-                true
-            }
-            _ => {
-                if let Some(state) = &mut self.state {
-                    let prev = state.click_count;
-                    let changed = state.handle_event(&event);
-                    if changed {
-                        state.upload_vertices();
-                    }
-                    if state.click_count != prev {
-                        let clicks = state.click_count;
-                        state.window.set_title(&format!(
-                            "Clear UI - Test Window  |  clicks: {}", clicks
-                        ));
-                    }
-                    changed
-                } else {
-                    false
-                }
-            }
-        };
-        if needs_redraw {
-            if let Some(state) = &mut self.state {
-                state.window.request_redraw();
-            }
-        }
     }
 }
 
 fn demo_positions(sw: f32, sh: f32) -> Vec<(f32, f32, f32, f32)> {
     vec![
-        (0.0, 0.0, sw, 40.0),                        // 0 header
-        (0.0, 40.0, 60.0, sh - 68.0),                // 1 sidebar
-        (60.0, 40.0, sw - 60.0, sh - 68.0),          // 2 content_bg
-        (70.0, 50.0, 140.0, 40.0),                   // 3 btn_a
-        (220.0, 50.0, 140.0, 40.0),                  // 4 btn_b
-        (370.0, 50.0, 140.0, 40.0),                  // 5 btn_c
-        (70.0, 100.0, 400.0, 250.0),                 // 6 panel
-        (70.0, 360.0, 140.0, 40.0),                  // 7 click_me
-        (220.0, 360.0, 140.0, 40.0),                 // 8 reset
-        (70.0, 410.0, 24.0, 24.0),                   // 9 checkbox
-        (104.0, 410.0, 48.0, 24.0),                  // 10 toggle
-        (162.0, 410.0, 160.0, 24.0),                 // 11 progress_bar
-        (70.0, 444.0, 300.0, 32.0),                  // 12 slider
-        (70.0, 486.0, 120.0, 32.0),                  // 13 spinbox
-        (0.0, sh - 28.0, sw, 28.0),                  // 14 status_bar
+        (0.0, 0.0, sw, 40.0),               // 0 header
+        (0.0, 40.0, 60.0, sh - 68.0),       // 1 sidebar
+        (60.0, 40.0, sw - 60.0, sh - 68.0), // 2 content_bg
+        (70.0, 50.0, 140.0, 40.0),          // 3 btn_a
+        (220.0, 50.0, 140.0, 40.0),         // 4 btn_b
+        (370.0, 50.0, 140.0, 40.0),         // 5 btn_c
+        (70.0, 100.0, 400.0, 250.0),        // 6 panel
+        (70.0, 360.0, 140.0, 40.0),         // 7 click_me
+        (220.0, 360.0, 140.0, 40.0),        // 8 reset
+        (70.0, 410.0, 24.0, 24.0),          // 9 checkbox
+        (104.0, 410.0, 48.0, 24.0),         // 10 toggle
+        (162.0, 410.0, 160.0, 24.0),        // 11 progress_bar
+        (70.0, 444.0, 300.0, 32.0),         // 12 slider
+        (70.0, 486.0, 120.0, 32.0),         // 13 spinbox
+        (0.0, sh - 28.0, sw, 28.0),         // 14 status_bar
     ]
 }
 
-fn main() {
-    let event_loop = EventLoop::new().unwrap();
-    event_loop.set_control_flow(ControlFlow::Poll);
+struct AppState {
+    registry_state: RegistryState,
+    compositor_state: CompositorState,
+    xdg_shell_state: XdgShell,
+    shm_state: Shm,
+    seat_state: SeatState,
+    output_state: OutputState,
 
-    let mut app = App::new();
-    event_loop.run_app(&mut app).unwrap();
+    seats: Vec<wl_seat::WlSeat>,
+    pointer: Option<wl_pointer::WlPointer>,
+    keyboard: Option<wl_keyboard::WlKeyboard>,
+
+    window: XdgWindow,
+    surface: wl_surface::WlSurface,
+
+    state: Option<State>,
+    exit: bool,
+    redraw: bool,
+}
+
+impl CompositorHandler for AppState {
+    fn scale_factor_changed(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        scale_factor: i32,
+    ) {
+        if let Some(state) = &mut self.state {
+            state.scale = scale_factor as f64;
+            state.resize(state.physical_width, state.physical_height);
+        }
+        self.redraw = true;
+    }
+
+    fn transform_changed(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _new_transform: wl_output::Transform,
+    ) {
+    }
+
+    fn frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _time: u32,
+    ) {
+    }
+
+    fn surface_enter(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _output: &wl_output::WlOutput,
+    ) {
+    }
+
+    fn surface_leave(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _surface: &wl_surface::WlSurface,
+        _output: &wl_output::WlOutput,
+    ) {
+    }
+}
+
+impl OutputHandler for AppState {
+    fn output_state(&mut self) -> &mut OutputState {
+        &mut self.output_state
+    }
+
+    fn new_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {}
+
+    fn update_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {}
+
+    fn output_destroyed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {}
+}
+
+impl SeatHandler for AppState {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seat_state
+    }
+
+    fn new_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        self.seats.push(seat);
+    }
+
+    fn new_capability(
+        &mut self,
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            let pointer = self.seat_state.get_pointer(qh, &seat).unwrap();
+            self.pointer = Some(pointer);
+        }
+        if capability == Capability::Keyboard && self.keyboard.is_none() {
+            let keyboard = self.seat_state.get_keyboard(qh, &seat, None).unwrap();
+            self.keyboard = Some(keyboard);
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer {
+            self.pointer = None;
+        }
+        if capability == Capability::Keyboard {
+            self.keyboard = None;
+        }
+    }
+
+    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        self.seats.retain(|s| s != &seat);
+    }
+}
+
+impl ShmHandler for AppState {
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm_state
+    }
+}
+
+impl PointerHandler for AppState {
+    fn pointer_frame(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _pointer: &wl_pointer::WlPointer,
+        events: &[smithay_client_toolkit::seat::pointer::PointerEvent],
+    ) {
+        use smithay_client_toolkit::seat::pointer::PointerEventKind;
+        for event in events {
+            let (x, y) = event.position;
+            if let Some(state) = &mut self.state {
+                state.cursor_x = x as f32;
+                state.cursor_y = y as f32;
+            }
+
+            match &event.kind {
+                PointerEventKind::Enter { .. } => {}
+                PointerEventKind::Leave { .. } => {}
+                PointerEventKind::Motion { .. } => {
+                    if let Some(state) = &mut self.state {
+                        let mut changed = false;
+                        if let Some(idx) = state.drag_widget {
+                            if state.widgets[idx].drag_update(state.cursor_x, state.cursor_y) {
+                                changed = true;
+                            }
+                        }
+                        if state.drag_widget.is_none() {
+                            for w in &mut state.widgets {
+                                if w.cursor_moved(state.cursor_x, state.cursor_y) {
+                                    changed = true;
+                                }
+                            }
+                        }
+                        if changed {
+                            state.upload_vertices();
+                            self.redraw = true;
+                        }
+                    }
+                }
+                PointerEventKind::Press { button, .. } => {
+                    if *button != 272 {
+                        continue;
+                    }
+                    if let Some(st) = &mut self.state {
+                        let button = clear_ui::widget::MouseButton::Left;
+                        let btn_state = clear_ui::widget::ElementState::Pressed;
+                        let mut changed = false;
+                        if let Some(old) = st.focused_widget.take() {
+                            st.widgets[old].unfocus();
+                        }
+                        for i in (0..st.widgets.len()).rev() {
+                            if st.widgets[i].hit_test(st.cursor_x, st.cursor_y) {
+                                if st.widgets[i].mouse_input(
+                                    button,
+                                    btn_state,
+                                    st.cursor_x,
+                                    st.cursor_y,
+                                ) {
+                                    changed = true;
+                                }
+                                if st.widgets[i].draggable() {
+                                    st.widgets[i].drag_begin(st.cursor_x, st.cursor_y);
+                                    st.drag_widget = Some(i);
+                                }
+                                st.widgets[i].focus();
+                                st.focused_widget = Some(i);
+                                break;
+                            }
+                        }
+                        if changed {
+                            st.upload_vertices();
+                            self.redraw = true;
+                        }
+                    }
+                }
+                PointerEventKind::Release { button, .. } => {
+                    if *button != 272 {
+                        continue;
+                    }
+                    if let Some(st) = &mut self.state {
+                        let button = clear_ui::widget::MouseButton::Left;
+                        let btn_state = clear_ui::widget::ElementState::Released;
+                        let mut changed = false;
+                        if let Some(idx) = st.drag_widget {
+                            st.widgets[idx].drag_end();
+                            st.drag_widget = None;
+                            changed = true;
+                        }
+                        for w in &mut st.widgets {
+                            if w.mouse_input(button, btn_state, st.cursor_x, st.cursor_y) {
+                                changed = true;
+                            }
+                        }
+                        let mut clicked = false;
+                        for w in &mut st.widgets {
+                            if w.take_click() {
+                                clicked = true;
+                            }
+                        }
+                        if clicked {
+                            st.click_count += 1;
+                            st.update_status_text(&format!("Clicks: {}", st.click_count));
+                        }
+                        if changed {
+                            st.upload_vertices();
+                            self.redraw = true;
+                        }
+                    }
+                }
+                PointerEventKind::Axis { horizontal, vertical, .. } => {
+                    if let Some(state) = &mut self.state {
+                        let h_scroll = horizontal.absolute as f32;
+                        let v_scroll = vertical.absolute as f32;
+                        
+                        let delta = clear_ui::widget::MouseScrollDelta::LineDelta(-h_scroll / 10.0, -v_scroll / 10.0);
+                        let mut changed = false;
+                        for w in &mut state.widgets {
+                            if w.mouse_wheel(&delta, state.cursor_x, state.cursor_y) {
+                                changed = true;
+                            }
+                        }
+                        if changed {
+                            state.upload_vertices();
+                            self.redraw = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl KeyboardHandler for AppState {
+    fn enter(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _serial: u32,
+        _raw_modifiers: &[u32],
+        _keysyms: &[xkeysym::Keysym],
+    ) {
+    }
+
+    fn leave(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _surface: &wl_surface::WlSurface,
+        _serial: u32,
+    ) {
+    }
+
+    fn press_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        event: smithay_client_toolkit::seat::keyboard::KeyEvent,
+    ) {
+        self.handle_key(event, clear_ui::widget::ElementState::Pressed);
+    }
+
+    fn release_key(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        event: smithay_client_toolkit::seat::keyboard::KeyEvent,
+    ) {
+        self.handle_key(event, clear_ui::widget::ElementState::Released);
+    }
+
+    fn update_modifiers(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        _serial: u32,
+        _modifiers: smithay_client_toolkit::seat::keyboard::Modifiers,
+        _layout: u32,
+    ) {
+    }
+}
+
+impl AppState {
+    fn handle_key(&mut self, event: smithay_client_toolkit::seat::keyboard::KeyEvent, state: clear_ui::widget::ElementState) {
+        use clear_ui::widget::{Key, KeyEvent, NamedKey};
+        let logical_key = match event.keysym {
+            xkeysym::Keysym::Escape => Key::Named(NamedKey::Escape),
+            xkeysym::Keysym::Return => Key::Named(NamedKey::Enter),
+            xkeysym::Keysym::BackSpace => Key::Named(NamedKey::Backspace),
+            xkeysym::Keysym::Down => Key::Named(NamedKey::ArrowDown),
+            xkeysym::Keysym::Up => Key::Named(NamedKey::ArrowUp),
+            xkeysym::Keysym::Left => Key::Named(NamedKey::ArrowLeft),
+            xkeysym::Keysym::Right => Key::Named(NamedKey::ArrowRight),
+            xkeysym::Keysym::Tab => Key::Named(NamedKey::Tab),
+            xkeysym::Keysym::Delete => Key::Named(NamedKey::Delete),
+            xkeysym::Keysym::space => Key::Named(NamedKey::Space),
+            _ => {
+                if let Some(ref text) = event.utf8 {
+                    Key::Character(text.clone())
+                } else {
+                    return;
+                }
+            }
+        };
+
+        let custom_event = KeyEvent {
+            state,
+            logical_key,
+            text: event.utf8.clone(),
+            repeat: false,
+        };
+
+        if let Some(st) = &mut self.state {
+            if let Some(idx) = st.focused_widget {
+                let val = st.widgets[idx].value();
+                let mut changed = st.widgets[idx].keyboard_input(&custom_event);
+                if st.widgets[idx].value() != val {
+                    changed = true;
+                }
+                if changed {
+                    st.upload_vertices();
+                    self.redraw = true;
+                }
+            }
+        }
+    }
+}
+
+impl WindowHandler for AppState {
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _window: &XdgWindow,
+        configure: WindowConfigure,
+        _serial: u32,
+    ) {
+        let (w, h) = configure.new_size;
+        if let (Some(w), Some(h)) = (w, h) {
+            let width = w.get();
+            let height = h.get();
+            if let Some(state) = &mut self.state {
+                state.resize(width, height);
+            }
+        }
+        self.redraw = true;
+    }
+
+    fn request_close(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _window: &XdgWindow) {
+        self.exit = true;
+    }
+}
+
+impl ProvidesRegistryState for AppState {
+    fn registry(&mut self) -> &mut RegistryState {
+        &mut self.registry_state
+    }
+    
+    fn runtime_add_global(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _name: u32,
+        _interface: &str,
+        _version: u32,
+    ) {}
+    
+    fn runtime_remove_global(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _name: u32,
+        _interface: &str,
+    ) {}
+}
+
+delegate_compositor!(AppState);
+delegate_xdg_shell!(AppState);
+delegate_xdg_window!(AppState);
+delegate_shm!(AppState);
+delegate_seat!(AppState);
+delegate_pointer!(AppState);
+delegate_keyboard!(AppState);
+delegate_registry!(AppState);
+delegate_output!(AppState);
+
+fn main() {
+    let conn = Connection::connect_to_env().unwrap();
+    let (globals, mut event_queue) = registry_queue_init(&conn).unwrap();
+    let qh = event_queue.handle();
+
+    let compositor_state = CompositorState::bind(&globals, &qh).unwrap();
+    let xdg_shell_state = XdgShell::bind(&globals, &qh).unwrap();
+    let shm_state = Shm::bind(&globals, &qh).unwrap();
+    let seat_state = SeatState::new(&globals, &qh);
+    let output_state = OutputState::new(&globals, &qh);
+
+    let surface = compositor_state.create_surface(&qh);
+    let window = xdg_shell_state.create_window(surface.clone(), WindowDecorations::None, &qh);
+    window.set_title("Clear UI - Test Window");
+    window.set_app_id("clear-ui");
+    window.set_min_size(Some((1024, 768)));
+    window.commit();
+
+    let wayland_handle = Box::leak(Box::new(clear_ui::wayland::WaylandSurfaceHandle {
+        display_ptr: conn.backend().display_id().as_ptr() as *mut std::ffi::c_void,
+        surface_ptr: surface.id().as_ptr() as *mut std::ffi::c_void,
+    }));
+
+    let state = pollster::block_on(State::new(wayland_handle, 1024, 768));
+
+    let mut app = AppState {
+        registry_state: RegistryState::new(&globals),
+        compositor_state,
+        xdg_shell_state,
+        shm_state,
+        seat_state,
+        output_state,
+        seats: Vec::new(),
+        pointer: None,
+        keyboard: None,
+        window,
+        surface,
+        state: Some(state),
+        exit: false,
+        redraw: true,
+    };
+
+    let mut event_loop = EventLoop::try_new().unwrap();
+    let loop_handle = event_loop.handle();
+    WaylandSource::new(conn, event_queue).insert(loop_handle).unwrap();
+
+    loop {
+        event_loop
+            .dispatch(std::time::Duration::from_millis(16), &mut app)
+            .unwrap();
+        if app.exit {
+            break;
+        }
+        if app.redraw {
+            app.redraw = false;
+            if let Some(state) = &mut app.state {
+                state.render();
+            }
+        }
+    }
 }
