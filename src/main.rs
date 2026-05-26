@@ -539,6 +539,7 @@ struct AppState {
     state: Option<State>,
     exit: bool,
     redraw: bool,
+    ctrl_pressed: bool,
 }
 
 impl CompositorHandler for AppState {
@@ -844,9 +845,10 @@ impl KeyboardHandler for AppState {
         _qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _modifiers: smithay_client_toolkit::seat::keyboard::Modifiers,
+        modifiers: smithay_client_toolkit::seat::keyboard::Modifiers,
         _layout: u32,
     ) {
+        self.ctrl_pressed = modifiers.ctrl;
     }
 }
 
@@ -878,6 +880,7 @@ impl AppState {
             logical_key,
             text: event.utf8.clone(),
             repeat: false,
+            ctrl: self.ctrl_pressed,
         };
 
         if let Some(st) = &mut self.state {
@@ -982,6 +985,7 @@ fn main() {
         state: None,
         exit: false,
         redraw: true,
+        ctrl_pressed: false,
     };
 
     // Perform a roundtrip to populate output_state with active output scales

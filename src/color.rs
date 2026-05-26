@@ -48,3 +48,29 @@ pub const TEXT_FG: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
 pub const TEXT_DIM: [f32; 4] = [0.53, 0.53, 0.60, 1.0];
 pub const TEXT_HEADER: [f32; 4] = [0.90, 0.90, 0.95, 1.0];
 pub const TEXT_ACCENT: [f32; 4] = [0.56, 0.83, 0.56, 1.0];
+
+pub fn srgb_to_linear(c: f32) -> f32 {
+    c.powf(2.2)
+}
+
+pub fn linear_to_srgb(c: f32) -> f32 {
+    c.powf(1.0 / 2.2)
+}
+
+pub fn to_linear(color: [f32; 4]) -> [f32; 4] {
+    [
+        srgb_to_linear(color[0]),
+        srgb_to_linear(color[1]),
+        srgb_to_linear(color[2]),
+        color[3],
+    ]
+}
+
+pub fn to_srgb(color: [f32; 4]) -> [f32; 4] {
+    [
+        linear_to_srgb(color[0]),
+        linear_to_srgb(color[1]),
+        linear_to_srgb(color[2]),
+        color[3],
+    ]
+}

@@ -191,7 +191,15 @@ impl Section {
     }
 
     pub fn finish(&mut self, pc: &mut dyn RenderTarget) -> f32 {
-        let border: [f32; 4] = [0.25, 0.25, 0.35, 1.0];
+        self.finish_focused(pc, false)
+    }
+
+    pub fn finish_focused(&mut self, pc: &mut dyn RenderTarget, focused: bool) -> f32 {
+        let border: [f32; 4] = if focused {
+            [0.30, 0.50, 0.32, 1.0] // Focused green
+        } else {
+            [0.25, 0.25, 0.35, 1.0] // Default gray
+        };
         let x = self.left + 8.0;
         let y = self.top + 22.0;
         let w = self.cw - 16.0;
