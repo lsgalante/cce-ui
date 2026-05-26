@@ -3347,3 +3347,83 @@ mod tests {
         assert_eq!(sb.get_item_draw_y(60.0, 24.0), Some(30.0));
     }
 }
+
+// Generic text item layout wrapper
+#[derive(Debug)]
+pub struct TextItem {
+    pub buffer: glyphon::Buffer,
+    pub x: f32,
+    pub y: f32,
+    pub color: glyphon::Color,
+}
+
+// Styled label builder with optional strikethrough
+#[derive(Debug)]
+pub struct StyledLabel {
+    pub buffer: glyphon::Buffer,
+    pub w: f32,
+    pub color: [f32; 4],
+    pub g_color: glyphon::Color,
+    pub strikethrough: bool,
+    pub strikethrough_color: Option<[f32; 4]>,
+}
+
+impl StyledLabel {
+    pub fn new(fs: &mut glyphon::FontSystem, text: &str, size: f32, color: [f32; 4]) -> Self {
+        let metrics = glyphon::Metrics::new(size, size * 1.4);
+        let mut buffer = glyphon::Buffer::new(fs, metrics);
+        buffer.set_text(fs, text, glyphon::Attrs::new(), glyphon::Shaping::Advanced);
+        buffer.shape_until_scroll(fs, true);
+        let w = buffer.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0);
+        let g_color = glyphon::Color::rgb(
+            (color[0] * 255.0) as u8,
+            (color[1] * 255.0) as u8,
+            (color[2] * 255.0) as u8,
+        );
+        Self {
+            buffer,
+            w,
+            color,
+            g_color,
+            strikethrough: false,
+            strikethrough_color: None,
+        }
+    }
+
+    pub fn with_strikethrough(mut self, enabled: bool) -> Self {
+        self.strikethrough = enabled;
+        self
+    }
+
+    pub fn with_strikethrough_color(mut self, color: [f32; 4]) -> Self {
+        self.strikethrough_color = Some(color);
+        self
+    }
+
+    pub fn draw(self, text_items: &mut Vec<TextItem>, x: f32, y: f32) -> f32 {
+        let w = self.w;
+        text_items.push(TextItem {
+            buffer: self.buffer,
+            x,
+            y,
+            color: self.g_color,
+        });
+        w
+    }
+
+    pub fn strikethrough_rect(&self, x: f32, y: f32, scale: f32) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        if self.strikethrough {
+            let col = self.strikethrough_color.unwrap_or(self.color);
+            Some((
+                x,
+                y + 8.0 * scale,
+                self.w,
+                1.0 * scale,
+                col,
+            ))
+        } else {
+            None
+        }
+    }
+}
+
