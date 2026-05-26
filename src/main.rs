@@ -128,8 +128,7 @@ struct State {
 }
 
 impl State {
-    async fn new(wayland_handle: &'static clear_ui::wayland::WaylandSurfaceHandle, pw: u32, ph: u32) -> Self {
-        let scale = 1.0f64;
+    async fn new(wayland_handle: &'static clear_ui::wayland::WaylandSurfaceHandle, pw: u32, ph: u32, scale: f64) -> Self {
         let lw = pw as f32 / scale as f32;
         let lh = ph as f32 / scale as f32;
         let sw = lw;
@@ -534,8 +533,8 @@ struct AppState {
     pointer: Option<wl_pointer::WlPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
 
-    window: XdgWindow,
-    surface: wl_surface::WlSurface,
+    window: Option<XdgWindow>,
+    surface: Option<wl_surface::WlSurface>,
 
     state: Option<State>,
     exit: bool,
@@ -550,9 +549,12 @@ impl CompositorHandler for AppState {
         _surface: &wl_surface::WlSurface,
         scale_factor: i32,
     ) {
+        _surface.set_buffer_scale(scale_factor);
         if let Some(state) = &mut self.state {
             state.scale = scale_factor as f64;
-            state.resize(state.physical_width, state.physical_height);
+            let pw = (state.width as f64 * state.scale) as u32;
+            let ph = (state.height as f64 * state.scale) as u32;
+            state.resize(pw, ph);
         }
         self.redraw = true;
     }
@@ -908,7 +910,9 @@ impl WindowHandler for AppState {
             let width = w.get();
             let height = h.get();
             if let Some(state) = &mut self.state {
-                state.resize(width, height);
+                let pw = (width as f64 * state.scale) as u32;
+                let ph = (height as f64 * state.scale) as u32;
+                state.resize(pw, ph);
             }
         }
         self.redraw = true;
@@ -963,20 +967,6 @@ fn main() {
     let seat_state = SeatState::new(&globals, &qh);
     let output_state = OutputState::new(&globals, &qh);
 
-    let surface = compositor_state.create_surface(&qh);
-    let window = xdg_shell_state.create_window(surface.clone(), WindowDecorations::None, &qh);
-    window.set_title("Clear UI - Test Window");
-    window.set_app_id("clear-ui");
-    window.set_min_size(Some((1024, 768)));
-    window.commit();
-
-    let wayland_handle = Box::leak(Box::new(clear_ui::wayland::WaylandSurfaceHandle {
-        display_ptr: conn.backend().display_id().as_ptr() as *mut std::ffi::c_void,
-        surface_ptr: surface.id().as_ptr() as *mut std::ffi::c_void,
-    }));
-
-    let state = pollster::block_on(State::new(wayland_handle, 1024, 768));
-
     let mut app = AppState {
         registry_state: RegistryState::new(&globals),
         compositor_state,
@@ -987,12 +977,40 @@ fn main() {
         seats: Vec::new(),
         pointer: None,
         keyboard: None,
-        window,
-        surface,
-        state: Some(state),
+        window: None,
+        surface: None,
+        state: None,
         exit: false,
         redraw: true,
     };
+
+    // Perform a roundtrip to populate output_state with active output scales
+    event_queue.roundtrip(&mut app).unwrap();
+
+    let scale = clear_ui::wayland::detect_scale_factor(&app.output_state);
+
+    let surface = app.compositor_state.create_surface(&qh);
+    surface.set_buffer_scale(scale as i32);
+
+    let pw = (1024.0 * scale) as u32;
+    let ph = (768.0 * scale) as u32;
+
+    let window = app.xdg_shell_state.create_window(surface.clone(), WindowDecorations::None, &qh);
+    window.set_title("Clear UI - Test Window");
+    window.set_app_id("clear-ui");
+    window.set_min_size(Some((pw, ph)));
+    window.commit();
+
+    let wayland_handle = Box::leak(Box::new(clear_ui::wayland::WaylandSurfaceHandle {
+        display_ptr: conn.backend().display_id().as_ptr() as *mut std::ffi::c_void,
+        surface_ptr: surface.id().as_ptr() as *mut std::ffi::c_void,
+    }));
+
+    let state = pollster::block_on(State::new(wayland_handle, pw, ph, scale));
+
+    app.window = Some(window);
+    app.surface = Some(surface);
+    app.state = Some(state);
 
     let mut event_loop = EventLoop::try_new().unwrap();
     let loop_handle = event_loop.handle();

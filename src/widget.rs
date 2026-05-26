@@ -60,6 +60,7 @@ pub struct KeyEvent {
 
 use crate::colors;
 
+#[derive(Debug, Clone)]
 pub struct TextLabel {
     pub text: String,
     pub x: f32,
@@ -2987,7 +2988,7 @@ impl ScrollBox {
 
     pub fn get_item_draw_y(&self, virtual_y: f32, item_h: f32) -> Option<f32> {
         let draw_y = self.viewport_y + virtual_y - self.scroll_y;
-        if draw_y >= self.viewport_y + 2.0 && draw_y + item_h <= self.viewport_y + self.viewport_h - 2.0 {
+        if draw_y >= self.viewport_y - 1.0 && draw_y + item_h <= self.viewport_y + self.viewport_h + 1.0 {
             Some(draw_y)
         } else {
             None
