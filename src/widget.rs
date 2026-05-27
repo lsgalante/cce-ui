@@ -57,6 +57,7 @@ pub struct KeyEvent {
     pub text: Option<String>,
     pub repeat: bool,
     pub ctrl: bool,
+    pub shift: bool,
 }
 
 use crate::colors;
@@ -206,6 +207,255 @@ pub mod focus {
     }
 }
 
+pub mod clipboard {
+    pub fn copy_to_clipboard(text: &str) {
+        let text = text.to_string();
+        std::thread::spawn(move || {
+            if let Ok(mut child) = std::process::Command::new("wl-copy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
+            } else if let Ok(mut child) = std::process::Command::new("xclip")
+                .arg("-selection")
+                .arg("clipboard")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
+            }
+        });
+    }
+
+    pub fn read_from_clipboard() -> Option<String> {
+        if let Ok(output) = std::process::Command::new("wl-paste")
+            .arg("-n")
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    return Some(text);
+                }
+            }
+        }
+        if let Ok(output) = std::process::Command::new("xclip")
+            .arg("-selection")
+            .arg("clipboard")
+            .arg("-o")
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(text) = String::from_utf8(output.stdout) {
+                    return Some(text);
+                }
+            }
+        }
+        None
+    }
+}
+
+pub mod context_menu {
+    use super::{Widget, TextBox, MouseButton, ElementState, TextLabel};
+    use std::cell::RefCell;
+
+    #[derive(Debug, Clone)]
+    pub struct ContextMenuState {
+        pub x: f32,
+        pub y: f32,
+        pub w: f32,
+        pub h: f32,
+        pub visible: bool,
+        pub options: Vec<String>,
+        pub hovered_item: Option<usize>,
+        pub target: Option<*mut TextBox>,
+    }
+
+    impl ContextMenuState {
+        pub fn new() -> Self {
+            Self {
+                x: 0.0,
+                y: 0.0,
+                w: 120.0,
+                h: 0.0,
+                visible: false,
+                options: Vec::new(),
+                hovered_item: None,
+                target: None,
+            }
+        }
+
+        pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, target: *mut TextBox) {
+            self.x = x;
+            self.y = y;
+            self.options = options;
+            self.h = self.options.len() as f32 * 24.0;
+            self.visible = true;
+            self.hovered_item = None;
+            self.target = Some(target);
+        }
+
+        pub fn hide(&mut self) {
+            self.visible = false;
+            self.target = None;
+        }
+
+        pub fn hit_test(&self, px: f32, py: f32) -> bool {
+            if !self.visible { return false; }
+            px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h
+        }
+
+        pub fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+            if !self.visible { return false; }
+            let was_hovered = self.hovered_item;
+            self.hovered_item = None;
+            if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
+                let idx = ((py - self.y) / 24.0) as usize;
+                if idx < self.options.len() {
+                    self.hovered_item = Some(idx);
+                }
+            }
+            self.hovered_item != was_hovered
+        }
+
+        pub fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+            if !self.visible { return false; }
+            if button != MouseButton::Left || state != ElementState::Pressed {
+                if state == ElementState::Pressed {
+                    self.hide();
+                    return true;
+                }
+                return false;
+            }
+
+            if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
+                let idx = ((py - self.y) / 24.0) as usize;
+                if idx < self.options.len() {
+                    let opt = self.options[idx].clone();
+                    if let Some(target_ptr) = self.target {
+                        unsafe {
+                            let target = &mut *target_ptr;
+                            match opt.as_str() {
+                                "Cut" => {
+                                    if target.cut_selection() {
+                                        target.just_changed = true;
+                                    }
+                                }
+                                "Copy" => {
+                                    target.copy_selection();
+                                }
+                                "Paste" => {
+                                    if target.paste_from_clipboard() {
+                                        target.just_changed = true;
+                                    }
+                                }
+                                "Select All" => {
+                                    target.select_all();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                self.hide();
+                return true;
+            } else {
+                self.hide();
+                return true;
+            }
+        }
+
+        pub fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+            let mut quads = Vec::new();
+            if !self.visible { return quads; }
+
+            // border
+            quads.push((self.x, self.y, self.w, self.h, [0.22, 0.22, 0.28, 1.0]));
+            // bg
+            quads.push((self.x + 1.0, self.y + 1.0, self.w - 2.0, self.h - 2.0, [0.06, 0.06, 0.09, 1.0]));
+
+            if let Some(h_idx) = self.hovered_item {
+                let iy = self.y + h_idx as f32 * 24.0;
+                quads.push((self.x + 2.0, iy + 2.0, self.w - 4.0, 20.0, [0.20, 0.40, 0.65, 0.6]));
+            }
+
+            quads
+        }
+
+        pub fn text_labels(&self) -> Vec<TextLabel> {
+            let mut labels = Vec::new();
+            if !self.visible { return labels; }
+
+            for (idx, opt) in self.options.iter().enumerate() {
+                let iy = self.y + idx as f32 * 24.0 + (24.0 - 12.0) / 2.0;
+                let text_color = if self.hovered_item == Some(idx) {
+                    [0xff, 0xff, 0xff]
+                } else {
+                    [0xcc, 0xcc, 0xd4]
+                };
+
+                labels.push(TextLabel {
+                    text: opt.clone(),
+                    x: self.x + 8.0,
+                    y: iy,
+                    font_size: 12.0,
+                    color: text_color,
+                });
+            }
+            labels
+        }
+    }
+
+    thread_local! {
+        pub static CONTEXT_MENU: RefCell<ContextMenuState> = RefCell::new(ContextMenuState::new());
+    }
+
+    pub fn is_visible() -> bool {
+        CONTEXT_MENU.with(|m| m.borrow().visible)
+    }
+
+    pub fn show(x: f32, y: f32, options: Vec<String>, target: *mut TextBox) {
+        CONTEXT_MENU.with(|m| m.borrow_mut().show(x, y, options, target));
+    }
+
+    pub fn hide() {
+        CONTEXT_MENU.with(|m| m.borrow_mut().hide());
+    }
+
+    pub fn x() -> f32 { CONTEXT_MENU.with(|m| m.borrow().x) }
+    pub fn y() -> f32 { CONTEXT_MENU.with(|m| m.borrow().y) }
+    pub fn w() -> f32 { CONTEXT_MENU.with(|m| m.borrow().w) }
+    pub fn h() -> f32 { CONTEXT_MENU.with(|m| m.borrow().h) }
+    pub fn hovered_item() -> Option<usize> { CONTEXT_MENU.with(|m| m.borrow().hovered_item) }
+    pub fn options() -> Vec<String> { CONTEXT_MENU.with(|m| m.borrow().options.clone()) }
+
+    pub fn hit_test(px: f32, py: f32) -> bool {
+        CONTEXT_MENU.with(|m| m.borrow().hit_test(px, py))
+    }
+
+    pub fn cursor_moved(px: f32, py: f32) -> bool {
+        CONTEXT_MENU.with(|m| m.borrow_mut().cursor_moved(px, py))
+    }
+
+    pub fn mouse_input(button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        CONTEXT_MENU.with(|m| m.borrow_mut().mouse_input(button, state, px, py))
+    }
+
+    pub fn extra_quads() -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        CONTEXT_MENU.with(|m| m.borrow().extra_quads())
+    }
+
+    pub fn text_labels() -> Vec<TextLabel> {
+        CONTEXT_MENU.with(|m| m.borrow().text_labels())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TextLabel {
@@ -247,6 +497,7 @@ pub trait Widget {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { Vec::new() }
     fn text_labels(&self) -> Vec<TextLabel> { Vec::new() }
+    fn widget_font(&self) -> Option<String> { None }
     fn value(&self) -> i32 { 0 }
     fn top_room(&self) -> f32 { 0.0 }
 
@@ -2225,6 +2476,7 @@ impl Widget for Spinbox {
     fn value(&self) -> i32 { self.value }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
+    fn widget_font(&self) -> Option<String> { Some("monospace".to_string()) }
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
         let (x, y, w, h) = self.rect();
@@ -2341,14 +2593,12 @@ impl Widget for Spinbox {
             }
             _ => {
                 if let Some(text) = &event.text {
-                    if !event.repeat {
-                        for ch in text.chars() {
-                            match ch {
-                                '-' if self.edit_buffer.is_empty() => self.edit_buffer.push('-'),
-                                '.' if self.decimals > 0 && !self.edit_buffer.contains('.') => self.edit_buffer.push('.'),
-                                '0'..='9' => self.edit_buffer.push(ch),
-                                _ => {}
-                            }
+                    for ch in text.chars() {
+                        match ch {
+                            '-' if self.edit_buffer.is_empty() => self.edit_buffer.push('-'),
+                            '.' if self.decimals > 0 && !self.edit_buffer.contains('.') => self.edit_buffer.push('.'),
+                            '0'..='9' => self.edit_buffer.push(ch),
+                            _ => {}
                         }
                     }
                 }
@@ -2400,8 +2650,8 @@ impl Widget for Spinbox {
             quads.push((self.x + self.w * 0.55 - 1.0, self.y, 1.0, self.h, border_color));
 
             // Caret cursor
-            let char_width = 8.0;
-            let cursor_x = self.x + 6.0 + (self.edit_buffer.len() as f32 * char_width);
+            let char_width = 8.4;
+            let cursor_x = self.x + 4.0 + (self.edit_buffer.len() as f32 * char_width);
             let max_cursor_x = split - 4.0;
             let final_cursor_x = cursor_x.min(max_cursor_x);
             let cursor_y = self.y + (self.h - 14.0) / 2.0;
@@ -2626,15 +2876,13 @@ impl Widget for ColorSelector {
             }
             _ => {
                 if let Some(text) = &event.text {
-                    if !event.repeat {
-                        for ch in text.chars() {
-                            match ch {
-                                '#' if self.edit_buffer.is_empty() => self.edit_buffer.push('#'),
-                                '0'..='9' | 'a'..='f' | 'A'..='F' => {
-                                    if self.edit_buffer.len() < 7 { self.edit_buffer.push(ch.to_ascii_lowercase()); }
-                                }
-                                _ => {}
+                    for ch in text.chars() {
+                        match ch {
+                            '#' if self.edit_buffer.is_empty() => self.edit_buffer.push('#'),
+                            '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                                if self.edit_buffer.len() < 7 { self.edit_buffer.push(ch.to_ascii_lowercase()); }
                             }
+                            _ => {}
                         }
                     }
                 }
@@ -3707,6 +3955,140 @@ mod tests {
         assert_eq!(dd.selected, 1);
         assert!(dd.take_change());
     }
+
+    #[test]
+    fn test_textbox_selection_highlight() {
+        let mut tb = TextBox::new("Initial Text".to_string());
+        tb.set_rect(10.0, 10.0, 200.0, 30.0);
+
+        // 1. Initial state
+        assert!(!tb.editing);
+        assert!(!tb.all_selected);
+
+        // 2. Click focuses and triggers highlighting
+        let clicked = tb.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0);
+        assert!(clicked);
+        assert!(tb.editing);
+        assert!(tb.all_selected);
+        assert_eq!(tb.edit_buffer, "Initial Text");
+
+        // 3. Typing a key replaces all text
+        let key_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character("A".to_string()),
+            text: Some("A".to_string()),
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        let handled = tb.keyboard_input(&key_ev);
+        assert!(handled);
+        assert!(!tb.all_selected);
+        assert_eq!(tb.edit_buffer, "A");
+
+        // 4. Pressing Enter commits change
+        let enter_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::Enter),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        let handled_enter = tb.keyboard_input(&enter_ev);
+        assert!(handled_enter);
+        assert!(!tb.editing);
+        assert_eq!(tb.text, "A");
+        assert!(tb.take_change());
+    }
+
+    #[test]
+    fn test_textbox_drag_and_modifier_selection() {
+        let mut tb = TextBox::new("Hello World".to_string());
+        tb.set_rect(10.0, 10.0, 200.0, 30.0);
+
+        // 1. Initial click focuses and selects all
+        let pressed = tb.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0);
+        assert!(pressed);
+        let released = tb.mouse_input(MouseButton::Left, ElementState::Released, 50.0, 20.0);
+        assert!(released);
+        assert!(tb.editing);
+        assert!(tb.all_selected);
+        assert_eq!(tb.cursor_idx, 11);
+        assert_eq!(tb.select_anchor, Some(0));
+
+        // 2. Click inside placed caret at index 5 (x = 10 + 8 + 5 * 7.2 = 54)
+        let pressed_inside = tb.mouse_input(MouseButton::Left, ElementState::Pressed, 54.0, 20.0);
+        assert!(pressed_inside);
+        assert_eq!(tb.cursor_idx, 5);
+        assert_eq!(tb.select_anchor, Some(5));
+        assert!(!tb.all_selected);
+
+        // 3. Drag to index 11 (x = 10 + 8 + 11 * 7.2 = 97.2)
+        tb.drag_begin(54.0, 20.0);
+        let updated = tb.drag_update(97.2, 20.0);
+        assert!(updated);
+        assert_eq!(tb.cursor_idx, 11);
+        assert_eq!(tb.select_anchor, Some(5));
+        tb.drag_end();
+
+        // 4. Keyboard ArrowLeft with Shift shrinks selection from 11 to 10
+        let left_shift_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::ArrowLeft),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: true,
+        };
+        let handled = tb.keyboard_input(&left_shift_ev);
+        assert!(handled);
+        assert_eq!(tb.cursor_idx, 10);
+        assert_eq!(tb.select_anchor, Some(5));
+
+        // 5. Keyboard ArrowLeft without Shift collapses selection to start (index 5)
+        let left_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::ArrowLeft),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        let handled = tb.keyboard_input(&left_ev);
+        assert!(handled);
+        assert_eq!(tb.cursor_idx, 5);
+        assert_eq!(tb.select_anchor, None);
+
+        // 6. Keyboard Shift+Up highlights to beginning (cursor 0, anchor 5)
+        let up_shift_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::ArrowUp),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: true,
+        };
+        let handled = tb.keyboard_input(&up_shift_ev);
+        assert!(handled);
+        assert_eq!(tb.cursor_idx, 0);
+        assert_eq!(tb.select_anchor, Some(5));
+
+        // 7. Typing a key replaces selected range "Hello" with "Rust"
+        let rust_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character("Rust".to_string()),
+            text: Some("Rust".to_string()),
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        let handled = tb.keyboard_input(&rust_ev);
+        assert!(handled);
+        assert_eq!(tb.edit_buffer, "Rust World");
+        assert_eq!(tb.cursor_idx, 4);
+        assert_eq!(tb.select_anchor, None);
+    }
 }
 
 // Generic text item layout wrapper
@@ -3731,9 +4113,14 @@ pub struct StyledLabel {
 
 impl StyledLabel {
     pub fn new(fs: &mut glyphon::FontSystem, text: &str, size: f32, color: [f32; 4]) -> Self {
+        Self::new_with_family(fs, text, size, color, "sans-serif")
+    }
+
+    pub fn new_with_family(fs: &mut glyphon::FontSystem, text: &str, size: f32, color: [f32; 4], family: &str) -> Self {
         let metrics = glyphon::Metrics::new(size, size * 1.4);
         let mut buffer = glyphon::Buffer::new(fs, metrics);
-        buffer.set_text(fs, text, glyphon::Attrs::new(), glyphon::Shaping::Advanced);
+        let attrs = glyphon::Attrs::new().family(glyphon::Family::Name(family));
+        buffer.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
         buffer.shape_until_scroll(fs, true);
         let w = buffer.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0);
         let g_color = glyphon::Color::rgb(
@@ -4224,13 +4611,752 @@ impl Widget for Dropdown {
     fn clear_children(&mut self) { self.children.clear(); }
 }
 
-impl Drop for Dropdown {
+unsafe impl Send for Dropdown {}
+unsafe impl Sync for Dropdown {}
+
+// ── TextBox Widget ──
+
+#[derive(Debug, Clone)]
+pub struct TextBox {
+    x: f32, y: f32, w: f32, h: f32,
+    pub text: String,
+    pub editing: bool,
+    pub edit_buffer: String,
+    hovered: bool,
+    just_changed: bool,
+    label: Option<String>,
+    row_x: f32,
+    row_w: f32,
+    pub disabled: bool,
+    pub all_selected: bool,
+    pub cursor_idx: usize,
+    pub select_anchor: Option<usize>,
+    pub dragging: bool,
+    pub just_focused: bool,
+    pub drag_start_idx: Option<usize>,
+    pub parent: Option<*mut (dyn Widget + 'static)>,
+    pub children: Vec<*mut (dyn Widget + 'static)>,
+    pub max_width: Option<f32>,
+    pub width: Option<f32>,
+}
+
+impl TextBox {
+    pub fn new(text: String) -> Self {
+        Self {
+            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            text,
+            editing: false,
+            edit_buffer: String::new(),
+            hovered: false,
+            just_changed: false,
+            label: None,
+            row_x: 0.0,
+            row_w: 0.0,
+            disabled: false,
+            all_selected: false,
+            cursor_idx: 0,
+            select_anchor: None,
+            dragging: false,
+            just_focused: false,
+            drag_start_idx: None,
+            parent: None,
+            children: Vec::new(),
+            max_width: Some(300.0),
+            width: None,
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.label = Some(label.to_string());
+        self
+    }
+
+    pub fn set_label(&mut self, label: &str) {
+        self.label = Some(label.to_string());
+    }
+
+    pub fn take_change(&mut self) -> bool {
+        let changed = self.just_changed;
+        self.just_changed = false;
+        changed
+    }
+
+    pub fn with_max_width(mut self, max_w: Option<f32>) -> Self {
+        self.max_width = max_w;
+        self
+    }
+
+    pub fn set_max_width(&mut self, max_w: Option<f32>) {
+        self.max_width = max_w;
+    }
+
+    pub fn with_width(mut self, w: f32) -> Self {
+        self.width = Some(w);
+        self
+    }
+
+    pub fn set_width(&mut self, w: f32) {
+        self.width = Some(w);
+    }
+
+    pub fn copy_selection(&self) {
+        let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+        let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+        if start != end {
+            let chars: Vec<char> = self.edit_buffer.chars().collect();
+            let selected_text: String = chars[start..end].iter().collect();
+            clipboard::copy_to_clipboard(&selected_text);
+        }
+    }
+
+    pub fn cut_selection(&mut self) -> bool {
+        let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+        let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+        if start != end {
+            let chars: Vec<char> = self.edit_buffer.chars().collect();
+            let selected_text: String = chars[start..end].iter().collect();
+            clipboard::copy_to_clipboard(&selected_text);
+
+            let mut new_buf = String::new();
+            for i in 0..start {
+                new_buf.push(chars[i]);
+            }
+            for i in end..chars.len() {
+                new_buf.push(chars[i]);
+            }
+            self.edit_buffer = new_buf;
+            self.cursor_idx = start;
+            self.select_anchor = None;
+            self.all_selected = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn paste_from_clipboard(&mut self) -> bool {
+        if let Some(text) = clipboard::read_from_clipboard() {
+            let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+            let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+            let chars: Vec<char> = self.edit_buffer.chars().collect();
+            let mut new_buf = String::new();
+            for i in 0..start {
+                new_buf.push(chars[i]);
+            }
+            let mut inserted_count = 0;
+            for ch in text.chars() {
+                if !ch.is_control() && ch != '\n' && ch != '\r' {
+                    new_buf.push(ch);
+                    inserted_count += 1;
+                }
+            }
+            for i in end..chars.len() {
+                new_buf.push(chars[i]);
+            }
+            self.edit_buffer = new_buf;
+            self.cursor_idx = start + inserted_count;
+            self.select_anchor = None;
+            self.all_selected = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn select_all(&mut self) {
+        let len = self.edit_buffer.chars().count();
+        self.select_anchor = Some(0);
+        self.cursor_idx = len;
+        self.all_selected = len > 0;
+    }
+}
+
+impl Default for TextBox {
+    fn default() -> Self {
+        Self::new(String::new())
+    }
+}
+
+impl Widget for TextBox {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.x = x;
+        self.y = y;
+        self.w = if let Some(explicit_w) = self.width {
+            explicit_w
+        } else if let Some(max_w) = self.max_width {
+            w.min(max_w)
+        } else {
+            w
+        };
+        self.h = h;
+    }
+    fn set_row_rect(&mut self, x: f32, w: f32) {
+        self.row_x = x;
+        self.row_w = if let Some(explicit_w) = self.width {
+            explicit_w
+        } else if let Some(max_w) = self.max_width {
+            w.min(max_w)
+        } else {
+            w
+        };
+    }
+    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
+    fn hovered(&self) -> bool { self.hovered }
+
+    fn color(&self) -> [f32; 4] {
+        [0.10, 0.10, 0.16, 1.0]
+    }
+
+    fn hit_test(&self, px: f32, py: f32) -> bool {
+        let (x, y, w, h) = self.rect();
+        let hx = if self.row_w > 0.0 { self.row_x } else { x };
+        let hw = if self.row_w > 0.0 { self.row_w } else { w };
+        let (hy, hh) = if self.label.is_some() {
+            (y - 18.0, h + 18.0)
+        } else {
+            (y, h)
+        };
+        px >= hx && px <= hx + hw && py >= hy && py <= hy + hh
+    }
+
+    fn top_room(&self) -> f32 { if self.label.is_some() { 18.0 } else { 0.0 } }
+
+    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        if self.disabled {
+            let was = self.hovered;
+            self.hovered = false;
+            return was;
+        }
+        let mut changed = false;
+        if self.dragging && self.editing {
+            let char_width = 7.2;
+            let drag_idx = (((px - (self.x + 8.0)) / char_width).round() as isize)
+                .max(0)
+                .min(self.edit_buffer.chars().count() as isize) as usize;
+            if self.cursor_idx != drag_idx {
+                self.cursor_idx = drag_idx;
+                self.just_focused = false;
+                let len = self.edit_buffer.chars().count();
+                let start = self.select_anchor.unwrap_or(0).min(self.cursor_idx);
+                let end = self.select_anchor.unwrap_or(0).max(self.cursor_idx);
+                self.all_selected = start == 0 && end == len && len > 0;
+                changed = true;
+            }
+        }
+        let was = self.hovered;
+        self.hovered = self.hit_test(px, py);
+        if was != self.hovered {
+            changed = true;
+        }
+        changed
+    }
+
+    fn draggable(&self) -> bool { !self.disabled }
+    fn is_dragging(&self) -> bool { self.dragging }
+    fn widget_font(&self) -> Option<String> { Some("monospace".to_string()) }
+
+    fn drag_begin(&mut self, _px: f32, _py: f32) {
+        if self.disabled || !self.editing { return; }
+        self.dragging = true;
+    }
+
+    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
+        if self.disabled || !self.editing { return false; }
+        let char_width = 7.2;
+        let drag_idx = (((px - (self.x + 8.0)) / char_width).round() as isize)
+            .max(0)
+            .min(self.edit_buffer.chars().count() as isize) as usize;
+        if self.cursor_idx != drag_idx {
+            self.cursor_idx = drag_idx;
+            self.just_focused = false;
+            let len = self.edit_buffer.chars().count();
+            let start = self.select_anchor.unwrap_or(0).min(self.cursor_idx);
+            let end = self.select_anchor.unwrap_or(0).max(self.cursor_idx);
+            self.all_selected = start == 0 && end == len && len > 0;
+            return true;
+        }
+        false
+    }
+
+    fn drag_end(&mut self) {
+        self.dragging = false;
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if self.disabled { return false; }
+        
+        let (x, y, w, h) = self.rect();
+        let (hy, hh) = if self.label.is_some() {
+            (y - 18.0, h + 18.0)
+        } else {
+            (y, h)
+        };
+        let is_inside = px >= x && px <= x + w && py >= hy && py <= hy + hh;
+
+        if button == MouseButton::Right {
+            if state == ElementState::Pressed {
+                if !is_inside {
+                    return false;
+                }
+                
+                // Focus the TextBox if it wasn't editing yet
+                if !self.editing {
+                    self.editing = true;
+                    self.edit_buffer = self.text.clone();
+                    let len = self.edit_buffer.chars().count();
+                    self.cursor_idx = len;
+                    self.select_anchor = Some(0);
+                    self.all_selected = len > 0;
+                    self.just_focused = true;
+                    focus::set_focused(self);
+                }
+
+                // Place cursor under click if clicked inside the content bounds
+                if px >= x && px <= x + w && py >= y && py <= y + h {
+                    let char_width = 7.2;
+                    let click_idx = (((px - (self.x + 8.0)) / char_width).round() as isize)
+                        .max(0)
+                        .min(self.edit_buffer.chars().count() as isize) as usize;
+                    self.cursor_idx = click_idx;
+                    self.select_anchor = Some(click_idx);
+                    self.all_selected = false;
+                }
+                
+                // Spawn context menu
+                let options = vec![
+                    "Cut".to_string(),
+                    "Copy".to_string(),
+                    "Paste".to_string(),
+                    "Select All".to_string(),
+                ];
+                context_menu::show(px, py, options, self as *mut TextBox);
+                return true;
+            }
+            return false;
+        }
+
+        if button != MouseButton::Left { return false; }
+        
+        let (x, y, w, h) = self.rect();
+        let (hy, hh) = if self.label.is_some() {
+            (y - 18.0, h + 18.0)
+        } else {
+            (y, h)
+        };
+        let is_inside = px >= x && px <= x + w && py >= hy && py <= hy + hh;
+
+        if state == ElementState::Pressed {
+            if !is_inside {
+                if self.editing {
+                    self.unfocus();
+                    return true;
+                }
+                return false;
+            }
+            
+            let char_width = 7.2;
+            let click_idx = (((px - (self.x + 8.0)) / char_width).round() as isize)
+                .max(0)
+                .min(self.edit_buffer.chars().count() as isize) as usize;
+            
+            if self.editing {
+                self.cursor_idx = click_idx;
+                self.select_anchor = Some(click_idx);
+                self.all_selected = false;
+                self.just_focused = false;
+                self.drag_start_idx = Some(click_idx);
+            } else {
+                self.editing = true;
+                self.edit_buffer = self.text.clone();
+                let len = self.edit_buffer.chars().count();
+                self.cursor_idx = len;
+                self.select_anchor = Some(0);
+                self.all_selected = len > 0;
+                self.just_focused = true;
+                self.drag_start_idx = Some(click_idx);
+                focus::set_focused(self);
+            }
+            true
+        } else if state == ElementState::Released {
+            if is_inside && self.editing && self.just_focused {
+                let len = self.edit_buffer.chars().count();
+                self.cursor_idx = len;
+                self.select_anchor = Some(0);
+                self.all_selected = len > 0;
+            }
+            self.just_focused = false;
+            self.drag_start_idx = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn focus(&mut self) {
+        if self.disabled { return; }
+        if !self.editing {
+            self.editing = true;
+            self.edit_buffer = self.text.clone();
+            let len = self.edit_buffer.chars().count();
+            self.cursor_idx = len;
+            self.select_anchor = Some(0);
+            self.all_selected = len > 0;
+            self.just_focused = true;
+            focus::set_focused(self);
+        }
+    }
+
+    fn unfocus(&mut self) {
+        if self.editing {
+            self.editing = false;
+            self.all_selected = false;
+            self.select_anchor = None;
+            self.dragging = false;
+            self.just_focused = false;
+            self.drag_start_idx = None;
+            if self.text != self.edit_buffer {
+                self.text = self.edit_buffer.clone();
+                self.just_changed = true;
+            }
+        }
+    }
+
+    fn keyboard_input(&mut self, event: &KeyEvent) -> bool {
+        if self.disabled { return false; }
+        if !self.editing { return false; }
+        if event.state != ElementState::Pressed { return false; }
+        let char_count = self.edit_buffer.chars().count();
+        match &event.logical_key {
+            Key::Named(NamedKey::Backspace) => {
+                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                if start != end {
+                    let chars: Vec<char> = self.edit_buffer.chars().collect();
+                    let mut new_buf = String::new();
+                    for i in 0..start {
+                        new_buf.push(chars[i]);
+                    }
+                    for i in end..chars.len() {
+                        new_buf.push(chars[i]);
+                    }
+                    self.edit_buffer = new_buf;
+                    self.cursor_idx = start;
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                } else if self.cursor_idx > 0 {
+                    let chars: Vec<char> = self.edit_buffer.chars().collect();
+                    let mut new_buf = String::new();
+                    for i in 0..(self.cursor_idx - 1) {
+                        new_buf.push(chars[i]);
+                    }
+                    for i in self.cursor_idx..chars.len() {
+                        new_buf.push(chars[i]);
+                    }
+                    self.edit_buffer = new_buf;
+                    self.cursor_idx -= 1;
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                }
+                true
+            }
+            Key::Named(NamedKey::Delete) => {
+                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                if start != end {
+                    let chars: Vec<char> = self.edit_buffer.chars().collect();
+                    let mut new_buf = String::new();
+                    for i in 0..start {
+                        new_buf.push(chars[i]);
+                    }
+                    for i in end..chars.len() {
+                        new_buf.push(chars[i]);
+                    }
+                    self.edit_buffer = new_buf;
+                    self.cursor_idx = start;
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                } else if self.cursor_idx < char_count {
+                    let chars: Vec<char> = self.edit_buffer.chars().collect();
+                    let mut new_buf = String::new();
+                    for i in 0..self.cursor_idx {
+                        new_buf.push(chars[i]);
+                    }
+                    for i in (self.cursor_idx + 1)..chars.len() {
+                        new_buf.push(chars[i]);
+                    }
+                    self.edit_buffer = new_buf;
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                }
+                true
+            }
+            Key::Named(NamedKey::ArrowLeft) => {
+                if event.shift {
+                    if self.select_anchor.is_none() {
+                        self.select_anchor = Some(self.cursor_idx);
+                    }
+                    if self.cursor_idx > 0 {
+                        self.cursor_idx -= 1;
+                    }
+                } else {
+                    let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                    let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                    if start != end {
+                        self.cursor_idx = start;
+                    } else if self.cursor_idx > 0 {
+                        self.cursor_idx -= 1;
+                    }
+                    self.select_anchor = None;
+                }
+                let len = self.edit_buffer.chars().count();
+                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                self.all_selected = start == 0 && end == len && len > 0;
+                true
+            }
+            Key::Named(NamedKey::ArrowRight) => {
+                if event.shift {
+                    if self.select_anchor.is_none() {
+                        self.select_anchor = Some(self.cursor_idx);
+                    }
+                    if self.cursor_idx < char_count {
+                        self.cursor_idx += 1;
+                    }
+                } else {
+                    let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                    let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                    if start != end {
+                        self.cursor_idx = end;
+                    } else if self.cursor_idx < char_count {
+                        self.cursor_idx += 1;
+                    }
+                    self.select_anchor = None;
+                }
+                let len = self.edit_buffer.chars().count();
+                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                self.all_selected = start == 0 && end == len && len > 0;
+                true
+            }
+            Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::Home) => {
+                if event.shift {
+                    if self.select_anchor.is_none() {
+                        self.select_anchor = Some(self.cursor_idx);
+                    }
+                    self.cursor_idx = 0;
+                } else {
+                    self.cursor_idx = 0;
+                    self.select_anchor = None;
+                }
+                let len = self.edit_buffer.chars().count();
+                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                self.all_selected = start == 0 && end == len && len > 0;
+                true
+            }
+            Key::Named(NamedKey::ArrowDown) | Key::Named(NamedKey::End) => {
+                if event.shift {
+                    if self.select_anchor.is_none() {
+                        self.select_anchor = Some(self.cursor_idx);
+                    }
+                    self.cursor_idx = char_count;
+                } else {
+                    self.cursor_idx = char_count;
+                    self.select_anchor = None;
+                }
+                let len = self.edit_buffer.chars().count();
+                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                self.all_selected = start == 0 && end == len && len > 0;
+                true
+            }
+            Key::Named(NamedKey::Enter) => {
+                self.text = self.edit_buffer.clone();
+                self.editing = false;
+                self.all_selected = false;
+                self.select_anchor = None;
+                self.just_changed = true;
+                true
+            }
+            Key::Named(NamedKey::Escape) => {
+                self.editing = false;
+                self.all_selected = false;
+                self.select_anchor = None;
+                true
+            }
+            Key::Character(ref s) if event.ctrl => {
+                match s.as_str() {
+                    "c" | "C" => {
+                        self.copy_selection();
+                        true
+                    }
+                    "x" | "X" => {
+                        if self.cut_selection() {
+                            self.just_changed = true;
+                        }
+                        true
+                    }
+                    "v" | "V" => {
+                        if self.paste_from_clipboard() {
+                            self.just_changed = true;
+                        }
+                        true
+                    }
+                    "a" | "A" => {
+                        self.select_all();
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            _ => {
+                if event.ctrl {
+                    return false;
+                }
+                if let Some(text) = &event.text {
+                    let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                    let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                    let chars: Vec<char> = self.edit_buffer.chars().collect();
+                    let mut new_buf = String::new();
+                    for i in 0..start {
+                        new_buf.push(chars[i]);
+                    }
+                    let mut inserted_count = 0;
+                    for ch in text.chars() {
+                        if ch.is_alphanumeric() || ch == ' ' || ch == '-' || ch == '_' || ch == '*' {
+                            new_buf.push(ch);
+                            inserted_count += 1;
+                        }
+                    }
+                    for i in end..chars.len() {
+                        new_buf.push(chars[i]);
+                    }
+                    self.edit_buffer = new_buf;
+                    self.cursor_idx = start + inserted_count;
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                } else {
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                }
+                true
+            }
+        }
+    }
+
+    fn hover_highlight(&self) -> Option<[f32; 4]> {
+        None
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        if self.disabled {
+            quads.push((self.x, self.y, self.w, self.h, [0.12, 0.12, 0.16, 1.0]));
+            quads.push((self.x + 1.0, self.y + 1.0, self.w - 2.0, self.h - 2.0, [0.06, 0.06, 0.08, 1.0]));
+            return quads;
+        }
+        if self.hovered {
+            let (hy, hh) = if self.label.is_some() {
+                (self.y - 18.0, self.h + 18.0)
+            } else {
+                (self.y, self.h)
+            };
+            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
+            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
+            quads.push((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.06]));
+        }
+        let bg_color = if self.editing {
+            [0.06, 0.10, 0.18, 1.0]
+        } else {
+            [0.08, 0.08, 0.12, 1.0]
+        };
+        let border_color = if self.editing {
+            [0.20, 0.50, 0.85, 1.0]
+        } else if self.hovered {
+            [0.25, 0.25, 0.35, 1.0]
+        } else {
+            [0.18, 0.18, 0.24, 1.0]
+        };
+        quads.push((self.x, self.y, self.w, self.h, border_color));
+        quads.push((self.x + 1.0, self.y + 1.0, self.w - 2.0, self.h - 2.0, bg_color));
+
+        if self.editing {
+            let char_width = 7.2;
+            let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+            let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+            
+            if start != end {
+                let highlight_x = self.x + 8.0 + (start as f32 * char_width);
+                let max_x = self.x + self.w - 6.0;
+                let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
+                quads.push((
+                    highlight_x,
+                    self.y + (self.h - 16.0) / 2.0,
+                    highlight_w,
+                    16.0,
+                    [0.20, 0.40, 0.75, 0.4],
+                ));
+            }
+
+            let cursor_x = self.x + 8.0 + (self.cursor_idx as f32 * char_width);
+            let max_cursor_x = self.x + self.w - 6.0;
+            let final_cursor_x = cursor_x.min(max_cursor_x);
+            let cursor_y = self.y + (self.h - 14.0) / 2.0;
+            quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
+        }
+
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        if let Some(ref label) = self.label {
+            labels.push(TextLabel {
+                text: label.clone(),
+                x: self.x + 4.0,
+                y: self.y - 14.0,
+                font_size: 11.0,
+                color: [0x83, 0x83, 0x8a],
+            });
+        }
+        let val_text = if self.editing {
+            self.edit_buffer.clone()
+        } else {
+            self.text.clone()
+        };
+        labels.push(TextLabel {
+            text: val_text,
+            x: self.x + 8.0,
+            y: self.y + (self.h - 12.0) / 2.0,
+            font_size: 12.0,
+            color: if self.disabled {
+                [0x53, 0x53, 0x5a]
+            } else if self.all_selected {
+                [0xff, 0xff, 0xff]
+            } else if self.editing {
+                [0xee, 0xee, 0xf5]
+            } else {
+                [0xcc, 0xcc, 0xd4]
+            },
+        });
+        labels
+    }
+
+    fn parent(&self) -> Option<*mut (dyn Widget + 'static)> { self.parent }
+    fn set_parent(&mut self, parent: Option<*mut (dyn Widget + 'static)>) { self.parent = parent; }
+    fn children(&self) -> Vec<*mut (dyn Widget + 'static)> { self.children.clone() }
+    fn add_child(&mut self, child: *mut (dyn Widget + 'static)) { self.children.push(child); }
+    fn clear_children(&mut self) { self.children.clear(); }
+}
+
+impl Drop for TextBox {
     fn drop(&mut self) {
         focus::clear_if_matches(self);
     }
 }
 
-unsafe impl Send for Dropdown {}
-unsafe impl Sync for Dropdown {}
+unsafe impl Send for TextBox {}
+unsafe impl Sync for TextBox {}
 
 

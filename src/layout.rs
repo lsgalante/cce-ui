@@ -3,6 +3,9 @@ use crate::widget::Widget;
 pub trait RenderTarget {
     fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32);
     fn text(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4]);
+    fn text_with_font(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], _font: &str) {
+        self.text(content, x, y, size, color);
+    }
 }
 
 pub fn render_widget<T: Widget>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32) {
@@ -14,19 +17,19 @@ pub fn render_widget<T: Widget>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y:
     if let Some(hc) = w.hover_highlight() {
         pc.rect(hc, x, y, ww, wh);
     }
+    let font_opt = w.widget_font();
     for label in w.text_labels() {
-        pc.text(
-            &label.text,
-            label.x,
-            label.y,
-            label.font_size,
-            [
-                label.color[0] as f32 / 255.0,
-                label.color[1] as f32 / 255.0,
-                label.color[2] as f32 / 255.0,
-                1.0,
-            ],
-        );
+        let color_f32 = [
+            label.color[0] as f32 / 255.0,
+            label.color[1] as f32 / 255.0,
+            label.color[2] as f32 / 255.0,
+            1.0,
+        ];
+        if let Some(ref font) = font_opt {
+            pc.text_with_font(&label.text, label.x, label.y, label.font_size, color_f32, font);
+        } else {
+            pc.text(&label.text, label.x, label.y, label.font_size, color_f32);
+        }
     }
 }
 
@@ -98,6 +101,8 @@ impl Column {
             pc: &mut *pc,
             base_x: self.ox + self.cx,
             y: row_y,
+            cursor_x: 0.0,
+            spacing: 8.0,
         };
         f(&mut row);
         self.y = self.y + h;
@@ -108,16 +113,28 @@ pub struct Row<'a> {
     pc: &'a mut dyn RenderTarget,
     base_x: f32,
     y: f32,
+    pub cursor_x: f32,
+    pub spacing: f32,
 }
 
 impl<'a> Row<'a> {
-    pub fn text(&mut self, text: &str, x_off: f32, y_off: f32, font_size: f32, color: [f32; 4]) {
-        self.pc
-            .text(text, self.base_x + x_off, self.y + y_off, font_size, color);
+    pub fn set_spacing(&mut self, spacing: f32) {
+        self.spacing = spacing;
     }
 
-    pub fn widget<T: Widget>(&mut self, w: &mut T, x_off: f32, ww: f32, wh: f32) {
-        render_widget(self.pc, w, self.base_x + x_off, self.y, ww, wh);
+    pub fn gap(&mut self, width: f32) {
+        self.cursor_x += width;
+    }
+
+    pub fn text(&mut self, text: &str, y_off: f32, font_size: f32, color: [f32; 4], width: f32) {
+        self.pc
+            .text(text, self.base_x + self.cursor_x, self.y + y_off, font_size, color);
+        self.cursor_x += width + self.spacing;
+    }
+
+    pub fn widget<T: Widget>(&mut self, w: &mut T, ww: f32, wh: f32) {
+        render_widget(self.pc, w, self.base_x + self.cursor_x, self.y, ww, wh);
+        self.cursor_x += ww + self.spacing;
     }
 }
 
@@ -129,13 +146,20 @@ pub struct Section {
 }
 
 impl Section {
+    pub const ROW_PADDING_X: f32 = 8.0;
+    pub const DEFAULT_MARGIN_X: f32 = 12.0;
+    pub const DEFAULT_ROW_GAP: f32 = 8.0;
+
     pub fn new(pc: &mut dyn RenderTarget, left: f32, top: f32, cw: f32, label: &str) -> Self {
-        pc.text(label, left + 12.0, top, 14.0, [0.83, 0.83, 0.83, 1.0]);
-        pc.rect([0.18, 0.18, 0.27, 1.0], left + 8.0, top + 22.0, cw - 16.0, 1.0);
-        Self { left, top, content_y: top + 40.0, cw }
+        pc.text(label, left + Self::DEFAULT_MARGIN_X, top, 14.0, [0.83, 0.83, 0.83, 1.0]);
+        pc.rect([0.18, 0.18, 0.27, 1.0], left + Self::ROW_PADDING_X, top + 22.0, cw - 2.0 * Self::ROW_PADDING_X, 1.0);
+        Self { left, top, content_y: top + 34.0, cw }
     }
 
-    pub fn ax(&self, x_off: f32) -> f32 { self.left + x_off }
+    pub fn ax(&self, x_off: f32) -> f32 {
+        let shift = if x_off >= 12.0 { 8.0 } else { 0.0 };
+        self.left + x_off + shift
+    }
 
     pub fn ay(&self) -> f32 { self.content_y }
 
@@ -146,15 +170,17 @@ impl Section {
     }
 
     pub fn widget<T: Widget>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
-        w.set_row_rect(self.left + 8.0, self.cw - 16.0);
+        w.set_row_rect(self.left + Self::ROW_PADDING_X, self.cw - 2.0 * Self::ROW_PADDING_X);
+        let top_room = w.top_room();
+        self.content_y += top_room;
         render_widget(pc, w, self.ax(x_off), self.ay(), ww, wh);
-        self.content_y += wh + w.top_room();
+        self.content_y += wh;
     }
 
     pub fn separator(&mut self, pc: &mut dyn RenderTarget) {
-        let x = self.ax(8.0);
+        let x = self.ax(Self::ROW_PADDING_X);
         let y = self.ay();
-        pc.rect([0.18, 0.18, 0.27, 1.0], x, y, self.cw - 16.0, 1.0);
+        pc.rect([0.18, 0.18, 0.27, 1.0], x, y, self.cw - 2.0 * Self::ROW_PADDING_X, 1.0);
         self.content_y += 8.0;
     }
 
@@ -164,7 +190,8 @@ impl Section {
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
-        let usable_w = self.cw - 24.0; // 12.0 padding on left and right inside outer bounds
+        let margin_x = Self::ROW_PADDING_X + 12.0; // 20.0 px (12.0 px inner padding)
+        let usable_w = self.cw - 2.0 * margin_x; // padding on left and right inside outer bounds
         if count == 0 {
             return Vec::new();
         }
@@ -173,7 +200,7 @@ impl Section {
 
         let mut cols = Vec::with_capacity(count);
         for i in 0..count {
-            let x = self.left + 12.0 + i as f32 * (col_w + gap);
+            let x = self.left + margin_x + i as f32 * (col_w + gap);
             cols.push((x, col_w));
         }
         cols
@@ -200,14 +227,135 @@ impl Section {
         } else {
             [0.25, 0.25, 0.35, 1.0] // Default gray
         };
-        let x = self.left + 8.0;
+        let x = self.left + Self::ROW_PADDING_X;
         let y = self.top + 22.0;
-        let w = self.cw - 16.0;
+        let w = self.cw - 2.0 * Self::ROW_PADDING_X;
         let h = self.content_y - y;
         pc.rect(border, x, y, w, 1.0);
-        pc.rect(border, x, y + h + 4.0, w, 1.0);
-        pc.rect(border, x, y, 1.0, h + 4.0);
-        pc.rect(border, x + w - 1.0, y, 1.0, h + 4.0);
-        self.content_y + 12.0
+        pc.rect(border, x, y + h + 12.0, w, 1.0);
+        pc.rect(border, x, y, 1.0, h + 12.0);
+        pc.rect(border, x + w - 1.0, y, 1.0, h + 12.0);
+        self.content_y + 20.0
+    }
+
+    pub fn vstack<'a>(&'a mut self, pc: &'a mut dyn RenderTarget, spacing: f32) -> VStack<'a> {
+        VStack {
+            section: self,
+            pc,
+            spacing,
+        }
+    }
+}
+
+pub struct VStack<'a> {
+    section: &'a mut Section,
+    pc: &'a mut dyn RenderTarget,
+    spacing: f32,
+}
+
+impl<'a> VStack<'a> {
+    pub fn add_widget<T: Widget>(&mut self, w: &mut T, ww: f32, wh: f32) {
+        self.section.widget(self.pc, w, Section::DEFAULT_MARGIN_X, ww, wh);
+        self.section.spacing(self.spacing);
+    }
+
+    pub fn add_row<F>(&mut self, count: usize, gap: f32, h: f32, f: F)
+    where
+        F: FnMut(usize, f32, f32),
+    {
+        self.section.row(count, gap, h, f);
+        self.section.spacing(self.spacing);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MockRenderTarget {
+        rects: Vec<([f32; 4], f32, f32, f32, f32)>,
+    }
+
+    impl RenderTarget for MockRenderTarget {
+        fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
+            self.rects.push((color, x, y, w, h));
+        }
+        fn text(&mut self, _content: &str, _x: f32, _y: f32, _size: f32, _color: [f32; 4]) {}
+    }
+
+    struct MockWidget {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    }
+
+    impl Widget for MockWidget {
+        fn rect(&self) -> (f32, f32, f32, f32) {
+            (self.x, self.y, self.w, self.h)
+        }
+        fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+            self.x = x;
+            self.y = y;
+            self.w = w;
+            self.h = h;
+        }
+        fn color(&self) -> [f32; 4] {
+            [0.0, 0.0, 0.0, 0.0]
+        }
+    }
+
+    struct MockWidgetWithLabel {
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        top_room: f32,
+    }
+
+    impl Widget for MockWidgetWithLabel {
+        fn rect(&self) -> (f32, f32, f32, f32) {
+            (self.x, self.y, self.w, self.h)
+        }
+        fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+            self.x = x;
+            self.y = y;
+            self.w = w;
+            self.h = h;
+        }
+        fn color(&self) -> [f32; 4] {
+            [0.0, 0.0, 0.0, 0.0]
+        }
+        fn top_room(&self) -> f32 {
+            self.top_room
+        }
+    }
+
+    #[test]
+    fn test_vstack_flow() {
+        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
+        let mut sec = Section::new(&mut mock_pc, 10.0, 20.0, 200.0, "Test Section");
+        
+        let start_y = sec.ay();
+        let mut stack = sec.vstack(&mut mock_pc, 10.0);
+
+        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        stack.add_widget(&mut w1, 50.0, 30.0);
+
+        // Standard margin should be applied
+        assert_eq!(w1.x, 30.0);
+        assert_eq!(w1.y, start_y);
+
+        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        stack.add_widget(&mut w2, 60.0, 40.0);
+
+        // Second widget should start after first widget height + vstack spacing
+        assert_eq!(w2.y, start_y + 30.0 + 10.0);
+
+        let mut w3 = MockWidgetWithLabel { x: 0.0, y: 0.0, w: 0.0, h: 0.0, top_room: 15.0 };
+        stack.add_widget(&mut w3, 70.0, 50.0);
+
+        // Third widget has top_room = 15.0, so its y should be shifted by 15.0
+        assert_eq!(w3.y, start_y + 30.0 + 10.0 + 40.0 + 10.0 + 15.0);
     }
 }

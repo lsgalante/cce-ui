@@ -317,6 +317,11 @@ impl State {
                 verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
             }
         }
+        if clear_ui::widget::context_menu::is_visible() {
+            for (qx, qy, qw, qh, qc) in clear_ui::widget::context_menu::extra_quads() {
+                verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
+            }
+        }
         verts
     }
 
@@ -400,6 +405,13 @@ impl State {
         let mut widget_labels: Vec<TextLabel> = Vec::new();
         for w in self.widgets.iter() {
             for label in w.text_labels() {
+                widget_buffers.push(make_text_buffer(font_system, &label.text, label.font_size));
+                widget_labels.push(label);
+            }
+        }
+
+        if clear_ui::widget::context_menu::is_visible() {
+            for label in clear_ui::widget::context_menu::text_labels() {
                 widget_buffers.push(make_text_buffer(font_system, &label.text, label.font_size));
                 widget_labels.push(label);
             }
@@ -521,6 +533,29 @@ fn demo_positions(sw: f32, sh: f32) -> Vec<(f32, f32, f32, f32)> {
     ]
 }
 
+struct PressedKey {
+    logical_key: clear_ui::widget::Key,
+    text: Option<String>,
+    first_pressed: std::time::Instant,
+    last_repeated: std::time::Instant,
+}
+
+fn is_repeatable_key(key: &clear_ui::widget::Key) -> bool {
+    use clear_ui::widget::{Key, NamedKey};
+    match key {
+        Key::Named(NamedKey::Backspace) |
+        Key::Named(NamedKey::Delete) |
+        Key::Named(NamedKey::ArrowLeft) |
+        Key::Named(NamedKey::ArrowRight) |
+        Key::Named(NamedKey::ArrowUp) |
+        Key::Named(NamedKey::ArrowDown) |
+        Key::Named(NamedKey::Home) |
+        Key::Named(NamedKey::End) |
+        Key::Character(_) => true,
+        _ => false,
+    }
+}
+
 struct AppState {
     registry_state: RegistryState,
     compositor_state: CompositorState,
@@ -540,6 +575,8 @@ struct AppState {
     exit: bool,
     redraw: bool,
     ctrl_pressed: bool,
+    shift_pressed: bool,
+    pressed_key: Option<PressedKey>,
 }
 
 impl CompositorHandler for AppState {
@@ -683,15 +720,21 @@ impl PointerHandler for AppState {
                 PointerEventKind::Motion { .. } => {
                     if let Some(state) = &mut self.state {
                         let mut changed = false;
-                        if let Some(idx) = state.drag_widget {
-                            if state.widgets[idx].drag_update(state.cursor_x, state.cursor_y) {
+                        if clear_ui::widget::context_menu::is_visible() {
+                            if clear_ui::widget::context_menu::cursor_moved(state.cursor_x, state.cursor_y) {
                                 changed = true;
                             }
-                        }
-                        if state.drag_widget.is_none() {
-                            for w in &mut state.widgets {
-                                if w.cursor_moved(state.cursor_x, state.cursor_y) {
+                        } else {
+                            if let Some(idx) = state.drag_widget {
+                                if state.widgets[idx].drag_update(state.cursor_x, state.cursor_y) {
                                     changed = true;
+                                }
+                            }
+                            if state.drag_widget.is_none() {
+                                for w in &mut state.widgets {
+                                    if w.cursor_moved(state.cursor_x, state.cursor_y) {
+                                        changed = true;
+                                    }
                                 }
                             }
                         }
@@ -702,33 +745,44 @@ impl PointerHandler for AppState {
                     }
                 }
                 PointerEventKind::Press { button, .. } => {
-                    if *button != 272 {
-                        continue;
-                    }
+                    let btn = match *button {
+                        272 => clear_ui::widget::MouseButton::Left,
+                        273 => clear_ui::widget::MouseButton::Right,
+                        274 => clear_ui::widget::MouseButton::Middle,
+                        _ => continue,
+                    };
                     if let Some(st) = &mut self.state {
-                        let button = clear_ui::widget::MouseButton::Left;
-                        let btn_state = clear_ui::widget::ElementState::Pressed;
                         let mut changed = false;
-                        if let Some(old) = st.focused_widget.take() {
-                            st.widgets[old].unfocus();
-                        }
-                        for i in (0..st.widgets.len()).rev() {
-                            if st.widgets[i].hit_test(st.cursor_x, st.cursor_y) {
-                                if st.widgets[i].mouse_input(
-                                    button,
-                                    btn_state,
-                                    st.cursor_x,
-                                    st.cursor_y,
-                                ) {
-                                    changed = true;
+                        if clear_ui::widget::context_menu::is_visible() {
+                            if clear_ui::widget::context_menu::mouse_input(btn, clear_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y) {
+                                changed = true;
+                            }
+                        } else {
+                            if btn == clear_ui::widget::MouseButton::Left {
+                                if let Some(old) = st.focused_widget.take() {
+                                    st.widgets[old].unfocus();
                                 }
-                                if st.widgets[i].draggable() {
-                                    st.widgets[i].drag_begin(st.cursor_x, st.cursor_y);
-                                    st.drag_widget = Some(i);
+                            }
+                            for i in (0..st.widgets.len()).rev() {
+                                if st.widgets[i].hit_test(st.cursor_x, st.cursor_y) {
+                                    if st.widgets[i].mouse_input(
+                                        btn,
+                                        clear_ui::widget::ElementState::Pressed,
+                                        st.cursor_x,
+                                        st.cursor_y,
+                                    ) {
+                                        changed = true;
+                                    }
+                                    if btn == clear_ui::widget::MouseButton::Left && st.widgets[i].draggable() {
+                                        st.widgets[i].drag_begin(st.cursor_x, st.cursor_y);
+                                        st.drag_widget = Some(i);
+                                    }
+                                    if btn == clear_ui::widget::MouseButton::Left {
+                                        st.widgets[i].focus();
+                                        st.focused_widget = Some(i);
+                                    }
+                                    break;
                                 }
-                                st.widgets[i].focus();
-                                st.focused_widget = Some(i);
-                                break;
                             }
                         }
                         if changed {
@@ -738,32 +792,43 @@ impl PointerHandler for AppState {
                     }
                 }
                 PointerEventKind::Release { button, .. } => {
-                    if *button != 272 {
-                        continue;
-                    }
+                    let btn = match *button {
+                        272 => clear_ui::widget::MouseButton::Left,
+                        273 => clear_ui::widget::MouseButton::Right,
+                        274 => clear_ui::widget::MouseButton::Middle,
+                        _ => continue,
+                    };
                     if let Some(st) = &mut self.state {
-                        let button = clear_ui::widget::MouseButton::Left;
-                        let btn_state = clear_ui::widget::ElementState::Released;
                         let mut changed = false;
-                        if let Some(idx) = st.drag_widget {
-                            st.widgets[idx].drag_end();
-                            st.drag_widget = None;
-                            changed = true;
-                        }
-                        for w in &mut st.widgets {
-                            if w.mouse_input(button, btn_state, st.cursor_x, st.cursor_y) {
+                        if clear_ui::widget::context_menu::is_visible() {
+                            if clear_ui::widget::context_menu::mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y) {
                                 changed = true;
                             }
-                        }
-                        let mut clicked = false;
-                        for w in &mut st.widgets {
-                            if w.take_click() {
-                                clicked = true;
+                        } else {
+                            if btn == clear_ui::widget::MouseButton::Left {
+                                if let Some(idx) = st.drag_widget {
+                                    st.widgets[idx].drag_end();
+                                    st.drag_widget = None;
+                                    changed = true;
+                                }
                             }
-                        }
-                        if clicked {
-                            st.click_count += 1;
-                            st.update_status_text(&format!("Clicks: {}", st.click_count));
+                            for w in &mut st.widgets {
+                                if w.mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y) {
+                                    changed = true;
+                                }
+                            }
+                            if btn == clear_ui::widget::MouseButton::Left {
+                                let mut clicked = false;
+                                for w in &mut st.widgets {
+                                    if w.take_click() {
+                                        clicked = true;
+                                    }
+                                }
+                                if clicked {
+                                    st.click_count += 1;
+                                    st.update_status_text(&format!("Clicks: {}", st.click_count));
+                                }
+                            }
                         }
                         if changed {
                             st.upload_vertices();
@@ -849,6 +914,7 @@ impl KeyboardHandler for AppState {
         _layout: u32,
     ) {
         self.ctrl_pressed = modifiers.ctrl;
+        self.shift_pressed = modifiers.shift;
     }
 }
 
@@ -881,7 +947,27 @@ impl AppState {
             text: event.utf8.clone(),
             repeat: false,
             ctrl: self.ctrl_pressed,
+            shift: self.shift_pressed,
         };
+
+        if state == clear_ui::widget::ElementState::Pressed {
+            if is_repeatable_key(&custom_event.logical_key) {
+                self.pressed_key = Some(PressedKey {
+                    logical_key: custom_event.logical_key.clone(),
+                    text: custom_event.text.clone(),
+                    first_pressed: std::time::Instant::now(),
+                    last_repeated: std::time::Instant::now(),
+                });
+            } else {
+                self.pressed_key = None;
+            }
+        } else if state == clear_ui::widget::ElementState::Released {
+            if let Some(ref pk) = self.pressed_key {
+                if pk.logical_key == custom_event.logical_key {
+                    self.pressed_key = None;
+                }
+            }
+        }
 
         if let Some(st) = &mut self.state {
             if let Some(idx) = st.focused_widget {
@@ -986,6 +1072,8 @@ fn main() {
         exit: false,
         redraw: true,
         ctrl_pressed: false,
+        shift_pressed: false,
+        pressed_key: None,
     };
 
     // Perform a roundtrip to populate output_state with active output scales
@@ -1020,6 +1108,9 @@ fn main() {
     let loop_handle = event_loop.handle();
     WaylandSource::new(conn, event_queue).insert(loop_handle).unwrap();
 
+    const KEY_REPEAT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
+    const KEY_REPEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
     loop {
         event_loop
             .dispatch(std::time::Duration::from_millis(16), &mut app)
@@ -1027,6 +1118,37 @@ fn main() {
         if app.exit {
             break;
         }
+
+        if let Some(ref mut pk) = app.pressed_key {
+            let now = std::time::Instant::now();
+            if now.duration_since(pk.first_pressed) >= KEY_REPEAT_DELAY {
+                if now.duration_since(pk.last_repeated) >= KEY_REPEAT_INTERVAL {
+                    pk.last_repeated = now;
+                    let custom_event = clear_ui::widget::KeyEvent {
+                        state: clear_ui::widget::ElementState::Pressed,
+                        logical_key: pk.logical_key.clone(),
+                        text: pk.text.clone(),
+                        repeat: true,
+                        ctrl: app.ctrl_pressed,
+                        shift: app.shift_pressed,
+                    };
+                    if let Some(st) = &mut app.state {
+                        if let Some(idx) = st.focused_widget {
+                            let val = st.widgets[idx].value();
+                            let mut changed = st.widgets[idx].keyboard_input(&custom_event);
+                            if st.widgets[idx].value() != val {
+                                changed = true;
+                            }
+                            if changed {
+                                st.upload_vertices();
+                                app.redraw = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if app.redraw {
             app.redraw = false;
             if let Some(state) = &mut app.state {
