@@ -19,3 +19,5 @@ calloop = "0.13.0"
 calloop-wayland-source = "0.3.0"
 wayland-client = { version = "0.31", features = ["system"] }
 xkeysym = "0.2"
+resvg = "0.41.0"
+

@@ -1587,31 +1587,49 @@ impl Drop for MenuBar {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
     Primary,
     Reset,
+    ListRow,
+    CopyIcon,
 }
 
+#[derive(Debug, Clone)]
 pub struct Button {
     x: f32, y: f32, w: f32, h: f32,
     hovering: bool,
     pressed: bool,
     just_clicked: bool,
     kind: ButtonKind,
-    label: Option<String>,
+    pub label: Option<String>,
+    pub selected: bool,
 }
 
 impl Button {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Primary, label: None }
+        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Primary, label: None, selected: false }
     }
 
     pub fn new_reset(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Reset, label: None }
+        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Reset, label: None, selected: false }
+    }
+
+    pub fn new_list_row(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::ListRow, label: None, selected: false }
+    }
+
+    pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::CopyIcon, label: None, selected: false }
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
         self.label = Some(label.to_string());
+        self
+    }
+
+    pub fn with_selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
         self
     }
 }
@@ -1632,6 +1650,28 @@ impl Widget for Button {
                 if self.pressed { colors::RESET_BTN_PRESS }
                 else if self.hovering { colors::RESET_BTN_HOVER }
                 else { colors::RESET_BTN_IDLE }
+            }
+            ButtonKind::ListRow => {
+                if self.selected {
+                    if self.pressed { [0.30, 0.52, 0.78, 0.6] }
+                    else if self.hovering { [0.30, 0.52, 0.78, 0.5] }
+                    else { [0.20, 0.40, 0.65, 0.4] }
+                } else {
+                    if self.pressed { [0.20, 0.20, 0.25, 0.25] }
+                    else if self.hovering { [0.20, 0.20, 0.25, 0.15] }
+                    else { [0.0, 0.0, 0.0, 0.0] }
+                }
+            }
+            ButtonKind::CopyIcon => {
+                if self.selected {
+                    if self.pressed { [0.30, 0.52, 0.78, 0.5] }
+                    else if self.hovering { [0.30, 0.52, 0.78, 0.5] }
+                    else { [0.20, 0.40, 0.65, 0.2] }
+                } else {
+                    if self.pressed { [0.20, 0.20, 0.25, 0.25] }
+                    else if self.hovering { [0.20, 0.20, 0.25, 0.25] }
+                    else { [0.0, 0.0, 0.0, 0.0] }
+                }
             }
         }
     }
@@ -1671,13 +1711,24 @@ impl Widget for Button {
         let mut labels = Vec::new();
         if let Some(ref label) = self.label {
             let font_size = 12.0;
-            let est_w = label.len() as f32 * 6.5;
+            let est_w = if label == "📋" {
+                12.0
+            } else {
+                label.len() as f32 * 6.5
+            };
+            let color = match self.kind {
+                ButtonKind::ListRow | ButtonKind::CopyIcon => {
+                    if self.selected { [230, 230, 242] }
+                    else { [178, 178, 191] }
+                }
+                _ => [0xcc, 0xcc, 0xd4]
+            };
             labels.push(TextLabel {
                 text: label.clone(),
                 x: self.x + (self.w - est_w) / 2.0,
                 y: self.y + (self.h - font_size) / 2.0 - 1.0,
                 font_size,
-                color: [0xcc, 0xcc, 0xd4],
+                color,
             });
         }
         labels
@@ -2225,6 +2276,95 @@ impl Widget for Label {
             font_size: self.font_size,
             color: self.color,
         }]
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Svg {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub quads: Vec<(f32, f32, f32, f32, [f32; 4])>,
+}
+
+impl Svg {
+    pub fn new(svg_data: &[u8], x: f32, y: f32, w: f32, h: f32) -> Option<Self> {
+        let opt = resvg::usvg::Options::default();
+        let fontdb = resvg::usvg::fontdb::Database::new();
+        let tree = resvg::usvg::Tree::from_data(svg_data, &opt, &fontdb).ok()?;
+        
+        let target_w = w as u32;
+        let target_h = h as u32;
+        if target_w == 0 || target_h == 0 {
+            return None;
+        }
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(target_w, target_h)?;
+        
+        let orig_w = tree.size().width();
+        let orig_h = tree.size().height();
+        let sx = target_w as f32 / orig_w;
+        let sy = target_h as f32 / orig_h;
+        let transform = resvg::tiny_skia::Transform::from_scale(sx, sy);
+        
+        resvg::render(&tree, transform, &mut pixmap.as_mut());
+        
+        let mut quads = Vec::new();
+        let pixels = pixmap.data();
+        for row in 0..target_h {
+            for col in 0..target_w {
+                let idx = ((row * target_w + col) * 4) as usize;
+                if idx + 3 < pixels.len() {
+                    let a = pixels[idx + 3] as f32 / 255.0;
+                    if a > 0.0 {
+                        let r = pixels[idx] as f32 / 255.0;
+                        let g = pixels[idx + 1] as f32 / 255.0;
+                        let b = pixels[idx + 2] as f32 / 255.0;
+                        quads.push((
+                            x + col as f32,
+                            y + row as f32,
+                            1.0,
+                            1.0,
+                            [r, g, b, a],
+                        ));
+                    }
+                }
+            }
+        }
+        
+        Some(Self { x, y, w, h, quads })
+    }
+
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P, x: f32, y: f32, w: f32, h: f32) -> Option<Self> {
+        let data = std::fs::read(path).ok()?;
+        Self::new(&data, x, y, w, h)
+    }
+
+    pub fn from_str(svg_str: &str, x: f32, y: f32, w: f32, h: f32) -> Option<Self> {
+        Self::new(svg_str.as_bytes(), x, y, w, h)
+    }
+}
+
+impl Widget for Svg {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let dx = x - self.x;
+        let dy = y - self.y;
+        for quad in &mut self.quads {
+            quad.0 += dx;
+            quad.1 += dy;
+        }
+        self.x = x;
+        self.y = y;
+        self.w = w;
+        self.h = h;
+    }
+    
+    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+    
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        self.quads.clone()
     }
 }
 
@@ -4162,9 +4302,12 @@ impl StyledLabel {
     pub fn strikethrough_rect(&self, x: f32, y: f32, scale: f32) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         if self.strikethrough {
             let col = self.strikethrough_color.unwrap_or(self.color);
+            let font_size = self.buffer.metrics().font_size;
+            let line_y = self.buffer.layout_runs().next().map(|r| r.line_y).unwrap_or(font_size * 1.05);
+            let offset_y = line_y - 0.28 * font_size;
             Some((
                 x,
-                y + 8.0 * scale,
+                y + offset_y * scale,
                 self.w,
                 1.0 * scale,
                 col,
