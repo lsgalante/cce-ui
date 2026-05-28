@@ -4781,6 +4781,7 @@ pub struct TextBox {
     pub children: Vec<*mut (dyn Widget + 'static)>,
     pub max_width: Option<f32>,
     pub width: Option<f32>,
+    pub is_password: bool,
 }
 
 impl TextBox {
@@ -4806,7 +4807,13 @@ impl TextBox {
             children: Vec::new(),
             max_width: Some(300.0),
             width: None,
+            is_password: false,
         }
+    }
+
+    pub fn with_password(mut self, is_password: bool) -> Self {
+        self.is_password = is_password;
+        self
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
@@ -5463,11 +5470,14 @@ impl Widget for TextBox {
                 color: [0x83, 0x83, 0x8a],
             });
         }
-        let val_text = if self.editing {
+        let mut val_text = if self.editing {
             self.edit_buffer.clone()
         } else {
             self.text.clone()
         };
+        if self.is_password {
+            val_text = "•".repeat(val_text.chars().count());
+        }
         labels.push(TextLabel {
             text: val_text,
             x: self.x + 8.0,
