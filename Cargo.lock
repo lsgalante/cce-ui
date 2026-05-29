@@ -177,6 +177,7 @@ dependencies = [
  "pollster",
  "raw-window-handle",
  "resvg",
+ "serde",
  "smithay-client-toolkit",
  "tokio",
  "wayland-client",
@@ -1227,6 +1228,16 @@ name = "self_cell"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b12e76d157a900eb52e81bc6e9f3069344290341720e9178cde2407113ac8d89"
+
+[[package]]
+name = "serde"
+version = "1.0.228"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
+dependencies = [
+ "serde_core",
+ "serde_derive",
+]
 
 [[package]]
 name = "serde_core"

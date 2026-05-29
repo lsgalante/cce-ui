@@ -466,24 +466,138 @@ pub struct TextLabel {
     pub color: [u8; 3],
 }
 
+impl TextLabel {
+    pub fn is_covered_by(&self, px: f32, py: f32, pw: f32, ph: f32) -> bool {
+        let text_w = self.text.chars().count() as f32 * self.font_size * 0.65;
+        let x_overlap = self.x <= px + pw && (self.x + text_w) >= px;
+        let y_overlap = self.y <= py + ph && (self.y + self.font_size) >= py;
+        x_overlap && y_overlap
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct WidgetBase {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub label: Option<String>,
+    pub hovered: bool,
+    pub row_x: f32,
+    pub row_w: f32,
+}
+
+impl WidgetBase {
+    pub fn new() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+            label: None,
+            hovered: false,
+            row_x: 0.0,
+            row_w: 0.0,
+        }
+    }
+}
+
 pub trait Widget {
-    fn rect(&self) -> (f32, f32, f32, f32);
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32);
-    fn set_row_rect(&mut self, _x: f32, _w: f32) {}
+    fn base(&self) -> Option<&WidgetBase> { None }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { None }
+
+    fn rect(&self) -> (f32, f32, f32, f32) {
+        if let Some(b) = self.base() {
+            (b.x, b.y, b.w, b.h)
+        } else {
+            (0.0, 0.0, 0.0, 0.0)
+        }
+    }
+
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        if let Some(b) = self.base_mut() {
+            b.x = x;
+            b.y = y;
+            b.w = w;
+            b.h = h;
+        }
+    }
+
+    fn set_row_rect(&mut self, x: f32, w: f32) {
+        if let Some(b) = self.base_mut() {
+            b.row_x = x;
+            b.row_w = w;
+        }
+    }
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
         let (x, y, w, h) = self.rect();
-        px >= x && px <= x + w && py >= y && py <= y + h
+        let (hx, hw) = if let Some(b) = self.base() {
+            if b.row_w > 0.0 {
+                (b.row_x, b.row_w)
+            } else {
+                (x, w)
+            }
+        } else {
+            (x, w)
+        };
+        let top = self.top_room();
+        let hy = y - top;
+        let hh = h + top;
+        px >= hx && px <= hx + hw && py >= hy && py <= hy + hh
     }
 
-    fn cursor_moved(&mut self, _px: f32, _py: f32) -> bool { false }
+    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        if self.base().is_some() {
+            let was = self.hovered();
+            let is_hit = self.hit_test(px, py);
+            self.set_hovered(is_hit);
+            was != is_hit
+        } else {
+            false
+        }
+    }
+
     fn mouse_input(&mut self, _button: MouseButton, _state: ElementState, _px: f32, _py: f32) -> bool { false }
     fn mouse_wheel(&mut self, _delta: &MouseScrollDelta, _px: f32, _py: f32) -> bool { false }
 
-    fn set_hovered(&mut self, _hovered: bool) {}
-    fn hovered(&self) -> bool { false }
+    fn set_hovered(&mut self, hovered: bool) {
+        if let Some(b) = self.base_mut() {
+            b.hovered = hovered;
+        }
+    }
+
+    fn hovered(&self) -> bool {
+        if let Some(b) = self.base() {
+            b.hovered
+        } else {
+            false
+        }
+    }
+
     fn hover_highlight(&self) -> Option<[f32; 4]> {
         if self.hovered() { Some([1.0, 1.0, 1.0, 0.06]) } else { None }
+    }
+
+    fn hover_highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        if let Some(b) = self.base() {
+            if self.hovered() {
+                let hx = if b.row_w > 0.0 { b.row_x } else { b.x };
+                let hw = if b.row_w > 0.0 { b.row_w } else { b.w };
+                let top_offset = self.top_room();
+                let hy = b.y - top_offset;
+                let hh = b.h + top_offset;
+                Some((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.06]))
+            } else {
+                None
+            }
+        } else if let Some(hc) = self.hover_highlight() {
+            let (x, y, w, h) = self.rect();
+            Some((x, y, w, h, hc))
+        } else {
+            None
+        }
     }
 
     fn color(&self) -> [f32; 4];
@@ -496,15 +610,42 @@ pub trait Widget {
     fn draggable(&self) -> bool { false }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { Vec::new() }
-    fn text_labels(&self) -> Vec<TextLabel> { Vec::new() }
+    fn text_labels(&self) -> Vec<TextLabel> {
+        if let Some(b) = self.base() {
+            if let Some(ref label) = b.label {
+                return vec![TextLabel {
+                    text: label.clone(),
+                    x: b.x,
+                    y: b.y - 18.0,
+                    font_size: 12.0,
+                    color: [0x83, 0x83, 0x8a],
+                }];
+            }
+        }
+        Vec::new()
+    }
     fn widget_font(&self) -> Option<String> { None }
     fn value(&self) -> i32 { 0 }
-    fn top_room(&self) -> f32 { 0.0 }
+    fn top_room(&self) -> f32 {
+        if let Some(b) = self.base() {
+            if b.label.is_some() {
+                return 18.0;
+            }
+        }
+        0.0
+    }
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> { None }
+    fn set_text(&mut self, text: &str) {
+        if let Some(b) = self.base_mut() {
+            b.label = Some(text.to_string());
+        }
+    }
 
     fn set_drag_bounds(&mut self, _bx: f32, _by: f32, _bw: f32, _bh: f32) {}
 
     fn focus(&mut self) {}
     fn unfocus(&mut self) {}
+    fn set_selected(&mut self, _selected: bool) {}
     fn keyboard_input(&mut self, _event: &KeyEvent) -> bool { false }
 
     fn menu_click(&mut self) -> Option<(usize, usize)> { None }
@@ -543,6 +684,7 @@ pub trait Widget {
     fn children(&self) -> Vec<*mut (dyn Widget + 'static)> { vec![] }
     fn add_child(&mut self, _child: *mut (dyn Widget + 'static)) {}
     fn clear_children(&mut self) {}
+    fn z_index(&self) -> i32 { 0 }
 }
 
 #[derive(Clone)]
@@ -1165,23 +1307,24 @@ impl Widget for Canvas {
 
 const DROPDOWN_ITEM_H: f32 = 22.0;
 const CHECKBOX_WIDTH: f32 = 16.0;
-
 pub struct MenuBar {
     x: f32, y: f32, w: f32, h: f32,
     hovering: bool,
     pub title: String,
+    pub menus: Vec<Box<Menu>>,
     pub menu_items: Vec<String>,
     pub vertical_items: Vec<String>,
     pub menu_dropdowns: Vec<Vec<String>>,
-    menu_dropdown_checked: Vec<Vec<Option<bool>>>,
-    hovered_menu: Option<usize>,
-    open_menu: Option<usize>,
-    hovered_dropdown: Option<usize>,
-    clicked_dropdown: Option<(usize, usize)>,
-    was_open: Option<usize>,
+    pub menu_dropdown_checked: Vec<Vec<Option<bool>>>,
+    pub hovered_menu: Option<usize>,
+    pub open_menu: Option<usize>,
+    pub hovered_dropdown: Option<usize>,
+    pub clicked_dropdown: Option<(usize, usize)>,
+    pub was_open: Option<usize>,
     pub vertical: bool,
     pub visible: bool,
     pub focused: bool,
+    pub z_level: i32,
 }
 
 impl MenuBar {
@@ -1189,6 +1332,7 @@ impl MenuBar {
         Self {
             x, y, w, h, hovering: false,
             title: String::new(),
+            menus: Vec::new(),
             menu_items: Vec::new(),
             vertical_items: Vec::new(),
             menu_dropdowns: Vec::new(),
@@ -1201,9 +1345,9 @@ impl MenuBar {
             vertical: false,
             visible: true,
             focused: false,
+            z_level: 100,
         }
     }
-
 
     pub fn with_title(mut self, title: &str) -> Self {
         self.title = title.to_string();
@@ -1215,6 +1359,11 @@ impl MenuBar {
         self.vertical_items.push(label.to_string());
         self.menu_dropdowns.push(items.iter().map(|s| s.to_string()).collect());
         self.menu_dropdown_checked.push(vec![None; items.len()]);
+
+        let item_strs: Vec<String> = items.iter().map(|s| s.to_string()).collect();
+        let mut menu = Menu::new(label, label, &item_strs);
+        menu.vertical = self.vertical;
+        self.menus.push(Box::new(menu));
         self
     }
 
@@ -1223,11 +1372,24 @@ impl MenuBar {
         self.vertical_items.push(vertical_label.to_string());
         self.menu_dropdowns.push(items.iter().map(|s| s.to_string()).collect());
         self.menu_dropdown_checked.push(vec![None; items.len()]);
+
+        let item_strs: Vec<String> = items.iter().map(|s| s.to_string()).collect();
+        let mut menu = Menu::new(horizontal_label, vertical_label, &item_strs);
+        menu.vertical = self.vertical;
+        self.menus.push(Box::new(menu));
         self
     }
 
     pub fn with_vertical(mut self, vertical: bool) -> Self {
         self.vertical = vertical;
+        for menu in &mut self.menus {
+            menu.vertical = vertical;
+        }
+        self
+    }
+
+    pub fn with_z_index(mut self, z: i32) -> Self {
+        self.z_level = z;
         self
     }
 
@@ -1242,60 +1404,18 @@ impl MenuBar {
     fn item_h_vertical(&self) -> f32 {
         24.0
     }
-
-    fn dropdown_rect(&self, idx: usize) -> (f32, f32, f32, f32) {
-        if self.vertical {
-            let iy = self.item_y_vertical(idx);
-            let dx = self.x + self.w;
-            let dy = self.y + iy;
-            let mut dw = 80.0f32;
-            if let Some(items) = self.menu_dropdowns.get(idx) {
-                for (i, item) in items.iter().enumerate() {
-                    let mut tw = item.len() as f32 * 7.5 + 16.0;
-                    if self.menu_dropdown_checked.get(idx)
-                        .and_then(|m| m.get(i))
-                        .is_some()
-                    {
-                        tw += CHECKBOX_WIDTH;
-                    }
-                    dw = dw.max(tw);
-                }
-            }
-            let dh = self.menu_dropdowns.get(idx).map_or(0.0, |items| items.len() as f32 * DROPDOWN_ITEM_H);
-            (dx, dy, dw, dh)
-        } else {
-            let ix = menu_item_x(&self.title, &self.menu_items, idx);
-            let iw = menu_item_w(&self.menu_items, idx);
-            let dx = self.x + ix;
-            let dy = self.y + self.h;
-            let mut dw = iw;
-            if let Some(items) = self.menu_dropdowns.get(idx) {
-                for (i, item) in items.iter().enumerate() {
-                    let mut tw = item.len() as f32 * 7.5 + 16.0;
-                    if self.menu_dropdown_checked.get(idx)
-                        .and_then(|m| m.get(i))
-                        .is_some()
-                    {
-                        tw += CHECKBOX_WIDTH;
-                    }
-                    dw = dw.max(tw);
-                }
-            }
-            let dh = self.menu_dropdowns.get(idx).map_or(0.0, |items| items.len() as f32 * DROPDOWN_ITEM_H);
-            (dx, dy, dw, dh)
-        }
-    }
 }
+
 impl Widget for MenuBar {
     fn rect(&self) -> (f32, f32, f32, f32) {
         if !self.visible {
             return (0.0, 0.0, 0.0, 0.0);
         }
         if self.vertical {
-            let total_h = if self.menu_items.is_empty() {
+            let total_h = if self.menus.is_empty() {
                 self.h
             } else {
-                let last_idx = self.menu_items.len() - 1;
+                let last_idx = self.menus.len() - 1;
                 self.item_y_vertical(last_idx) + self.item_h_vertical()
             };
             (self.x, self.y, self.w, total_h)
@@ -1303,7 +1423,40 @@ impl Widget for MenuBar {
             (self.x, self.y, self.w, self.h)
         }
     }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.x = x;
+        self.y = y;
+        self.w = w;
+        self.h = h;
+
+        let parent_ptr = self as *mut MenuBar as *mut (dyn Widget + 'static);
+
+        if self.vertical {
+            let mut cy = 8.0;
+            if !self.title.is_empty() {
+                cy += 24.0;
+            }
+            for menu in &mut self.menus {
+                let ih = 24.0;
+                menu.set_rect(x, y + cy, w, ih);
+                menu.set_parent(Some(parent_ptr));
+                cy += ih;
+            }
+        } else {
+            let mut cx = 8.0;
+            if !self.title.is_empty() {
+                cx += self.title.len() as f32 * 7.5 + 24.0;
+            }
+            for menu in &mut self.menus {
+                let iw = menu.active_title().len() as f32 * 7.5 + 16.0;
+                menu.set_rect(x + cx, y, iw, h);
+                menu.set_parent(Some(parent_ptr));
+                cx += iw;
+            }
+        }
+    }
+
     fn color(&self) -> [f32; 4] {
         if !self.visible {
             [0.0, 0.0, 0.0, 0.0]
@@ -1313,8 +1466,14 @@ impl Widget for MenuBar {
             colors::PANEL_MENU_BG
         }
     }
-    fn set_hovered(&mut self, v: bool) { self.hovering = v; }
-    fn hovered(&self) -> bool { self.hovering }
+
+    fn set_hovered(&mut self, v: bool) {
+        self.hovering = v;
+    }
+
+    fn hovered(&self) -> bool {
+        self.hovering
+    }
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
         if !self.visible {
@@ -1324,9 +1483,8 @@ impl Widget for MenuBar {
         if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
             return true;
         }
-        if let Some(idx) = self.open_menu {
-            let (dx, dy, dw, dh) = self.dropdown_rect(idx);
-            if dh > 0.0 && px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+        for menu in &self.menus {
+            if menu.hit_test(px, py) {
                 return true;
             }
         }
@@ -1337,134 +1495,75 @@ impl Widget for MenuBar {
         if !self.visible {
             return false;
         }
-        self.was_open = None;
-        let was = self.hovering;
-        self.hovering = self.hit_test(px, py);
-        let old_menu = self.hovered_menu;
-        let old_dd = self.hovered_dropdown;
-        self.hovered_menu = None;
-        self.hovered_dropdown = None;
+        let (rx, ry, rw, rh) = self.rect();
+        self.set_rect(rx, ry, rw, rh);
 
-        if self.hovering {
-            if self.vertical {
-                if px >= self.x && px < self.x + self.w {
-                    let ly = py - self.y;
-                    for i in 0..self.menu_items.len() {
-                        let iy = self.item_y_vertical(i);
-                        let ih = self.item_h_vertical();
-                        if ly >= iy && ly < iy + ih {
-                            self.hovered_menu = Some(i);
-                            break;
-                        }
-                    }
-                }
-            } else {
-                if py >= self.y && py < self.y + self.h {
-                    let lx = px - self.x;
-                    for i in 0..self.menu_items.len() {
-                        let ix = menu_item_x(&self.title, &self.menu_items, i);
-                        if lx >= ix && lx < ix + menu_item_w(&self.menu_items, i) {
-                            self.hovered_menu = Some(i);
-                            break;
-                        }
-                    }
-                }
+        let mut changed = false;
+        self.hovered_menu = None;
+        for (idx, menu) in self.menus.iter_mut().enumerate() {
+            if menu.cursor_moved(px, py) {
+                changed = true;
             }
-            if let Some(idx) = self.open_menu {
-                let (dx, dy, dw, dh) = self.dropdown_rect(idx);
-                if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
-                    let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
-                    if let Some(items) = self.menu_dropdowns.get(idx) {
-                        if di < items.len() {
-                            self.hovered_dropdown = Some(di);
-                        }
-                    }
-                }
+            if menu.hovered() {
+                self.hovered_menu = Some(idx);
             }
         }
-
-        was != self.hovering || old_menu != self.hovered_menu || old_dd != self.hovered_dropdown
+        changed
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
         if !self.visible {
             return false;
         }
-        if button != MouseButton::Left || state != ElementState::Pressed { return false; }
-        if !self.hit_test(px, py) { return false; }
+        let (rx, ry, rw, rh) = self.rect();
+        self.set_rect(rx, ry, rw, rh);
 
-        if self.vertical {
-            if px >= self.x && px < self.x + self.w {
-                let ly = py - self.y;
-                for i in 0..self.menu_items.len() {
-                    let iy = self.item_y_vertical(i);
-                    let ih = self.item_h_vertical();
-                    if ly >= iy && ly < iy + ih {
-                        if self.was_open == Some(i) || self.open_menu == Some(i) {
-                            self.open_menu = None;
-                            self.was_open = None;
-                        } else {
-                            self.open_menu = Some(i);
-                            self.was_open = None;
-                        }
-                        return true;
-                    }
-                }
-                self.was_open = None;
-                self.open_menu = None;
-                return true;
-            }
-        } else {
-            if py >= self.y && py < self.y + self.h {
-                let lx = px - self.x;
-                for i in 0..self.menu_items.len() {
-                    let ix = menu_item_x(&self.title, &self.menu_items, i);
-                    if lx >= ix && lx < ix + menu_item_w(&self.menu_items, i) {
-                        if self.was_open == Some(i) || self.open_menu == Some(i) {
-                            self.open_menu = None;
-                            self.was_open = None;
-                        } else {
-                            self.open_menu = Some(i);
-                            self.was_open = None;
-                        }
-                        return true;
-                    }
-                }
-                self.was_open = None;
-                self.open_menu = None;
-                return true;
+        let mut changed = false;
+        for menu in &mut self.menus {
+            if menu.mouse_input(button, state, px, py) {
+                changed = true;
             }
         }
-
-        if let Some(idx) = self.open_menu {
-            let (dx, dy, dw, dh) = self.dropdown_rect(idx);
-            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
-                let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
-                if let Some(items) = self.menu_dropdowns.get(idx) {
-                    if di < items.len() {
-                        self.clicked_dropdown = Some((idx, di));
-                        self.open_menu = None;
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
+        changed
     }
 
     fn focus(&mut self) {
+        if self.is_menu_open() {
+            for menu in &mut self.menus {
+                if menu.is_menu_open() {
+                    menu.focus();
+                    return;
+                }
+            }
+        }
         self.focused = true;
         focus::set_focused(self);
     }
 
     fn unfocus(&mut self) {
         self.focused = false;
-        self.was_open = self.open_menu.take();
+        focus::clear_if_matches(self);
+        for menu in &mut self.menus {
+            menu.unfocus();
+        }
+    }
+
+    fn set_selected(&mut self, selected: bool) {
+        self.focused = selected;
+        if !selected {
+            for menu in &mut self.menus {
+                menu.set_selected(false);
+            }
+        }
     }
 
     fn menu_click(&mut self) -> Option<(usize, usize)> {
-        self.clicked_dropdown.take()
+        for (idx, menu) in self.menus.iter_mut().enumerate() {
+            if let Some((_, item_idx)) = menu.menu_click() {
+                return Some((idx, item_idx));
+            }
+        }
+        None
     }
 
     fn set_item_checked(&mut self, menu_idx: usize, item_idx: usize, checked: bool) {
@@ -1473,6 +1572,9 @@ impl Widget for MenuBar {
                 menu[item_idx] = Some(checked);
             }
         }
+        if let Some(menu) = self.menus.get_mut(menu_idx) {
+            menu.set_item_checked(0, item_idx, checked);
+        }
     }
 
     fn set_menu_items(&mut self, menu_idx: usize, items: &[String]) {
@@ -1480,34 +1582,27 @@ impl Widget for MenuBar {
             self.menu_dropdowns[menu_idx] = items.to_vec();
             self.menu_dropdown_checked[menu_idx] = vec![Some(false); items.len()];
         }
+        if let Some(menu) = self.menus.get_mut(menu_idx) {
+            menu.items = items.to_vec();
+            menu.item_checked = vec![Some(false); items.len()];
+        }
     }
 
-    fn is_menu_bar(&self) -> bool { self.visible }
-    fn is_menu_open(&self) -> bool { self.visible && self.open_menu.is_some() }
+    fn is_menu_bar(&self) -> bool {
+        self.visible
+    }
+
+    fn is_menu_open(&self) -> bool {
+        self.visible && self.menus.iter().any(|m| m.is_menu_open())
+    }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.visible {
             return Vec::new();
         }
         let mut quads = Vec::new();
-        if let Some(idx) = self.hovered_menu {
-            if self.vertical {
-                let iy = self.item_y_vertical(idx);
-                let ih = self.item_h_vertical();
-                quads.push((self.x, self.y + iy, self.w, ih, colors::PANEL_MENU_HOVER));
-            } else {
-                let ix = menu_item_x(&self.title, &self.menu_items, idx);
-                quads.push((self.x + ix, self.y, menu_item_w(&self.menu_items, idx), self.h, colors::PANEL_MENU_HOVER));
-            }
-        }
-        if let Some(idx) = self.open_menu {
-            let (dx, dy, dw, dh) = self.dropdown_rect(idx);
-            if dh > 0.0 {
-                quads.push((dx, dy, dw, dh, colors::PANEL_MENU_BG));
-                if let Some(di) = self.hovered_dropdown {
-                    quads.push((dx, dy + di as f32 * DROPDOWN_ITEM_H, dw, DROPDOWN_ITEM_H, colors::PANEL_MENU_HOVER));
-                }
-            }
+        for menu in &self.menus {
+            quads.extend(menu.extra_quads());
         }
         quads
     }
@@ -1526,62 +1621,316 @@ impl Widget for MenuBar {
                 color: [0xaa, 0xaa, 0xbb],
             });
         }
-        if self.vertical {
-            for (i, item) in self.vertical_items.iter().enumerate() {
-                let iy = self.item_y_vertical(i);
-                labels.push(TextLabel {
-                    text: item.clone(),
-                    x: self.x + 8.0,
-                    y: self.y + iy + 5.0,
-                    font_size: 12.0,
-                    color: [0xcc, 0xcc, 0xd4],
-                });
-            }
-        } else {
-            for (i, item) in self.menu_items.iter().enumerate() {
-                labels.push(TextLabel {
-                    text: item.clone(),
-                    x: self.x + menu_item_x(&self.title, &self.menu_items, i) + 8.0,
-                    y: self.y + 7.0,
-                    font_size: 12.0,
-                    color: [0xcc, 0xcc, 0xd4],
-                });
-            }
-        }
-        if let Some(idx) = self.open_menu {
-            if let Some(items) = self.menu_dropdowns.get(idx) {
-                let (dx, dy, _, _) = self.dropdown_rect(idx);
-                for (i, item) in items.iter().enumerate() {
-                    let checked = self.menu_dropdown_checked.get(idx)
-                        .and_then(|m| m.get(i))
-                        .and_then(|&v| v);
-                    let prefix = match checked {
-                        Some(true) => "\u{2713} ",
-                        Some(false) => "  ",
-                        None => "",
-                    };
-                    labels.push(TextLabel {
-                        text: format!("{}{}", prefix, item),
-                        x: dx + 8.0,
-                        y: dy + i as f32 * DROPDOWN_ITEM_H + 5.0,
-                        font_size: 12.0,
-                        color: [0xcc, 0xcc, 0xd4],
-                    });
-                }
-            }
+        for menu in &self.menus {
+            labels.extend(menu.text_labels());
         }
         labels
     }
 
     fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
+        for menu in &mut self.menus {
+            menu.set_visible(visible);
+        }
     }
+
     fn visible(&self) -> bool {
         self.visible
+    }
+
+    fn children(&self) -> Vec<*mut (dyn Widget + 'static)> {
+        self.menus.iter().map(|m| {
+            let ptr: *const dyn Widget = &**m as &dyn Widget;
+            ptr as *mut (dyn Widget + 'static)
+        }).collect()
+    }
+
+    fn z_index(&self) -> i32 {
+        self.z_level
     }
 }
 
 impl Drop for MenuBar {
+    fn drop(&mut self) {
+        focus::clear_if_matches(self);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Menu {
+    x: f32, y: f32, w: f32, h: f32,
+    pub title: String,
+    pub vertical_title: String,
+    pub items: Vec<String>,
+    pub item_checked: Vec<Option<bool>>,
+    pub open: bool,
+    pub vertical: bool,
+    pub focused: bool,
+    hovering: bool,
+    hovered_item: Option<usize>,
+    clicked_item: Option<usize>,
+    was_open: Option<usize>,
+    pub parent: Option<*mut (dyn Widget + 'static)>,
+    pub children: Vec<*mut (dyn Widget + 'static)>,
+}
+
+impl Menu {
+    pub fn new(title: &str, vertical_title: &str, items: &[String]) -> Self {
+        Self {
+            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            title: title.to_string(),
+            vertical_title: vertical_title.to_string(),
+            items: items.to_vec(),
+            item_checked: vec![None; items.len()],
+            open: false,
+            vertical: false,
+            focused: false,
+            hovering: false,
+            hovered_item: None,
+            clicked_item: None,
+            was_open: None,
+            parent: None,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn active_title(&self) -> &str {
+        if self.vertical {
+            &self.vertical_title
+        } else {
+            &self.title
+        }
+    }
+
+    fn dropdown_rect(&self) -> (f32, f32, f32, f32) {
+        let dh = self.items.len() as f32 * DROPDOWN_ITEM_H;
+        let mut max_len = 0;
+        for item in &self.items {
+            max_len = max_len.max(item.len());
+        }
+        let dw = (max_len as f32 * 7.5 + 40.0).max(120.0);
+        let dx = if self.vertical {
+            self.x + self.w
+        } else {
+            self.x
+        };
+        let dy = if self.vertical {
+            self.y
+        } else {
+            self.y + self.h
+        };
+        (dx, dy, dw, dh)
+    }
+}
+
+impl Widget for Menu {
+    fn rect(&self) -> (f32, f32, f32, f32) {
+        (self.x, self.y, self.w, self.h)
+    }
+
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.x = x;
+        self.y = y;
+        self.w = w;
+        self.h = h;
+    }
+
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
+    fn set_hovered(&mut self, v: bool) {
+        self.hovering = v;
+    }
+
+    fn hovered(&self) -> bool {
+        self.hovering
+    }
+
+    fn hit_test(&self, px: f32, py: f32) -> bool {
+        let (rx, ry, rw, rh) = self.rect();
+        if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+            return true;
+        }
+        if self.open {
+            let (dx, dy, dw, dh) = self.dropdown_rect();
+            if dh > 0.0 && px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        self.was_open = None;
+        let was_hovering = self.hovering;
+        self.hovering = self.hit_test(px, py);
+        let old_item = self.hovered_item;
+        self.hovered_item = None;
+
+        if self.open {
+            let (dx, dy, dw, dh) = self.dropdown_rect();
+            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
+                if di < self.items.len() {
+                    self.hovered_item = Some(di);
+                }
+            }
+        }
+
+        was_hovering != self.hovering || old_item != self.hovered_item
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if button != MouseButton::Left || state != ElementState::Pressed {
+            return false;
+        }
+        if !self.hit_test(px, py) {
+            return false;
+        }
+
+        let (rx, ry, rw, rh) = self.rect();
+        if px >= rx && px < rx + rw && py >= ry && py < ry + rh {
+            if self.was_open == Some(0) || self.open {
+                self.open = false;
+                self.was_open = None;
+            } else {
+                self.open = true;
+                self.was_open = None;
+                focus::set_focused(self);
+            }
+            return true;
+        }
+
+        if self.open {
+            let (dx, dy, dw, dh) = self.dropdown_rect();
+            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
+                if di < self.items.len() {
+                    self.clicked_item = Some(di);
+                    self.open = false;
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn focus(&mut self) {
+        self.open = true;
+        self.focused = true;
+        focus::set_focused(self);
+    }
+
+    fn unfocus(&mut self) {
+        if self.open {
+            self.was_open = Some(0);
+        }
+        self.open = false;
+        self.focused = false;
+        focus::clear_if_matches(self);
+        self.hovered_item = None;
+    }
+
+    fn set_selected(&mut self, selected: bool) {
+        self.focused = selected;
+        if !selected {
+            self.open = false;
+            self.was_open = None;
+            self.hovered_item = None;
+            focus::clear_if_matches(self);
+        }
+    }
+
+    fn menu_click(&mut self) -> Option<(usize, usize)> {
+        self.clicked_item.take().map(|i| (0, i))
+    }
+
+    fn set_item_checked(&mut self, _menu_idx: usize, item_idx: usize, checked: bool) {
+        if item_idx < self.item_checked.len() {
+            self.item_checked[item_idx] = Some(checked);
+        }
+    }
+
+    fn is_menu_open(&self) -> bool {
+        self.open
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        if self.hovering && !self.open {
+            quads.push((self.x, self.y, self.w, self.h, colors::PANEL_MENU_HOVER));
+        }
+        if self.open {
+            let (dx, dy, dw, dh) = self.dropdown_rect();
+            if dh > 0.0 {
+                quads.push((dx, dy, dw, dh, colors::PANEL_MENU_BG));
+                if let Some(di) = self.hovered_item {
+                    quads.push((dx, dy + di as f32 * DROPDOWN_ITEM_H, dw, DROPDOWN_ITEM_H, colors::PANEL_MENU_HOVER));
+                }
+            }
+        }
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        labels.push(TextLabel {
+            text: self.active_title().to_string(),
+            x: self.x + 8.0,
+            y: self.y + 7.0,
+            font_size: 12.0,
+            color: [0xcc, 0xcc, 0xd4],
+        });
+        if self.open {
+            let (dx, dy, _, _) = self.dropdown_rect();
+            for (i, item) in self.items.iter().enumerate() {
+                let checked = self.item_checked.get(i).and_then(|&v| v);
+                let prefix = match checked {
+                    Some(true) => "\u{2713} ",
+                    Some(false) => "  ",
+                    None => "",
+                };
+                labels.push(TextLabel {
+                    text: format!("{}{}", prefix, item),
+                    x: dx + 8.0,
+                    y: dy + i as f32 * DROPDOWN_ITEM_H + 5.0,
+                    font_size: 12.0,
+                    color: [0xcc, 0xcc, 0xd4],
+                });
+            }
+        }
+        labels
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        self.hovering = false;
+        if !visible {
+            self.open = false;
+            self.was_open = None;
+            self.hovered_item = None;
+            focus::clear_if_matches(self);
+        }
+    }
+
+    fn parent(&self) -> Option<*mut (dyn Widget + 'static)> {
+        self.parent
+    }
+
+    fn set_parent(&mut self, parent: Option<*mut (dyn Widget + 'static)>) {
+        self.parent = parent;
+    }
+
+    fn z_index(&self) -> i32 {
+        100
+    }
+}
+
+unsafe impl Send for Menu {}
+unsafe impl Sync for Menu {}
+
+impl Drop for Menu {
     fn drop(&mut self) {
         focus::clear_if_matches(self);
     }
@@ -1597,34 +1946,56 @@ pub enum ButtonKind {
 
 #[derive(Debug, Clone)]
 pub struct Button {
-    x: f32, y: f32, w: f32, h: f32,
-    hovering: bool,
+    base: WidgetBase,
     pressed: bool,
     just_clicked: bool,
     kind: ButtonKind,
-    pub label: Option<String>,
     pub selected: bool,
 }
 
 impl Button {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Primary, label: None, selected: false }
+        Self {
+            base: WidgetBase { x, y, w, h, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            pressed: false,
+            just_clicked: false,
+            kind: ButtonKind::Primary,
+            selected: false,
+        }
     }
 
     pub fn new_reset(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::Reset, label: None, selected: false }
+        Self {
+            base: WidgetBase { x, y, w, h, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            pressed: false,
+            just_clicked: false,
+            kind: ButtonKind::Reset,
+            selected: false,
+        }
     }
 
     pub fn new_list_row(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::ListRow, label: None, selected: false }
+        Self {
+            base: WidgetBase { x, y, w, h, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            pressed: false,
+            just_clicked: false,
+            kind: ButtonKind::ListRow,
+            selected: false,
+        }
     }
 
     pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovering: false, pressed: false, just_clicked: false, kind: ButtonKind::CopyIcon, label: None, selected: false }
+        Self {
+            base: WidgetBase { x, y, w, h, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            pressed: false,
+            just_clicked: false,
+            kind: ButtonKind::CopyIcon,
+            selected: false,
+        }
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
         self
     }
 
@@ -1635,51 +2006,46 @@ impl Button {
 }
 
 impl Widget for Button {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn set_hovered(&mut self, v: bool) { self.hovering = v; }
-    fn hovered(&self) -> bool { self.hovering }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+    fn top_room(&self) -> f32 { 0.0 }
+    fn hover_highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
+
     fn color(&self) -> [f32; 4] {
         match self.kind {
             ButtonKind::Primary => {
                 if self.pressed { colors::BUTTON_PRESS }
-                else if self.hovering { colors::BUTTON_HOVER }
+                else if self.base.hovered { colors::BUTTON_HOVER }
                 else { colors::BUTTON_IDLE }
             }
             ButtonKind::Reset => {
                 if self.pressed { colors::RESET_BTN_PRESS }
-                else if self.hovering { colors::RESET_BTN_HOVER }
+                else if self.base.hovered { colors::RESET_BTN_HOVER }
                 else { colors::RESET_BTN_IDLE }
             }
             ButtonKind::ListRow => {
                 if self.selected {
                     if self.pressed { [0.30, 0.52, 0.78, 0.6] }
-                    else if self.hovering { [0.30, 0.52, 0.78, 0.5] }
+                    else if self.base.hovered { [0.30, 0.52, 0.78, 0.5] }
                     else { [0.20, 0.40, 0.65, 0.4] }
                 } else {
                     if self.pressed { [0.20, 0.20, 0.25, 0.25] }
-                    else if self.hovering { [0.20, 0.20, 0.25, 0.15] }
+                    else if self.base.hovered { [0.20, 0.20, 0.25, 0.15] }
                     else { [0.0, 0.0, 0.0, 0.0] }
                 }
             }
             ButtonKind::CopyIcon => {
                 if self.selected {
                     if self.pressed { [0.30, 0.52, 0.78, 0.5] }
-                    else if self.hovering { [0.30, 0.52, 0.78, 0.5] }
+                    else if self.base.hovered { [0.30, 0.52, 0.78, 0.5] }
                     else { [0.20, 0.40, 0.65, 0.2] }
                 } else {
                     if self.pressed { [0.20, 0.20, 0.25, 0.25] }
-                    else if self.hovering { [0.20, 0.20, 0.25, 0.25] }
+                    else if self.base.hovered { [0.20, 0.20, 0.25, 0.25] }
                     else { [0.0, 0.0, 0.0, 0.0] }
                 }
             }
         }
-    }
-
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovering;
-        self.hovering = self.hit_test(px, py);
-        was != self.hovering
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
@@ -1709,7 +2075,7 @@ impl Widget for Button {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        if let Some(ref label) = self.label {
+        if let Some(ref label) = self.base.label {
             let font_size = 12.0;
             let est_w = if label == "📋" {
                 12.0
@@ -1725,13 +2091,16 @@ impl Widget for Button {
             };
             labels.push(TextLabel {
                 text: label.clone(),
-                x: self.x + (self.w - est_w) / 2.0,
-                y: self.y + (self.h - font_size) / 2.0 - 1.0,
+                x: self.base.x + (self.base.w - est_w) / 2.0,
+                y: self.base.y + (self.base.h - font_size) / 2.0 - 1.0,
                 font_size,
                 color,
             });
         }
         labels
+    }
+    fn set_selected(&mut self, selected: bool) {
+        self.selected = selected;
     }
 }
 
@@ -1758,8 +2127,7 @@ impl Widget for Sidebar {
 }
 
 pub struct Panel {
-    x: f32, y: f32, w: f32, h: f32,
-    hovered: bool,
+    base: WidgetBase,
     dragging: bool,
     drag_ox: f32, drag_oy: f32,
     drag_start_x: f32, drag_start_y: f32,
@@ -1768,7 +2136,29 @@ pub struct Panel {
 
 impl Panel {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self { x, y, w, h, hovered: false, dragging: false, drag_ox: 0.0, drag_oy: 0.0, drag_start_x: 0.0, drag_start_y: 0.0, bounds: None }
+        Self {
+            base: WidgetBase {
+                x,
+                y,
+                w,
+                h,
+                label: None,
+                hovered: false,
+                row_x: 0.0,
+                row_w: 0.0,
+            },
+            dragging: false,
+            drag_ox: 0.0,
+            drag_oy: 0.0,
+            drag_start_x: 0.0,
+            drag_start_y: 0.0,
+            bounds: None,
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
     }
 
     pub fn set_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
@@ -1777,11 +2167,12 @@ impl Panel {
 }
 
 impl Widget for Panel {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+    fn top_room(&self) -> f32 { 0.0 }
+    fn hover_highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
+
     fn color(&self) -> [f32; 4] { if self.dragging { colors::PANEL_DRAG } else { colors::PANEL_IDLE } }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
 
     fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
         self.bounds = Some((bx, by, bw, bh));
@@ -1810,13 +2201,13 @@ impl Widget for Panel {
         let nx = px - self.drag_ox;
         let ny = py - self.drag_oy;
         let (nx, ny) = if let Some((bx, by, bw, bh)) = self.bounds {
-            (nx.clamp(bx, bx + bw - self.w), ny.clamp(by, by + bh - self.h))
+            (nx.clamp(bx, bx + bw - self.base.w), ny.clamp(by, by + bh - self.base.h))
         } else {
             (nx, ny)
         };
-        if (nx - self.x).abs() > 0.01 || (ny - self.y).abs() > 0.01 {
-            self.x = nx;
-            self.y = ny;
+        if (nx - self.base.x).abs() > 0.01 || (ny - self.base.y).abs() > 0.01 {
+            self.base.x = nx;
+            self.base.y = ny;
             return true;
         }
         false
@@ -1824,10 +2215,10 @@ impl Widget for Panel {
 
     fn drag_begin(&mut self, px: f32, py: f32) {
         self.dragging = true;
-        self.drag_ox = px - self.x;
-        self.drag_oy = py - self.y;
-        self.drag_start_x = self.x;
-        self.drag_start_y = self.y;
+        self.drag_ox = px - self.base.x;
+        self.drag_oy = py - self.base.y;
+        self.drag_start_x = self.base.x;
+        self.drag_start_y = self.base.y;
     }
 
     fn drag_end(&mut self) { self.dragging = false; }
@@ -2036,30 +2427,31 @@ fn menu_item_w(menu_items: &[String], idx: usize) -> f32 {
 }
 
 pub struct Checkbox {
-    x: f32, y: f32, w: f32, h: f32,
-    hovering: bool,
+    base: WidgetBase,
     checked: bool,
     just_clicked: bool,
 }
 
 impl Checkbox {
     pub fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovering: false, checked: false, just_clicked: false }
+        Self {
+            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            checked: false,
+            just_clicked: false,
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
     }
 }
 
 impl Widget for Checkbox {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::CHECKBOX_BG }
-    fn set_hovered(&mut self, v: bool) { self.hovering = v; }
-    fn hovered(&self) -> bool { self.hovering }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovering;
-        self.hovering = self.hit_test(px, py);
-        was != self.hovering
-    }
+    fn color(&self) -> [f32; 4] { if self.checked { colors::CHECKBOX_CHECKED } else { colors::CHECKBOX_BG } }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
         if button != MouseButton::Left { return false; }
@@ -2076,34 +2468,46 @@ impl Widget for Checkbox {
         false
     }
 
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        if self.checked {
+            let (x, y, w, h) = self.rect();
+            let pad_x = w * 0.25;
+            let pad_y = h * 0.25;
+            quads.push((x + pad_x, y + pad_y, w - 2.0 * pad_x, h - 2.0 * pad_y, [1.0, 1.0, 1.0, 0.9]));
+        }
+        quads
+    }
+
     fn take_click(&mut self) -> bool {
         if self.just_clicked { self.just_clicked = false; true } else { false }
     }
+    fn value(&self) -> i32 { if self.checked { 1 } else { 0 } }
 }
 
 #[derive(Debug, Clone)]
 pub struct Toggle {
-    x: f32, y: f32, w: f32, h: f32,
-    hovering: bool,
+    base: WidgetBase,
     toggled: bool,
     just_toggled: bool,
-    label: Option<String>,
-    row_x: f32,
-    row_w: f32,
 }
 
 impl Toggle {
     pub fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovering: false, toggled: false, just_toggled: false, label: None, row_x: 0.0, row_w: 0.0 }
+        Self {
+            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            toggled: false,
+            just_toggled: false,
+        }
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
         self
     }
 
     pub fn set_label(&mut self, label: &str) {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
     }
 
     pub fn set_toggled(&mut self, v: bool) {
@@ -2116,32 +2520,10 @@ impl Toggle {
 }
 
 impl Widget for Toggle {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn set_row_rect(&mut self, x: f32, w: f32) { self.row_x = x; self.row_w = w; }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+
     fn color(&self) -> [f32; 4] { if self.toggled { colors::TOGGLE_ON } else { colors::TOGGLE_OFF } }
-    fn set_hovered(&mut self, v: bool) { self.hovering = v; }
-    fn hovered(&self) -> bool { self.hovering }
-
-    fn hit_test(&self, px: f32, py: f32) -> bool {
-        let (x, y, w, h) = self.rect();
-        let hx = if self.row_w > 0.0 { self.row_x } else { x };
-        let hw = if self.row_w > 0.0 { self.row_w } else { w };
-        let (hy, hh) = if self.label.is_some() {
-            (y - 18.0, h + 18.0)
-        } else {
-            (y, h)
-        };
-        px >= hx && px <= hx + hw && py >= hy && py <= hy + hh
-    }
-
-    fn top_room(&self) -> f32 { if self.label.is_some() { 18.0 } else { 0.0 } }
-
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovering;
-        self.hovering = self.hit_test(px, py);
-        was != self.hovering
-    }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
         if button != MouseButton::Left { return false; }
@@ -2159,62 +2541,37 @@ impl Widget for Toggle {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = Vec::new();
         let bg = if self.toggled { colors::TOGGLE_ON } else { colors::TOGGLE_OFF };
-        quads.push((self.x, self.y, self.w, self.h, bg));
-        if self.hovering {
-            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
-            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
-            let (hy, hh) = if self.label.is_some() {
-                (self.y - 18.0, self.h + 18.0)
-            } else {
-                (self.y, self.h)
-            };
-            quads.push((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.06]));
-        }
-        quads
+        vec![(self.base.x, self.base.y, self.base.w, self.base.h, bg)]
     }
 
     fn take_click(&mut self) -> bool {
         if self.just_toggled { self.just_toggled = false; true } else { false }
     }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if let Some(ref label) = self.label {
-            vec![TextLabel {
-                text: label.clone(),
-                x: self.x,
-                y: self.y - 18.0,
-                font_size: 12.0,
-                color: [0x83, 0x83, 0x8a],
-            }]
-        } else {
-            Vec::new()
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Label {
-    x: f32, y: f32, w: f32, h: f32,
-    text: String,
+    base: WidgetBase,
     font_size: f32,
     color: [u8; 3],
-    hovered: bool,
-    row_x: f32,
-    row_w: f32,
 }
 
 impl Label {
     pub fn new(text: &str) -> Self {
         Self {
-            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
-            text: text.to_string(),
+            base: WidgetBase {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+                label: Some(text.to_string()),
+                hovered: false,
+                row_x: 0.0,
+                row_w: 0.0,
+            },
             font_size: 12.0,
             color: [0x83, 0x83, 0x8a],
-            hovered: false,
-            row_x: 0.0,
-            row_w: 0.0,
         }
     }
 
@@ -2229,7 +2586,7 @@ impl Label {
     }
 
     pub fn set_text(&mut self, text: &str) {
-        self.text = text.to_string();
+        self.base.label = Some(text.to_string());
     }
 
     pub fn set_color(&mut self, color: [u8; 3]) {
@@ -2238,41 +2595,17 @@ impl Label {
 }
 
 impl Widget for Label {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn set_row_rect(&mut self, x: f32, w: f32) { self.row_x = x; self.row_w = w; }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+    fn top_room(&self) -> f32 { 0.0 }
+
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
-
-    fn hit_test(&self, px: f32, py: f32) -> bool {
-        let (x, y, w, h) = self.rect();
-        let hx = if self.row_w > 0.0 { self.row_x } else { x };
-        let hw = if self.row_w > 0.0 { self.row_w } else { w };
-        px >= hx && px <= hx + hw && py >= y && py <= y + h
-    }
-
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovered;
-        self.hovered = self.hit_test(px, py);
-        was != self.hovered
-    }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = Vec::new();
-        if self.hovered {
-            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
-            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
-            quads.push((hx, self.y, hw, self.h, [1.0, 1.0, 1.0, 0.06]));
-        }
-        quads
-    }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         vec![TextLabel {
-            text: self.text.clone(),
-            x: self.x,
-            y: self.y + (self.h - self.font_size) / 2.0,
+            text: self.base.label.clone().unwrap_or_default(),
+            x: self.base.x,
+            y: self.base.y + (self.base.h - self.font_size) / 2.0,
             font_size: self.font_size,
             color: self.color,
         }]
@@ -2369,8 +2702,7 @@ impl Widget for Svg {
 }
 
 pub struct Slider {
-    x: f32, y: f32, w: f32, h: f32,
-    hovered: bool,
+    base: WidgetBase,
     dragging: bool,
     value: f32,
     drag_offset: f32,
@@ -2379,7 +2711,18 @@ pub struct Slider {
 
 impl Slider {
     pub fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovered: false, dragging: false, value: 0.5, drag_offset: 0.0, scroll_enabled: false }
+        Self {
+            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            dragging: false,
+            value: 0.5,
+            drag_offset: 0.0,
+            scroll_enabled: false,
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
     }
 
     pub fn with_scroll(mut self, enabled: bool) -> Self {
@@ -2393,18 +2736,17 @@ impl Slider {
 }
 
 impl Widget for Slider {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+
     fn color(&self) -> [f32; 4] { colors::SLIDER_TRACK }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
 
     fn draggable(&self) -> bool { true }
     fn is_dragging(&self) -> bool { self.dragging }
 
     fn drag_update(&mut self, px: f32, _py: f32) -> bool {
         let (sx, _, sw, _) = self.rect();
-        let thumb_size = self.h * 0.9;
+        let thumb_size = self.base.h * 0.9;
         let range = sw - thumb_size;
         let raw = (px - self.drag_offset - sx) / range;
         let new_val = raw.clamp(0.0, 1.0);
@@ -2417,8 +2759,8 @@ impl Widget for Slider {
 
     fn drag_begin(&mut self, px: f32, _py: f32) {
         self.dragging = true;
-        let thumb_size = self.h * 0.9;
-        let thumb_x = self.x + self.value * (self.w - thumb_size);
+        let thumb_size = self.base.h * 0.9;
+        let thumb_x = self.base.x + self.value * (self.base.w - thumb_size);
         self.drag_offset = px - thumb_x;
     }
 
@@ -2445,9 +2787,9 @@ impl Widget for Slider {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let thumb_size = self.h * 0.9;
-        let thumb_x = self.x + self.value * (self.w - thumb_size);
-        let thumb_y = self.y + (self.h - thumb_size) / 2.0;
+        let thumb_size = self.base.h * 0.9;
+        let thumb_x = self.base.x + self.value * (self.base.w - thumb_size);
+        let thumb_y = self.base.y + (self.base.h - thumb_size) / 2.0;
         let thumb_color = if self.dragging {
             colors::SLIDER_THUMB_DRAG
         } else {
@@ -2455,26 +2797,189 @@ impl Widget for Slider {
         };
         vec![(thumb_x, thumb_y, thumb_size, thumb_size, thumb_color)]
     }
+    fn value(&self) -> i32 { (self.value * 100.0) as i32 }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveThumb {
+    Low,
+    High,
+}
+
+pub struct RangeSlider {
+    base: WidgetBase,
+    value_low: f32,
+    value_high: f32,
+    active_thumb: Option<ActiveThumb>,
+    drag_offset: f32,
+}
+
+impl RangeSlider {
+    pub fn new() -> Self {
+        Self {
+            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            value_low: 0.2,
+            value_high: 0.8,
+            active_thumb: None,
+            drag_offset: 0.0,
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
+    }
+
+    pub fn with_values(mut self, low: f32, high: f32) -> Self {
+        self.value_low = low.clamp(0.0, 1.0);
+        self.value_high = high.clamp(self.value_low, 1.0);
+        self
+    }
+
+    pub fn set_values(&mut self, low: f32, high: f32) {
+        self.value_low = low.clamp(0.0, 1.0);
+        self.value_high = high.clamp(self.value_low, 1.0);
+    }
+
+    pub fn values(&self) -> (f32, f32) {
+        (self.value_low, self.value_high)
+    }
+}
+
+impl Widget for RangeSlider {
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+
+    fn color(&self) -> [f32; 4] { colors::SLIDER_TRACK }
+
+    fn draggable(&self) -> bool { true }
+    fn is_dragging(&self) -> bool { self.active_thumb.is_some() }
+
+    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
+        let Some(active) = self.active_thumb else { return false; };
+        let thumb_size = self.base.h * 0.9;
+        let range = self.base.w - thumb_size;
+        if range <= 0.0 { return false; }
+        
+        let new_val = ((px - self.drag_offset - self.base.x) / range).clamp(0.0, 1.0);
+        match active {
+            ActiveThumb::Low => {
+                let constrained = new_val.min(self.value_high);
+                if (constrained - self.value_low).abs() > 0.001 {
+                    self.value_low = constrained;
+                    return true;
+                }
+            }
+            ActiveThumb::High => {
+                let constrained = new_val.max(self.value_low);
+                if (constrained - self.value_high).abs() > 0.001 {
+                    self.value_high = constrained;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn drag_begin(&mut self, px: f32, _py: f32) {
+        let thumb_size = self.base.h * 0.9;
+        let range = self.base.w - thumb_size;
+        let thumb_low_x = self.base.x + self.value_low * range;
+        let thumb_high_x = self.base.x + self.value_high * range;
+        let center_low = thumb_low_x + thumb_size / 2.0;
+        let center_high = thumb_high_x + thumb_size / 2.0;
+
+        let active = if (self.value_low - self.value_high).abs() < 0.001 {
+            if px < center_low {
+                ActiveThumb::Low
+            } else {
+                ActiveThumb::High
+            }
+        } else {
+            let dist_low = (px - center_low).abs();
+            let dist_high = (px - center_high).abs();
+            if dist_low < dist_high {
+                ActiveThumb::Low
+            } else {
+                ActiveThumb::High
+            }
+        };
+
+        self.active_thumb = Some(active);
+        let active_x = match active {
+            ActiveThumb::Low => thumb_low_x,
+            ActiveThumb::High => thumb_high_x,
+        };
+        self.drag_offset = px - active_x;
+    }
+
+    fn drag_end(&mut self) {
+        self.active_thumb = None;
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let thumb_size = self.base.h * 0.9;
+        let range = self.base.w - thumb_size;
+        let thumb_low_x = self.base.x + self.value_low * range;
+        let thumb_high_x = self.base.x + self.value_high * range;
+        
+        let thumb_y = self.base.y + (self.base.h - thumb_size) / 2.0;
+        
+        // Highlighted track segment
+        let highlight_x = thumb_low_x + thumb_size / 2.0;
+        let highlight_w = thumb_high_x - thumb_low_x;
+        let highlight_y = self.base.y + self.base.h * 0.35;
+        let highlight_h = self.base.h * 0.3;
+        
+        let low_color = if self.active_thumb == Some(ActiveThumb::Low) {
+            colors::SLIDER_THUMB_DRAG
+        } else {
+            colors::SLIDER_THUMB
+        };
+
+        let high_color = if self.active_thumb == Some(ActiveThumb::High) {
+            colors::SLIDER_THUMB_DRAG
+        } else {
+            colors::SLIDER_THUMB
+        };
+
+        vec![
+            (highlight_x, highlight_y, highlight_w, highlight_h, colors::PROGRESS_FILL),
+            (thumb_low_x, thumb_y, thumb_size, thumb_size, low_color),
+            (thumb_high_x, thumb_y, thumb_size, thumb_size, high_color),
+        ]
+    }
+
+    fn value(&self) -> i32 {
+        ((self.value_low * 100.0) as i32) | (((self.value_high * 100.0) as i32) << 16)
+    }
 }
 
 pub struct ProgressBar {
-    x: f32, y: f32, w: f32, h: f32,
-    hovered: bool,
+    base: WidgetBase,
     value: f32,
 }
 
 impl ProgressBar {
     pub fn new(value: f32) -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovered: false, value }
+        Self {
+            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            value,
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
     }
 }
 
 impl Widget for ProgressBar {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+    fn hover_highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
+
     fn color(&self) -> [f32; 4] { colors::PROGRESS_BG }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
 }
 
 pub struct StatusBar {
@@ -2562,18 +3067,14 @@ impl Widget for Splitter {
 
 #[derive(Debug, Clone)]
 pub struct Spinbox {
-    x: f32, y: f32, w: f32, h: f32,
+    base: WidgetBase,
     pub value: i32,
     min: i32, max: i32, step: i32,
     editing: bool,
     edit_buffer: String,
-    hovered: bool,
     hover_dec: bool,
     hover_inc: bool,
-    label: Option<String>,
     unit: Option<String>,
-    row_x: f32,
-    row_w: f32,
     pub decimals: u32,
     pub parent: Option<*mut (dyn Widget + 'static)>,
     pub children: Vec<*mut (dyn Widget + 'static)>,
@@ -2581,16 +3082,30 @@ pub struct Spinbox {
 
 impl Spinbox {
     pub fn new(value: i32, min: i32, max: i32, step: i32) -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, value, min, max, step, editing: false, edit_buffer: String::new(), hovered: false, hover_dec: false, hover_inc: false, label: None, unit: None, row_x: 0.0, row_w: 0.0, decimals: 0, parent: None, children: Vec::new() }
+        Self {
+            base: WidgetBase::new(),
+            value,
+            min,
+            max,
+            step,
+            editing: false,
+            edit_buffer: String::new(),
+            hover_dec: false,
+            hover_inc: false,
+            unit: None,
+            decimals: 0,
+            parent: None,
+            children: Vec::new(),
+        }
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
         self
     }
 
     pub fn set_label(&mut self, label: &str) {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
     }
 
     pub fn with_unit(mut self, unit: &str) -> Self {
@@ -2609,45 +3124,31 @@ impl Spinbox {
 }
 
 impl Widget for Spinbox {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn set_row_rect(&mut self, x: f32, w: f32) { self.row_x = x; self.row_w = w; }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+
     fn color(&self) -> [f32; 4] { colors::SPINBOX_BG }
     fn value(&self) -> i32 { self.value }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
     fn widget_font(&self) -> Option<String> { Some("monospace".to_string()) }
 
-    fn hit_test(&self, px: f32, py: f32) -> bool {
-        let (x, y, w, h) = self.rect();
-        let hx = if self.row_w > 0.0 { self.row_x } else { x };
-        let hw = if self.row_w > 0.0 { self.row_w } else { w };
-        let (hy, hh) = if self.label.is_some() {
-            (y - 20.0, h + 20.0)
-        } else {
-            (y, h)
-        };
-        px >= hx && px <= hx + hw && py >= hy && py <= hy + hh
-    }
 
-    fn top_room(&self) -> f32 { if self.label.is_some() { 16.0 } else { 0.0 } }
 
     fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovered;
-        self.hovered = self.hit_test(px, py);
-        if !self.hovered {
+        let was = self.base.hovered;
+        self.base.hovered = self.hit_test(px, py);
+        if !self.base.hovered {
             let changed = self.hover_dec || self.hover_inc;
             self.hover_dec = false;
             self.hover_inc = false;
-            return changed || was != self.hovered;
+            return changed || was != self.base.hovered;
         }
-        let split = self.x + self.w * 0.55;
-        let hd = px >= split && px < split + self.w * 0.225;
-        let hi = px >= split + self.w * 0.225;
+        let split = self.base.x + self.base.w * 0.55;
+        let hd = px >= split && px < split + self.base.w * 0.225;
+        let hi = px >= split + self.base.w * 0.225;
         let changed = hd != self.hover_dec || hi != self.hover_inc;
         self.hover_dec = hd;
         self.hover_inc = hi;
-        changed || was != self.hovered
+        changed || was != self.base.hovered
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
@@ -2655,11 +3156,11 @@ impl Widget for Spinbox {
         if !self.hit_test(px, py) { return false; }
         match state {
             ElementState::Pressed => {
-                let split = self.x + self.w * 0.55;
-                if px >= split && px < split + self.w * 0.225 {
+                let split = self.base.x + self.base.w * 0.55;
+                if px >= split && px < split + self.base.w * 0.225 {
                     self.value = (self.value - self.step).max(self.min);
                     true
-                } else if px >= split + self.w * 0.225 {
+                } else if px >= split + self.base.w * 0.225 {
                     self.value = (self.value + self.step).min(self.max);
                     true
                 } else if px < split {
@@ -2747,24 +3248,10 @@ impl Widget for Spinbox {
         }
     }
 
-    fn hover_highlight(&self) -> Option<[f32; 4]> {
-        None // rendered in extra_quads to cover label area
-    }
-
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        if self.hovered {
-            let (hy, hh) = if self.label.is_some() {
-                (self.y - 20.0, self.h + 20.0)
-            } else {
-                (self.y, self.h)
-            };
-            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
-            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
-            quads.push((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.06]));
-        }
-        let split = self.x + self.w * 0.55;
-        let btn_w = self.w * 0.225;
+        let split = self.base.x + self.base.w * 0.55;
+        let btn_w = self.base.w * 0.225;
         let inc_col = if self.hover_inc { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
         let dec_col = if self.hover_dec { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
         
@@ -2774,27 +3261,27 @@ impl Widget for Spinbox {
             colors::SPINBOX_DISPLAY
         };
         
-        quads.push((self.x, self.y, self.w * 0.55, self.h, display_bg));
-        quads.push((split, self.y, btn_w, self.h, dec_col));
-        quads.push((split + btn_w, self.y, btn_w, self.h, inc_col));
+        quads.push((self.base.x, self.base.y, self.base.w * 0.55, self.base.h, display_bg));
+        quads.push((split, self.base.y, btn_w, self.base.h, dec_col));
+        quads.push((split + btn_w, self.base.y, btn_w, self.base.h, inc_col));
         
         if self.editing {
             let border_color = [0.20, 0.50, 0.85, 1.0]; // Bright focused blue border
             // Top border
-            quads.push((self.x, self.y, self.w * 0.55, 1.0, border_color));
+            quads.push((self.base.x, self.base.y, self.base.w * 0.55, 1.0, border_color));
             // Bottom border
-            quads.push((self.x, self.y + self.h - 1.0, self.w * 0.55, 1.0, border_color));
+            quads.push((self.base.x, self.base.y + self.base.h - 1.0, self.base.w * 0.55, 1.0, border_color));
             // Left border
-            quads.push((self.x, self.y, 1.0, self.h, border_color));
+            quads.push((self.base.x, self.base.y, 1.0, self.base.h, border_color));
             // Right border
-            quads.push((self.x + self.w * 0.55 - 1.0, self.y, 1.0, self.h, border_color));
+            quads.push((self.base.x + self.base.w * 0.55 - 1.0, self.base.y, 1.0, self.base.h, border_color));
 
             // Caret cursor
             let char_width = 8.4;
-            let cursor_x = self.x + 4.0 + (self.edit_buffer.len() as f32 * char_width);
+            let cursor_x = self.base.x + 4.0 + (self.edit_buffer.len() as f32 * char_width);
             let max_cursor_x = split - 4.0;
             let final_cursor_x = cursor_x.min(max_cursor_x);
-            let cursor_y = self.y + (self.h - 14.0) / 2.0;
+            let cursor_y = self.base.y + (self.base.h - 14.0) / 2.0;
             quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
         }
         
@@ -2803,11 +3290,11 @@ impl Widget for Spinbox {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        if let Some(ref label) = self.label {
+        if let Some(ref label) = self.base.label {
             labels.push(TextLabel {
                 text: label.clone(),
-                x: self.x + 4.0,
-                y: self.y - 16.0,
+                x: self.base.x + 4.0,
+                y: self.base.y - 18.0,
                 font_size: 12.0,
                 color: [0x83, 0x83, 0x8a],
             });
@@ -2822,31 +3309,32 @@ impl Widget for Spinbox {
         };
         labels.push(TextLabel {
             text: value_text,
-            x: self.x + 4.0,
-            y: self.y + (self.h - 14.0) / 2.0 - 2.0,
+            x: self.base.x + 4.0,
+            y: self.base.y + (self.base.h - 14.0) / 2.0 - 2.0,
             font_size: 14.0,
             color: [0xcc, 0xcc, 0xd4],
         });
         if let Some(ref unit) = self.unit {
             labels.push(TextLabel {
                 text: unit.clone(),
-                x: self.x + 4.0 + 36.0,
-                y: self.y + (self.h - 11.0) / 2.0 - 2.0,
+                x: self.base.x + 4.0 + 36.0,
+                y: self.base.y + (self.base.h - 11.0) / 2.0 - 2.0,
                 font_size: 11.0,
                 color: [0x73, 0x73, 0x7a],
             });
         }
+        let split = self.base.x + self.base.w * 0.55;
         labels.push(TextLabel {
             text: "-".to_string(),
-            x: self.x + self.w * 0.6625 - 4.0,
-            y: self.y + (self.h - 12.0) / 2.0 - 2.0,
+            x: self.base.x + self.base.w * 0.6625 - 4.0,
+            y: self.base.y + (self.base.h - 12.0) / 2.0 - 2.0,
             font_size: 12.0,
             color: [0xcc, 0xcc, 0xd4],
         });
         labels.push(TextLabel {
             text: "+".to_string(),
-            x: self.x + self.w * 0.8875 - 4.0,
-            y: self.y + (self.h - 12.0) / 2.0 - 2.0,
+            x: self.base.x + self.base.w * 0.8875 - 4.0,
+            y: self.base.y + (self.base.h - 12.0) / 2.0 - 2.0,
             font_size: 12.0,
             color: [0xcc, 0xcc, 0xd4],
         });
@@ -2868,15 +3356,11 @@ impl Drop for Spinbox {
 
 #[derive(Debug, Clone)]
 pub struct ColorSelector {
-    x: f32, y: f32, w: f32, h: f32,
+    base: WidgetBase,
     pub color: [u8; 3],
     just_clicked: bool,
-    hovered: bool,
     editing: bool,
     edit_buffer: String,
-    label: Option<String>,
-    row_x: f32,
-    row_w: f32,
     pub command: String,
     pub parent: Option<*mut (dyn Widget + 'static)>,
     pub children: Vec<*mut (dyn Widget + 'static)>,
@@ -2885,15 +3369,11 @@ pub struct ColorSelector {
 impl ColorSelector {
     pub fn new(color: [u8; 3]) -> Self {
         Self {
-            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            base: WidgetBase::new(),
             color,
             just_clicked: false,
-            hovered: false,
             editing: false,
             edit_buffer: String::new(),
-            label: None,
-            row_x: 0.0,
-            row_w: 0.0,
             command: "clear-color-interface".to_string(),
             parent: None,
             children: Vec::new(),
@@ -2901,7 +3381,7 @@ impl ColorSelector {
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
         self
     }
 
@@ -2912,25 +3392,10 @@ impl ColorSelector {
 }
 
 impl Widget for ColorSelector {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn set_row_rect(&mut self, x: f32, w: f32) { self.row_x = x; self.row_w = w; }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
 
-    fn hit_test(&self, px: f32, py: f32) -> bool {
-        let (x, y, w, h) = self.rect();
-        let hx = if self.row_w > 0.0 { self.row_x } else { x };
-        let hw = if self.row_w > 0.0 { self.row_w } else { w };
-        let (hy, hh) = if self.label.is_some() {
-            (y - 20.0, h + 20.0)
-        } else {
-            (y, h)
-        };
-        px >= hx && px <= hx + hw && py >= hy && py <= hy + hh
-    }
 
-    fn top_room(&self) -> f32 { if self.label.is_some() { 16.0 } else { 0.0 } }
 
     fn color(&self) -> [f32; 4] {
         colors::to_linear([
@@ -2941,17 +3406,11 @@ impl Widget for ColorSelector {
         ])
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was = self.hovered;
-        self.hovered = self.hit_test(px, py);
-        was != self.hovered
-    }
-
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
         if button != MouseButton::Left { return false; }
         if state != ElementState::Pressed { return false; }
         if !self.hit_test(px, py) { return false; }
-        if px >= self.x + self.w * 0.65 {
+        if px >= self.base.x + self.base.w * 0.65 {
             self.just_clicked = true;
             let hex = format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]);
             if let Ok(output) = std::process::Command::new(&self.command)
@@ -3031,41 +3490,27 @@ impl Widget for ColorSelector {
         }
     }
 
-    fn hover_highlight(&self) -> Option<[f32; 4]> {
-        None // rendered in extra_quads to cover label area
-    }
-
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        if self.hovered {
-            let (hy, hh) = if self.label.is_some() {
-                (self.y - 20.0, self.h + 20.0)
-            } else {
-                (self.y, self.h)
-            };
-            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
-            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
-            quads.push((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.06]));
-        }
-        let pick_x = self.x + self.w * 0.65;
-        let pick_w = self.w * 0.35;
+        let pick_x = self.base.x + self.base.w * 0.65;
+        let pick_w = self.base.w * 0.35;
         let linear_c = colors::to_linear([
             self.color[0] as f32 / 255.0,
             self.color[1] as f32 / 255.0,
             self.color[2] as f32 / 255.0,
             1.0,
         ]);
-        quads.push((pick_x, self.y, pick_w, self.h, linear_c));
+        quads.push((pick_x, self.base.y, pick_w, self.base.h, linear_c));
         quads
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        if let Some(ref label) = self.label {
+        if let Some(ref label) = self.base.label {
             labels.push(TextLabel {
                 text: label.clone(),
-                x: self.x + 4.0,
-                y: self.y - 16.0,
+                x: self.base.x + 4.0,
+                y: self.base.y - 18.0,
                 font_size: 12.0,
                 color: [0x83, 0x83, 0x8a],
             });
@@ -3073,8 +3518,8 @@ impl Widget for ColorSelector {
         let hex = if self.editing { self.edit_buffer.clone() } else { format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]) };
         labels.push(TextLabel {
             text: hex,
-            x: self.x + 4.0,
-            y: self.y + 3.0,
+            x: self.base.x + 4.0,
+            y: self.base.y + 3.0,
             font_size: 12.0,
             color: [0xcc, 0xcc, 0xd4],
         });
@@ -3786,6 +4231,71 @@ impl Drop for ScrollBox {
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_rangeslider_interaction() {
+        let mut rs = RangeSlider::new();
+        rs.set_rect(10.0, 10.0, 200.0, 20.0);
+
+        // Low value: 0.2, High value: 0.8
+        let (low, high) = rs.values();
+        assert_eq!(low, 0.2);
+        assert_eq!(high, 0.8);
+
+        // Thumb size = h * 0.9 = 18.0
+        // Range = w - thumb_size = 200.0 - 18.0 = 182.0
+        // Thumb low center: x + 0.2 * 182.0 + 9.0 = 10.0 + 36.4 + 9.0 = 55.4
+        // Thumb high center: x + 0.8 * 182.0 + 9.0 = 10.0 + 145.6 + 9.0 = 164.6
+
+        // 1. Drag Low thumb from 0.2 to 0.45
+        // Click at px = 55.4 (center of low thumb)
+        rs.drag_begin(55.4, 20.0);
+        assert_eq!(rs.active_thumb, Some(ActiveThumb::Low));
+
+        // Drag to px = 100.9 (new low value = (100.9 - offset(9.0) - 10.0) / 182.0 = 81.9 / 182.0 = 0.45)
+        let changed = rs.drag_update(100.9, 20.0);
+        assert!(changed);
+        assert!((rs.values().0 - 0.45).abs() < 0.01);
+        assert_eq!(rs.values().1, 0.8); // High value unchanged
+
+        rs.drag_end();
+        assert_eq!(rs.active_thumb, None);
+
+        // 2. Drag High thumb from 0.8 to 0.6
+        // Click at px = 164.6 (center of high thumb)
+        rs.drag_begin(164.6, 20.0);
+        assert_eq!(rs.active_thumb, Some(ActiveThumb::High));
+
+        // Drag to px = 128.2 (new high value = (128.2 - offset(9.0) - 10.0) / 182.0 = 109.2 / 182.0 = 0.6)
+        let changed = rs.drag_update(128.2, 20.0);
+        assert!(changed);
+        assert!((rs.values().1 - 0.6).abs() < 0.01);
+
+        rs.drag_end();
+    }
+
+    #[test]
+    fn test_rangeslider_overlap() {
+        let mut rs = RangeSlider::new().with_values(0.5, 0.5);
+        rs.set_rect(10.0, 10.0, 200.0, 20.0);
+
+        // Both low and high are 0.5. Thumb center = 10.0 + 0.5 * 182.0 + 9.0 = 110.0
+        // Click to the left of center should select Low thumb
+        rs.drag_begin(109.0, 20.0);
+        assert_eq!(rs.active_thumb, Some(ActiveThumb::Low));
+        rs.drag_end();
+
+        // Click to the right of center should select High thumb
+        rs.drag_begin(111.0, 20.0);
+        assert_eq!(rs.active_thumb, Some(ActiveThumb::High));
+        rs.drag_end();
+
+        // Drag Low thumb past High value (0.5). It should be constrained to 0.5
+        rs.drag_begin(110.0, 20.0); // selects low
+        rs.drag_update(150.0, 20.0); // drag past high
+        assert_eq!(rs.values().0, 0.5); // constrained
+        rs.drag_end();
+    }
+
 
     #[test]
     fn test_node_toggle_geometry_visibility() {
@@ -4436,16 +4946,12 @@ unsafe impl Sync for ScrollingList {}
 
 #[derive(Debug, Clone)]
 pub struct Dropdown {
-    x: f32, y: f32, w: f32, h: f32,
+    base: WidgetBase,
     pub options: Vec<String>,
     pub selected: usize,
     pub open: bool,
-    hovered: bool,
     hovered_item: Option<usize>,
     just_changed: bool,
-    label: Option<String>,
-    row_x: f32,
-    row_w: f32,
     pub parent: Option<*mut (dyn Widget + 'static)>,
     pub children: Vec<*mut (dyn Widget + 'static)>,
 }
@@ -4453,28 +4959,24 @@ pub struct Dropdown {
 impl Dropdown {
     pub fn new(options: Vec<String>, selected: usize) -> Self {
         Self {
-            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            base: WidgetBase::new(),
             options,
             selected,
             open: false,
-            hovered: false,
             hovered_item: None,
             just_changed: false,
-            label: None,
-            row_x: 0.0,
-            row_w: 0.0,
             parent: None,
             children: Vec::new(),
         }
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
         self
     }
 
     pub fn set_label(&mut self, label: &str) {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
     }
 
     pub fn take_change(&mut self) -> bool {
@@ -4486,15 +4988,15 @@ impl Dropdown {
     pub fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
         if !self.open { return; }
         
-        let dy = self.y + self.h;
+        let dy = self.base.y + self.base.h;
         let dh = self.options.len() as f32 * 24.0;
         
-        pc.rect([0.22, 0.22, 0.28, 1.0], self.x, dy, self.w, dh); // border
-        pc.rect([0.06, 0.06, 0.09, 1.0], self.x + 1.0, dy + 1.0, self.w - 2.0, dh - 2.0); // bg
+        pc.rect([0.22, 0.22, 0.28, 1.0], self.base.x, dy, self.base.w, dh); // border
+        pc.rect([0.06, 0.06, 0.09, 1.0], self.base.x + 1.0, dy + 1.0, self.base.w - 2.0, dh - 2.0); // bg
         
         if let Some(h_idx) = self.hovered_item {
             let iy = dy + h_idx as f32 * 24.0;
-            pc.rect([0.20, 0.40, 0.65, 0.6], self.x + 2.0, iy + 2.0, self.w - 4.0, 20.0);
+            pc.rect([0.20, 0.40, 0.65, 0.6], self.base.x + 2.0, iy + 2.0, self.base.w - 4.0, 20.0);
         }
         
         for (idx, opt) in self.options.iter().enumerate() {
@@ -4509,7 +5011,7 @@ impl Dropdown {
             
             pc.text(
                 opt,
-                self.x + 8.0,
+                self.base.x + 8.0,
                 iy,
                 12.0,
                 [
@@ -4530,11 +5032,8 @@ impl Default for Dropdown {
 }
 
 impl Widget for Dropdown {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn set_row_rect(&mut self, x: f32, w: f32) { self.row_x = x; self.row_w = w; }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
 
     fn color(&self) -> [f32; 4] {
         [0.08, 0.08, 0.12, 1.0]
@@ -4542,13 +5041,11 @@ impl Widget for Dropdown {
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
         let (x, y, w, h) = self.rect();
-        let hx = if self.row_w > 0.0 { self.row_x } else { x };
-        let hw = if self.row_w > 0.0 { self.row_w } else { w };
-        let (hy, hh) = if self.label.is_some() {
-            (y - 18.0, h + 18.0)
-        } else {
-            (y, h)
-        };
+        let hx = if self.base.row_w > 0.0 { self.base.row_x } else { x };
+        let hw = if self.base.row_w > 0.0 { self.base.row_w } else { w };
+        let top = self.top_room();
+        let hy = y - top;
+        let hh = h + top;
         if self.open {
             let dy = y + h;
             let dh = self.options.len() as f32 * 24.0;
@@ -4560,13 +5057,11 @@ impl Widget for Dropdown {
         }
     }
 
-    fn top_room(&self) -> f32 { if self.label.is_some() { 18.0 } else { 0.0 } }
-
     fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
-        let was_hovered = self.hovered;
+        let was_hovered = self.base.hovered;
         let was_hovered_item = self.hovered_item;
         
-        self.hovered = self.hit_test(px, py);
+        self.base.hovered = self.hit_test(px, py);
         self.hovered_item = None;
 
         if self.open {
@@ -4581,14 +5076,14 @@ impl Widget for Dropdown {
             }
         }
 
-        self.hovered != was_hovered || self.hovered_item != was_hovered_item
+        self.base.hovered != was_hovered || self.hovered_item != was_hovered_item
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
         if button != MouseButton::Left || state != ElementState::Pressed { return false; }
 
         let (x, y, w, h) = self.rect();
-        let (hy, hh) = if self.label.is_some() {
+        let (hy, hh) = if self.base.label.is_some() {
             (y - 18.0, h + 18.0)
         } else {
             (y, h)
@@ -4687,29 +5182,32 @@ impl Widget for Dropdown {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        
-        if self.hovered && !self.open {
-            let (hy, hh) = if self.label.is_some() {
-                (self.y - 18.0, self.h + 18.0)
-            } else {
-                (self.y, self.h)
-            };
-            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
-            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
-            quads.push((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.04]));
-        }
 
         let bg_color = [0.08, 0.08, 0.12, 1.0];
         let border_color = if self.open {
             [0.30, 0.50, 0.32, 1.0]
-        } else if self.hovered {
+        } else if self.base.hovered {
             [0.25, 0.25, 0.35, 1.0]
         } else {
             [0.18, 0.18, 0.24, 1.0]
         };
 
-        quads.push((self.x, self.y, self.w, self.h, border_color));
-        quads.push((self.x + 1.0, self.y + 1.0, self.w - 2.0, self.h - 2.0, bg_color));
+        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, border_color));
+        quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, bg_color));
+
+        if self.open {
+            let dy = self.base.y + self.base.h;
+            let dh = self.options.len() as f32 * 24.0;
+            // Border
+            quads.push((self.base.x, dy, self.base.w, dh, [0.22, 0.22, 0.28, 1.0]));
+            // BG
+            quads.push((self.base.x + 1.0, dy + 1.0, self.base.w - 2.0, dh - 2.0, [0.06, 0.06, 0.09, 1.0]));
+
+            if let Some(h_idx) = self.hovered_item {
+                let iy = dy + h_idx as f32 * 24.0;
+                quads.push((self.base.x + 2.0, iy + 2.0, self.base.w - 4.0, 20.0, [0.20, 0.40, 0.65, 0.6]));
+            }
+        }
 
         quads
     }
@@ -4717,11 +5215,11 @@ impl Widget for Dropdown {
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         
-        if let Some(ref label) = self.label {
+        if let Some(ref label) = self.base.label {
             labels.push(TextLabel {
                 text: label.clone(),
-                x: self.x + 4.0,
-                y: self.y - 14.0,
+                x: self.base.x + 4.0,
+                y: self.base.y - 14.0,
                 font_size: 11.0,
                 color: [0x83, 0x83, 0x8a],
             });
@@ -4730,19 +5228,40 @@ impl Widget for Dropdown {
         let selected_text = self.options.get(self.selected).cloned().unwrap_or_default();
         labels.push(TextLabel {
             text: selected_text,
-            x: self.x + 8.0,
-            y: self.y + (self.h - 12.0) / 2.0,
+            x: self.base.x + 8.0,
+            y: self.base.y + (self.base.h - 12.0) / 2.0,
             font_size: 12.0,
             color: [0xdd, 0xdd, 0xe2],
         });
 
         labels.push(TextLabel {
             text: "▼".to_string(),
-            x: self.x + self.w - 18.0,
-            y: self.y + (self.h - 10.0) / 2.0,
+            x: self.base.x + self.base.w - 18.0,
+            y: self.base.y + (self.base.h - 10.0) / 2.0,
             font_size: 10.0,
             color: [0x83, 0x83, 0x8a],
         });
+
+        if self.open {
+            let dy = self.base.y + self.base.h;
+            for (idx, opt) in self.options.iter().enumerate() {
+                let iy = dy + idx as f32 * 24.0 + (24.0 - 12.0) / 2.0;
+                let text_color = if self.hovered_item == Some(idx) {
+                    [0xff, 0xff, 0xff]
+                } else if self.selected == idx {
+                    [0x3a, 0x9a, 0xff]
+                } else {
+                    [0xcc, 0xcc, 0xd4]
+                };
+                labels.push(TextLabel {
+                    text: opt.clone(),
+                    x: self.base.x + 8.0,
+                    y: iy,
+                    font_size: 12.0,
+                    color: text_color,
+                });
+            }
+        }
 
         labels
     }
@@ -4752,6 +5271,15 @@ impl Widget for Dropdown {
     fn children(&self) -> Vec<*mut (dyn Widget + 'static)> { self.children.clone() }
     fn add_child(&mut self, child: *mut (dyn Widget + 'static)) { self.children.push(child); }
     fn clear_children(&mut self) { self.children.clear(); }
+    fn value(&self) -> i32 { self.selected as i32 }
+    fn take_click(&mut self) -> bool { self.take_change() }
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        if self.open {
+            Some((self.base.x, self.base.y + self.base.h, self.base.w, self.options.len() as f32 * 24.0))
+        } else {
+            None
+        }
+    }
 }
 
 unsafe impl Send for Dropdown {}
@@ -4761,15 +5289,11 @@ unsafe impl Sync for Dropdown {}
 
 #[derive(Debug, Clone)]
 pub struct TextBox {
-    x: f32, y: f32, w: f32, h: f32,
+    base: WidgetBase,
     pub text: String,
     pub editing: bool,
     pub edit_buffer: String,
-    hovered: bool,
     just_changed: bool,
-    label: Option<String>,
-    row_x: f32,
-    row_w: f32,
     pub disabled: bool,
     pub all_selected: bool,
     pub cursor_idx: usize,
@@ -4787,15 +5311,11 @@ pub struct TextBox {
 impl TextBox {
     pub fn new(text: String) -> Self {
         Self {
-            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            base: WidgetBase::new(),
             text,
             editing: false,
             edit_buffer: String::new(),
-            hovered: false,
             just_changed: false,
-            label: None,
-            row_x: 0.0,
-            row_w: 0.0,
             disabled: false,
             all_selected: false,
             cursor_idx: 0,
@@ -4817,12 +5337,12 @@ impl TextBox {
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
         self
     }
 
     pub fn set_label(&mut self, label: &str) {
-        self.label = Some(label.to_string());
+        self.base.label = Some(label.to_string());
     }
 
     pub fn take_change(&mut self) -> bool {
@@ -4878,10 +5398,9 @@ impl TextBox {
             self.cursor_idx = start;
             self.select_anchor = None;
             self.all_selected = false;
-            true
-        } else {
-            false
+            return true;
         }
+        false
     }
 
     pub fn paste_from_clipboard(&mut self) -> bool {
@@ -4928,60 +5447,55 @@ impl Default for TextBox {
 }
 
 impl Widget for TextBox {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.base.x, self.base.y, self.base.w, self.base.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.x = x;
-        self.y = y;
-        self.w = if let Some(explicit_w) = self.width {
+        let final_w = if let Some(explicit_w) = self.width {
             explicit_w
         } else if let Some(max_w) = self.max_width {
             w.min(max_w)
         } else {
             w
         };
-        self.h = h;
+        if let Some(b) = self.base_mut() {
+            b.x = x;
+            b.y = y;
+            b.w = final_w;
+            b.h = h;
+        }
     }
     fn set_row_rect(&mut self, x: f32, w: f32) {
-        self.row_x = x;
-        self.row_w = if let Some(explicit_w) = self.width {
+        let final_w = if let Some(explicit_w) = self.width {
             explicit_w
         } else if let Some(max_w) = self.max_width {
             w.min(max_w)
         } else {
             w
         };
+        if let Some(b) = self.base_mut() {
+            b.row_x = x;
+            b.row_w = final_w;
+        }
     }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
 
     fn color(&self) -> [f32; 4] {
         [0.10, 0.10, 0.16, 1.0]
     }
 
-    fn hit_test(&self, px: f32, py: f32) -> bool {
-        let (x, y, w, h) = self.rect();
-        let hx = if self.row_w > 0.0 { self.row_x } else { x };
-        let hw = if self.row_w > 0.0 { self.row_w } else { w };
-        let (hy, hh) = if self.label.is_some() {
-            (y - 18.0, h + 18.0)
-        } else {
-            (y, h)
-        };
-        px >= hx && px <= hx + hw && py >= hy && py <= hy + hh
-    }
 
-    fn top_room(&self) -> f32 { if self.label.is_some() { 18.0 } else { 0.0 } }
 
     fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
         if self.disabled {
-            let was = self.hovered;
-            self.hovered = false;
+            let was = self.base.hovered;
+            self.base.hovered = false;
             return was;
         }
         let mut changed = false;
         if self.dragging && self.editing {
             let char_width = 7.2;
-            let drag_idx = (((px - (self.x + 8.0)) / char_width).round() as isize)
+            let drag_idx = (((px - (self.base.x + 8.0)) / char_width).round() as isize)
                 .max(0)
                 .min(self.edit_buffer.chars().count() as isize) as usize;
             if self.cursor_idx != drag_idx {
@@ -4994,9 +5508,9 @@ impl Widget for TextBox {
                 changed = true;
             }
         }
-        let was = self.hovered;
-        self.hovered = self.hit_test(px, py);
-        if was != self.hovered {
+        let was = self.base.hovered;
+        self.base.hovered = self.hit_test(px, py);
+        if was != self.base.hovered {
             changed = true;
         }
         changed
@@ -5014,7 +5528,7 @@ impl Widget for TextBox {
     fn drag_update(&mut self, px: f32, _py: f32) -> bool {
         if self.disabled || !self.editing { return false; }
         let char_width = 7.2;
-        let drag_idx = (((px - (self.x + 8.0)) / char_width).round() as isize)
+        let drag_idx = (((px - (self.base.x + 8.0)) / char_width).round() as isize)
             .max(0)
             .min(self.edit_buffer.chars().count() as isize) as usize;
         if self.cursor_idx != drag_idx {
@@ -5033,152 +5547,78 @@ impl Widget for TextBox {
         self.dragging = false;
     }
 
+    fn value(&self) -> i32 { 0 }
+
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
         if self.disabled { return false; }
-        
-        let (x, y, w, h) = self.rect();
-        let (hy, hh) = if self.label.is_some() {
-            (y - 18.0, h + 18.0)
-        } else {
-            (y, h)
-        };
-        let is_inside = px >= x && px <= x + w && py >= hy && py <= hy + hh;
-
-        if button == MouseButton::Right {
-            if state == ElementState::Pressed {
-                if !is_inside {
-                    return false;
-                }
-                
-                // Focus the TextBox if it wasn't editing yet
+        if button != MouseButton::Left { return false; }
+        if !self.hit_test(px, py) { return false; }
+        match state {
+            ElementState::Pressed => {
                 if !self.editing {
-                    self.editing = true;
-                    self.edit_buffer = self.text.clone();
-                    let len = self.edit_buffer.chars().count();
-                    self.cursor_idx = len;
-                    self.select_anchor = Some(0);
-                    self.all_selected = len > 0;
-                    self.just_focused = true;
-                    focus::set_focused(self);
-                }
-
-                // Place cursor under click if clicked inside the content bounds
-                if px >= x && px <= x + w && py >= y && py <= y + h {
+                    self.focus();
+                } else {
                     let char_width = 7.2;
-                    let click_idx = (((px - (self.x + 8.0)) / char_width).round() as isize)
+                    let idx = (((px - (self.base.x + 8.0)) / char_width).round() as isize)
                         .max(0)
                         .min(self.edit_buffer.chars().count() as isize) as usize;
-                    self.cursor_idx = click_idx;
-                    self.select_anchor = Some(click_idx);
+                    self.cursor_idx = idx;
+                    self.select_anchor = Some(idx);
                     self.all_selected = false;
                 }
-                
-                // Spawn context menu
-                let options = vec![
-                    "Cut".to_string(),
-                    "Copy".to_string(),
-                    "Paste".to_string(),
-                    "Select All".to_string(),
-                ];
-                context_menu::show(px, py, options, self as *mut TextBox);
-                return true;
+                true
             }
-            return false;
-        }
-
-        if button != MouseButton::Left { return false; }
-        
-        let (x, y, w, h) = self.rect();
-        let (hy, hh) = if self.label.is_some() {
-            (y - 18.0, h + 18.0)
-        } else {
-            (y, h)
-        };
-        let is_inside = px >= x && px <= x + w && py >= hy && py <= hy + hh;
-
-        if state == ElementState::Pressed {
-            if !is_inside {
-                if self.editing {
-                    self.unfocus();
-                    return true;
+            ElementState::Released => {
+                if self.dragging {
+                    self.drag_end();
                 }
-                return false;
+                if self.select_anchor == Some(self.cursor_idx) {
+                    self.select_anchor = None;
+                }
+                true
             }
-            
-            let char_width = 7.2;
-            let click_idx = (((px - (self.x + 8.0)) / char_width).round() as isize)
-                .max(0)
-                .min(self.edit_buffer.chars().count() as isize) as usize;
-            
-            if self.editing {
-                self.cursor_idx = click_idx;
-                self.select_anchor = Some(click_idx);
-                self.all_selected = false;
-                self.just_focused = false;
-                self.drag_start_idx = Some(click_idx);
-            } else {
-                self.editing = true;
-                self.edit_buffer = self.text.clone();
-                let len = self.edit_buffer.chars().count();
-                self.cursor_idx = len;
-                self.select_anchor = Some(0);
-                self.all_selected = len > 0;
-                self.just_focused = true;
-                self.drag_start_idx = Some(click_idx);
-                focus::set_focused(self);
-            }
-            true
-        } else if state == ElementState::Released {
-            if is_inside && self.editing && self.just_focused {
-                let len = self.edit_buffer.chars().count();
-                self.cursor_idx = len;
-                self.select_anchor = Some(0);
-                self.all_selected = len > 0;
-            }
-            self.just_focused = false;
-            self.drag_start_idx = None;
-            true
-        } else {
-            false
         }
     }
 
     fn focus(&mut self) {
         if self.disabled { return; }
-        if !self.editing {
-            self.editing = true;
-            self.edit_buffer = self.text.clone();
-            let len = self.edit_buffer.chars().count();
-            self.cursor_idx = len;
-            self.select_anchor = Some(0);
-            self.all_selected = len > 0;
-            self.just_focused = true;
-            focus::set_focused(self);
-        }
+        self.editing = true;
+        self.edit_buffer = self.text.clone();
+        let len = self.edit_buffer.chars().count();
+        self.cursor_idx = len;
+        self.select_anchor = Some(0);
+        self.all_selected = len > 0;
+        self.just_focused = true;
+        focus::set_focused(self);
     }
 
     fn unfocus(&mut self) {
         if self.editing {
             self.editing = false;
-            self.all_selected = false;
-            self.select_anchor = None;
-            self.dragging = false;
-            self.just_focused = false;
-            self.drag_start_idx = None;
             if self.text != self.edit_buffer {
                 self.text = self.edit_buffer.clone();
                 self.just_changed = true;
             }
+            self.select_anchor = None;
+            self.all_selected = false;
         }
     }
 
     fn keyboard_input(&mut self, event: &KeyEvent) -> bool {
-        if self.disabled { return false; }
-        if !self.editing { return false; }
+        if !self.editing || self.disabled { return false; }
         if event.state != ElementState::Pressed { return false; }
-        let char_count = self.edit_buffer.chars().count();
+        
+        let control = event.ctrl;
+        
         match &event.logical_key {
             Key::Named(NamedKey::Backspace) => {
+                if self.all_selected {
+                    self.edit_buffer.clear();
+                    self.cursor_idx = 0;
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                    return true;
+                }
                 let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
                 let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
                 if start != end {
@@ -5193,24 +5633,26 @@ impl Widget for TextBox {
                     self.edit_buffer = new_buf;
                     self.cursor_idx = start;
                     self.select_anchor = None;
-                    self.all_selected = false;
-                } else if self.cursor_idx > 0 {
-                    let chars: Vec<char> = self.edit_buffer.chars().collect();
-                    let mut new_buf = String::new();
-                    for i in 0..(self.cursor_idx - 1) {
-                        new_buf.push(chars[i]);
-                    }
-                    for i in self.cursor_idx..chars.len() {
-                        new_buf.push(chars[i]);
-                    }
-                    self.edit_buffer = new_buf;
+                    return true;
+                }
+                if self.cursor_idx > 0 {
+                    let mut chars: Vec<char> = self.edit_buffer.chars().collect();
+                    chars.remove(self.cursor_idx - 1);
+                    self.edit_buffer = chars.into_iter().collect();
                     self.cursor_idx -= 1;
                     self.select_anchor = None;
-                    self.all_selected = false;
+                    return true;
                 }
-                true
+                false
             }
             Key::Named(NamedKey::Delete) => {
+                if self.all_selected {
+                    self.edit_buffer.clear();
+                    self.cursor_idx = 0;
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                    return true;
+                }
                 let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
                 let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
                 if start != end {
@@ -5225,160 +5667,157 @@ impl Widget for TextBox {
                     self.edit_buffer = new_buf;
                     self.cursor_idx = start;
                     self.select_anchor = None;
-                    self.all_selected = false;
-                } else if self.cursor_idx < char_count {
-                    let chars: Vec<char> = self.edit_buffer.chars().collect();
-                    let mut new_buf = String::new();
-                    for i in 0..self.cursor_idx {
-                        new_buf.push(chars[i]);
-                    }
-                    for i in (self.cursor_idx + 1)..chars.len() {
-                        new_buf.push(chars[i]);
-                    }
-                    self.edit_buffer = new_buf;
-                    self.select_anchor = None;
-                    self.all_selected = false;
+                    return true;
                 }
-                true
+                if self.cursor_idx < self.edit_buffer.chars().count() {
+                    let mut chars: Vec<char> = self.edit_buffer.chars().collect();
+                    chars.remove(self.cursor_idx);
+                    self.edit_buffer = chars.into_iter().collect();
+                    self.select_anchor = None;
+                    return true;
+                }
+                false
             }
             Key::Named(NamedKey::ArrowLeft) => {
-                if event.shift {
+                let shift = event.shift;
+                if shift {
                     if self.select_anchor.is_none() {
                         self.select_anchor = Some(self.cursor_idx);
                     }
                     if self.cursor_idx > 0 {
                         self.cursor_idx -= 1;
+                        true
+                    } else {
+                        false
                     }
                 } else {
-                    let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
-                    let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
-                    if start != end {
-                        self.cursor_idx = start;
+                    if let Some(anchor) = self.select_anchor {
+                        self.cursor_idx = anchor.min(self.cursor_idx);
+                        self.select_anchor = None;
+                        self.all_selected = false;
+                        true
                     } else if self.cursor_idx > 0 {
                         self.cursor_idx -= 1;
+                        true
+                    } else {
+                        false
                     }
-                    self.select_anchor = None;
                 }
-                let len = self.edit_buffer.chars().count();
-                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
-                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
-                self.all_selected = start == 0 && end == len && len > 0;
-                true
             }
             Key::Named(NamedKey::ArrowRight) => {
-                if event.shift {
+                let shift = event.shift;
+                if shift {
                     if self.select_anchor.is_none() {
                         self.select_anchor = Some(self.cursor_idx);
                     }
-                    if self.cursor_idx < char_count {
+                    if self.cursor_idx < self.edit_buffer.chars().count() {
                         self.cursor_idx += 1;
+                        true
+                    } else {
+                        false
                     }
                 } else {
-                    let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
-                    let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
-                    if start != end {
-                        self.cursor_idx = end;
-                    } else if self.cursor_idx < char_count {
+                    if let Some(anchor) = self.select_anchor {
+                        self.cursor_idx = anchor.max(self.cursor_idx);
+                        self.select_anchor = None;
+                        self.all_selected = false;
+                        true
+                    } else if self.cursor_idx < self.edit_buffer.chars().count() {
                         self.cursor_idx += 1;
+                        true
+                    } else {
+                        false
                     }
-                    self.select_anchor = None;
                 }
-                let len = self.edit_buffer.chars().count();
-                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
-                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
-                self.all_selected = start == 0 && end == len && len > 0;
+            }
+            Key::Named(NamedKey::ArrowUp) => {
+                let shift = event.shift;
+                if shift {
+                    if self.select_anchor.is_none() {
+                        self.select_anchor = Some(self.cursor_idx);
+                    }
+                } else {
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                }
+                self.cursor_idx = 0;
                 true
             }
-            Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::Home) => {
-                if event.shift {
+            Key::Named(NamedKey::ArrowDown) => {
+                let shift = event.shift;
+                if shift {
                     if self.select_anchor.is_none() {
                         self.select_anchor = Some(self.cursor_idx);
                     }
-                    self.cursor_idx = 0;
                 } else {
-                    self.cursor_idx = 0;
                     self.select_anchor = None;
+                    self.all_selected = false;
                 }
-                let len = self.edit_buffer.chars().count();
-                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
-                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
-                self.all_selected = start == 0 && end == len && len > 0;
+                self.cursor_idx = self.edit_buffer.chars().count();
                 true
             }
-            Key::Named(NamedKey::ArrowDown) | Key::Named(NamedKey::End) => {
-                if event.shift {
+            Key::Named(NamedKey::Home) => {
+                let shift = event.shift;
+                if shift {
                     if self.select_anchor.is_none() {
                         self.select_anchor = Some(self.cursor_idx);
                     }
-                    self.cursor_idx = char_count;
                 } else {
-                    self.cursor_idx = char_count;
                     self.select_anchor = None;
+                    self.all_selected = false;
                 }
-                let len = self.edit_buffer.chars().count();
-                let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
-                let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
-                self.all_selected = start == 0 && end == len && len > 0;
+                self.cursor_idx = 0;
+                true
+            }
+            Key::Named(NamedKey::End) => {
+                let shift = event.shift;
+                if shift {
+                    if self.select_anchor.is_none() {
+                        self.select_anchor = Some(self.cursor_idx);
+                    }
+                } else {
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                }
+                self.cursor_idx = self.edit_buffer.chars().count();
                 true
             }
             Key::Named(NamedKey::Enter) => {
-                self.text = self.edit_buffer.clone();
-                self.editing = false;
-                self.all_selected = false;
-                self.select_anchor = None;
-                self.just_changed = true;
+                self.unfocus();
                 true
             }
             Key::Named(NamedKey::Escape) => {
                 self.editing = false;
-                self.all_selected = false;
+                self.edit_buffer = self.text.clone();
                 self.select_anchor = None;
+                self.all_selected = false;
                 true
             }
-            Key::Character(ref s) if event.ctrl => {
-                match s.as_str() {
-                    "c" | "C" => {
-                        self.copy_selection();
-                        true
-                    }
-                    "x" | "X" => {
-                        if self.cut_selection() {
-                            self.just_changed = true;
-                        }
-                        true
-                    }
-                    "v" | "V" => {
-                        if self.paste_from_clipboard() {
-                            self.just_changed = true;
-                        }
-                        true
-                    }
-                    "a" | "A" => {
-                        self.select_all();
-                        true
-                    }
-                    _ => false,
-                }
+            Key::Character(ref ch_str) if control && (ch_str == "a" || ch_str == "A") => {
+                self.cursor_idx = self.edit_buffer.chars().count();
+                self.select_anchor = Some(0);
+                self.all_selected = true;
+                true
             }
-            _ => {
-                if event.ctrl {
-                    return false;
-                }
-                if let Some(text) = &event.text {
+            Key::Character(ref ch_str) if control && (ch_str == "c" || ch_str == "C") => {
+                self.copy_selection();
+                true
+            }
+            Key::Character(ref ch_str) if control && (ch_str == "x" || ch_str == "X") => {
+                self.cut_selection();
+                true
+            }
+            Key::Character(ref ch_str) if control && (ch_str == "v" || ch_str == "V") => {
+                if let Some(pasted) = clipboard::read_from_clipboard() {
                     let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
                     let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
-                    let chars: Vec<char> = self.edit_buffer.chars().collect();
                     let mut new_buf = String::new();
+                    let chars: Vec<char> = self.edit_buffer.chars().collect();
                     for i in 0..start {
                         new_buf.push(chars[i]);
                     }
-                    let mut inserted_count = 0;
-                    for ch in text.chars() {
-                        if !ch.is_control() {
-                            new_buf.push(ch);
-                            inserted_count += 1;
-                        }
-                    }
+                    let inserted_count = pasted.chars().count();
+                    new_buf.push_str(&pasted);
                     for i in end..chars.len() {
                         new_buf.push(chars[i]);
                     }
@@ -5392,29 +5831,39 @@ impl Widget for TextBox {
                 }
                 true
             }
+            _ => {
+                if let Some(text) = &event.text {
+                    if !control {
+                        let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                        let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                        let mut new_buf = String::new();
+                        let chars: Vec<char> = self.edit_buffer.chars().collect();
+                        for i in 0..start {
+                            new_buf.push(chars[i]);
+                        }
+                        let inserted_count = text.chars().count();
+                        new_buf.push_str(text);
+                        for i in end..chars.len() {
+                            new_buf.push(chars[i]);
+                        }
+                        self.edit_buffer = new_buf;
+                        self.cursor_idx = start + inserted_count;
+                        self.select_anchor = None;
+                        self.all_selected = false;
+                        return true;
+                    }
+                }
+                false
+            }
         }
-    }
-
-    fn hover_highlight(&self) -> Option<[f32; 4]> {
-        None
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
         if self.disabled {
-            quads.push((self.x, self.y, self.w, self.h, [0.12, 0.12, 0.16, 1.0]));
-            quads.push((self.x + 1.0, self.y + 1.0, self.w - 2.0, self.h - 2.0, [0.06, 0.06, 0.08, 1.0]));
+            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, [0.12, 0.12, 0.16, 1.0]));
+            quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, [0.06, 0.06, 0.08, 1.0]));
             return quads;
-        }
-        if self.hovered {
-            let (hy, hh) = if self.label.is_some() {
-                (self.y - 18.0, self.h + 18.0)
-            } else {
-                (self.y, self.h)
-            };
-            let hx = if self.row_w > 0.0 { self.row_x } else { self.x };
-            let hw = if self.row_w > 0.0 { self.row_w } else { self.w };
-            quads.push((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.06]));
         }
         let bg_color = if self.editing {
             [0.06, 0.10, 0.18, 1.0]
@@ -5423,13 +5872,13 @@ impl Widget for TextBox {
         };
         let border_color = if self.editing {
             [0.20, 0.50, 0.85, 1.0]
-        } else if self.hovered {
+        } else if self.base.hovered {
             [0.25, 0.25, 0.35, 1.0]
         } else {
             [0.18, 0.18, 0.24, 1.0]
         };
-        quads.push((self.x, self.y, self.w, self.h, border_color));
-        quads.push((self.x + 1.0, self.y + 1.0, self.w - 2.0, self.h - 2.0, bg_color));
+        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, border_color));
+        quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, bg_color));
 
         if self.editing {
             let char_width = 7.2;
@@ -5437,22 +5886,22 @@ impl Widget for TextBox {
             let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
             
             if start != end {
-                let highlight_x = self.x + 8.0 + (start as f32 * char_width);
-                let max_x = self.x + self.w - 6.0;
+                let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
+                let max_x = self.base.x + self.base.w - 6.0;
                 let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
                 quads.push((
                     highlight_x,
-                    self.y + (self.h - 16.0) / 2.0,
+                    self.base.y + (self.base.h - 16.0) / 2.0,
                     highlight_w,
                     16.0,
                     [0.20, 0.40, 0.75, 0.4],
                 ));
             }
 
-            let cursor_x = self.x + 8.0 + (self.cursor_idx as f32 * char_width);
-            let max_cursor_x = self.x + self.w - 6.0;
+            let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width);
+            let max_cursor_x = self.base.x + self.base.w - 6.0;
             let final_cursor_x = cursor_x.min(max_cursor_x);
-            let cursor_y = self.y + (self.h - 14.0) / 2.0;
+            let cursor_y = self.base.y + (self.base.h - 14.0) / 2.0;
             quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
         }
 
@@ -5461,11 +5910,11 @@ impl Widget for TextBox {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        if let Some(ref label) = self.label {
+        if let Some(ref label) = self.base.label {
             labels.push(TextLabel {
                 text: label.clone(),
-                x: self.x + 4.0,
-                y: self.y - 14.0,
+                x: self.base.x + 4.0,
+                y: self.base.y - 14.0,
                 font_size: 11.0,
                 color: [0x83, 0x83, 0x8a],
             });
@@ -5480,8 +5929,8 @@ impl Widget for TextBox {
         }
         labels.push(TextLabel {
             text: val_text,
-            x: self.x + 8.0,
-            y: self.y + (self.h - 12.0) / 2.0,
+            x: self.base.x + 8.0,
+            y: self.base.y + (self.base.h - 12.0) / 2.0,
             font_size: 12.0,
             color: if self.disabled {
                 [0x53, 0x53, 0x5a]
@@ -5511,5 +5960,359 @@ impl Drop for TextBox {
 
 unsafe impl Send for TextBox {}
 unsafe impl Sync for TextBox {}
+
+pub struct Paginator {
+    x: f32, y: f32, w: f32, h: f32,
+    hovered: bool,
+    sidebar_w: f32,
+    pages: Vec<String>,
+    selected_page: usize,
+    hovered_tab: Option<usize>,
+    pressed_tab: Option<usize>,
+    page_changed: bool,
+    parent: Option<*mut (dyn Widget + 'static)>,
+    children: Vec<*mut (dyn Widget + 'static)>,
+}
+
+impl Paginator {
+    pub fn new(sidebar_w: f32, pages: Vec<String>) -> Self {
+        Self {
+            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            hovered: false,
+            sidebar_w,
+            pages,
+            selected_page: 0,
+            hovered_tab: None,
+            pressed_tab: None,
+            page_changed: false,
+            parent: None,
+            children: Vec::new(),
+        }
+    }
+
+    pub fn selected_page(&self) -> usize {
+        self.selected_page
+    }
+
+    pub fn set_selected_page(&mut self, page: usize) {
+        if page < self.pages.len() {
+            self.selected_page = page;
+        }
+    }
+}
+
+impl Widget for Paginator {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
+    fn hovered(&self) -> bool { self.hovered }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        quads.push((self.x, self.y, self.sidebar_w, self.h, colors::SIDEBAR_BG));
+        quads.push((self.x + self.sidebar_w, self.y, self.w - self.sidebar_w, self.h, colors::CONTENT_BG));
+
+        for i in 0..self.pages.len() {
+            let bx = self.x + 5.0;
+            let by = self.y + 10.0 + i as f32 * 50.0;
+            let bw = self.sidebar_w - 10.0;
+            let bh = 40.0;
+
+            let c = if self.selected_page == i {
+                [0.20, 0.40, 0.65, 0.4]
+            } else if self.pressed_tab == Some(i) {
+                [0.20, 0.20, 0.25, 0.25]
+            } else if self.hovered_tab == Some(i) {
+                [0.20, 0.20, 0.25, 0.15]
+            } else {
+                [0.0, 0.0, 0.0, 0.0]
+            };
+            
+            if c[3] > 0.0 {
+                quads.push((bx, by, bw, bh, c));
+            }
+        }
+
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        for (i, page_name) in self.pages.iter().enumerate() {
+            let bx = self.x + 5.0;
+            let by = self.y + 10.0 + i as f32 * 50.0;
+            let bw = self.sidebar_w - 10.0;
+            let bh = 40.0;
+
+            let font_size = 12.0;
+            let est_w = page_name.len() as f32 * 6.5;
+            let color = if self.selected_page == i {
+                [230, 230, 242]
+            } else {
+                [178, 178, 191]
+            };
+
+            labels.push(TextLabel {
+                text: page_name.clone(),
+                x: bx + (bw - est_w) / 2.0,
+                y: by + (bh - font_size) / 2.0 - 1.0,
+                font_size,
+                color,
+            });
+        }
+        labels
+    }
+
+    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        let was_hovered_tab = self.hovered_tab;
+        self.hovered_tab = None;
+        for i in 0..self.pages.len() {
+            let bx = self.x + 5.0;
+            let by = self.y + 10.0 + i as f32 * 50.0;
+            let bw = self.sidebar_w - 10.0;
+            let bh = 40.0;
+            if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
+                self.hovered_tab = Some(i);
+                break;
+            }
+        }
+        was_hovered_tab != self.hovered_tab
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if button != MouseButton::Left { return false; }
+        match state {
+            ElementState::Pressed => {
+                self.pressed_tab = None;
+                for i in 0..self.pages.len() {
+                    let bx = self.x + 5.0;
+                    let by = self.y + 10.0 + i as f32 * 50.0;
+                    let bw = self.sidebar_w - 10.0;
+                    let bh = 40.0;
+                    if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
+                        self.pressed_tab = Some(i);
+                        return true;
+                    }
+                }
+            }
+            ElementState::Released => {
+                if let Some(i) = self.pressed_tab.take() {
+                    let bx = self.x + 5.0;
+                    let by = self.y + 10.0 + i as f32 * 50.0;
+                    let bw = self.sidebar_w - 10.0;
+                    let bh = 40.0;
+                    if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
+                        if self.selected_page != i {
+                            self.selected_page = i;
+                            self.page_changed = true;
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn take_click(&mut self) -> bool {
+        if self.page_changed {
+            self.page_changed = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn value(&self) -> i32 { self.selected_page as i32 }
+
+    fn parent(&self) -> Option<*mut (dyn Widget + 'static)> { self.parent }
+    fn set_parent(&mut self, parent: Option<*mut (dyn Widget + 'static)>) { self.parent = parent; }
+    fn children(&self) -> Vec<*mut (dyn Widget + 'static)> { self.children.clone() }
+    fn add_child(&mut self, child: *mut (dyn Widget + 'static)) { self.children.push(child); }
+    fn clear_children(&mut self) { self.children.clear(); }
+}
+
+unsafe impl Send for Paginator {}
+unsafe impl Sync for Paginator {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct Finger {
+    pub slot: usize,
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct Trackpad {
+    base: WidgetBase,
+    pub fingers: Vec<Finger>,
+}
+
+impl Trackpad {
+    pub fn new() -> Self {
+        Self {
+            base: WidgetBase {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+                label: None,
+                hovered: false,
+                row_x: 0.0,
+                row_w: 0.0,
+            },
+            fingers: Vec::new(),
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
+    }
+
+    pub fn set_fingers(&mut self, fingers: Vec<Finger>) {
+        self.fingers = fingers;
+    }
+}
+
+impl Widget for Trackpad {
+    fn base(&self) -> Option<&WidgetBase> {
+        Some(&self.base)
+    }
+
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> {
+        Some(&mut self.base)
+    }
+
+    fn color(&self) -> [f32; 4] {
+        [0.11, 0.11, 0.16, 0.85]
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let (x, y, w, h) = self.rect();
+        let mut quads = Vec::new();
+
+        // 1. Background
+        quads.push((x, y, w, h, [0.11, 0.11, 0.16, 0.85]));
+
+        // 2. Borders
+        let border_color = [0.28, 0.28, 0.38, 1.0];
+        quads.push((x, y, w, 1.0, border_color));             // Top
+        quads.push((x, y + h - 1.0, w, 1.0, border_color));     // Bottom
+        quads.push((x, y, 1.0, h, border_color));             // Left
+        quads.push((x + w - 1.0, y, 1.0, h, border_color));     // Right
+
+        // 3. Fingers
+        for finger in &self.fingers {
+            let rx = finger.x.clamp(0.0, 1.0);
+            let ry = finger.y.clamp(0.0, 1.0);
+            let fx = x + rx * w;
+            let fy = y + ry * h;
+            let dot_size = 12.0;
+
+            // Render glow (outer light blue rectangle)
+            quads.push((
+                fx - (dot_size + 6.0) / 2.0,
+                fy - (dot_size + 6.0) / 2.0,
+                dot_size + 6.0,
+                dot_size + 6.0,
+                [0.35, 0.55, 0.95, 0.4],
+            ));
+            // Render core (solid blue/purple rectangle)
+            quads.push((
+                fx - dot_size / 2.0,
+                fy - dot_size / 2.0,
+                dot_size,
+                dot_size,
+                [0.45, 0.65, 1.0, 1.0],
+            ));
+        }
+
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let (x, y, _w, h) = self.rect();
+        let mut labels = Vec::new();
+
+        // Render "Touchpad Area" label
+        labels.push(TextLabel {
+            text: "Touchpad Area".to_string(),
+            x: x + 12.0,
+            y: y + h - 22.0,
+            font_size: 11.0,
+            color: [0x73, 0x73, 0x8c],
+        });
+
+        // Optional widget-base label on top
+        if let Some(ref label) = self.base.label {
+            labels.push(TextLabel {
+                text: label.clone(),
+                x,
+                y: y - 18.0,
+                font_size: 12.0,
+                color: [0x83, 0x83, 0x8a],
+            });
+        }
+
+        labels
+    }
+
+    fn top_room(&self) -> f32 {
+        if self.base.label.is_some() {
+            16.0
+        } else {
+            0.0
+        }
+    }
+
+    fn draggable(&self) -> bool { true }
+    fn is_dragging(&self) -> bool { !self.fingers.is_empty() }
+
+    fn drag_begin(&mut self, px: f32, py: f32) {
+        let (x, y, w, h) = self.rect();
+        if w > 0.0 && h > 0.0 {
+            let rx = ((px - x) / w).clamp(0.0, 1.0);
+            let ry = ((py - y) / h).clamp(0.0, 1.0);
+            self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
+        }
+    }
+
+    fn drag_update(&mut self, px: f32, py: f32) -> bool {
+        let (x, y, w, h) = self.rect();
+        if w > 0.0 && h > 0.0 {
+            let rx = ((px - x) / w).clamp(0.0, 1.0);
+            let ry = ((py - y) / h).clamp(0.0, 1.0);
+            self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
+            true
+        } else {
+            false
+        }
+    }
+
+    fn drag_end(&mut self) {
+        self.fingers.clear();
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if button == MouseButton::Left {
+            let (x, y, w, h) = self.rect();
+            if px >= x && px <= x + w && py >= y && py <= y + h {
+                if state == ElementState::Pressed {
+                    let rx = ((px - x) / w).clamp(0.0, 1.0);
+                    let ry = ((py - y) / h).clamp(0.0, 1.0);
+                    self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
+                    return true;
+                } else {
+                    self.fingers.clear();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
 
 

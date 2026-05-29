@@ -14,8 +14,8 @@ pub fn render_widget<T: Widget>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y:
         pc.rect(qc, qx, qy, qw, qh);
     }
     // Render hover highlight on top of widget surfaces
-    if let Some(hc) = w.hover_highlight() {
-        pc.rect(hc, x, y, ww, wh);
+    if let Some((hx, hy, hw, hh, hc)) = w.hover_highlight_quad() {
+        pc.rect(hc, hx, hy, hw, hh);
     }
     let font_opt = w.widget_font();
     for label in w.text_labels() {

@@ -1,6 +1,6 @@
 use clear_ui::widget::{
-    Button, Checkbox, ContentBg, Header, Panel, ProgressBar, Sidebar, Slider, Spinbox, StatusBar,
-    TextLabel, Toggle, Widget,
+    Button, Checkbox, ContentBg, Header, Panel, ProgressBar, RangeSlider, Sidebar, Slider, Spinbox,
+    StatusBar, TextLabel, Toggle, Widget,
 };
 
 use glyphon::{
@@ -17,7 +17,7 @@ use smithay_client_toolkit::{
     output::{OutputHandler, OutputState},
     seat::{
         keyboard::KeyboardHandler,
-        pointer::PointerHandler,
+        pointer::{PointerHandler, ThemedPointer, ThemeSpec, CursorIcon},
         Capability, SeatHandler, SeatState,
     },
     shell::{
@@ -248,8 +248,9 @@ impl State {
             Box::new(Toggle::new()),
             Box::new(ProgressBar::new(0.65)),
             Box::new(Slider::new()),
-            Box::new(StatusBar::new()),
             Box::new(Spinbox::new(0, -10, 10, 1)),
+            Box::new(RangeSlider::new()),
+            Box::new(StatusBar::new()),
         ];
 
         let positions = demo_positions(sw, sh);
@@ -311,7 +312,10 @@ impl State {
         let sw = self.width;
         let sh = self.height;
         let mut verts = Vec::new();
-        for w in &self.widgets {
+        let mut draw_order: Vec<usize> = (0..self.widgets.len()).collect();
+        draw_order.sort_by_key(|&i| self.widgets[i].z_index());
+        for &i in &draw_order {
+            let w = &self.widgets[i];
             verts.extend(widget_vertices(w.as_ref(), sw, sh));
             for (qx, qy, qw, qh, qc) in w.extra_quads() {
                 verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
@@ -403,10 +407,23 @@ impl State {
 
         let mut widget_buffers: Vec<Buffer> = Vec::new();
         let mut widget_labels: Vec<TextLabel> = Vec::new();
-        for w in self.widgets.iter() {
+        for (i, w) in self.widgets.iter().enumerate() {
             for label in w.text_labels() {
-                widget_buffers.push(make_text_buffer(font_system, &label.text, label.font_size));
-                widget_labels.push(label);
+                let mut covered = false;
+                for (pi, pw) in self.widgets.iter().enumerate() {
+                    if pi != i {
+                        if let Some((px, py, pw_val, ph)) = pw.popover_rect() {
+                            if label.is_covered_by(px, py, pw_val, ph) {
+                                covered = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !covered {
+                    widget_buffers.push(make_text_buffer(font_system, &label.text, label.font_size));
+                    widget_labels.push(label);
+                }
             }
         }
 
@@ -487,7 +504,7 @@ impl State {
                             r: 0.05,
                             g: 0.05,
                             b: 0.08,
-                            a: 0.92,
+                            a: 0.20,
                         }),
                         store: wgpu::StoreOp::Store,
                     },
@@ -529,7 +546,8 @@ fn demo_positions(sw: f32, sh: f32) -> Vec<(f32, f32, f32, f32)> {
         (162.0, 410.0, 160.0, 24.0),        // 11 progress_bar
         (70.0, 444.0, 300.0, 32.0),         // 12 slider
         (70.0, 486.0, 120.0, 32.0),         // 13 spinbox
-        (0.0, sh - 28.0, sw, 28.0),         // 14 status_bar
+        (70.0, 528.0, 300.0, 32.0),         // 14 range_slider
+        (0.0, sh - 28.0, sw, 28.0),         // 15 status_bar
     ]
 }
 
@@ -565,7 +583,7 @@ struct AppState {
     output_state: OutputState,
 
     seats: Vec<wl_seat::WlSeat>,
-    pointer: Option<wl_pointer::WlPointer>,
+    pointer: Option<ThemedPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
 
     window: Option<XdgWindow>,
@@ -663,8 +681,15 @@ impl SeatHandler for AppState {
         capability: Capability,
     ) {
         if capability == Capability::Pointer && self.pointer.is_none() {
-            let pointer = self.seat_state.get_pointer(qh, &seat).unwrap();
-            self.pointer = Some(pointer);
+            let surface = self.compositor_state.create_surface(qh);
+            let themed_pointer = self.seat_state.get_pointer_with_theme(
+                qh,
+                &seat,
+                self.shm_state.wl_shm(),
+                surface,
+                ThemeSpec::System,
+            ).unwrap();
+            self.pointer = Some(themed_pointer);
         }
         if capability == Capability::Keyboard && self.keyboard.is_none() {
             let keyboard = self.seat_state.get_keyboard(qh, &seat, None).unwrap();
@@ -715,7 +740,11 @@ impl PointerHandler for AppState {
             }
 
             match &event.kind {
-                PointerEventKind::Enter { .. } => {}
+                PointerEventKind::Enter { .. } => {
+                    if let Some(ref themed_pointer) = self.pointer {
+                        let _ = themed_pointer.set_cursor(_conn, CursorIcon::Default);
+                    }
+                }
                 PointerEventKind::Leave { .. } => {}
                 PointerEventKind::Motion { .. } => {
                     if let Some(state) = &mut self.state {
@@ -758,30 +787,37 @@ impl PointerHandler for AppState {
                                 changed = true;
                             }
                         } else {
-                            if btn == clear_ui::widget::MouseButton::Left {
-                                if let Some(old) = st.focused_widget.take() {
-                                    st.widgets[old].unfocus();
-                                }
-                            }
+                            let mut clicked_idx = None;
                             for i in (0..st.widgets.len()).rev() {
                                 if st.widgets[i].hit_test(st.cursor_x, st.cursor_y) {
-                                    if st.widgets[i].mouse_input(
-                                        btn,
-                                        clear_ui::widget::ElementState::Pressed,
-                                        st.cursor_x,
-                                        st.cursor_y,
-                                    ) {
-                                        changed = true;
-                                    }
-                                    if btn == clear_ui::widget::MouseButton::Left && st.widgets[i].draggable() {
-                                        st.widgets[i].drag_begin(st.cursor_x, st.cursor_y);
-                                        st.drag_widget = Some(i);
-                                    }
-                                    if btn == clear_ui::widget::MouseButton::Left {
-                                        st.widgets[i].focus();
-                                        st.focused_widget = Some(i);
-                                    }
+                                    clicked_idx = Some(i);
                                     break;
+                                }
+                            }
+                            if btn == clear_ui::widget::MouseButton::Left {
+                                if let Some(old) = st.focused_widget {
+                                    if Some(old) != clicked_idx {
+                                        st.widgets[old].unfocus();
+                                        st.focused_widget = None;
+                                    }
+                                }
+                            }
+                            if let Some(i) = clicked_idx {
+                                if st.widgets[i].mouse_input(
+                                    btn,
+                                    clear_ui::widget::ElementState::Pressed,
+                                    st.cursor_x,
+                                    st.cursor_y,
+                                ) {
+                                    changed = true;
+                                }
+                                if btn == clear_ui::widget::MouseButton::Left && st.widgets[i].draggable() {
+                                    st.widgets[i].drag_begin(st.cursor_x, st.cursor_y);
+                                    st.drag_widget = Some(i);
+                                }
+                                if btn == clear_ui::widget::MouseButton::Left {
+                                    st.widgets[i].focus();
+                                    st.focused_widget = Some(i);
                                 }
                             }
                         }
