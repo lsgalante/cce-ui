@@ -5374,7 +5374,7 @@ impl Widget for TextBox {
                     }
                     let mut inserted_count = 0;
                     for ch in text.chars() {
-                        if ch.is_alphanumeric() || ch == ' ' || ch == '-' || ch == '_' || ch == '*' {
+                        if !ch.is_control() {
                             new_buf.push(ch);
                             inserted_count += 1;
                         }
