@@ -207,6 +207,183 @@ pub mod focus {
     }
 }
 
+pub mod hover_animation {
+    use std::cell::RefCell;
+    use crate::colors;
+
+    #[derive(Debug, Clone)]
+    pub struct HoverState {
+        pub current_x: f32,
+        pub current_y: f32,
+        pub current_w: f32,
+        pub current_h: f32,
+        pub current_alpha: f32,
+
+        pub target_x: Option<f32>,
+        pub target_y: Option<f32>,
+        pub target_w: Option<f32>,
+        pub target_h: Option<f32>,
+        pub target_alpha: f32,
+
+        pub registered_this_frame: bool,
+        pub scroll_offset: f32,
+    }
+
+    impl HoverState {
+        fn new() -> Self {
+            Self {
+                current_x: 0.0,
+                current_y: 0.0,
+                current_w: 0.0,
+                current_h: 0.0,
+                current_alpha: 0.0,
+
+                target_x: None,
+                target_y: None,
+                target_w: None,
+                target_h: None,
+                target_alpha: 0.0,
+
+                registered_this_frame: false,
+                scroll_offset: 0.0,
+            }
+        }
+    }
+
+    thread_local! {
+        pub static HOVER_STATE: RefCell<HoverState> = RefCell::new(HoverState::new());
+        pub static CURSOR_POS: RefCell<(f32, f32)> = RefCell::new((0.0, 0.0));
+    }
+
+    pub fn set_cursor_pos(x: f32, y: f32) {
+        CURSOR_POS.with(|pos| {
+            *pos.borrow_mut() = (x, y);
+        });
+    }
+
+    pub fn reset_frame_registration() {
+        HOVER_STATE.with(|state| {
+            state.borrow_mut().registered_this_frame = false;
+        });
+    }
+
+    pub fn set_scroll_offset(offset: f32) {
+        HOVER_STATE.with(|state| {
+            state.borrow_mut().scroll_offset = offset;
+        });
+    }
+
+    pub fn get_scroll_offset() -> f32 {
+        HOVER_STATE.with(|state| {
+            state.borrow().scroll_offset
+        })
+    }
+
+    pub fn register_hovered(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) {
+        HOVER_STATE.with(|state| {
+            let mut s = state.borrow_mut();
+            s.target_x = Some(x);
+            s.target_y = Some(y);
+            s.target_w = Some(w);
+            s.target_h = Some(h);
+            s.target_alpha = color[3];
+            s.registered_this_frame = true;
+        });
+    }
+
+    pub fn post_render_check() {
+        HOVER_STATE.with(|state| {
+            let mut s = state.borrow_mut();
+            if !s.registered_this_frame {
+                s.target_alpha = 0.0;
+                let (cx, cy) = CURSOR_POS.with(|pos| *pos.borrow());
+                s.target_x = Some(cx);
+                s.target_y = Some(cy + s.scroll_offset);
+                s.target_w = Some(0.0);
+                s.target_h = Some(0.0);
+            }
+        });
+    }
+
+    pub fn tick(dt: f32) -> bool {
+        HOVER_STATE.with(|state| {
+            let mut s = state.borrow_mut();
+            let decay = 15.0;
+            let mut changed = false;
+
+            if s.current_alpha <= 0.001 && s.target_alpha > 0.0 {
+                if let (Some(tx), Some(ty), Some(tw), Some(th)) = (s.target_x, s.target_y, s.target_w, s.target_h) {
+                    s.current_x = tx;
+                    s.current_y = ty;
+                    s.current_w = tw;
+                    s.current_h = th;
+                }
+            }
+
+            if (s.current_alpha - s.target_alpha).abs() > 0.001 {
+                s.current_alpha += (s.target_alpha - s.current_alpha) * (1.0 - (-decay * dt).exp());
+                changed = true;
+            } else if s.current_alpha != s.target_alpha {
+                s.current_alpha = s.target_alpha;
+                changed = true;
+            }
+
+            if let (Some(tx), Some(ty), Some(tw), Some(th)) = (s.target_x, s.target_y, s.target_w, s.target_h) {
+                if (s.current_x - tx).abs() > 0.1 {
+                    s.current_x += (tx - s.current_x) * (1.0 - (-decay * dt).exp());
+                    changed = true;
+                } else if s.current_x != tx {
+                    s.current_x = tx;
+                    changed = true;
+                }
+
+                if (s.current_y - ty).abs() > 0.1 {
+                    s.current_y += (ty - s.current_y) * (1.0 - (-decay * dt).exp());
+                    changed = true;
+                } else if s.current_y != ty {
+                    s.current_y = ty;
+                    changed = true;
+                }
+
+                if (s.current_w - tw).abs() > 0.1 {
+                    s.current_w += (tw - s.current_w) * (1.0 - (-decay * dt).exp());
+                    changed = true;
+                } else if s.current_w != tw {
+                    s.current_w = tw;
+                    changed = true;
+                }
+
+                if (s.current_h - th).abs() > 0.1 {
+                    s.current_h += (th - s.current_h) * (1.0 - (-decay * dt).exp());
+                    changed = true;
+                } else if s.current_h != th {
+                    s.current_h = th;
+                    changed = true;
+                }
+            }
+
+            changed
+        })
+    }
+
+    pub fn get_quad() -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        HOVER_STATE.with(|state| {
+            let s = state.borrow();
+            if s.current_alpha > 0.001 {
+                Some((
+                    s.current_x,
+                    s.current_y,
+                    s.current_w,
+                    s.current_h,
+                    [1.0, 1.0, 1.0, s.current_alpha],
+                ))
+            } else {
+                None
+            }
+        })
+    }
+}
+
 pub mod clipboard {
     pub fn copy_to_clipboard(text: &str) {
         let text = text.to_string();
@@ -467,8 +644,22 @@ pub struct TextLabel {
 }
 
 impl TextLabel {
+    pub fn estimate_width(text: &str, font_size: f32) -> f32 {
+        let mut weight_sum = 0.0;
+        for c in text.chars() {
+            weight_sum += match c {
+                'i' | 'l' | 't' | 'j' | 'I' | ' ' | '.' | ',' | '!' | ';' | ':' | '\'' | '1' | '-' | '(' | ')' | '[' | ']' => 0.26,
+                'f' | 'r' | 's' | 'J' => 0.35,
+                'w' | 'm' | 'M' | 'W' => 0.72,
+                'A' | 'B' | 'C' | 'D' | 'E' | 'G' | 'H' | 'K' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'X' | 'Y' | 'Z' => 0.65,
+                _ => 0.52,
+            };
+        }
+        weight_sum * font_size
+    }
+
     pub fn is_covered_by(&self, px: f32, py: f32, pw: f32, ph: f32) -> bool {
-        let text_w = self.text.chars().count() as f32 * self.font_size * 0.65;
+        let text_w = Self::estimate_width(&self.text, self.font_size);
         let x_overlap = self.x <= px + pw && (self.x + text_w) >= px;
         let y_overlap = self.y <= py + ph && (self.y + self.font_size) >= py;
         x_overlap && y_overlap
@@ -486,6 +677,7 @@ pub struct WidgetBase {
     pub hovered: bool,
     pub row_x: f32,
     pub row_w: f32,
+    pub focused: bool,
 }
 
 impl WidgetBase {
@@ -499,6 +691,21 @@ impl WidgetBase {
             hovered: false,
             row_x: 0.0,
             row_w: 0.0,
+            focused: false,
+        }
+    }
+
+    pub fn new_rect(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self {
+            x,
+            y,
+            w,
+            h,
+            label: None,
+            hovered: false,
+            row_x: 0.0,
+            row_w: 0.0,
+            focused: false,
         }
     }
 }
@@ -549,6 +756,11 @@ pub trait Widget {
     }
 
     fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        hover_animation::set_cursor_pos(px, py);
+        self.on_cursor_moved(px, py)
+    }
+
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         if self.base().is_some() {
             let was = self.hovered();
             let is_hit = self.hit_test(px, py);
@@ -576,27 +788,32 @@ pub trait Widget {
         }
     }
 
-    fn hover_highlight(&self) -> Option<[f32; 4]> {
-        if self.hovered() { Some([1.0, 1.0, 1.0, 0.06]) } else { None }
-    }
+    fn is_active(&self) -> bool { false }
 
-    fn hover_highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> {
-        if let Some(b) = self.base() {
-            if self.hovered() {
-                let hx = if b.row_w > 0.0 { b.row_x } else { b.x };
-                let hw = if b.row_w > 0.0 { b.row_w } else { b.w };
-                let top_offset = self.top_room();
-                let hy = b.y - top_offset;
-                let hh = b.h + top_offset;
-                Some((hx, hy, hw, hh, [1.0, 1.0, 1.0, 0.06]))
-            } else {
-                None
-            }
-        } else if let Some(hc) = self.hover_highlight() {
-            let (x, y, w, h) = self.rect();
-            Some((x, y, w, h, hc))
+    fn highlight_color(&self) -> Option<[f32; 4]> {
+        let is_focused = self.base().map_or(false, |b| b.focused);
+        if is_focused || self.is_active() {
+            Some(colors::HIGHLIGHT_PRIMARY)
+        } else if self.hovered() {
+            Some(colors::HIGHLIGHT_SECONDARY)
         } else {
             None
+        }
+    }
+
+    fn highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        let hc = self.highlight_color()?;
+        if let Some(b) = self.base() {
+            let hx = if b.row_w > 0.0 { b.row_x } else { b.x };
+            let hw = if b.row_w > 0.0 { b.row_w } else { b.w };
+            let top_offset = self.top_room();
+            let hy = b.y - top_offset;
+            let hh = b.h + top_offset;
+            Some((hx, hy, hw, hh, hc))
+        } else {
+            let (x, y, w, h) = self.rect();
+            let top_offset = self.top_room();
+            Some((x, y - top_offset, w, h + top_offset, hc))
         }
     }
 
@@ -610,6 +827,17 @@ pub trait Widget {
     fn draggable(&self) -> bool { false }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { Vec::new() }
+    fn all_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = self.extra_quads();
+        if let Some(hq) = self.highlight_quad() {
+            if hq.4 == colors::HIGHLIGHT_SECONDARY {
+                hover_animation::register_hovered(hq.0, hq.1, hq.2, hq.3, hq.4);
+            } else {
+                quads.push(hq);
+            }
+        }
+        quads
+    }
     fn text_labels(&self) -> Vec<TextLabel> {
         if let Some(b) = self.base() {
             if let Some(ref label) = b.label {
@@ -626,6 +854,10 @@ pub trait Widget {
     }
     fn widget_font(&self) -> Option<String> { None }
     fn value(&self) -> i32 { 0 }
+    fn type_name(&self) -> &'static str {
+        let full_name = std::any::type_name::<Self>();
+        full_name.split("::").last().unwrap_or("Widget")
+    }
     fn top_room(&self) -> f32 {
         if let Some(b) = self.base() {
             if b.label.is_some() {
@@ -643,8 +875,16 @@ pub trait Widget {
 
     fn set_drag_bounds(&mut self, _bx: f32, _by: f32, _bw: f32, _bh: f32) {}
 
-    fn focus(&mut self) {}
-    fn unfocus(&mut self) {}
+    fn focus(&mut self) {
+        if let Some(b) = self.base_mut() {
+            b.focused = true;
+        }
+    }
+    fn unfocus(&mut self) {
+        if let Some(b) = self.base_mut() {
+            b.focused = false;
+        }
+    }
     fn set_selected(&mut self, _selected: bool) {}
     fn keyboard_input(&mut self, _event: &KeyEvent) -> bool { false }
 
@@ -1228,7 +1468,7 @@ impl Widget for ParametersBg {
                 let thumb_x = track_x + t * (track_w - thumb_size);
                 let thumb_y = r.1 + 3.0;
 
-                quads.push((track_x, track_y, track_w, track_h, colors::SLIDER_TRACK));
+                quads.push((track_x, track_y, track_w, track_h, colors::slider_track()));
 
                 let thumb_color = if self.dragging_param == Some(i) {
                     colors::SLIDER_THUMB_DRAG
@@ -1491,7 +1731,7 @@ impl Widget for MenuBar {
         false
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         if !self.visible {
             return false;
         }
@@ -1761,7 +2001,7 @@ impl Widget for Menu {
         false
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         self.was_open = None;
         let was_hovering = self.hovering;
         self.hovering = self.hit_test(px, py);
@@ -1956,7 +2196,7 @@ pub struct Button {
 impl Button {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            base: WidgetBase { x, y, w, h, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new_rect(x, y, w, h),
             pressed: false,
             just_clicked: false,
             kind: ButtonKind::Primary,
@@ -1966,7 +2206,7 @@ impl Button {
 
     pub fn new_reset(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            base: WidgetBase { x, y, w, h, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new_rect(x, y, w, h),
             pressed: false,
             just_clicked: false,
             kind: ButtonKind::Reset,
@@ -1976,7 +2216,7 @@ impl Button {
 
     pub fn new_list_row(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            base: WidgetBase { x, y, w, h, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new_rect(x, y, w, h),
             pressed: false,
             just_clicked: false,
             kind: ButtonKind::ListRow,
@@ -1986,7 +2226,7 @@ impl Button {
 
     pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            base: WidgetBase { x, y, w, h, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new_rect(x, y, w, h),
             pressed: false,
             just_clicked: false,
             kind: ButtonKind::CopyIcon,
@@ -2009,7 +2249,7 @@ impl Widget for Button {
     fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
     fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
     fn top_room(&self) -> f32 { 0.0 }
-    fn hover_highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
+    fn highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
 
     fn color(&self) -> [f32; 4] {
         match self.kind {
@@ -2080,7 +2320,7 @@ impl Widget for Button {
             let est_w = if label == "📋" {
                 12.0
             } else {
-                label.len() as f32 * 6.5
+                TextLabel::estimate_width(label, font_size)
             };
             let color = match self.kind {
                 ButtonKind::ListRow | ButtonKind::CopyIcon => {
@@ -2137,16 +2377,7 @@ pub struct Panel {
 impl Panel {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            base: WidgetBase {
-                x,
-                y,
-                w,
-                h,
-                label: None,
-                hovered: false,
-                row_x: 0.0,
-                row_w: 0.0,
-            },
+            base: WidgetBase::new_rect(x, y, w, h),
             dragging: false,
             drag_ox: 0.0,
             drag_oy: 0.0,
@@ -2170,7 +2401,7 @@ impl Widget for Panel {
     fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
     fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
     fn top_room(&self) -> f32 { 0.0 }
-    fn hover_highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
+    fn highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
 
     fn color(&self) -> [f32; 4] { if self.dragging { colors::PANEL_DRAG } else { colors::PANEL_IDLE } }
 
@@ -2306,7 +2537,7 @@ impl Widget for Node {
         self.bounds = Some((bx, by, bw, bh));
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was_hovered = self.hovered;
         self.hovered = self.hit_test(px, py);
 
@@ -2435,7 +2666,7 @@ pub struct Checkbox {
 impl Checkbox {
     pub fn new() -> Self {
         Self {
-            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new(),
             checked: false,
             just_clicked: false,
         }
@@ -2495,7 +2726,7 @@ pub struct Toggle {
 impl Toggle {
     pub fn new() -> Self {
         Self {
-            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new(),
             toggled: false,
             just_toggled: false,
         }
@@ -2559,17 +2790,10 @@ pub struct Label {
 
 impl Label {
     pub fn new(text: &str) -> Self {
+        let mut base = WidgetBase::new();
+        base.label = Some(text.to_string());
         Self {
-            base: WidgetBase {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-                label: Some(text.to_string()),
-                hovered: false,
-                row_x: 0.0,
-                row_w: 0.0,
-            },
+            base,
             font_size: 12.0,
             color: [0x83, 0x83, 0x8a],
         }
@@ -2701,6 +2925,7 @@ impl Widget for Svg {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Slider {
     base: WidgetBase,
     dragging: bool,
@@ -2712,7 +2937,7 @@ pub struct Slider {
 impl Slider {
     pub fn new() -> Self {
         Self {
-            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new(),
             dragging: false,
             value: 0.5,
             drag_offset: 0.0,
@@ -2733,13 +2958,22 @@ impl Slider {
     pub fn set_scroll(&mut self, enabled: bool) {
         self.scroll_enabled = enabled;
     }
+
+    pub fn with_value(mut self, val: f32) -> Self {
+        self.value = val.clamp(0.0, 1.0);
+        self
+    }
+
+    pub fn set_value(&mut self, val: f32) {
+        self.value = val.clamp(0.0, 1.0);
+    }
 }
 
 impl Widget for Slider {
     fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
     fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
 
-    fn color(&self) -> [f32; 4] { colors::SLIDER_TRACK }
+    fn color(&self) -> [f32; 4] { colors::slider_track() }
 
     fn draggable(&self) -> bool { true }
     fn is_dragging(&self) -> bool { self.dragging }
@@ -2817,7 +3051,7 @@ pub struct RangeSlider {
 impl RangeSlider {
     pub fn new() -> Self {
         Self {
-            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new(),
             value_low: 0.2,
             value_high: 0.8,
             active_thumb: None,
@@ -2850,7 +3084,7 @@ impl Widget for RangeSlider {
     fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
     fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
 
-    fn color(&self) -> [f32; 4] { colors::SLIDER_TRACK }
+    fn color(&self) -> [f32; 4] { colors::slider_track() }
 
     fn draggable(&self) -> bool { true }
     fn is_dragging(&self) -> bool { self.active_thumb.is_some() }
@@ -2963,7 +3197,7 @@ pub struct ProgressBar {
 impl ProgressBar {
     pub fn new(value: f32) -> Self {
         Self {
-            base: WidgetBase { x: 0.0, y: 0.0, w: 0.0, h: 0.0, label: None, hovered: false, row_x: 0.0, row_w: 0.0 },
+            base: WidgetBase::new(),
             value,
         }
     }
@@ -2977,7 +3211,7 @@ impl ProgressBar {
 impl Widget for ProgressBar {
     fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
     fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
-    fn hover_highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
+    fn highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
 
     fn color(&self) -> [f32; 4] { colors::PROGRESS_BG }
 }
@@ -3023,7 +3257,7 @@ impl Widget for Splitter {
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was = self.hovered;
         self.hovered = self.hit_test(px, py);
         was != self.hovered
@@ -3133,7 +3367,7 @@ impl Widget for Spinbox {
 
 
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was = self.base.hovered;
         self.base.hovered = self.hit_test(px, py);
         if !self.base.hovered {
@@ -3500,7 +3734,33 @@ impl Widget for ColorSelector {
             self.color[2] as f32 / 255.0,
             1.0,
         ]);
-        quads.push((pick_x, self.base.y, pick_w, self.base.h, linear_c));
+        let border_w = 1.0;
+        let border_c = colors::color_borders_color();
+        
+        let r = border_c[0];
+        let g = border_c[1];
+        let b = border_c[2];
+        let steps = 6;
+        for i in (1..=steps).rev() {
+            let offset = i as f32 * 0.75;
+            let rx = pick_x - offset;
+            let ry = self.base.y - offset;
+            let rw = pick_w + 2.0 * offset;
+            let rh = self.base.h + 2.0 * offset;
+            let alpha = 0.08 * (1.0 - (i as f32 / steps as f32).powf(1.5));
+            if alpha > 0.001 {
+                quads.push((rx, ry, rw, rh, [r, g, b, alpha]));
+            }
+        }
+
+        quads.push((pick_x, self.base.y, pick_w, self.base.h, border_c));
+        quads.push((
+            pick_x + border_w,
+            self.base.y + border_w,
+            pick_w - 2.0 * border_w,
+            self.base.h - 2.0 * border_w,
+            linear_c,
+        ));
         quads
     }
 
@@ -3576,7 +3836,7 @@ impl Widget for Breadcrumb {
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was = self.hovered;
         self.hovered = self.hit_test(px, py);
         let old = self.hovered_seg;
@@ -3747,7 +4007,7 @@ impl Widget for Spreadsheet {
         self.scroll_y = self.scroll_y.clamp(0.0, max_scroll_y);
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was_hovered = self.hovered;
         self.hovered = self.hit_test(px, py);
 
@@ -4091,7 +4351,7 @@ impl Widget for ScrollBox {
     fn color(&self) -> [f32; 4] { [0.08, 0.08, 0.12, 0.3] }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
-    fn hover_highlight(&self) -> Option<[f32; 4]> { None }
+    fn highlight_color(&self) -> Option<[f32; 4]> { None }
 
     fn focus(&mut self) {
         focus::set_focused(self);
@@ -4108,7 +4368,7 @@ impl Widget for ScrollBox {
         false
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was = self.hovered;
         self.hovered = self.hit_test(px, py);
         was != self.hovered
@@ -4892,11 +5152,11 @@ impl Widget for ScrollingList {
         self.scroll_box.hovered()
     }
 
-    fn hover_highlight(&self) -> Option<[f32; 4]> {
-        self.scroll_box.hover_highlight()
+    fn highlight_color(&self) -> Option<[f32; 4]> {
+        self.scroll_box.highlight_color()
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         self.scroll_box.cursor_moved(px, py)
     }
 
@@ -5057,7 +5317,7 @@ impl Widget for Dropdown {
         }
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was_hovered = self.base.hovered;
         let was_hovered_item = self.hovered_item;
         
@@ -5486,7 +5746,7 @@ impl Widget for TextBox {
 
 
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         if self.disabled {
             let was = self.base.hovered;
             self.base.hovered = false;
@@ -5970,6 +6230,8 @@ pub struct Paginator {
     hovered_tab: Option<usize>,
     pressed_tab: Option<usize>,
     page_changed: bool,
+    current_y: Option<f32>,
+    target_y: f32,
     parent: Option<*mut (dyn Widget + 'static)>,
     children: Vec<*mut (dyn Widget + 'static)>,
 }
@@ -5985,6 +6247,8 @@ impl Paginator {
             hovered_tab: None,
             pressed_tab: None,
             page_changed: false,
+            current_y: Some(10.0),
+            target_y: 10.0,
             parent: None,
             children: Vec::new(),
         }
@@ -5996,7 +6260,17 @@ impl Paginator {
 
     pub fn set_selected_page(&mut self, page: usize) {
         if page < self.pages.len() {
-            self.selected_page = page;
+            let target = 10.0 + page as f32 * 50.0;
+            if self.selected_page != page {
+                self.selected_page = page;
+                self.target_y = target;
+                if self.current_y.is_none() {
+                    self.current_y = Some(target);
+                }
+            } else if self.current_y.is_none() {
+                self.target_y = target;
+                self.current_y = Some(target);
+            }
         }
     }
 }
@@ -6008,10 +6282,46 @@ impl Widget for Paginator {
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
 
+    fn highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        if let Some(i) = self.hovered_tab {
+            let bx = self.x + 5.0;
+            let by = self.y + 10.0 + i as f32 * 50.0;
+            let bw = self.sidebar_w - 10.0;
+            let bh = 40.0;
+            let scroll_offset = hover_animation::get_scroll_offset();
+            Some((bx, by + scroll_offset, bw, bh, colors::HIGHLIGHT_SECONDARY))
+        } else {
+            None
+        }
+    }
+
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
         quads.push((self.x, self.y, self.sidebar_w, self.h, colors::SIDEBAR_BG));
-        quads.push((self.x + self.sidebar_w, self.y, self.w - self.sidebar_w, self.h, colors::CONTENT_BG));
+        quads.push((self.x + self.sidebar_w, self.y, self.w - self.sidebar_w, self.h, colors::page_low_color()));
+
+        if let Some(cy) = self.current_y {
+            let bx = self.x + 5.0;
+            let by = self.y + cy;
+            let bw = self.sidebar_w - 10.0;
+            let bh = 40.0;
+            
+            // Draw nested rectangles to create a soft, faded-out edge/border effect
+            let steps = 16;
+            let start_alpha = 0.008;
+            let c = 0.000516;
+            for i in 0..steps {
+                let offset = i as f32 * 0.5;
+                let rx = bx + offset;
+                let ry = by + offset;
+                let rw = bw - 2.0 * offset;
+                let rh = bh - 2.0 * offset;
+                if rw > 0.0 && rh > 0.0 {
+                    let step_alpha = start_alpha + c * (i * i) as f32;
+                    quads.push((rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha]));
+                }
+            }
+        }
 
         for i in 0..self.pages.len() {
             let bx = self.x + 5.0;
@@ -6019,9 +6329,7 @@ impl Widget for Paginator {
             let bw = self.sidebar_w - 10.0;
             let bh = 40.0;
 
-            let c = if self.selected_page == i {
-                [0.20, 0.40, 0.65, 0.4]
-            } else if self.pressed_tab == Some(i) {
+            let c = if self.pressed_tab == Some(i) {
                 [0.20, 0.20, 0.25, 0.25]
             } else if self.hovered_tab == Some(i) {
                 [0.20, 0.20, 0.25, 0.15]
@@ -6046,7 +6354,7 @@ impl Widget for Paginator {
             let bh = 40.0;
 
             let font_size = 12.0;
-            let est_w = page_name.len() as f32 * 6.5;
+            let est_w = TextLabel::estimate_width(page_name, font_size);
             let color = if self.selected_page == i {
                 [230, 230, 242]
             } else {
@@ -6064,7 +6372,7 @@ impl Widget for Paginator {
         labels
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
         let was_hovered_tab = self.hovered_tab;
         self.hovered_tab = None;
         for i in 0..self.pages.len() {
@@ -6106,6 +6414,10 @@ impl Widget for Paginator {
                         if self.selected_page != i {
                             self.selected_page = i;
                             self.page_changed = true;
+                            self.target_y = 10.0 + i as f32 * 50.0;
+                            if self.current_y.is_none() {
+                                self.current_y = Some(self.target_y);
+                            }
                         }
                         return true;
                     }
@@ -6125,6 +6437,23 @@ impl Widget for Paginator {
     }
 
     fn value(&self) -> i32 { self.selected_page as i32 }
+
+    fn tick(&mut self, dt: f32) -> bool {
+        if let Some(current) = self.current_y {
+            let diff = self.target_y - current;
+            if diff.abs() > 0.1 {
+                let decay = 15.0;
+                let next = current + diff * (1.0 - (-decay * dt).exp());
+                self.current_y = Some(next);
+                true
+            } else {
+                self.current_y = Some(self.target_y);
+                false
+            }
+        } else {
+            false
+        }
+    }
 
     fn parent(&self) -> Option<*mut (dyn Widget + 'static)> { self.parent }
     fn set_parent(&mut self, parent: Option<*mut (dyn Widget + 'static)>) { self.parent = parent; }
@@ -6152,16 +6481,7 @@ pub struct Trackpad {
 impl Trackpad {
     pub fn new() -> Self {
         Self {
-            base: WidgetBase {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-                label: None,
-                hovered: false,
-                row_x: 0.0,
-                row_w: 0.0,
-            },
+            base: WidgetBase::new(),
             fingers: Vec::new(),
         }
     }
@@ -6313,6 +6633,65 @@ impl Widget for Trackpad {
         false
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct Separator {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub color: [f32; 4],
+}
+
+impl Separator {
+    pub fn new(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Self {
+        Self { x, y, w, h, color }
+    }
+}
+
+impl Widget for Separator {
+    fn rect(&self) -> (f32, f32, f32, f32) {
+        (self.x, self.y, self.w, self.h)
+    }
+
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.x = x;
+        self.y = y;
+        self.w = w;
+        self.h = h;
+    }
+
+    fn color(&self) -> [f32; 4] {
+        self.color
+    }
+}
+
+pub fn serialize_widgets(widgets: &[Box<dyn Widget>]) -> String {
+    let mut json = String::new();
+    json.push('[');
+    for (i, w) in widgets.iter().enumerate() {
+        if i > 0 {
+            json.push(',');
+        }
+        let (x, y, width, height) = w.rect();
+        let label = w.base().and_then(|b| b.label.clone()).unwrap_or_default();
+        let focused = w.base().map_or(false, |b| b.focused);
+        let hovered = w.hovered();
+        let value = w.value();
+        let type_name = w.type_name();
+
+        // Escape JSON label
+        let escaped_label = label.replace('\\', "\\\\").replace('"', "\\\"");
+
+        json.push_str(&format!(
+            "{{\"type\":\"{}\",\"label\":\"{}\",\"rect\":[{},{},{},{}],\"focused\":{},\"hovered\":{},\"value\":{}}}",
+            type_name, escaped_label, x, y, width, height, focused, hovered, value
+        ));
+    }
+    json.push(']');
+    json
+}
+
 
 
 

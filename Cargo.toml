@@ -18,6 +18,8 @@ smithay-client-toolkit = { version = "0.19.2", features = ["calloop"] }
 calloop = "0.13.0"
 calloop-wayland-source = "0.3.0"
 wayland-client = { version = "0.31", features = ["system"] }
+wayland-backend = "0.3"
+wayland-scanner = "0.31"
 xkeysym = "0.2"
 resvg = "0.41.0"
 serde = { version = "1.0", features = ["derive"] }

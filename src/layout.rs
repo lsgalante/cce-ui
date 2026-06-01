@@ -10,12 +10,8 @@ pub trait RenderTarget {
 
 pub fn render_widget<T: Widget>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32) {
     w.set_rect(x, y, ww, wh);
-    for (qx, qy, qw, qh, qc) in w.extra_quads() {
+    for (qx, qy, qw, qh, qc) in w.all_quads() {
         pc.rect(qc, qx, qy, qw, qh);
-    }
-    // Render hover highlight on top of widget surfaces
-    if let Some((hx, hy, hw, hh, hc)) = w.hover_highlight_quad() {
-        pc.rect(hc, hx, hy, hw, hh);
     }
     let font_opt = w.widget_font();
     for label in w.text_labels() {
@@ -29,6 +25,23 @@ pub fn render_widget<T: Widget>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y:
             pc.text_with_font(&label.text, label.x, label.y, label.font_size, color_f32, font);
         } else {
             pc.text(&label.text, label.x, label.y, label.font_size, color_f32);
+        }
+    }
+}
+
+pub struct UiFrame;
+
+impl UiFrame {
+    pub fn start(scroll_offset: f32) -> Self {
+        crate::widget::hover_animation::reset_frame_registration();
+        crate::widget::hover_animation::set_scroll_offset(scroll_offset);
+        Self
+    }
+
+    pub fn finish(self, pc: &mut dyn RenderTarget) {
+        crate::widget::hover_animation::post_render_check();
+        if let Some((qx, qy, qw, qh, qc)) = crate::widget::hover_animation::get_quad() {
+            pc.rect(qc, qx, qy, qw, qh);
         }
     }
 }

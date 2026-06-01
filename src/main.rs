@@ -145,7 +145,7 @@ impl State {
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
+                power_preference: wgpu::PowerPreference::LowPower,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
@@ -595,6 +595,7 @@ struct AppState {
     ctrl_pressed: bool,
     shift_pressed: bool,
     pressed_key: Option<PressedKey>,
+    inspector: Option<clear_ui::protocol::zclear_inspector_v1::ZclearInspectorV1>,
 }
 
 impl CompositorHandler for AppState {
@@ -1071,6 +1072,17 @@ impl ProvidesRegistryState for AppState {
     ) {}
 }
 
+impl wayland_client::Dispatch<clear_ui::protocol::zclear_inspector_v1::ZclearInspectorV1, ()> for AppState {
+    fn event(
+        _state: &mut Self,
+        _proxy: &clear_ui::protocol::zclear_inspector_v1::ZclearInspectorV1,
+        _event: clear_ui::protocol::zclear_inspector_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {}
+}
+
 delegate_compositor!(AppState);
 delegate_xdg_shell!(AppState);
 delegate_xdg_window!(AppState);
@@ -1091,6 +1103,7 @@ fn main() {
     let shm_state = Shm::bind(&globals, &qh).unwrap();
     let seat_state = SeatState::new(&globals, &qh);
     let output_state = OutputState::new(&globals, &qh);
+    let inspector = globals.bind(&qh, 1..=1, ()).ok();
 
     let mut app = AppState {
         registry_state: RegistryState::new(&globals),
@@ -1110,6 +1123,7 @@ fn main() {
         ctrl_pressed: false,
         shift_pressed: false,
         pressed_key: None,
+        inspector,
     };
 
     // Perform a roundtrip to populate output_state with active output scales
@@ -1128,6 +1142,10 @@ fn main() {
     window.set_app_id("clear-ui");
     window.set_min_size(Some((pw, ph)));
     window.commit();
+
+    if let Some(ref inspector) = app.inspector {
+        inspector.register_client(&surface);
+    }
 
     let wayland_handle = Box::leak(Box::new(clear_ui::wayland::WaylandSurfaceHandle {
         display_ptr: conn.backend().display_id().as_ptr() as *mut std::ffi::c_void,
@@ -1189,6 +1207,12 @@ fn main() {
             app.redraw = false;
             if let Some(state) = &mut app.state {
                 state.render();
+                if let Some(ref inspector) = app.inspector {
+                    if let Some(ref surface) = app.surface {
+                        let json = clear_ui::widget::serialize_widgets(&state.widgets);
+                        inspector.update_state(surface, json);
+                    }
+                }
             }
         }
     }

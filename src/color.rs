@@ -22,10 +22,131 @@ pub const TOGGLE_OFF: [f32; 4] = [0.25, 0.25, 0.30, 1.0];
 pub const TOGGLE_ON: [f32; 4] = [0.14, 0.70, 0.38, 1.0];
 pub const TOGGLE_HOVER: [f32; 4] = [0.30, 0.30, 0.35, 1.0];
 pub const SLIDER_TRACK: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
+
+use std::sync::RwLock;
+
+static SLIDER_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_TRACK);
+static PAGE_LOW_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0600316, 0.0600316, 0.080219, 1.0]);
+static COLOR_BORDERS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.2039, 0.2039, 0.2530, 1.0]);
+
+pub fn page_low_color() -> [f32; 4] {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("page_low_color") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
+                    if hex.len() >= 6 {
+                        if let (Ok(r), Ok(g), Ok(b)) = (
+                            u8::from_str_radix(&hex[0..2], 16),
+                            u8::from_str_radix(&hex[2..4], 16),
+                            u8::from_str_radix(&hex[4..6], 16),
+                        ) {
+                            let r_f = srgb_to_linear(r as f32 / 255.0);
+                            let g_f = srgb_to_linear(g as f32 / 255.0);
+                            let b_f = srgb_to_linear(b as f32 / 255.0);
+                            if let Ok(mut lock) = PAGE_LOW_COLOR.write() {
+                                *lock = [r_f, g_f, b_f, 1.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *PAGE_LOW_COLOR.read().unwrap()
+}
+
+pub fn set_page_low_color(color: [f32; 4]) {
+    if let Ok(mut lock) = PAGE_LOW_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn color_borders_color() -> [f32; 4] {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("color_borders_color") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
+                    if hex.len() >= 6 {
+                        if let (Ok(r), Ok(g), Ok(b)) = (
+                            u8::from_str_radix(&hex[0..2], 16),
+                            u8::from_str_radix(&hex[2..4], 16),
+                            u8::from_str_radix(&hex[4..6], 16),
+                        ) {
+                            let r_f = srgb_to_linear(r as f32 / 255.0);
+                            let g_f = srgb_to_linear(g as f32 / 255.0);
+                            let b_f = srgb_to_linear(b as f32 / 255.0);
+                            if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() {
+                                *lock = [r_f, g_f, b_f, 1.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *COLOR_BORDERS_COLOR.read().unwrap()
+}
+
+pub fn set_color_borders_color(color: [f32; 4]) {
+    if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn slider_track() -> [f32; 4] {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("slider_track_color") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
+                    if hex.len() >= 6 {
+                        if let (Ok(r), Ok(g), Ok(b)) = (
+                            u8::from_str_radix(&hex[0..2], 16),
+                            u8::from_str_radix(&hex[2..4], 16),
+                            u8::from_str_radix(&hex[4..6], 16),
+                        ) {
+                            let r_f = srgb_to_linear(r as f32 / 255.0);
+                            let g_f = srgb_to_linear(g as f32 / 255.0);
+                            let b_f = srgb_to_linear(b as f32 / 255.0);
+                            if let Ok(mut lock) = SLIDER_TRACK_COLOR.write() {
+                                *lock = [r_f, g_f, b_f, 1.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *SLIDER_TRACK_COLOR.read().unwrap()
+}
+
+pub fn set_slider_track(color: [f32; 4]) {
+    if let Ok(mut lock) = SLIDER_TRACK_COLOR.write() {
+        *lock = color;
+    }
+}
+
 pub const SLIDER_THUMB: [f32; 4] = [0.60, 0.60, 0.65, 1.0];
 pub const SLIDER_THUMB_DRAG: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
 pub const PROGRESS_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
 pub const PROGRESS_FILL: [f32; 4] = [0.20, 0.50, 0.75, 1.0];
+
+pub const HIGHLIGHT_PRIMARY: [f32; 4] = [1.0, 1.0, 1.0, 0.12];
+pub const HIGHLIGHT_SECONDARY: [f32; 4] = [1.0, 1.0, 1.0, 0.06];
 
 pub const SPINBOX_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
 pub const SPINBOX_BUTTON: [f32; 4] = [0.25, 0.25, 0.32, 1.0];
