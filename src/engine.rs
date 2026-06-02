@@ -735,7 +735,11 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         _keyboard: &wl_keyboard::WlKeyboard,
         _surface: &wl_surface::WlSurface,
         _serial: u32,
-    ) {}
+    ) {
+        self.pressed_key = None;
+        self.ctrl_pressed = false;
+        self.shift_pressed = false;
+    }
     
     fn press_key(
         &mut self,
@@ -789,6 +793,8 @@ impl<A: Application> EngineState<A> {
             _ => {
                 if let Some(ref text) = event.utf8 {
                     Key::Character(text.clone())
+                } else if let Some(ch) = event.keysym.key_char() {
+                    Key::Character(ch.to_string())
                 } else {
                     return;
                 }

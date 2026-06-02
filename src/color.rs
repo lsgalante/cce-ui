@@ -28,6 +28,37 @@ use std::sync::RwLock;
 static SLIDER_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_TRACK);
 static PAGE_LOW_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0600316, 0.0600316, 0.080219, 1.0]);
 static COLOR_BORDERS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.2039, 0.2039, 0.2530, 1.0]);
+static NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
+
+pub fn node_color() -> [f32; 4] {
+    *NODE_COLOR.read().unwrap()
+}
+
+pub fn set_node_color(color: [f32; 4]) {
+    if let Ok(mut lock) = NODE_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn node_selected_color() -> [f32; 4] {
+    let base = node_color();
+    [
+        (base[0] + 0.10).min(1.0),
+        (base[1] + 0.20).min(1.0),
+        (base[2] + 0.20).min(1.0),
+        base[3]
+    ]
+}
+
+pub fn node_drag_color() -> [f32; 4] {
+    let base = node_color();
+    [
+        (base[0] + 0.20).min(1.0),
+        (base[1] + 0.35).min(1.0),
+        (base[2] + 0.30).min(1.0),
+        base[3]
+    ]
+}
 
 pub fn page_low_color() -> [f32; 4] {
     use std::sync::Once;

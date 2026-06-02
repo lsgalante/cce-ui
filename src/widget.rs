@@ -207,6 +207,59 @@ pub mod focus {
     }
 }
 
+pub mod popovers {
+    use super::Widget;
+    use std::cell::RefCell;
+
+    thread_local! {
+        static ACTIVE_POPOVERS: RefCell<Vec<*const (dyn Widget + 'static)>> = RefCell::new(Vec::new());
+    }
+
+    pub fn clear() {
+        ACTIVE_POPOVERS.with(|list| {
+            list.borrow_mut().clear();
+        });
+    }
+
+    pub fn register(w: &(dyn Widget + 'static)) {
+        ACTIVE_POPOVERS.with(|list| {
+            let ptr = w as *const (dyn Widget + 'static);
+            let mut list = list.borrow_mut();
+            if !list.contains(&ptr) {
+                list.push(ptr);
+            }
+        });
+    }
+
+    pub fn get_active() -> Vec<*const (dyn Widget + 'static)> {
+        ACTIVE_POPOVERS.with(|list| {
+            list.borrow().clone()
+        })
+    }
+
+    pub fn is_coordinate_covered(query_address: usize, px: f32, py: f32) -> bool {
+        ACTIVE_POPOVERS.with(|list| {
+            let list = list.borrow();
+            for popover_ptr in list.iter() {
+                let current_data = *popover_ptr as *const () as usize;
+                if query_address == current_data {
+                    continue;
+                }
+                unsafe {
+                    if let Some(popover) = popover_ptr.as_ref() {
+                        if let Some((x, y, width, height)) = popover.popover_rect() {
+                            if px >= x && px <= x + width && py >= y && py <= y + height {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        })
+    }
+}
+
 pub mod hover_animation {
     use std::cell::RefCell;
     use crate::colors;
@@ -658,6 +711,48 @@ impl TextLabel {
         weight_sum * font_size
     }
 
+    pub fn curved_layout(
+        text: &str,
+        cx: f32,
+        cy: f32,
+        r: f32,
+        start_angle: f32,
+        end_angle: f32,
+        font_size: f32,
+        color: [u8; 3],
+    ) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        let char_widths: Vec<f32> = text.chars().map(|c| {
+            Self::estimate_width(&c.to_string(), font_size)
+        }).collect();
+        let total_width: f32 = char_widths.iter().sum();
+        
+        let mid_angle = (start_angle + end_angle) / 2.0;
+        let angular_width = total_width / r;
+        let text_start_angle = mid_angle - angular_width / 2.0;
+        
+        let mut current_angle = text_start_angle;
+        for (i, c) in text.chars().enumerate() {
+            let cw = char_widths[i];
+            let dtheta = cw / r;
+            let char_center_angle = current_angle + dtheta / 2.0;
+            
+            let x = cx + r * char_center_angle.cos() - cw / 2.0;
+            let y = cy + r * char_center_angle.sin() - font_size / 2.0;
+            
+            labels.push(TextLabel {
+                text: c.to_string(),
+                x,
+                y,
+                font_size,
+                color,
+            });
+            
+            current_angle += dtheta;
+        }
+        labels
+    }
+
     pub fn is_covered_by(&self, px: f32, py: f32, pw: f32, ph: f32) -> bool {
         let text_w = Self::estimate_width(&self.text, self.font_size);
         let x_overlap = self.x <= px + pw && (self.x + text_w) >= px;
@@ -710,6 +805,14 @@ impl WidgetBase {
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct GraphNode {
+    pub name: String,
+    pub position: (f32, f32), // (column, row)
+    pub parameters: Vec<(String, String, String)>, // (name, value, type)
+    pub geom_visible: bool,
+}
+
 pub trait Widget {
     fn base(&self) -> Option<&WidgetBase> { None }
     fn base_mut(&mut self) -> Option<&mut WidgetBase> { None }
@@ -721,6 +824,10 @@ pub trait Widget {
             (0.0, 0.0, 0.0, 0.0)
         }
     }
+
+    fn label(&self) -> Option<String> { None }
+    
+    fn set_curved_circle(&mut self, _circle: Option<(f32, f32, f32)>) {}
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         if let Some(b) = self.base_mut() {
@@ -739,6 +846,9 @@ pub trait Widget {
     }
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
         let (x, y, w, h) = self.rect();
         let (hx, hw) = if let Some(b) = self.base() {
             if b.row_w > 0.0 {
@@ -757,6 +867,11 @@ pub trait Widget {
 
     fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
         hover_animation::set_cursor_pos(px, py);
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            let was = self.hovered();
+            self.set_hovered(false);
+            return was;
+        }
         self.on_cursor_moved(px, py)
     }
 
@@ -827,6 +942,7 @@ pub trait Widget {
     fn draggable(&self) -> bool { false }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { Vec::new() }
+    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> { Vec::new() }
     fn all_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = self.extra_quads();
         if let Some(hq) = self.highlight_quad() {
@@ -867,6 +983,7 @@ pub trait Widget {
         0.0
     }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> { None }
+    fn render_popover(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
     fn set_text(&mut self, text: &str) {
         if let Some(b) = self.base_mut() {
             b.label = Some(text.to_string());
@@ -919,12 +1036,25 @@ pub trait Widget {
     fn set_spreadsheet_data(&mut self, _headers: Vec<String>, _rows: Vec<Vec<String>>) {}
     fn tick(&mut self, _dt: f32) -> bool { false }
 
+    fn set_nodes(&mut self, _nodes: &[GraphNode]) {}
+    fn get_nodes(&self) -> Vec<GraphNode> { vec![] }
+    fn selected_node(&self) -> Option<usize> { None }
+    fn set_selected_node(&mut self, _idx: Option<usize>) {}
+    fn double_clicked_node(&self) -> Option<usize> { None }
+    fn clear_double_clicked_node(&mut self) {}
+    fn set_grid_snap_enabled(&mut self, _enabled: bool) {}
+    fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { None }
+
     fn parent(&self) -> Option<*mut (dyn Widget + 'static)> { None }
     fn set_parent(&mut self, _parent: Option<*mut (dyn Widget + 'static)>) {}
     fn children(&self) -> Vec<*mut (dyn Widget + 'static)> { vec![] }
     fn add_child(&mut self, _child: *mut (dyn Widget + 'static)) {}
     fn clear_children(&mut self) {}
     fn z_index(&self) -> i32 { 0 }
+    fn set_center_items(&mut self, _center: bool) {}
+    fn menu_items(&self) -> Vec<String> { vec![] }
+    fn menu_item_checked(&self) -> Vec<Option<bool>> { vec![] }
+    fn is_vertical(&self) -> bool { false }
 }
 
 #[derive(Clone)]
@@ -1287,11 +1417,19 @@ impl Widget for ParametersBg {
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
     fn hit_test(&self, px: f32, py: f32) -> bool {
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
         px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h
     }
 
     fn set_display_params(&mut self, params: &[(String, String, String)]) {
         self.display_params = params.to_vec();
+        self.focused_param = None;
+    }
+
+    fn unfocus(&mut self) {
+        self.focused_param = None;
     }
 
     fn node_params(&self) -> Vec<(String, String, String)> {
@@ -1565,6 +1703,9 @@ pub struct MenuBar {
     pub visible: bool,
     pub focused: bool,
     pub z_level: i32,
+    pub center_items: bool,
+    pub curved_circle: Option<(f32, f32, f32)>,
+    pub title_pos: Option<(f32, f32)>,
 }
 
 impl MenuBar {
@@ -1586,7 +1727,15 @@ impl MenuBar {
             visible: true,
             focused: false,
             z_level: 100,
+            center_items: false,
+            curved_circle: None,
+            title_pos: None,
         }
+    }
+
+    pub fn with_center_items(mut self, center: bool) -> Self {
+        self.center_items = center;
+        self
     }
 
     pub fn with_title(mut self, title: &str) -> Self {
@@ -1664,6 +1813,15 @@ impl Widget for MenuBar {
         }
     }
 
+    fn set_curved_circle(&mut self, circle: Option<(f32, f32, f32)>) {
+        self.curved_circle = circle;
+        if circle.is_none() {
+            for menu in &mut self.menus {
+                menu.curved_arc = None;
+            }
+        }
+    }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.x = x;
         self.y = y;
@@ -1684,15 +1842,70 @@ impl Widget for MenuBar {
                 cy += ih;
             }
         } else {
-            let mut cx = 8.0;
-            if !self.title.is_empty() {
-                cx += self.title.len() as f32 * 7.5 + 24.0;
-            }
-            for menu in &mut self.menus {
-                let iw = menu.active_title().len() as f32 * 7.5 + 16.0;
-                menu.set_rect(x + cx, y, iw, h);
-                menu.set_parent(Some(parent_ptr));
-                cx += iw;
+            if let Some((ccx, ccy, ccr)) = self.curved_circle {
+                let r_mid = ccr - h / 2.0;
+                let mut total_width = 8.0;
+                if !self.title.is_empty() {
+                    total_width += self.title.len() as f32 * 7.5 + 24.0;
+                }
+                for menu in &self.menus {
+                    total_width += menu.active_title().len() as f32 * 7.5 + 16.0;
+                }
+                
+                let total_angular_width = total_width / r_mid;
+                let start_angle = 1.5 * std::f32::consts::PI - total_angular_width / 2.0;
+                let mut current_angle = start_angle;
+                
+                if !self.title.is_empty() {
+                    let title_w = self.title.len() as f32 * 7.5 + 24.0;
+                    let dtheta_title = title_w / r_mid;
+                    let theta_title = current_angle + dtheta_title / 2.0;
+                    
+                    let tx = ccx + r_mid * theta_title.cos() - title_w / 2.0 + 8.0;
+                    let ty = ccy + r_mid * theta_title.sin() - h / 2.0;
+                    self.title_pos = Some((tx, ty));
+                    current_angle += dtheta_title;
+                } else {
+                    self.title_pos = None;
+                }
+                
+                for menu in &mut self.menus {
+                    let iw = menu.active_title().len() as f32 * 7.5 + 16.0;
+                    let dtheta_menu = iw / r_mid;
+                    let theta_menu = current_angle + dtheta_menu / 2.0;
+                    
+                    let mx = ccx + r_mid * theta_menu.cos() - iw / 2.0;
+                    let my = ccy + r_mid * theta_menu.sin() - h / 2.0;
+                    
+                    menu.set_rect(mx, my, iw, h);
+                    menu.set_parent(Some(parent_ptr));
+                    menu.curved_arc = Some((ccx, ccy, ccr, h, current_angle, current_angle + dtheta_menu));
+                    current_angle += dtheta_menu;
+                }
+            } else {
+                self.title_pos = None;
+                let mut cx = 8.0;
+                if self.center_items {
+                    let mut total_width = 8.0;
+                    if !self.title.is_empty() {
+                        total_width += self.title.len() as f32 * 7.5 + 24.0;
+                    }
+                    for menu in &self.menus {
+                        total_width += menu.active_title().len() as f32 * 7.5 + 16.0;
+                    }
+                    if self.w > total_width {
+                        cx = (self.w - total_width) / 2.0;
+                    }
+                }
+                if !self.title.is_empty() {
+                    cx += self.title.len() as f32 * 7.5 + 24.0;
+                }
+                for menu in &mut self.menus {
+                    let iw = menu.active_title().len() as f32 * 7.5 + 16.0;
+                    menu.set_rect(x + cx, y, iw, h);
+                    menu.set_parent(Some(parent_ptr));
+                    cx += iw;
+                }
             }
         }
     }
@@ -1719,6 +1932,43 @@ impl Widget for MenuBar {
         if !self.visible {
             return false;
         }
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
+        if let Some((ccx, ccy, ccr)) = self.curved_circle {
+            let dx = px - ccx;
+            let dy = py - ccy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist >= ccr - self.h && dist <= ccr {
+                let angle = dy.atan2(dx);
+                let mut norm_angle = angle;
+                if norm_angle < 0.0 {
+                    norm_angle += 2.0 * std::f32::consts::PI;
+                }
+                
+                let r_mid = ccr - self.h / 2.0;
+                let mut total_width = 8.0;
+                if !self.title.is_empty() {
+                    total_width += self.title.len() as f32 * 7.5 + 24.0;
+                }
+                for menu in &self.menus {
+                    total_width += menu.active_title().len() as f32 * 7.5 + 16.0;
+                }
+                let total_angular_width = total_width / r_mid;
+                let start_angle = 1.5 * std::f32::consts::PI - total_angular_width / 2.0;
+                let end_angle = 1.5 * std::f32::consts::PI + total_angular_width / 2.0;
+                
+                if norm_angle >= start_angle && norm_angle <= end_angle {
+                    return true;
+                }
+            }
+            for menu in &self.menus {
+                if menu.hit_test(px, py) {
+                    return true;
+                }
+            }
+            return false;
+        }
         let (rx, ry, rw, rh) = self.rect();
         if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
             return true;
@@ -1738,11 +1988,20 @@ impl Widget for MenuBar {
         let (rx, ry, rw, rh) = self.rect();
         self.set_rect(rx, ry, rw, rh);
 
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/lsgalante/Dropbox/Clear/debug.txt") {
+            use std::io::Write;
+            let _ = writeln!(f, "MenuBar::on_cursor_moved px={}, py={} curved={:?} rect={:?}", px, py, self.curved_circle, (rx, ry, rw, rh));
+        }
+
         let mut changed = false;
         self.hovered_menu = None;
         for (idx, menu) in self.menus.iter_mut().enumerate() {
             if menu.cursor_moved(px, py) {
                 changed = true;
+            }
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/home/lsgalante/Dropbox/Clear/debug.txt") {
+                use std::io::Write;
+                let _ = writeln!(f, "  Menu[{}] active_title={} curved={:?} hovered={} hit={}", idx, menu.active_title(), menu.curved_arc, menu.hovered(), menu.hit_test(px, py));
             }
             if menu.hovered() {
                 self.hovered_menu = Some(idx);
@@ -1760,7 +2019,8 @@ impl Widget for MenuBar {
 
         let mut changed = false;
         for menu in &mut self.menus {
-            if menu.mouse_input(button, state, px, py) {
+            let res = menu.mouse_input(button, state, px, py);
+            if res {
                 changed = true;
             }
         }
@@ -1847,19 +2107,70 @@ impl Widget for MenuBar {
         quads
     }
 
+    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut arcs = Vec::new();
+        for menu in &self.menus {
+            arcs.extend(menu.extra_arcs());
+        }
+        arcs
+    }
+
     fn text_labels(&self) -> Vec<TextLabel> {
         if !self.visible {
             return Vec::new();
         }
         let mut labels = Vec::new();
-        if !self.title.is_empty() {
-            labels.push(TextLabel {
-                text: self.title.clone(),
-                x: self.x + 8.0,
-                y: self.y + 7.0,
-                font_size: 12.0,
-                color: [0xaa, 0xaa, 0xbb],
-            });
+        if let Some((ccx, ccy, ccr)) = self.curved_circle {
+            let r_mid = ccr - self.h / 2.0;
+            let mut total_width = 8.0;
+            if !self.title.is_empty() {
+                total_width += self.title.len() as f32 * 7.5 + 24.0;
+            }
+            for menu in &self.menus {
+                total_width += menu.active_title().len() as f32 * 7.5 + 16.0;
+            }
+            let total_angular_width = total_width / r_mid;
+            let start_angle = 1.5 * std::f32::consts::PI - total_angular_width / 2.0;
+            let mut current_angle = start_angle;
+
+            if !self.title.is_empty() {
+                let title_w = self.title.len() as f32 * 7.5 + 24.0;
+                let dtheta_title = title_w / r_mid;
+                labels.extend(TextLabel::curved_layout(
+                    &self.title,
+                    ccx, ccy, r_mid,
+                    current_angle, current_angle + dtheta_title,
+                    12.0,
+                    [0xaa, 0xaa, 0xbb],
+                ));
+                current_angle += dtheta_title;
+            }
+        } else {
+            let mut start_x = 8.0;
+            if self.center_items {
+                let mut total_width = 8.0;
+                if !self.title.is_empty() {
+                    total_width += self.title.len() as f32 * 7.5 + 24.0;
+                }
+                for menu in &self.menus {
+                    total_width += menu.active_title().len() as f32 * 7.5 + 16.0;
+                }
+                if self.w > total_width {
+                    start_x = (self.w - total_width) / 2.0;
+                }
+            }
+            if !self.title.is_empty() {
+                labels.push(TextLabel {
+                    text: self.title.clone(),
+                    x: self.x + start_x,
+                    y: self.y + 7.0,
+                    font_size: 12.0,
+                    color: [0xaa, 0xaa, 0xbb],
+                });
+            }
         }
         for menu in &self.menus {
             labels.extend(menu.text_labels());
@@ -1888,6 +2199,10 @@ impl Widget for MenuBar {
     fn z_index(&self) -> i32 {
         self.z_level
     }
+
+    fn set_center_items(&mut self, center: bool) {
+        self.center_items = center;
+    }
 }
 
 impl Drop for MenuBar {
@@ -1912,6 +2227,7 @@ pub struct Menu {
     was_open: Option<usize>,
     pub parent: Option<*mut (dyn Widget + 'static)>,
     pub children: Vec<*mut (dyn Widget + 'static)>,
+    pub curved_arc: Option<(f32, f32, f32, f32, f32, f32)>,
 }
 
 impl Menu {
@@ -1931,6 +2247,7 @@ impl Menu {
             was_open: None,
             parent: None,
             children: Vec::new(),
+            curved_arc: None,
         }
     }
 
@@ -1968,6 +2285,10 @@ impl Widget for Menu {
         (self.x, self.y, self.w, self.h)
     }
 
+    fn label(&self) -> Option<String> {
+        Some(self.active_title().to_string())
+    }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.x = x;
         self.y = y;
@@ -1988,6 +2309,31 @@ impl Widget for Menu {
     }
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
+        if let Some((cx, cy, r, thickness, start_angle, end_angle)) = self.curved_arc {
+            let dx = px - cx;
+            let dy = py - cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist >= r - thickness && dist <= r {
+                let angle = dy.atan2(dx);
+                let mut norm_angle = angle;
+                if norm_angle < 0.0 {
+                    norm_angle += 2.0 * std::f32::consts::PI;
+                }
+                if norm_angle >= start_angle && norm_angle <= end_angle {
+                    return true;
+                }
+            }
+            if self.open {
+                let (dx, dy, dw, dh) = self.dropdown_rect();
+                if dh > 0.0 && px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                    return true;
+                }
+            }
+            return false;
+        }
         let (rx, ry, rw, rh) = self.rect();
         if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
             return true;
@@ -2029,22 +2375,10 @@ impl Widget for Menu {
             return false;
         }
 
-        let (rx, ry, rw, rh) = self.rect();
-        if px >= rx && px < rx + rw && py >= ry && py < ry + rh {
-            if self.was_open == Some(0) || self.open {
-                self.open = false;
-                self.was_open = None;
-            } else {
-                self.open = true;
-                self.was_open = None;
-                focus::set_focused(self);
-            }
-            return true;
-        }
-
+        // Check dropdown click if open
         if self.open {
             let (dx, dy, dw, dh) = self.dropdown_rect();
-            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+            if dh > 0.0 && px >= dx && px < dx + dw && py >= dy && py < dy + dh {
                 let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
                 if di < self.items.len() {
                     self.clicked_item = Some(di);
@@ -2054,7 +2388,16 @@ impl Widget for Menu {
             }
         }
 
-        false
+        // Since we passed hit_test and didn't click dropdown, it's a click on the header title
+        if self.was_open == Some(0) || self.open {
+            self.open = false;
+            self.was_open = None;
+        } else {
+            self.open = true;
+            self.was_open = None;
+            focus::set_focused(self);
+        }
+        true
     }
 
     fn focus(&mut self) {
@@ -2099,7 +2442,7 @@ impl Widget for Menu {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        if self.hovering && !self.open {
+        if self.hovering && !self.open && self.curved_arc.is_none() {
             quads.push((self.x, self.y, self.w, self.h, colors::PANEL_MENU_HOVER));
         }
         if self.open {
@@ -2114,15 +2457,36 @@ impl Widget for Menu {
         quads
     }
 
+    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
+        let mut arcs = Vec::new();
+        if let Some((cx, cy, r, thickness, start_angle, end_angle)) = self.curved_arc {
+            if self.hovering && !self.open {
+                arcs.push((cx, cy, r, thickness, start_angle, end_angle, colors::PANEL_MENU_HOVER));
+            }
+        }
+        arcs
+    }
+
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        labels.push(TextLabel {
-            text: self.active_title().to_string(),
-            x: self.x + 8.0,
-            y: self.y + 7.0,
-            font_size: 12.0,
-            color: [0xcc, 0xcc, 0xd4],
-        });
+        if let Some((cx, cy, r, thickness, start_angle, end_angle)) = self.curved_arc {
+            let r_mid = r - thickness / 2.0;
+            labels.extend(TextLabel::curved_layout(
+                &self.active_title(),
+                cx, cy, r_mid,
+                start_angle, end_angle,
+                12.0,
+                [0xcc, 0xcc, 0xd4],
+            ));
+        } else {
+            labels.push(TextLabel {
+                text: self.active_title().to_string(),
+                x: self.x + 8.0,
+                y: self.y + 7.0,
+                font_size: 12.0,
+                color: [0xcc, 0xcc, 0xd4],
+            });
+        }
         if self.open {
             let (dx, dy, _, _) = self.dropdown_rect();
             for (i, item) in self.items.iter().enumerate() {
@@ -2164,6 +2528,18 @@ impl Widget for Menu {
 
     fn z_index(&self) -> i32 {
         100
+    }
+
+    fn menu_items(&self) -> Vec<String> {
+        self.items.clone()
+    }
+
+    fn menu_item_checked(&self) -> Vec<Option<bool>> {
+        self.item_checked.clone()
+    }
+
+    fn is_vertical(&self) -> bool {
+        self.vertical
     }
 }
 
@@ -2505,9 +2881,9 @@ impl Widget for Node {
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
     fn color(&self) -> [f32; 4] {
-        if self.dragging { colors::NODE_DRAG }
-        else if self.selected { colors::NODE_SELECTED }
-        else { colors::NODE_IDLE }
+        if self.dragging { colors::node_drag_color() }
+        else if self.selected { colors::node_selected_color() }
+        else { colors::node_color() }
     }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
@@ -2675,6 +3051,14 @@ impl Checkbox {
     pub fn with_label(mut self, label: &str) -> Self {
         self.base.label = Some(label.to_string());
         self
+    }
+
+    pub fn set_checked(&mut self, checked: bool) {
+        self.checked = checked;
+    }
+
+    pub fn checked(&self) -> bool {
+        self.checked
     }
 }
 
@@ -3306,6 +3690,7 @@ pub struct Spinbox {
     min: i32, max: i32, step: i32,
     editing: bool,
     edit_buffer: String,
+    pub cursor_idx: usize,
     hover_dec: bool,
     hover_inc: bool,
     unit: Option<String>,
@@ -3324,6 +3709,7 @@ impl Spinbox {
             step,
             editing: false,
             edit_buffer: String::new(),
+            cursor_idx: 0,
             hover_dec: false,
             hover_inc: false,
             unit: None,
@@ -3399,7 +3785,18 @@ impl Widget for Spinbox {
                     true
                 } else if px < split {
                     self.editing = true;
-                    self.edit_buffer = self.value.to_string();
+                    if self.decimals > 0 {
+                        let divisor = 10.0f32.powi(self.decimals as i32);
+                        self.edit_buffer = format!("{:.width$}", self.value as f32 / divisor, width = self.decimals as usize);
+                    } else {
+                        self.edit_buffer = self.value.to_string();
+                    }
+                    let char_width = 8.4;
+                    let click_idx = (((px - (self.base.x + 4.0)) / char_width).round() as isize)
+                        .max(0)
+                        .min(self.edit_buffer.chars().count() as isize) as usize;
+                    self.cursor_idx = click_idx;
+                    focus::set_focused(self);
                     true
                 } else {
                     false
@@ -3419,6 +3816,7 @@ impl Widget for Spinbox {
         } else {
             self.edit_buffer = self.value.to_string();
         }
+        self.cursor_idx = self.edit_buffer.chars().count();
         focus::set_focused(self);
     }
 
@@ -3444,8 +3842,39 @@ impl Widget for Spinbox {
         if event.state != ElementState::Pressed { return false; }
         match &event.logical_key {
             Key::Named(NamedKey::Backspace) => {
-                self.edit_buffer.pop();
-                true
+                if self.cursor_idx > 0 {
+                    let mut chars: Vec<char> = self.edit_buffer.chars().collect();
+                    chars.remove(self.cursor_idx - 1);
+                    self.edit_buffer = chars.into_iter().collect();
+                    self.cursor_idx -= 1;
+                    return true;
+                }
+                false
+            }
+            Key::Named(NamedKey::Delete) => {
+                if self.cursor_idx < self.edit_buffer.chars().count() {
+                    let mut chars: Vec<char> = self.edit_buffer.chars().collect();
+                    chars.remove(self.cursor_idx);
+                    self.edit_buffer = chars.into_iter().collect();
+                    return true;
+                }
+                false
+            }
+            Key::Named(NamedKey::ArrowLeft) => {
+                if self.cursor_idx > 0 {
+                    self.cursor_idx -= 1;
+                    true
+                } else {
+                    false
+                }
+            }
+            Key::Named(NamedKey::ArrowRight) => {
+                if self.cursor_idx < self.edit_buffer.chars().count() {
+                    self.cursor_idx += 1;
+                    true
+                } else {
+                    false
+                }
             }
             Key::Named(NamedKey::Enter) => {
                 if self.decimals > 0 {
@@ -3470,9 +3899,22 @@ impl Widget for Spinbox {
                 if let Some(text) = &event.text {
                     for ch in text.chars() {
                         match ch {
-                            '-' if self.edit_buffer.is_empty() => self.edit_buffer.push('-'),
-                            '.' if self.decimals > 0 && !self.edit_buffer.contains('.') => self.edit_buffer.push('.'),
-                            '0'..='9' => self.edit_buffer.push(ch),
+                            '-' if self.cursor_idx == 0 && !self.edit_buffer.starts_with('-') => {
+                                self.edit_buffer.insert(0, '-');
+                                self.cursor_idx += 1;
+                            }
+                            '.' if self.decimals > 0 && !self.edit_buffer.contains('.') => {
+                                let mut chars: Vec<char> = self.edit_buffer.chars().collect();
+                                chars.insert(self.cursor_idx, '.');
+                                self.edit_buffer = chars.into_iter().collect();
+                                self.cursor_idx += 1;
+                            }
+                            '0'..='9' => {
+                                let mut chars: Vec<char> = self.edit_buffer.chars().collect();
+                                chars.insert(self.cursor_idx, ch);
+                                self.edit_buffer = chars.into_iter().collect();
+                                self.cursor_idx += 1;
+                            }
                             _ => {}
                         }
                     }
@@ -3512,7 +3954,7 @@ impl Widget for Spinbox {
 
             // Caret cursor
             let char_width = 8.4;
-            let cursor_x = self.base.x + 4.0 + (self.edit_buffer.len() as f32 * char_width);
+            let cursor_x = self.base.x + 4.0 + (self.cursor_idx as f32 * char_width);
             let max_cursor_x = split - 4.0;
             let final_cursor_x = cursor_x.min(max_cursor_x);
             let cursor_y = self.base.y + (self.base.h - 14.0) / 2.0;
@@ -3982,6 +4424,9 @@ impl Widget for Spreadsheet {
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
         if !self.visible {
+            return false;
+        }
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
         let (rx, ry, rw, rh) = self.rect();
@@ -4598,6 +5043,62 @@ mod tests {
         assert!(node.geom_visible(), "Geometry visibility should be toggled back on");
         assert!(node.take_geom_toggle());
     }
+
+    #[test]
+    fn test_graph_interaction() {
+        let mut graph = Graph::new();
+        graph.set_rect(0.0, 0.0, 800.0, 600.0);
+        graph.set_grid_sizes(100.0, 50.0);
+        graph.set_skipped_sizes(10.0, 20.0);
+        graph.set_grid_origin(0.0, 0.0);
+
+        let nodes = vec![
+            GraphNode {
+                name: "Node A".to_string(),
+                position: (0.0, 0.0),
+                parameters: vec![],
+                geom_visible: true,
+            },
+            GraphNode {
+                name: "Node B".to_string(),
+                position: (2.0, 1.0),
+                parameters: vec![],
+                geom_visible: true,
+            },
+        ];
+        graph.set_nodes(&nodes);
+
+        // 1. Initial State
+        assert_eq!(graph.get_nodes().len(), 2);
+        assert_eq!(graph.selected_node(), None);
+
+        // 2. Select Node A
+        // Node A screen rect: (0, 0, 100, 50)
+        let clicked = graph.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 25.0);
+        assert!(clicked);
+        assert_eq!(graph.selected_node(), Some(0));
+        assert!(graph.draggable());
+
+        // 3. Drag Node A
+        graph.drag_begin(50.0, 25.0);
+        assert!(graph.is_dragging());
+
+        // Enable snapping
+        graph.set_grid_snap_enabled(true);
+        graph.drag_update(170.0, 85.0); // drag offset from Node A center (50, 25): nx = 170 - 50 = 120, ny = 85 - 25 = 60
+        assert_eq!(graph.drag_node_pos, Some((120.0, 60.0)));
+
+        graph.drag_end();
+        assert_eq!(graph.get_nodes()[0].position, (1.0, 1.0)); // Snapped grid position: (120/120, 60/60)
+
+        // 4. Toggle geometry visibility of Node B
+        // Node B screen rect: (2 * 120 = 240, 1 * 60 = 60, 100, 50)
+        // Toggle button: tx = 240 + 100 - 30 = 310, ty = 60 + (50 - 18)/2 = 76, tw = 18, th = 18
+        let clicked_toggle = graph.mouse_input(MouseButton::Left, ElementState::Pressed, 319.0, 85.0);
+        assert!(clicked_toggle);
+        assert_eq!(graph.take_node_geom_toggle(), Some((1, false)));
+    }
+
 
     #[test]
     fn test_menubar_vertical_horizontal_labels() {
@@ -5300,6 +5801,9 @@ impl Widget for Dropdown {
     }
 
     fn hit_test(&self, px: f32, py: f32) -> bool {
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
         let (x, y, w, h) = self.rect();
         let hx = if self.base.row_w > 0.0 { self.base.row_x } else { x };
         let hw = if self.base.row_w > 0.0 { self.base.row_w } else { w };
@@ -5455,20 +5959,6 @@ impl Widget for Dropdown {
         quads.push((self.base.x, self.base.y, self.base.w, self.base.h, border_color));
         quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, bg_color));
 
-        if self.open {
-            let dy = self.base.y + self.base.h;
-            let dh = self.options.len() as f32 * 24.0;
-            // Border
-            quads.push((self.base.x, dy, self.base.w, dh, [0.22, 0.22, 0.28, 1.0]));
-            // BG
-            quads.push((self.base.x + 1.0, dy + 1.0, self.base.w - 2.0, dh - 2.0, [0.06, 0.06, 0.09, 1.0]));
-
-            if let Some(h_idx) = self.hovered_item {
-                let iy = dy + h_idx as f32 * 24.0;
-                quads.push((self.base.x + 2.0, iy + 2.0, self.base.w - 4.0, 20.0, [0.20, 0.40, 0.65, 0.6]));
-            }
-        }
-
         quads
     }
 
@@ -5502,27 +5992,6 @@ impl Widget for Dropdown {
             color: [0x83, 0x83, 0x8a],
         });
 
-        if self.open {
-            let dy = self.base.y + self.base.h;
-            for (idx, opt) in self.options.iter().enumerate() {
-                let iy = dy + idx as f32 * 24.0 + (24.0 - 12.0) / 2.0;
-                let text_color = if self.hovered_item == Some(idx) {
-                    [0xff, 0xff, 0xff]
-                } else if self.selected == idx {
-                    [0x3a, 0x9a, 0xff]
-                } else {
-                    [0xcc, 0xcc, 0xd4]
-                };
-                labels.push(TextLabel {
-                    text: opt.clone(),
-                    x: self.base.x + 8.0,
-                    y: iy,
-                    font_size: 12.0,
-                    color: text_color,
-                });
-            }
-        }
-
         labels
     }
 
@@ -5539,6 +6008,9 @@ impl Widget for Dropdown {
         } else {
             None
         }
+    }
+    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        Dropdown::render_popover(self, pc);
     }
 }
 
@@ -6666,6 +7138,67 @@ impl Widget for Separator {
     }
 }
 
+fn serialize_single_widget(w: &dyn Widget, json: &mut String) {
+    let (x, y, width, height) = w.rect();
+    let label = w.label().or_else(|| w.base().and_then(|b| b.label.clone())).unwrap_or_default();
+    let focused = w.base().map_or(false, |b| b.focused);
+    let hovered = w.hovered();
+    let value = w.value();
+    let type_name = w.type_name();
+
+    // Escape JSON label
+    let escaped_label = label.replace('\\', "\\\\").replace('"', "\\\"");
+
+    json.push_str(&format!(
+        "{{\"type\":\"{}\",\"label\":\"{}\",\"rect\":[{},{},{},{}],\"focused\":{},\"hovered\":{},\"value\":{}",
+        type_name, escaped_label, x, y, width, height, focused, hovered, value
+    ));
+
+    // Handle children
+    let children = w.children();
+    let menu_items = w.menu_items();
+
+    if type_name == "Menu" && w.is_menu_open() && !menu_items.is_empty() {
+        json.push_str(",\"children\":[");
+        let mut max_len = 0;
+        for item in &menu_items {
+            max_len = max_len.max(item.len());
+        }
+        let dw = (max_len as f32 * 7.5 + 40.0).max(120.0);
+        let vertical = w.is_vertical();
+        let dx = if vertical { x + width } else { x };
+        let dy = if vertical { y } else { y + height };
+
+        let checked_states = w.menu_item_checked();
+        for (i, item) in menu_items.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            let item_y = dy + i as f32 * DROPDOWN_ITEM_H;
+            let checked = checked_states.get(i).copied().flatten().unwrap_or(false);
+            let item_escaped = item.replace('\\', "\\\\").replace('"', "\\\"");
+            json.push_str(&format!(
+                "{{\"type\":\"MenuItem\",\"label\":\"{}\",\"rect\":[{},{},{},{}],\"focused\":false,\"hovered\":false,\"value\":{}}}",
+                item_escaped, dx, item_y, dw, DROPDOWN_ITEM_H, if checked { 1 } else { 0 }
+            ));
+        }
+        json.push_str("]}");
+    } else if !children.is_empty() {
+        json.push_str(",\"children\":[");
+        for (i, child_ptr) in children.iter().enumerate() {
+            if i > 0 {
+                json.push(',');
+            }
+            unsafe {
+                serialize_single_widget(&**child_ptr, json);
+            }
+        }
+        json.push_str("]}");
+    } else {
+        json.push('}');
+    }
+}
+
 pub fn serialize_widgets(widgets: &[Box<dyn Widget>]) -> String {
     let mut json = String::new();
     json.push('[');
@@ -6673,23 +7206,436 @@ pub fn serialize_widgets(widgets: &[Box<dyn Widget>]) -> String {
         if i > 0 {
             json.push(',');
         }
-        let (x, y, width, height) = w.rect();
-        let label = w.base().and_then(|b| b.label.clone()).unwrap_or_default();
-        let focused = w.base().map_or(false, |b| b.focused);
-        let hovered = w.hovered();
-        let value = w.value();
-        let type_name = w.type_name();
-
-        // Escape JSON label
-        let escaped_label = label.replace('\\', "\\\\").replace('"', "\\\"");
-
-        json.push_str(&format!(
-            "{{\"type\":\"{}\",\"label\":\"{}\",\"rect\":[{},{},{},{}],\"focused\":{},\"hovered\":{},\"value\":{}}}",
-            type_name, escaped_label, x, y, width, height, focused, hovered, value
-        ));
+        serialize_single_widget(&**w, &mut json);
     }
     json.push(']');
     json
+}
+
+pub struct Graph {
+    x: f32, y: f32, w: f32, h: f32,
+    hovered: bool,
+    show_network_grid: bool,
+    grid_size_x: f32,
+    grid_size_y: f32,
+    grid_origin_x: f32,
+    grid_origin_y: f32,
+    skipped_row_h: f32,
+    skipped_col_w: f32,
+    nodes: Vec<GraphNode>,
+    selected_idx: Option<usize>,
+    double_clicked_idx: Option<usize>,
+    double_click_timer: Option<(std::time::Instant, usize)>,
+    grid_snap_enabled: bool,
+    node_geom_toggled: Option<(usize, bool)>,
+
+    // For dragging a node
+    dragging_idx: Option<usize>,
+    drag_ox: f32,
+    drag_oy: f32,
+    drag_node_pos: Option<(f32, f32)>,
+
+    // Hover tracking
+    toggle_hovered_idx: Option<usize>,
+}
+
+impl Graph {
+    pub fn new() -> Self {
+        Self {
+            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            hovered: false,
+            show_network_grid: false,
+            grid_size_x: 150.0,
+            grid_size_y: 75.0,
+            grid_origin_x: 0.0,
+            grid_origin_y: 0.0,
+            skipped_row_h: 37.5,
+            skipped_col_w: 37.5,
+            nodes: Vec::new(),
+            selected_idx: None,
+            double_clicked_idx: None,
+            double_click_timer: None,
+            grid_snap_enabled: false,
+            node_geom_toggled: None,
+            dragging_idx: None,
+            drag_ox: 0.0,
+            drag_oy: 0.0,
+            drag_node_pos: None,
+            toggle_hovered_idx: None,
+        }
+    }
+
+    pub fn node_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
+        let node = self.nodes.get(idx)?;
+        let (nx, ny) = if self.dragging_idx == Some(idx) {
+            self.drag_node_pos.unwrap_or((
+                node.position.0 * (self.grid_size_x + self.skipped_col_w) + self.grid_origin_x,
+                node.position.1 * (self.grid_size_y + self.skipped_row_h) + self.grid_origin_y,
+            ))
+        } else {
+            (
+                node.position.0 * (self.grid_size_x + self.skipped_col_w) + self.grid_origin_x,
+                node.position.1 * (self.grid_size_y + self.skipped_row_h) + self.grid_origin_y,
+            )
+        };
+        Some((nx, ny, self.grid_size_x, self.grid_size_y))
+    }
+
+    pub fn toggle_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
+        let (nx, ny, nw, nh) = self.node_rect(idx)?;
+        Some((nx + nw - 30.0, ny + (nh - 18.0) / 2.0, 18.0, 18.0))
+    }
+
+    fn find_empty_cell(&self, start_x: f32, start_y: f32, skip_idx: Option<usize>) -> (f32, f32) {
+        let x = start_x;
+        let mut y = start_y;
+        loop {
+            let occupied = self.nodes.iter().enumerate().any(|(idx, node)| {
+                if Some(idx) == skip_idx {
+                    false
+                } else {
+                    (node.position.0 - x).abs() < 0.01 && (node.position.1 - y).abs() < 0.01
+                }
+            });
+            if occupied {
+                y += 1.0;
+            } else {
+                break;
+            }
+        }
+        (x, y)
+    }
+}
+
+impl Widget for Graph {
+    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
+    fn hovered(&self) -> bool { self.hovered }
+    fn hit_test(&self, px: f32, py: f32) -> bool {
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
+        px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
+    }
+
+    fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
+    fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
+    fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
+    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
+
+    fn set_nodes(&mut self, nodes: &[GraphNode]) {
+        self.nodes = nodes.to_vec();
+        if let Some(sel) = self.selected_idx {
+            if sel >= self.nodes.len() {
+                self.selected_idx = None;
+            }
+        }
+    }
+    fn get_nodes(&self) -> Vec<GraphNode> { self.nodes.clone() }
+    fn selected_node(&self) -> Option<usize> { self.selected_idx }
+    fn set_selected_node(&mut self, idx: Option<usize>) { self.selected_idx = idx; }
+    fn double_clicked_node(&self) -> Option<usize> { self.double_clicked_idx }
+    fn clear_double_clicked_node(&mut self) { self.double_clicked_idx = None; }
+    fn set_grid_snap_enabled(&mut self, enabled: bool) { self.grid_snap_enabled = enabled; }
+    fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { self.node_geom_toggled.take() }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        for (i, node) in self.nodes.iter().enumerate() {
+            if let Some((nx, ny, _nw, nh)) = self.node_rect(i) {
+                labels.push(TextLabel {
+                    text: node.name.clone(),
+                    x: nx + 8.0,
+                    y: ny + (nh - 12.0) / 2.0,
+                    font_size: 14.0,
+                    color: [0xcc, 0xcc, 0xd4],
+                });
+            }
+        }
+        labels
+    }
+
+    fn focus(&mut self) {
+        focus::set_focused(self);
+    }
+
+    fn is_dragging(&self) -> bool { self.dragging_idx.is_some() }
+    fn draggable(&self) -> bool { self.dragging_idx.is_some() }
+
+    fn drag_begin(&mut self, px: f32, py: f32) {
+        if let Some(idx) = self.dragging_idx {
+            if let Some((nx, ny, _, _)) = self.node_rect(idx) {
+                self.drag_ox = px - nx;
+                self.drag_oy = py - ny;
+                self.drag_node_pos = Some((nx, ny));
+            }
+        }
+    }
+
+    fn drag_update(&mut self, px: f32, py: f32) -> bool {
+        if self.dragging_idx.is_some() {
+            let nx = px - self.drag_ox;
+            let ny = py - self.drag_oy;
+
+            let snap_x = if self.grid_snap_enabled { self.grid_size_x + self.skipped_col_w } else { 0.0 };
+            let snap_y = if self.grid_snap_enabled { self.grid_size_y + self.skipped_row_h } else { 0.0 };
+
+            let nx = if snap_x > 0.0 {
+                let relative = nx - self.grid_origin_x;
+                let snapped = (relative / snap_x).round() * snap_x;
+                snapped + self.grid_origin_x
+            } else { nx };
+
+            let ny = if snap_y > 0.0 {
+                let relative = ny - self.grid_origin_y;
+                let snapped = (relative / snap_y).round() * snap_y;
+                snapped + self.grid_origin_y
+            } else { ny };
+
+            self.drag_node_pos = Some((nx, ny));
+            return true;
+        }
+        false
+    }
+
+    fn drag_end(&mut self) {
+        if let Some((nx, ny)) = self.drag_node_pos.take() {
+            let c = ((nx - self.grid_origin_x) / (self.grid_size_x + self.skipped_col_w)).round();
+            let r = ((ny - self.grid_origin_y) / (self.grid_size_y + self.skipped_row_h)).round();
+            if let Some(idx) = self.dragging_idx.take() {
+                let (nx, ny) = self.find_empty_cell(c, r, Some(idx));
+                self.nodes[idx].position = (nx, ny);
+            }
+        } else {
+            self.dragging_idx = None;
+        }
+    }
+
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        let was_toggle_hovered = self.toggle_hovered_idx;
+        self.toggle_hovered_idx = None;
+        for i in 0..self.nodes.len() {
+            if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
+                if px >= tx && px < tx + tw && py >= ty && py < ty + th {
+                    self.toggle_hovered_idx = Some(i);
+                    break;
+                }
+            }
+        }
+        was_toggle_hovered != self.toggle_hovered_idx
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if button != MouseButton::Left { return false; }
+        match state {
+            ElementState::Pressed => {
+                for i in (0..self.nodes.len()).rev() {
+                    if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
+                        if px >= tx && px < tx + tw && py >= ty && py < ty + th {
+                            self.nodes[i].geom_visible = !self.nodes[i].geom_visible;
+                            self.node_geom_toggled = Some((i, self.nodes[i].geom_visible));
+                            return true;
+                        }
+                    }
+                    if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                        if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
+                            let now = std::time::Instant::now();
+                            if let Some((prev_time, prev_idx)) = self.double_click_timer {
+                                if prev_idx == i && now.duration_since(prev_time) < std::time::Duration::from_millis(500) {
+                                    self.double_clicked_idx = Some(i);
+                                }
+                            }
+                            self.double_click_timer = Some((now, i));
+                            self.selected_idx = Some(i);
+                            self.dragging_idx = Some(i);
+                            self.drag_ox = px - nx;
+                            self.drag_oy = py - ny;
+                            self.drag_node_pos = Some((nx, ny));
+                            self.focus();
+                            return true;
+                        }
+                    }
+                }
+                self.selected_idx = None;
+                false
+            }
+            ElementState::Released => {
+                if self.dragging_idx.is_some() {
+                    self.drag_end();
+                    return true;
+                }
+                false
+            }
+        }
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+
+        if self.show_network_grid && self.grid_size_x > 0.0 && self.grid_size_y > 0.0 {
+            let grid_color = [0.0, 0.0, 0.0, 0.0];
+            let max_alpha = colors::CONTENT_BG[3];
+            let steps = 20;
+
+            let step_y = self.grid_size_y + self.skipped_row_h;
+            let step_x = self.grid_size_x + self.skipped_col_w;
+
+            if step_y >= 4.0 && step_x >= 4.0 {
+                let ry_start = ((self.y - self.grid_origin_y) / step_y).floor() as i32 - 1;
+                let ry_end = ((self.y + self.h - self.grid_origin_y) / step_y).ceil() as i32 + 1;
+                let ry_start = ry_start.max(-100_000);
+                let ry_end = ry_end.min(100_000);
+
+                let cx_start = ((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1;
+                let cx_end = ((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1;
+                let cx_start = cx_start.max(-100_000);
+                let cx_end = cx_end.min(100_000);
+
+                for ry in ry_start..=ry_end {
+                    let y1 = self.grid_origin_y + (ry as f32) * step_y;
+                    let draw_start_y = y1.max(self.y);
+                    let draw_end_y = (y1 + self.grid_size_y).min(self.y + self.h);
+                    if draw_start_y < draw_end_y {
+                        for cx in cx_start..=cx_end {
+                            let x1 = self.grid_origin_x + (cx as f32) * step_x;
+                            let draw_start_x = x1.max(self.x);
+                            let draw_end_x = (x1 + self.grid_size_x).min(self.x + self.w);
+                            if draw_start_x < draw_end_x {
+                                quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, colors::CONTENT_BG));
+                            }
+                        }
+                    }
+                }
+
+                if self.skipped_row_h > 0.0 {
+                    for k in ry_start..=ry_end {
+                        let y1 = self.grid_origin_y + (k as f32) * step_y;
+                        let y2 = y1 + self.grid_size_y;
+                        if y1 < self.y + self.h {
+                            let draw_start_y = y2.max(self.y);
+                            let draw_end_y = (y2 + self.skipped_row_h).min(self.y + self.h);
+                            if draw_start_y < draw_end_y {
+                                for cx in cx_start..=cx_end {
+                                    let x1 = self.grid_origin_x + (cx as f32) * step_x;
+                                    let x_mid = x1 + self.grid_size_x / 2.0;
+                                    let w_total = self.grid_size_x;
+                                    let sub_w = w_total / steps as f32;
+
+                                    for i in 0..steps {
+                                        let sx_start = x1 + i as f32 * sub_w;
+                                        let sx_end = sx_start + sub_w;
+                                        let draw_start_x = sx_start.max(self.x);
+                                        let draw_end_x = sx_end.min(self.x + self.w);
+                                        if draw_start_x < draw_end_x {
+                                            let sx_mid = (sx_start + sx_end) / 2.0;
+                                            let dist = (sx_mid - x_mid).abs();
+                                            let d = (dist / (w_total / 2.0)).min(1.0);
+                                            let alpha = max_alpha * (1.0 - d);
+                                            if alpha > 0.001 {
+                                                quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, [colors::CONTENT_BG[0], colors::CONTENT_BG[1], colors::CONTENT_BG[2], alpha]));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if self.skipped_col_w > 0.0 {
+                    for k in cx_start..=cx_end {
+                        let x1 = self.grid_origin_x + (k as f32) * step_x;
+                        let x2 = x1 + self.grid_size_x;
+                        if x1 < self.x + self.w {
+                            let draw_start_x = x2.max(self.x);
+                            let draw_end_x = (x2 + self.skipped_col_w).min(self.x + self.w);
+                            if draw_start_x < draw_end_x {
+                                for ry in ry_start..=ry_end {
+                                    let y1 = self.grid_origin_y + (ry as f32) * step_y;
+                                    let y_mid = y1 + self.grid_size_y / 2.0;
+                                    let h_total = self.grid_size_y;
+                                    let sub_h = h_total / steps as f32;
+
+                                    for i in 0..steps {
+                                        let sy_start = y1 + i as f32 * sub_h;
+                                        let sy_end = sy_start + sub_h;
+                                        let draw_start_y = sy_start.max(self.y);
+                                        let draw_end_y = sy_end.min(self.y + self.h);
+                                        if draw_start_y < draw_end_y {
+                                            let sy_mid = (sy_start + sy_end) / 2.0;
+                                            let dist = (sy_mid - y_mid).abs();
+                                            let d = (dist / (h_total / 2.0)).min(1.0);
+                                            let alpha = max_alpha * (1.0 - d);
+                                            if alpha > 0.001 {
+                                                quads.push((draw_start_x, draw_start_y, draw_end_x - draw_start_x, draw_end_y - draw_start_y, [colors::CONTENT_BG[0], colors::CONTENT_BG[1], colors::CONTENT_BG[2], alpha]));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for k in ry_start..=ry_end {
+                    let y1 = self.grid_origin_y + (k as f32) * step_y;
+                    let y2 = y1 + self.grid_size_y;
+                    if y1 < self.y + self.h {
+                        if y1 >= self.y {
+                            quads.push((self.x, y1, self.w, 1.0, grid_color));
+                        }
+                        if y2 >= self.y && y2 < self.y + self.h {
+                            quads.push((self.x, y2, self.w, 1.0, grid_color));
+                        }
+                    }
+                }
+
+                for k in cx_start..=cx_end {
+                    let x1 = self.grid_origin_x + (k as f32) * step_x;
+                    let x2 = x1 + self.grid_size_x;
+                    if x1 < self.x + self.w {
+                        if x1 >= self.x {
+                            quads.push((x1, self.y, 1.0, self.h, grid_color));
+                        }
+                        if x2 >= self.x && x2 < self.x + self.w {
+                            quads.push((x2, self.y, 1.0, self.h, grid_color));
+                        }
+                    }
+                }
+            }
+        }
+
+        for i in 0..self.nodes.len() {
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                let bg_color = if self.dragging_idx == Some(i) {
+                    colors::node_drag_color()
+                } else if self.selected_idx == Some(i) {
+                    colors::node_selected_color()
+                } else {
+                    colors::node_color()
+                };
+                quads.push((nx, ny, nw, nh, bg_color));
+
+                if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
+                    let btn_color = if self.toggle_hovered_idx == Some(i) {
+                        colors::TOGGLE_HOVER
+                    } else {
+                        colors::TOGGLE_OFF
+                    };
+                    quads.push((tx, ty, tw, th, btn_color));
+
+                    if self.nodes[i].geom_visible {
+                        let inset = 3.0;
+                        quads.push((tx + inset, ty + inset, tw - inset * 2.0, th - inset * 2.0, colors::TOGGLE_ON));
+                    }
+                }
+            }
+        }
+
+        quads
+    }
 }
 
 

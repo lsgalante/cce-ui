@@ -321,6 +321,19 @@ impl State {
                 verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
             }
         }
+
+        // Draw popover quads on top
+        let mut popover_pc = clear_ui::layout::PopoverCollector::new();
+        for &i in &draw_order {
+            let w = &self.widgets[i];
+            if w.popover_rect().is_some() {
+                w.render_popover(&mut popover_pc);
+            }
+        }
+        for (qc, qx, qy, qw, qh) in popover_pc.rects {
+            verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
+        }
+
         if clear_ui::widget::context_menu::is_visible() {
             for (qx, qy, qw, qh, qc) in clear_ui::widget::context_menu::extra_quads() {
                 verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
@@ -447,6 +460,38 @@ impl State {
                     bottom: *physical_height as i32,
                 },
                 default_color: glyphon::Color::rgb(label.color[0], label.color[1], label.color[2]),
+                custom_glyphs: &[],
+            });
+        }
+
+        // Draw popover texts on top
+        let mut popover_pc = clear_ui::layout::PopoverCollector::new();
+        for w in &self.widgets {
+            if w.popover_rect().is_some() {
+                w.render_popover(&mut popover_pc);
+            }
+        }
+        let mut popover_buffers = Vec::new();
+        for (t, size, _x, _y, _tc, _font_opt) in &popover_pc.texts {
+            popover_buffers.push(make_text_buffer(font_system, t, *size));
+        }
+        for (buf, (_, size, x, y, tc, _font_opt)) in popover_buffers.iter().zip(popover_pc.texts.iter()) {
+            areas.push(TextArea {
+                buffer: buf,
+                left: *x * scale_f32,
+                top: *y * scale_f32,
+                scale: scale_f32,
+                bounds: TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: *physical_width as i32,
+                    bottom: *physical_height as i32,
+                },
+                default_color: glyphon::Color::rgb(
+                    (tc[0] * 255.0) as u8,
+                    (tc[1] * 255.0) as u8,
+                    (tc[2] * 255.0) as u8,
+                ),
                 custom_glyphs: &[],
             });
         }
@@ -917,6 +962,9 @@ impl KeyboardHandler for AppState {
         _surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
+        self.pressed_key = None;
+        self.ctrl_pressed = false;
+        self.shift_pressed = false;
     }
 
     fn press_key(
@@ -972,6 +1020,8 @@ impl AppState {
             _ => {
                 if let Some(ref text) = event.utf8 {
                     Key::Character(text.clone())
+                } else if let Some(ch) = event.keysym.key_char() {
+                    Key::Character(ch.to_string())
                 } else {
                     return;
                 }
@@ -1203,6 +1253,22 @@ fn main() {
             }
         }
 
+fn create_memfd_with_data(name: &str, data: &[u8]) -> std::io::Result<std::os::unix::io::RawFd> {
+    use std::io::{Seek, Write};
+    use std::os::unix::io::FromRawFd;
+    use std::os::unix::io::IntoRawFd;
+
+    let c_name = std::ffi::CString::new(name).unwrap();
+    let fd = unsafe { libc::memfd_create(c_name.as_ptr(), libc::MFD_CLOEXEC) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut file = unsafe { std::fs::File::from_raw_fd(fd) };
+    file.write_all(data)?;
+    file.seek(std::io::SeekFrom::Start(0))?;
+    Ok(file.into_raw_fd())
+}
+
         if app.redraw {
             app.redraw = false;
             if let Some(state) = &mut app.state {
@@ -1210,7 +1276,11 @@ fn main() {
                 if let Some(ref inspector) = app.inspector {
                     if let Some(ref surface) = app.surface {
                         let json = clear_ui::widget::serialize_widgets(&state.widgets);
-                        inspector.update_state(surface, json);
+                        if let Ok(raw_fd) = create_memfd_with_data("clear_ui_state", json.as_bytes()) {
+                            use std::os::unix::io::{FromRawFd, AsFd};
+                            let file = unsafe { std::fs::File::from_raw_fd(raw_fd) };
+                            inspector.update_state(surface, file.as_fd(), json.len() as u32);
+                        }
                     }
                 }
             }

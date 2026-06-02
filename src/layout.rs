@@ -8,7 +8,32 @@ pub trait RenderTarget {
     }
 }
 
-pub fn render_widget<T: Widget>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32) {
+pub struct PopoverCollector {
+    pub rects: Vec<([f32; 4], f32, f32, f32, f32)>,
+    pub texts: Vec<(String, f32, f32, f32, [f32; 4], Option<String>)>,
+}
+
+impl PopoverCollector {
+    pub fn new() -> Self {
+        Self { rects: Vec::new(), texts: Vec::new() }
+    }
+}
+
+impl RenderTarget for PopoverCollector {
+    fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
+        self.rects.push((color, x, y, w, h));
+    }
+
+    fn text(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4]) {
+        self.texts.push((content.to_string(), size, x, y, color, None));
+    }
+
+    fn text_with_font(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], font: &str) {
+        self.texts.push((content.to_string(), size, x, y, color, Some(font.to_string())));
+    }
+}
+
+pub fn render_widget<T: Widget + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32) {
     w.set_rect(x, y, ww, wh);
     for (qx, qy, qw, qh, qc) in w.all_quads() {
         pc.rect(qc, qx, qy, qw, qh);
@@ -27,6 +52,17 @@ pub fn render_widget<T: Widget>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y:
             pc.text(&label.text, label.x, label.y, label.font_size, color_f32);
         }
     }
+    if w.popover_rect().is_some() {
+        crate::widget::popovers::register(w);
+    }
+}
+
+pub fn render_popovers(pc: &mut dyn RenderTarget) {
+    for popover_ptr in crate::widget::popovers::get_active() {
+        unsafe {
+            (*popover_ptr).render_popover(pc);
+        }
+    }
 }
 
 pub struct UiFrame;
@@ -35,6 +71,7 @@ impl UiFrame {
     pub fn start(scroll_offset: f32) -> Self {
         crate::widget::hover_animation::reset_frame_registration();
         crate::widget::hover_animation::set_scroll_offset(scroll_offset);
+        crate::widget::popovers::clear();
         Self
     }
 
@@ -43,6 +80,7 @@ impl UiFrame {
         if let Some((qx, qy, qw, qh, qc)) = crate::widget::hover_animation::get_quad() {
             pc.rect(qc, qx, qy, qw, qh);
         }
+        render_popovers(pc);
     }
 }
 
@@ -100,7 +138,7 @@ impl Column {
         pc.text(text, x, y, font_size, color);
     }
 
-    pub fn widget<T: Widget>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
+    pub fn widget<T: Widget + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
         let x = self.ax(x_off);
         let y = self.ay();
         w.set_row_rect(self.ox + self.cx + 8.0, self.cw - 16.0);
@@ -145,7 +183,7 @@ impl<'a> Row<'a> {
         self.cursor_x += width + self.spacing;
     }
 
-    pub fn widget<T: Widget>(&mut self, w: &mut T, ww: f32, wh: f32) {
+    pub fn widget<T: Widget + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
         render_widget(self.pc, w, self.base_x + self.cursor_x, self.y, ww, wh);
         self.cursor_x += ww + self.spacing;
     }
@@ -182,7 +220,7 @@ impl Section {
         pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
     }
 
-    pub fn widget<T: Widget>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
+    pub fn widget<T: Widget + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
         w.set_row_rect(self.left + Self::ROW_PADDING_X, self.cw - 2.0 * Self::ROW_PADDING_X);
         let top_room = w.top_room();
         self.content_y += top_room;
@@ -267,7 +305,7 @@ pub struct VStack<'a> {
 }
 
 impl<'a> VStack<'a> {
-    pub fn add_widget<T: Widget>(&mut self, w: &mut T, ww: f32, wh: f32) {
+    pub fn add_widget<T: Widget + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
         self.section.widget(self.pc, w, Section::DEFAULT_MARGIN_X, ww, wh);
         self.section.spacing(self.spacing);
     }
