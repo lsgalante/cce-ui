@@ -146,7 +146,7 @@ impl JsonLayoutWidget {
                     });
                 }
             }
-            paginator = Some(Paginator::new(150.0, page_titles));
+            paginator = Some(Paginator::new(56.0, page_titles));
         } else if let Some(ref widgets_conf) = config.widgets {
             for (idx, w_conf) in widgets_conf.iter().enumerate() {
                 let id = w_conf.id.clone().unwrap_or_else(|| format!("widget_{}", idx));
@@ -240,7 +240,7 @@ impl JsonLayoutWidget {
         }
 
         let has_paginator = self.paginator.is_some();
-        let pad_x = if has_paginator { 170.0 } else { 16.0 };
+        let pad_x = if has_paginator { 76.0 } else { 16.0 };
         let usable_w = if has_paginator { bw - pad_x - 16.0 } else { bw - 2.0 * 16.0 };
         
         let mut page_current_y = vec![16.0; 16]; // support up to 16 pages

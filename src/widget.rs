@@ -915,7 +915,7 @@ pub trait Widget {
     fn highlight_color(&self) -> Option<[f32; 4]> {
         let is_focused = self.base().map_or(false, |b| b.focused);
         if is_focused || self.is_active() {
-            Some(colors::HIGHLIGHT_PRIMARY)
+            Some(colors::highlight_primary_color())
         } else if self.hovered() {
             Some(colors::HIGHLIGHT_SECONDARY)
         } else {
@@ -3459,6 +3459,10 @@ impl Widget for Button {
     fn set_selected(&mut self, selected: bool) {
         self.selected = selected;
     }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())]
+    }
 }
 
 pub enum PageButton {
@@ -3478,7 +3482,7 @@ impl Sidebar {
 impl Widget for Sidebar {
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::SIDEBAR_BG }
+    fn color(&self) -> [f32; 4] { colors::sidebar_bg_color() }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
 }
@@ -3961,6 +3965,39 @@ impl Widget for Label {
     }
 }
 
+#[derive(Clone)]
+pub struct SectionHeader {
+    base: WidgetBase,
+}
+
+impl SectionHeader {
+    pub fn new(title: &str) -> Self {
+        let mut base = WidgetBase::new();
+        base.label = Some(title.to_string());
+        Self { base }
+    }
+}
+
+impl Widget for SectionHeader {
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+    fn top_room(&self) -> f32 { 10.0 }
+    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        vec![(self.base.x + 8.0, self.base.y + 22.0, self.base.w - 16.0, 1.0, [0.18, 0.18, 0.27, 1.0])]
+    }
+    fn text_labels(&self) -> Vec<TextLabel> {
+        vec![TextLabel {
+            text: self.base.label.clone().unwrap_or_default(),
+            x: self.base.x + 12.0,
+            y: self.base.y,
+            font_size: 14.0,
+            color: [212, 212, 212],
+        }]
+    }
+}
+
+
 #[derive(Debug, Clone)]
 pub struct Svg {
     pub x: f32,
@@ -4089,6 +4126,15 @@ impl Slider {
     pub fn with_label(mut self, label: &str) -> Self {
         self.base.label = Some(label.to_string());
         self
+    }
+
+    pub fn set_label(&mut self, label: &str) {
+        self.base.label = Some(label.to_string());
+    }
+
+    pub fn set_range(&mut self, min: f32, max: f32) {
+        self.min = min;
+        self.max = max;
     }
 
     pub fn with_scroll(mut self, enabled: bool) -> Self {
@@ -5062,8 +5108,8 @@ pub struct Spinbox {
     base: WidgetBase,
     pub value: i32,
     min: i32, max: i32, step: i32,
-    editing: bool,
-    edit_buffer: String,
+    pub editing: bool,
+    pub edit_buffer: String,
     pub cursor_idx: usize,
     hover_dec: bool,
     hover_inc: bool,
@@ -5505,20 +5551,13 @@ impl Widget for ColorSelector {
         let mut child_opt = self.child.lock().unwrap();
         if let Some(ref mut child) = *child_opt {
             match child.try_wait() {
-                Ok(Some(status)) => {
+                Ok(Some(_status)) => {
                     let child = child_opt.take().unwrap();
-                    if status.success() {
-                        if let Ok(output) = child.wait_with_output() {
-                            let stdout_str = String::from_utf8_lossy(&output.stdout);
-                            let mut found_color = None;
-                            for line in stdout_str.lines().rev() {
-                                if let Some(c) = parse_hex(line.trim()) {
-                                    found_color = Some(c);
-                                    break;
-                                }
-                            }
-                            if let Some(new_color) = found_color {
-                                self.color = new_color;
+                    if let Ok(output) = child.wait_with_output() {
+                        let stdout_str = String::from_utf8_lossy(&output.stdout);
+                        for line in stdout_str.lines().rev() {
+                            if let Some(c) = parse_hex(line.trim()) {
+                                self.color = c;
                                 self.just_clicked = true;
                                 return true;
                             }
@@ -5590,6 +5629,25 @@ impl Widget for ColorSelector {
         let mut quads = Vec::new();
         let pick_x = self.base.x + self.base.w * 0.65;
         let pick_w = self.base.w * 0.35;
+
+        // Draw the text box part background and border
+        let bg_color = if self.editing {
+            [0.06, 0.10, 0.18, 1.0]
+        } else {
+            [0.08, 0.08, 0.12, 1.0]
+        };
+        let border_color = if self.editing {
+            [0.20, 0.50, 0.85, 1.0]
+        } else if self.base.hovered {
+            [0.25, 0.25, 0.35, 1.0]
+        } else {
+            [0.18, 0.18, 0.24, 1.0]
+        };
+
+        // Background & border for hex text box part
+        quads.push((self.base.x, self.base.y, self.base.w * 0.65, self.base.h, border_color));
+        quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w * 0.65 - 2.0, self.base.h - 2.0, bg_color));
+
         let linear_c = colors::to_linear([
             self.color[0] as f32 / 255.0,
             self.color[1] as f32 / 255.0,
@@ -6922,6 +6980,87 @@ mod tests {
         assert_eq!(tb.cursor_idx, 4);
         assert_eq!(tb.select_anchor, None);
     }
+
+    #[test]
+    fn test_paginator_rotated_tabs() {
+        let pages = vec!["📁 Browse".to_string(), "🌐 Network".to_string()];
+        let mut paginator = Paginator::new(56.0, pages)
+            .with_tab_y_offset(100.0)
+            .with_tabs_rotated(true);
+        
+        paginator.set_rect(0.0, 0.0, 1000.0, 600.0);
+
+        // Verify target_y is updated correctly
+        // selected_page = 0: tab_y_offset = 100.0
+        assert_eq!(paginator.target_y, 100.0);
+
+        paginator.set_selected_page(1);
+        // selected_page = 1: tab_y_offset + 1 * (120.0 + 10.0) = 230.0
+        assert_eq!(paginator.target_y, 230.0);
+
+        // Verify hover coordinates
+        // Tab 0 bx/by bounds:
+        // tab_w = 32.0, tab_h = 120.0, spacing = 10.0, sidebar_w = 48.0
+        // bx = self.x + (sidebar_w - tab_w) / 2 = 8.0
+        // by = self.y + tab_y_offset + i * 130.0 = 100.0
+        // bx range: [8.0, 40.0], by range: [100.0, 220.0]
+        
+        // Hover at (24.0, 150.0) should hit Tab 0
+        let hover_tab0 = paginator.on_cursor_moved(24.0, 150.0);
+        assert!(hover_tab0);
+        assert_eq!(paginator.hovered_tab, Some(0));
+
+        // Hover at (24.0, 280.0) should hit Tab 1 (by range: [230.0, 350.0])
+        let hover_tab1 = paginator.on_cursor_moved(24.0, 280.0);
+        assert!(hover_tab1);
+        assert_eq!(paginator.hovered_tab, Some(1));
+
+        // Clicking Tab 0 selects it
+        let click_tab0 = paginator.mouse_input(MouseButton::Left, ElementState::Pressed, 24.0, 150.0);
+        assert!(click_tab0);
+        assert_eq!(paginator.pressed_tab, Some(0));
+
+        let release_tab0 = paginator.mouse_input(MouseButton::Left, ElementState::Released, 24.0, 150.0);
+        assert!(release_tab0);
+        assert_eq!(paginator.selected_page, 0);
+
+        // Check vertical text formatting
+        let labels = paginator.text_labels();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[0].text, "📁");
+        assert_eq!(labels[1].text, "🌐");
+        
+        // Check that rotated text quads were generated
+        assert!(!paginator.tab_text_quads[0].is_empty());
+        assert!(!paginator.tab_text_quads[1].is_empty());
+    }
+
+    #[test]
+    fn test_svg_text_rendering() {
+        let svg_data = r##"<svg width="32" height="120" xmlns="http://www.w3.org/2000/svg">
+  <text x="16" y="60" font-family="sans-serif" font-size="12" fill="#E6E6F2" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 16 60)">Audio</text>
+</svg>"##.as_bytes();
+
+        let opt = resvg::usvg::Options::default();
+        let mut fontdb = resvg::usvg::fontdb::Database::new();
+        fontdb.load_system_fonts();
+        let tree = resvg::usvg::Tree::from_data(svg_data, &opt, &fontdb).unwrap();
+        
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(32, 120).unwrap();
+        resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+        
+        pixmap.save_png("/home/lsgalante/Dropbox/Clear/scratch/test_svg.png").unwrap();
+
+        // Check that some pixels were drawn (are non-transparent)
+        let pixels = pixmap.data();
+        let mut non_transparent = 0;
+        for i in (3..pixels.len()).step_by(4) {
+            if pixels[i] > 0 {
+                non_transparent += 1;
+            }
+        }
+        assert!(non_transparent > 0, "Should have rendered some text pixels");
+    }
 }
 
 // Generic text item layout wrapper
@@ -7469,6 +7608,11 @@ pub struct TextBox {
     pub max_width: Option<f32>,
     pub width: Option<f32>,
     pub is_password: bool,
+    pub multiline: bool,
+    pub draw_bg_border: bool,
+    pub text_color: Option<[u8; 3]>,
+    pub font_size: f32,
+    pub font_family: String,
 }
 
 impl TextBox {
@@ -7491,7 +7635,122 @@ impl TextBox {
             max_width: Some(300.0),
             width: None,
             is_password: false,
+            multiline: false,
+            draw_bg_border: true,
+            text_color: None,
+            font_size: 12.0,
+            font_family: "monospace".to_string(),
         }
+    }
+
+    pub fn with_multiline(mut self, multiline: bool) -> Self {
+        self.multiline = multiline;
+        self
+    }
+
+    pub fn with_draw_bg_border(mut self, draw: bool) -> Self {
+        self.draw_bg_border = draw;
+        self
+    }
+
+    pub fn with_text_color(mut self, color: Option<[u8; 3]>) -> Self {
+        self.text_color = color;
+        self
+    }
+
+    pub fn with_font_size(mut self, size: f32) -> Self {
+        self.font_size = size;
+        self
+    }
+
+    pub fn with_font_family(mut self, family: String) -> Self {
+        self.font_family = family;
+        self
+    }
+
+    pub fn wrap_text(&self, max_chars_per_line: usize) -> (Vec<String>, Vec<(usize, usize)>) {
+        let text_src = if self.editing { &self.edit_buffer } else { &self.text };
+        let chars: Vec<char> = text_src.chars().collect();
+        let mut lines = Vec::new();
+        let mut current_line = Vec::new();
+        let mut index_map = vec![(0, 0); chars.len() + 1];
+        
+        let max_chars = max_chars_per_line.max(1);
+        
+        let mut i = 0;
+        while i < chars.len() {
+            let ch = chars[i];
+            
+            if ch == '\n' {
+                index_map[i] = (lines.len(), current_line.len());
+                lines.push(current_line.iter().collect::<String>());
+                current_line.clear();
+                i += 1;
+                continue;
+            }
+            
+            current_line.push(ch);
+            index_map[i] = (lines.len(), current_line.len() - 1);
+            
+            if current_line.len() > max_chars {
+                let mut space_idx = None;
+                for (s_idx, &c) in current_line.iter().enumerate().rev() {
+                    if c.is_whitespace() {
+                        space_idx = Some(s_idx);
+                        break;
+                    }
+                }
+                
+                if let Some(s_idx) = space_idx {
+                    let line_to_push: Vec<char> = current_line[0..s_idx + 1].to_vec();
+                    let remaining: Vec<char> = current_line[s_idx + 1..].to_vec();
+                    
+                    let line_idx = lines.len();
+                    lines.push(line_to_push.iter().collect::<String>());
+                    
+                    current_line = remaining;
+                    let start_orig = i - current_line.len() + 1;
+                    for c_idx in 0..current_line.len() {
+                        index_map[start_orig + c_idx] = (line_idx + 1, c_idx);
+                    }
+                } else {
+                    let line_to_push: Vec<char> = current_line[0..max_chars].to_vec();
+                    let remaining: Vec<char> = current_line[max_chars..].to_vec();
+                    
+                    let line_idx = lines.len();
+                    lines.push(line_to_push.iter().collect::<String>());
+                    
+                    current_line = remaining;
+                    let start_orig = i - current_line.len() + 1;
+                    for c_idx in 0..current_line.len() {
+                        index_map[start_orig + c_idx] = (line_idx + 1, c_idx);
+                    }
+                }
+            }
+            i += 1;
+        }
+        
+        index_map[chars.len()] = (lines.len(), current_line.len());
+        lines.push(current_line.iter().collect::<String>());
+        
+        (lines, index_map)
+    }
+
+    pub fn map_2d_to_1d(&self, index_map: &[(usize, usize)], target_line: usize, target_col: usize, max_line_idx: usize) -> usize {
+        let line = target_line.min(max_line_idx);
+        let mut best_idx = 0;
+        let mut best_dist = usize::MAX;
+        
+        for (i, &(l, c)) in index_map.iter().enumerate() {
+            if l == line {
+                let dist = (c as isize - target_col as isize).abs() as usize;
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_idx = i;
+                }
+            }
+        }
+        best_idx
     }
 
     pub fn with_password(mut self, is_password: bool) -> Self {
@@ -7657,10 +7916,19 @@ impl Widget for TextBox {
         }
         let mut changed = false;
         if self.dragging && self.editing {
-            let char_width = 7.2;
-            let drag_idx = (((px - (self.base.x + 8.0)) / char_width).round() as isize)
-                .max(0)
-                .min(self.edit_buffer.chars().count() as isize) as usize;
+            let char_width = self.font_size * 0.6;
+            let drag_idx = if self.multiline {
+                let line_height = self.font_size * 1.333;
+                let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                let (lines, index_map) = self.wrap_text(max_chars);
+                let click_line = (((py - (self.base.y + 8.0)) / line_height).floor() as isize).max(0) as usize;
+                let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
+                self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
+            } else {
+                (((px - (self.base.x + 8.0)) / char_width).round() as isize)
+                    .max(0)
+                    .min(self.edit_buffer.chars().count() as isize) as usize
+            };
             if self.cursor_idx != drag_idx {
                 self.cursor_idx = drag_idx;
                 self.just_focused = false;
@@ -7681,19 +7949,28 @@ impl Widget for TextBox {
 
     fn draggable(&self) -> bool { !self.disabled }
     fn is_dragging(&self) -> bool { self.dragging }
-    fn widget_font(&self) -> Option<String> { Some("monospace".to_string()) }
+    fn widget_font(&self) -> Option<String> { Some(self.font_family.clone()) }
 
     fn drag_begin(&mut self, _px: f32, _py: f32) {
         if self.disabled || !self.editing { return; }
         self.dragging = true;
     }
 
-    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
+    fn drag_update(&mut self, px: f32, py: f32) -> bool {
         if self.disabled || !self.editing { return false; }
-        let char_width = 7.2;
-        let drag_idx = (((px - (self.base.x + 8.0)) / char_width).round() as isize)
-            .max(0)
-            .min(self.edit_buffer.chars().count() as isize) as usize;
+        let char_width = self.font_size * 0.6;
+        let drag_idx = if self.multiline {
+            let line_height = self.font_size * 1.333;
+            let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+            let (lines, index_map) = self.wrap_text(max_chars);
+            let click_line = (((py - (self.base.y + 8.0)) / line_height).floor() as isize).max(0) as usize;
+            let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
+            self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
+        } else {
+            (((px - (self.base.x + 8.0)) / char_width).round() as isize)
+                .max(0)
+                .min(self.edit_buffer.chars().count() as isize) as usize
+        };
         if self.cursor_idx != drag_idx {
             self.cursor_idx = drag_idx;
             self.just_focused = false;
@@ -7721,10 +7998,19 @@ impl Widget for TextBox {
                 if !self.editing {
                     self.focus();
                 } else {
-                    let char_width = 7.2;
-                    let idx = (((px - (self.base.x + 8.0)) / char_width).round() as isize)
-                        .max(0)
-                        .min(self.edit_buffer.chars().count() as isize) as usize;
+                    let char_width = self.font_size * 0.6;
+                    let idx = if self.multiline {
+                        let line_height = self.font_size * 1.333;
+                        let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                        let (lines, index_map) = self.wrap_text(max_chars);
+                        let click_line = (((py - (self.base.y + 8.0)) / line_height).floor() as isize).max(0) as usize;
+                        let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
+                        self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
+                    } else {
+                        (((px - (self.base.x + 8.0)) / char_width).round() as isize)
+                            .max(0)
+                            .min(self.edit_buffer.chars().count() as isize) as usize
+                    };
                     self.cursor_idx = idx;
                     self.select_anchor = Some(idx);
                     self.all_selected = false;
@@ -7903,7 +8189,19 @@ impl Widget for TextBox {
                     self.select_anchor = None;
                     self.all_selected = false;
                 }
-                self.cursor_idx = 0;
+                if self.multiline {
+                    let char_width = self.font_size * 0.6;
+                    let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                    let (lines, index_map) = self.wrap_text(max_chars);
+                    let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
+                    if cursor_l > 0 {
+                        self.cursor_idx = self.map_2d_to_1d(&index_map, cursor_l - 1, cursor_c, lines.len() - 1);
+                    } else {
+                        self.cursor_idx = 0;
+                    }
+                } else {
+                    self.cursor_idx = 0;
+                }
                 true
             }
             Key::Named(NamedKey::ArrowDown) => {
@@ -7916,7 +8214,19 @@ impl Widget for TextBox {
                     self.select_anchor = None;
                     self.all_selected = false;
                 }
-                self.cursor_idx = self.edit_buffer.chars().count();
+                if self.multiline {
+                    let char_width = self.font_size * 0.6;
+                    let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                    let (lines, index_map) = self.wrap_text(max_chars);
+                    let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
+                    if cursor_l < lines.len() - 1 {
+                        self.cursor_idx = self.map_2d_to_1d(&index_map, cursor_l + 1, cursor_c, lines.len() - 1);
+                    } else {
+                        self.cursor_idx = self.edit_buffer.chars().count();
+                    }
+                } else {
+                    self.cursor_idx = self.edit_buffer.chars().count();
+                }
                 true
             }
             Key::Named(NamedKey::Home) => {
@@ -7946,7 +8256,25 @@ impl Widget for TextBox {
                 true
             }
             Key::Named(NamedKey::Enter) => {
-                self.unfocus();
+                if self.multiline {
+                    let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+                    let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+                    let mut new_buf = String::new();
+                    let chars: Vec<char> = self.edit_buffer.chars().collect();
+                    for i in 0..start {
+                        new_buf.push(chars[i]);
+                    }
+                    new_buf.push('\n');
+                    for i in end..chars.len() {
+                        new_buf.push(chars[i]);
+                    }
+                    self.edit_buffer = new_buf;
+                    self.cursor_idx = start + 1;
+                    self.select_anchor = None;
+                    self.all_selected = false;
+                } else {
+                    self.unfocus();
+                }
                 true
             }
             Key::Named(NamedKey::Escape) => {
@@ -8024,48 +8352,110 @@ impl Widget for TextBox {
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
         if self.disabled {
-            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, [0.12, 0.12, 0.16, 1.0]));
-            quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, [0.06, 0.06, 0.08, 1.0]));
+            if self.draw_bg_border {
+                quads.push((self.base.x, self.base.y, self.base.w, self.base.h, [0.12, 0.12, 0.16, 1.0]));
+                quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, [0.06, 0.06, 0.08, 1.0]));
+            }
             return quads;
         }
-        let bg_color = if self.editing {
-            [0.06, 0.10, 0.18, 1.0]
-        } else {
-            [0.08, 0.08, 0.12, 1.0]
-        };
-        let border_color = if self.editing {
-            [0.20, 0.50, 0.85, 1.0]
-        } else if self.base.hovered {
-            [0.25, 0.25, 0.35, 1.0]
-        } else {
-            [0.18, 0.18, 0.24, 1.0]
-        };
-        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, border_color));
-        quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, bg_color));
+        
+        if self.draw_bg_border {
+            let bg_color = if self.editing {
+                [0.06, 0.10, 0.18, 1.0]
+            } else {
+                [0.08, 0.08, 0.12, 1.0]
+            };
+            let border_color = if self.editing {
+                [0.20, 0.50, 0.85, 1.0]
+            } else if self.base.hovered {
+                [0.25, 0.25, 0.35, 1.0]
+            } else {
+                [0.18, 0.18, 0.24, 1.0]
+            };
+            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, border_color));
+            quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, bg_color));
+        }
 
         if self.editing {
-            let char_width = 7.2;
+            let char_width = self.font_size * 0.6;
+            let line_height = self.font_size * 1.333;
+            
+            let highlight_color = [0.20, 0.50, 0.85, 0.3];
+            let cursor_color = if self.draw_bg_border {
+                [0.80, 0.80, 0.85, 1.0]
+            } else {
+                [0.10, 0.10, 0.15, 1.0]
+            };
+
             let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
             let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
-            
-            if start != end {
-                let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
-                let max_x = self.base.x + self.base.w - 6.0;
-                let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
-                quads.push((
-                    highlight_x,
-                    self.base.y + (self.base.h - 16.0) / 2.0,
-                    highlight_w,
-                    16.0,
-                    [0.20, 0.40, 0.75, 0.4],
-                ));
-            }
 
-            let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width);
-            let max_cursor_x = self.base.x + self.base.w - 6.0;
-            let final_cursor_x = cursor_x.min(max_cursor_x);
-            let cursor_y = self.base.y + (self.base.h - 14.0) / 2.0;
-            quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
+            if self.multiline {
+                let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                let (lines, index_map) = self.wrap_text(max_chars);
+
+                if start != end {
+                    let start_pos = index_map[start.min(index_map.len() - 1)];
+                    let end_pos = index_map[end.min(index_map.len() - 1)];
+                    
+                    for line_idx in start_pos.0..=end_pos.0 {
+                        let mut line_start_col = None;
+                        let mut line_end_col = None;
+                        for idx in start..end {
+                            if idx < index_map.len() {
+                                let (l, c) = index_map[idx];
+                                if l == line_idx {
+                                    if line_start_col.is_none() || c < line_start_col.unwrap() {
+                                        line_start_col = Some(c);
+                                    }
+                                    if line_end_col.is_none() || c > line_end_col.unwrap() {
+                                        line_end_col = Some(c);
+                                    }
+                                }
+                            }
+                        }
+                        if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
+                            let highlight_x = self.base.x + 8.0 + (sc as f32 * char_width);
+                            let highlight_w = ((ec - sc + 1) as f32 * char_width);
+                            let highlight_y = self.base.y + 8.0 + (line_idx as f32 * line_height);
+                            quads.push((
+                                highlight_x,
+                                highlight_y,
+                                highlight_w,
+                                line_height,
+                                highlight_color,
+                            ));
+                        }
+                    }
+                }
+                
+                let caret_h = self.font_size * 1.15;
+                let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
+                let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width);
+                let cursor_y = self.base.y + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0;
+                quads.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+            } else {
+                let caret_h = self.font_size * 1.15;
+                let line_h = self.font_size * 1.333;
+                if start != end {
+                    let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
+                    let max_x = self.base.x + self.base.w - 6.0;
+                    let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
+                    quads.push((
+                        highlight_x,
+                        self.base.y + (self.base.h - line_h) / 2.0,
+                        highlight_w,
+                        line_h,
+                        highlight_color,
+                    ));
+                }
+
+                let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width);
+                let max_cursor_x = self.base.x + self.base.w - 6.0;
+                let final_cursor_x = cursor_x.min(max_cursor_x);
+                let cursor_y = self.base.y + (self.base.h - caret_h) / 2.0;
+                quads.push((final_cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+            }
         }
 
         quads
@@ -8090,21 +8480,42 @@ impl Widget for TextBox {
         if self.is_password {
             val_text = "•".repeat(val_text.chars().count());
         }
-        labels.push(TextLabel {
-            text: val_text,
-            x: self.base.x + 8.0,
-            y: self.base.y + (self.base.h - 12.0) / 2.0,
-            font_size: 12.0,
-            color: if self.disabled {
-                [0x53, 0x53, 0x5a]
-            } else if self.all_selected {
-                [0xff, 0xff, 0xff]
-            } else if self.editing {
-                [0xee, 0xee, 0xf5]
-            } else {
-                [0xcc, 0xcc, 0xd4]
-            },
-        });
+
+        let label_color = if let Some(custom_color) = self.text_color {
+            custom_color
+        } else if self.disabled {
+            [0x53, 0x53, 0x5a]
+        } else if self.all_selected {
+            [0xff, 0xff, 0xff]
+        } else if self.editing {
+            [0xee, 0xee, 0xf5]
+        } else {
+            [0xcc, 0xcc, 0xd4]
+        };
+
+        if self.multiline {
+            let char_width = self.font_size * 0.6;
+            let line_height = self.font_size * 1.333;
+            let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+            let (lines, _) = self.wrap_text(max_chars);
+            for (line_idx, line_text) in lines.iter().enumerate() {
+                labels.push(TextLabel {
+                    text: line_text.clone(),
+                    x: self.base.x + 8.0,
+                    y: self.base.y + 8.0 + (line_idx as f32 * line_height) + (line_height - self.font_size) / 2.0,
+                    font_size: self.font_size,
+                    color: label_color,
+                });
+            }
+        } else {
+            labels.push(TextLabel {
+                text: val_text,
+                x: self.base.x + 8.0,
+                y: self.base.y + (self.base.h - self.font_size) / 2.0,
+                font_size: self.font_size,
+                color: label_color,
+            });
+        }
         labels
     }
 
@@ -8124,6 +8535,17 @@ impl Drop for TextBox {
 unsafe impl Send for TextBox {}
 unsafe impl Sync for TextBox {}
 
+use std::sync::OnceLock;
+static FONT_DB: OnceLock<resvg::usvg::fontdb::Database> = OnceLock::new();
+
+pub fn get_font_db() -> &'static resvg::usvg::fontdb::Database {
+    FONT_DB.get_or_init(|| {
+        let mut db = resvg::usvg::fontdb::Database::new();
+        db.load_system_fonts();
+        db
+    })
+}
+
 pub struct Paginator {
     x: f32, y: f32, w: f32, h: f32,
     hovered: bool,
@@ -8136,14 +8558,20 @@ pub struct Paginator {
     current_y: Option<f32>,
     target_y: f32,
     pub tabs_at_top: bool,
+    pub tab_y_offset: f32,
+    pub tabs_rotated: bool,
     current_x: Option<f32>,
     target_x: f32,
     parent: Option<*mut (dyn Widget + 'static)>,
     children: Vec<*mut (dyn Widget + 'static)>,
+    pub page_widgets: Vec<Vec<*mut (dyn Widget + 'static)>>,
+    pub tab_text_quads: Vec<Vec<(f32, f32, f32, f32, [f32; 4])>>,
+    pub sidebar_scroll_y: f32,
 }
 
 impl Paginator {
     pub fn new(sidebar_w: f32, pages: Vec<String>) -> Self {
+        let num_pages = pages.len();
         Self {
             x: 0.0, y: 0.0, w: 0.0, h: 0.0,
             hovered: false,
@@ -8156,17 +8584,158 @@ impl Paginator {
             current_y: Some(10.0),
             target_y: 10.0,
             tabs_at_top: false,
+            tab_y_offset: 10.0,
+            tabs_rotated: true,
             current_x: Some(0.0),
             target_x: 0.0,
             parent: None,
             children: Vec::new(),
+            page_widgets: vec![Vec::new(); num_pages],
+            tab_text_quads: Vec::new(),
+            sidebar_scroll_y: 0.0,
         }
     }
 
-    pub fn with_tabs_at_top(mut self, top: bool) -> Self {
-        self.tabs_at_top = top;
+    pub fn add_widget_to_page(&mut self, page_idx: usize, widget: *mut (dyn Widget + 'static)) {
+        if page_idx < self.page_widgets.len() {
+            self.page_widgets[page_idx].push(widget);
+            self.add_child(widget);
+        }
+    }
+
+    pub fn clear_page_widgets(&mut self, page_idx: usize) {
+        if page_idx < self.page_widgets.len() {
+            for widget_ptr in &self.page_widgets[page_idx] {
+                self.children.retain(|&c| !std::ptr::addr_eq(c, *widget_ptr));
+                unsafe {
+                    (&mut **widget_ptr).set_parent(None);
+                }
+            }
+            self.page_widgets[page_idx].clear();
+        }
+    }
+
+    pub fn with_tabs_at_top(mut self, _top: bool) -> Self {
+        self.tabs_at_top = false;
         self.update_target_pos();
         self
+    }
+
+    pub fn with_tab_y_offset(mut self, offset: f32) -> Self {
+        self.tab_y_offset = offset;
+        if self.current_y == Some(10.0) {
+            self.current_y = Some(offset);
+        }
+        self.update_target_pos();
+        self
+    }
+
+    pub fn with_tabs_rotated(mut self, _rotated: bool) -> Self {
+        self.tabs_rotated = true;
+        self.update_target_pos();
+        self
+    }
+
+    pub fn vertical_tab_size(&self) -> (f32, f32) {
+        if self.tabs_rotated {
+            ((self.sidebar_w - 16.0).clamp(24.0, 120.0), 120.0)
+        } else {
+            (self.sidebar_w - 10.0, 40.0)
+        }
+    }
+
+    fn total_sidebar_height(&self) -> f32 {
+        let (_, tab_h) = self.vertical_tab_size();
+        let spacing = 10.0;
+        let step = if self.tabs_rotated { tab_h + spacing } else { 50.0 };
+        self.tab_y_offset + self.pages.len() as f32 * step - spacing
+    }
+
+    fn generate_tab_quads(&mut self) {
+        self.tab_text_quads.clear();
+        let (tab_w, tab_h) = self.vertical_tab_size();
+        let active_color = colors::paginator_tab_label_color();
+        let active_srgb = colors::to_srgb(active_color);
+        let active_r = (active_srgb[0] * 255.0) as u8;
+        let active_g = (active_srgb[1] * 255.0) as u8;
+        let active_b = (active_srgb[2] * 255.0) as u8;
+        let inactive_r = (active_r as f32 * 0.78) as u8;
+        let inactive_g = (active_g as f32 * 0.78) as u8;
+        let inactive_b = (active_b as f32 * 0.78) as u8;
+
+        for (i, page_name) in self.pages.iter().enumerate() {
+            let color = if self.selected_page == i {
+                [active_r, active_g, active_b]
+            } else {
+                [inactive_r, inactive_g, inactive_b]
+            };
+            let hex_color = format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]);
+
+            let trimmed = page_name.trim();
+            let has_icon = trimmed.find(' ').is_some();
+            let label_text = if let Some(space_idx) = trimmed.find(' ') {
+                trimmed.split_at(space_idx).1.trim()
+            } else {
+                trimmed
+            };
+
+            let w_px = tab_w as u32;
+            let h_px = if has_icon { 80 } else { 120 };
+
+            if w_px == 0 || h_px == 0 {
+                self.tab_text_quads.push(Vec::new());
+                continue;
+            }
+
+            // Generate SVG string for the rotated text
+            let svg_data = format!(
+                r##"<svg width="{}" height="{}" xmlns="http://www.w3.org/2000/svg">
+  <text x="{}" y="{}" font-family="sans-serif" font-size="12" fill="{}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 {} {})">{}</text>
+</svg>"##,
+                w_px, h_px,
+                w_px as f32 / 2.0, h_px as f32 / 2.0,
+                hex_color,
+                w_px as f32 / 2.0, h_px as f32 / 2.0,
+                label_text
+            );
+
+            // Render SVG using resvg and tiny_skia
+            let opt = resvg::usvg::Options::default();
+            let fontdb = get_font_db();
+            
+            let mut page_quads = Vec::new();
+            if let Ok(tree) = resvg::usvg::Tree::from_data(svg_data.as_bytes(), &opt, fontdb) {
+                if let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(w_px, h_px) {
+                    resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+                    let pixels = pixmap.data();
+                    for row in 0..h_px {
+                        for col in 0..w_px {
+                            let idx = ((row * w_px + col) * 4) as usize;
+                            if idx + 3 < pixels.len() {
+                                let a = pixels[idx + 3] as f32 / 255.0;
+                                if a > 0.0 {
+                                    let r = pixels[idx] as f32 / 255.0;
+                                    let g = pixels[idx + 1] as f32 / 255.0;
+                                    let b = pixels[idx + 2] as f32 / 255.0;
+                                    page_quads.push((
+                                        col as f32,
+                                        row as f32,
+                                        1.0,
+                                        1.0,
+                                        [r, g, b, a],
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/paginator_debug.txt") {
+                use std::io::Write;
+                let _ = writeln!(file, "Page {}: label='{}', w_px={}, h_px={}, quads_len={}", i, label_text, w_px, h_px, page_quads.len());
+            }
+            self.tab_text_quads.push(page_quads);
+        }
     }
 
     fn update_target_pos(&mut self) {
@@ -8176,13 +8745,22 @@ impl Paginator {
             if self.current_x.is_none() {
                 self.current_x = Some(self.target_x);
             }
+        } else if self.tabs_rotated {
+            let (_, tab_h) = self.vertical_tab_size();
+            let spacing = 10.0;
+            let target = self.tab_y_offset + self.selected_page as f32 * (tab_h + spacing);
+            self.target_y = target;
+            if self.current_y.is_none() {
+                self.current_y = Some(target);
+            }
         } else {
-            let target = 10.0 + self.selected_page as f32 * 50.0;
+            let target = self.tab_y_offset + self.selected_page as f32 * 50.0;
             self.target_y = target;
             if self.current_y.is_none() {
                 self.current_y = Some(target);
             }
         }
+        self.generate_tab_quads();
     }
 
     pub fn selected_page(&self) -> usize {
@@ -8207,6 +8785,54 @@ impl Widget for Paginator {
         self.w = w;
         self.h = h;
         self.update_target_pos();
+
+        // Perform relative wrapping layout for all page widgets
+        let padding_x = 20.0;
+        let gap_y = 16.0;
+        let gap_x = 20.0;
+
+        let (left_x, available_w, start_y) = if self.tabs_at_top {
+            (self.x + padding_x, self.w - 2.0 * padding_x, self.y + 40.0 + 20.0)
+        } else {
+            (self.x + self.sidebar_w + padding_x, self.w - self.sidebar_w - 2.0 * padding_x, self.y + 20.0)
+        };
+
+        for page_idx in 0..self.page_widgets.len() {
+            let mut cur_y = start_y;
+            let widgets = &self.page_widgets[page_idx];
+            let mut i = 0;
+            while i < widgets.len() {
+                let w1_ptr = widgets[i];
+                let w1 = unsafe { &mut *w1_ptr };
+                let (_, _, w1_w, w1_h) = w1.rect();
+
+                if i + 1 < widgets.len() {
+                    let w2_ptr = widgets[i + 1];
+                    let w2 = unsafe { &mut *w2_ptr };
+                    let (_, _, w2_w, w2_h) = w2.rect();
+
+                    if w1_w > 0.0 && w2_w > 0.0 && w1_w + w2_w + gap_x <= available_w {
+                        let top_room = w1.top_room().max(w2.top_room());
+                        let widget_y = cur_y + top_room;
+
+                        w1.set_rect(left_x, widget_y, w1_w, w1_h);
+                        w2.set_rect(left_x + w1_w + gap_x, widget_y, w2_w, w2_h);
+
+                        cur_y = widget_y + w1_h.max(w2_h) + gap_y;
+                        i += 2;
+                        continue;
+                    }
+                }
+
+                let top_room = w1.top_room();
+                let widget_y = cur_y + top_room;
+                let use_w = if w1_w > 0.0 { w1_w.min(available_w) } else { available_w };
+
+                w1.set_rect(left_x, widget_y, use_w, w1_h);
+                cur_y = widget_y + w1_h + gap_y;
+                i += 1;
+            }
+        }
     }
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
@@ -8223,12 +8849,39 @@ impl Widget for Paginator {
                 let scroll_offset = hover_animation::get_scroll_offset();
                 Some((bx, by + scroll_offset, bw, bh, colors::HIGHLIGHT_SECONDARY))
             } else {
-                let bx = self.x + 5.0;
-                let by = self.y + 10.0 + i as f32 * 50.0;
-                let bw = self.sidebar_w - 10.0;
-                let bh = 40.0;
+                let (bx, by, bw, bh) = if self.tabs_rotated {
+                    let (tab_w, tab_h) = self.vertical_tab_size();
+                    let spacing = 10.0;
+                    (
+                        self.x + (self.sidebar_w - tab_w) / 2.0,
+                        self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y,
+                        tab_w,
+                        tab_h,
+                    )
+                } else {
+                    let bw = self.sidebar_w - 10.0;
+                    (
+                        self.x + 5.0,
+                        self.y + self.tab_y_offset + i as f32 * 50.0 - self.sidebar_scroll_y,
+                        bw,
+                        40.0,
+                    )
+                };
                 let scroll_offset = hover_animation::get_scroll_offset();
-                Some((bx, by + scroll_offset, bw, bh, colors::HIGHLIGHT_SECONDARY))
+                let qy = by + scroll_offset;
+                let qh = bh;
+
+                // Clip to paginator Y bounds
+                let min_y = self.y;
+                let max_y = self.y + self.h;
+                let ry1 = qy.max(min_y);
+                let ry2 = (qy + qh).min(max_y);
+                let rh = ry2 - ry1;
+                if rh > 0.0 {
+                    Some((bx, ry1, bw, rh, colors::HIGHLIGHT_SECONDARY))
+                } else {
+                    None
+                }
             }
         } else {
             None
@@ -8239,7 +8892,7 @@ impl Widget for Paginator {
         let mut quads = Vec::new();
         if self.tabs_at_top {
             // Draw top tab bar background
-            quads.push((self.x, self.y, self.w, 40.0, colors::SIDEBAR_BG));
+            quads.push((self.x, self.y, self.w, 40.0, colors::sidebar_bg_color()));
             // Draw main page background
             quads.push((self.x, self.y + 40.0, self.w, self.h - 40.0, colors::page_low_color()));
             // Divider line below tab bar
@@ -8292,14 +8945,38 @@ impl Widget for Paginator {
             }
         } else {
             // Vertical layout (old)
-            quads.push((self.x, self.y, self.sidebar_w, self.h, colors::SIDEBAR_BG));
+            quads.push((self.x, self.y, self.sidebar_w, self.h, colors::sidebar_bg_color()));
             quads.push((self.x + self.sidebar_w, self.y, self.w - self.sidebar_w, self.h, colors::page_low_color()));
 
+            let min_y = self.y;
+            let max_y = self.y + self.h;
+            let mut push_sidebar_quad = |qx: f32, qy: f32, qw: f32, qh: f32, qc: [f32; 4], q: &mut Vec<(f32, f32, f32, f32, [f32; 4])>| {
+                let ry1 = qy.max(min_y);
+                let ry2 = (qy + qh).min(max_y);
+                let rh = ry2 - ry1;
+                if rh > 0.0 {
+                    q.push((qx, ry1, qw, rh, qc));
+                }
+            };
+
             if let Some(cy) = self.current_y {
-                let bx = self.x + 5.0;
-                let by = self.y + cy;
-                let bw = self.sidebar_w - 10.0;
-                let bh = 40.0;
+                let (bx, by, bw, bh) = if self.tabs_rotated {
+                    let (tab_w, tab_h) = self.vertical_tab_size();
+                    (
+                        self.x + (self.sidebar_w - tab_w) / 2.0,
+                        self.y + cy - self.sidebar_scroll_y,
+                        tab_w,
+                        tab_h,
+                    )
+                } else {
+                    let bw = self.sidebar_w - 10.0;
+                    (
+                        self.x + 5.0,
+                        self.y + cy - self.sidebar_scroll_y,
+                        bw,
+                        40.0,
+                    )
+                };
                 
                 let steps = 16;
                 let start_alpha = 0.008;
@@ -8312,16 +8989,30 @@ impl Widget for Paginator {
                     let rh = bh - 2.0 * offset;
                     if rw > 0.0 && rh > 0.0 {
                         let step_alpha = start_alpha + c * (i * i) as f32;
-                        quads.push((rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha]));
+                        push_sidebar_quad(rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha], &mut quads);
                     }
                 }
             }
 
             for i in 0..self.pages.len() {
-                let bx = self.x + 5.0;
-                let by = self.y + 10.0 + i as f32 * 50.0;
-                let bw = self.sidebar_w - 10.0;
-                let bh = 40.0;
+                let (bx, by, bw, bh) = if self.tabs_rotated {
+                    let (tab_w, tab_h) = self.vertical_tab_size();
+                    let spacing = 10.0;
+                    (
+                        self.x + (self.sidebar_w - tab_w) / 2.0,
+                        self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y,
+                        tab_w,
+                        tab_h,
+                    )
+                } else {
+                    let bw = self.sidebar_w - 10.0;
+                    (
+                        self.x + 5.0,
+                        self.y + self.tab_y_offset + i as f32 * 50.0 - self.sidebar_scroll_y,
+                        bw,
+                        40.0,
+                    )
+                };
 
                 let c = if self.pressed_tab == Some(i) {
                     [0.20, 0.20, 0.25, 0.25]
@@ -8332,8 +9023,52 @@ impl Widget for Paginator {
                 };
                 
                 if c[3] > 0.0 {
-                    quads.push((bx, by, bw, bh, c));
+                    push_sidebar_quad(bx, by, bw, bh, c, &mut quads);
                 }
+            }
+        }
+
+        if self.tabs_rotated {
+            let (tab_w, tab_h) = self.vertical_tab_size();
+            let spacing = 10.0;
+            let min_y = self.y;
+            let max_y = self.y + self.h;
+
+            for (i, page_name) in self.pages.iter().enumerate() {
+                let bx = self.x + (self.sidebar_w - tab_w) / 2.0;
+                let by = self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y;
+
+                let trimmed = page_name.trim();
+                let has_icon = trimmed.find(' ').is_some();
+                let y_offset = if has_icon { 40.0 } else { 0.0 };
+
+                if i < self.tab_text_quads.len() {
+                    for &(qx, qy, qw, qh, qc) in &self.tab_text_quads[i] {
+                        let absolute_x = bx + qx;
+                        let absolute_y = by + y_offset + qy;
+                        
+                        // Clip vertical drawing bounds to paginator height
+                        let ry1 = absolute_y.max(min_y);
+                        let ry2 = (absolute_y + qh).min(max_y);
+                        let rh = ry2 - ry1;
+                        if rh > 0.0 {
+                            quads.push((absolute_x, ry1, qw, rh, qc));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Delegate rendering to active page widgets
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &*widget_ptr };
+                let c = widget.color();
+                if c[3] > 0.0 {
+                    let (wx, wy, ww, wh) = widget.rect();
+                    quads.push((wx, wy, ww, wh, c));
+                }
+                quads.extend(widget.all_quads());
             }
         }
         quads
@@ -8341,13 +9076,22 @@ impl Widget for Paginator {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
+        let active_color = colors::paginator_tab_label_color();
+        let active_srgb = colors::to_srgb(active_color);
+        let active_r = (active_srgb[0] * 255.0) as u8;
+        let active_g = (active_srgb[1] * 255.0) as u8;
+        let active_b = (active_srgb[2] * 255.0) as u8;
+        let inactive_r = (active_r as f32 * 0.78) as u8;
+        let inactive_g = (active_g as f32 * 0.78) as u8;
+        let inactive_b = (active_b as f32 * 0.78) as u8;
+
         for (i, page_name) in self.pages.iter().enumerate() {
             let font_size = 12.0;
             let est_w = TextLabel::estimate_width(page_name, font_size);
             let color = if self.selected_page == i {
-                [230, 230, 242]
+                [active_r, active_g, active_b]
             } else {
-                [178, 178, 191]
+                [inactive_r, inactive_g, inactive_b]
             };
 
             if self.tabs_at_top {
@@ -8364,94 +9108,286 @@ impl Widget for Paginator {
                     font_size,
                     color,
                 });
+            } else if self.tabs_rotated {
+                let (tab_w, tab_h) = self.vertical_tab_size();
+                let spacing = 10.0;
+                let bx = self.x + (self.sidebar_w - tab_w) / 2.0;
+                let by = self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y;
+                let bw = tab_w;
+
+                let trimmed = page_name.trim();
+                let has_icon = trimmed.find(' ').is_some();
+                if has_icon {
+                    if let Some(space_idx) = trimmed.find(' ') {
+                        let (icon, _) = trimmed.split_at(space_idx);
+                        let icon = icon.trim();
+                        if !icon.is_empty() {
+                            let icon_font_size = 14.0;
+                            let est_icon_w = TextLabel::estimate_width(icon, icon_font_size);
+                            let icon_y = by + 12.0;
+                            if icon_y >= self.y && icon_y + icon_font_size <= self.y + self.h {
+                                labels.push(TextLabel {
+                                    text: icon.to_string(),
+                                    x: bx + (bw - est_icon_w) / 2.0,
+                                    y: icon_y,
+                                    font_size: icon_font_size,
+                                    color,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Rotated tab text is rendered as quads in generate_tab_quads and extra_quads
             } else {
                 let bx = self.x + 5.0;
-                let by = self.y + 10.0 + i as f32 * 50.0;
+                let by = self.y + self.tab_y_offset + i as f32 * 50.0 - self.sidebar_scroll_y;
                 let bw = self.sidebar_w - 10.0;
                 let bh = 40.0;
 
-                labels.push(TextLabel {
-                    text: page_name.clone(),
-                    x: bx + (bw - est_w) / 2.0,
-                    y: by + (bh - font_size) / 2.0 - 1.0,
-                    font_size,
-                    color,
-                });
+                let text_y = by + (bh - font_size) / 2.0 - 1.0;
+                if text_y >= self.y && text_y + font_size <= self.y + self.h {
+                    labels.push(TextLabel {
+                        text: page_name.clone(),
+                        x: bx + (bw - est_w) / 2.0,
+                        y: text_y,
+                        font_size,
+                        color,
+                    });
+                }
+            }
+        }
+
+        // Delegate labels to active page widgets
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &*widget_ptr };
+                labels.extend(widget.text_labels());
             }
         }
         labels
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        let mut changed = false;
         let was_hovered_tab = self.hovered_tab;
         self.hovered_tab = None;
         for i in 0..self.pages.len() {
             let (bx, by, bw, bh) = if self.tabs_at_top {
                 let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
                 (self.x + i as f32 * tab_w, self.y, tab_w, 40.0)
+            } else if self.tabs_rotated {
+                let (tab_w, tab_h) = self.vertical_tab_size();
+                let spacing = 10.0;
+                (
+                    self.x + (self.sidebar_w - tab_w) / 2.0,
+                    self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y,
+                    tab_w,
+                    tab_h,
+                )
             } else {
                 let bw = self.sidebar_w - 10.0;
-                (self.x + 5.0, self.y + 10.0 + i as f32 * 50.0, bw, 40.0)
+                (self.x + 5.0, self.y + self.tab_y_offset + i as f32 * 50.0 - self.sidebar_scroll_y, bw, 40.0)
             };
-            if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
+            if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
                 self.hovered_tab = Some(i);
                 break;
             }
         }
-        was_hovered_tab != self.hovered_tab
+        if was_hovered_tab != self.hovered_tab {
+            changed = true;
+        }
+
+        // Delegate to active page widgets
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &mut *widget_ptr };
+                if widget.is_dragging() {
+                    if widget.drag_update(px, py) {
+                        changed = true;
+                    }
+                } else if widget.cursor_moved(px, py) {
+                    changed = true;
+                }
+            }
+        }
+
+        changed
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {
-                self.pressed_tab = None;
-                for i in 0..self.pages.len() {
-                    let (bx, by, bw, bh) = if self.tabs_at_top {
-                        let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
-                        (self.x + i as f32 * tab_w, self.y, tab_w, 40.0)
-                    } else {
-                        let bw = self.sidebar_w - 10.0;
-                        (self.x + 5.0, self.y + 10.0 + i as f32 * 50.0, bw, 40.0)
-                    };
-                    if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
-                        self.pressed_tab = Some(i);
-                        return true;
-                    }
-                }
-            }
-            ElementState::Released => {
-                if let Some(i) = self.pressed_tab.take() {
-                    let (bx, by, bw, bh) = if self.tabs_at_top {
-                        let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
-                        (self.x + i as f32 * tab_w, self.y, tab_w, 40.0)
-                    } else {
-                        let bw = self.sidebar_w - 10.0;
-                        (self.x + 5.0, self.y + 10.0 + i as f32 * 50.0, bw, 40.0)
-                    };
-                    if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
-                        if self.selected_page != i {
-                            self.selected_page = i;
-                            self.page_changed = true;
-                            if self.tabs_at_top {
-                                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
-                                self.target_x = i as f32 * tab_w;
-                                if self.current_x.is_none() {
-                                    self.current_x = Some(self.target_x);
-                                }
-                            } else {
-                                self.target_y = 10.0 + i as f32 * 50.0;
-                                if self.current_y.is_none() {
-                                    self.current_y = Some(self.target_y);
-                                }
-                            }
-                        }
+        // First check popover clicks for active page widgets
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &mut *widget_ptr };
+                if widget.popover_rect().is_some() {
+                    if widget.mouse_input(button, state, px, py) {
                         return true;
                     }
                 }
             }
         }
+
+        // Check if click is on paginator tabs
+        let mut clicked_tab = false;
+        if button == MouseButton::Left {
+            match state {
+                ElementState::Pressed => {
+                    self.pressed_tab = None;
+                    for i in 0..self.pages.len() {
+                        let (bx, by, bw, bh) = if self.tabs_at_top {
+                            let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                            (self.x + i as f32 * tab_w, self.y, tab_w, 40.0)
+                        } else if self.tabs_rotated {
+                            let (tab_w, tab_h) = self.vertical_tab_size();
+                            let spacing = 10.0;
+                            (
+                                self.x + (self.sidebar_w - tab_w) / 2.0,
+                                self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y,
+                                tab_w,
+                                tab_h,
+                            )
+                        } else {
+                            let bw = self.sidebar_w - 10.0;
+                            (self.x + 5.0, self.y + self.tab_y_offset + i as f32 * 50.0 - self.sidebar_scroll_y, bw, 40.0)
+                        };
+                        if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
+                            self.pressed_tab = Some(i);
+                            clicked_tab = true;
+                            break;
+                        }
+                    }
+                }
+                ElementState::Released => {
+                    if let Some(i) = self.pressed_tab.take() {
+                        let (bx, by, bw, bh) = if self.tabs_at_top {
+                            let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                            (self.x + i as f32 * tab_w, self.y, tab_w, 40.0)
+                        } else if self.tabs_rotated {
+                            let (tab_w, tab_h) = self.vertical_tab_size();
+                            let spacing = 10.0;
+                            (
+                                self.x + (self.sidebar_w - tab_w) / 2.0,
+                                self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y,
+                                tab_w,
+                                tab_h,
+                            )
+                        } else {
+                            let bw = self.sidebar_w - 10.0;
+                            (self.x + 5.0, self.y + self.tab_y_offset + i as f32 * 50.0 - self.sidebar_scroll_y, bw, 40.0)
+                        };
+                        if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
+                            if self.selected_page != i {
+                                // Unfocus all widgets on the previously selected page
+                                if self.selected_page < self.page_widgets.len() {
+                                    for &widget_ptr in &self.page_widgets[self.selected_page] {
+                                        let widget = unsafe { &mut *widget_ptr };
+                                        widget.unfocus();
+                                    }
+                                }
+                                self.selected_page = i;
+                                self.page_changed = true;
+                                self.update_target_pos();
+                            }
+                            clicked_tab = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if clicked_tab {
+            return true;
+        }
+
+        // Delegate mouse input to widgets on active page
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &mut *widget_ptr };
+                if widget.mouse_input(button, state, px, py) {
+                    return true;
+                }
+                if state == ElementState::Pressed && !widget.hit_test(px, py) {
+                    widget.unfocus();
+                }
+            }
+        }
+
         false
+    }
+
+    fn keyboard_input(&mut self, event: &KeyEvent) -> bool {
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &mut *widget_ptr };
+                if widget.keyboard_input(event) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+        if !self.tabs_at_top {
+            let bx = self.x;
+            let by = self.y;
+            let bw = self.sidebar_w;
+            let bh = self.h;
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/clear-scroll-debug.txt") {
+                use std::io::Write;
+                let _ = writeln!(file, "mouse_wheel check: px={}, py={}, bx={}, by={}, bw={}, bh={}, hover={}", px, py, bx, by, bw, bh, px >= bx && px <= bx + bw && py >= by && py <= by + bh);
+            }
+            if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
+                let scroll_speed = 24.0;
+                let dy = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
+                    MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+                };
+                let old_scroll = self.sidebar_scroll_y;
+                let max_scroll = (self.total_sidebar_height() - self.h).max(0.0);
+                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/clear-scroll-debug.txt") {
+                    use std::io::Write;
+                    let _ = writeln!(file, "mouse_wheel action: dy={}, old_scroll={}, total_h={}, h={}, max_scroll={}", dy, old_scroll, self.total_sidebar_height(), self.h, max_scroll);
+                }
+                self.sidebar_scroll_y = (self.sidebar_scroll_y + dy).clamp(0.0, max_scroll);
+                if (self.sidebar_scroll_y - old_scroll).abs() > 0.01 {
+                    self.update_target_pos();
+                    return true;
+                }
+            }
+        }
+
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &mut *widget_ptr };
+                if widget.mouse_wheel(delta, px, py) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &*widget_ptr };
+                if let Some(r) = widget.popover_rect() {
+                    return Some(r);
+                }
+            }
+        }
+        None
+    }
+
+    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &*widget_ptr };
+                widget.render_popover(pc);
+            }
+        }
     }
 
     fn take_click(&mut self) -> bool {
@@ -8489,6 +9425,17 @@ impl Widget for Paginator {
                 self.current_x = Some(self.target_x);
             }
         }
+
+        // Delegate tick to active page widgets
+        if self.selected_page < self.page_widgets.len() {
+            for &widget_ptr in &self.page_widgets[self.selected_page] {
+                let widget = unsafe { &mut *widget_ptr };
+                if widget.tick(dt) {
+                    changed = true;
+                }
+            }
+        }
+
         changed
     }
 
@@ -8929,13 +9876,17 @@ impl Widget for Graph {
         let mut labels = Vec::new();
         for (i, node) in self.nodes.iter().enumerate() {
             if let Some((nx, ny, _nw, nh)) = self.node_rect(i) {
-                labels.push(TextLabel {
-                    text: node.name.clone(),
-                    x: nx + 8.0,
-                    y: ny + (nh - 12.0) / 2.0,
-                    font_size: 14.0,
-                    color: [0xcc, 0xcc, 0xd4],
-                });
+                let lx = nx + 8.0;
+                let ly = ny + (nh - 12.0) / 2.0;
+                if lx >= self.x && lx < self.x + self.w && ly >= self.y && ly < self.y + self.h {
+                    labels.push(TextLabel {
+                        text: node.name.clone(),
+                        x: lx,
+                        y: ly,
+                        font_size: 14.0,
+                        color: [0xcc, 0xcc, 0xd4],
+                    });
+                }
             }
         }
         labels
@@ -9057,6 +10008,21 @@ impl Widget for Graph {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
+        let min_x = self.x;
+        let min_y = self.y;
+        let max_x = self.x + self.w;
+        let max_y = self.y + self.h;
+        let push_clipped = |qx: f32, qy: f32, qw: f32, qh: f32, qc: [f32; 4], q: &mut Vec<(f32, f32, f32, f32, [f32; 4])>| {
+            let rx1 = qx.max(min_x);
+            let ry1 = qy.max(min_y);
+            let rx2 = (qx + qw).min(max_x);
+            let ry2 = (qy + qh).min(max_y);
+            let rw = rx2 - rx1;
+            let rh = ry2 - ry1;
+            if rw > 0.0 && rh > 0.0 {
+                q.push((rx1, ry1, rw, rh, qc));
+            }
+        };
 
         // Draw connection wires
         let wire_color = [0.0, 0.75, 1.0, 0.7]; // Vibrant cyan glow
@@ -9076,35 +10042,38 @@ impl Widget for Graph {
                         // Vertical segment 1
                         let v1_min_y = start_y.min(mid_y);
                         let v1_max_y = start_y.max(mid_y);
-                        quads.push((
+                        push_clipped(
                             start_x - wire_thickness / 2.0,
                             v1_min_y,
                             wire_thickness,
                             v1_max_y - v1_min_y,
                             wire_color,
-                        ));
+                            &mut quads,
+                        );
 
                         // Horizontal segment
                         let h_min_x = start_x.min(end_x);
                         let h_max_x = start_x.max(end_x);
-                        quads.push((
+                        push_clipped(
                             h_min_x,
                             mid_y - wire_thickness / 2.0,
                             h_max_x - h_min_x,
                             wire_thickness,
                             wire_color,
-                        ));
+                            &mut quads,
+                        );
 
                         // Vertical segment 2
                         let v2_min_y = mid_y.min(end_y);
                         let v2_max_y = mid_y.max(end_y);
-                        quads.push((
+                        push_clipped(
                             end_x - wire_thickness / 2.0,
                             v2_min_y,
                             wire_thickness,
                             v2_max_y - v2_min_y,
                             wire_color,
-                        ));
+                            &mut quads,
+                        );
                     }
                 }
             }
@@ -9182,7 +10151,7 @@ impl Widget for Graph {
                 } else {
                     colors::node_color()
                 };
-                quads.push((nx, ny, nw, nh, bg_color));
+                push_clipped(nx, ny, nw, nh, bg_color, &mut quads);
 
                 if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
                     let btn_color = if self.toggle_hovered_idx == Some(i) {
@@ -9190,11 +10159,11 @@ impl Widget for Graph {
                     } else {
                         colors::TOGGLE_OFF
                     };
-                    quads.push((tx, ty, tw, th, btn_color));
+                    push_clipped(tx, ty, tw, th, btn_color, &mut quads);
 
                     if self.nodes[i].geom_visible {
                         let inset = 3.0;
-                        quads.push((tx + inset, ty + inset, tw - inset * 2.0, th - inset * 2.0, colors::TOGGLE_ON));
+                        push_clipped(tx + inset, ty + inset, tw - inset * 2.0, th - inset * 2.0, colors::TOGGLE_ON, &mut quads);
                     }
                 }
             }

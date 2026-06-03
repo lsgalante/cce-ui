@@ -1203,4 +1203,5 @@ pub fn run<A: Application>() {
             }
         }
     }
+    drop(engine_state);
 }

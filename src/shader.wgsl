@@ -49,18 +49,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         final_color.a = final_color.a * fade;
     }
     if (abs(in.color.a - 0.699) < 0.001) {
-        // Frosted glass effect
-        // Generate pseudo-random high-frequency noise based on pixel position
-        let noise = fract(sin(dot(in.clip_position.xy, vec2f(12.9898, 78.233))) * 43758.5453);
-        let grain = (noise - 0.5) * 0.08;
-        
-        // Add a subtle diagonal light sheen
-        let sheen = sin((in.clip_position.x + in.clip_position.y) * 0.012) * 0.018;
+        // Frosted glass effect with a smooth blur simulation (no high-frequency noise/grain)
+        // We use low-frequency wave combinations to create a soft, smooth organic glow/sheen
+        let wave1 = sin(in.clip_position.x * 0.02) * 0.02;
+        let wave2 = cos(in.clip_position.y * 0.02) * 0.02;
+        let sheen = sin((in.clip_position.x + in.clip_position.y) * 0.008) * 0.03;
+        let glow = wave1 + wave2 + sheen;
         
         final_color = vec4f(
-            clamp(in.color.r + grain + sheen, 0.0, 1.0),
-            clamp(in.color.g + grain + sheen, 0.0, 1.0),
-            clamp(in.color.b + grain + sheen, 0.0, 1.0),
+            clamp(in.color.r + glow, 0.0, 1.0),
+            clamp(in.color.g + glow, 0.0, 1.0),
+            clamp(in.color.b + glow, 0.0, 1.0),
             0.699
         );
     }

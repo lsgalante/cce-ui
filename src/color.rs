@@ -29,6 +29,10 @@ static SLIDER_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_TRACK);
 static PAGE_LOW_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0600316, 0.0600316, 0.080219, 1.0]);
 static COLOR_BORDERS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.2039, 0.2039, 0.2530, 1.0]);
 static NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
+static SIDEBAR_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(SIDEBAR_BG);
+static HIGHLIGHT_PRIMARY_COLOR: RwLock<[f32; 4]> = RwLock::new(HIGHLIGHT_PRIMARY);
+static PAGINATOR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
+
 
 pub fn node_color() -> [f32; 4] {
     *NODE_COLOR.read().unwrap()
@@ -226,3 +230,115 @@ pub fn to_srgb(color: [f32; 4]) -> [f32; 4] {
         color[3],
     ]
 }
+
+pub fn sidebar_bg_color() -> [f32; 4] {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("paginator_sidebar_color") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
+                    if hex.len() >= 6 {
+                        if let (Ok(r), Ok(g), Ok(b)) = (
+                            u8::from_str_radix(&hex[0..2], 16),
+                            u8::from_str_radix(&hex[2..4], 16),
+                            u8::from_str_radix(&hex[4..6], 16),
+                        ) {
+                            let r_f = srgb_to_linear(r as f32 / 255.0);
+                            let g_f = srgb_to_linear(g as f32 / 255.0);
+                            let b_f = srgb_to_linear(b as f32 / 255.0);
+                            if let Ok(mut lock) = SIDEBAR_BG_COLOR.write() {
+                                *lock = [r_f, g_f, b_f, 1.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *SIDEBAR_BG_COLOR.read().unwrap()
+}
+
+pub fn set_sidebar_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = SIDEBAR_BG_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn highlight_primary_color() -> [f32; 4] {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("primary_highlight_color") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
+                    if hex.len() >= 6 {
+                        if let (Ok(r), Ok(g), Ok(b)) = (
+                            u8::from_str_radix(&hex[0..2], 16),
+                            u8::from_str_radix(&hex[2..4], 16),
+                            u8::from_str_radix(&hex[4..6], 16),
+                        ) {
+                            let r_f = srgb_to_linear(r as f32 / 255.0);
+                            let g_f = srgb_to_linear(g as f32 / 255.0);
+                            let b_f = srgb_to_linear(b as f32 / 255.0);
+                            if let Ok(mut lock) = HIGHLIGHT_PRIMARY_COLOR.write() {
+                                *lock = [r_f, g_f, b_f, 0.12];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *HIGHLIGHT_PRIMARY_COLOR.read().unwrap()
+}
+
+pub fn set_highlight_primary_color(color: [f32; 4]) {
+    if let Ok(mut lock) = HIGHLIGHT_PRIMARY_COLOR.write() {
+        *lock = [color[0], color[1], color[2], 0.12];
+    }
+}
+
+pub fn paginator_tab_label_color() -> [f32; 4] {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("paginator_tab_label_color") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
+                    if hex.len() >= 6 {
+                        if let (Ok(r), Ok(g), Ok(b)) = (
+                            u8::from_str_radix(&hex[0..2], 16),
+                            u8::from_str_radix(&hex[2..4], 16),
+                            u8::from_str_radix(&hex[4..6], 16),
+                        ) {
+                            let r_f = srgb_to_linear(r as f32 / 255.0);
+                            let g_f = srgb_to_linear(g as f32 / 255.0);
+                            let b_f = srgb_to_linear(b as f32 / 255.0);
+                            if let Ok(mut lock) = PAGINATOR_TAB_LABEL_COLOR.write() {
+                                *lock = [r_f, g_f, b_f, 1.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *PAGINATOR_TAB_LABEL_COLOR.read().unwrap()
+}
+
+pub fn set_paginator_tab_label_color(color: [f32; 4]) {
+    if let Ok(mut lock) = PAGINATOR_TAB_LABEL_COLOR.write() {
+        *lock = color;
+    }
+}
+
