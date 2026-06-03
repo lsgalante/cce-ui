@@ -5409,7 +5409,7 @@ pub struct ColorSelector {
     base: WidgetBase,
     pub color: [u8; 3],
     just_clicked: bool,
-    editing: bool,
+    pub editing: bool,
     edit_buffer: String,
     pub command: String,
     pub parent: Option<*mut (dyn Widget + 'static)>,
