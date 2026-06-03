@@ -833,6 +833,8 @@ pub trait Widget {
     fn set_curved_circle(&mut self, _circle: Option<(f32, f32, f32)>) {}
     fn set_uniform_background(&mut self, _uniform: bool) {}
     fn set_network_opacity(&mut self, _opacity: f32) {}
+    fn set_cell_color(&mut self, _color: [f32; 3]) {}
+    fn set_gap_color(&mut self, _color: [f32; 3]) {}
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         if let Some(b) = self.base_mut() {
@@ -8132,6 +8134,9 @@ pub struct Paginator {
     page_changed: bool,
     current_y: Option<f32>,
     target_y: f32,
+    pub tabs_at_top: bool,
+    current_x: Option<f32>,
+    target_x: f32,
     parent: Option<*mut (dyn Widget + 'static)>,
     children: Vec<*mut (dyn Widget + 'static)>,
 }
@@ -8149,8 +8154,33 @@ impl Paginator {
             page_changed: false,
             current_y: Some(10.0),
             target_y: 10.0,
+            tabs_at_top: false,
+            current_x: Some(0.0),
+            target_x: 0.0,
             parent: None,
             children: Vec::new(),
+        }
+    }
+
+    pub fn with_tabs_at_top(mut self, top: bool) -> Self {
+        self.tabs_at_top = top;
+        self.update_target_pos();
+        self
+    }
+
+    fn update_target_pos(&mut self) {
+        if self.tabs_at_top {
+            let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+            self.target_x = self.selected_page as f32 * tab_w;
+            if self.current_x.is_none() {
+                self.current_x = Some(self.target_x);
+            }
+        } else {
+            let target = 10.0 + self.selected_page as f32 * 50.0;
+            self.target_y = target;
+            if self.current_y.is_none() {
+                self.current_y = Some(target);
+            }
         }
     }
 
@@ -8160,16 +8190,9 @@ impl Paginator {
 
     pub fn set_selected_page(&mut self, page: usize) {
         if page < self.pages.len() {
-            let target = 10.0 + page as f32 * 50.0;
             if self.selected_page != page {
                 self.selected_page = page;
-                self.target_y = target;
-                if self.current_y.is_none() {
-                    self.current_y = Some(target);
-                }
-            } else if self.current_y.is_none() {
-                self.target_y = target;
-                self.current_y = Some(target);
+                self.update_target_pos();
             }
         }
     }
@@ -8177,19 +8200,35 @@ impl Paginator {
 
 impl Widget for Paginator {
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.x = x;
+        self.y = y;
+        self.w = w;
+        self.h = h;
+        self.update_target_pos();
+    }
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
 
     fn highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         if let Some(i) = self.hovered_tab {
-            let bx = self.x + 5.0;
-            let by = self.y + 10.0 + i as f32 * 50.0;
-            let bw = self.sidebar_w - 10.0;
-            let bh = 40.0;
-            let scroll_offset = hover_animation::get_scroll_offset();
-            Some((bx, by + scroll_offset, bw, bh, colors::HIGHLIGHT_SECONDARY))
+            if self.tabs_at_top {
+                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                let bx = self.x + i as f32 * tab_w + 2.0;
+                let by = self.y + 2.0;
+                let bw = tab_w - 4.0;
+                let bh = 40.0 - 4.0;
+                let scroll_offset = hover_animation::get_scroll_offset();
+                Some((bx, by + scroll_offset, bw, bh, colors::HIGHLIGHT_SECONDARY))
+            } else {
+                let bx = self.x + 5.0;
+                let by = self.y + 10.0 + i as f32 * 50.0;
+                let bw = self.sidebar_w - 10.0;
+                let bh = 40.0;
+                let scroll_offset = hover_animation::get_scroll_offset();
+                Some((bx, by + scroll_offset, bw, bh, colors::HIGHLIGHT_SECONDARY))
+            }
         } else {
             None
         }
@@ -8197,62 +8236,113 @@ impl Widget for Paginator {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        quads.push((self.x, self.y, self.sidebar_w, self.h, colors::SIDEBAR_BG));
-        quads.push((self.x + self.sidebar_w, self.y, self.w - self.sidebar_w, self.h, colors::page_low_color()));
+        if self.tabs_at_top {
+            // Draw top tab bar background
+            quads.push((self.x, self.y, self.w, 40.0, colors::SIDEBAR_BG));
+            // Draw main page background
+            quads.push((self.x, self.y + 40.0, self.w, self.h - 40.0, colors::page_low_color()));
+            // Divider line below tab bar
+            quads.push((self.x, self.y + 40.0 - 1.0, self.w, 1.0, [0.20, 0.20, 0.25, 0.6]));
 
-        if let Some(cy) = self.current_y {
-            let bx = self.x + 5.0;
-            let by = self.y + cy;
-            let bw = self.sidebar_w - 10.0;
-            let bh = 40.0;
-            
-            // Draw nested rectangles to create a soft, faded-out edge/border effect
-            let steps = 16;
-            let start_alpha = 0.008;
-            let c = 0.000516;
-            for i in 0..steps {
-                let offset = i as f32 * 0.5;
-                let rx = bx + offset;
-                let ry = by + offset;
-                let rw = bw - 2.0 * offset;
-                let rh = bh - 2.0 * offset;
-                if rw > 0.0 && rh > 0.0 {
-                    let step_alpha = start_alpha + c * (i * i) as f32;
-                    quads.push((rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha]));
+            // Sliding active tab indicator
+            if let Some(cx) = self.current_x {
+                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                let bx = self.x + cx + 4.0;
+                let by = self.y + 4.0;
+                let bw = tab_w - 8.0;
+                let bh = 40.0 - 8.0;
+                
+                // Sliding capsule glow
+                let steps = 12;
+                let start_alpha = 0.01;
+                let c = 0.0006;
+                for i in 0..steps {
+                    let offset = i as f32 * 0.5;
+                    let rx = bx + offset;
+                    let ry = by + offset;
+                    let rw = bw - 2.0 * offset;
+                    let rh = bh - 2.0 * offset;
+                    if rw > 0.0 && rh > 0.0 {
+                        let step_alpha = start_alpha + c * (i * i) as f32;
+                        quads.push((rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha]));
+                    }
+                }
+                // Underline indicator
+                quads.push((bx + 10.0, self.y + 40.0 - 3.0, bw - 20.0, 2.0, [0.22, 0.58, 0.96, 0.8]));
+            }
+
+            // Tab button press/hover highlight overlays
+            for i in 0..self.pages.len() {
+                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                let bx = self.x + i as f32 * tab_w + 4.0;
+                let by = self.y + 4.0;
+                let bw = tab_w - 8.0;
+                let bh = 40.0 - 8.0;
+
+                let c = if self.pressed_tab == Some(i) {
+                    [0.20, 0.20, 0.25, 0.25]
+                } else if self.hovered_tab == Some(i) {
+                    [0.20, 0.20, 0.25, 0.15]
+                } else {
+                    [0.0, 0.0, 0.0, 0.0]
+                };
+                
+                if c[3] > 0.0 {
+                    quads.push((bx, by, bw, bh, c));
+                }
+            }
+        } else {
+            // Vertical layout (old)
+            quads.push((self.x, self.y, self.sidebar_w, self.h, colors::SIDEBAR_BG));
+            quads.push((self.x + self.sidebar_w, self.y, self.w - self.sidebar_w, self.h, colors::page_low_color()));
+
+            if let Some(cy) = self.current_y {
+                let bx = self.x + 5.0;
+                let by = self.y + cy;
+                let bw = self.sidebar_w - 10.0;
+                let bh = 40.0;
+                
+                let steps = 16;
+                let start_alpha = 0.008;
+                let c = 0.000516;
+                for i in 0..steps {
+                    let offset = i as f32 * 0.5;
+                    let rx = bx + offset;
+                    let ry = by + offset;
+                    let rw = bw - 2.0 * offset;
+                    let rh = bh - 2.0 * offset;
+                    if rw > 0.0 && rh > 0.0 {
+                        let step_alpha = start_alpha + c * (i * i) as f32;
+                        quads.push((rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha]));
+                    }
+                }
+            }
+
+            for i in 0..self.pages.len() {
+                let bx = self.x + 5.0;
+                let by = self.y + 10.0 + i as f32 * 50.0;
+                let bw = self.sidebar_w - 10.0;
+                let bh = 40.0;
+
+                let c = if self.pressed_tab == Some(i) {
+                    [0.20, 0.20, 0.25, 0.25]
+                } else if self.hovered_tab == Some(i) {
+                    [0.20, 0.20, 0.25, 0.15]
+                } else {
+                    [0.0, 0.0, 0.0, 0.0]
+                };
+                
+                if c[3] > 0.0 {
+                    quads.push((bx, by, bw, bh, c));
                 }
             }
         }
-
-        for i in 0..self.pages.len() {
-            let bx = self.x + 5.0;
-            let by = self.y + 10.0 + i as f32 * 50.0;
-            let bw = self.sidebar_w - 10.0;
-            let bh = 40.0;
-
-            let c = if self.pressed_tab == Some(i) {
-                [0.20, 0.20, 0.25, 0.25]
-            } else if self.hovered_tab == Some(i) {
-                [0.20, 0.20, 0.25, 0.15]
-            } else {
-                [0.0, 0.0, 0.0, 0.0]
-            };
-            
-            if c[3] > 0.0 {
-                quads.push((bx, by, bw, bh, c));
-            }
-        }
-
         quads
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         for (i, page_name) in self.pages.iter().enumerate() {
-            let bx = self.x + 5.0;
-            let by = self.y + 10.0 + i as f32 * 50.0;
-            let bw = self.sidebar_w - 10.0;
-            let bh = 40.0;
-
             let font_size = 12.0;
             let est_w = TextLabel::estimate_width(page_name, font_size);
             let color = if self.selected_page == i {
@@ -8261,13 +8351,34 @@ impl Widget for Paginator {
                 [178, 178, 191]
             };
 
-            labels.push(TextLabel {
-                text: page_name.clone(),
-                x: bx + (bw - est_w) / 2.0,
-                y: by + (bh - font_size) / 2.0 - 1.0,
-                font_size,
-                color,
-            });
+            if self.tabs_at_top {
+                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                let bx = self.x + i as f32 * tab_w;
+                let by = self.y;
+                let bw = tab_w;
+                let bh = 40.0;
+
+                labels.push(TextLabel {
+                    text: page_name.clone(),
+                    x: bx + (bw - est_w) / 2.0,
+                    y: by + (bh - font_size) / 2.0 - 1.0,
+                    font_size,
+                    color,
+                });
+            } else {
+                let bx = self.x + 5.0;
+                let by = self.y + 10.0 + i as f32 * 50.0;
+                let bw = self.sidebar_w - 10.0;
+                let bh = 40.0;
+
+                labels.push(TextLabel {
+                    text: page_name.clone(),
+                    x: bx + (bw - est_w) / 2.0,
+                    y: by + (bh - font_size) / 2.0 - 1.0,
+                    font_size,
+                    color,
+                });
+            }
         }
         labels
     }
@@ -8276,10 +8387,13 @@ impl Widget for Paginator {
         let was_hovered_tab = self.hovered_tab;
         self.hovered_tab = None;
         for i in 0..self.pages.len() {
-            let bx = self.x + 5.0;
-            let by = self.y + 10.0 + i as f32 * 50.0;
-            let bw = self.sidebar_w - 10.0;
-            let bh = 40.0;
+            let (bx, by, bw, bh) = if self.tabs_at_top {
+                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                (self.x + i as f32 * tab_w, self.y, tab_w, 40.0)
+            } else {
+                let bw = self.sidebar_w - 10.0;
+                (self.x + 5.0, self.y + 10.0 + i as f32 * 50.0, bw, 40.0)
+            };
             if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
                 self.hovered_tab = Some(i);
                 break;
@@ -8294,10 +8408,13 @@ impl Widget for Paginator {
             ElementState::Pressed => {
                 self.pressed_tab = None;
                 for i in 0..self.pages.len() {
-                    let bx = self.x + 5.0;
-                    let by = self.y + 10.0 + i as f32 * 50.0;
-                    let bw = self.sidebar_w - 10.0;
-                    let bh = 40.0;
+                    let (bx, by, bw, bh) = if self.tabs_at_top {
+                        let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                        (self.x + i as f32 * tab_w, self.y, tab_w, 40.0)
+                    } else {
+                        let bw = self.sidebar_w - 10.0;
+                        (self.x + 5.0, self.y + 10.0 + i as f32 * 50.0, bw, 40.0)
+                    };
                     if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
                         self.pressed_tab = Some(i);
                         return true;
@@ -8306,17 +8423,28 @@ impl Widget for Paginator {
             }
             ElementState::Released => {
                 if let Some(i) = self.pressed_tab.take() {
-                    let bx = self.x + 5.0;
-                    let by = self.y + 10.0 + i as f32 * 50.0;
-                    let bw = self.sidebar_w - 10.0;
-                    let bh = 40.0;
+                    let (bx, by, bw, bh) = if self.tabs_at_top {
+                        let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                        (self.x + i as f32 * tab_w, self.y, tab_w, 40.0)
+                    } else {
+                        let bw = self.sidebar_w - 10.0;
+                        (self.x + 5.0, self.y + 10.0 + i as f32 * 50.0, bw, 40.0)
+                    };
                     if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
                         if self.selected_page != i {
                             self.selected_page = i;
                             self.page_changed = true;
-                            self.target_y = 10.0 + i as f32 * 50.0;
-                            if self.current_y.is_none() {
-                                self.current_y = Some(self.target_y);
+                            if self.tabs_at_top {
+                                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+                                self.target_x = i as f32 * tab_w;
+                                if self.current_x.is_none() {
+                                    self.current_x = Some(self.target_x);
+                                }
+                            } else {
+                                self.target_y = 10.0 + i as f32 * 50.0;
+                                if self.current_y.is_none() {
+                                    self.current_y = Some(self.target_y);
+                                }
                             }
                         }
                         return true;
@@ -8339,20 +8467,30 @@ impl Widget for Paginator {
     fn value(&self) -> i32 { self.selected_page as i32 }
 
     fn tick(&mut self, dt: f32) -> bool {
+        let mut changed = false;
         if let Some(current) = self.current_y {
             let diff = self.target_y - current;
             if diff.abs() > 0.1 {
                 let decay = 15.0;
                 let next = current + diff * (1.0 - (-decay * dt).exp());
                 self.current_y = Some(next);
-                true
+                changed = true;
             } else {
                 self.current_y = Some(self.target_y);
-                false
             }
-        } else {
-            false
         }
+        if let Some(current) = self.current_x {
+            let diff = self.target_x - current;
+            if diff.abs() > 0.1 {
+                let decay = 15.0;
+                let next = current + diff * (1.0 - (-decay * dt).exp());
+                self.current_x = Some(next);
+                changed = true;
+            } else {
+                self.current_x = Some(self.target_x);
+            }
+        }
+        changed
     }
 
     fn parent(&self) -> Option<*mut (dyn Widget + 'static)> { self.parent }
@@ -8668,6 +8806,8 @@ pub struct Graph {
 
     uniform_background: bool,
     network_opacity: f32,
+    cell_color: [f32; 3],
+    gap_color: [f32; 3],
 }
 
 impl Graph {
@@ -8695,6 +8835,8 @@ impl Graph {
             toggle_hovered_idx: None,
             uniform_background: false,
             network_opacity: 0.95,
+            cell_color: [0.13, 0.13, 0.16],
+            gap_color: [0.07, 0.07, 0.09],
         }
     }
 
@@ -8745,6 +8887,8 @@ impl Widget for Graph {
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
     fn set_uniform_background(&mut self, uniform: bool) { self.uniform_background = uniform; }
     fn set_network_opacity(&mut self, opacity: f32) { self.network_opacity = opacity; }
+    fn set_cell_color(&mut self, color: [f32; 3]) { self.cell_color = color; }
+    fn set_gap_color(&mut self, color: [f32; 3]) { self.gap_color = color; }
     fn color(&self) -> [f32; 4] {
         if self.uniform_background {
             [0.10, 0.10, 0.13, self.network_opacity]
@@ -8982,8 +9126,23 @@ impl Widget for Graph {
                 let cx_start = cx_start.max(-100_000);
                 let cx_end = cx_end.min(100_000);
 
-                // Draw solid background color behind grid lines
-                quads.push((self.x, self.y, self.w, self.h, [colors::CONTENT_BG[0], colors::CONTENT_BG[1], colors::CONTENT_BG[2], self.network_opacity]));
+                // Draw gap color as solid background color of grid
+                quads.push((self.x, self.y, self.w, self.h, [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity]));
+
+                // Draw filled cells with cell color
+                for r in ry_start..=ry_end {
+                    let y1 = self.grid_origin_y + (r as f32) * step_y;
+                    for c in cx_start..=cx_end {
+                        let x1 = self.grid_origin_x + (c as f32) * step_x;
+                        let cell_x = x1.max(self.x);
+                        let cell_y = y1.max(self.y);
+                        let cell_w = (x1 + self.grid_size_x).min(self.x + self.w) - cell_x;
+                        let cell_h = (y1 + self.grid_size_y).min(self.y + self.h) - cell_y;
+                        if cell_w > 0.0 && cell_h > 0.0 {
+                            quads.push((cell_x, cell_y, cell_w, cell_h, [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity]));
+                        }
+                    }
+                }
 
                 let grid_line_color = [0.18, 0.18, 0.22, 0.40];
 
