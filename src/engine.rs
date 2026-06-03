@@ -38,12 +38,14 @@ use crate::wayland::{WaylandSurfaceHandle, detect_scale_factor};
 pub struct Vertex {
     pub position: [f32; 2],
     pub color: [f32; 4],
+    pub clip_circle: [f32; 3], // [cx, cy, r]
 }
 
 impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
+    const ATTRIBS: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![
         0 => Float32x2,
         1 => Float32x4,
+        2 => Float32x3,
     ];
 
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
@@ -61,14 +63,169 @@ pub fn quad_vertices(x: f32, y: f32, w: f32, h: f32, sw: f32, sh: f32, c: [f32; 
     let x1 = ((x + w) / sw) * 2.0 - 1.0;
     let y1 = 1.0 - ((y + h) / sh) * 2.0;
     [
-        Vertex { position: [x0, y0], color: c },
-        Vertex { position: [x1, y0], color: c },
-        Vertex { position: [x0, y1], color: c },
-        Vertex { position: [x1, y0], color: c },
-        Vertex { position: [x1, y1], color: c },
-        Vertex { position: [x0, y1], color: c },
+        Vertex { position: [x0, y0], color: c, clip_circle: [0.0, 0.0, 0.0] },
+        Vertex { position: [x1, y0], color: c, clip_circle: [0.0, 0.0, 0.0] },
+        Vertex { position: [x0, y1], color: c, clip_circle: [0.0, 0.0, 0.0] },
+        Vertex { position: [x1, y0], color: c, clip_circle: [0.0, 0.0, 0.0] },
+        Vertex { position: [x1, y1], color: c, clip_circle: [0.0, 0.0, 0.0] },
+        Vertex { position: [x0, y1], color: c, clip_circle: [0.0, 0.0, 0.0] },
     ]
 }
+
+pub fn quad_vertices_with_clip(
+    x: f32, y: f32, w: f32, h: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    clip_circle: [f32; 3],
+) -> [Vertex; 6] {
+    let x0 = (x / sw) * 2.0 - 1.0;
+    let y0 = 1.0 - (y / sh) * 2.0;
+    let x1 = ((x + w) / sw) * 2.0 - 1.0;
+    let y1 = 1.0 - ((y + h) / sh) * 2.0;
+    [
+        Vertex { position: [x0, y0], color, clip_circle },
+        Vertex { position: [x1, y0], color, clip_circle },
+        Vertex { position: [x0, y1], color, clip_circle },
+        Vertex { position: [x1, y0], color, clip_circle },
+        Vertex { position: [x1, y1], color, clip_circle },
+        Vertex { position: [x0, y1], color, clip_circle },
+    ]
+}
+
+pub fn quad_vertices_clipped(
+    x: f32, y: f32, w: f32, h: f32,
+    surface_w: f32, surface_h: f32,
+    color: [f32; 4],
+    clip: (f32, f32, f32, f32),
+    clip_circle: [f32; 3],
+) -> Vec<Vertex> {
+    let (cx0, cy0, cx1, cy1) = clip;
+    let ix0 = x.max(cx0);
+    let iy0 = y.max(cy0);
+    let ix1 = (x + w).min(cx1);
+    let iy1 = (y + h).min(cy1);
+    if ix1 <= ix0 || iy1 <= iy0 {
+        return Vec::new();
+    }
+    quad_vertices_with_clip(ix0, iy0, ix1 - ix0, iy1 - iy0, surface_w, surface_h, color, clip_circle).to_vec()
+}
+
+pub fn widget_vertices(w: &dyn crate::widget::Widget, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
+    let (x, y, ww, h) = w.rect();
+    quad_vertices_with_clip(x, y, ww, h, sw, sh, w.color(), clip_circle).to_vec()
+}
+
+pub fn circle_vertices(
+    cx: f32, cy: f32, r: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    segments: usize,
+    clip_circle: [f32; 3],
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+    for i in 0..segments {
+        let theta1 = (i as f32) * 2.0 * std::f32::consts::PI / (segments as f32);
+        let theta2 = ((i + 1) as f32) * 2.0 * std::f32::consts::PI / (segments as f32);
+        let x0 = cx;
+        let y0 = cy;
+        let x1 = cx + r * theta1.cos();
+        let y1 = cy + r * theta1.sin();
+        let x2 = cx + r * theta2.cos();
+        let y2 = cy + r * theta2.sin();
+        
+        let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+        let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+        let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+        let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+        let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
+        let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+        
+        verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+    }
+    verts
+}
+
+pub fn circle_border_vertices(
+    cx: f32, cy: f32, r: f32,
+    thickness: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    segments: usize,
+    clip_circle: [f32; 3],
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+    for i in 0..segments {
+        let theta1 = (i as f32) * 2.0 * std::f32::consts::PI / (segments as f32);
+        let theta2 = ((i + 1) as f32) * 2.0 * std::f32::consts::PI / (segments as f32);
+        
+        let x0 = cx + (r - thickness) * theta1.cos();
+        let y0 = cy + (r - thickness) * theta1.sin();
+        let x1 = cx + r * theta1.cos();
+        let y1 = cy + r * theta1.sin();
+        
+        let x2 = cx + r * theta2.cos();
+        let y2 = cy + r * theta2.sin();
+        let x3 = cx + (r - thickness) * theta2.cos();
+        let y3 = cy + (r - thickness) * theta2.sin();
+        
+        let ndc_x0 = (x0 / sw) * 2.0 - 1.0; let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+        let ndc_x1 = (x1 / sw) * 2.0 - 1.0; let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+        let ndc_x2 = (x2 / sw) * 2.0 - 1.0; let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+        let ndc_x3 = (x3 / sw) * 2.0 - 1.0; let ndc_y3 = 1.0 - (y3 / sh) * 2.0;
+        
+        verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+        
+        verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x3, ndc_y3], color, clip_circle });
+    }
+    verts
+}
+
+pub fn arc_background_vertices(
+    cx: f32, cy: f32, r: f32,
+    thickness: f32,
+    start_angle: f32, end_angle: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    segments: usize,
+    clip_circle: [f32; 3],
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+    for i in 0..segments {
+        let theta1 = start_angle + (i as f32) * (end_angle - start_angle) / (segments as f32);
+        let theta2 = start_angle + ((i + 1) as f32) * (end_angle - start_angle) / (segments as f32);
+        
+        let x0 = cx + (r - thickness) * theta1.cos();
+        let y0 = cy + (r - thickness) * theta1.sin();
+        let x1 = cx + r * theta1.cos();
+        let y1 = cy + r * theta1.sin();
+        
+        let x2 = cx + r * theta2.cos();
+        let y2 = cy + r * theta2.sin();
+        let x3 = cx + (r - thickness) * theta2.cos();
+        let y3 = cy + (r - thickness) * theta2.sin();
+        
+        let ndc_x0 = (x0 / sw) * 2.0 - 1.0; let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+        let ndc_x1 = (x1 / sw) * 2.0 - 1.0; let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+        let ndc_x2 = (x2 / sw) * 2.0 - 1.0; let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+        let ndc_x3 = (x3 / sw) * 2.0 - 1.0; let ndc_y3 = 1.0 - (y3 / sh) * 2.0;
+        
+        verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+        
+        verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x3, ndc_y3], color, clip_circle });
+    }
+    verts
+}
+
 
 #[derive(Debug, Clone)]
 pub struct WindowSettings {
@@ -118,6 +275,18 @@ pub trait Application: Sized + 'static {
     fn view(&mut self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, size: LogicalSize, scale: f64);
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
     fn text_items(&self) -> &[TextItem];
+    
+    fn text_areas(&self, scale_f32: f32, bounds: TextBounds) -> Vec<TextArea<'_>> {
+        self.text_items().iter().map(|ti| TextArea {
+            buffer: &ti.buffer,
+            left: ti.x * scale_f32,
+            top: ti.y * scale_f32,
+            scale: scale_f32,
+            bounds,
+            default_color: ti.color,
+            custom_glyphs: &[],
+        }).collect()
+    }
     
     fn clear_color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
@@ -393,16 +562,7 @@ impl<A: Application> EngineState<A> {
         text_viewport.update(queue, Resolution { width: pw, height: ph });
         
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
-        let text_items = self.inner.text_items();
-        let areas: Vec<TextArea> = text_items.iter().map(|ti| TextArea {
-            buffer: &ti.buffer,
-            left: ti.x * scale_f32,
-            top: ti.y * scale_f32,
-            scale: scale_f32,
-            bounds,
-            default_color: ti.color,
-            custom_glyphs: &[],
-        }).collect();
+        let areas = self.inner.text_areas(scale_f32, bounds);
         
         text_renderer.prepare(device, queue, &mut self.font_system, text_atlas, text_viewport, areas, &mut self.swash_cache).unwrap();
         
@@ -469,6 +629,20 @@ impl<A: Application> EngineState<A> {
         queue.submit(std::iter::once(encoder.finish()));
         output.present();
         text_atlas.trim();
+    }
+}
+
+impl<A: Application> Drop for EngineState<A> {
+    fn drop(&mut self) {
+        self.wgpu_surface = None;
+        self.device = None;
+        self.queue = None;
+        self.render_pipeline = None;
+        self.vertex_buffer = None;
+        self.overlay_vertex_buffer = None;
+        self.text_atlas = None;
+        self.text_renderer = None;
+        self.text_viewport = None;
     }
 }
 
