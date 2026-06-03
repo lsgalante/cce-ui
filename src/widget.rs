@@ -1045,6 +1045,7 @@ pub trait Widget {
     fn take_config_spin(&mut self) -> Option<(usize, f32)> { None }
     fn set_grid_sizes(&mut self, _gx: f32, _gy: f32) {}
     fn set_grid_origin(&mut self, _ox: f32, _oy: f32) {}
+    fn grid_origin(&self) -> (f32, f32) { (0.0, 0.0) }
     fn set_skipped_sizes(&mut self, _row_h: f32, _col_w: f32) {}
     fn set_palette_state(&mut self, _visible: bool, _query: &str, _items: &[String], _selected: usize) {}
 
@@ -8267,8 +8268,6 @@ impl Widget for Paginator {
                         quads.push((rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha]));
                     }
                 }
-                // Underline indicator
-                quads.push((bx + 10.0, self.y + 40.0 - 3.0, bw - 20.0, 2.0, [0.22, 0.58, 0.96, 0.8]));
             }
 
             // Tab button press/hover highlight overlays
@@ -9202,6 +9201,25 @@ impl Widget for Graph {
         }
 
         quads
+    }
+
+    fn grid_origin(&self) -> (f32, f32) {
+        (self.grid_origin_x, self.grid_origin_y)
+    }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, _px: f32, _py: f32) -> bool {
+        match delta {
+            MouseScrollDelta::LineDelta(x, y) => {
+                self.grid_origin_x += *x * 15.0;
+                self.grid_origin_y += *y * 15.0;
+                true
+            }
+            MouseScrollDelta::PixelDelta(pos) => {
+                self.grid_origin_x += pos.x as f32;
+                self.grid_origin_y += pos.y as f32;
+                true
+            }
+        }
     }
 }
 
