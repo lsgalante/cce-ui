@@ -9207,18 +9207,22 @@ impl Widget for Graph {
         (self.grid_origin_x, self.grid_origin_y)
     }
 
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, _px: f32, _py: f32) -> bool {
-        match delta {
-            MouseScrollDelta::LineDelta(x, y) => {
-                self.grid_origin_x += *x * 15.0;
-                self.grid_origin_y += *y * 15.0;
-                true
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+        if self.hit_test(px, py) {
+            match delta {
+                MouseScrollDelta::LineDelta(x, y) => {
+                    self.grid_origin_x += *x * 15.0;
+                    self.grid_origin_y += *y * 15.0;
+                    true
+                }
+                MouseScrollDelta::PixelDelta(pos) => {
+                    self.grid_origin_x += pos.x as f32;
+                    self.grid_origin_y += pos.y as f32;
+                    true
+                }
             }
-            MouseScrollDelta::PixelDelta(pos) => {
-                self.grid_origin_x += pos.x as f32;
-                self.grid_origin_y += pos.y as f32;
-                true
-            }
+        } else {
+            false
         }
     }
 }
