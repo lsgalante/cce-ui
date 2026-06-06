@@ -452,7 +452,7 @@ pub fn plate_bevel_vertices(
     verts
 }
 
-pub fn widget_vertices(w: &dyn crate::widget::Widget, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
+pub fn widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
     let (x, y, ww, h) = w.rect();
     let corners = w.rounded_corners();
     let mut verts = if corners != (false, false, false, false) {
@@ -469,7 +469,7 @@ pub fn widget_vertices(w: &dyn crate::widget::Widget, sw: f32, sh: f32, clip_cir
 }
 
 pub fn extra_quad_vertices(
-    w: &dyn crate::widget::Widget,
+    w: &dyn crate::widget::Element,
     qx: f32, qy: f32, qw: f32, qh: f32,
     sw: f32, sh: f32,
     qc: [f32; 4],
@@ -492,7 +492,7 @@ pub fn extra_quad_vertices(
 }
 
 pub fn extra_quad_vertices_clipped(
-    w: &dyn crate::widget::Widget,
+    w: &dyn crate::widget::Element,
     qx: f32, qy: f32, qw: f32, qh: f32,
     sw: f32, sh: f32,
     qc: [f32; 4],
@@ -1631,7 +1631,7 @@ impl<A: Application> PopupHandler for EngineState<A> {
     fn done(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _popup: &Popup) {
         for popover_ptr in crate::widget::popovers::get_active() {
             unsafe {
-                let popover = &mut *(popover_ptr as *mut dyn crate::widget::Widget);
+                let popover = &mut *(popover_ptr as *mut dyn crate::widget::Element);
                 popover.unfocus();
             }
         }

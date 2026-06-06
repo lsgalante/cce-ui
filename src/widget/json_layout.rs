@@ -1,5 +1,5 @@
 use crate::widget::{
-    Widget, WidgetBase, Checkbox, Button, Label, Spinbox, ColorSelector, TextLabel, Paginator,
+    Element, Widget, Checkbox, Button, Label, Spinbox, ColorSelector, TextLabel, Paginator,
     KeyEvent, MouseButton, ElementState, focus, Slider,
 };
 use serde::Deserialize;
@@ -55,7 +55,7 @@ pub struct JsonWidget {
 }
 
 pub struct JsonLayoutWidget {
-    base: WidgetBase,
+    base: Widget,
     pub widgets: Vec<JsonWidget>,
     pub paginator: Option<Paginator>,
     pub dragging_slider_idx: Option<usize>,
@@ -228,7 +228,7 @@ impl JsonLayoutWidget {
         }
 
         Self {
-            base: WidgetBase::new(),
+            base: Widget::new(),
             widgets,
             paginator,
             dragging_slider_idx: None,
@@ -260,21 +260,21 @@ impl JsonLayoutWidget {
 
             let mut top_room = 0.0;
             if let Some(sb) = &w_state.spinbox {
-                top_room = sb.top_room();
+                top_room = crate::widget::label_offset(sb);
             } else if let Some(cs) = &w_state.color_selector {
-                top_room = cs.top_room();
+                top_room = crate::widget::label_offset(cs);
             } else if let Some(cb) = &w_state.checkbox {
-                top_room = cb.top_room();
+                top_room = crate::widget::label_offset(cb);
             } else if let Some(btn) = &w_state.button {
-                top_room = btn.top_room();
+                top_room = crate::widget::label_offset(btn);
             } else if let Some(lbl) = &w_state.label {
-                top_room = lbl.top_room();
+                top_room = crate::widget::label_offset(lbl);
             } else if let Some(sl) = &w_state.slider {
-                top_room = sl.top_room();
+                top_room = crate::widget::label_offset(sl);
             }
 
             let scroll_offset = self.page_scroll_y.get(p_idx).cloned().unwrap_or(0.0);
-            w_state.y = by + *current_y + top_room - scroll_offset;
+            w_state.y = by + *current_y - scroll_offset;
             w_state.w = usable_w;
 
             if let Some(cb) = &mut w_state.checkbox {
@@ -288,23 +288,28 @@ impl JsonLayoutWidget {
                     color: [0xcc, 0xcc, 0xd4],
                 });
             } else if let Some(btn) = &mut w_state.button {
-                btn.set_rect(w_state.x, w_state.y, usable_w, 24.0);
-                w_state.h = 24.0;
+                let btn_h = 24.0 + top_room;
+                btn.set_rect(w_state.x, w_state.y, usable_w, btn_h);
+                w_state.h = btn_h;
             } else if let Some(lbl) = &mut w_state.label {
-                lbl.set_rect(w_state.x, w_state.y, usable_w, 18.0);
-                w_state.h = 18.0;
+                let lbl_h = 18.0 + top_room;
+                lbl.set_rect(w_state.x, w_state.y, usable_w, lbl_h);
+                w_state.h = lbl_h;
             } else if let Some(sb) = &mut w_state.spinbox {
-                sb.set_rect(w_state.x, w_state.y, usable_w, 22.0);
-                w_state.h = 22.0;
+                let sb_h = 22.0 + top_room;
+                sb.set_rect(w_state.x, w_state.y, usable_w, sb_h);
+                w_state.h = sb_h;
             } else if let Some(cs) = &mut w_state.color_selector {
-                cs.set_rect(w_state.x, w_state.y, usable_w, 24.0);
-                w_state.h = 24.0;
+                let cs_h = 24.0 + top_room;
+                cs.set_rect(w_state.x, w_state.y, usable_w, cs_h);
+                w_state.h = cs_h;
             } else if let Some(sl) = &mut w_state.slider {
-                sl.set_rect(w_state.x, w_state.y, usable_w, 22.0);
-                w_state.h = 22.0;
+                let sl_h = 22.0 + top_room;
+                sl.set_rect(w_state.x, w_state.y, usable_w, sl_h);
+                w_state.h = sl_h;
             }
 
-            *current_y += top_room + w_state.h + spacing;
+            *current_y += w_state.h + spacing;
         }
 
         // Store total height of each page (adding a little padding at the end)
@@ -316,9 +321,9 @@ impl JsonLayoutWidget {
     }
 }
 
-impl Widget for JsonLayoutWidget {
-    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
-    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+impl Element for JsonLayoutWidget {
+    fn base(&self) -> Option<&Widget> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base) }
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {

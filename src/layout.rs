@@ -1,4 +1,4 @@
-use crate::widget::Widget;
+use crate::widget::Element;
 
 pub trait RenderTarget {
     fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32);
@@ -47,7 +47,7 @@ impl RenderTarget for PopoverCollector {
     }
 }
 
-pub fn render_widget<T: Widget + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32) {
+pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32) {
     w.set_rect(x, y, ww, wh);
     for (qx, qy, qw, qh, qc) in w.all_quads() {
         pc.rect(qc, qx, qy, qw, qh);
@@ -152,8 +152,8 @@ impl Column {
         pc.text(text, x, y, font_size, color);
     }
 
-    pub fn widget<T: Widget + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
-        let top_room = w.top_room();
+    pub fn widget<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
+        let top_room = crate::widget::label_offset(w);
         let total_h = wh + top_room;
         let x = self.ax(x_off);
         let y = self.ay();
@@ -200,7 +200,7 @@ impl<'a> Row<'a> {
         self.cursor_x += width + self.spacing;
     }
 
-    pub fn widget<T: Widget + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
+    pub fn widget<T: Element + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
         render_widget(self.pc, w, self.base_x + self.cursor_x, self.y, ww, wh);
         self.cursor_x += ww + self.spacing;
     }
@@ -254,18 +254,18 @@ impl Section {
         pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
     }
 
-    pub fn widget<T: Widget + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
+    pub fn widget<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
         w.set_row_rect(self.left + Self::ROW_PADDING_X, self.cw - 2.0 * Self::ROW_PADDING_X);
         let x = self.ax(x_off);
         let right_edge = self.left + self.cw - Self::ROW_PADDING_X;
         let clamped_w = ww.min((right_edge - x).max(0.0));
-        let top_room = w.top_room();
+        let top_room = crate::widget::label_offset(w);
         let total_h = wh + top_room;
         render_widget(pc, w, x, self.ay(), clamped_w, total_h);
         self.content_y += total_h;
     }
 
-    pub fn widget_full<T: Widget + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, wh: f32) {
+    pub fn widget_full<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, wh: f32) {
         let x_off = 12.0;
         let ww = self.cw - 2.0 * (Self::ROW_PADDING_X + x_off); // cw - 40.0
         self.widget(pc, w, x_off, ww, wh);
@@ -349,8 +349,8 @@ impl Section {
         self.content_y + 20.0
     }
 
-    pub fn vstack<'a>(&'a mut self, pc: &'a mut dyn RenderTarget, spacing: f32) -> VStack<'a> {
-        VStack {
+    pub fn vstack<'a>(&'a mut self, pc: &'a mut dyn RenderTarget, spacing: f32) -> SectionVStack<'a> {
+        SectionVStack {
             section: self,
             pc,
             spacing,
@@ -358,14 +358,14 @@ impl Section {
     }
 }
 
-pub struct VStack<'a> {
+pub struct SectionVStack<'a> {
     section: &'a mut Section,
     pc: &'a mut dyn RenderTarget,
     spacing: f32,
 }
 
-impl<'a> VStack<'a> {
-    pub fn add_widget<T: Widget + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
+impl<'a> SectionVStack<'a> {
+    pub fn add_widget<T: Element + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
         self.section.widget(self.pc, w, Section::DEFAULT_MARGIN_X, ww, wh);
         self.section.spacing(self.spacing);
     }
@@ -427,18 +427,18 @@ impl Subsection {
         pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
     }
 
-    pub fn widget<T: Widget + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
+    pub fn widget<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, wh: f32) {
         w.set_row_rect(self.left + Self::ROW_PADDING_X, self.cw - 2.0 * Self::ROW_PADDING_X);
         let x = self.ax(x_off);
         let right_edge = self.left + self.cw - Self::ROW_PADDING_X;
         let clamped_w = ww.min((right_edge - x).max(0.0));
-        let top_room = w.top_room();
+        let top_room = crate::widget::label_offset(w);
         let total_h = wh + top_room;
         render_widget(pc, w, x, self.ay(), clamped_w, total_h);
         self.content_y += total_h;
     }
 
-    pub fn widget_full<T: Widget + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, wh: f32) {
+    pub fn widget_full<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, wh: f32) {
         let x_off = 12.0;
         let ww = self.cw - 2.0 * (Self::ROW_PADDING_X + x_off);
         self.widget(pc, w, x_off, ww, wh);
@@ -522,8 +522,8 @@ impl Subsection {
         self.content_y + 20.0
     }
 
-    pub fn vstack<'a>(&'a mut self, pc: &'a mut dyn RenderTarget, spacing: f32) -> SubVStack<'a> {
-        SubVStack {
+    pub fn vstack<'a>(&'a mut self, pc: &'a mut dyn RenderTarget, spacing: f32) -> SubsectionVStack<'a> {
+        SubsectionVStack {
             subsection: self,
             pc,
             spacing,
@@ -531,14 +531,14 @@ impl Subsection {
     }
 }
 
-pub struct SubVStack<'a> {
+pub struct SubsectionVStack<'a> {
     subsection: &'a mut Subsection,
     pc: &'a mut dyn RenderTarget,
     spacing: f32,
 }
 
-impl<'a> SubVStack<'a> {
-    pub fn add_widget<T: Widget + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
+impl<'a> SubsectionVStack<'a> {
+    pub fn add_widget<T: Element + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
         self.subsection.widget(self.pc, w, Subsection::DEFAULT_MARGIN_X, ww, wh);
         self.subsection.spacing(self.spacing);
     }
@@ -750,7 +750,7 @@ impl Radial {
         }
     }
 
-    pub fn layout_widgets<T: Widget + 'static>(&self, widgets: &mut [&mut T]) {
+    pub fn layout_widgets<T: Element + 'static>(&self, widgets: &mut [&mut T]) {
         let mut active_idx = 0;
         for w in widgets.iter_mut() {
             if !w.layout_ignore() {
@@ -764,7 +764,7 @@ impl Radial {
         }
     }
 
-    pub fn layout_widget_ptors(&self, widgets: &[*mut (dyn Widget + 'static)]) {
+    pub fn layout_widget_ptors(&self, widgets: &[*mut (dyn Element + 'static)]) {
         let mut active_idx = 0;
         for &w_ptr in widgets {
             let w = unsafe { &mut *w_ptr };
@@ -950,15 +950,384 @@ impl<'a, P: RenderTarget + Default> PageLayoutBuilder<'a, P> {
         self
     }
 
-    pub fn add_section<F>(&mut self, final_pc: &mut P, mut render_fn: F)
+    pub fn add_section<F>(&mut self, final_pc: &mut P, label: &str, focused: bool, mut render_fn: F)
     where
-        F: FnMut(&mut P, f32, f32) -> f32,
+        F: FnMut(&mut SectionContext<'_, P>),
     {
         let mut dummy = P::default();
-        let wh = render_fn(&mut dummy, 0.0, 0.0);
+        let mut dummy_ctx = SectionContext::new(&mut dummy, 0.0, 0.0, self.section_width, label, focused);
+        render_fn(&mut dummy_ctx);
+        let wh = dummy_ctx.finish();
         let (rx, ry, _, _) = self.strategy.allocate(self.section_width, wh);
-        render_fn(final_pc, rx, ry);
+        let mut real_ctx = SectionContext::new(final_pc, rx, ry, self.section_width, label, focused);
+        render_fn(&mut real_ctx);
+        real_ctx.finish();
         self.idx += 1;
+    }
+
+    pub fn add_section_with_width<F>(&mut self, final_pc: &mut P, width: f32, label: &str, focused: bool, mut render_fn: F)
+    where
+        F: FnMut(&mut SectionContext<'_, P>),
+    {
+        let mut dummy = P::default();
+        let mut dummy_ctx = SectionContext::new(&mut dummy, 0.0, 0.0, width, label, focused);
+        render_fn(&mut dummy_ctx);
+        let wh = dummy_ctx.finish();
+        let (rx, ry, _, _) = self.strategy.allocate(width, wh);
+        let mut real_ctx = SectionContext::new(final_pc, rx, ry, width, label, focused);
+        render_fn(&mut real_ctx);
+        real_ctx.finish();
+        self.idx += 1;
+    }
+}
+
+pub struct SectionContext<'a, P> {
+    pub pc: &'a mut P,
+    pub left: f32,
+    pub top: f32,
+    pub content_y: f32,
+    pub cw: f32,
+    pub label_width: f32,
+    pub focused: bool,
+}
+
+impl<'a, P: RenderTarget> SectionContext<'a, P> {
+    pub const ROW_PADDING_X: f32 = 8.0;
+    pub const DEFAULT_MARGIN_X: f32 = 12.0;
+    pub const DEFAULT_ROW_GAP: f32 = 8.0;
+
+    fn estimate_label_width(label: &str) -> f32 {
+        let mut width = 0.0;
+        for c in label.chars() {
+            let factor = match c {
+                'i' | 'l' | 't' | 'j' | 'f' | 'I' | ' ' | '.' | ',' | '!' | ';' | ':' | '\'' | '"' | '(' | ')' | '[' | ']' | '-' => 0.28,
+                'r' | 's' | 'J' | 'c' | 'z' => 0.42,
+                'm' | 'w' | 'M' | 'W' | '&' | '@' => 0.80,
+                'A'..='Z' => 0.68,
+                _ => 0.55,
+            };
+            width += factor * 14.0;
+        }
+        width
+    }
+
+    pub fn new(pc: &'a mut P, left: f32, top: f32, cw: f32, label: &str, focused: bool) -> Self {
+        let label_width = Self::estimate_label_width(label);
+        let label_x = left + (cw - label_width) / 2.0;
+        pc.text(label, label_x, top, 14.0, [0.83, 0.83, 0.83, 1.0]);
+        Self {
+            pc,
+            left,
+            top,
+            content_y: top + 19.0,
+            cw,
+            label_width,
+            focused,
+        }
+    }
+
+    pub fn ax(&self, x_off: f32) -> f32 {
+        let shift = if x_off >= 12.0 { 8.0 } else { 0.0 };
+        self.left + x_off + shift
+    }
+
+    pub fn ay(&self) -> f32 {
+        self.content_y
+    }
+
+    pub fn spacing(&mut self, dy: f32) {
+        self.content_y += dy;
+    }
+
+    pub fn text(&mut self, text: &str, x_off: f32, y_off: f32, font_size: f32, color: [f32; 4]) {
+        self.pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
+    }
+
+    pub fn widget<T: Element + 'static>(&mut self, w: &mut T, x_off: f32, ww: f32, wh: f32) {
+        w.set_row_rect(self.left + Self::ROW_PADDING_X, self.cw - 2.0 * Self::ROW_PADDING_X);
+        let x = self.ax(x_off);
+        let y = self.ay();
+        let right_edge = self.left + self.cw - Self::ROW_PADDING_X;
+        let clamped_w = ww.min((right_edge - x).max(0.0));
+        let top_room = crate::widget::label_offset(w);
+        let total_h = wh + top_room;
+        render_widget(self.pc, w, x, y, clamped_w, total_h);
+        self.content_y += total_h;
+    }
+
+    pub fn widget_full<T: Element + 'static>(&mut self, w: &mut T, wh: f32) {
+        let x_off = 12.0;
+        let ww = self.cw - 2.0 * (Self::ROW_PADDING_X + x_off); // cw - 40.0
+        self.widget(w, x_off, ww, wh);
+    }
+
+    pub fn separator(&mut self) {
+        let x = self.ax(Self::ROW_PADDING_X);
+        let y = self.ay();
+        self.pc.rect([0.18, 0.18, 0.27, 1.0], x, y, self.cw - 2.0 * Self::ROW_PADDING_X, 1.0);
+        self.content_y += 8.0;
+    }
+
+    pub fn rect(&mut self, color: [f32; 4], x_off: f32, w: f32, h: f32) {
+        self.pc.rect(color, self.ax(x_off), self.ay(), w, h);
+        self.content_y += h;
+    }
+
+    pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
+        let margin_x = Self::ROW_PADDING_X + 12.0;
+        let usable_w = self.cw - 2.0 * margin_x;
+        if count == 0 {
+            return Vec::new();
+        }
+        let total_gap = gap * (count - 1) as f32;
+        let col_w = (usable_w - total_gap).max(0.0) / count as f32;
+
+        let mut cols = Vec::with_capacity(count);
+        for i in 0..count {
+            let x = self.left + margin_x + i as f32 * (col_w + gap);
+            cols.push((x, col_w));
+        }
+        cols
+    }
+
+    pub fn row<F>(&mut self, count: usize, gap: f32, h: f32, mut f: F)
+    where
+        F: FnMut(usize, f32, f32),
+    {
+        let cols = self.row_layout(count, gap);
+        for (i, &(x, w)) in cols.iter().enumerate() {
+            f(i, x, w);
+        }
+        self.content_y += h;
+    }
+
+    pub fn vstack(&mut self, spacing: f32) -> VStack<'_, 'a, P> {
+        VStack {
+            context: self,
+            spacing,
+        }
+    }
+
+    pub fn add_subsection<F>(&mut self, label: &str, focused: bool, mut render_fn: F)
+    where
+        F: FnMut(&mut SubsectionContext<'_, P>),
+    {
+        let left = self.ax(0.0) + Self::ROW_PADDING_X;
+        let top = self.content_y;
+        let cw = self.cw - 2.0 * Self::ROW_PADDING_X;
+
+        let mut sub_ctx = SubsectionContext::new(self.pc, left, top, cw, label, focused);
+        render_fn(&mut sub_ctx);
+        self.content_y = sub_ctx.finish();
+    }
+
+    pub fn finish(self) -> f32 {
+        let border: [f32; 4] = if self.focused {
+            [0.30, 0.50, 0.32, 1.0] // Focused green
+        } else {
+            [0.25, 0.25, 0.35, 1.0] // Default gray
+        };
+        let x = self.left + Self::ROW_PADDING_X;
+        let y = self.top + 7.0;
+        let w = self.cw - 2.0 * Self::ROW_PADDING_X;
+        let h = self.content_y - y;
+
+        let left_edge = x;
+        let right_edge = x + w;
+        if self.label_width > 0.0 {
+            let label_x = self.left + (self.cw - self.label_width) / 2.0;
+            let gap_margin = 6.0;
+            let gap_start = label_x - gap_margin;
+            let gap_end = label_x + self.label_width + gap_margin;
+            if gap_start > left_edge {
+                self.pc.rect(border, left_edge, y, gap_start - left_edge, 1.0);
+            }
+            if right_edge > gap_end {
+                self.pc.rect(border, gap_end, y, right_edge - gap_end, 1.0);
+            }
+        } else {
+            self.pc.rect(border, left_edge, y, w, 1.0);
+        }
+
+        self.pc.rect(border, x, y + h + 12.0, w, 1.0);
+        self.pc.rect(border, x, y, 1.0, h + 12.0);
+        self.pc.rect(border, x + w - 1.0, y, 1.0, h + 12.0);
+        self.content_y + 20.0
+    }
+}
+
+pub struct SubsectionContext<'a, P> {
+    pub pc: &'a mut P,
+    pub left: f32,
+    pub top: f32,
+    pub content_y: f32,
+    pub cw: f32,
+    pub label_width: f32,
+    pub focused: bool,
+}
+
+impl<'a, P: RenderTarget> SubsectionContext<'a, P> {
+    pub const ROW_PADDING_X: f32 = 8.0;
+    pub const DEFAULT_MARGIN_X: f32 = 12.0;
+    pub const DEFAULT_ROW_GAP: f32 = 8.0;
+
+    fn estimate_label_width(label: &str) -> f32 {
+        let mut width = 0.0;
+        for c in label.chars() {
+            let factor = match c {
+                'i' | 'l' | 't' | 'j' | 'f' | 'I' | ' ' | '.' | ',' | '!' | ';' | ':' | '\'' | '"' | '(' | ')' | '[' | ']' | '-' => 0.28,
+                'r' | 's' | 'J' | 'c' | 'z' => 0.42,
+                'm' | 'w' | 'M' | 'W' | '&' | '@' => 0.80,
+                'A'..='Z' => 0.68,
+                _ => 0.55,
+            };
+            width += factor * 12.0;
+        }
+        width
+    }
+
+    pub fn new(pc: &'a mut P, left: f32, top: f32, cw: f32, label: &str, focused: bool) -> Self {
+        let label_width = Self::estimate_label_width(label);
+        let label_x = left + (cw - label_width) / 2.0;
+        pc.text(label, label_x, top, 12.0, [0.53, 0.53, 0.60, 1.0]);
+        Self {
+            pc,
+            left,
+            top,
+            content_y: top + 17.0,
+            cw,
+            label_width,
+            focused,
+        }
+    }
+
+    pub fn ax(&self, x_off: f32) -> f32 {
+        let shift = if x_off >= 12.0 { 8.0 } else { 0.0 };
+        self.left + x_off + shift
+    }
+
+    pub fn ay(&self) -> f32 {
+        self.content_y
+    }
+
+    pub fn spacing(&mut self, dy: f32) {
+        self.content_y += dy;
+    }
+
+    pub fn text(&mut self, text: &str, x_off: f32, y_off: f32, font_size: f32, color: [f32; 4]) {
+        self.pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
+    }
+
+    pub fn widget<T: Element + 'static>(&mut self, w: &mut T, x_off: f32, ww: f32, wh: f32) {
+        w.set_row_rect(self.left + Self::ROW_PADDING_X, self.cw - 2.0 * Self::ROW_PADDING_X);
+        let x = self.ax(x_off);
+        let y = self.ay();
+        let right_edge = self.left + self.cw - Self::ROW_PADDING_X;
+        let clamped_w = ww.min((right_edge - x).max(0.0));
+        let top_room = crate::widget::label_offset(w);
+        let total_h = wh + top_room;
+        render_widget(self.pc, w, x, y, clamped_w, total_h);
+        self.content_y += total_h;
+    }
+
+    pub fn widget_full<T: Element + 'static>(&mut self, w: &mut T, wh: f32) {
+        let x_off = 12.0;
+        let ww = self.cw - 2.0 * (Self::ROW_PADDING_X + x_off);
+        self.widget(w, x_off, ww, wh);
+    }
+
+    pub fn separator(&mut self) {
+        let x = self.ax(Self::ROW_PADDING_X);
+        let y = self.ay();
+        self.pc.rect([0.15, 0.15, 0.22, 1.0], x, y, self.cw - 2.0 * Self::ROW_PADDING_X, 1.0);
+        self.content_y += 8.0;
+    }
+
+    pub fn rect(&mut self, color: [f32; 4], x_off: f32, w: f32, h: f32) {
+        self.pc.rect(color, self.ax(x_off), self.ay(), w, h);
+        self.content_y += h;
+    }
+
+    pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
+        let margin_x = Self::ROW_PADDING_X + 12.0;
+        let usable_w = self.cw - 2.0 * margin_x;
+        if count == 0 {
+            return Vec::new();
+        }
+        let total_gap = gap * (count - 1) as f32;
+        let col_w = (usable_w - total_gap).max(0.0) / count as f32;
+
+        let mut cols = Vec::with_capacity(count);
+        for i in 0..count {
+            let x = self.left + margin_x + i as f32 * (col_w + gap);
+            cols.push((x, col_w));
+        }
+        cols
+    }
+
+    pub fn row<F>(&mut self, count: usize, gap: f32, h: f32, mut f: F)
+    where
+        F: FnMut(usize, f32, f32),
+    {
+        let cols = self.row_layout(count, gap);
+        for (i, &(x, w)) in cols.iter().enumerate() {
+            f(i, x, w);
+        }
+        self.content_y += h;
+    }
+
+    pub fn finish(self) -> f32 {
+        let border: [f32; 4] = if self.focused {
+            [0.22, 0.38, 0.24, 1.0]
+        } else {
+            [0.18, 0.18, 0.25, 1.0]
+        };
+        let x = self.left + Self::ROW_PADDING_X;
+        let y = self.top + 7.0;
+        let w = self.cw - 2.0 * Self::ROW_PADDING_X;
+        let h = self.content_y - y;
+
+        let left_edge = x;
+        let right_edge = x + w;
+        if self.label_width > 0.0 {
+            let label_x = self.left + (self.cw - self.label_width) / 2.0;
+            let gap_margin = 6.0;
+            let gap_start = label_x - gap_margin;
+            let gap_end = label_x + self.label_width + gap_margin;
+            if gap_start > left_edge {
+                self.pc.rect(border, left_edge, y, gap_start - left_edge, 1.0);
+            }
+            if right_edge > gap_end {
+                self.pc.rect(border, gap_end, y, right_edge - gap_end, 1.0);
+            }
+        } else {
+            self.pc.rect(border, left_edge, y, w, 1.0);
+        }
+
+        self.pc.rect(border, x, y + h + 12.0, w, 1.0);
+        self.pc.rect(border, x, y, 1.0, h + 12.0);
+        self.pc.rect(border, x + w - 1.0, y, 1.0, h + 12.0);
+        self.content_y + 20.0
+    }
+}
+
+pub struct VStack<'b, 'a, P> {
+    context: &'b mut SectionContext<'a, P>,
+    spacing: f32,
+}
+
+impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
+    pub fn add_widget<T: Element + 'static>(&mut self, w: &mut T, ww: f32, wh: f32) {
+        self.context.widget(w, SectionContext::<P>::DEFAULT_MARGIN_X, ww, wh);
+        self.context.spacing(self.spacing);
+    }
+
+    pub fn add_row<F>(&mut self, count: usize, gap: f32, h: f32, f: F)
+    where
+        F: FnMut(usize, f32, f32),
+    {
+        self.context.row(count, gap, h, f);
+        self.context.spacing(self.spacing);
     }
 }
 
@@ -984,7 +1353,7 @@ mod tests {
         h: f32,
     }
 
-    impl Widget for MockWidget {
+    impl Element for MockWidget {
         fn rect(&self) -> (f32, f32, f32, f32) {
             (self.x, self.y, self.w, self.h)
         }
@@ -1007,7 +1376,7 @@ mod tests {
         top_room: f32,
     }
 
-    impl Widget for MockWidgetWithLabel {
+    impl Element for MockWidgetWithLabel {
         fn rect(&self) -> (f32, f32, f32, f32) {
             (self.x, self.y - self.top_room, self.w, self.h + self.top_room)
         }

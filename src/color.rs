@@ -458,3 +458,23 @@ pub fn set_toggle_off_color(color: [f32; 4]) {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Theme {
+    pub surface_bg: [f32; 4],
+    pub surface_border: [f32; 4],
+    pub primary_accent: [f32; 4],
+    pub press_overlay: [f32; 4],
+    pub hover_overlay: [f32; 4],
+}
+
+pub fn active_theme() -> Theme {
+    Theme {
+        surface_bg: [0.10, 0.10, 0.14, 0.95],
+        surface_border: [0.25, 0.25, 0.35, 0.8],
+        primary_accent: [0.20, 0.50, 0.75, 1.0],
+        press_overlay: [1.0, 1.0, 1.0, 0.15],
+        hover_overlay: [1.0, 1.0, 1.0, 0.08],
+    }
+}
+
+

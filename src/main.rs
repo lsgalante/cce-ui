@@ -1,6 +1,6 @@
 use clear_ui::widget::{
     Button, Checkbox, ContentBg, Header, Panel, ProgressBar, RangeSlider, Sidebar, Slider, Spinbox,
-    StatusBar, TextLabel, Toggle, Widget, JsonLayoutWidget, JsonLayoutConfig,
+    StatusBar, TextLabel, Toggle, Element, JsonLayoutWidget, JsonLayoutConfig,
 };
 
 use glyphon::{
@@ -170,7 +170,7 @@ fn rounded_rect_vertices(
     rounded_rect_vertices_corners(x, y, ww, h, r, sw, sh, color, (true, true, true, true))
 }
 
-fn widget_vertices(w: &dyn Widget, sw: f32, sh: f32) -> Vec<Vertex> {
+fn widget_vertices(w: &dyn Element, sw: f32, sh: f32) -> Vec<Vertex> {
     let (x, y, ww, h) = w.rect();
     let corners = w.rounded_corners();
     if corners != (false, false, false, false) {
@@ -181,7 +181,7 @@ fn widget_vertices(w: &dyn Widget, sw: f32, sh: f32) -> Vec<Vertex> {
 }
 
 fn extra_quad_vertices(
-    w: &dyn Widget,
+    w: &dyn Element,
     qx: f32, qy: f32, qw: f32, qh: f32,
     sw: f32, sh: f32,
     qc: [f32; 4],
@@ -237,7 +237,7 @@ struct State {
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
 
-    widgets: Vec<Box<dyn Widget>>,
+    widgets: Vec<Box<dyn Element>>,
     positions: Vec<(f32, f32, f32, f32)>,
 
     font_system: FontSystem,
@@ -380,7 +380,7 @@ impl State {
         let status_buffer = make_text_buffer(&mut font_system, "Click a button to interact", 12.0);
 
         let layout_mode = json_layout_config.is_some();
-        let mut widgets: Vec<Box<dyn Widget>> = Vec::new();
+        let mut widgets: Vec<Box<dyn Element>> = Vec::new();
         let mut positions = Vec::new();
         let json_layout = if let Some(ref config) = json_layout_config {
             let mut jl = JsonLayoutWidget::new(config);
