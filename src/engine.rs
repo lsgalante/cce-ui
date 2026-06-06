@@ -2,7 +2,7 @@ use std::time::Instant;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_keyboard, delegate_pointer, delegate_registry,
-    delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window, delegate_output,
+    delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window, delegate_output, delegate_xdg_popup,
     registry::{ProvidesRegistryState, RegistryState},
     output::{OutputHandler, OutputState},
     seat::{
@@ -24,13 +24,48 @@ use wayland_client::{
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface, wl_registry},
     Connection, QueueHandle, Proxy,
 };
+use smithay_client_toolkit::shell::xdg::popup::{Popup, PopupHandler, PopupConfigure};
+use smithay_client_toolkit::shell::xdg::{XdgPositioner, XdgSurface};
+use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{Anchor, Gravity, ConstraintAdjustment};
+
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
 use glyphon::{
     Cache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas,
-    TextBounds, TextRenderer, Viewport,
+    TextBounds, TextRenderer, Viewport, Buffer, Attrs, Metrics,
 };
 use crate::widget::{TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey};
+
+pub struct ActivePopup {
+    pub sctk_popup: Popup,
+    pub wgpu_surface: wgpu::Surface<'static>,
+    pub config: wgpu::SurfaceConfiguration,
+    pub logical_width: f32,
+    pub logical_height: f32,
+    pub configured: bool,
+    pub viewport: Viewport,
+    pub x: f32,
+    pub y: f32,
+    pub vertex_buffer: Option<wgpu::Buffer>,
+}
+
+fn make_text_buffer_with_font(fs: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
+    let metrics = Metrics::new(size, size * 1.4);
+    let mut buf = Buffer::new(fs, metrics);
+    let mut attrs = Attrs::new();
+    if let Some(font_name) = font {
+        let family = match font_name {
+            "monospace" => glyphon::Family::Monospace,
+            "sans-serif" => glyphon::Family::SansSerif,
+            "serif" => glyphon::Family::Serif,
+            _ => glyphon::Family::Name(font_name),
+        };
+        attrs = attrs.family(family);
+    }
+    buf.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
+    buf.shape_until_scroll(fs, true);
+    buf
+}
 use crate::wayland::{WaylandSurfaceHandle, detect_scale_factor};
 
 #[repr(C)]
@@ -110,9 +145,382 @@ pub fn quad_vertices_clipped(
     quad_vertices_with_clip(ix0, iy0, ix1 - ix0, iy1 - iy0, surface_w, surface_h, color, clip_circle).to_vec()
 }
 
+pub fn line_vertices(
+    x1: f32, y1: f32, x2: f32, y2: f32,
+    thickness: f32,
+    sw: f32, sh: f32,
+    c: [f32; 4]
+) -> [Vertex; 6] {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.001 {
+        return quad_vertices(x1 - thickness/2.0, y1 - thickness/2.0, thickness, thickness, sw, sh, c);
+    }
+    let ux = dx / len;
+    let uy = dy / len;
+    let nx = -uy;
+    let ny = ux;
+    
+    let half_t = thickness * 0.5;
+    let p0x = x1 + nx * half_t;
+    let p0y = y1 + ny * half_t;
+    let p1x = x1 - nx * half_t;
+    let p1y = y1 - ny * half_t;
+    let p2x = x2 - nx * half_t;
+    let p2y = y2 - ny * half_t;
+    let p3x = x2 + nx * half_t;
+    let p3y = y2 + ny * half_t;
+
+    let ndc_p0x = (p0x / sw) * 2.0 - 1.0;
+    let ndc_p0y = 1.0 - (p0y / sh) * 2.0;
+    let ndc_p1x = (p1x / sw) * 2.0 - 1.0;
+    let ndc_p1y = 1.0 - (p1y / sh) * 2.0;
+    let ndc_p2x = (p2x / sw) * 2.0 - 1.0;
+    let ndc_p2y = 1.0 - (p2y / sh) * 2.0;
+    let ndc_p3x = (p3x / sw) * 2.0 - 1.0;
+    let ndc_p3y = 1.0 - (p3y / sh) * 2.0;
+
+    let clip_circle = [0.0, 0.0, 0.0];
+    [
+        Vertex { position: [ndc_p0x, ndc_p0y], color: c, clip_circle },
+        Vertex { position: [ndc_p1x, ndc_p1y], color: c, clip_circle },
+        Vertex { position: [ndc_p2x, ndc_p2y], color: c, clip_circle },
+        Vertex { position: [ndc_p0x, ndc_p0y], color: c, clip_circle },
+        Vertex { position: [ndc_p2x, ndc_p2y], color: c, clip_circle },
+        Vertex { position: [ndc_p3x, ndc_p3y], color: c, clip_circle },
+    ]
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum LineCap {
+    Arrow,
+    Round,
+    Flat,
+}
+
+pub fn vector_vertices(
+    x1: f32, y1: f32, x2: f32, y2: f32,
+    thickness: f32,
+    sw: f32, sh: f32,
+    c: [f32; 4],
+    line_cap: LineCap,
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.001 {
+        return quad_vertices(x1 - thickness/2.0, y1 - thickness/2.0, thickness, thickness, sw, sh, c).to_vec();
+    }
+    
+    match line_cap {
+        LineCap::Arrow => {
+            let ux = dx / len;
+            let uy = dy / len;
+            let nx = -uy;
+            let ny = ux;
+            
+            let arrow_len = (thickness * 3.0).max(10.0).min(len);
+            let arrow_width = (thickness * 2.5).max(8.0);
+            
+            let line_x2 = x2 - ux * arrow_len;
+            let line_y2 = y2 - uy * arrow_len;
+            
+            if len > arrow_len {
+                verts.extend_from_slice(&line_vertices(x1, y1, line_x2, line_y2, thickness, sw, sh, c));
+            }
+            
+            let bx = line_x2;
+            let by = line_y2;
+            
+            let w1x = bx + nx * (arrow_width * 0.5);
+            let w1y = by + ny * (arrow_width * 0.5);
+            let w2x = bx - nx * (arrow_width * 0.5);
+            let w2y = by - ny * (arrow_width * 0.5);
+            
+            let ndc_tip_x = (x2 / sw) * 2.0 - 1.0;
+            let ndc_tip_y = 1.0 - (y2 / sh) * 2.0;
+            let ndc_w1x = (w1x / sw) * 2.0 - 1.0;
+            let ndc_w1y = 1.0 - (w1y / sh) * 2.0;
+            let ndc_w2x = (w2x / sw) * 2.0 - 1.0;
+            let ndc_w2y = 1.0 - (w2y / sh) * 2.0;
+            
+            let clip_circle = [0.0, 0.0, 0.0];
+            verts.push(Vertex { position: [ndc_tip_x, ndc_tip_y], color: c, clip_circle });
+            verts.push(Vertex { position: [ndc_w1x, ndc_w1y], color: c, clip_circle });
+            verts.push(Vertex { position: [ndc_w2x, ndc_w2y], color: c, clip_circle });
+        }
+        LineCap::Round => {
+            verts.extend_from_slice(&line_vertices(x1, y1, x2, y2, thickness, sw, sh, c));
+            let clip_circle = [0.0, 0.0, 0.0];
+            verts.extend(circle_vertices(x2, y2, thickness / 2.0, sw, sh, c, 16, clip_circle));
+        }
+        LineCap::Flat => {
+            verts.extend_from_slice(&line_vertices(x1, y1, x2, y2, thickness, sw, sh, c));
+        }
+    }
+    
+    verts
+}
+
+pub fn rounded_rect_vertices_corners(
+    x: f32, y: f32, ww: f32, h: f32,
+    r: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    clip_circle: [f32; 3],
+    corners: (bool, bool, bool, bool),
+    clip_rect: Option<(f32, f32, f32, f32)>,
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+    let r = r.min(ww * 0.5).min(h * 0.5);
+
+    let clamp_x = |val: f32| -> f32 {
+        if let Some((cx0, _, cx1, _)) = clip_rect {
+            val.max(cx0).min(cx1)
+        } else {
+            val
+        }
+    };
+    let clamp_y = |val: f32| -> f32 {
+        if let Some((_, cy0, _, cy1)) = clip_rect {
+            val.max(cy0).min(cy1)
+        } else {
+            val
+        }
+    };
+
+    let push_quad = |verts: &mut Vec<Vertex>, qx: f32, qy: f32, qw: f32, qh: f32| {
+        let x0 = clamp_x(qx);
+        let y0 = clamp_y(qy);
+        let x1 = clamp_x(qx + qw);
+        let y1 = clamp_y(qy + qh);
+        
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+
+        let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+        let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+        let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+        let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+        
+        verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x0, ndc_y1], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x0, ndc_y1], color, clip_circle });
+    };
+
+    if r <= 0.1 || (!corners.0 && !corners.1 && !corners.2 && !corners.3) {
+        push_quad(&mut verts, x, y, ww, h);
+        return verts;
+    }
+
+    // 1. Center rectangle
+    push_quad(&mut verts, x + r, y, ww - 2.0 * r, h);
+    
+    // 2. Left rectangle
+    push_quad(&mut verts, x, y + r, r, h - 2.0 * r);
+    
+    // 3. Right rectangle
+    push_quad(&mut verts, x + ww - r, y + r, r, h - 2.0 * r);
+
+    // 4. Four corners
+    let corner_configs = [
+        // Top-left
+        (corners.0, x, y, x + r, y + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI),
+        // Top-right
+        (corners.1, x + ww - r, y, x + ww - r, y + r, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI),
+        // Bottom-right
+        (corners.2, x + ww - r, y + h - r, x + ww - r, y + h - r, 0.0, 0.5 * std::f32::consts::PI),
+        // Bottom-left
+        (corners.3, x, y + h - r, x + r, y + h - r, 0.5 * std::f32::consts::PI, std::f32::consts::PI),
+    ];
+
+    let segments = 16;
+    for &(is_rounded, sqx, sqy, cx, cy, start, end) in &corner_configs {
+        if is_rounded {
+            for i in 0..segments {
+                let theta1 = start + (i as f32) * (end - start) / (segments as f32);
+                let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
+                
+                let x0 = clamp_x(cx);
+                let y0 = clamp_y(cy);
+                let x1 = clamp_x(cx + r * theta1.cos());
+                let y1 = clamp_y(cy + r * theta1.sin());
+                let x2 = clamp_x(cx + r * theta2.cos());
+                let y2 = clamp_y(cy + r * theta2.sin());
+                
+                let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+                let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+                let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+                let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+                let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
+                let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+                
+                verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+                verts.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+                verts.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+            }
+        } else {
+            push_quad(&mut verts, sqx, sqy, r, r);
+        }
+    }
+
+    verts
+}
+
+pub fn rounded_rect_vertices(
+    x: f32, y: f32, ww: f32, h: f32,
+    r: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    clip_circle: [f32; 3],
+) -> Vec<Vertex> {
+    rounded_rect_vertices_corners(x, y, ww, h, r, sw, sh, color, clip_circle, (true, true, true, true), None)
+}
+
+pub fn plate_bevel_vertices(
+    x: f32, y: f32, ww: f32, h: f32,
+    r: f32,
+    t: f32,
+    sw: f32, sh: f32,
+    clip_circle: [f32; 3],
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+
+    // 3D Bevel Colors
+    // Highlight (light) for top and left edges
+    let highlight_color = [1.0, 1.0, 1.0, 0.15];
+    // Shadow (dark) for bottom and right edges
+    let shadow_color = [0.0, 0.0, 0.0, 0.25];
+
+    // Straight borders on the inside edge
+    // Top border (light)
+    verts.extend(quad_vertices_with_clip(x + r, y, ww - 2.0 * r, t, sw, sh, highlight_color, clip_circle));
+    // Left border (light)
+    verts.extend(quad_vertices_with_clip(x, y + r, t, h - 2.0 * r, sw, sh, highlight_color, clip_circle));
+    // Bottom border (dark)
+    verts.extend(quad_vertices_with_clip(x + r, y + h - t, ww - 2.0 * r, t, sw, sh, shadow_color, clip_circle));
+    // Right border (dark)
+    verts.extend(quad_vertices_with_clip(x + ww - t, y + r, t, h - 2.0 * r, sw, sh, shadow_color, clip_circle));
+
+    // Corner arcs on the inside edge
+    let segments = 16;
+
+    // Top-left corner (fully light)
+    verts.extend(arc_background_vertices(
+        x + r, y + r, r, t,
+        std::f32::consts::PI, 1.5 * std::f32::consts::PI,
+        sw, sh, highlight_color, segments, clip_circle,
+    ));
+
+    // Top-right corner (split at 45 degrees)
+    verts.extend(arc_background_vertices(
+        x + ww - r, y + r, r, t,
+        1.5 * std::f32::consts::PI, 1.75 * std::f32::consts::PI,
+        sw, sh, highlight_color, segments / 2, clip_circle,
+    ));
+    verts.extend(arc_background_vertices(
+        x + ww - r, y + r, r, t,
+        1.75 * std::f32::consts::PI, 2.0 * std::f32::consts::PI,
+        sw, sh, shadow_color, segments / 2, clip_circle,
+    ));
+
+    // Bottom-right corner (fully dark)
+    verts.extend(arc_background_vertices(
+        x + ww - r, y + h - r, r, t,
+        0.0, 0.5 * std::f32::consts::PI,
+        sw, sh, shadow_color, segments, clip_circle,
+    ));
+
+    // Bottom-left corner (split at 45 degrees)
+    verts.extend(arc_background_vertices(
+        x + r, y + h - r, r, t,
+        0.5 * std::f32::consts::PI, 0.75 * std::f32::consts::PI,
+        sw, sh, shadow_color, segments / 2, clip_circle,
+    ));
+    verts.extend(arc_background_vertices(
+        x + r, y + h - r, r, t,
+        0.75 * std::f32::consts::PI, std::f32::consts::PI,
+        sw, sh, highlight_color, segments / 2, clip_circle,
+    ));
+
+    verts
+}
+
 pub fn widget_vertices(w: &dyn crate::widget::Widget, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
     let (x, y, ww, h) = w.rect();
-    quad_vertices_with_clip(x, y, ww, h, sw, sh, w.color(), clip_circle).to_vec()
+    let corners = w.rounded_corners();
+    let mut verts = if corners != (false, false, false, false) {
+        rounded_rect_vertices_corners(x, y, ww, h, 12.0, sw, sh, w.color(), clip_circle, corners, None)
+    } else {
+        quad_vertices_with_clip(x, y, ww, h, sw, sh, w.color(), clip_circle).to_vec()
+    };
+
+    if w.is_plate() {
+        verts.extend(plate_bevel_vertices(x, y, ww, h, 12.0, 1.5, sw, sh, clip_circle));
+    }
+
+    verts
+}
+
+pub fn extra_quad_vertices(
+    w: &dyn crate::widget::Widget,
+    qx: f32, qy: f32, qw: f32, qh: f32,
+    sw: f32, sh: f32,
+    qc: [f32; 4],
+    clip_circle: [f32; 3],
+) -> Vec<Vertex> {
+    let corners = w.rounded_corners();
+    if corners == (false, false, false, false) {
+        return quad_vertices_with_clip(qx, qy, qw, qh, sw, sh, qc, clip_circle).to_vec();
+    }
+
+    let (wx, wy, ww, wh) = w.rect();
+    let extra_corners = (
+        corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
+        corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,
+        corners.2 && qx + qw >= wx + ww - 0.1 && qy + qh >= wy + wh - 0.1,
+        corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
+    );
+
+    rounded_rect_vertices_corners(qx, qy, qw, qh, 12.0, sw, sh, qc, clip_circle, extra_corners, None)
+}
+
+pub fn extra_quad_vertices_clipped(
+    w: &dyn crate::widget::Widget,
+    qx: f32, qy: f32, qw: f32, qh: f32,
+    sw: f32, sh: f32,
+    qc: [f32; 4],
+    clip: (f32, f32, f32, f32),
+    clip_circle: [f32; 3],
+) -> Vec<Vertex> {
+    let corners = w.rounded_corners();
+    if corners == (false, false, false, false) {
+        let (cx0, cy0, cx1, cy1) = clip;
+        let ix0 = qx.max(cx0);
+        let iy0 = qy.max(cy0);
+        let ix1 = (qx + qw).min(cx1);
+        let iy1 = (qy + qh).min(cy1);
+        if ix1 <= ix0 || iy1 <= iy0 {
+            return Vec::new();
+        }
+        return quad_vertices_with_clip(ix0, iy0, ix1 - ix0, iy1 - iy0, sw, sh, qc, clip_circle).to_vec();
+    }
+
+    let (wx, wy, ww, wh) = w.rect();
+    let extra_corners = (
+        corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
+        corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,
+        corners.2 && qx + qw >= wx + ww - 0.1 && qy + qh >= wy + wh - 0.1,
+        corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
+    );
+
+    rounded_rect_vertices_corners(qx, qy, qw, qh, 12.0, sw, sh, qc, clip_circle, extra_corners, Some(clip))
 }
 
 pub fn circle_vertices(
@@ -273,18 +681,31 @@ pub trait Application: Sized + 'static {
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
     fn view(&mut self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, size: LogicalSize, scale: f64);
+    fn view_vectors(&mut self, _vectors: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4], LineCap)>, _size: LogicalSize, _scale: f64) {}
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
     fn text_items(&self) -> &[TextItem];
     
     fn text_areas(&self, scale_f32: f32, bounds: TextBounds) -> Vec<TextArea<'_>> {
-        self.text_items().iter().map(|ti| TextArea {
-            buffer: &ti.buffer,
-            left: ti.x * scale_f32,
-            top: ti.y * scale_f32,
-            scale: scale_f32,
-            bounds,
-            default_color: ti.color,
-            custom_glyphs: &[],
+        self.text_items().iter().map(|ti| {
+            let item_bounds = if let Some([l, t, r, b]) = ti.bounds {
+                TextBounds {
+                    left: (l * scale_f32).round() as i32,
+                    top: (t * scale_f32).round() as i32,
+                    right: (r * scale_f32).round() as i32,
+                    bottom: (b * scale_f32).round() as i32,
+                }
+            } else {
+                bounds
+            };
+            TextArea {
+                buffer: &ti.buffer,
+                left: ti.x * scale_f32,
+                top: ti.y * scale_f32,
+                scale: scale_f32,
+                bounds: item_bounds,
+                default_color: ti.color,
+                custom_glyphs: &[],
+            }
         }).collect()
     }
     
@@ -336,6 +757,7 @@ pub struct EngineState<A: Application> {
     
     pub inner: A,
     
+    pub instance: Option<wgpu::Instance>,
     pub wgpu_surface: Option<wgpu::Surface<'static>>,
     pub device: Option<wgpu::Device>,
     pub queue: Option<wgpu::Queue>,
@@ -363,6 +785,8 @@ pub struct EngineState<A: Application> {
     pub shift_pressed: bool,
     pub pressed_key: Option<PressedKey>,
     pub sender: calloop::channel::Sender<A::Message>,
+    pub active_popup: Option<ActivePopup>,
+    pub qh: QueueHandle<EngineState<A>>,
 }
 
 impl<A: Application> EngineState<A> {
@@ -382,6 +806,7 @@ impl<A: Application> EngineState<A> {
             backends: wgpu::Backends::VULKAN,
             ..Default::default()
         });
+        self.instance = Some(instance.clone());
         
         let wgpu_surface = instance.create_surface(wayland_handle).expect("failed to create wgpu surface");
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -397,7 +822,16 @@ impl<A: Application> EngineState<A> {
             memory_hints: wgpu::MemoryHints::MemoryUsage,
         }, None).await.expect("failed to request device");
         
-        let config = wgpu_surface.get_default_config(&adapter, pw.max(1), ph.max(1)).expect("failed to get surface configuration");
+        let mut config = wgpu_surface.get_default_config(&adapter, pw.max(1), ph.max(1)).expect("failed to get surface configuration");
+        let capabilities = wgpu_surface.get_capabilities(&adapter);
+        let alpha_mode = if capabilities.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+            wgpu::CompositeAlphaMode::PreMultiplied
+        } else if capabilities.alpha_modes.contains(&wgpu::CompositeAlphaMode::PostMultiplied) {
+            wgpu::CompositeAlphaMode::PostMultiplied
+        } else {
+            capabilities.alpha_modes[0]
+        };
+        config.alpha_mode = alpha_mode;
         
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
@@ -498,6 +932,9 @@ impl<A: Application> EngineState<A> {
         let mut quads = Vec::new();
         self.inner.view(&mut quads, LogicalSize::new(logical_w, logical_h), scale_factor);
         
+        let mut vectors = Vec::new();
+        self.inner.view_vectors(&mut vectors, LogicalSize::new(logical_w, logical_h), scale_factor);
+        
         let device = self.device.as_ref().unwrap();
         let queue = self.queue.as_ref().unwrap();
         let wgpu_surface = self.wgpu_surface.as_ref().unwrap();
@@ -511,6 +948,9 @@ impl<A: Application> EngineState<A> {
         let mut verts = Vec::new();
         for &(qx, qy, qw, qh, qc) in &quads {
             verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
+        }
+        for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
+            verts.extend(vector_vertices(vx1, vy1, vx2, vy2, vthickness, logical_w, logical_h, vcolor, vcap));
         }
         self.vertex_count = verts.len() as u32;
         if self.vertex_count > 0 {
@@ -628,12 +1068,140 @@ impl<A: Application> EngineState<A> {
         
         queue.submit(std::iter::once(encoder.finish()));
         output.present();
+        
+        if let Some(ref mut popup) = self.active_popup {
+            if popup.configured {
+                let mut collector = crate::layout::PopoverCollector::new();
+                crate::layout::render_popovers(&mut collector);
+
+                let mut verts = Vec::new();
+                for &(color, qx, qy, qw, qh) in &collector.rects {
+                    let qx_local = qx - popup.x;
+                    let qy_local = qy - popup.y;
+                    verts.extend(quad_vertices(qx_local, qy_local, qw, qh, popup.logical_width, popup.logical_height, color));
+                }
+
+                let vertex_count = verts.len() as u32;
+                if vertex_count > 0 {
+                    let data = bytemuck::cast_slice(&verts);
+                    let needed = data.len() as wgpu::BufferAddress;
+                    let mut vbuf = popup.vertex_buffer.as_ref();
+                    if vbuf.map_or(true, |v| needed > v.size()) {
+                        let new_vbuf = device.create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("Popup Vertex Buffer"),
+                            size: needed,
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        });
+                        popup.vertex_buffer = Some(new_vbuf);
+                        vbuf = popup.vertex_buffer.as_ref();
+                    }
+                    queue.write_buffer(vbuf.unwrap(), 0, data);
+                }
+
+                let mut text_items = Vec::new();
+                for (content, size, tx, ty, color, font, bounds) in collector.texts {
+                    let tx_local = tx - popup.x;
+                    let ty_local = ty - popup.y;
+                    text_items.push(TextItem {
+                        buffer: make_text_buffer_with_font(&mut self.font_system, &content, size, font.as_deref()),
+                        x: tx_local,
+                        y: ty_local,
+                        color: glyphon::Color::rgb(
+                            (color[0] * 255.0).clamp(0.0, 255.0) as u8,
+                            (color[1] * 255.0).clamp(0.0, 255.0) as u8,
+                            (color[2] * 255.0).clamp(0.0, 255.0) as u8,
+                        ),
+                        bounds,
+                    });
+                }
+
+                let scale_f32 = scale_factor as f32;
+                let bounds = TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: (popup.logical_width * scale_f32) as i32,
+                    bottom: (popup.logical_height * scale_f32) as i32,
+                };
+                let areas: Vec<TextArea<'_>> = text_items.iter().map(|ti| TextArea {
+                    buffer: &ti.buffer,
+                    left: ti.x * scale_f32,
+                    top: ti.y * scale_f32,
+                    scale: scale_f32,
+                    bounds,
+                    default_color: ti.color,
+                    custom_glyphs: &[],
+                }).collect();
+
+                popup.viewport.update(queue, Resolution {
+                    width: (popup.logical_width * scale_f32) as u32,
+                    height: (popup.logical_height * scale_f32) as u32,
+                });
+
+                text_renderer.prepare(
+                    device,
+                    queue,
+                    &mut self.font_system,
+                    text_atlas,
+                    &popup.viewport,
+                    areas,
+                    &mut self.swash_cache,
+                ).unwrap();
+
+                let popup_output = match popup.wgpu_surface.get_current_texture() {
+                    Ok(t) => t,
+                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                        popup.wgpu_surface.configure(device, &popup.config);
+                        return;
+                    }
+                    Err(wgpu::SurfaceError::Timeout) => return,
+                    Err(e) => {
+                        eprintln!("Popup surface error: {e:?}");
+                        return;
+                    }
+                };
+                let popup_view = popup_output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let mut popup_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Popup Encoder"),
+                });
+
+                {
+                    let mut pass = popup_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Popup Render Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &popup_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                    if vertex_count > 0 {
+                        pass.set_pipeline(render_pipeline);
+                        pass.set_vertex_buffer(0, popup.vertex_buffer.as_ref().unwrap().slice(..));
+                        pass.draw(0..vertex_count, 0..1);
+                    }
+
+                    text_renderer.render(text_atlas, &popup.viewport, &mut pass).unwrap();
+                }
+
+                queue.submit(std::iter::once(popup_encoder.finish()));
+                popup_output.present();
+            }
+        }
+
         text_atlas.trim();
     }
 }
 
 impl<A: Application> Drop for EngineState<A> {
     fn drop(&mut self) {
+        self.instance = None;
         self.wgpu_surface = None;
         self.device = None;
         self.queue = None;
@@ -820,8 +1388,15 @@ impl<A: Application> PointerHandler for EngineState<A> {
         use smithay_client_toolkit::seat::pointer::PointerEventKind;
         for event in events {
             let (x, y) = event.position;
-            let lx = x as f32;
-            let ly = y as f32;
+            let mut lx = x as f32;
+            let mut ly = y as f32;
+            
+            if let Some(ref popup) = self.active_popup {
+                if event.surface == *popup.sctk_popup.wl_surface() {
+                    lx += popup.x;
+                    ly += popup.y;
+                }
+            }
             
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
@@ -1039,10 +1614,37 @@ impl<A: Application> wayland_client::Dispatch<crate::protocol::zclear_inspector_
     ) {}
 }
 
+impl<A: Application> PopupHandler for EngineState<A> {
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _popup: &Popup,
+        _config: PopupConfigure,
+    ) {
+        if let Some(ref mut p) = self.active_popup {
+            p.configured = true;
+        }
+        self.redraw = true;
+    }
+
+    fn done(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _popup: &Popup) {
+        for popover_ptr in crate::widget::popovers::get_active() {
+            unsafe {
+                let popover = &mut *(popover_ptr as *mut dyn crate::widget::Widget);
+                popover.unfocus();
+            }
+        }
+        self.active_popup = None;
+        self.redraw = true;
+    }
+}
+
 // Delegate macros for generic EngineState
 delegate_compositor!(@<A: Application> EngineState<A>);
 delegate_xdg_shell!(@<A: Application> EngineState<A>);
 delegate_xdg_window!(@<A: Application> EngineState<A>);
+delegate_xdg_popup!(@<A: Application> EngineState<A>);
 delegate_shm!(@<A: Application> EngineState<A>);
 delegate_seat!(@<A: Application> EngineState<A>);
 delegate_pointer!(@<A: Application> EngineState<A>);
@@ -1082,6 +1684,7 @@ pub fn run<A: Application>() {
         window: None,
         surface: None,
         inner,
+        instance: None,
         wgpu_surface: None,
         device: None,
         queue: None,
@@ -1106,6 +1709,8 @@ pub fn run<A: Application>() {
         shift_pressed: false,
         pressed_key: None,
         sender,
+        active_popup: None,
+        qh: qh.clone(),
     };
 
     event_queue.roundtrip(&mut engine_state).unwrap();
@@ -1133,7 +1738,7 @@ pub fn run<A: Application>() {
 
     let mut event_loop = EventLoop::try_new().unwrap();
     let loop_handle = event_loop.handle();
-    WaylandSource::new(conn, event_queue).insert(loop_handle.clone()).unwrap();
+    WaylandSource::new(conn.clone(), event_queue).insert(loop_handle.clone()).unwrap();
 
     loop_handle.insert_source(channel, |event, _metadata, app_state: &mut EngineState<A>| {
         if let calloop::channel::Event::Msg(msg) = event {
@@ -1148,6 +1753,7 @@ pub fn run<A: Application>() {
     const KEY_REPEAT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
     const KEY_REPEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
+    let mut last_title = settings.title.clone();
     let mut last_tick = std::time::Instant::now();
     loop {
         event_loop.dispatch(std::time::Duration::from_millis(16), &mut engine_state).unwrap();
@@ -1193,6 +1799,84 @@ pub fn run<A: Application>() {
                         engine_state.redraw = true;
                     }
                 }
+            }
+        }
+        let current_title = engine_state.inner.settings().title;
+        if current_title != last_title {
+            if let Some(ref window) = engine_state.window {
+                window.set_title(&current_title);
+                window.commit();
+            }
+            last_title = current_title;
+        }
+
+        let active_popovers = crate::widget::popovers::get_active();
+        if !active_popovers.is_empty() {
+            let popover_widget = unsafe { &*active_popovers[0] };
+            if let Some((px, py, pw, ph)) = popover_widget.popover_rect() {
+                if engine_state.active_popup.is_none() {
+                    let wl_surface = engine_state.compositor_state.create_surface(&engine_state.qh);
+                    wl_surface.set_buffer_scale(engine_state.scale_factor as i32);
+                    
+                    let positioner = XdgPositioner::new(&engine_state.xdg_shell_state).unwrap();
+                    positioner.set_size(pw as i32, ph as i32);
+                    
+                    let (rx, ry, rw, rh) = popover_widget.rect();
+                    positioner.set_anchor_rect(rx as i32, ry as i32, rw as i32, rh as i32);
+                    positioner.set_anchor(Anchor::BottomLeft);
+                    positioner.set_gravity(Gravity::BottomRight);
+                    positioner.set_constraint_adjustment(
+                        ConstraintAdjustment::SlideX | ConstraintAdjustment::SlideY
+                    );
+                    
+                    let parent_xdg_surface = XdgSurface::xdg_surface(engine_state.window.as_ref().unwrap());
+                    let sctk_popup = Popup::new(
+                        parent_xdg_surface,
+                        &positioner,
+                        &engine_state.qh,
+                        &engine_state.compositor_state,
+                        &engine_state.xdg_shell_state,
+                    ).unwrap();
+                    
+                    let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
+                    let surface_ptr = sctk_popup.wl_surface().id().as_ptr() as *mut std::ffi::c_void;
+                    let wayland_handle = Box::leak(Box::new(WaylandSurfaceHandle {
+                        display_ptr,
+                        surface_ptr,
+                    }));
+                    let instance = engine_state.instance.as_ref().unwrap();
+                    let wgpu_surface = instance.create_surface(wayland_handle).expect("failed to create popup wgpu surface");
+                    
+                    let device = engine_state.device.as_ref().unwrap();
+                    let main_config = engine_state.config.as_ref().unwrap();
+                    
+                    let scale_f32 = engine_state.scale_factor as f32;
+                    let mut popup_config = main_config.clone();
+                    popup_config.width = (pw * scale_f32) as u32;
+                    popup_config.height = (ph * scale_f32) as u32;
+                    wgpu_surface.configure(device, &popup_config);
+                    
+                    let cache = Cache::new(device);
+                    let viewport = Viewport::new(device, &cache);
+                    
+                    engine_state.active_popup = Some(ActivePopup {
+                        sctk_popup,
+                        wgpu_surface,
+                        config: popup_config,
+                        logical_width: pw,
+                        logical_height: ph,
+                        configured: false,
+                        viewport,
+                        x: px,
+                        y: py,
+                        vertex_buffer: None,
+                    });
+                }
+            }
+        } else {
+            if engine_state.active_popup.is_some() {
+                engine_state.active_popup = None;
+                engine_state.redraw = true;
             }
         }
 

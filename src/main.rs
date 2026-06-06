@@ -1,6 +1,6 @@
 use clear_ui::widget::{
     Button, Checkbox, ContentBg, Header, Panel, ProgressBar, RangeSlider, Sidebar, Slider, Spinbox,
-    StatusBar, TextLabel, Toggle, Widget,
+    StatusBar, TextLabel, Toggle, Widget, JsonLayoutWidget, JsonLayoutConfig,
 };
 
 use glyphon::{
@@ -81,15 +81,149 @@ fn quad_vertices(
     ]
 }
 
+fn rounded_rect_vertices_corners(
+    x: f32, y: f32, ww: f32, h: f32,
+    r: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    corners: (bool, bool, bool, bool),
+) -> Vec<Vertex> {
+    let mut verts = Vec::new();
+    let r = r.min(ww * 0.5).min(h * 0.5);
+
+    let push_quad = |verts: &mut Vec<Vertex>, qx: f32, qy: f32, qw: f32, qh: f32| {
+        let x0 = qx;
+        let y0 = qy;
+        let x1 = qx + qw;
+        let y1 = qy + qh;
+        
+        let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+        let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+        let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+        let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+        
+        let clip_circle = [0.0, 0.0, 0.0];
+        verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x0, ndc_y1], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y0], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+        verts.push(Vertex { position: [ndc_x0, ndc_y1], color, clip_circle });
+    };
+
+    if r <= 0.1 || (!corners.0 && !corners.1 && !corners.2 && !corners.3) {
+        push_quad(&mut verts, x, y, ww, h);
+        return verts;
+    }
+
+    push_quad(&mut verts, x + r, y, ww - 2.0 * r, h);
+    push_quad(&mut verts, x, y + r, r, h - 2.0 * r);
+    push_quad(&mut verts, x + ww - r, y + r, r, h - 2.0 * r);
+
+    let corner_configs = [
+        (corners.0, x, y, x + r, y + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI),
+        (corners.1, x + ww - r, y, x + ww - r, y + r, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI),
+        (corners.2, x + ww - r, y + h - r, x + ww - r, y + h - r, 0.0, 0.5 * std::f32::consts::PI),
+        (corners.3, x, y + h - r, x + r, y + h - r, 0.5 * std::f32::consts::PI, std::f32::consts::PI),
+    ];
+
+    let segments = 16;
+    for &(is_rounded, sqx, sqy, cx, cy, start, end) in &corner_configs {
+        if is_rounded {
+            for i in 0..segments {
+                let theta1 = start + (i as f32) * (end - start) / (segments as f32);
+                let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
+                
+                let x0 = cx;
+                let y0 = cy;
+                let x1 = cx + r * theta1.cos();
+                let y1 = cy + r * theta1.sin();
+                let x2 = cx + r * theta2.cos();
+                let y2 = cy + r * theta2.sin();
+                
+                let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+                let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+                let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+                let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+                let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
+                let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+                
+                let clip_circle = [0.0, 0.0, 0.0];
+                verts.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+                verts.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+                verts.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+            }
+        } else {
+            push_quad(&mut verts, sqx, sqy, r, r);
+        }
+    }
+
+    verts
+}
+
+fn rounded_rect_vertices(
+    x: f32, y: f32, ww: f32, h: f32,
+    r: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+) -> Vec<Vertex> {
+    rounded_rect_vertices_corners(x, y, ww, h, r, sw, sh, color, (true, true, true, true))
+}
+
 fn widget_vertices(w: &dyn Widget, sw: f32, sh: f32) -> Vec<Vertex> {
     let (x, y, ww, h) = w.rect();
-    quad_vertices(x, y, ww, h, sw, sh, w.color()).to_vec()
+    let corners = w.rounded_corners();
+    if corners != (false, false, false, false) {
+        rounded_rect_vertices_corners(x, y, ww, h, 12.0, sw, sh, w.color(), corners)
+    } else {
+        quad_vertices(x, y, ww, h, sw, sh, w.color()).to_vec()
+    }
+}
+
+fn extra_quad_vertices(
+    w: &dyn Widget,
+    qx: f32, qy: f32, qw: f32, qh: f32,
+    sw: f32, sh: f32,
+    qc: [f32; 4],
+) -> Vec<Vertex> {
+    let corners = w.rounded_corners();
+    if corners == (false, false, false, false) {
+        return quad_vertices(qx, qy, qw, qh, sw, sh, qc).to_vec();
+    }
+
+    let (wx, wy, ww, wh) = w.rect();
+    let extra_corners = (
+        corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
+        corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,
+        corners.2 && qx + qw >= wx + ww - 0.1 && qy + qh >= wy + wh - 0.1,
+        corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
+    );
+
+    rounded_rect_vertices_corners(qx, qy, qw, qh, 12.0, sw, sh, qc, extra_corners)
 }
 
 fn make_text_buffer(font_system: &mut FontSystem, text: &str, size: f32) -> Buffer {
     let metrics = Metrics::new(size, size * 1.4);
     let mut buffer = Buffer::new(font_system, metrics);
     buffer.set_text(font_system, text, Attrs::new(), glyphon::Shaping::Advanced);
+    buffer.shape_until_scroll(font_system, true);
+    buffer
+}
+
+fn make_text_buffer_with_font(font_system: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
+    let metrics = Metrics::new(size, size * 1.4);
+    let mut buffer = Buffer::new(font_system, metrics);
+    let mut attrs = Attrs::new();
+    if let Some(font_name) = font {
+        let family = match font_name {
+            "monospace" => glyphon::Family::Monospace,
+            "sans-serif" => glyphon::Family::SansSerif,
+            "serif" => glyphon::Family::Serif,
+            _ => glyphon::Family::Name(font_name),
+        };
+        attrs = attrs.family(family);
+    }
+    buffer.set_text(font_system, text, attrs, glyphon::Shaping::Advanced);
     buffer.shape_until_scroll(font_system, true);
     buffer
 }
@@ -127,10 +261,19 @@ struct State {
     physical_width: u32,
     physical_height: u32,
     scale: f64,
+    json_layout: Option<JsonLayoutWidget>,
+    layout_mode: bool,
 }
 
 impl State {
-    async fn new(wayland_handle: &'static clear_ui::wayland::WaylandSurfaceHandle, pw: u32, ph: u32, scale: f64) -> Self {
+    async fn new(
+        wayland_handle: &'static clear_ui::wayland::WaylandSurfaceHandle,
+        pw: u32,
+        ph: u32,
+        scale: f64,
+        json_layout_config: Option<JsonLayoutConfig>,
+    ) -> Self {
+        clear_ui::scale::set_scale_factor(scale as f32);
         let lw = pw as f32 / scale as f32;
         let lh = ph as f32 / scale as f32;
         let sw = lw;
@@ -236,26 +379,36 @@ impl State {
         let label_buffer = make_text_buffer(&mut font_system, "Hello, Clear UI!", 16.0);
         let status_buffer = make_text_buffer(&mut font_system, "Click a button to interact", 12.0);
 
-        let widgets: Vec<Box<dyn Widget>> = vec![
-            Box::new(Header::new()),
-            Box::new(Sidebar::new(60.0)),
-            Box::new(ContentBg::new()),
-            Box::new(Button::new(0.0, 0.0, 140.0, 40.0).with_label("Button A")),
-            Box::new(Button::new(0.0, 0.0, 140.0, 40.0).with_label("Button B")),
-            Box::new(Button::new(0.0, 0.0, 140.0, 40.0).with_label("Button C")),
-            Box::new(Panel::new(0.0, 0.0, 400.0, 250.0)),
-            Box::new(Button::new(0.0, 0.0, 140.0, 40.0).with_label("Click Me")),
-            Box::new(Button::new_reset(0.0, 0.0, 140.0, 40.0).with_label("Reset")),
-            Box::new(Checkbox::new()),
-            Box::new(Toggle::new()),
-            Box::new(ProgressBar::new(0.65)),
-            Box::new(Slider::new()),
-            Box::new(Spinbox::new(0, -10, 10, 1)),
-            Box::new(RangeSlider::new()),
-            Box::new(StatusBar::new()),
-        ];
-
-        let positions = demo_positions(sw, sh);
+        let layout_mode = json_layout_config.is_some();
+        let mut widgets: Vec<Box<dyn Widget>> = Vec::new();
+        let mut positions = Vec::new();
+        let json_layout = if let Some(ref config) = json_layout_config {
+            let mut jl = JsonLayoutWidget::new(config);
+            jl.set_rect(0.0, 0.0, sw, sh);
+            positions.push((0.0, 0.0, sw, sh));
+            Some(jl)
+        } else {
+            widgets = vec![
+                Box::new(Header::new()),
+                Box::new(Sidebar::new(60.0)),
+                Box::new(ContentBg::new()),
+                Box::new(Button::new(0.0, 0.0, 140.0, 40.0).with_label("Button A")),
+                Box::new(Button::new(0.0, 0.0, 140.0, 40.0).with_label("Button B")),
+                Box::new(Button::new(0.0, 0.0, 140.0, 40.0).with_label("Button C")),
+                Box::new(Panel::new(0.0, 0.0, 400.0, 250.0)),
+                Box::new(Button::new(0.0, 0.0, 140.0, 40.0).with_label("Click Me")),
+                Box::new(Button::new_reset(0.0, 0.0, 140.0, 40.0).with_label("Reset")),
+                Box::new(Checkbox::new()),
+                Box::new(Toggle::new()),
+                Box::new(ProgressBar::new(0.65)),
+                Box::new(Slider::new()),
+                Box::new(Spinbox::new(0, -10, 10, 1)),
+                Box::new(RangeSlider::new()),
+                Box::new(StatusBar::new()),
+            ];
+            positions = demo_positions(sw, sh);
+            None
+        };
 
         let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Vertex Buffer"),
@@ -291,6 +444,8 @@ impl State {
             physical_width: pw,
             physical_height: ph,
             scale,
+            json_layout,
+            layout_mode,
         };
 
         state.apply_layout();
@@ -299,13 +454,20 @@ impl State {
     }
 
     fn apply_layout(&mut self) {
-        for (i, pos) in self.positions.iter().enumerate() {
-            if let Some(widget) = self.widgets.get_mut(i) {
-                if widget.is_dragging() {
-                    continue;
+        if self.layout_mode {
+            if let Some(jl) = &mut self.json_layout {
+                clear_ui::scale::set_scale_factor(self.scale as f32);
+                jl.set_rect(0.0, 0.0, self.width, self.height);
+            }
+        } else {
+            for (i, pos) in self.positions.iter().enumerate() {
+                if let Some(widget) = self.widgets.get_mut(i) {
+                    if widget.is_dragging() {
+                        continue;
+                    }
+                    let (x, y, w, h) = *pos;
+                    widget.set_rect(x, y, w, h);
                 }
-                let (x, y, w, h) = *pos;
-                widget.set_rect(x, y, w, h);
             }
         }
     }
@@ -314,31 +476,41 @@ impl State {
         let sw = self.width;
         let sh = self.height;
         let mut verts = Vec::new();
-        let mut draw_order: Vec<usize> = (0..self.widgets.len()).collect();
-        draw_order.sort_by_key(|&i| self.widgets[i].z_index());
-        for &i in &draw_order {
-            let w = &self.widgets[i];
-            verts.extend(widget_vertices(w.as_ref(), sw, sh));
-            for (qx, qy, qw, qh, qc) in w.extra_quads() {
+        if self.layout_mode {
+            verts.extend(quad_vertices(0.0, 0.0, sw, sh, sw, sh, [0.05, 0.05, 0.08, 1.0]));
+            if let Some(jl) = &self.json_layout {
+                verts.extend(widget_vertices(jl, sw, sh));
+                for (qx, qy, qw, qh, qc) in jl.extra_quads() {
+                    verts.extend(extra_quad_vertices(jl, qx, qy, qw, qh, sw, sh, qc));
+                }
+            }
+        } else {
+            let mut draw_order: Vec<usize> = (0..self.widgets.len()).collect();
+            draw_order.sort_by_key(|&i| self.widgets[i].z_index());
+            for &i in &draw_order {
+                let w = &self.widgets[i];
+                verts.extend(widget_vertices(w.as_ref(), sw, sh));
+                for (qx, qy, qw, qh, qc) in w.extra_quads() {
+                    verts.extend(extra_quad_vertices(w.as_ref(), qx, qy, qw, qh, sw, sh, qc));
+                }
+            }
+
+            // Draw popover quads on top
+            let mut popover_pc = clear_ui::layout::PopoverCollector::new();
+            for &i in &draw_order {
+                let w = &self.widgets[i];
+                if w.popover_rect().is_some() {
+                    w.render_popover(&mut popover_pc);
+                }
+            }
+            for (qc, qx, qy, qw, qh) in popover_pc.rects {
                 verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
             }
-        }
 
-        // Draw popover quads on top
-        let mut popover_pc = clear_ui::layout::PopoverCollector::new();
-        for &i in &draw_order {
-            let w = &self.widgets[i];
-            if w.popover_rect().is_some() {
-                w.render_popover(&mut popover_pc);
-            }
-        }
-        for (qc, qx, qy, qw, qh) in popover_pc.rects {
-            verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
-        }
-
-        if clear_ui::widget::context_menu::is_visible() {
-            for (qx, qy, qw, qh, qc) in clear_ui::widget::context_menu::extra_quads() {
-                verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
+            if clear_ui::widget::context_menu::is_visible() {
+                for (qx, qy, qw, qh, qc) in clear_ui::widget::context_menu::extra_quads() {
+                    verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
+                }
             }
         }
         verts
@@ -381,6 +553,8 @@ impl State {
             physical_width,
             physical_height,
             scale,
+            ref json_layout,
+            layout_mode,
             ..
         } = self;
 
@@ -389,8 +563,9 @@ impl State {
 
         let scale_f32 = *scale as f32;
 
-        let mut areas: Vec<TextArea> = vec![
-            TextArea {
+        let mut areas: Vec<TextArea> = Vec::new();
+        if !*layout_mode {
+            areas.push(TextArea {
                 buffer: label_buffer,
                 left: 80.0 * scale_f32,
                 top: 12.0 * scale_f32,
@@ -403,8 +578,8 @@ impl State {
                 },
                 default_color: glyphon::Color::rgb(0xcc, 0xcc, 0xd4),
                 custom_glyphs: &[],
-            },
-            TextArea {
+            });
+            areas.push(TextArea {
                 buffer: status_buffer,
                 left: 12.0 * scale_f32,
                 top: *physical_height as f32 - 24.0 * scale_f32,
@@ -417,78 +592,109 @@ impl State {
                 },
                 default_color: glyphon::Color::rgb(0x55, 0x55, 0x66),
                 custom_glyphs: &[],
-            },
-        ];
+            });
+        }
 
         let mut widget_buffers: Vec<Buffer> = Vec::new();
-        let mut widget_labels: Vec<TextLabel> = Vec::new();
-        for (i, w) in self.widgets.iter().enumerate() {
-            for label in w.text_labels() {
-                let mut covered = false;
-                for (pi, pw) in self.widgets.iter().enumerate() {
-                    if pi != i {
-                        if let Some((px, py, pw_val, ph)) = pw.popover_rect() {
-                            if label.is_covered_by(px, py, pw_val, ph) {
-                                covered = true;
-                                break;
+        let mut widget_labels: Vec<(TextLabel, Option<[f32; 4]>)> = Vec::new();
+        if *layout_mode {
+            if let Some(jl) = json_layout {
+                for (label, font, bounds) in jl.text_labels_with_font_and_bounds() {
+                    widget_buffers.push(make_text_buffer_with_font(font_system, &label.text, label.font_size, font.as_deref()));
+                    widget_labels.push((label, bounds));
+                }
+            }
+        } else {
+            for (i, w) in self.widgets.iter().enumerate() {
+                for (label, font, bounds) in w.text_labels_with_font_and_bounds() {
+                    let mut covered = false;
+                    for (pi, pw) in self.widgets.iter().enumerate() {
+                        if pi != i {
+                            if let Some((px, py, pw_val, ph)) = pw.popover_rect() {
+                                if label.is_covered_by(px, py, pw_val, ph) {
+                                    covered = true;
+                                    break;
+                                }
                             }
                         }
                     }
+                    if !covered {
+                        widget_buffers.push(make_text_buffer_with_font(font_system, &label.text, label.font_size, font.as_deref()));
+                        widget_labels.push((label, bounds));
+                    }
                 }
-                if !covered {
+            }
+
+            if clear_ui::widget::context_menu::is_visible() {
+                for label in clear_ui::widget::context_menu::text_labels() {
                     widget_buffers.push(make_text_buffer(font_system, &label.text, label.font_size));
-                    widget_labels.push(label);
+                    widget_labels.push((label, None));
                 }
             }
         }
 
-        if clear_ui::widget::context_menu::is_visible() {
-            for label in clear_ui::widget::context_menu::text_labels() {
-                widget_buffers.push(make_text_buffer(font_system, &label.text, label.font_size));
-                widget_labels.push(label);
-            }
-        }
-
-        for (buf, label) in widget_buffers.iter().zip(widget_labels.iter()) {
+        for (buf, (label, bounds)) in widget_buffers.iter().zip(widget_labels.iter()) {
+            let item_bounds = if let Some([l, t, r, b]) = bounds {
+                TextBounds {
+                    left: (l * scale_f32).round() as i32,
+                    top: (t * scale_f32).round() as i32,
+                    right: (r * scale_f32).round() as i32,
+                    bottom: (b * scale_f32).round() as i32,
+                }
+            } else {
+                TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: *physical_width as i32,
+                    bottom: *physical_height as i32,
+                }
+            };
             areas.push(TextArea {
                 buffer: buf,
                 left: label.x * scale_f32,
                 top: label.y * scale_f32,
                 scale: scale_f32,
-                bounds: TextBounds {
-                    left: 0,
-                    top: 0,
-                    right: *physical_width as i32,
-                    bottom: *physical_height as i32,
-                },
+                bounds: item_bounds,
                 default_color: glyphon::Color::rgb(label.color[0], label.color[1], label.color[2]),
                 custom_glyphs: &[],
             });
         }
 
-        // Draw popover texts on top
         let mut popover_pc = clear_ui::layout::PopoverCollector::new();
-        for w in &self.widgets {
-            if w.popover_rect().is_some() {
-                w.render_popover(&mut popover_pc);
-            }
-        }
         let mut popover_buffers = Vec::new();
-        for (t, size, _x, _y, _tc, _font_opt) in &popover_pc.texts {
-            popover_buffers.push(make_text_buffer(font_system, t, *size));
-        }
-        for (buf, (_, size, x, y, tc, _font_opt)) in popover_buffers.iter().zip(popover_pc.texts.iter()) {
-            areas.push(TextArea {
-                buffer: buf,
-                left: *x * scale_f32,
-                top: *y * scale_f32,
-                scale: scale_f32,
-                bounds: TextBounds {
-                    left: 0,
-                    top: 0,
-                    right: *physical_width as i32,
-                    bottom: *physical_height as i32,
-                },
+
+        if !*layout_mode {
+            // Draw popover texts on top
+            for w in &self.widgets {
+                if w.popover_rect().is_some() {
+                    w.render_popover(&mut popover_pc);
+                }
+            }
+            for (t, size, _x, _y, _tc, _font_opt, _bounds) in &popover_pc.texts {
+                popover_buffers.push(make_text_buffer(font_system, t, *size));
+            }
+            for (buf, (_, size, x, y, tc, _font_opt, bounds)) in popover_buffers.iter().zip(popover_pc.texts.iter()) {
+                let item_bounds = if let Some([l, t, r, b]) = bounds {
+                    TextBounds {
+                        left: (l * scale_f32).round() as i32,
+                        top: (t * scale_f32).round() as i32,
+                        right: (r * scale_f32).round() as i32,
+                        bottom: (b * scale_f32).round() as i32,
+                    }
+                } else {
+                    TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: *physical_width as i32,
+                        bottom: *physical_height as i32,
+                    }
+                };
+                areas.push(TextArea {
+                    buffer: buf,
+                    left: *x * scale_f32,
+                    top: *y * scale_f32,
+                    scale: scale_f32,
+                    bounds: item_bounds,
                 default_color: glyphon::Color::rgb(
                     (tc[0] * 255.0) as u8,
                     (tc[1] * 255.0) as u8,
@@ -496,6 +702,7 @@ impl State {
                 ),
                 custom_glyphs: &[],
             });
+        }
         }
 
         text_renderer
@@ -512,7 +719,11 @@ impl State {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
-            self.positions = demo_positions(self.width, self.height);
+            if self.layout_mode {
+                self.positions = vec![(0.0, 0.0, self.width, self.height)];
+            } else {
+                self.positions = demo_positions(self.width, self.height);
+            }
             self.apply_layout();
             self.upload_vertices();
         }
@@ -642,6 +853,8 @@ struct AppState {
     ctrl_pressed: bool,
     shift_pressed: bool,
     pressed_key: Option<PressedKey>,
+    key_repeat_delay: std::time::Duration,
+    key_repeat_interval: std::time::Duration,
     inspector: Option<clear_ui::protocol::zclear_inspector_v1::ZclearInspectorV1>,
 }
 
@@ -801,6 +1014,12 @@ impl PointerHandler for AppState {
                             if clear_ui::widget::context_menu::cursor_moved(state.cursor_x, state.cursor_y) {
                                 changed = true;
                             }
+                        } else if state.layout_mode {
+                            if let Some(jl) = &mut state.json_layout {
+                                if jl.cursor_moved(state.cursor_x, state.cursor_y) {
+                                    changed = true;
+                                }
+                            }
                         } else {
                             if let Some(idx) = state.drag_widget {
                                 if state.widgets[idx].drag_update(state.cursor_x, state.cursor_y) {
@@ -833,6 +1052,12 @@ impl PointerHandler for AppState {
                         if clear_ui::widget::context_menu::is_visible() {
                             if clear_ui::widget::context_menu::mouse_input(btn, clear_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y) {
                                 changed = true;
+                            }
+                        } else if st.layout_mode {
+                            if let Some(jl) = &mut st.json_layout {
+                                if jl.mouse_input(btn, clear_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y) {
+                                    changed = true;
+                                }
                             }
                         } else {
                             let mut clicked_idx = None;
@@ -884,9 +1109,59 @@ impl PointerHandler for AppState {
                     };
                     if let Some(st) = &mut self.state {
                         let mut changed = false;
+                        let mut should_close = false;
                         if clear_ui::widget::context_menu::is_visible() {
                             if clear_ui::widget::context_menu::mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y) {
                                 changed = true;
+                            }
+                        } else if st.layout_mode {
+                            let mut clicked_btn_id = None;
+                            if let Some(jl) = &mut st.json_layout {
+                                if jl.mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y) {
+                                    changed = true;
+                                }
+                                if btn == clear_ui::widget::MouseButton::Left {
+                                    for w in &mut jl.widgets {
+                                        let active_page = jl.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+                                        if w.page_idx != active_page {
+                                            continue;
+                                        }
+                                        if let Some(btn_w) = &mut w.button {
+                                            if btn_w.take_click() {
+                                                clicked_btn_id = Some(w.id.clone());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if let Some(btn_id) = clicked_btn_id {
+                                let mut checkboxes = std::collections::HashMap::new();
+                                let mut spinboxes = std::collections::HashMap::new();
+                                let mut colors = std::collections::HashMap::new();
+                                let mut sliders = std::collections::HashMap::new();
+                                if let Some(jl) = &st.json_layout {
+                                    for w in &jl.widgets {
+                                        if let Some(cb) = &w.checkbox {
+                                            checkboxes.insert(w.id.clone(), cb.checked());
+                                        } else if let Some(sb) = &w.spinbox {
+                                            spinboxes.insert(w.id.clone(), sb.value);
+                                        } else if let Some(cs) = &w.color_selector {
+                                            colors.insert(w.id.clone(), cs.color);
+                                        } else if let Some(sl) = &w.slider {
+                                            sliders.insert(w.id.clone(), sl.get_scaled_value());
+                                        }
+                                    }
+                                }
+                                let out_val = serde_json::json!({
+                                    "button": btn_id,
+                                    "checkboxes": checkboxes,
+                                    "spinboxes": spinboxes,
+                                    "colors": colors,
+                                    "sliders": sliders
+                                });
+                                println!("{}", out_val.to_string());
+                                should_close = true;
                             }
                         } else {
                             if btn == clear_ui::widget::MouseButton::Left {
@@ -918,6 +1193,9 @@ impl PointerHandler for AppState {
                             st.upload_vertices();
                             self.redraw = true;
                         }
+                        if should_close {
+                            self.exit = true;
+                        }
                     }
                 }
                 PointerEventKind::Axis { horizontal, vertical, .. } => {
@@ -927,9 +1205,17 @@ impl PointerHandler for AppState {
                         
                         let delta = clear_ui::widget::MouseScrollDelta::LineDelta(-h_scroll / 10.0, -v_scroll / 10.0);
                         let mut changed = false;
-                        for w in &mut state.widgets {
-                            if w.mouse_wheel(&delta, state.cursor_x, state.cursor_y) {
-                                changed = true;
+                        if !state.layout_mode {
+                            for w in &mut state.widgets {
+                                if w.mouse_wheel(&delta, state.cursor_x, state.cursor_y) {
+                                    changed = true;
+                                }
+                            }
+                        } else {
+                            if let Some(jl) = &mut state.json_layout {
+                                if jl.mouse_wheel(&delta, state.cursor_x, state.cursor_y) {
+                                    changed = true;
+                                }
                             }
                         }
                         if changed {
@@ -1003,6 +1289,25 @@ impl KeyboardHandler for AppState {
         self.ctrl_pressed = modifiers.ctrl;
         self.shift_pressed = modifiers.shift;
     }
+
+    fn update_repeat_info(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        info: smithay_client_toolkit::seat::keyboard::RepeatInfo,
+    ) {
+        match info {
+            smithay_client_toolkit::seat::keyboard::RepeatInfo::Repeat { rate, delay } => {
+                self.key_repeat_delay = std::time::Duration::from_millis(delay as u64);
+                let interval_ms = 1000 / rate.get() as u64;
+                self.key_repeat_interval = std::time::Duration::from_millis(interval_ms);
+            }
+            smithay_client_toolkit::seat::keyboard::RepeatInfo::Disable => {
+                self.key_repeat_delay = std::time::Duration::from_secs(999999);
+            }
+        }
+    }
 }
 
 impl AppState {
@@ -1059,7 +1364,15 @@ impl AppState {
         }
 
         if let Some(st) = &mut self.state {
-            if let Some(idx) = st.focused_widget {
+            if st.layout_mode {
+                if let Some(jl) = &mut st.json_layout {
+                    let mut changed = jl.keyboard_input(&custom_event);
+                    if changed {
+                        st.upload_vertices();
+                        self.redraw = true;
+                    }
+                }
+            } else if let Some(idx) = st.focused_widget {
                 let val = st.widgets[idx].value();
                 let mut changed = st.widgets[idx].keyboard_input(&custom_event);
                 if st.widgets[idx].value() != val {
@@ -1146,6 +1459,44 @@ delegate_registry!(AppState);
 delegate_output!(AppState);
 
 fn main() {
+    let mut layout_mode = false;
+    let mut json_layout_config: Option<JsonLayoutConfig> = None;
+
+    let args = std::env::args().skip(1).collect::<Vec<String>>();
+    let mut idx = 0;
+    while idx < args.len() {
+        let arg = &args[idx];
+        if arg == "--layout" || arg == "--json" {
+            layout_mode = true;
+            idx += 1;
+        } else {
+            idx += 1;
+        }
+    }
+
+    if layout_mode {
+        use std::io::Read;
+        let mut json_str = String::new();
+        let mut stdin = std::io::stdin();
+        match stdin.read_to_string(&mut json_str) {
+            Ok(_) => {
+                match serde_json::from_str::<JsonLayoutConfig>(&json_str) {
+                    Ok(cfg) => {
+                        json_layout_config = Some(cfg);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to parse JSON layout: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to read JSON layout from stdin: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     let conn = Connection::connect_to_env().unwrap();
     let (globals, mut event_queue) = registry_queue_init(&conn).unwrap();
     let qh = event_queue.handle();
@@ -1175,6 +1526,8 @@ fn main() {
         ctrl_pressed: false,
         shift_pressed: false,
         pressed_key: None,
+        key_repeat_delay: std::time::Duration::from_millis(500),
+        key_repeat_interval: std::time::Duration::from_millis(50),
         inspector,
     };
 
@@ -1186,13 +1539,23 @@ fn main() {
     let surface = app.compositor_state.create_surface(&qh);
     surface.set_buffer_scale(scale as i32);
 
-    let pw = (1024.0 * scale) as u32;
-    let ph = (768.0 * scale) as u32;
+    let mut win_w = 1024.0;
+    let mut win_h = 768.0;
+    if let Some(ref cfg) = json_layout_config {
+        if let Some(w) = cfg.width {
+            win_w = w as f64;
+        }
+        if let Some(h) = cfg.height {
+            win_h = h as f64;
+        }
+    }
+    let pw = (win_w * scale) as u32;
+    let ph = (win_h * scale) as u32;
 
     let window = app.xdg_shell_state.create_window(surface.clone(), WindowDecorations::None, &qh);
     window.set_title("Clear UI - Test Window");
     window.set_app_id("clear-ui");
-    window.set_min_size(Some((pw, ph)));
+    window.set_min_size(Some((win_w as u32, win_h as u32)));
     window.commit();
 
     if let Some(ref inspector) = app.inspector {
@@ -1204,7 +1567,7 @@ fn main() {
         surface_ptr: surface.id().as_ptr() as *mut std::ffi::c_void,
     }));
 
-    let state = pollster::block_on(State::new(wayland_handle, pw, ph, scale));
+    let state = pollster::block_on(State::new(wayland_handle, pw, ph, scale, json_layout_config));
 
     app.window = Some(window);
     app.surface = Some(surface);
@@ -1214,8 +1577,9 @@ fn main() {
     let loop_handle = event_loop.handle();
     WaylandSource::new(conn, event_queue).insert(loop_handle).unwrap();
 
-    const KEY_REPEAT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
-    const KEY_REPEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+
+    let mut last_tick = std::time::Instant::now();
 
     loop {
         event_loop
@@ -1225,10 +1589,35 @@ fn main() {
             break;
         }
 
+        let now = std::time::Instant::now();
+        let dt = now.duration_since(last_tick).as_secs_f32();
+        last_tick = now;
+
+        if let Some(ref mut st) = app.state {
+            let mut tick_changed = false;
+            if st.layout_mode {
+                if let Some(ref mut jl) = &mut st.json_layout {
+                    if jl.tick(dt) {
+                        tick_changed = true;
+                    }
+                }
+            } else {
+                for w in &mut st.widgets {
+                    if w.tick(dt) {
+                        tick_changed = true;
+                    }
+                }
+            }
+            if tick_changed {
+                st.upload_vertices();
+                app.redraw = true;
+            }
+        }
+
         if let Some(ref mut pk) = app.pressed_key {
             let now = std::time::Instant::now();
-            if now.duration_since(pk.first_pressed) >= KEY_REPEAT_DELAY {
-                if now.duration_since(pk.last_repeated) >= KEY_REPEAT_INTERVAL {
+            if now.duration_since(pk.first_pressed) >= app.key_repeat_delay {
+                if now.duration_since(pk.last_repeated) >= app.key_repeat_interval {
                     pk.last_repeated = now;
                     let custom_event = clear_ui::widget::KeyEvent {
                         state: clear_ui::widget::ElementState::Pressed,
@@ -1239,7 +1628,15 @@ fn main() {
                         shift: app.shift_pressed,
                     };
                     if let Some(st) = &mut app.state {
-                        if let Some(idx) = st.focused_widget {
+                        if st.layout_mode {
+                            if let Some(jl) = &mut st.json_layout {
+                                let mut changed = jl.keyboard_input(&custom_event);
+                                if changed {
+                                    st.upload_vertices();
+                                    app.redraw = true;
+                                }
+                            }
+                        } else if let Some(idx) = st.focused_widget {
                             let val = st.widgets[idx].value();
                             let mut changed = st.widgets[idx].keyboard_input(&custom_event);
                             if st.widgets[idx].value() != val {

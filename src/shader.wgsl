@@ -48,20 +48,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         let fade = smoothstep(0.0, 1.0, min_dist / feather);
         final_color.a = final_color.a * fade;
     }
-    if (abs(in.color.a - 0.699) < 0.001) {
-        // Frosted glass effect with a smooth blur simulation (no high-frequency noise/grain)
-        // We use low-frequency wave combinations to create a soft, smooth organic glow/sheen
-        let wave1 = sin(in.clip_position.x * 0.02) * 0.02;
-        let wave2 = cos(in.clip_position.y * 0.02) * 0.02;
-        let sheen = sin((in.clip_position.x + in.clip_position.y) * 0.008) * 0.03;
-        let glow = wave1 + wave2 + sheen;
-        
-        final_color = vec4f(
-            clamp(in.color.r + glow, 0.0, 1.0),
-            clamp(in.color.g + glow, 0.0, 1.0),
-            clamp(in.color.b + glow, 0.0, 1.0),
-            0.699
-        );
-    }
     return final_color;
 }

@@ -1074,6 +1074,34 @@ pub trait Widget {
     fn menu_items(&self) -> Vec<String> { vec![] }
     fn menu_item_checked(&self) -> Vec<Option<bool>> { vec![] }
     fn is_vertical(&self) -> bool { false }
+
+    fn is_plate(&self) -> bool { false }
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
+    fn layout_ignore(&self) -> bool { false }
+    fn text_labels_with_bounds(&self) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        self.text_labels().into_iter().map(|l| (l, None)).collect()
+    }
+    fn text_labels_with_font_and_bounds(&self) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        self.text_labels().into_iter().map(|l| (l, None, None)).collect()
+    }
+
+    fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
+    fn menu_names(&self) -> Vec<String> { vec![] }
+    fn selected_page(&self) -> usize { 0 }
+    fn set_selected_page(&mut self, _page: usize) {}
+    fn is_page_hidden(&self) -> bool { false }
+    fn set_page_hidden(&mut self, _hidden: bool) {}
+    fn set_pages(&mut self, _pages: Vec<String>) {}
+    fn sidebar_w(&self) -> f32 { 0.0 }
+    fn set_sidebar_mode(&mut self, _enabled: bool) {}
+    fn set_sidebar_label(&mut self, _label: Option<String>) {}
+    fn add_widget_to_page(&mut self, _page_idx: usize, _widget: *mut (dyn Widget + 'static)) {}
+    fn clear_page_widgets(&mut self, _page_idx: usize) {}
+    fn menu_items_list(&self) -> Vec<Vec<String>> { vec![] }
+    fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> { vec![] }
+    fn color_u8(&self) -> Option<[u8; 4]> { None }
+    fn update_bounds(&mut self, _count: usize, _viewport_y: f32, _viewport_h: f32) {}
+    fn get_item_draw_y(&self, _idx: usize, _offset: f32) -> Option<f32> { None }
 }
 
 #[derive(Clone)]
@@ -2588,6 +2616,16 @@ impl Widget for MenuBar {
         }
     }
 
+    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
+        for menu in &mut self.menus {
+            menu.set_modifiers(ctrl, shift, alt);
+        }
+    }
+
+    fn menu_names(&self) -> Vec<String> {
+        self.menu_items.clone()
+    }
+
     fn menu_click(&mut self) -> Option<(usize, usize)> {
         for (idx, menu) in self.menus.iter_mut().enumerate() {
             if let Some((_, item_idx)) = menu.menu_click() {
@@ -2860,6 +2898,14 @@ impl Widget for MenuBar {
 
     fn set_center_items(&mut self, center: bool) {
         self.center_items = center;
+    }
+
+    fn menu_items_list(&self) -> Vec<Vec<String>> {
+        self.menu_dropdowns.clone()
+    }
+
+    fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> {
+        self.menu_dropdown_checked.clone()
     }
 }
 
@@ -5509,6 +5555,10 @@ impl Widget for ColorSelector {
     fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
     fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
 
+    fn color_u8(&self) -> Option<[u8; 4]> {
+        Some([self.color[0], self.color[1], self.color[2], 255])
+    }
+
 
 
     fn color(&self) -> [f32; 4] {
@@ -5722,6 +5772,7 @@ impl Drop for ColorSelector {
 const BREADCRUMB_PADDING: f32 = 8.0;
 const SEGMENT_GAP: f32 = 4.0;
 
+#[derive(Debug, Clone)]
 pub struct Breadcrumb {
     x: f32, y: f32, w: f32, h: f32,
     hovered: bool,
@@ -6234,6 +6285,7 @@ pub struct ScrollBox {
     pub viewport_y: f32,
     pub viewport_h: f32,
     hovered: bool,
+    pub show_border: bool,
     pub parent: Option<*mut (dyn Widget + 'static)>,
     pub children: Vec<*mut (dyn Widget + 'static)>,
 }
@@ -6247,6 +6299,7 @@ impl ScrollBox {
             viewport_y: 0.0,
             viewport_h: 0.0,
             hovered: false,
+            show_border: true,
             parent: None,
             children: Vec::new(),
         }
@@ -7070,6 +7123,7 @@ pub struct TextItem {
     pub x: f32,
     pub y: f32,
     pub color: glyphon::Color,
+    pub bounds: Option<[f32; 4]>,
 }
 
 // Styled label builder with optional strikethrough
@@ -7127,6 +7181,7 @@ impl StyledLabel {
             x,
             y,
             color: self.g_color,
+            bounds: None,
         });
         w
     }
@@ -7251,6 +7306,14 @@ impl Widget for ScrollingList {
     fn children(&self) -> Vec<*mut (dyn Widget + 'static)> { self.scroll_box.children() }
     fn add_child(&mut self, child: *mut (dyn Widget + 'static)) { self.scroll_box.add_child(child); }
     fn clear_children(&mut self) { self.scroll_box.clear_children(); }
+
+    fn update_bounds(&mut self, count: usize, viewport_y: f32, viewport_h: f32) {
+        self.update_bounds(count, viewport_y, viewport_h);
+    }
+
+    fn get_item_draw_y(&self, idx: usize, offset: f32) -> Option<f32> {
+        self.get_item_draw_y(idx, offset)
+    }
 }
 
 unsafe impl Send for Container {}
@@ -8546,77 +8609,665 @@ pub fn get_font_db() -> &'static resvg::usvg::fontdb::Database {
     })
 }
 
-pub struct Paginator {
-    x: f32, y: f32, w: f32, h: f32,
-    hovered: bool,
-    sidebar_w: f32,
-    pages: Vec<String>,
-    selected_page: usize,
-    hovered_tab: Option<usize>,
-    pressed_tab: Option<usize>,
-    page_changed: bool,
-    current_y: Option<f32>,
-    target_y: f32,
-    pub tabs_at_top: bool,
-    pub tab_y_offset: f32,
-    pub tabs_rotated: bool,
-    current_x: Option<f32>,
-    target_x: f32,
-    parent: Option<*mut (dyn Widget + 'static)>,
-    children: Vec<*mut (dyn Widget + 'static)>,
-    pub page_widgets: Vec<Vec<*mut (dyn Widget + 'static)>>,
-    pub tab_text_quads: Vec<Vec<(f32, f32, f32, f32, [f32; 4])>>,
-    pub sidebar_scroll_y: f32,
+pub struct Plate {
+    pub base: WidgetBase,
+    pub dragging: bool,
+    pub drag_ox: f32,
+    pub drag_oy: f32,
+    pub drag_start_x: f32,
+    pub drag_start_y: f32,
+    pub bounds: Option<(f32, f32, f32, f32)>,
+    pub color: Option<[f32; 4]>,
+    pub curved_circle: Option<(f32, f32, f32)>,
+    pub network_opacity: f32,
+    pub blur: bool,
+    pub children: Vec<*mut (dyn Widget + 'static)>,
+    pub parent: Option<*mut (dyn Widget + 'static)>,
+    pub visible: bool,
+    pub column_layout: bool,
 }
 
-impl Paginator {
-    pub fn new(sidebar_w: f32, pages: Vec<String>) -> Self {
-        let num_pages = pages.len();
+impl Plate {
+    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
-            hovered: false,
-            sidebar_w,
-            pages,
-            selected_page: 0,
-            hovered_tab: None,
-            pressed_tab: None,
-            page_changed: false,
-            current_y: Some(10.0),
-            target_y: 10.0,
-            tabs_at_top: false,
-            tab_y_offset: 10.0,
-            tabs_rotated: true,
-            current_x: Some(0.0),
-            target_x: 0.0,
-            parent: None,
+            base: WidgetBase::new_rect(x, y, w, h),
+            dragging: false,
+            drag_ox: 0.0,
+            drag_oy: 0.0,
+            drag_start_x: 0.0,
+            drag_start_y: 0.0,
+            bounds: None,
+            color: None,
+            curved_circle: None,
+            network_opacity: 1.0,
+            blur: true,
             children: Vec::new(),
-            page_widgets: vec![Vec::new(); num_pages],
-            tab_text_quads: Vec::new(),
-            sidebar_scroll_y: 0.0,
+            parent: None,
+            visible: true,
+            column_layout: false,
         }
     }
 
+    pub fn with_color(mut self, color: [f32; 4]) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
+    }
+
+    pub fn with_blur(mut self, blur: bool) -> Self {
+        self.blur = blur;
+        self
+    }
+
+    pub fn set_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
+        self.bounds = Some((bx, by, bw, bh));
+    }
+}
+
+impl Widget for Plate {
+    fn base(&self) -> Option<&WidgetBase> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut WidgetBase> { Some(&mut self.base) }
+    fn is_plate(&self) -> bool { true }
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }
+    fn top_room(&self) -> f32 { 0.0 }
+    fn highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> { None }
+
+    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
+        for &child_ptr in &self.children {
+            unsafe {
+                (*child_ptr).set_modifiers(ctrl, shift, alt);
+            }
+        }
+    }
+
+    fn visible(&self) -> bool {
+        self.visible
+    }
+
+    fn color(&self) -> [f32; 4] {
+        let mut c = if let Some(c) = self.color {
+            c
+        } else if self.dragging {
+            colors::PANEL_DRAG
+        } else {
+            colors::PANEL_IDLE
+        };
+        c[3] *= self.network_opacity;
+        if self.blur {
+            c[3] = -c[3].abs();
+        }
+        c
+    }
+
+    fn set_network_opacity(&mut self, opacity: f32) {
+        self.network_opacity = opacity;
+    }
+
+    fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
+        self.bounds = Some((bx, by, bw, bh));
+    }
+
+    fn set_curved_circle(&mut self, circle: Option<(f32, f32, f32)>) {
+        self.curved_circle = circle;
+    }
+
+    fn hit_test(&self, px: f32, py: f32) -> bool {
+        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
+        if let Some((cx, cy, r)) = self.curved_circle {
+            let dx = px - cx;
+            let dy = py - cy;
+            return dx * dx + dy * dy <= r * r;
+        }
+        
+        let (x, y, w, h) = self.rect();
+        if px < x || px >= x + w || py < y || py >= y + h {
+            return false;
+        }
+        
+        let r = 12.0f32.min(w * 0.5).min(h * 0.5);
+        if r <= 0.1 {
+            return true;
+        }
+        
+        // Check corners
+        if px < x + r && py < y + r {
+            let dx = px - (x + r);
+            let dy = py - (y + r);
+            return dx * dx + dy * dy <= r * r;
+        }
+        if px >= x + w - r && py < y + r {
+            let dx = px - (x + w - r);
+            let dy = py - (y + r);
+            return dx * dx + dy * dy <= r * r;
+        }
+        if px >= x + w - r && py >= y + h - r {
+            let dx = px - (x + w - r);
+            let dy = py - (y + h - r);
+            return dx * dx + dy * dy <= r * r;
+        }
+        if px < x + r && py >= y + h - r {
+            let dx = px - (x + r);
+            let dy = py - (y + h - r);
+            return dx * dx + dy * dy <= r * r;
+        }
+        
+        true
+    }
+
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        if let Some(b) = self.base_mut() {
+            b.x = x;
+            b.y = y;
+            b.w = w;
+            b.h = h;
+        }
+
+        if !self.visible {
+            return;
+        }
+
+        let padding_x = 20.0;
+        let padding_y = 20.0;
+        let left_x = x + padding_x;
+        let available_w = (w - 2.0 * padding_x).max(1.0);
+        let start_y = y + padding_y;
+        let available_h = (h - 2.0 * padding_y).max(1.0);
+
+        let center_x = left_x + available_w / 2.0;
+        let center_y = start_y + available_h / 2.0;
+        let aspect_ratio = available_w / available_h;
+
+        let mut active_widgets = Vec::new();
+        for &w_ptr in &self.children {
+            let w = unsafe { &*w_ptr };
+            if !w.layout_ignore() {
+                active_widgets.push(w_ptr);
+            }
+        }
+
+        if self.column_layout {
+            let mut current_y = start_y;
+            let spacing = 12.0;
+            for &w_ptr in &active_widgets {
+                let w = unsafe { &mut *w_ptr };
+                let (_, _, ww, wh) = w.rect();
+                let use_w = if ww > 0.0 { ww.min(available_w) } else { available_w };
+                let top = w.top_room();
+                let use_h = if wh > 0.0 { wh } else { 24.0 + top };
+
+                w.set_rect(left_x, current_y, use_w, use_h);
+                current_y += use_h + spacing;
+            }
+        } else {
+            let mut total_diagonal = 0.0;
+            let mut count = 0;
+            for &w_ptr in &active_widgets {
+                let w = unsafe { &*w_ptr };
+                let (_, _, ww, wh) = w.rect();
+                let use_w = if ww > 0.0 { ww.min(available_w) } else { available_w };
+                let use_h = if wh > 0.0 { wh } else { 50.0 };
+                total_diagonal += (use_w * use_w + use_h * use_h).sqrt();
+                count += 1;
+            }
+            let avg_diagonal = if count > 0 { total_diagonal / count as f32 } else { 100.0 };
+            let base_spacing = (avg_diagonal * 0.55).max(60.0);
+
+            for (i, &w_ptr) in active_widgets.iter().enumerate() {
+                let w = unsafe { &mut *w_ptr };
+                let (_, _, ww, wh) = w.rect();
+                let use_w = if ww > 0.0 { ww.min(available_w) } else { available_w };
+                let use_h = if wh > 0.0 { wh } else { 50.0 };
+
+                if i == 0 {
+                    w.set_rect(center_x - use_w / 2.0, center_y - use_h / 2.0, use_w, use_h);
+                } else {
+                    let mut ring = 1;
+                    let mut ring_start = 1;
+                    let mut placed = false;
+                    while !placed {
+                        let ring_capacity = ring * 6;
+                        if i < ring_start + ring_capacity {
+                            let pos_in_ring = i - ring_start;
+                            let angle = (pos_in_ring as f32) * (2.0 * std::f32::consts::PI / ring_capacity as f32);
+                            let radius = (ring as f32) * base_spacing;
+
+                            let x_offset = radius * angle.cos() * aspect_ratio;
+                            let y_offset = radius * angle.sin();
+
+                            w.set_rect(
+                                center_x + x_offset - use_w / 2.0,
+                                center_y + y_offset - use_h / 2.0,
+                                use_w,
+                                use_h,
+                            );
+                            placed = true;
+                        } else {
+                            ring_start += ring_capacity;
+                            ring += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn parent(&self) -> Option<*mut (dyn Widget + 'static)> {
+        self.parent
+    }
+
+    fn set_parent(&mut self, parent: Option<*mut (dyn Widget + 'static)>) {
+        self.parent = parent;
+    }
+
+    fn children(&self) -> Vec<*mut (dyn Widget + 'static)> {
+        self.children.clone()
+    }
+
+    fn add_child(&mut self, child: *mut (dyn Widget + 'static)) {
+        self.children.push(child);
+    }
+
+    fn clear_children(&mut self) {
+        self.children.clear();
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut quads = Vec::new();
+        let (px, py, pw, ph) = self.rect();
+        quads.push((px, py, pw, ph, self.color()));
+
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            let c = widget.color();
+            if c[3] > 0.0 {
+                let (wx, wy, ww, wh) = widget.rect();
+                quads.push((wx, wy, ww, wh, c));
+            }
+            quads.extend(widget.all_quads());
+        }
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut labels = Vec::new();
+        if let Some(ref label) = self.base.label {
+            labels.push(TextLabel {
+                text: label.clone(),
+                x: self.base.x,
+                y: self.base.y - 18.0,
+                font_size: 12.0,
+                color: [0x83, 0x83, 0x8a],
+            });
+        }
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            labels.extend(widget.text_labels());
+        }
+        labels
+    }
+
+    fn text_labels_with_bounds(&self) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        if let Some(ref label) = self.base.label {
+            result.push((
+                TextLabel {
+                    text: label.clone(),
+                    x: self.base.x,
+                    y: self.base.y - 18.0,
+                    font_size: 12.0,
+                    color: [0x83, 0x83, 0x8a],
+                },
+                None,
+            ));
+        }
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            result.extend(widget.text_labels_with_bounds());
+        }
+        result
+    }
+
+    fn on_cursor_moved(&mut self, px: f32, py: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
+        let mut changed = false;
+        for &widget_ptr in &self.children {
+            let widget = unsafe { &mut *widget_ptr };
+            if widget.is_dragging() {
+                if widget.drag_update(px, py) {
+                    changed = true;
+                }
+            } else if widget.cursor_moved(px, py) {
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
+        for &widget_ptr in self.children.iter().rev() {
+            let widget = unsafe { &mut *widget_ptr };
+            if widget.popover_rect().is_some() {
+                if widget.mouse_input(button, state, px, py) {
+                    return true;
+                }
+            }
+        }
+        for &widget_ptr in self.children.iter().rev() {
+            let widget = unsafe { &mut *widget_ptr };
+            if widget.mouse_input(button, state, px, py) {
+                return true;
+            }
+            if state == ElementState::Pressed && !widget.hit_test(px, py) {
+                widget.unfocus();
+            }
+        }
+
+        if button != MouseButton::Left { return false; }
+        match state {
+            ElementState::Pressed => {
+                if self.hit_test(px, py) {
+                    self.drag_begin(px, py);
+                    return true;
+                }
+            }
+            ElementState::Released => {
+                if self.dragging { self.drag_end(); return true; }
+            }
+        }
+        false
+    }
+
+    fn keyboard_input(&mut self, event: &KeyEvent) -> bool {
+        if !self.visible {
+            return false;
+        }
+        for &widget_ptr in &self.children {
+            let widget = unsafe { &mut *widget_ptr };
+            if widget.keyboard_input(event) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
+        for &widget_ptr in self.children.iter().rev() {
+            let widget = unsafe { &mut *widget_ptr };
+            if widget.mouse_wheel(delta, px, py) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        if !self.visible {
+            return None;
+        }
+        for &widget_ptr in self.children.iter().rev() {
+            let widget = unsafe { &*widget_ptr };
+            if let Some(r) = widget.popover_rect() {
+                return Some(r);
+            }
+        }
+        None
+    }
+
+    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        if !self.visible {
+            return;
+        }
+        for &widget_ptr in self.children.iter().rev() {
+            let widget = unsafe { &*widget_ptr };
+            widget.render_popover(pc);
+        }
+    }
+
+    fn tick(&mut self, dt: f32) -> bool {
+        if !self.visible {
+            return false;
+        }
+        let mut changed = false;
+        for &widget_ptr in &self.children {
+            let widget = unsafe { &mut *widget_ptr };
+            if widget.tick(dt) {
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    fn drag_update(&mut self, px: f32, py: f32) -> bool {
+        let nx = px - self.drag_ox;
+        let ny = py - self.drag_oy;
+        let (nx, ny) = if let Some((bx, by, bw, bh)) = self.bounds {
+            (nx.clamp(bx, bx + bw - self.base.w), ny.clamp(by, by + bh - self.base.h))
+        } else {
+            (nx, ny)
+        };
+        if (nx - self.base.x).abs() > 0.01 || (ny - self.base.y).abs() > 0.01 {
+            let dx = nx - self.base.x;
+            let dy = ny - self.base.y;
+            self.base.x = nx;
+            self.base.y = ny;
+            
+            for &child_ptr in &self.children {
+                unsafe {
+                    let (cx, cy, cw, ch) = (*child_ptr).rect();
+                    (*child_ptr).set_rect(cx + dx, cy + dy, cw, ch);
+                }
+            }
+            return true;
+        }
+        false
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32) {
+        self.dragging = true;
+        self.drag_ox = px - self.base.x;
+        self.drag_oy = py - self.base.y;
+        self.drag_start_x = self.base.x;
+        self.drag_start_y = self.base.y;
+    }
+
+    fn drag_end(&mut self) { self.dragging = false; }
+}
+
+unsafe impl Send for Plate {}
+unsafe impl Sync for Plate {}
+
+pub struct Paginator {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    hovered: bool,
+    pub sidebar_menu: MenuBar,
+    pub plates: Vec<Plate>,
+    pub selected_page: usize,
+    pub page_changed: bool,
+    pub sidebar_label: Option<String>,
+    pub tab_text_quads: Vec<Vec<(f32, f32, f32, f32, [f32; 4])>>,
+    pub sidebar_scroll_y: f32,
+    pub scale_factor: f32,
+    pub sidebar_mode: bool,
+    pub page_hidden: bool,
+    pub sidebar_w: f32,
+    pub pages: Vec<String>,
+    pub tabs_at_top: bool,
+    pub tab_y_offset: f32,
+    pub tabs_rotated: bool,
+    pub hovered_tab: Option<usize>,
+    pub pressed_tab: Option<usize>,
+    pub target_y: f32,
+    pub target_x: f32,
+    pub current_y: Option<f32>,
+    pub current_x: Option<f32>,
+    parent: Option<*mut (dyn Widget + 'static)>,
+}
+
+impl Paginator {
+    pub fn sidebar_w(&self) -> f32 {
+        self.sidebar_w
+    }
+
+    pub fn new(sidebar_w: f32, pages: Vec<String>) -> Self {
+        let num_pages = pages.len();
+        
+        let mut sidebar_menu = MenuBar::new(0.0, 0.0, sidebar_w, 0.0)
+            .with_vertical(true);
+        for page in &pages {
+            sidebar_menu = sidebar_menu.with_item(page, &[]);
+        }
+
+        let mut plates = Vec::new();
+        for _ in 0..num_pages {
+            let mut plate = Plate::new(0.0, 0.0, 0.0, 0.0);
+            plate.visible = false;
+            plates.push(plate);
+        }
+        if num_pages > 0 {
+            plates[0].visible = true;
+            sidebar_menu.menus[0].set_selected(true);
+        }
+
+        let mut pag = Self {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+            hovered: false,
+            sidebar_menu,
+            plates,
+            selected_page: 0,
+            page_changed: false,
+            sidebar_label: None,
+            tab_text_quads: Vec::new(),
+            sidebar_scroll_y: 0.0,
+            scale_factor: 1.0,
+            sidebar_mode: true,
+            page_hidden: false,
+            sidebar_w,
+            pages,
+            tabs_at_top: false,
+            tab_y_offset: 10.0,
+            tabs_rotated: true,
+            hovered_tab: None,
+            pressed_tab: None,
+            target_y: 10.0,
+            target_x: 0.0,
+            current_y: Some(10.0),
+            current_x: Some(0.0),
+            parent: None,
+        };
+        pag.update_target_pos();
+        pag
+    }
+
+    pub fn tab_rect(&self, idx: usize) -> (f32, f32, f32, f32) {
+        if idx >= self.pages.len() {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+        if self.tabs_at_top {
+            let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+            (self.x + idx as f32 * tab_w, self.y, tab_w, 40.0)
+        } else if self.tabs_rotated {
+            let (tab_w, tab_h) = self.vertical_tab_size();
+            let spacing = 10.0;
+            (
+                self.x + (self.sidebar_w - tab_w) / 2.0,
+                self.y + self.tab_y_offset + idx as f32 * (tab_h + spacing) - self.sidebar_scroll_y,
+                tab_w,
+                tab_h,
+            )
+        } else {
+            let bw = self.sidebar_w - 10.0;
+            (self.x + 5.0, self.y + self.tab_y_offset + idx as f32 * 50.0 - self.sidebar_scroll_y, bw, 40.0)
+        }
+    }
+
+    pub fn tab_size(&self, idx: usize) -> (f32, f32) {
+        let r = self.tab_rect(idx);
+        (r.2, r.3)
+    }
+
+    pub fn with_column_layout(mut self, enabled: bool) -> Self {
+        for plate in &mut self.plates {
+            plate.column_layout = enabled;
+        }
+        self
+    }
+
+    pub fn with_sidebar_mode(mut self, enabled: bool) -> Self {
+        self.sidebar_mode = enabled;
+        self
+    }
+
+    pub fn with_sidebar_label(mut self, label: &str) -> Self {
+        self.sidebar_label = Some(label.to_string());
+        self
+    }
+
+    pub fn sidebar_label_height(&self) -> f32 {
+        if self.sidebar_label.is_some() {
+            24.0
+        } else {
+            0.0
+        }
+    }
+
+    pub fn is_page_hidden(&self) -> bool {
+        self.page_hidden
+    }
+
+    pub fn set_page_hidden(&mut self, hidden: bool) {
+        self.page_hidden = hidden;
+    }
+
+    pub fn set_sidebar_mode(&mut self, enabled: bool) {
+        self.sidebar_mode = enabled;
+    }
+
     pub fn add_widget_to_page(&mut self, page_idx: usize, widget: *mut (dyn Widget + 'static)) {
-        if page_idx < self.page_widgets.len() {
-            self.page_widgets[page_idx].push(widget);
-            self.add_child(widget);
+        if page_idx < self.plates.len() {
+            self.plates[page_idx].add_child(widget);
+            unsafe {
+                (*widget).set_parent(Some(&mut self.plates[page_idx] as *mut _));
+            }
         }
     }
 
     pub fn clear_page_widgets(&mut self, page_idx: usize) {
-        if page_idx < self.page_widgets.len() {
-            for widget_ptr in &self.page_widgets[page_idx] {
-                self.children.retain(|&c| !std::ptr::addr_eq(c, *widget_ptr));
-                unsafe {
-                    (&mut **widget_ptr).set_parent(None);
-                }
-            }
-            self.page_widgets[page_idx].clear();
+        if page_idx < self.plates.len() {
+            self.plates[page_idx].clear_children();
         }
     }
 
-    pub fn with_tabs_at_top(mut self, _top: bool) -> Self {
-        self.tabs_at_top = false;
+    pub fn with_tabs_at_top(mut self, top: bool) -> Self {
+        self.tabs_at_top = top;
         self.update_target_pos();
         self
     }
@@ -8630,10 +9281,62 @@ impl Paginator {
         self
     }
 
-    pub fn with_tabs_rotated(mut self, _rotated: bool) -> Self {
-        self.tabs_rotated = true;
+    pub fn with_tabs_rotated(mut self, rotated: bool) -> Self {
+        self.tabs_rotated = rotated;
         self.update_target_pos();
         self
+    }
+
+    pub fn selected_page(&self) -> usize {
+        self.selected_page
+    }
+
+    pub fn set_selected_page(&mut self, page: usize) {
+        if page < self.plates.len() {
+            if self.selected_page != page {
+                self.plates[self.selected_page].visible = false;
+                self.selected_page = page;
+                self.plates[self.selected_page].visible = true;
+                self.update_target_pos();
+                
+                // Update MenuBar focus/selection
+                for (i, menu) in self.sidebar_menu.menus.iter_mut().enumerate() {
+                    menu.set_selected(i == page);
+                }
+            }
+        }
+    }
+
+    pub fn set_pages(&mut self, pages: Vec<String>) {
+        self.pages = pages.clone();
+        let num_pages = pages.len();
+        
+        let mut sidebar_menu = MenuBar::new(0.0, 0.0, self.sidebar_w, 0.0)
+            .with_vertical(true);
+        for page in &pages {
+            sidebar_menu = sidebar_menu.with_item(page, &[]);
+        }
+        self.sidebar_menu = sidebar_menu;
+
+        let mut plates = Vec::new();
+        for _ in 0..num_pages {
+            let mut plate = Plate::new(0.0, 0.0, 0.0, 0.0);
+            plate.visible = false;
+            plates.push(plate);
+        }
+        self.plates = plates;
+        if self.selected_page >= num_pages {
+            self.selected_page = 0;
+        }
+        if !self.plates.is_empty() {
+            self.plates[self.selected_page].visible = true;
+            self.sidebar_menu.menus[self.selected_page].set_selected(true);
+        }
+        self.update_target_pos();
+    }
+
+    pub fn set_scale_factor(&mut self, scale: f32) {
+        self.scale_factor = scale;
     }
 
     pub fn vertical_tab_size(&self) -> (f32, f32) {
@@ -8649,6 +9352,31 @@ impl Paginator {
         let spacing = 10.0;
         let step = if self.tabs_rotated { tab_h + spacing } else { 50.0 };
         self.tab_y_offset + self.pages.len() as f32 * step - spacing
+    }
+
+    fn update_target_pos(&mut self) {
+        if self.tabs_at_top {
+            let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
+            self.target_x = self.selected_page as f32 * tab_w;
+            if self.current_x.is_none() {
+                self.current_x = Some(self.target_x);
+            }
+        } else if self.tabs_rotated {
+            let (_, tab_h) = self.vertical_tab_size();
+            let spacing = 10.0;
+            let target = self.tab_y_offset + self.selected_page as f32 * (tab_h + spacing);
+            self.target_y = target;
+            if self.current_y.is_none() {
+                self.current_y = Some(target);
+            }
+        } else {
+            let target = self.tab_y_offset + self.selected_page as f32 * 50.0;
+            self.target_y = target;
+            if self.current_y.is_none() {
+                self.current_y = Some(target);
+            }
+        }
+        self.generate_tab_quads();
     }
 
     fn generate_tab_quads(&mut self) {
@@ -8687,7 +9415,6 @@ impl Paginator {
                 continue;
             }
 
-            // Generate SVG string for the rotated text
             let svg_data = format!(
                 r##"<svg width="{}" height="{}" xmlns="http://www.w3.org/2000/svg">
   <text x="{}" y="{}" font-family="sans-serif" font-size="12" fill="{}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 {} {})">{}</text>
@@ -8699,7 +9426,6 @@ impl Paginator {
                 label_text
             );
 
-            // Render SVG using resvg and tiny_skia
             let opt = resvg::usvg::Options::default();
             let fontdb = get_font_db();
             
@@ -8730,55 +9456,16 @@ impl Paginator {
                     }
                 }
             }
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/paginator_debug.txt") {
-                use std::io::Write;
-                let _ = writeln!(file, "Page {}: label='{}', w_px={}, h_px={}, quads_len={}", i, label_text, w_px, h_px, page_quads.len());
-            }
             self.tab_text_quads.push(page_quads);
-        }
-    }
-
-    fn update_target_pos(&mut self) {
-        if self.tabs_at_top {
-            let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
-            self.target_x = self.selected_page as f32 * tab_w;
-            if self.current_x.is_none() {
-                self.current_x = Some(self.target_x);
-            }
-        } else if self.tabs_rotated {
-            let (_, tab_h) = self.vertical_tab_size();
-            let spacing = 10.0;
-            let target = self.tab_y_offset + self.selected_page as f32 * (tab_h + spacing);
-            self.target_y = target;
-            if self.current_y.is_none() {
-                self.current_y = Some(target);
-            }
-        } else {
-            let target = self.tab_y_offset + self.selected_page as f32 * 50.0;
-            self.target_y = target;
-            if self.current_y.is_none() {
-                self.current_y = Some(target);
-            }
-        }
-        self.generate_tab_quads();
-    }
-
-    pub fn selected_page(&self) -> usize {
-        self.selected_page
-    }
-
-    pub fn set_selected_page(&mut self, page: usize) {
-        if page < self.pages.len() {
-            if self.selected_page != page {
-                self.selected_page = page;
-                self.update_target_pos();
-            }
         }
     }
 }
 
 impl Widget for Paginator {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    fn rect(&self) -> (f32, f32, f32, f32) {
+        (self.x, self.y, self.w, self.h)
+    }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.x = x;
         self.y = y;
@@ -8786,57 +9473,38 @@ impl Widget for Paginator {
         self.h = h;
         self.update_target_pos();
 
-        // Perform relative wrapping layout for all page widgets
-        let padding_x = 20.0;
-        let gap_y = 16.0;
-        let gap_x = 20.0;
+        let self_ptr = self as *mut Paginator;
+        self.sidebar_menu.set_parent(Some(self_ptr));
+        for plate in &mut self.plates {
+            plate.set_parent(Some(self_ptr));
+        }
 
-        let (left_x, available_w, start_y) = if self.tabs_at_top {
-            (self.x + padding_x, self.w - 2.0 * padding_x, self.y + 40.0 + 20.0)
+        let tabs_at_top = self.tabs_at_top;
+        if tabs_at_top {
+            self.sidebar_menu.set_rect(self.x, self.y, self.w, 40.0);
+            for plate in &mut self.plates {
+                plate.set_rect(self.x, self.y + 40.0, self.w, (self.h - 40.0).max(0.0));
+            }
         } else {
-            (self.x + self.sidebar_w + padding_x, self.w - self.sidebar_w - 2.0 * padding_x, self.y + 20.0)
-        };
-
-        for page_idx in 0..self.page_widgets.len() {
-            let mut cur_y = start_y;
-            let widgets = &self.page_widgets[page_idx];
-            let mut i = 0;
-            while i < widgets.len() {
-                let w1_ptr = widgets[i];
-                let w1 = unsafe { &mut *w1_ptr };
-                let (_, _, w1_w, w1_h) = w1.rect();
-
-                if i + 1 < widgets.len() {
-                    let w2_ptr = widgets[i + 1];
-                    let w2 = unsafe { &mut *w2_ptr };
-                    let (_, _, w2_w, w2_h) = w2.rect();
-
-                    if w1_w > 0.0 && w2_w > 0.0 && w1_w + w2_w + gap_x <= available_w {
-                        let top_room = w1.top_room().max(w2.top_room());
-                        let widget_y = cur_y + top_room;
-
-                        w1.set_rect(left_x, widget_y, w1_w, w1_h);
-                        w2.set_rect(left_x + w1_w + gap_x, widget_y, w2_w, w2_h);
-
-                        cur_y = widget_y + w1_h.max(w2_h) + gap_y;
-                        i += 2;
-                        continue;
-                    }
-                }
-
-                let top_room = w1.top_room();
-                let widget_y = cur_y + top_room;
-                let use_w = if w1_w > 0.0 { w1_w.min(available_w) } else { available_w };
-
-                w1.set_rect(left_x, widget_y, use_w, w1_h);
-                cur_y = widget_y + w1_h + gap_y;
-                i += 1;
+            let sidebar_w = self.sidebar_w;
+            self.sidebar_menu.set_rect(self.x, self.y, sidebar_w, self.h);
+            for plate in &mut self.plates {
+                plate.set_rect(self.x + sidebar_w, self.y, (self.w - sidebar_w).max(0.0), self.h);
             }
         }
     }
-    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
+
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
+    fn set_hovered(&mut self, v: bool) {
+        self.hovered = v;
+    }
+
+    fn hovered(&self) -> bool {
+        self.hovered
+    }
 
     fn highlight_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         if let Some(i) = self.hovered_tab {
@@ -8871,7 +9539,6 @@ impl Widget for Paginator {
                 let qy = by + scroll_offset;
                 let qh = bh;
 
-                // Clip to paginator Y bounds
                 let min_y = self.y;
                 let max_y = self.y + self.h;
                 let ry1 = qy.max(min_y);
@@ -8890,145 +9557,9 @@ impl Widget for Paginator {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        if self.tabs_at_top {
-            // Draw top tab bar background
-            quads.push((self.x, self.y, self.w, 40.0, colors::sidebar_bg_color()));
-            // Draw main page background
-            quads.push((self.x, self.y + 40.0, self.w, self.h - 40.0, colors::page_low_color()));
-            // Divider line below tab bar
-            quads.push((self.x, self.y + 40.0 - 1.0, self.w, 1.0, [0.20, 0.20, 0.25, 0.6]));
-
-            // Sliding active tab indicator
-            if let Some(cx) = self.current_x {
-                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
-                let bx = self.x + cx + 4.0;
-                let by = self.y + 4.0;
-                let bw = tab_w - 8.0;
-                let bh = 40.0 - 8.0;
-                
-                // Sliding capsule glow
-                let steps = 12;
-                let start_alpha = 0.01;
-                let c = 0.0006;
-                for i in 0..steps {
-                    let offset = i as f32 * 0.5;
-                    let rx = bx + offset;
-                    let ry = by + offset;
-                    let rw = bw - 2.0 * offset;
-                    let rh = bh - 2.0 * offset;
-                    if rw > 0.0 && rh > 0.0 {
-                        let step_alpha = start_alpha + c * (i * i) as f32;
-                        quads.push((rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha]));
-                    }
-                }
-            }
-
-            // Tab button press/hover highlight overlays
-            for i in 0..self.pages.len() {
-                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
-                let bx = self.x + i as f32 * tab_w + 4.0;
-                let by = self.y + 4.0;
-                let bw = tab_w - 8.0;
-                let bh = 40.0 - 8.0;
-
-                let c = if self.pressed_tab == Some(i) {
-                    [0.20, 0.20, 0.25, 0.25]
-                } else if self.hovered_tab == Some(i) {
-                    [0.20, 0.20, 0.25, 0.15]
-                } else {
-                    [0.0, 0.0, 0.0, 0.0]
-                };
-                
-                if c[3] > 0.0 {
-                    quads.push((bx, by, bw, bh, c));
-                }
-            }
-        } else {
-            // Vertical layout (old)
-            quads.push((self.x, self.y, self.sidebar_w, self.h, colors::sidebar_bg_color()));
-            quads.push((self.x + self.sidebar_w, self.y, self.w - self.sidebar_w, self.h, colors::page_low_color()));
-
-            let min_y = self.y;
-            let max_y = self.y + self.h;
-            let mut push_sidebar_quad = |qx: f32, qy: f32, qw: f32, qh: f32, qc: [f32; 4], q: &mut Vec<(f32, f32, f32, f32, [f32; 4])>| {
-                let ry1 = qy.max(min_y);
-                let ry2 = (qy + qh).min(max_y);
-                let rh = ry2 - ry1;
-                if rh > 0.0 {
-                    q.push((qx, ry1, qw, rh, qc));
-                }
-            };
-
-            if let Some(cy) = self.current_y {
-                let (bx, by, bw, bh) = if self.tabs_rotated {
-                    let (tab_w, tab_h) = self.vertical_tab_size();
-                    (
-                        self.x + (self.sidebar_w - tab_w) / 2.0,
-                        self.y + cy - self.sidebar_scroll_y,
-                        tab_w,
-                        tab_h,
-                    )
-                } else {
-                    let bw = self.sidebar_w - 10.0;
-                    (
-                        self.x + 5.0,
-                        self.y + cy - self.sidebar_scroll_y,
-                        bw,
-                        40.0,
-                    )
-                };
-                
-                let steps = 16;
-                let start_alpha = 0.008;
-                let c = 0.000516;
-                for i in 0..steps {
-                    let offset = i as f32 * 0.5;
-                    let rx = bx + offset;
-                    let ry = by + offset;
-                    let rw = bw - 2.0 * offset;
-                    let rh = bh - 2.0 * offset;
-                    if rw > 0.0 && rh > 0.0 {
-                        let step_alpha = start_alpha + c * (i * i) as f32;
-                        push_sidebar_quad(rx, ry, rw, rh, [0.20, 0.40, 0.65, step_alpha], &mut quads);
-                    }
-                }
-            }
-
-            for i in 0..self.pages.len() {
-                let (bx, by, bw, bh) = if self.tabs_rotated {
-                    let (tab_w, tab_h) = self.vertical_tab_size();
-                    let spacing = 10.0;
-                    (
-                        self.x + (self.sidebar_w - tab_w) / 2.0,
-                        self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y,
-                        tab_w,
-                        tab_h,
-                    )
-                } else {
-                    let bw = self.sidebar_w - 10.0;
-                    (
-                        self.x + 5.0,
-                        self.y + self.tab_y_offset + i as f32 * 50.0 - self.sidebar_scroll_y,
-                        bw,
-                        40.0,
-                    )
-                };
-
-                let c = if self.pressed_tab == Some(i) {
-                    [0.20, 0.20, 0.25, 0.25]
-                } else if self.hovered_tab == Some(i) {
-                    [0.20, 0.20, 0.25, 0.15]
-                } else {
-                    [0.0, 0.0, 0.0, 0.0]
-                };
-                
-                if c[3] > 0.0 {
-                    push_sidebar_quad(bx, by, bw, bh, c, &mut quads);
-                }
-            }
-        }
-
         if self.tabs_rotated {
+            quads.push((self.x, self.y, self.sidebar_w, self.h, colors::sidebar_bg_color()));
+            
             let (tab_w, tab_h) = self.vertical_tab_size();
             let spacing = 10.0;
             let min_y = self.y;
@@ -9047,7 +9578,6 @@ impl Widget for Paginator {
                         let absolute_x = bx + qx;
                         let absolute_y = by + y_offset + qy;
                         
-                        // Clip vertical drawing bounds to paginator height
                         let ry1 = absolute_y.max(min_y);
                         let ry2 = (absolute_y + qh).min(max_y);
                         let rh = ry2 - ry1;
@@ -9057,60 +9587,36 @@ impl Widget for Paginator {
                     }
                 }
             }
+        } else {
+            quads.extend(self.sidebar_menu.extra_quads());
         }
 
-        // Delegate rendering to active page widgets
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &*widget_ptr };
-                let c = widget.color();
-                if c[3] > 0.0 {
-                    let (wx, wy, ww, wh) = widget.rect();
-                    quads.push((wx, wy, ww, wh, c));
-                }
-                quads.extend(widget.all_quads());
-            }
+        if self.selected_page < self.plates.len() {
+            quads.extend(self.plates[self.selected_page].extra_quads());
         }
         quads
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        let active_color = colors::paginator_tab_label_color();
-        let active_srgb = colors::to_srgb(active_color);
-        let active_r = (active_srgb[0] * 255.0) as u8;
-        let active_g = (active_srgb[1] * 255.0) as u8;
-        let active_b = (active_srgb[2] * 255.0) as u8;
-        let inactive_r = (active_r as f32 * 0.78) as u8;
-        let inactive_g = (active_g as f32 * 0.78) as u8;
-        let inactive_b = (active_b as f32 * 0.78) as u8;
+        if self.tabs_rotated {
+            let (tab_w, tab_h) = self.vertical_tab_size();
+            let spacing = 10.0;
+            let active_color = colors::paginator_tab_label_color();
+            let active_srgb = colors::to_srgb(active_color);
+            let active_r = (active_srgb[0] * 255.0) as u8;
+            let active_g = (active_srgb[1] * 255.0) as u8;
+            let active_b = (active_srgb[2] * 255.0) as u8;
+            let inactive_r = (active_r as f32 * 0.78) as u8;
+            let inactive_g = (active_g as f32 * 0.78) as u8;
+            let inactive_b = (active_b as f32 * 0.78) as u8;
 
-        for (i, page_name) in self.pages.iter().enumerate() {
-            let font_size = 12.0;
-            let est_w = TextLabel::estimate_width(page_name, font_size);
-            let color = if self.selected_page == i {
-                [active_r, active_g, active_b]
-            } else {
-                [inactive_r, inactive_g, inactive_b]
-            };
-
-            if self.tabs_at_top {
-                let tab_w = if self.pages.is_empty() { 0.0 } else { self.w / self.pages.len() as f32 };
-                let bx = self.x + i as f32 * tab_w;
-                let by = self.y;
-                let bw = tab_w;
-                let bh = 40.0;
-
-                labels.push(TextLabel {
-                    text: page_name.clone(),
-                    x: bx + (bw - est_w) / 2.0,
-                    y: by + (bh - font_size) / 2.0 - 1.0,
-                    font_size,
-                    color,
-                });
-            } else if self.tabs_rotated {
-                let (tab_w, tab_h) = self.vertical_tab_size();
-                let spacing = 10.0;
+            for (i, page_name) in self.pages.iter().enumerate() {
+                let color = if self.selected_page == i {
+                    [active_r, active_g, active_b]
+                } else {
+                    [inactive_r, inactive_g, inactive_b]
+                };
                 let bx = self.x + (self.sidebar_w - tab_w) / 2.0;
                 let by = self.y + self.tab_y_offset + i as f32 * (tab_h + spacing) - self.sidebar_scroll_y;
                 let bw = tab_w;
@@ -9137,33 +9643,21 @@ impl Widget for Paginator {
                         }
                     }
                 }
-
-                // Rotated tab text is rendered as quads in generate_tab_quads and extra_quads
-            } else {
-                let bx = self.x + 5.0;
-                let by = self.y + self.tab_y_offset + i as f32 * 50.0 - self.sidebar_scroll_y;
-                let bw = self.sidebar_w - 10.0;
-                let bh = 40.0;
-
-                let text_y = by + (bh - font_size) / 2.0 - 1.0;
-                if text_y >= self.y && text_y + font_size <= self.y + self.h {
-                    labels.push(TextLabel {
-                        text: page_name.clone(),
-                        x: bx + (bw - est_w) / 2.0,
-                        y: text_y,
-                        font_size,
-                        color,
-                    });
-                }
             }
+        } else {
+            labels.extend(self.sidebar_menu.text_labels());
         }
 
-        // Delegate labels to active page widgets
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &*widget_ptr };
-                labels.extend(widget.text_labels());
-            }
+        if self.selected_page < self.plates.len() {
+            labels.extend(self.plates[self.selected_page].text_labels());
+        }
+        labels
+    }
+
+    fn text_labels_with_bounds(&self) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        let mut labels = Vec::new();
+        for l in self.text_labels() {
+            labels.push((l, None));
         }
         labels
     }
@@ -9198,17 +9692,12 @@ impl Widget for Paginator {
             changed = true;
         }
 
-        // Delegate to active page widgets
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &mut *widget_ptr };
-                if widget.is_dragging() {
-                    if widget.drag_update(px, py) {
-                        changed = true;
-                    }
-                } else if widget.cursor_moved(px, py) {
-                    changed = true;
-                }
+        if self.sidebar_menu.cursor_moved(px, py) {
+            changed = true;
+        }
+        if self.selected_page < self.plates.len() {
+            if self.plates[self.selected_page].cursor_moved(px, py) {
+                changed = true;
             }
         }
 
@@ -9216,19 +9705,14 @@ impl Widget for Paginator {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        // First check popover clicks for active page widgets
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &mut *widget_ptr };
-                if widget.popover_rect().is_some() {
-                    if widget.mouse_input(button, state, px, py) {
-                        return true;
-                    }
+        if self.selected_page < self.plates.len() {
+            if self.plates[self.selected_page].popover_rect().is_some() {
+                if self.plates[self.selected_page].mouse_input(button, state, px, py) {
+                    return true;
                 }
             }
         }
 
-        // Check if click is on paginator tabs
         let mut clicked_tab = false;
         if button == MouseButton::Left {
             match state {
@@ -9278,16 +9762,8 @@ impl Widget for Paginator {
                         };
                         if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
                             if self.selected_page != i {
-                                // Unfocus all widgets on the previously selected page
-                                if self.selected_page < self.page_widgets.len() {
-                                    for &widget_ptr in &self.page_widgets[self.selected_page] {
-                                        let widget = unsafe { &mut *widget_ptr };
-                                        widget.unfocus();
-                                    }
-                                }
-                                self.selected_page = i;
+                                self.set_selected_page(i);
                                 self.page_changed = true;
-                                self.update_target_pos();
                             }
                             clicked_tab = true;
                         }
@@ -9300,16 +9776,13 @@ impl Widget for Paginator {
             return true;
         }
 
-        // Delegate mouse input to widgets on active page
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &mut *widget_ptr };
-                if widget.mouse_input(button, state, px, py) {
-                    return true;
-                }
-                if state == ElementState::Pressed && !widget.hit_test(px, py) {
-                    widget.unfocus();
-                }
+        if self.sidebar_menu.mouse_input(button, state, px, py) {
+            return true;
+        }
+
+        if self.selected_page < self.plates.len() {
+            if self.plates[self.selected_page].mouse_input(button, state, px, py) {
+                return true;
             }
         }
 
@@ -9317,12 +9790,12 @@ impl Widget for Paginator {
     }
 
     fn keyboard_input(&mut self, event: &KeyEvent) -> bool {
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &mut *widget_ptr };
-                if widget.keyboard_input(event) {
-                    return true;
-                }
+        if self.sidebar_menu.keyboard_input(event) {
+            return true;
+        }
+        if self.selected_page < self.plates.len() {
+            if self.plates[self.selected_page].keyboard_input(event) {
+                return true;
             }
         }
         false
@@ -9334,10 +9807,6 @@ impl Widget for Paginator {
             let by = self.y;
             let bw = self.sidebar_w;
             let bh = self.h;
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/clear-scroll-debug.txt") {
-                use std::io::Write;
-                let _ = writeln!(file, "mouse_wheel check: px={}, py={}, bx={}, by={}, bw={}, bh={}, hover={}", px, py, bx, by, bw, bh, px >= bx && px <= bx + bw && py >= by && py <= by + bh);
-            }
             if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
                 let scroll_speed = 24.0;
                 let dy = match delta {
@@ -9346,10 +9815,6 @@ impl Widget for Paginator {
                 };
                 let old_scroll = self.sidebar_scroll_y;
                 let max_scroll = (self.total_sidebar_height() - self.h).max(0.0);
-                if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/clear-scroll-debug.txt") {
-                    use std::io::Write;
-                    let _ = writeln!(file, "mouse_wheel action: dy={}, old_scroll={}, total_h={}, h={}, max_scroll={}", dy, old_scroll, self.total_sidebar_height(), self.h, max_scroll);
-                }
                 self.sidebar_scroll_y = (self.sidebar_scroll_y + dy).clamp(0.0, max_scroll);
                 if (self.sidebar_scroll_y - old_scroll).abs() > 0.01 {
                     self.update_target_pos();
@@ -9358,35 +9823,34 @@ impl Widget for Paginator {
             }
         }
 
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &mut *widget_ptr };
-                if widget.mouse_wheel(delta, px, py) {
-                    return true;
-                }
+        if self.sidebar_menu.mouse_wheel(delta, px, py) {
+            return true;
+        }
+
+        if self.selected_page < self.plates.len() {
+            if self.plates[self.selected_page].mouse_wheel(delta, px, py) {
+                return true;
             }
         }
         false
     }
 
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &*widget_ptr };
-                if let Some(r) = widget.popover_rect() {
-                    return Some(r);
-                }
+        if let Some(r) = self.sidebar_menu.popover_rect() {
+            return Some(r);
+        }
+        if self.selected_page < self.plates.len() {
+            if let Some(r) = self.plates[self.selected_page].popover_rect() {
+                return Some(r);
             }
         }
         None
     }
 
     fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &*widget_ptr };
-                widget.render_popover(pc);
-            }
+        self.sidebar_menu.render_popover(pc);
+        if self.selected_page < self.plates.len() {
+            self.plates[self.selected_page].render_popover(pc);
         }
     }
 
@@ -9399,7 +9863,9 @@ impl Widget for Paginator {
         }
     }
 
-    fn value(&self) -> i32 { self.selected_page as i32 }
+    fn value(&self) -> i32 {
+        self.selected_page as i32
+    }
 
     fn tick(&mut self, dt: f32) -> bool {
         let mut changed = false;
@@ -9426,24 +9892,91 @@ impl Widget for Paginator {
             }
         }
 
-        // Delegate tick to active page widgets
-        if self.selected_page < self.page_widgets.len() {
-            for &widget_ptr in &self.page_widgets[self.selected_page] {
-                let widget = unsafe { &mut *widget_ptr };
-                if widget.tick(dt) {
-                    changed = true;
-                }
+        let self_ptr = self as *mut Paginator;
+        self.sidebar_menu.set_parent(Some(self_ptr));
+        for plate in &mut self.plates {
+            plate.set_parent(Some(self_ptr));
+        }
+
+        if self.sidebar_menu.tick(dt) {
+            changed = true;
+        }
+
+        for plate in &mut self.plates {
+            if plate.tick(dt) {
+                changed = true;
             }
         }
 
         changed
     }
 
-    fn parent(&self) -> Option<*mut (dyn Widget + 'static)> { self.parent }
-    fn set_parent(&mut self, parent: Option<*mut (dyn Widget + 'static)>) { self.parent = parent; }
-    fn children(&self) -> Vec<*mut (dyn Widget + 'static)> { self.children.clone() }
-    fn add_child(&mut self, child: *mut (dyn Widget + 'static)) { self.children.push(child); }
-    fn clear_children(&mut self) { self.children.clear(); }
+    fn parent(&self) -> Option<*mut (dyn Widget + 'static)> {
+        self.parent
+    }
+
+    fn set_parent(&mut self, parent: Option<*mut (dyn Widget + 'static)>) {
+        self.parent = parent;
+    }
+
+    fn children(&self) -> Vec<*mut (dyn Widget + 'static)> {
+        let mut list = Vec::new();
+        list.push(&self.sidebar_menu as *const dyn Widget as *mut dyn Widget);
+        for plate in &self.plates {
+            list.push(plate as *const dyn Widget as *mut dyn Widget);
+        }
+        list
+    }
+
+    fn add_child(&mut self, _child: *mut (dyn Widget + 'static)) {}
+    fn clear_children(&mut self) {}
+
+    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
+        self.sidebar_menu.set_modifiers(ctrl, shift, alt);
+        if self.selected_page < self.plates.len() {
+            self.plates[self.selected_page].set_modifiers(ctrl, shift, alt);
+        }
+    }
+    fn menu_names(&self) -> Vec<String> {
+        self.pages.clone()
+    }
+    fn selected_page(&self) -> usize {
+        self.selected_page()
+    }
+    fn set_selected_page(&mut self, page: usize) {
+        self.set_selected_page(page);
+    }
+    fn is_page_hidden(&self) -> bool {
+        self.is_page_hidden()
+    }
+    fn set_page_hidden(&mut self, hidden: bool) {
+        self.set_page_hidden(hidden);
+    }
+    fn set_pages(&mut self, pages: Vec<String>) {
+        self.set_pages(pages);
+    }
+    fn sidebar_w(&self) -> f32 {
+        self.sidebar_w()
+    }
+    fn set_sidebar_mode(&mut self, enabled: bool) {
+        self.set_sidebar_mode(enabled);
+    }
+    fn set_sidebar_label(&mut self, label: Option<String>) {
+        self.sidebar_label = label;
+        self.update_target_pos();
+    }
+    fn add_widget_to_page(&mut self, page_idx: usize, widget: *mut (dyn Widget + 'static)) {
+        self.add_widget_to_page(page_idx, widget);
+    }
+    fn clear_page_widgets(&mut self, page_idx: usize) {
+        self.clear_page_widgets(page_idx);
+    }
+    fn menu_items_list(&self) -> Vec<Vec<String>> {
+        self.sidebar_menu.menu_items_list()
+    }
+    fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> {
+        self.sidebar_menu.menu_checked_list()
+    }
 }
 
 unsafe impl Send for Paginator {}

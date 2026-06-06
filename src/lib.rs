@@ -4,6 +4,7 @@ pub mod layout;
 pub mod wayland;
 pub mod protocol;
 pub mod engine;
+pub mod scale;
 
 pub mod colors {
     pub use crate::color::*;

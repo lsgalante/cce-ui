@@ -32,6 +32,9 @@ static NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
 static SIDEBAR_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(SIDEBAR_BG);
 static HIGHLIGHT_PRIMARY_COLOR: RwLock<[f32; 4]> = RwLock::new(HIGHLIGHT_PRIMARY);
 static PAGINATOR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
+static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
+static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
+static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
 
 
 pub fn node_color() -> [f32; 4] {
@@ -92,7 +95,11 @@ pub fn page_low_color() -> [f32; 4] {
             }
         }
     });
-    *PAGE_LOW_COLOR.read().unwrap()
+    let mut color = *PAGE_LOW_COLOR.read().unwrap();
+    if let Some(opacity) = read_opacity_if_configured() {
+        color[3] = opacity;
+    }
+    color
 }
 
 pub fn set_page_low_color(color: [f32; 4]) {
@@ -259,7 +266,11 @@ pub fn sidebar_bg_color() -> [f32; 4] {
             }
         }
     });
-    *SIDEBAR_BG_COLOR.read().unwrap()
+    let mut color = *SIDEBAR_BG_COLOR.read().unwrap();
+    if let Some(opacity) = read_opacity_if_configured() {
+        color[3] = opacity;
+    }
+    color
 }
 
 pub fn set_sidebar_bg_color(color: [f32; 4]) {
@@ -338,6 +349,111 @@ pub fn paginator_tab_label_color() -> [f32; 4] {
 
 pub fn set_paginator_tab_label_color(color: [f32; 4]) {
     if let Ok(mut lock) = PAGINATOR_TAB_LABEL_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn read_opacity_if_configured() -> Option<f32> {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            let mut in_section = false;
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed == "[transparency]" {
+                    in_section = true;
+                    continue;
+                }
+                if trimmed.starts_with('[') && in_section {
+                    break;
+                }
+                if in_section && trimmed.starts_with("opacity") {
+                    if let Some(val) = trimmed.split('=').nth(1) {
+                        if let Ok(o) = val.trim().parse::<f32>() {
+                            if let Ok(mut lock) = OPACITY.write() {
+                                *lock = Some(o.clamp(0.0, 1.0));
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *OPACITY.read().unwrap()
+}
+
+pub fn toggle_on_color() -> [f32; 4] {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("toggle_enabled_color") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
+                    if hex.len() >= 6 {
+                        if let (Ok(r), Ok(g), Ok(b)) = (
+                            u8::from_str_radix(&hex[0..2], 16),
+                            u8::from_str_radix(&hex[2..4], 16),
+                            u8::from_str_radix(&hex[4..6], 16),
+                        ) {
+                            let r_f = srgb_to_linear(r as f32 / 255.0);
+                            let g_f = srgb_to_linear(g as f32 / 255.0);
+                            let b_f = srgb_to_linear(b as f32 / 255.0);
+                            if let Ok(mut lock) = TOGGLE_ON_COLOR.write() {
+                                *lock = [r_f, g_f, b_f, 1.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *TOGGLE_ON_COLOR.read().unwrap()
+}
+
+pub fn set_toggle_on_color(color: [f32; 4]) {
+    if let Ok(mut lock) = TOGGLE_ON_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn toggle_off_color() -> [f32; 4] {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Ok(content) = std::fs::read_to_string("/home/lsgalante/.config/ccec/config.toml") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("toggle_disabled_color") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
+                    if hex.len() >= 6 {
+                        if let (Ok(r), Ok(g), Ok(b)) = (
+                            u8::from_str_radix(&hex[0..2], 16),
+                            u8::from_str_radix(&hex[2..4], 16),
+                            u8::from_str_radix(&hex[4..6], 16),
+                        ) {
+                            let r_f = srgb_to_linear(r as f32 / 255.0);
+                            let g_f = srgb_to_linear(g as f32 / 255.0);
+                            let b_f = srgb_to_linear(b as f32 / 255.0);
+                            if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() {
+                                *lock = [r_f, g_f, b_f, 1.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *TOGGLE_OFF_COLOR.read().unwrap()
+}
+
+pub fn set_toggle_off_color(color: [f32; 4]) {
+    if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() {
         *lock = color;
     }
 }

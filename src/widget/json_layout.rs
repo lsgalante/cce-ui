@@ -59,6 +59,8 @@ pub struct JsonLayoutWidget {
     pub widgets: Vec<JsonWidget>,
     pub paginator: Option<Paginator>,
     pub dragging_slider_idx: Option<usize>,
+    pub page_scroll_y: Vec<f32>,
+    pub page_total_heights: Vec<f32>,
 }
 
 impl JsonLayoutWidget {
@@ -230,6 +232,8 @@ impl JsonLayoutWidget {
             widgets,
             paginator,
             dragging_slider_idx: None,
+            page_scroll_y: vec![0.0; 16],
+            page_total_heights: vec![0.0; 16],
         }
     }
 
@@ -269,7 +273,8 @@ impl JsonLayoutWidget {
                 top_room = sl.top_room();
             }
 
-            w_state.y = by + *current_y + top_room;
+            let scroll_offset = self.page_scroll_y.get(p_idx).cloned().unwrap_or(0.0);
+            w_state.y = by + *current_y + top_room - scroll_offset;
             w_state.w = usable_w;
 
             if let Some(cb) = &mut w_state.checkbox {
@@ -300,6 +305,13 @@ impl JsonLayoutWidget {
             }
 
             *current_y += top_room + w_state.h + spacing;
+        }
+
+        // Store total height of each page (adding a little padding at the end)
+        for (i, &height) in page_current_y.iter().enumerate() {
+            if i < self.page_total_heights.len() {
+                self.page_total_heights[i] = height + 4.0;
+            }
         }
     }
 }
@@ -354,35 +366,66 @@ impl Widget for JsonLayoutWidget {
         }
 
         let active_page = self.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+        let (bx, by, bw, bh) = self.rect();
+        let has_paginator = self.paginator.is_some();
+        let pad_x = if has_paginator { 76.0 } else { 16.0 };
+        let min_x = bx + pad_x - 4.0;
+        let max_x = bx + bw;
+        let min_y = by;
+        let max_y = by + bh;
+
+        let push_clipped = |qx: f32, qy: f32, qw: f32, qh: f32, qc: [f32; 4], q: &mut Vec<(f32, f32, f32, f32, [f32; 4])>| {
+            let rx1 = qx.max(min_x);
+            let ry1 = qy.max(min_y);
+            let rx2 = (qx + qw).min(max_x);
+            let ry2 = (qy + qh).min(max_y);
+            let rw = rx2 - rx1;
+            let rh = ry2 - ry1;
+            if rw > 0.0 && rh > 0.0 {
+                q.push((rx1, ry1, rw, rh, qc));
+            }
+        };
 
         for w in &self.widgets {
             if w.page_idx != active_page {
                 continue;
             }
             if let Some(cb) = &w.checkbox {
-                quads.push((cb.rect().0, cb.rect().1, cb.rect().2, cb.rect().3, cb.color()));
-                quads.extend(cb.extra_quads());
+                push_clipped(cb.rect().0, cb.rect().1, cb.rect().2, cb.rect().3, cb.color(), &mut quads);
+                for q in cb.extra_quads() {
+                    push_clipped(q.0, q.1, q.2, q.3, q.4, &mut quads);
+                }
                 if let Some(hq) = cb.highlight_quad() {
-                    quads.push(hq);
+                    push_clipped(hq.0, hq.1, hq.2, hq.3, hq.4, &mut quads);
                 }
             } else if let Some(btn) = &w.button {
-                quads.push((btn.rect().0, btn.rect().1, btn.rect().2, btn.rect().3, btn.color()));
-                quads.extend(btn.extra_quads());
+                push_clipped(btn.rect().0, btn.rect().1, btn.rect().2, btn.rect().3, btn.color(), &mut quads);
+                for q in btn.extra_quads() {
+                    push_clipped(q.0, q.1, q.2, q.3, q.4, &mut quads);
+                }
                 if let Some(hq) = btn.highlight_quad() {
-                    quads.push(hq);
+                    push_clipped(hq.0, hq.1, hq.2, hq.3, hq.4, &mut quads);
                 }
             } else if let Some(lbl) = &w.label {
-                quads.push((lbl.rect().0, lbl.rect().1, lbl.rect().2, lbl.rect().3, lbl.color()));
-                quads.extend(lbl.extra_quads());
+                push_clipped(lbl.rect().0, lbl.rect().1, lbl.rect().2, lbl.rect().3, lbl.color(), &mut quads);
+                for q in lbl.extra_quads() {
+                    push_clipped(q.0, q.1, q.2, q.3, q.4, &mut quads);
+                }
             } else if let Some(sb) = &w.spinbox {
-                quads.push((sb.rect().0, sb.rect().1, sb.rect().2, sb.rect().3, sb.color()));
-                quads.extend(sb.extra_quads());
+                push_clipped(sb.rect().0, sb.rect().1, sb.rect().2, sb.rect().3, sb.color(), &mut quads);
+                for q in sb.extra_quads() {
+                    push_clipped(q.0, q.1, q.2, q.3, q.4, &mut quads);
+                }
             } else if let Some(cs) = &w.color_selector {
-                quads.push((cs.rect().0, cs.rect().1, cs.rect().2, cs.rect().3, cs.color()));
-                quads.extend(cs.extra_quads());
+                push_clipped(cs.rect().0, cs.rect().1, cs.rect().2, cs.rect().3, cs.color(), &mut quads);
+                for q in cs.extra_quads() {
+                    push_clipped(q.0, q.1, q.2, q.3, q.4, &mut quads);
+                }
             } else if let Some(sl) = &w.slider {
-                quads.push((sl.rect().0, sl.rect().1, sl.rect().2, sl.rect().3, sl.color()));
-                quads.extend(sl.extra_quads());
+                push_clipped(sl.rect().0, sl.rect().1, sl.rect().2, sl.rect().3, sl.color(), &mut quads);
+                for q in sl.extra_quads() {
+                    push_clipped(q.0, q.1, q.2, q.3, q.4, &mut quads);
+                }
             }
         }
         quads
@@ -414,6 +457,50 @@ impl Widget for JsonLayoutWidget {
                 labels.extend(cs.text_labels());
             } else if let Some(sl) = &w.slider {
                 labels.extend(sl.text_labels());
+            }
+        }
+        labels
+    }
+
+    fn text_labels_with_bounds(&self) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        let mut labels = Vec::new();
+        let (bx, by, bw, bh) = self.rect();
+        if let Some(paginator) = &self.paginator {
+            for l in paginator.text_labels() {
+                labels.push((l, None));
+            }
+        }
+
+        let active_page = self.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+        let has_paginator = self.paginator.is_some();
+        let pad_x = if has_paginator { 76.0 } else { 16.0 };
+        let content_bounds = Some([bx + pad_x - 4.0, by, bx + bw, by + bh]);
+
+        for w in &self.widgets {
+            if w.page_idx != active_page {
+                continue;
+            }
+            let w_labels = if let Some(_cb) = &w.checkbox {
+                if let Some(tl) = &w.label_text {
+                    vec![tl.clone()]
+                } else {
+                    Vec::new()
+                }
+            } else if let Some(btn) = &w.button {
+                btn.text_labels()
+            } else if let Some(lbl) = &w.label {
+                lbl.text_labels()
+            } else if let Some(sb) = &w.spinbox {
+                sb.text_labels()
+            } else if let Some(cs) = &w.color_selector {
+                cs.text_labels()
+            } else if let Some(sl) = &w.slider {
+                sl.text_labels()
+            } else {
+                Vec::new()
+            };
+            for l in w_labels {
+                labels.push((l, content_bounds));
             }
         }
         labels
@@ -567,6 +654,31 @@ impl Widget for JsonLayoutWidget {
             } else if let Some(sl) = &mut w.slider {
                 if sl.keyboard_input(event) {
                     return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn mouse_wheel(&mut self, delta: &crate::widget::MouseScrollDelta, px: f32, py: f32) -> bool {
+        let (bx, by, bw, bh) = self.rect();
+        if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
+            let active_page = self.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+            if active_page < self.page_total_heights.len() {
+                let total_height = self.page_total_heights[active_page];
+                let visible_h = bh;
+                let max_scroll_y = (total_height - visible_h).max(0.0);
+                if max_scroll_y > 0.0 {
+                    let scroll_amount = match delta {
+                        crate::widget::MouseScrollDelta::LineDelta(_x, y) => *y * 24.0,
+                        crate::widget::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                    };
+                    let old_scroll = self.page_scroll_y[active_page];
+                    self.page_scroll_y[active_page] = (old_scroll + scroll_amount).clamp(0.0, max_scroll_y);
+                    if (self.page_scroll_y[active_page] - old_scroll).abs() > 0.01 {
+                        self.layout_children();
+                        return true;
+                    }
                 }
             }
         }
