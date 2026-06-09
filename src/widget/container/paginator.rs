@@ -238,6 +238,9 @@ impl Paginator {
     }
 
     pub fn set_pages(&mut self, pages: Vec<String>) {
+        if self.pages == pages {
+            return;
+        }
         self.pages = pages.clone();
         let num_pages = pages.len();
         
@@ -249,6 +252,57 @@ impl Paginator {
         }
         for page in &pages {
             sidebar_menu = sidebar_menu.with_item(page, &[]);
+        }
+        self.sidebar_menu = sidebar_menu;
+
+        let mut plates = Vec::new();
+        for _ in 0..num_pages {
+            let mut plate = Plate::new(0.0, 0.0, 0.0, 0.0).with_draggable(false);
+            plate.visible = false;
+            plates.push(plate);
+        }
+        self.plates = plates;
+        if self.selected_page >= num_pages {
+            self.selected_page = 0;
+        }
+        if !self.plates.is_empty() {
+            self.plates[self.selected_page].visible = true;
+            self.sidebar_menu.menus[self.selected_page].set_selected(true);
+        }
+        self.update_sidebar_w();
+        self.update_target_pos();
+    }
+
+    pub fn set_pages_with_items(&mut self, pages: Vec<String>, items: Vec<Vec<String>>) {
+        if self.pages == pages {
+            let mut items_changed = false;
+            if self.sidebar_menu.menus.len() == items.len() {
+                for (i, menu) in self.sidebar_menu.menus.iter().enumerate() {
+                    if menu.items != items[i] {
+                        items_changed = true;
+                        break;
+                    }
+                }
+            } else {
+                items_changed = true;
+            }
+            if !items_changed {
+                return;
+            }
+        }
+        self.pages = pages.clone();
+        let num_pages = pages.len();
+        
+        self.update_sidebar_w();
+        let mut sidebar_menu = MenuBar::new(0.0, 0.0, self.sidebar_w, 0.0)
+            .with_vertical(true);
+        if let Some(ref l) = self.sidebar_label {
+            sidebar_menu = sidebar_menu.with_label(l);
+        }
+        for (i, page) in pages.iter().enumerate() {
+            let page_items: &[String] = if i < items.len() { &items[i] } else { &[] };
+            let page_items_ref: Vec<&str> = page_items.iter().map(|s| s.as_str()).collect();
+            sidebar_menu = sidebar_menu.with_item(page, &page_items_ref);
         }
         self.sidebar_menu = sidebar_menu;
 
@@ -543,6 +597,8 @@ impl Element for Paginator {
                     }
                 }
             }
+        } else {
+            quads.extend(self.sidebar_menu.extra_quads());
         }
         quads
     }
@@ -567,10 +623,10 @@ impl Element for Paginator {
                 let line_height = font_size * 1.2;
                 let sidebar_w = self.sidebar_w();
                 let start_y = self.y + 10.0;
+                let char_w = TextLabel::estimate_width("o", font_size);
+                let x_pos = self.x + (sidebar_w - char_w) / 2.0;
                 for (i, c) in label.chars().enumerate() {
                     let char_str = c.to_string();
-                    let char_w = TextLabel::estimate_width(&char_str, font_size);
-                    let x_pos = self.x + (sidebar_w - char_w) / 2.0;
                     let y_pos = start_y + i as f32 * line_height;
                     labels.push(TextLabel {
                         text: char_str,
@@ -647,11 +703,13 @@ impl Element for Paginator {
         let mut changed = false;
         let was_hovered_tab = self.hovered_tab;
         self.hovered_tab = None;
-        for i in 0..self.pages.len() {
-            let (bx, by, bw, bh) = self.tab_rect(i);
-            if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
-                self.hovered_tab = Some(i);
-                break;
+        if self.tabs_rotated {
+            for i in 0..self.pages.len() {
+                let (bx, by, bw, bh) = self.tab_rect(i);
+                if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
+                    self.hovered_tab = Some(i);
+                    break;
+                }
             }
         }
         if was_hovered_tab != self.hovered_tab {
@@ -681,27 +739,68 @@ impl Element for Paginator {
 
         let mut clicked_tab = false;
         if button == MouseButton::Left {
-            match state {
-                ElementState::Pressed => {
-                    self.pressed_tab = None;
-                    for i in 0..self.pages.len() {
-                        let (bx, by, bw, bh) = self.tab_rect(i);
-                        if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
-                            self.pressed_tab = Some(i);
-                            clicked_tab = true;
-                            break;
+            if self.tabs_rotated {
+                match state {
+                    ElementState::Pressed => {
+                        self.pressed_tab = None;
+                        for i in 0..self.pages.len() {
+                            let (bx, by, bw, bh) = self.tab_rect(i);
+                            if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
+                                self.pressed_tab = Some(i);
+                                clicked_tab = true;
+                                break;
+                            }
+                        }
+                    }
+                    ElementState::Released => {
+                        if let Some(i) = self.pressed_tab.take() {
+                            let (bx, by, bw, bh) = self.tab_rect(i);
+                            if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
+                                if self.selected_page != i {
+                                    self.set_selected_page(i);
+                                    self.page_changed = true;
+                                }
+                                clicked_tab = true;
+                            }
                         }
                     }
                 }
-                ElementState::Released => {
-                    if let Some(i) = self.pressed_tab.take() {
-                        let (bx, by, bw, bh) = self.tab_rect(i);
-                        if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
+            } else {
+                if self.sidebar_menu.mouse_input(button, state, px, py, ctx) {
+                    for i in 0..self.sidebar_menu.menus.len() {
+                        if self.sidebar_menu.menus[i].is_menu_open() {
                             if self.selected_page != i {
                                 self.set_selected_page(i);
                                 self.page_changed = true;
                             }
-                            clicked_tab = true;
+                            break;
+                        }
+                    }
+                    clicked_tab = true;
+                } else {
+                    match state {
+                        ElementState::Pressed => {
+                            self.pressed_tab = None;
+                            for i in 0..self.sidebar_menu.menus.len() {
+                                let (bx, by, bw, bh) = self.sidebar_menu.menus[i].rect();
+                                if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
+                                    self.pressed_tab = Some(i);
+                                    if self.selected_page != i {
+                                        self.set_selected_page(i);
+                                        self.page_changed = true;
+                                    }
+                                    clicked_tab = true;
+                                    break;
+                                }
+                            }
+                        }
+                        ElementState::Released => {
+                            if let Some(i) = self.pressed_tab.take() {
+                                let (bx, by, bw, bh) = self.sidebar_menu.menus[i].rect();
+                                if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
+                                    clicked_tab = true;
+                                }
+                            }
                         }
                     }
                 }
@@ -709,10 +808,6 @@ impl Element for Paginator {
         }
 
         if clicked_tab {
-            return true;
-        }
-
-        if self.sidebar_menu.mouse_input(button, state, px, py, ctx) {
             return true;
         }
 
@@ -892,6 +987,9 @@ impl Element for Paginator {
     fn set_pages(&mut self, pages: Vec<String>) {
         self.set_pages(pages);
     }
+    fn set_pages_with_items(&mut self, pages: Vec<String>, items: Vec<Vec<String>>) {
+        self.set_pages_with_items(pages, items);
+    }
     fn sidebar_w(&self) -> f32 {
         self.sidebar_w()
     }
@@ -914,6 +1012,50 @@ impl Element for Paginator {
     }
     fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> {
         self.sidebar_menu.menu_checked_list()
+    }
+
+    fn get_menu_items_at(&self, px: f32, py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> {
+        if self.sidebar_mode {
+            self.sidebar_menu.get_menu_items_at(px, py)
+        } else {
+            None
+        }
+    }
+
+    fn menu_click(&mut self) -> Option<(usize, usize)> {
+        if self.sidebar_mode {
+            self.sidebar_menu.menu_click()
+        } else {
+            None
+        }
+    }
+
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+        self.sidebar_menu.prepare_text(fs);
+        for plate in &mut self.plates {
+            plate.prepare_text(fs);
+        }
+    }
+
+    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let mut result = Vec::new();
+        if self.tabs_rotated {
+            let font = self.widget_font();
+            for l in self.text_labels() {
+                result.push((l, font.clone(), None));
+            }
+        } else {
+            result.extend(self.sidebar_menu.text_labels_with_font_and_bounds(ctx));
+        }
+
+        if self.selected_page < self.plates.len() {
+            result.extend(self.plates[self.selected_page].text_labels_with_font_and_bounds(ctx));
+        }
+        result
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::menubar_font())
     }
 }
 
@@ -998,5 +1140,36 @@ mod tests {
         crate::layout::set_paginator_tab_padding_x(orig_padding_x);
         crate::layout::set_paginator_tab_padding_y(orig_padding_y);
         crate::layout::set_menubar_font(&orig_font);
+    }
+
+    #[test]
+    fn test_paginator_vertical_tabs() {
+        let pages = vec!["File".to_string(), "Edit".to_string()];
+        let mut paginator = Paginator::new(56.0, pages)
+            .with_tab_y_offset(10.0)
+            .with_tabs_rotated(false);
+        
+        paginator.set_rect(0.0, 0.0, 1000.0, 600.0);
+
+        let mut dummy = crate::context::UiContext::new();
+
+        // Check rects of menus
+        let (bx, by, bw, bh) = paginator.sidebar_menu.menus[1].rect();
+        assert!(by > 0.0);
+
+        // Click Edit menu (index 1)
+        let px = bx + bw / 2.0;
+        let py = by + bh / 2.0;
+
+        // Press
+        let click_press = paginator.mouse_input(MouseButton::Left, ElementState::Pressed, px, py, &mut dummy);
+        assert!(click_press);
+        assert_eq!(paginator.selected_page, 1);
+
+        // Release
+        let click_release = paginator.mouse_input(MouseButton::Left, ElementState::Released, px, py, &mut dummy);
+        assert!(!click_release);
+        assert_eq!(paginator.selected_page, 1);
+        assert!(paginator.page_changed);
     }
 }

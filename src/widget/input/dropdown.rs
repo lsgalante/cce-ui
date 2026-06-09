@@ -135,7 +135,7 @@ impl Element for Dropdown {
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
         let (x, y, w, h) = self.rect();

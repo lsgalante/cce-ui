@@ -481,6 +481,7 @@ pub trait Element {
     fn is_page_hidden(&self) -> bool { false }
     fn set_page_hidden(&mut self, _hidden: bool) {}
     fn set_pages(&mut self, _pages: Vec<String>) {}
+    fn set_pages_with_items(&mut self, _pages: Vec<String>, _items: Vec<Vec<String>>) {}
     fn sidebar_w(&self) -> f32 { 0.0 }
     fn set_sidebar_mode(&mut self, _enabled: bool) {}
     fn set_sidebar_label(&mut self, _label: Option<String>) {}

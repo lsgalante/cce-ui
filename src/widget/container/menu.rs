@@ -3,8 +3,7 @@ use crate::widget::*;
 use crate::widget::display::{make_widget_text_buffer, TextLabel};
 
 pub struct MenuBar {
-    x: f32, y: f32, w: f32, h: f32,
-    hovering: bool,
+    pub base: Plate,
     pub title: String,
     pub menus: Vec<Box<Menu>>,
     pub menu_items: Vec<String>,
@@ -17,22 +16,19 @@ pub struct MenuBar {
     pub clicked_dropdown: Option<(usize, usize)>,
     pub was_open: Option<usize>,
     pub vertical: bool,
-    pub visible: bool,
     pub focused: bool,
     pub z_level: i32,
     pub center_items: bool,
-    pub curved_circle: Option<(f32, f32, f32)>,
     pub title_pos: Option<(f32, f32)>,
     pub title_buf: Option<glyphon::Buffer>,
     pub curved_title_char_bufs: Vec<glyphon::Buffer>,
-    pub network_opacity: f32,
     pub font_family: String,
     pub label: Option<String>,
 }
 
 impl MenuBar {
     pub fn set_curved_circle(&mut self, circle: Option<(f32, f32, f32)>) {
-        self.curved_circle = circle;
+        self.base.curved_circle = circle;
         if circle.is_none() {
             for menu in &mut self.menus {
                 menu.curved_arc = None;
@@ -41,12 +37,17 @@ impl MenuBar {
     }
 
     pub fn set_network_opacity(&mut self, opacity: f32) {
-        self.network_opacity = opacity;
+        self.base.set_network_opacity(opacity);
     }
 
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        let mut base_plate = Plate::new(x, y, w, h)
+            .with_color(colors::PANEL_MENU_BG)
+            .with_draggable(false);
+        base_plate.blur = true;
+
         Self {
-            x, y, w, h, hovering: false,
+            base: base_plate,
             title: String::new(),
             menus: Vec::new(),
             menu_items: Vec::new(),
@@ -59,15 +60,12 @@ impl MenuBar {
             clicked_dropdown: None,
             was_open: None,
             vertical: false,
-            visible: true,
             focused: false,
             z_level: 100,
             center_items: false,
-            curved_circle: None,
             title_pos: None,
             title_buf: None,
             curved_title_char_bufs: Vec::new(),
-            network_opacity: 1.0,
             font_family: crate::layout::menubar_font(),
             label: None,
         }
@@ -75,11 +73,13 @@ impl MenuBar {
 
     pub fn with_label(mut self, label: &str) -> Self {
         self.label = Some(label.to_string());
+        self.base.base.label = Some(label.to_string());
         self
     }
 
     pub fn set_label(&mut self, label: &str) {
         self.label = Some(label.to_string());
+        self.base.base.label = Some(label.to_string());
     }
 
     pub fn with_center_items(mut self, center: bool) -> Self {
@@ -145,6 +145,12 @@ impl MenuBar {
 
     fn item_y_vertical(&self, idx: usize) -> f32 {
         let mut y = 8.0;
+        if let Some(ref label) = self.label {
+            let font_size = 12.0;
+            let line_height = font_size * 1.2;
+            let label_h = label.chars().count() as f32 * line_height;
+            y += label_h + 8.0;
+        }
         if !self.title.is_empty() {
             let font_size = 12.0;
             let line_height = font_size * 1.2;
@@ -165,36 +171,50 @@ impl Element for MenuBar {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
     }
 
+    fn base(&self) -> Option<&Widget> { Some(&self.base.base) }
+    fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base.base) }
+
     fn label(&self) -> Option<String> {
         self.label.clone()
     }
 
     fn set_text(&mut self, text: &str) {
         self.label = Some(text.to_string());
+        self.base.base.label = Some(text.to_string());
     }
 
     fn rect(&self) -> (f32, f32, f32, f32) {
-        if !self.visible {
+        if !self.base.visible {
             return (0.0, 0.0, 0.0, 0.0);
         }
         if self.vertical {
             let total_h = if self.menus.is_empty() {
-                self.h
+                let mut h = 16.0;
+                if let Some(ref label) = self.label {
+                    let font_size = 12.0;
+                    let line_height = font_size * 1.2;
+                    let label_h = label.chars().count() as f32 * line_height;
+                    h += label_h + 8.0;
+                }
+                if !self.title.is_empty() {
+                    let font_size = 12.0;
+                    let line_height = font_size * 1.2;
+                    let title_h = self.title.chars().count() as f32 * line_height;
+                    h += title_h + 8.0;
+                }
+                h
             } else {
                 let last_idx = self.menus.len() - 1;
                 self.item_y_vertical(last_idx) + self.item_h_vertical(last_idx)
             };
-            (self.x, self.y, self.w, total_h)
+            (self.base.base.x, self.base.base.y, self.base.base.w, total_h)
         } else {
-            (self.x, self.y, self.w, self.h)
+            (self.base.base.x, self.base.base.y, self.base.base.w, self.base.base.h)
         }
     }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.x = x;
-        self.y = y;
-        self.w = w;
-        self.h = h;
+        self.base.set_rect(x, y, w, h);
 
         let parent_ptr = self as *mut MenuBar as *mut (dyn Element + 'static);
 
@@ -202,10 +222,15 @@ impl Element for MenuBar {
         let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
         let char_w = 7.5 * (font_size / 12.0);
-        let ih = font_size + 12.0;
 
         if self.vertical {
             let mut cy = 8.0;
+            if let Some(ref label) = self.label {
+                let font_size = 12.0;
+                let line_height = font_size * 1.2;
+                let label_h = label.chars().count() as f32 * line_height;
+                cy += label_h + 8.0;
+            }
             if !self.title.is_empty() {
                 let font_size = 12.0;
                 let line_height = font_size * 1.2;
@@ -224,7 +249,7 @@ impl Element for MenuBar {
             }
         } else {
             let padding_x = crate::layout::paginator_tab_padding_x();
-            if let Some((ccx, ccy, ccr)) = self.curved_circle {
+            if let Some((ccx, ccy, ccr)) = self.base.curved_circle {
                 let r_mid = ccr - h / 2.0;
                 let mut total_width = 8.0;
                 if !self.title.is_empty() {
@@ -276,8 +301,8 @@ impl Element for MenuBar {
                     for menu in &self.menus {
                         total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
                     }
-                    if self.w > total_width {
-                        cx = (self.w - total_width) / 2.0;
+                    if self.base.base.w > total_width {
+                        cx = (self.base.base.w - total_width) / 2.0;
                     }
                 }
                 if !self.title.is_empty() {
@@ -295,32 +320,33 @@ impl Element for MenuBar {
     }
 
     fn color(&self) -> [f32; 4] {
-        if !self.visible {
+        if !self.base.visible {
             [0.0, 0.0, 0.0, 0.0]
         } else if self.focused {
             let mut c = colors::PANEL_MENU_FOCUSED;
-            c[3] *= self.network_opacity;
+            c[3] *= self.base.network_opacity;
+            if self.base.blur {
+                c[3] = -c[3].abs();
+            }
             c
         } else {
-            let mut c = colors::PANEL_MENU_BG;
-            c[3] *= self.network_opacity;
-            c
+            self.base.color()
         }
     }
 
     fn set_hovered(&mut self, v: bool) {
-        self.hovering = v;
+        self.base.base.hovered = v;
     }
 
     fn hovered(&self) -> bool {
-        self.hovering
+        self.base.base.hovered
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if !self.visible {
+        if !self.base.visible {
             return false;
         }
-        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
         let font_setting = crate::layout::menubar_font();
@@ -328,18 +354,18 @@ impl Element for MenuBar {
         let font_size = font_size_opt.unwrap_or(12.0);
         let char_w = 7.5 * (font_size / 12.0);
 
-        if let Some((ccx, ccy, ccr)) = self.curved_circle {
+        if let Some((ccx, ccy, ccr)) = self.base.curved_circle {
             let dx = px - ccx;
             let dy = py - ccy;
             let dist = (dx * dx + dy * dy).sqrt();
-            if dist >= ccr - self.h && dist <= ccr {
+            if dist >= ccr - self.base.base.h && dist <= ccr {
                 let angle = dy.atan2(dx);
                 let mut norm_angle = angle;
                 if norm_angle < 0.0 {
                     norm_angle += 2.0 * std::f32::consts::PI;
                 }
                 
-                let r_mid = ccr - self.h / 2.0;
+                let r_mid = ccr - self.base.base.h / 2.0;
                 let mut total_width = 8.0;
                 if !self.title.is_empty() {
                     total_width += self.title.len() as f32 * char_w + 24.0;
@@ -376,7 +402,7 @@ impl Element for MenuBar {
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if !self.visible {
+        if !self.base.visible {
             return false;
         }
         let (rx, ry, rw, rh) = self.rect();
@@ -396,7 +422,7 @@ impl Element for MenuBar {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if !self.visible {
+        if !self.base.visible {
             return false;
         }
         let (rx, ry, rw, rh) = self.rect();
@@ -497,11 +523,11 @@ impl Element for MenuBar {
     }
 
     fn is_menu_bar(&self) -> bool {
-        self.visible
+        self.base.visible
     }
 
     fn get_menu_items_at(&self, px: f32, py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> {
-        if !self.visible {
+        if !self.base.visible {
             return None;
         }
         let dummy = crate::context::UiContext::new();
@@ -530,14 +556,15 @@ impl Element for MenuBar {
     }
 
     fn is_menu_open(&self) -> bool {
-        self.visible && self.menus.iter().any(|m| m.is_menu_open())
+        self.base.visible && self.menus.iter().any(|m| m.is_menu_open())
     }
 
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
+        if !self.base.visible {
             return Vec::new();
         }
         let mut quads = Vec::new();
+        quads.extend(self.base.all_quads(ctx));
         for menu in &self.menus {
             quads.extend(menu.all_quads(ctx));
         }
@@ -545,7 +572,7 @@ impl Element for MenuBar {
     }
 
     fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
+        if !self.base.visible {
             return Vec::new();
         }
         let mut arcs = Vec::new();
@@ -556,7 +583,7 @@ impl Element for MenuBar {
     }
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
-        if !self.visible {
+        if !self.base.visible {
             return;
         }
         let current_font = crate::layout::menubar_font();
@@ -574,7 +601,7 @@ impl Element for MenuBar {
         let font_size = font_size_opt.unwrap_or(12.0);
 
         if !self.title.is_empty() {
-            if let Some((_ccx, _ccy, _ccr)) = self.curved_circle {
+            if let Some((_ccx, _ccy, _ccr)) = self.base.curved_circle {
                 if self.curved_title_char_bufs.len() != self.title.chars().count() {
                     let font_fam_clone = font_fam.clone();
                     self.curved_title_char_bufs = self.title.chars()
@@ -601,11 +628,17 @@ impl Element for MenuBar {
     }
 
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if !self.visible {
+        if !self.base.visible {
             return Vec::new();
         }
         let mut items = Vec::new();
-        let color = glyphon::Color::rgb(0xaa, 0xaa, 0xbb);
+        let label_color = crate::colors::paginator_tab_label_color();
+        let srgb = crate::colors::to_srgb(label_color);
+        let color = glyphon::Color::rgb(
+            (srgb[0] * 255.0) as u8,
+            (srgb[1] * 255.0) as u8,
+            (srgb[2] * 255.0) as u8,
+        );
 
         let font_setting = crate::layout::menubar_font();
         let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
@@ -613,8 +646,8 @@ impl Element for MenuBar {
         let char_w = 7.5 * (font_size / 12.0);
 
         let padding_x = crate::layout::paginator_tab_padding_x();
-        if let Some((ccx, ccy, ccr)) = self.curved_circle {
-            let r_mid = ccr - self.h / 2.0;
+        if let Some((ccx, ccy, ccr)) = self.base.curved_circle {
+            let r_mid = ccr - self.base.base.h / 2.0;
             let mut total_width = 8.0;
             if !self.title.is_empty() {
                 total_width += self.title.len() as f32 * char_w + 24.0;
@@ -661,13 +694,13 @@ impl Element for MenuBar {
                 for menu in &self.menus {
                     total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
                 }
-                if self.w > total_width {
-                    start_x = (self.w - total_width) / 2.0;
+                if self.base.base.w > total_width {
+                    start_x = (self.base.base.w - total_width) / 2.0;
                 }
             }
             if let Some(ref title_buf) = self.title_buf {
-                let text_y = self.y + (self.h - font_size) / 2.0;
-                items.push((title_buf, self.x + start_x, text_y, color));
+                let text_y = self.base.base.y + (self.base.base.h - font_size) / 2.0;
+                items.push((title_buf, self.base.base.x + start_x, text_y, color));
             }
         }
 
@@ -678,9 +711,16 @@ impl Element for MenuBar {
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.visible {
+        if !self.base.visible {
             return Vec::new();
         }
+        let label_color = crate::colors::paginator_tab_label_color();
+        let srgb = crate::colors::to_srgb(label_color);
+        let text_color = [
+            (srgb[0] * 255.0) as u8,
+            (srgb[1] * 255.0) as u8,
+            (srgb[2] * 255.0) as u8,
+        ];
         let padding_x = crate::layout::paginator_tab_padding_x();
         let mut labels = Vec::new();
 
@@ -688,13 +728,11 @@ impl Element for MenuBar {
             if self.vertical {
                 let font_size = 12.0;
                 let line_height = font_size * 1.2;
-                let label_len = label.chars().count() as f32;
-                let total_h = label_len * line_height;
-                let start_y = self.y - (crate::layout::label_margin() + total_h);
+                let start_y = self.base.base.y + 8.0;
                 for (i, c) in label.chars().enumerate() {
                     let char_str = c.to_string();
                     let char_w = TextLabel::estimate_width(&char_str, font_size);
-                    let x_pos = self.x + (self.w - char_w) / 2.0;
+                    let x_pos = self.base.base.x + (self.base.base.w - char_w) / 2.0;
                     let y_pos = start_y + i as f32 * line_height;
                     labels.push(TextLabel {
                         text: char_str,
@@ -704,14 +742,6 @@ impl Element for MenuBar {
                         color: [0x83, 0x83, 0x8a],
                     });
                 }
-            } else {
-                labels.push(TextLabel {
-                    text: label.clone(),
-                    x: self.x,
-                    y: self.y - (12.0 + crate::layout::label_margin()),
-                    font_size: 12.0,
-                    color: [0x83, 0x83, 0x8a],
-                });
             }
         }
 
@@ -720,8 +750,8 @@ impl Element for MenuBar {
         let font_size = font_size_opt.unwrap_or(12.0);
         let char_w = 7.5 * (font_size / 12.0);
 
-        if let Some((ccx, ccy, ccr)) = self.curved_circle {
-            let r_mid = ccr - self.h / 2.0;
+        if let Some((ccx, ccy, ccr)) = self.base.curved_circle {
+            let r_mid = ccr - self.base.base.h / 2.0;
             let mut total_width = 8.0;
             if !self.title.is_empty() {
                 total_width += self.title.len() as f32 * char_w + 24.0;
@@ -741,24 +771,30 @@ impl Element for MenuBar {
                     ccx, ccy, r_mid,
                     current_angle, current_angle + dtheta_title,
                     font_size,
-                    [0xaa, 0xaa, 0xbb],
+                    text_color,
                 ));
             }
         } else if self.vertical {
             if !self.title.is_empty() {
+                let mut start_y = self.base.base.y + 8.0;
+                if let Some(ref label) = self.label {
+                    let font_size = 12.0;
+                    let line_height = font_size * 1.2;
+                    let label_h = label.chars().count() as f32 * line_height;
+                    start_y += label_h + 8.0;
+                }
                 let line_height = font_size * 1.2;
-                let start_y = self.y + 8.0;
+                let char_w = TextLabel::estimate_width("o", font_size);
+                let x_pos = self.base.base.x + (self.base.base.w - char_w) / 2.0;
                 for (i, c) in self.title.chars().enumerate() {
                     let char_str = c.to_string();
-                    let char_w = TextLabel::estimate_width(&char_str, font_size);
-                    let x_pos = self.x + (self.w - char_w) / 2.0;
                     let y_pos = start_y + i as f32 * line_height;
                     labels.push(TextLabel {
                         text: char_str,
                         x: x_pos,
                         y: y_pos,
                         font_size,
-                        color: [0xaa, 0xaa, 0xbb],
+                        color: text_color,
                     });
                 }
             }
@@ -772,18 +808,18 @@ impl Element for MenuBar {
                 for menu in &self.menus {
                     total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
                 }
-                if self.w > total_width {
-                    start_x = (self.w - total_width) / 2.0;
+                if self.base.base.w > total_width {
+                    start_x = (self.base.base.w - total_width) / 2.0;
                 }
             }
             if !self.title.is_empty() {
-                let text_y = self.y + (self.h - font_size) / 2.0;
+                let text_y = self.base.base.y + (self.base.base.h - font_size) / 2.0;
                 labels.push(TextLabel {
                     text: self.title.clone(),
-                    x: self.x + start_x,
+                    x: self.base.base.x + start_x,
                     y: text_y,
                     font_size,
-                    color: [0xaa, 0xaa, 0xbb],
+                    color: text_color,
                 });
             }
         }
@@ -794,17 +830,17 @@ impl Element for MenuBar {
     }
 
     fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
+        self.base.set_visible(visible);
         for menu in &mut self.menus {
             menu.set_visible(visible);
         }
     }
 
     fn visible(&self) -> bool {
-        self.visible
+        self.base.visible()
     }
 
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
         self.menus.iter().map(|m| {
             let ptr: *const dyn Element = &**m as &dyn Element;
             ptr as *mut (dyn Element + 'static)
@@ -826,9 +862,22 @@ impl Element for MenuBar {
     fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> {
         self.menu_dropdown_checked.clone()
     }
-}
 
-impl Drop for MenuBar {
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.base.visible {
+            return Vec::new();
+        }
+        let mut quads = Vec::new();
+        for menu in &self.menus {
+            quads.extend(menu.extra_quads());
+        }
+        quads
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::menubar_font())
+    }
+}impl Drop for MenuBar {
     fn drop(&mut self) {
         focus::clear_if_matches(self);
     }
@@ -853,6 +902,7 @@ pub struct Menu {
     pub item_bufs: Vec<glyphon::Buffer>,
     pub check_buf: Option<glyphon::Buffer>,
     pub curved_char_bufs: Vec<glyphon::Buffer>,
+    pub font_family: String,
 }
 
 impl Menu {
@@ -875,6 +925,7 @@ impl Menu {
             item_bufs: Vec::new(),
             check_buf: None,
             curved_char_bufs: Vec::new(),
+            font_family: String::new(),
         }
     }
 
@@ -922,8 +973,12 @@ impl Element for Menu {
         [0.0, 0.0, 0.0, 0.0]
     }
 
+    fn is_active(&self) -> bool {
+        self.base.focused || self.open
+    }
+
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
         if let Some((cx, cy, r, thickness, start_angle, end_angle)) = self.curved_arc {
@@ -1055,17 +1110,19 @@ impl Element for Menu {
         self.open
     }
 
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{
-        if self.curved_arc.is_some() {
-            None
-        } else {
-            let hc = self.highlight_color(ctx)?;
-            Some((self.base.x, self.base.y, self.base.w, self.base.h, hc))
-        }
+    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{
+        None
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
+        if self.curved_arc.is_none() {
+            if self.base.focused || self.open {
+                quads.push((self.base.x, self.base.y, self.base.w, self.base.h, colors::highlight_primary_color()));
+            } else if self.base.hovered {
+                quads.push((self.base.x, self.base.y, self.base.w, self.base.h, colors::HIGHLIGHT_SECONDARY));
+            }
+        }
         if self.open {
             let (dx, dy, dw, dh) = self.dropdown_rect();
             if dh > 0.0 {
@@ -1089,6 +1146,13 @@ impl Element for Menu {
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
+        let label_color = crate::colors::paginator_tab_label_color();
+        let srgb = crate::colors::to_srgb(label_color);
+        let text_color = [
+            (srgb[0] * 255.0) as u8,
+            (srgb[1] * 255.0) as u8,
+            (srgb[2] * 255.0) as u8,
+        ];
         let mut labels = Vec::new();
         if let Some((cx, cy, r, thickness, start_angle, end_angle)) = self.curved_arc {
             let r_mid = r - thickness / 2.0;
@@ -1097,7 +1161,7 @@ impl Element for Menu {
                 cx, cy, r_mid,
                 start_angle, end_angle,
                 12.0,
-                [0xcc, 0xcc, 0xd4],
+                text_color,
             ));
         } else if self.vertical {
             let font_size = 12.0;
@@ -1106,17 +1170,17 @@ impl Element for Menu {
             let label_len = title.chars().count() as f32;
             let total_h = label_len * line_height;
             let start_y = self.base.y + (self.base.h - total_h) / 2.0;
+            let char_w = TextLabel::estimate_width("o", font_size);
+            let x_pos = self.base.x + (self.base.w - char_w) / 2.0;
             for (i, c) in title.chars().enumerate() {
                 let char_str = c.to_string();
-                let char_w = TextLabel::estimate_width(&char_str, font_size);
-                let x_pos = self.base.x + (self.base.w - char_w) / 2.0;
                 let y_pos = start_y + i as f32 * line_height;
                 labels.push(TextLabel {
                     text: char_str,
                     x: x_pos,
                     y: y_pos,
                     font_size,
-                    color: [0xcc, 0xcc, 0xd4],
+                    color: text_color,
                 });
             }
         } else {
@@ -1125,7 +1189,7 @@ impl Element for Menu {
                 x: self.base.x + crate::layout::paginator_tab_padding_x(),
                 y: self.base.y + 7.0,
                 font_size: 12.0,
-                color: [0xcc, 0xcc, 0xd4],
+                color: text_color,
             });
         }
         if self.open {
@@ -1142,7 +1206,7 @@ impl Element for Menu {
                     x: dx + 8.0,
                     y: dy + i as f32 * DROPDOWN_ITEM_H + 5.0,
                     font_size: 12.0,
-                    color: [0xcc, 0xcc, 0xd4],
+                    color: text_color,
                 });
             }
         }
@@ -1188,8 +1252,14 @@ impl Element for Menu {
     }
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
-        let title_text = self.active_title();
         let font_setting = crate::layout::menubar_font();
+        if self.font_family != font_setting {
+            self.font_family = font_setting.clone();
+            self.title_buf = None;
+            self.curved_char_bufs.clear();
+            self.item_bufs.clear();
+        }
+        let title_text = self.active_title();
         let (font_fam, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
 
@@ -1232,7 +1302,13 @@ impl Element for Menu {
 
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
         let mut items = Vec::new();
-        let color = glyphon::Color::rgb(0xcc, 0xcc, 0xd4);
+        let label_color = crate::colors::paginator_tab_label_color();
+        let srgb = crate::colors::to_srgb(label_color);
+        let color = glyphon::Color::rgb(
+            (srgb[0] * 255.0) as u8,
+            (srgb[1] * 255.0) as u8,
+            (srgb[2] * 255.0) as u8,
+        );
 
         let font_setting = crate::layout::menubar_font();
         let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
@@ -1284,6 +1360,10 @@ impl Element for Menu {
         }
 
         items
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::menubar_font())
     }
 }
 

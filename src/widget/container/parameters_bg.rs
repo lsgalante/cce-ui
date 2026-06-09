@@ -264,7 +264,7 @@ impl Element for ParametersBg {
         if !self.visible {
             return false;
         }
-        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
         px >= self.base.x && px <= self.base.x + self.base.w && py >= self.base.y && py <= self.base.y + self.base.h

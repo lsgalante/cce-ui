@@ -78,11 +78,12 @@ pub(crate) fn make_widget_text_buffer(fs: &mut glyphon::FontSystem, text: &str, 
     let physical_size = size * scale;
     let metrics = glyphon::Metrics::new(physical_size, physical_size * 1.4);
     let mut buf = glyphon::Buffer::new(fs, metrics);
-    let family = match font_family {
+    let (family_name, _) = crate::layout::parse_font_string(font_family);
+    let family = match family_name.as_str() {
         "monospace" => glyphon::Family::Monospace,
         "sans-serif" => glyphon::Family::SansSerif,
         "serif" => glyphon::Family::Serif,
-        name => glyphon::Family::Name(name),
+        _ => glyphon::Family::Name(&family_name),
     };
     let attrs = glyphon::Attrs::new().family(family);
     buf.set_text(fs, text, attrs, glyphon::Shaping::Advanced);

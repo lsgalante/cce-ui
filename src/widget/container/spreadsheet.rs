@@ -76,7 +76,7 @@ impl Element for Spreadsheet {
         if !self.visible {
             return false;
         }
-        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
         let (rx, ry, rw, rh) = self.rect();

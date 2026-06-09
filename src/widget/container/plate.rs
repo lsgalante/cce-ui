@@ -95,6 +95,15 @@ impl Element for Plate {
         self.visible
     }
 
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+        for &child_ptr in &self.children {
+            unsafe {
+                (*child_ptr).set_visible(visible);
+            }
+        }
+    }
+
     fn color(&self) -> [f32; 4] {
         let mut c = if let Some(c) = self.color {
             c
@@ -121,7 +130,7 @@ impl Element for Plate {
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if crate::widget::popovers::is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
         if let Some((cx, cy, r)) = self.curved_circle {
@@ -367,6 +376,43 @@ impl Element for Plate {
         }
         result
     }
+
+    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        if let Some(ref label) = self.base.label {
+            result.push((
+                TextLabel {
+                    text: label.clone(),
+                    x: self.base.x,
+                    y: self.base.y - (12.0 + crate::layout::label_margin()),
+                    font_size: 12.0,
+                    color: [0x83, 0x83, 0x8a],
+                },
+                None,
+                None,
+            ));
+        }
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            result.extend(widget.text_labels_with_font_and_bounds(ctx));
+        }
+        result
+    }
+
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+        if !self.visible {
+            return;
+        }
+        for &child_ptr in &self.children {
+            unsafe {
+                (*child_ptr).prepare_text(fs);
+            }
+        }
+    }
+
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if !self.visible {
