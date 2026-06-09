@@ -5,9 +5,12 @@ pub mod wayland;
 pub mod protocol;
 pub mod engine;
 pub mod scale;
+pub mod backend;
+pub mod context;
 
 pub mod colors {
     pub use crate::color::*;
 }
 
 pub const SHADER: &str = include_str!("shader.wgsl");
+

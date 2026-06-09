@@ -263,6 +263,7 @@ struct State {
     scale: f64,
     json_layout: Option<JsonLayoutWidget>,
     layout_mode: bool,
+    ui_context: clear_ui::context::UiContext,
 }
 
 impl State {
@@ -284,53 +285,58 @@ impl State {
             ..Default::default()
         });
 
-        let surface = instance
-            .create_surface(wayland_handle)
-            .expect("Failed to create surface");
+        let surface = unsafe { instance.create_surface(wayland_handle).unwrap() };
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
+                power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             })
             .await
-            .expect("Failed to find adapter");
+            .unwrap();
 
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    label: Some("GPU Device"),
+                    label: None,
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                        .using_resolution(adapter.limits()),
+                    required_limits: wgpu::Limits::default(),
                     memory_hints: wgpu::MemoryHints::MemoryUsage,
                 },
                 None,
             )
             .await
-            .expect("Failed to create device");
+            .unwrap();
 
-        let mut config = surface
-            .get_default_config(&adapter, pw, ph)
-            .expect("Failed to get surface config");
-        config.present_mode = wgpu::PresentMode::Fifo;
+        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+        let mut config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: pw,
+            height: ph,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
         surface.configure(&device, &config);
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(clear_ui::SHADER.into()),
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Pipeline Layout"),
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[],
             push_constant_ranges: &[],
         });
-
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
-            layout: Some(&pipeline_layout),
+            layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
@@ -352,8 +358,8 @@ impl State {
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
             depth_stencil: None,
@@ -366,18 +372,18 @@ impl State {
             cache: None,
         });
 
-        // Initialize text rendering
         let mut font_system = FontSystem::new();
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&device);
-        let mut text_atlas = TextAtlas::new(&device, &queue, &cache, config.format);
-        let text_renderer = TextRenderer::new(&mut text_atlas, &device, wgpu::MultisampleState::default(), None);
+        let viewport = Viewport::new(&device, &cache);
+        let mut text_atlas = TextAtlas::new(&device, &queue, &cache, surface_format);
+        let text_renderer =
+            TextRenderer::new(&mut text_atlas, &device, wgpu::MultisampleState::default(), None);
 
-        let mut text_viewport = Viewport::new(&device, &cache);
-        text_viewport.update(&queue, Resolution { width: pw, height: ph });
+        let label_buffer = make_text_buffer(&mut font_system, "Design System Playground", 16.0);
+        let status_buffer = make_text_buffer(&mut font_system, "Ready", 12.0);
 
-        let label_buffer = make_text_buffer(&mut font_system, "Hello, Clear UI!", 16.0);
-        let status_buffer = make_text_buffer(&mut font_system, "Click a button to interact", 12.0);
+        let text_viewport = viewport;
 
         let layout_mode = json_layout_config.is_some();
         let mut widgets: Vec<Box<dyn Element>> = Vec::new();
@@ -446,6 +452,7 @@ impl State {
             scale,
             json_layout,
             layout_mode,
+            ui_context: clear_ui::context::UiContext::new(),
         };
 
         state.apply_layout();
@@ -555,6 +562,7 @@ impl State {
             scale,
             ref json_layout,
             layout_mode,
+            ref ui_context,
             ..
         } = self;
 
@@ -599,14 +607,14 @@ impl State {
         let mut widget_labels: Vec<(TextLabel, Option<[f32; 4]>)> = Vec::new();
         if *layout_mode {
             if let Some(jl) = json_layout {
-                for (label, font, bounds) in jl.text_labels_with_font_and_bounds() {
+                for (label, font, bounds) in jl.text_labels_with_font_and_bounds(ui_context) {
                     widget_buffers.push(make_text_buffer_with_font(font_system, &label.text, label.font_size, font.as_deref()));
                     widget_labels.push((label, bounds));
                 }
             }
         } else {
             for (i, w) in self.widgets.iter().enumerate() {
-                for (label, font, bounds) in w.text_labels_with_font_and_bounds() {
+                for (label, font, bounds) in w.text_labels_with_font_and_bounds(ui_context) {
                     let mut covered = false;
                     for (pi, pw) in self.widgets.iter().enumerate() {
                         if pi != i {
@@ -1016,7 +1024,7 @@ impl PointerHandler for AppState {
                             }
                         } else if state.layout_mode {
                             if let Some(jl) = &mut state.json_layout {
-                                if jl.cursor_moved(state.cursor_x, state.cursor_y) {
+                                if jl.cursor_moved(state.cursor_x, state.cursor_y, &mut state.ui_context) {
                                     changed = true;
                                 }
                             }
@@ -1028,7 +1036,7 @@ impl PointerHandler for AppState {
                             }
                             if state.drag_widget.is_none() {
                                 for w in &mut state.widgets {
-                                    if w.cursor_moved(state.cursor_x, state.cursor_y) {
+                                    if w.cursor_moved(state.cursor_x, state.cursor_y, &mut state.ui_context) {
                                         changed = true;
                                     }
                                 }
@@ -1055,14 +1063,14 @@ impl PointerHandler for AppState {
                             }
                         } else if st.layout_mode {
                             if let Some(jl) = &mut st.json_layout {
-                                if jl.mouse_input(btn, clear_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y) {
+                                if jl.mouse_input(btn, clear_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y, &mut st.ui_context) {
                                     changed = true;
                                 }
                             }
                         } else {
                             let mut clicked_idx = None;
                             for i in (0..st.widgets.len()).rev() {
-                                if st.widgets[i].hit_test(st.cursor_x, st.cursor_y) {
+                                if st.widgets[i].hit_test(st.cursor_x, st.cursor_y, &st.ui_context) {
                                     clicked_idx = Some(i);
                                     break;
                                 }
@@ -1081,6 +1089,7 @@ impl PointerHandler for AppState {
                                     clear_ui::widget::ElementState::Pressed,
                                     st.cursor_x,
                                     st.cursor_y,
+                                    &mut st.ui_context,
                                 ) {
                                     changed = true;
                                 }
@@ -1117,7 +1126,7 @@ impl PointerHandler for AppState {
                         } else if st.layout_mode {
                             let mut clicked_btn_id = None;
                             if let Some(jl) = &mut st.json_layout {
-                                if jl.mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y) {
+                                if jl.mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y, &mut st.ui_context) {
                                     changed = true;
                                 }
                                 if btn == clear_ui::widget::MouseButton::Left {
@@ -1126,7 +1135,7 @@ impl PointerHandler for AppState {
                                         if w.page_idx != active_page {
                                             continue;
                                         }
-                                        if let Some(btn_w) = &mut w.button {
+                                        if let Some(btn_w) = w.widget.as_any_mut().downcast_mut::<clear_ui::widget::Button>() {
                                             if btn_w.take_click() {
                                                 clicked_btn_id = Some(w.id.clone());
                                                 break;
@@ -1142,13 +1151,13 @@ impl PointerHandler for AppState {
                                 let mut sliders = std::collections::HashMap::new();
                                 if let Some(jl) = &st.json_layout {
                                     for w in &jl.widgets {
-                                        if let Some(cb) = &w.checkbox {
+                                        if let Some(cb) = w.widget.as_any().downcast_ref::<clear_ui::widget::Checkbox>() {
                                             checkboxes.insert(w.id.clone(), cb.checked());
-                                        } else if let Some(sb) = &w.spinbox {
+                                        } else if let Some(sb) = w.widget.as_any().downcast_ref::<clear_ui::widget::Spinbox>() {
                                             spinboxes.insert(w.id.clone(), sb.value);
-                                        } else if let Some(cs) = &w.color_selector {
+                                        } else if let Some(cs) = w.widget.as_any().downcast_ref::<clear_ui::widget::ColorSelector>() {
                                             colors.insert(w.id.clone(), cs.color);
-                                        } else if let Some(sl) = &w.slider {
+                                        } else if let Some(sl) = w.widget.as_any().downcast_ref::<clear_ui::widget::Slider>() {
                                             sliders.insert(w.id.clone(), sl.get_scaled_value());
                                         }
                                     }
@@ -1172,7 +1181,7 @@ impl PointerHandler for AppState {
                                 }
                             }
                             for w in &mut st.widgets {
-                                if w.mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y) {
+                                if w.mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y, &mut st.ui_context) {
                                     changed = true;
                                 }
                             }
@@ -1207,13 +1216,13 @@ impl PointerHandler for AppState {
                         let mut changed = false;
                         if !state.layout_mode {
                             for w in &mut state.widgets {
-                                if w.mouse_wheel(&delta, state.cursor_x, state.cursor_y) {
+                                if w.mouse_wheel(&delta, state.cursor_x, state.cursor_y, &mut state.ui_context) {
                                     changed = true;
                                 }
                             }
                         } else {
                             if let Some(jl) = &mut state.json_layout {
-                                if jl.mouse_wheel(&delta, state.cursor_x, state.cursor_y) {
+                                if jl.mouse_wheel(&delta, state.cursor_x, state.cursor_y, &mut state.ui_context) {
                                     changed = true;
                                 }
                             }
@@ -1366,7 +1375,7 @@ impl AppState {
         if let Some(st) = &mut self.state {
             if st.layout_mode {
                 if let Some(jl) = &mut st.json_layout {
-                    let mut changed = jl.keyboard_input(&custom_event);
+                    let changed = jl.keyboard_input(&custom_event, &mut st.ui_context);
                     if changed {
                         st.upload_vertices();
                         self.redraw = true;
@@ -1374,7 +1383,7 @@ impl AppState {
                 }
             } else if let Some(idx) = st.focused_widget {
                 let val = st.widgets[idx].value();
-                let mut changed = st.widgets[idx].keyboard_input(&custom_event);
+                let mut changed = st.widgets[idx].keyboard_input(&custom_event, &mut st.ui_context);
                 if st.widgets[idx].value() != val {
                     changed = true;
                 }
@@ -1597,13 +1606,13 @@ fn main() {
             let mut tick_changed = false;
             if st.layout_mode {
                 if let Some(ref mut jl) = &mut st.json_layout {
-                    if jl.tick(dt) {
+                    if jl.tick(dt, &mut st.ui_context) {
                         tick_changed = true;
                     }
                 }
             } else {
                 for w in &mut st.widgets {
-                    if w.tick(dt) {
+                    if w.tick(dt, &mut st.ui_context) {
                         tick_changed = true;
                     }
                 }
@@ -1630,7 +1639,7 @@ fn main() {
                     if let Some(st) = &mut app.state {
                         if st.layout_mode {
                             if let Some(jl) = &mut st.json_layout {
-                                let mut changed = jl.keyboard_input(&custom_event);
+                                let changed = jl.keyboard_input(&custom_event, &mut st.ui_context);
                                 if changed {
                                     st.upload_vertices();
                                     app.redraw = true;
@@ -1638,7 +1647,7 @@ fn main() {
                             }
                         } else if let Some(idx) = st.focused_widget {
                             let val = st.widgets[idx].value();
-                            let mut changed = st.widgets[idx].keyboard_input(&custom_event);
+                            let mut changed = st.widgets[idx].keyboard_input(&custom_event, &mut st.ui_context);
                             if st.widgets[idx].value() != val {
                                 changed = true;
                             }

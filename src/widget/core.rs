@@ -66,15 +66,19 @@ pub mod focus {
         FOCUSED_WIDGET.with(|cell| cell.get().is_some())
     }
 
-    pub fn link_parent_child(parent: &mut dyn Element, child: &mut dyn Element) {
+    pub fn link_parent_child(parent: &mut dyn Element, child: &mut dyn Element, ctx: &mut crate::context::UiContext) {
         let parent_ptr = unsafe {
             std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(parent as *mut dyn Element)
         };
         let child_ptr = unsafe {
             std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(child as *mut dyn Element)
         };
-        parent.add_child(child_ptr);
-        child.set_parent(Some(parent_ptr));
+        if let (Some(p_base), Some(c_base)) = (parent.base(), child.base()) {
+            ctx.register_widget(p_base.id(), parent_ptr);
+            ctx.register_widget(c_base.id(), child_ptr);
+        }
+        parent.add_child(child_ptr, ctx);
+        child.set_parent(Some(parent_ptr), ctx);
     }
 
     pub fn navigate_focus(key: &super::Key, ctrl: bool) -> bool {
@@ -87,7 +91,8 @@ pub mod focus {
             unsafe {
                 match (key, ctrl) {
                     (super::Key::Character(c), true) if c == "u" || c == "U" => {
-                        if let Some(parent_ptr) = (*ptr).parent() {
+                        let dummy = crate::context::UiContext::new();
+                        if let Some(parent_ptr) = (*ptr).parent(&dummy) {
                             let parent_ref = &mut *parent_ptr;
                             set_focused(parent_ref);
                             parent_ref.focus();
@@ -95,7 +100,8 @@ pub mod focus {
                         }
                     }
                     (super::Key::Character(c), true) if c == "i" || c == "I" => {
-                        let mut children = (*ptr).children();
+                        let dummy = crate::context::UiContext::new();
+                        let mut children = (*ptr).children(&dummy);
                         if !children.is_empty() {
                             let child_ref = &mut *children[0];
                             set_focused(child_ref);
@@ -104,8 +110,9 @@ pub mod focus {
                         }
                     }
                     (super::Key::Character(c), true) if c == "j" || c == "J" => {
-                        if let Some(parent_ptr) = (*ptr).parent() {
-                            let mut siblings = (*parent_ptr).children();
+                        let dummy = crate::context::UiContext::new();
+                        if let Some(parent_ptr) = (*ptr).parent(&dummy) {
+                            let mut siblings = (*parent_ptr).children(&dummy);
                             let current_idx = siblings.iter().position(|&x| {
                                 let a = x as *mut () as usize;
                                 let b = ptr as *mut () as usize;
@@ -121,8 +128,9 @@ pub mod focus {
                         }
                     }
                     (super::Key::Character(c), true) if c == "k" || c == "K" => {
-                        if let Some(parent_ptr) = (*ptr).parent() {
-                            let mut siblings = (*parent_ptr).children();
+                        let dummy = crate::context::UiContext::new();
+                        if let Some(parent_ptr) = (*ptr).parent(&dummy) {
+                            let mut siblings = (*parent_ptr).children(&dummy);
                             let current_idx = siblings.iter().position(|&x| {
                                 let a = x as *mut () as usize;
                                 let b = ptr as *mut () as usize;
@@ -220,7 +228,7 @@ pub mod hover_animation {
     }
 
     impl HoverState {
-        fn new() -> Self {
+        pub fn new() -> Self {
             Self {
                 current_x: 0.0,
                 current_y: 0.0,
@@ -635,6 +643,7 @@ pub struct Widget {
     pub row_x: f32,
     pub row_w: f32,
     pub focused: bool,
+    pub id: std::cell::Cell<Option<crate::widget::WidgetId>>,
 }
 
 impl Widget {
@@ -649,6 +658,7 @@ impl Widget {
             row_x: 0.0,
             row_w: 0.0,
             focused: false,
+            id: std::cell::Cell::new(None),
         }
     }
 
@@ -663,12 +673,25 @@ impl Widget {
             row_x: 0.0,
             row_w: 0.0,
             focused: false,
+            id: std::cell::Cell::new(None),
+        }
+    }
+
+    pub fn id(&self) -> crate::widget::WidgetId {
+        let current = self.id.get();
+        if let Some(id) = current {
+            id
+        } else {
+            let next = crate::widget::NEXT_WIDGET_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let id = crate::widget::WidgetId(next);
+            self.id.set(Some(id));
+            id
         }
     }
 
     pub fn label_offset(&self) -> f32 {
         if self.label.is_some() {
-            18.0
+            12.0 + crate::layout::label_margin()
         } else {
             0.0
         }
@@ -679,7 +702,12 @@ impl Widget {
 #[macro_export]
 macro_rules! impl_widget_base {
     ($name:ident) => {
-        fn base(&self) -> Option<&crate::widget::Widget> { Some(&self.base) }
-        fn base_mut(&mut self) -> Option<&mut crate::widget::Widget> { Some(&mut self.base) }
+        fn base(&self) -> Option<&$crate::widget::Widget> { Some(&self.base) }
+        fn base_mut(&mut self) -> Option<&mut $crate::widget::Widget> { Some(&mut self.base) }
+        fn as_any(&self) -> &dyn std::any::Any { self }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+        fn as_ptr(&self) -> *mut (dyn $crate::widget::Element + 'static) {
+            self as *const Self as *mut Self as *mut (dyn $crate::widget::Element + 'static)
+        }
     };
 }

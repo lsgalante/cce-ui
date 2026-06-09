@@ -37,16 +37,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
             discard;
         }
     }
-    var final_color = in.color;
-    if (in.is_background > 0.999) {
-        // Feather the background quad edges
-        let dist_x = 1.0 - abs(in.ndc_position.x);
-        let dist_y = 1.0 - abs(in.ndc_position.y);
-        let min_dist = min(dist_x, dist_y);
-
-        let feather = 0.15; // Size of the feathering zone (15% of the half-width/height)
-        let fade = smoothstep(0.0, 1.0, min_dist / feather);
-        final_color.a = final_color.a * fade;
-    }
-    return final_color;
+    return in.color;
 }

@@ -1,0 +1,179 @@
+use crate::colors;
+use crate::widget::*;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonKind {
+    Primary,
+    Reset,
+    ListRow,
+    CopyIcon,
+}
+
+#[derive(Debug, Clone)]
+pub struct Button {
+    base: Widget,
+    pressed: bool,
+    just_clicked: bool,
+    kind: ButtonKind,
+    pub selected: bool,
+}
+
+impl Button {
+    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self {
+            base: Widget::new_rect(x, y, w, h),
+            pressed: false,
+            just_clicked: false,
+            kind: ButtonKind::Primary,
+            selected: false,
+        }
+    }
+
+    pub fn new_reset(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self {
+            base: Widget::new_rect(x, y, w, h),
+            pressed: false,
+            just_clicked: false,
+            kind: ButtonKind::Reset,
+            selected: false,
+        }
+    }
+
+    pub fn new_list_row(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self {
+            base: Widget::new_rect(x, y, w, h),
+            pressed: false,
+            just_clicked: false,
+            kind: ButtonKind::ListRow,
+            selected: false,
+        }
+    }
+
+    pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self {
+            base: Widget::new_rect(x, y, w, h),
+            pressed: false,
+            just_clicked: false,
+            kind: ButtonKind::CopyIcon,
+            selected: false,
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
+    }
+
+    pub fn with_selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+}
+
+impl Element for Button {
+    crate::impl_widget_base!(Button);
+    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+
+    fn color(&self) -> [f32; 4] {
+        match self.kind {
+            ButtonKind::Primary => {
+                if self.pressed { colors::BUTTON_PRESS }
+                else if self.base.hovered { colors::BUTTON_HOVER }
+                else { colors::BUTTON_IDLE }
+            }
+            ButtonKind::Reset => {
+                if self.pressed { colors::RESET_BTN_PRESS }
+                else if self.base.hovered { colors::RESET_BTN_HOVER }
+                else { colors::RESET_BTN_IDLE }
+            }
+            ButtonKind::ListRow => {
+                if self.selected {
+                    if self.pressed { [0.30, 0.52, 0.78, 0.6] }
+                    else if self.base.hovered { [0.30, 0.52, 0.78, 0.5] }
+                    else { [0.20, 0.40, 0.65, 0.4] }
+                } else {
+                    if self.pressed { [0.20, 0.20, 0.25, 0.25] }
+                    else if self.base.hovered { [0.20, 0.20, 0.25, 0.15] }
+                    else { [0.0, 0.0, 0.0, 0.0] }
+                }
+            }
+            ButtonKind::CopyIcon => {
+                if self.selected {
+                    if self.pressed { [0.30, 0.52, 0.78, 0.5] }
+                    else if self.base.hovered { [0.30, 0.52, 0.78, 0.5] }
+                    else { [0.20, 0.40, 0.65, 0.2] }
+                } else {
+                    if self.pressed { [0.20, 0.20, 0.25, 0.25] }
+                    else if self.base.hovered { [0.20, 0.20, 0.25, 0.25] }
+                    else { [0.0, 0.0, 0.0, 0.0] }
+                }
+            }
+        }
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button != MouseButton::Left { return false; }
+        match state {
+            ElementState::Pressed => {
+                if self.hit_test(px, py, ctx) {
+                    self.pressed = true;
+                    return true;
+                }
+            }
+            ElementState::Released => {
+                if self.pressed && self.hit_test(px, py, ctx) {
+                    self.just_clicked = true;
+                }
+                let was = self.pressed;
+                self.pressed = false;
+                return was;
+            }
+        }
+        false
+    }
+
+    fn take_click(&mut self) -> bool {
+        if self.just_clicked { self.just_clicked = false; true } else { false }
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        if let Some(ref label) = self.base.label {
+            let font_size = 12.0;
+            let est_w = if label == "📋" {
+                12.0
+            } else {
+                TextLabel::estimate_width(label, font_size)
+            };
+            let color = match self.kind {
+                ButtonKind::ListRow | ButtonKind::CopyIcon => {
+                    if self.selected { [230, 230, 242] }
+                    else { [178, 178, 191] }
+                }
+                _ => [0xcc, 0xcc, 0xd4]
+            };
+            labels.push(TextLabel {
+                text: label.clone(),
+                x: self.base.x + (self.base.w - est_w) / 2.0,
+                y: self.base.y + (self.base.h - font_size) / 2.0 - 1.0,
+                font_size,
+                color,
+            });
+        }
+        labels
+    }
+    fn set_selected(&mut self, selected: bool) {
+        self.selected = selected;
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())]
+    }
+}
+
+pub enum PageButton {
+    Active,
+    Inactive,
+}
+
+impl Control for Button {}

@@ -1,0 +1,143 @@
+use crate::widget::*;
+
+#[derive(Debug, Clone)]
+pub struct FontSelector {
+    base: Widget,
+    pub font_family: String,
+    just_changed: bool,
+    pub parent: Option<*mut (dyn Element + 'static)>,
+    pub children: Vec<*mut (dyn Element + 'static)>,
+    pressed: bool,
+}
+
+impl FontSelector {
+    pub fn new(font_family: String) -> Self {
+        Self {
+            base: Widget::new(),
+            font_family,
+            just_changed: false,
+            parent: None,
+            children: Vec::new(),
+            pressed: false,
+        }
+    }
+
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
+    }
+
+    pub fn take_change(&mut self) -> bool {
+        let changed = self.just_changed;
+        self.just_changed = false;
+        changed
+    }
+}
+
+impl Element for FontSelector {
+    crate::impl_widget_base!(FontSelector);
+
+    fn preferred_height(&self) -> Option<f32> {
+        Some(crate::layout::font_selector_height())
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(self.font_family.clone())
+    }
+
+    fn color(&self) -> [f32; 4] {
+        [0.08, 0.08, 0.12, 1.0]
+    }
+
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button != MouseButton::Left { return false; }
+        match state {
+            ElementState::Pressed => {
+                if self.hit_test(px, py, ctx) {
+                    self.pressed = true;
+                    return true;
+                }
+            }
+            ElementState::Released => {
+                if self.pressed && self.hit_test(px, py, ctx) {
+                    self.pressed = false;
+                    let output = std::process::Command::new("/home/lsgalante/.local/bin/cce-fonts")
+                        .arg("--select")
+                        .arg(&self.font_family)
+                        .output();
+                    if let Ok(out) = output {
+                        if out.status.success() {
+                            let stdout = String::from_utf8_lossy(&out.stdout);
+                            let trimmed = stdout.trim().to_string();
+                            if !trimmed.is_empty() && trimmed != self.font_family {
+                                self.font_family = trimmed;
+                                self.just_changed = true;
+                            }
+                        }
+                    }
+                    return true;
+                }
+                let was = self.pressed;
+                self.pressed = false;
+                return was;
+            }
+        }
+        false
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        let top = self.base.label_offset();
+        let visual_h = self.base.h - top;
+        let bg_color = [0.08, 0.08, 0.12, 1.0];
+        let border_color = if self.pressed {
+            [0.30, 0.50, 0.32, 1.0]
+        } else if self.base.hovered {
+            [0.25, 0.25, 0.35, 1.0]
+        } else {
+            [0.18, 0.18, 0.24, 1.0]
+        };
+
+        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, border_color));
+        quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, bg_color));
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        let top = self.base.label_offset();
+        let visual_h = self.base.h - top;
+        if let Some(lbl) = self.control_label() {
+            labels.push(lbl);
+        }
+
+        labels.push(TextLabel {
+            text: self.font_family.clone(),
+            x: self.base.x + 8.0,
+            y: self.base.y + top + (visual_h - 12.0) / 2.0,
+            font_size: 12.0,
+            color: [0xdd, 0xdd, 0xe2],
+        });
+
+        labels.push(TextLabel {
+            text: "🔤".to_string(),
+            x: self.base.x + self.base.w - 20.0,
+            y: self.base.y + top + (visual_h - 11.0) / 2.0,
+            font_size: 11.0,
+            color: [0x83, 0x83, 0x8a],
+        });
+
+        labels
+    }
+}
+
+impl Drop for FontSelector {
+    fn drop(&mut self) {
+        focus::clear_if_matches(self);
+    }
+}
+
+unsafe impl Send for FontSelector {}
+unsafe impl Sync for FontSelector {}
+
+impl Control for FontSelector {}
