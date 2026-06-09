@@ -5,16 +5,11 @@ use crate::widget::display::{make_widget_text_buffer, TextLabel};
 pub struct MenuBar {
     pub base: Plate,
     pub title: String,
-    pub menus: Vec<Box<Menu>>,
+    pub menus: ButtonStrip,
     pub menu_items: Vec<String>,
     pub vertical_items: Vec<String>,
     pub menu_dropdowns: Vec<Vec<String>>,
     pub menu_dropdown_checked: Vec<Vec<Option<bool>>>,
-    pub hovered_menu: Option<usize>,
-    pub open_menu: Option<usize>,
-    pub hovered_dropdown: Option<usize>,
-    pub clicked_dropdown: Option<(usize, usize)>,
-    pub was_open: Option<usize>,
     pub vertical: bool,
     pub focused: bool,
     pub z_level: i32,
@@ -24,16 +19,18 @@ pub struct MenuBar {
     pub curved_title_char_bufs: Vec<glyphon::Buffer>,
     pub font_family: String,
     pub label: Option<String>,
+    pub context_options: Vec<String>,
+    pub context_selected: usize,
+    pub context_dropdown_open: bool,
+    pub context_just_changed: bool,
+    pub context_hovered_item: Option<usize>,
+    pub context_title_hovered: bool,
+    pub context_item_bufs: Vec<glyphon::Buffer>,
 }
 
 impl MenuBar {
     pub fn set_curved_circle(&mut self, circle: Option<(f32, f32, f32)>) {
         self.base.curved_circle = circle;
-        if circle.is_none() {
-            for menu in &mut self.menus {
-                menu.curved_arc = None;
-            }
-        }
     }
 
     pub fn set_network_opacity(&mut self, opacity: f32) {
@@ -49,16 +46,11 @@ impl MenuBar {
         Self {
             base: base_plate,
             title: String::new(),
-            menus: Vec::new(),
+            menus: ButtonStrip::new(x, y, w, h),
             menu_items: Vec::new(),
             vertical_items: Vec::new(),
             menu_dropdowns: Vec::new(),
             menu_dropdown_checked: Vec::new(),
-            hovered_menu: None,
-            open_menu: None,
-            hovered_dropdown: None,
-            clicked_dropdown: None,
-            was_open: None,
             vertical: false,
             focused: false,
             z_level: 100,
@@ -68,6 +60,13 @@ impl MenuBar {
             curved_title_char_bufs: Vec::new(),
             font_family: crate::layout::menubar_font(),
             label: None,
+            context_options: Vec::new(),
+            context_selected: 0,
+            context_dropdown_open: false,
+            context_just_changed: false,
+            context_hovered_item: None,
+            context_title_hovered: false,
+            context_item_bufs: Vec::new(),
         }
     }
 
@@ -80,6 +79,108 @@ impl MenuBar {
     pub fn set_label(&mut self, label: &str) {
         self.label = Some(label.to_string());
         self.base.base.label = Some(label.to_string());
+    }
+
+    pub fn with_context_options(mut self, options: Vec<String>, selected: usize) -> Self {
+        self.context_options = options;
+        self.context_selected = selected;
+        self
+    }
+
+    pub fn set_context_selected(&mut self, selected: usize) {
+        if self.context_selected != selected {
+            self.context_selected = selected;
+            self.context_item_bufs.clear();
+        }
+    }
+
+    pub fn take_context_change(&mut self) -> Option<usize> {
+        if self.context_just_changed {
+            self.context_just_changed = false;
+            Some(self.context_selected)
+        } else {
+            None
+        }
+    }
+
+    pub fn title_rect(&self) -> (f32, f32, f32, f32) {
+        if self.title.is_empty() {
+            return (0.0, 0.0, 0.0, 0.0);
+        }
+        let font_setting = crate::layout::menubar_font();
+        let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
+        let font_size = font_size_opt.unwrap_or(12.0);
+        let char_w = 7.5 * (font_size / 12.0);
+        let padding_x = crate::layout::paginator_tab_padding_x();
+
+        let mut display_title = self.title.clone();
+        if !self.context_options.is_empty() {
+            display_title.push_str(" ▼");
+        }
+
+        if let Some((_ccx, _ccy, _ccr)) = self.base.curved_circle {
+            if let Some((tx, ty)) = self.title_pos {
+                let title_w = display_title.len() as f32 * char_w + 24.0;
+                (tx, ty, title_w, self.base.base.h)
+            } else {
+                (self.base.base.x, self.base.base.y, display_title.len() as f32 * char_w + 24.0, self.base.base.h)
+            }
+        } else if self.vertical {
+            let mut cy = 8.0;
+            if let Some(ref label) = self.label {
+                let line_height = font_size * 1.2;
+                let label_h = label.chars().count() as f32 * line_height;
+                cy += label_h + 8.0;
+            }
+            let line_height = font_size * 1.2;
+            let mut display_title_vertical = self.title.clone();
+            if !self.context_options.is_empty() {
+                display_title_vertical.push_str("▼");
+            }
+            let title_h = display_title_vertical.chars().count() as f32 * line_height;
+            (self.base.base.x, self.base.base.y + cy, self.base.base.w, title_h)
+        } else {
+            let mut start_x = 8.0;
+            if self.center_items {
+                let mut total_width = 8.0;
+                total_width += display_title.len() as f32 * char_w + 24.0;
+                for btn_label in &self.menus.buttons {
+                    total_width += btn_label.len() as f32 * char_w + 2.0 * padding_x;
+                }
+                if self.base.base.w > total_width {
+                    start_x = (self.base.base.w - total_width) / 2.0;
+                }
+            }
+            let title_w = display_title.len() as f32 * char_w + 24.0;
+            (self.base.base.x + start_x, self.base.base.y, title_w, self.base.base.h)
+        }
+    }
+
+    pub fn context_popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        if self.context_options.is_empty() || !self.context_dropdown_open {
+            return None;
+        }
+        let font_setting = crate::layout::menubar_font();
+        let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
+        let font_size = font_size_opt.unwrap_or(12.0);
+        let char_w = 7.5 * (font_size / 12.0);
+
+        let max_len = self.context_options.iter().map(|s| s.len()).max().unwrap_or(0);
+        let dw = (max_len as f32 * char_w + 40.0).max(140.0);
+        let dh = self.context_options.len() as f32 * DROPDOWN_ITEM_H;
+
+        let tr = self.title_rect();
+        let dx = if self.vertical {
+            tr.0 + tr.2
+        } else {
+            tr.0
+        };
+        let dy = if self.vertical {
+            tr.1
+        } else {
+            tr.1 + tr.3
+        };
+        Some((dx, dy, dw, dh))
     }
 
     pub fn with_center_items(mut self, center: bool) -> Self {
@@ -97,11 +198,7 @@ impl MenuBar {
         self.vertical_items.push(label.to_string());
         self.menu_dropdowns.push(items.iter().map(|s| s.to_string()).collect());
         self.menu_dropdown_checked.push(vec![None; items.len()]);
-
-        let item_strs: Vec<String> = items.iter().map(|s| s.to_string()).collect();
-        let mut menu = Menu::new(label, label, &item_strs);
-        menu.vertical = self.vertical;
-        self.menus.push(Box::new(menu));
+        self.menus.add_button(label);
         self
     }
 
@@ -110,57 +207,30 @@ impl MenuBar {
         self.vertical_items.push(vertical_label.to_string());
         self.menu_dropdowns.push(items.iter().map(|s| s.to_string()).collect());
         self.menu_dropdown_checked.push(vec![None; items.len()]);
-
-        let item_strs: Vec<String> = items.iter().map(|s| s.to_string()).collect();
-        let mut menu = Menu::new(horizontal_label, vertical_label, &item_strs);
-        menu.vertical = self.vertical;
-        self.menus.push(Box::new(menu));
+        let label = if self.vertical { vertical_label } else { horizontal_label };
+        self.menus.add_button(label);
         self
+    }
+
+    fn update_menu_labels(&mut self) {
+        let src = if self.vertical {
+            &self.vertical_items
+        } else {
+            &self.menu_items
+        };
+        self.menus.buttons = src.clone();
     }
 
     pub fn with_vertical(mut self, vertical: bool) -> Self {
         self.vertical = vertical;
-        for menu in &mut self.menus {
-            menu.vertical = vertical;
-        }
+        self.menus.vertical = vertical;
+        self.update_menu_labels();
         self
     }
 
     pub fn with_z_index(mut self, z: i32) -> Self {
         self.z_level = z;
         self
-    }
-
-    fn item_h_vertical(&self, idx: usize) -> f32 {
-        let font_size = 12.0;
-        let line_height = font_size * 1.2;
-        let padding_y = 12.0;
-        if let Some(menu) = self.menus.get(idx) {
-            let label_len = menu.active_title().chars().count() as f32;
-            label_len * line_height + padding_y
-        } else {
-            24.0
-        }
-    }
-
-    fn item_y_vertical(&self, idx: usize) -> f32 {
-        let mut y = 8.0;
-        if let Some(ref label) = self.label {
-            let font_size = 12.0;
-            let line_height = font_size * 1.2;
-            let label_h = label.chars().count() as f32 * line_height;
-            y += label_h + 8.0;
-        }
-        if !self.title.is_empty() {
-            let font_size = 12.0;
-            let line_height = font_size * 1.2;
-            let title_h = self.title.chars().count() as f32 * line_height;
-            y += title_h + 8.0;
-        }
-        for i in 0..idx {
-            y += self.item_h_vertical(i);
-        }
-        y
     }
 }
 
@@ -188,26 +258,25 @@ impl Element for MenuBar {
             return (0.0, 0.0, 0.0, 0.0);
         }
         if self.vertical {
-            let total_h = if self.menus.is_empty() {
-                let mut h = 16.0;
-                if let Some(ref label) = self.label {
-                    let font_size = 12.0;
-                    let line_height = font_size * 1.2;
-                    let label_h = label.chars().count() as f32 * line_height;
-                    h += label_h + 8.0;
+            let mut h = 16.0;
+            if let Some(ref label) = self.label {
+                let font_size = 12.0;
+                let line_height = font_size * 1.2;
+                let label_h = label.chars().count() as f32 * line_height;
+                h += label_h + 8.0;
+            }
+            if !self.title.is_empty() {
+                let font_size = 12.0;
+                let line_height = font_size * 1.2;
+                let mut display_title = self.title.clone();
+                if !self.context_options.is_empty() {
+                    display_title.push_str("▼");
                 }
-                if !self.title.is_empty() {
-                    let font_size = 12.0;
-                    let line_height = font_size * 1.2;
-                    let title_h = self.title.chars().count() as f32 * line_height;
-                    h += title_h + 8.0;
-                }
-                h
-            } else {
-                let last_idx = self.menus.len() - 1;
-                self.item_y_vertical(last_idx) + self.item_h_vertical(last_idx)
-            };
-            (self.base.base.x, self.base.base.y, self.base.base.w, total_h)
+                let title_h = display_title.chars().count() as f32 * line_height;
+                h += title_h + 8.0;
+            }
+            let (_, _, _, menus_h) = self.menus.rect();
+            (self.base.base.x, self.base.base.y, self.base.base.w, h + menus_h)
         } else {
             (self.base.base.x, self.base.base.y, self.base.base.w, self.base.base.h)
         }
@@ -215,7 +284,6 @@ impl Element for MenuBar {
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.set_rect(x, y, w, h);
-
         let parent_ptr = self as *mut MenuBar as *mut (dyn Element + 'static);
 
         let font_setting = crate::layout::menubar_font();
@@ -234,88 +302,53 @@ impl Element for MenuBar {
             if !self.title.is_empty() {
                 let font_size = 12.0;
                 let line_height = font_size * 1.2;
-                let title_h = self.title.chars().count() as f32 * line_height;
+                let mut display_title = self.title.clone();
+                if !self.context_options.is_empty() {
+                    display_title.push_str("▼");
+                }
+                let title_h = display_title.chars().count() as f32 * line_height;
                 cy += title_h + 8.0;
             }
-            let item_heights: Vec<f32> = (0..self.menus.len())
-                .map(|idx| self.item_h_vertical(idx))
-                .collect();
+            self.menus.vertical = true;
+            self.menus.set_rect(x, y + cy, w, (h - cy).max(0.0));
             let mut dummy = crate::context::UiContext::new();
-            for (idx, menu) in self.menus.iter_mut().enumerate() {
-                let item_h = item_heights[idx];
-                menu.set_rect(x, y + cy, w, item_h);
-                menu.set_parent(Some(parent_ptr), &mut dummy);
-                cy += item_h;
-            }
+            self.menus.set_parent(Some(parent_ptr), &mut dummy);
         } else {
             let padding_x = crate::layout::paginator_tab_padding_x();
-            if let Some((ccx, ccy, ccr)) = self.base.curved_circle {
-                let r_mid = ccr - h / 2.0;
+            let mut cx = 8.0;
+            if self.center_items {
                 let mut total_width = 8.0;
                 if !self.title.is_empty() {
-                    total_width += self.title.len() as f32 * char_w + 24.0;
-                }
-                for menu in &self.menus {
-                    total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
-                }
-                
-                let total_angular_width = total_width / r_mid;
-                let start_angle = 1.5 * std::f32::consts::PI - total_angular_width / 2.0;
-                let mut current_angle = start_angle;
-                
-                if !self.title.is_empty() {
-                    let title_w = self.title.len() as f32 * char_w + 24.0;
-                    let dtheta_title = title_w / r_mid;
-                    let theta_title = current_angle + dtheta_title / 2.0;
-                    
-                    let tx = ccx + r_mid * theta_title.cos() - title_w / 2.0 + 8.0;
-                    let ty = ccy + r_mid * theta_title.sin() - h / 2.0;
-                    self.title_pos = Some((tx, ty));
-                    current_angle += dtheta_title;
-                } else {
-                    self.title_pos = None;
-                }
-                
-                let mut dummy = crate::context::UiContext::new();
-                for menu in &mut self.menus {
-                    let iw = menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
-                    let dtheta_menu = iw / r_mid;
-                    let theta_menu = current_angle + dtheta_menu / 2.0;
-                    
-                    let mx = ccx + r_mid * theta_menu.cos() - iw / 2.0;
-                    let my = ccy + r_mid * theta_menu.sin() - h / 2.0;
-                    
-                    menu.set_rect(mx, my, iw, h);
-                    menu.set_parent(Some(parent_ptr), &mut dummy);
-                    menu.curved_arc = Some((ccx, ccy, ccr, h, current_angle, current_angle + dtheta_menu));
-                    current_angle += dtheta_menu;
-                }
-            } else {
-                self.title_pos = None;
-                let mut cx = 8.0;
-                if self.center_items {
-                    let mut total_width = 8.0;
-                    if !self.title.is_empty() {
-                        total_width += self.title.len() as f32 * char_w + 24.0;
+                    let mut display_title = self.title.clone();
+                    if !self.context_options.is_empty() {
+                        display_title.push_str(" ▼");
                     }
-                    for menu in &self.menus {
-                        total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
-                    }
-                    if self.base.base.w > total_width {
-                        cx = (self.base.base.w - total_width) / 2.0;
-                    }
+                    total_width += display_title.len() as f32 * char_w + 24.0;
                 }
-                if !self.title.is_empty() {
-                    cx += self.title.len() as f32 * char_w + 24.0;
+                let mut btn_strip_w = 0.0;
+                for btn_label in &self.menus.buttons {
+                    btn_strip_w += btn_label.len() as f32 * char_w + 2.0 * padding_x;
                 }
-                let mut dummy = crate::context::UiContext::new();
-                for menu in &mut self.menus {
-                    let iw = menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
-                    menu.set_rect(x + cx, y, iw, h);
-                    menu.set_parent(Some(parent_ptr), &mut dummy);
-                    cx += iw;
+                total_width += btn_strip_w;
+                if self.base.base.w > total_width {
+                    cx = (self.base.base.w - total_width) / 2.0;
                 }
             }
+            if !self.title.is_empty() {
+                let mut display_title = self.title.clone();
+                if !self.context_options.is_empty() {
+                    display_title.push_str(" ▼");
+                }
+                cx += display_title.len() as f32 * char_w + 24.0;
+            }
+            let mut btn_strip_w = 0.0;
+            for btn_label in &self.menus.buttons {
+                btn_strip_w += btn_label.len() as f32 * char_w + 2.0 * padding_x;
+            }
+            self.menus.vertical = false;
+            self.menus.set_rect(x + cx, y, btn_strip_w, h);
+            let mut dummy = crate::context::UiContext::new();
+            self.menus.set_parent(Some(parent_ptr), &mut dummy);
         }
     }
 
@@ -349,54 +382,17 @@ impl Element for MenuBar {
         if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
-        let font_setting = crate::layout::menubar_font();
-        let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
-        let font_size = font_size_opt.unwrap_or(12.0);
-        let char_w = 7.5 * (font_size / 12.0);
-
-        if let Some((ccx, ccy, ccr)) = self.base.curved_circle {
-            let dx = px - ccx;
-            let dy = py - ccy;
-            let dist = (dx * dx + dy * dy).sqrt();
-            if dist >= ccr - self.base.base.h && dist <= ccr {
-                let angle = dy.atan2(dx);
-                let mut norm_angle = angle;
-                if norm_angle < 0.0 {
-                    norm_angle += 2.0 * std::f32::consts::PI;
-                }
-                
-                let r_mid = ccr - self.base.base.h / 2.0;
-                let mut total_width = 8.0;
-                if !self.title.is_empty() {
-                    total_width += self.title.len() as f32 * char_w + 24.0;
-                }
-                let padding_x = crate::layout::paginator_tab_padding_x();
-                for menu in &self.menus {
-                    total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
-                }
-                let total_angular_width = total_width / r_mid;
-                let start_angle = 1.5 * std::f32::consts::PI - total_angular_width / 2.0;
-                let end_angle = 1.5 * std::f32::consts::PI + total_angular_width / 2.0;
-                
-                if norm_angle >= start_angle && norm_angle <= end_angle {
-                    return true;
-                }
+        if let Some((dx, dy, dw, dh)) = self.context_popover_rect() {
+            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                return true;
             }
-            for menu in &self.menus {
-                if menu.hit_test(px, py, ctx) {
-                    return true;
-                }
-            }
-            return false;
         }
         let (rx, ry, rw, rh) = self.rect();
         if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
             return true;
         }
-        for menu in &self.menus {
-            if menu.hit_test(px, py, ctx) {
-                return true;
-            }
+        if self.menus.hit_test(px, py, ctx) {
+            return true;
         }
         false
     }
@@ -409,14 +405,35 @@ impl Element for MenuBar {
         self.set_rect(rx, ry, rw, rh);
 
         let mut changed = false;
-        self.hovered_menu = None;
-        for (idx, menu) in self.menus.iter_mut().enumerate() {
-            if menu.cursor_moved(px, py, ctx) {
-                changed = true;
+
+        let old_title_hovered = self.context_title_hovered;
+        self.context_title_hovered = false;
+        if !self.context_options.is_empty() {
+            let tr = self.title_rect();
+            if px >= tr.0 && px <= tr.0 + tr.2 && py >= tr.1 && py <= tr.1 + tr.3 {
+                self.context_title_hovered = true;
             }
-            if menu.hovered() {
-                self.hovered_menu = Some(idx);
+        }
+        if old_title_hovered != self.context_title_hovered {
+            changed = true;
+        }
+
+        let old_hovered_item = self.context_hovered_item;
+        self.context_hovered_item = None;
+        if let Some((dx, dy, dw, dh)) = self.context_popover_rect() {
+            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
+                if di < self.context_options.len() {
+                    self.context_hovered_item = Some(di);
+                }
             }
+        }
+        if old_hovered_item != self.context_hovered_item {
+            changed = true;
+        }
+
+        if self.menus.cursor_moved(px, py, ctx) {
+            changed = true;
         }
         changed
     }
@@ -425,76 +442,145 @@ impl Element for MenuBar {
         if !self.base.visible {
             return false;
         }
+        if button != MouseButton::Left {
+            return false;
+        }
+
         let (rx, ry, rw, rh) = self.rect();
         self.set_rect(rx, ry, rw, rh);
 
         let mut changed = false;
-        for menu in &mut self.menus {
-            let res = menu.mouse_input(button, state, px, py, ctx);
-            if res {
-                changed = true;
+
+        if let Some((dx, dy, dw, dh)) = self.context_popover_rect() {
+            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                if state == ElementState::Pressed {
+                    let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
+                    if di < self.context_options.len() {
+                        self.context_selected = di;
+                        self.context_just_changed = true;
+                        self.context_dropdown_open = false;
+                        self.unfocus();
+                        return true;
+                    }
+                }
             }
         }
-        if !self.is_menu_open() {
+
+        if !self.context_options.is_empty() {
+            let tr = self.title_rect();
+            if px >= tr.0 && px <= tr.0 + tr.2 && py >= tr.1 && py <= tr.1 + tr.3 {
+                if state == ElementState::Pressed {
+                    if self.context_dropdown_open {
+                        self.context_dropdown_open = false;
+                        self.unfocus();
+                    } else {
+                        self.menus.unfocus();
+                        self.context_dropdown_open = true;
+                        self.focus();
+                    }
+                }
+                return true;
+            }
+        }
+
+        if self.context_dropdown_open && state == ElementState::Pressed {
+            self.context_dropdown_open = false;
             self.unfocus();
+            changed = true;
+        }
+
+        if self.menus.mouse_input(button, state, px, py, ctx) {
+            changed = true;
         }
         changed
     }
 
     fn focus(&mut self) {
-        if self.is_menu_open() {
+        if self.context_dropdown_open {
             self.focused = true;
-            for menu in &mut self.menus {
-                if menu.is_menu_open() {
-                    menu.focus();
-                    return;
-                }
-            }
+            focus::set_focused(self);
         } else {
             self.focused = false;
             focus::clear_if_matches(self);
-            return;
         }
-        self.focused = true;
-        focus::set_focused(self);
     }
 
     fn unfocus(&mut self) {
         self.focused = false;
+        self.context_dropdown_open = false;
+        self.context_hovered_item = None;
         focus::clear_if_matches(self);
-        for menu in &mut self.menus {
-            menu.unfocus();
-        }
+        self.menus.unfocus();
     }
 
     fn focused(&self, ctx: &UiContext) -> bool {
-        self.focused || self.is_menu_open()
+        self.focused || self.context_dropdown_open
+    }
+
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        self.context_popover_rect()
+    }
+
+    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        if event.state != ElementState::Pressed { return false; }
+        if self.context_dropdown_open {
+            match event.logical_key {
+                Key::Named(NamedKey::ArrowDown) => {
+                    let current = self.context_hovered_item.unwrap_or(self.context_selected);
+                    if current + 1 < self.context_options.len() {
+                        self.context_hovered_item = Some(current + 1);
+                    } else {
+                        self.context_hovered_item = Some(0);
+                    }
+                    return true;
+                }
+                Key::Named(NamedKey::ArrowUp) => {
+                    let current = self.context_hovered_item.unwrap_or(self.context_selected);
+                    if current > 0 {
+                        self.context_hovered_item = Some(current - 1);
+                    } else {
+                        self.context_hovered_item = Some(self.context_options.len() - 1);
+                    }
+                    return true;
+                }
+                Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                    if let Some(idx) = self.context_hovered_item {
+                        self.context_selected = idx;
+                        self.context_just_changed = true;
+                    }
+                    self.context_dropdown_open = false;
+                    self.unfocus();
+                    return true;
+                }
+                Key::Named(NamedKey::Escape) => {
+                    self.context_dropdown_open = false;
+                    self.unfocus();
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        self.menus.keyboard_input(event, ctx)
     }
 
     fn set_selected(&mut self, selected: bool) {
         self.focused = selected;
         if !selected {
-            for menu in &mut self.menus {
-                menu.set_selected(false);
-            }
+            self.menus.set_selected(None);
         }
     }
 
     fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
-        for menu in &mut self.menus {
-            menu.set_modifiers(ctrl, shift, alt);
-        }
+        self.menus.set_modifiers(ctrl, shift, alt);
     }
 
     fn menu_names(&self) -> Vec<String> {
-        self.menu_items.clone()
+        self.menus.buttons.clone()
     }
 
     fn menu_click(&mut self) -> Option<(usize, usize)> {
-        for (idx, menu) in self.menus.iter_mut().enumerate() {
-            if let Some((_, item_idx)) = menu.menu_click() {
-                return Some((idx, item_idx));
-            }
+        if let Some(idx) = self.menus.take_click() {
+            return Some((idx, 0));
         }
         None
     }
@@ -505,9 +591,6 @@ impl Element for MenuBar {
                 menu[item_idx] = Some(checked);
             }
         }
-        if let Some(menu) = self.menus.get_mut(menu_idx) {
-            menu.set_item_checked(0, item_idx, checked);
-        }
     }
 
     fn set_menu_items(&mut self, menu_idx: usize, items: &[String]) {
@@ -515,48 +598,20 @@ impl Element for MenuBar {
             self.menu_dropdowns[menu_idx] = items.to_vec();
             self.menu_dropdown_checked[menu_idx] = vec![Some(false); items.len()];
         }
-        if let Some(menu) = self.menus.get_mut(menu_idx) {
-            menu.items = items.to_vec();
-            menu.item_checked = vec![Some(false); items.len()];
-            menu.item_bufs.clear();
-        }
     }
 
     fn is_menu_bar(&self) -> bool {
         self.base.visible
     }
 
-    fn get_menu_items_at(&self, px: f32, py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> {
-        if !self.base.visible {
-            return None;
-        }
-        let dummy = crate::context::UiContext::new();
-        for (idx, menu) in self.menus.iter().enumerate() {
-            if menu.hit_test(px, py, &dummy) {
-                let mut formatted_items = Vec::new();
-                for (i, item) in menu.items.iter().enumerate() {
-                    let checked = menu.item_checked.get(i).and_then(|&v| v);
-                    let prefix = match checked {
-                        Some(true) => "✓ ",
-                        Some(false) => "  ",
-                        None => "",
-                    };
-                    formatted_items.push(format!("{}{}", prefix, item));
-                }
-                return Some((idx, menu.active_title().to_string(), formatted_items, menu.base.x, menu.base.y, menu.base.w, menu.base.h));
-            }
-        }
+    fn get_menu_items_at(&self, _px: f32, _py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> {
         None
     }
 
-    fn trigger_menu_click(&mut self, menu_idx: usize, item_idx: usize) {
-        if let Some(menu) = self.menus.get_mut(menu_idx) {
-            menu.clicked_item = Some(item_idx);
-        }
-    }
+    fn trigger_menu_click(&mut self, _menu_idx: usize, _item_idx: usize) {}
 
     fn is_menu_open(&self) -> bool {
-        self.base.visible && self.menus.iter().any(|m| m.is_menu_open())
+        self.context_dropdown_open
     }
 
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -565,9 +620,7 @@ impl Element for MenuBar {
         }
         let mut quads = Vec::new();
         quads.extend(self.base.all_quads(ctx));
-        for menu in &self.menus {
-            quads.extend(menu.all_quads(ctx));
-        }
+        quads.extend(self.menus.all_quads(ctx));
         quads
     }
 
@@ -575,11 +628,7 @@ impl Element for MenuBar {
         if !self.base.visible {
             return Vec::new();
         }
-        let mut arcs = Vec::new();
-        for menu in &self.menus {
-            arcs.extend(menu.extra_arcs());
-        }
-        arcs
+        self.menus.extra_arcs()
     }
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
@@ -591,20 +640,19 @@ impl Element for MenuBar {
             self.font_family = current_font;
             self.title_buf = None;
             self.curved_title_char_bufs.clear();
-            for menu in &mut self.menus {
-                menu.title_buf = None;
-                menu.curved_char_bufs.clear();
-                menu.item_bufs.clear();
-            }
         }
         let (font_fam, font_size_opt) = crate::layout::parse_font_string(&self.font_family);
         let font_size = font_size_opt.unwrap_or(12.0);
 
         if !self.title.is_empty() {
+            let mut display_title = self.title.clone();
+            if !self.context_options.is_empty() {
+                display_title.push_str(" ▼");
+            }
             if let Some((_ccx, _ccy, _ccr)) = self.base.curved_circle {
-                if self.curved_title_char_bufs.len() != self.title.chars().count() {
+                if self.curved_title_char_bufs.len() != display_title.chars().count() {
                     let font_fam_clone = font_fam.clone();
-                    self.curved_title_char_bufs = self.title.chars()
+                    self.curved_title_char_bufs = display_title.chars()
                         .map(|c| make_widget_text_buffer(fs, &c.to_string(), font_size, &font_fam_clone))
                         .collect();
                 }
@@ -614,7 +662,7 @@ impl Element for MenuBar {
                 self.curved_title_char_bufs.clear();
             } else {
                 if self.title_buf.is_none() {
-                    self.title_buf = Some(make_widget_text_buffer(fs, &self.title, font_size, &font_fam));
+                    self.title_buf = Some(make_widget_text_buffer(fs, &display_title, font_size, &font_fam));
                 }
                 self.curved_title_char_bufs.clear();
             }
@@ -622,9 +670,22 @@ impl Element for MenuBar {
             self.title_buf = None;
             self.curved_title_char_bufs.clear();
         }
-        for menu in &mut self.menus {
-            menu.prepare_text(fs);
+
+        if self.context_dropdown_open {
+            if self.context_item_bufs.len() != self.context_options.len() {
+                let font_fam_clone = font_fam.clone();
+                self.context_item_bufs = self.context_options.iter().enumerate().map(|(i, option)| {
+                    let is_selected = self.context_selected == i;
+                    let prefix = if is_selected { "✓ " } else { "  " };
+                    let text = format!("{}{}", prefix, option);
+                    make_widget_text_buffer(fs, &text, font_size, &font_fam_clone)
+                }).collect();
+            }
+        } else {
+            self.context_item_bufs.clear();
         }
+
+        self.menus.prepare_text(fs);
     }
 
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
@@ -649,21 +710,25 @@ impl Element for MenuBar {
         if let Some((ccx, ccy, ccr)) = self.base.curved_circle {
             let r_mid = ccr - self.base.base.h / 2.0;
             let mut total_width = 8.0;
-            if !self.title.is_empty() {
-                total_width += self.title.len() as f32 * char_w + 24.0;
+            let mut display_title = self.title.clone();
+            if !self.context_options.is_empty() {
+                display_title.push_str(" ▼");
             }
-            for menu in &self.menus {
-                total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
+            if !self.title.is_empty() {
+                total_width += display_title.len() as f32 * char_w + 24.0;
+            }
+            for btn_label in &self.menus.buttons {
+                total_width += btn_label.len() as f32 * char_w + 2.0 * padding_x;
             }
             let total_angular_width = total_width / r_mid;
             let start_angle = 1.5 * std::f32::consts::PI - total_angular_width / 2.0;
             let current_angle = start_angle;
 
             if !self.title.is_empty() {
-                let title_w = self.title.len() as f32 * char_w + 24.0;
+                let title_w = display_title.len() as f32 * char_w + 24.0;
                 let dtheta_title = title_w / r_mid;
 
-                let char_widths: Vec<f32> = self.title.chars().map(|c| {
+                let char_widths: Vec<f32> = display_title.chars().map(|c| {
                     TextLabel::estimate_width(&c.to_string(), font_size)
                 }).collect();
                 let total_chars_width: f32 = char_widths.iter().sum();
@@ -673,26 +738,32 @@ impl Element for MenuBar {
                 let mut cur_char_angle = text_start_angle;
 
                 for (char_idx, c_buf) in self.curved_title_char_bufs.iter().enumerate() {
-                    let cw = char_widths[char_idx];
-                    let dtheta = cw / r_mid;
-                    let char_center_angle = cur_char_angle + dtheta / 2.0;
+                    if char_idx < char_widths.len() {
+                        let cw = char_widths[char_idx];
+                        let dtheta = cw / r_mid;
+                        let char_center_angle = cur_char_angle + dtheta / 2.0;
 
-                    let tx = ccx + r_mid * char_center_angle.cos() - cw / 2.0;
-                    let ty = ccy + r_mid * char_center_angle.sin() - font_size / 2.0;
+                        let tx = ccx + r_mid * char_center_angle.cos() - cw / 2.0;
+                        let ty = ccy + r_mid * char_center_angle.sin() - font_size / 2.0;
 
-                    items.push((c_buf, tx, ty, color));
-                    cur_char_angle += dtheta;
+                        items.push((c_buf, tx, ty, color));
+                        cur_char_angle += dtheta;
+                    }
                 }
             }
         } else if !self.vertical {
             let mut start_x = 8.0;
+            let mut display_title = self.title.clone();
+            if !self.context_options.is_empty() {
+                display_title.push_str(" ▼");
+            }
             if self.center_items {
                 let mut total_width = 8.0;
                 if !self.title.is_empty() {
-                    total_width += self.title.len() as f32 * char_w + 24.0;
+                    total_width += display_title.len() as f32 * char_w + 24.0;
                 }
-                for menu in &self.menus {
-                    total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
+                for btn_label in &self.menus.buttons {
+                    total_width += btn_label.len() as f32 * char_w + 2.0 * padding_x;
                 }
                 if self.base.base.w > total_width {
                     start_x = (self.base.base.w - total_width) / 2.0;
@@ -704,9 +775,20 @@ impl Element for MenuBar {
             }
         }
 
-        for menu in &self.menus {
-            items.extend(menu.get_text_items());
+        if self.context_dropdown_open {
+            if let Some((dx, dy, _, _)) = self.context_popover_rect() {
+                for (i, item_buf) in self.context_item_bufs.iter().enumerate() {
+                    items.push((
+                        item_buf,
+                        dx + 8.0,
+                        dy + i as f32 * DROPDOWN_ITEM_H + 5.0,
+                        color,
+                    ));
+                }
+            }
         }
+
+        items.extend(self.menus.get_text_items());
         items
     }
 
@@ -750,24 +832,29 @@ impl Element for MenuBar {
         let font_size = font_size_opt.unwrap_or(12.0);
         let char_w = 7.5 * (font_size / 12.0);
 
+        let mut display_title = self.title.clone();
+        if !self.context_options.is_empty() {
+            display_title.push_str(" ▼");
+        }
+
         if let Some((ccx, ccy, ccr)) = self.base.curved_circle {
             let r_mid = ccr - self.base.base.h / 2.0;
             let mut total_width = 8.0;
             if !self.title.is_empty() {
-                total_width += self.title.len() as f32 * char_w + 24.0;
+                total_width += display_title.len() as f32 * char_w + 24.0;
             }
-            for menu in &self.menus {
-                total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
+            for btn_label in &self.menus.buttons {
+                total_width += btn_label.len() as f32 * char_w + 2.0 * padding_x;
             }
             let total_angular_width = total_width / r_mid;
             let start_angle = 1.5 * std::f32::consts::PI - total_angular_width / 2.0;
             let current_angle = start_angle;
 
             if !self.title.is_empty() {
-                let title_w = self.title.len() as f32 * char_w + 24.0;
+                let title_w = display_title.len() as f32 * char_w + 24.0;
                 let dtheta_title = title_w / r_mid;
                 labels.extend(TextLabel::curved_layout(
-                    &self.title,
+                    &display_title,
                     ccx, ccy, r_mid,
                     current_angle, current_angle + dtheta_title,
                     font_size,
@@ -786,7 +873,11 @@ impl Element for MenuBar {
                 let line_height = font_size * 1.2;
                 let char_w = TextLabel::estimate_width("o", font_size);
                 let x_pos = self.base.base.x + (self.base.base.w - char_w) / 2.0;
-                for (i, c) in self.title.chars().enumerate() {
+                let mut display_title_vertical = self.title.clone();
+                if !self.context_options.is_empty() {
+                    display_title_vertical.push_str("▼");
+                }
+                for (i, c) in display_title_vertical.chars().enumerate() {
                     let char_str = c.to_string();
                     let y_pos = start_y + i as f32 * line_height;
                     labels.push(TextLabel {
@@ -803,10 +894,10 @@ impl Element for MenuBar {
             if self.center_items {
                 let mut total_width = 8.0;
                 if !self.title.is_empty() {
-                    total_width += self.title.len() as f32 * char_w + 24.0;
+                    total_width += display_title.len() as f32 * char_w + 24.0;
                 }
-                for menu in &self.menus {
-                    total_width += menu.active_title().len() as f32 * char_w + 2.0 * padding_x;
+                for btn_label in &self.menus.buttons {
+                    total_width += btn_label.len() as f32 * char_w + 2.0 * padding_x;
                 }
                 if self.base.base.w > total_width {
                     start_x = (self.base.base.w - total_width) / 2.0;
@@ -815,7 +906,7 @@ impl Element for MenuBar {
             if !self.title.is_empty() {
                 let text_y = self.base.base.y + (self.base.base.h - font_size) / 2.0;
                 labels.push(TextLabel {
-                    text: self.title.clone(),
+                    text: display_title,
                     x: self.base.base.x + start_x,
                     y: text_y,
                     font_size,
@@ -823,17 +914,30 @@ impl Element for MenuBar {
                 });
             }
         }
-        for menu in &self.menus {
-            labels.extend(menu.text_labels());
+
+        if self.context_dropdown_open {
+            if let Some((dx, dy, _, _)) = self.context_popover_rect() {
+                for (i, option) in self.context_options.iter().enumerate() {
+                    let is_selected = self.context_selected == i;
+                    let prefix = if is_selected { "✓ " } else { "  " };
+                    labels.push(TextLabel {
+                        text: format!("{}{}", prefix, option),
+                        x: dx + 8.0,
+                        y: dy + i as f32 * DROPDOWN_ITEM_H + 5.0,
+                        font_size: 12.0,
+                        color: text_color,
+                    });
+                }
+            }
         }
+
+        labels.extend(self.menus.text_labels());
         labels
     }
 
     fn set_visible(&mut self, visible: bool) {
         self.base.set_visible(visible);
-        for menu in &mut self.menus {
-            menu.set_visible(visible);
-        }
+        self.menus.set_visible(visible);
     }
 
     fn visible(&self) -> bool {
@@ -841,10 +945,8 @@ impl Element for MenuBar {
     }
 
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        self.menus.iter().map(|m| {
-            let ptr: *const dyn Element = &**m as &dyn Element;
-            ptr as *mut (dyn Element + 'static)
-        }).collect()
+        let ptr: *const dyn Element = &self.menus as &dyn Element;
+        vec![ptr as *mut (dyn Element + 'static)]
     }
 
     fn z_index(&self) -> i32 {
@@ -856,11 +958,11 @@ impl Element for MenuBar {
     }
 
     fn menu_items_list(&self) -> Vec<Vec<String>> {
-        self.menu_dropdowns.clone()
+        self.menus.buttons.iter().map(|_| Vec::new()).collect()
     }
 
     fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> {
-        self.menu_dropdown_checked.clone()
+        self.menus.buttons.iter().map(|_| Vec::new()).collect()
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -868,14 +970,41 @@ impl Element for MenuBar {
             return Vec::new();
         }
         let mut quads = Vec::new();
-        for menu in &self.menus {
-            quads.extend(menu.extra_quads());
+
+        // 1. Highlight the title on hover or open
+        if !self.context_options.is_empty() {
+            let tr = self.title_rect();
+            if self.context_dropdown_open {
+                quads.push((tr.0, tr.1, tr.2, tr.3, colors::highlight_primary_color()));
+            } else if self.context_title_hovered {
+                quads.push((tr.0, tr.1, tr.2, tr.3, colors::HIGHLIGHT_SECONDARY));
+            }
         }
+
+        // 2. Draw the context popover background and hovered item highlight
+        if self.context_dropdown_open {
+            if let Some((dx, dy, dw, dh)) = self.context_popover_rect() {
+                quads.push((dx, dy, dw, dh, colors::PANEL_MENU_BG));
+                if let Some(di) = self.context_hovered_item {
+                    quads.push((dx, dy + di as f32 * DROPDOWN_ITEM_H, dw, DROPDOWN_ITEM_H, colors::PANEL_MENU_HOVER));
+                }
+            }
+        }
+
+        quads.extend(self.menus.extra_quads());
         quads
     }
 
     fn widget_font(&self) -> Option<String> {
         Some(crate::layout::menubar_font())
+    }
+
+    fn take_context_change(&mut self) -> Option<usize> {
+        self.take_context_change()
+    }
+
+    fn set_context_selected(&mut self, selected: usize) {
+        self.set_context_selected(selected);
     }
 }impl Drop for MenuBar {
     fn drop(&mut self) {

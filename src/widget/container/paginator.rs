@@ -33,6 +33,9 @@ pub struct Paginator {
     pub current_y: Option<f32>,
     pub current_x: Option<f32>,
     parent: Option<*mut (dyn Element + 'static)>,
+    pub context_options: Vec<String>,
+    pub context_selected: usize,
+    pub context_just_changed: bool,
 }
 
 impl Paginator {
@@ -85,6 +88,9 @@ impl Paginator {
             current_y: Some(10.0),
             current_x: Some(0.0),
             parent: None,
+            context_options: Vec::new(),
+            context_selected: 0,
+            context_just_changed: false,
         };
 
         for page in &pages {
@@ -101,7 +107,7 @@ impl Paginator {
 
         if num_pages > 0 {
             pag.plates[0].visible = true;
-            pag.sidebar_menu.menus[0].set_selected(true);
+            pag.sidebar_menu.menus.set_selected(Some(0));
         }
 
         pag.update_sidebar_w();
@@ -151,8 +157,26 @@ impl Paginator {
 
     pub fn with_sidebar_label(mut self, label: &str) -> Self {
         self.sidebar_label = Some(label.to_string());
-        self.sidebar_menu.label = Some(label.to_string());
+        if !self.context_options.is_empty() {
+            self.sidebar_menu.title = label.to_string();
+            self.sidebar_menu.label = None;
+        } else {
+            self.sidebar_menu.label = Some(label.to_string());
+            self.sidebar_menu.title = String::new();
+        }
         self
+    }
+
+    pub fn with_context_options(mut self, options: Vec<String>, selected: usize) -> Self {
+        self.context_options = options.clone();
+        self.context_selected = selected;
+        self.sidebar_menu = self.sidebar_menu.with_context_options(options, selected);
+        self
+    }
+
+    pub fn set_context_selected(&mut self, selected: usize) {
+        self.context_selected = selected;
+        self.sidebar_menu.set_context_selected(selected);
     }
 
     pub fn sidebar_label_height(&self) -> f32 {
@@ -230,9 +254,7 @@ impl Paginator {
                 self.update_target_pos();
                 
                 // Update MenuBar focus/selection
-                for (i, menu) in self.sidebar_menu.menus.iter_mut().enumerate() {
-                    menu.set_selected(i == page);
-                }
+                self.sidebar_menu.menus.set_selected(Some(page));
             }
         }
     }
@@ -248,7 +270,14 @@ impl Paginator {
         let mut sidebar_menu = MenuBar::new(0.0, 0.0, self.sidebar_w, 0.0)
             .with_vertical(true);
         if let Some(ref l) = self.sidebar_label {
-            sidebar_menu = sidebar_menu.with_label(l);
+            if !self.context_options.is_empty() {
+                sidebar_menu = sidebar_menu.with_title(l);
+            } else {
+                sidebar_menu = sidebar_menu.with_label(l);
+            }
+        }
+        if !self.context_options.is_empty() {
+            sidebar_menu = sidebar_menu.with_context_options(self.context_options.clone(), self.context_selected);
         }
         for page in &pages {
             sidebar_menu = sidebar_menu.with_item(page, &[]);
@@ -267,61 +296,14 @@ impl Paginator {
         }
         if !self.plates.is_empty() {
             self.plates[self.selected_page].visible = true;
-            self.sidebar_menu.menus[self.selected_page].set_selected(true);
+            self.sidebar_menu.menus.set_selected(Some(self.selected_page));
         }
         self.update_sidebar_w();
         self.update_target_pos();
     }
 
-    pub fn set_pages_with_items(&mut self, pages: Vec<String>, items: Vec<Vec<String>>) {
-        if self.pages == pages {
-            let mut items_changed = false;
-            if self.sidebar_menu.menus.len() == items.len() {
-                for (i, menu) in self.sidebar_menu.menus.iter().enumerate() {
-                    if menu.items != items[i] {
-                        items_changed = true;
-                        break;
-                    }
-                }
-            } else {
-                items_changed = true;
-            }
-            if !items_changed {
-                return;
-            }
-        }
-        self.pages = pages.clone();
-        let num_pages = pages.len();
-        
-        self.update_sidebar_w();
-        let mut sidebar_menu = MenuBar::new(0.0, 0.0, self.sidebar_w, 0.0)
-            .with_vertical(true);
-        if let Some(ref l) = self.sidebar_label {
-            sidebar_menu = sidebar_menu.with_label(l);
-        }
-        for (i, page) in pages.iter().enumerate() {
-            let page_items: &[String] = if i < items.len() { &items[i] } else { &[] };
-            let page_items_ref: Vec<&str> = page_items.iter().map(|s| s.as_str()).collect();
-            sidebar_menu = sidebar_menu.with_item(page, &page_items_ref);
-        }
-        self.sidebar_menu = sidebar_menu;
-
-        let mut plates = Vec::new();
-        for _ in 0..num_pages {
-            let mut plate = Plate::new(0.0, 0.0, 0.0, 0.0).with_draggable(false);
-            plate.visible = false;
-            plates.push(plate);
-        }
-        self.plates = plates;
-        if self.selected_page >= num_pages {
-            self.selected_page = 0;
-        }
-        if !self.plates.is_empty() {
-            self.plates[self.selected_page].visible = true;
-            self.sidebar_menu.menus[self.selected_page].set_selected(true);
-        }
-        self.update_sidebar_w();
-        self.update_target_pos();
+    pub fn set_pages_with_items(&mut self, pages: Vec<String>, _items: Vec<Vec<String>>) {
+        self.set_pages(pages);
     }
 
     pub fn set_scale_factor(&mut self, scale: f32) {
@@ -518,6 +500,26 @@ impl Element for Paginator {
 
     fn hovered(&self) -> bool {
         self.hovered
+    }
+
+    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
+        if self.sidebar_menu.hit_test(px, py, ctx) {
+            return true;
+        }
+        if self.selected_page < self.plates.len() {
+            if self.plates[self.selected_page].hit_test(px, py, ctx) {
+                return true;
+            }
+        }
+        let (x, y, w, h) = self.rect();
+        px >= x && px <= x + w && py >= y && py <= y + h
+    }
+
+    fn is_menu_open(&self) -> bool {
+        self.sidebar_menu.is_menu_open()
     }
 
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{
@@ -751,6 +753,15 @@ impl Element for Paginator {
                                 break;
                             }
                         }
+                        if !clicked_tab {
+                            if self.sidebar_menu.mouse_input(button, state, px, py, ctx) {
+                                if let Some(new_sel) = self.sidebar_menu.take_context_change() {
+                                    self.context_selected = new_sel;
+                                    self.context_just_changed = true;
+                                }
+                                clicked_tab = true;
+                            }
+                        }
                     }
                     ElementState::Released => {
                         if let Some(i) = self.pressed_tab.take() {
@@ -762,47 +773,30 @@ impl Element for Paginator {
                                 }
                                 clicked_tab = true;
                             }
+                        } else {
+                            if self.sidebar_menu.mouse_input(button, state, px, py, ctx) {
+                                if let Some(new_sel) = self.sidebar_menu.take_context_change() {
+                                    self.context_selected = new_sel;
+                                    self.context_just_changed = true;
+                                }
+                                clicked_tab = true;
+                            }
                         }
                     }
                 }
             } else {
                 if self.sidebar_menu.mouse_input(button, state, px, py, ctx) {
-                    for i in 0..self.sidebar_menu.menus.len() {
-                        if self.sidebar_menu.menus[i].is_menu_open() {
-                            if self.selected_page != i {
-                                self.set_selected_page(i);
-                                self.page_changed = true;
-                            }
-                            break;
+                    if let Some(new_sel) = self.sidebar_menu.take_context_change() {
+                        self.context_selected = new_sel;
+                        self.context_just_changed = true;
+                    }
+                    if let Some((idx, _)) = self.sidebar_menu.menu_click() {
+                        if self.selected_page != idx {
+                            self.set_selected_page(idx);
+                            self.page_changed = true;
                         }
                     }
                     clicked_tab = true;
-                } else {
-                    match state {
-                        ElementState::Pressed => {
-                            self.pressed_tab = None;
-                            for i in 0..self.sidebar_menu.menus.len() {
-                                let (bx, by, bw, bh) = self.sidebar_menu.menus[i].rect();
-                                if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
-                                    self.pressed_tab = Some(i);
-                                    if self.selected_page != i {
-                                        self.set_selected_page(i);
-                                        self.page_changed = true;
-                                    }
-                                    clicked_tab = true;
-                                    break;
-                                }
-                            }
-                        }
-                        ElementState::Released => {
-                            if let Some(i) = self.pressed_tab.take() {
-                                let (bx, by, bw, bh) = self.sidebar_menu.menus[i].rect();
-                                if px >= bx && px <= bx + bw && py >= by && py <= by + bh && py >= self.y && py <= self.y + self.h {
-                                    clicked_tab = true;
-                                }
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -822,6 +816,10 @@ impl Element for Paginator {
 
     fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
         if self.sidebar_menu.keyboard_input(event, ctx) {
+            if let Some(new_sel) = self.sidebar_menu.take_context_change() {
+                self.context_selected = new_sel;
+                self.context_just_changed = true;
+            }
             return true;
         }
         if self.selected_page < self.plates.len() {
@@ -998,7 +996,13 @@ impl Element for Paginator {
     }
     fn set_sidebar_label(&mut self, label: Option<String>) {
         self.sidebar_label = label.clone();
-        self.sidebar_menu.label = label;
+        if !self.context_options.is_empty() {
+            self.sidebar_menu.title = label.unwrap_or_default();
+            self.sidebar_menu.label = None;
+        } else {
+            self.sidebar_menu.label = label;
+            self.sidebar_menu.title = String::new();
+        }
         self.update_target_pos();
     }
     fn add_widget_to_page(&mut self, page_idx: usize, widget: *mut (dyn Element + 'static), ctx: &mut UiContext) {
@@ -1056,6 +1060,35 @@ impl Element for Paginator {
 
     fn widget_font(&self) -> Option<String> {
         Some(crate::layout::menubar_font())
+    }
+
+    fn take_context_change(&mut self) -> Option<usize> {
+        if self.context_just_changed {
+            self.context_just_changed = false;
+            Some(self.context_selected)
+        } else {
+            None
+        }
+    }
+
+    fn set_context_selected(&mut self, selected: usize) {
+        self.set_context_selected(selected);
+    }
+
+    fn focus(&mut self) {
+        self.sidebar_menu.focus();
+    }
+
+    fn unfocus(&mut self) {
+        self.sidebar_menu.unfocus();
+    }
+
+    fn focused(&self, ctx: &UiContext) -> bool {
+        self.sidebar_menu.focused(ctx)
+    }
+
+    fn is_menu_bar(&self) -> bool {
+        true
     }
 }
 
@@ -1154,7 +1187,7 @@ mod tests {
         let mut dummy = crate::context::UiContext::new();
 
         // Check rects of menus
-        let (bx, by, bw, bh) = paginator.sidebar_menu.menus[1].rect();
+        let (bx, by, bw, bh) = paginator.sidebar_menu.menus.item_rect(1);
         assert!(by > 0.0);
 
         // Click Edit menu (index 1)
@@ -1164,11 +1197,11 @@ mod tests {
         // Press
         let click_press = paginator.mouse_input(MouseButton::Left, ElementState::Pressed, px, py, &mut dummy);
         assert!(click_press);
-        assert_eq!(paginator.selected_page, 1);
+        assert_eq!(paginator.selected_page, 0);
 
         // Release
         let click_release = paginator.mouse_input(MouseButton::Left, ElementState::Released, px, py, &mut dummy);
-        assert!(!click_release);
+        assert!(click_release);
         assert_eq!(paginator.selected_page, 1);
         assert!(paginator.page_changed);
     }

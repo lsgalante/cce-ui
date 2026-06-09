@@ -492,6 +492,9 @@ pub trait Element {
     fn color_u8(&self) -> Option<[u8; 4]> { None }
     fn update_bounds(&mut self, _count: usize, _viewport_y: f32, _viewport_h: f32) {}
     fn get_item_draw_y(&self, _idx: usize, _offset: f32) -> Option<f32> { None }
+
+    fn take_context_change(&mut self) -> Option<usize> { None }
+    fn set_context_selected(&mut self, _selected: usize) {}
 }
 
 pub trait Control: Element {
@@ -533,7 +536,8 @@ pub use self::editor::TextEditorState;
 pub use self::core::{Widget, focus, hover_animation, popovers, clipboard, context_menu};
 pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
-    ColorSelector, Finger, Trackpad, Canvas, get_font_db, ActiveThumb, FontSelector
+    ColorSelector, Finger, Trackpad, Canvas, get_font_db, ActiveThumb, FontSelector,
+    ButtonStrip
 };
 pub use self::container::{
     Container, Header, ContentBg, ViewportBg, ParametersBg, ScrollingList,
