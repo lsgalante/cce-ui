@@ -122,6 +122,39 @@ impl Default for Dropdown {
 impl Element for Dropdown {
     crate::impl_widget_base!(Dropdown);
 
+    fn get_value_string(&self) -> Option<String> {
+        self.options.get(self.selected).cloned()
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        let val_trimmed = val.trim();
+        for (idx, opt) in self.options.iter().enumerate() {
+            if opt.eq_ignore_ascii_case(val_trimmed) {
+                if self.selected != idx {
+                    self.selected = idx;
+                    self.just_changed = true;
+                    return true;
+                }
+                return false;
+            }
+        }
+        if let Ok(idx) = val_trimmed.parse::<usize>() {
+            if idx < self.options.len() {
+                if self.selected != idx {
+                    self.selected = idx;
+                    self.just_changed = true;
+                    return true;
+                }
+                return false;
+            }
+        }
+        false
+    }
+
+    fn take_change(&mut self) -> bool {
+        self.take_change()
+    }
+
     fn color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
     }
@@ -175,6 +208,12 @@ impl Element for Dropdown {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            if self.hit_test(px, py, ctx) {
+                ctx.handle_right_click(self.as_ptr(), px, py);
+                return true;
+            }
+        }
         if button != MouseButton::Left || state != ElementState::Pressed { return false; }
 
         let (x, y, w, h) = self.rect();
@@ -332,6 +371,13 @@ impl Element for Dropdown {
         Dropdown::render_popover(self, pc);
     }
 }
+
+impl Drop for Dropdown {
+    fn drop(&mut self) {
+        focus::clear_if_matches(self);
+    }
+}
+
 
 unsafe impl Send for Dropdown {}
 unsafe impl Sync for Dropdown {}

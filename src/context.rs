@@ -339,34 +339,54 @@ impl UiContext {
 
     // --- Context Menu ---
     pub fn is_context_menu_visible(&self) -> bool {
-        self.context_menu.visible
+        crate::widget::context_menu::is_visible()
     }
 
-    pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, target: *mut TextBox) {
-        self.context_menu.show(x, y, options, target);
+    pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, target: *mut (dyn Element + 'static)) {
+        crate::widget::context_menu::show(x, y, options, target);
+    }
+
+    pub fn handle_right_click(&mut self, target: *mut (dyn Element + 'static), px: f32, py: f32) {
+        let name = unsafe { (*target).type_name() };
+        let label = unsafe { (*target).label() };
+        let header = if let Some(lbl) = label {
+            format!("[{}]: {}", name, lbl)
+        } else {
+            format!("[{}]", name)
+        };
+
+        let options = if name == "TextBox" {
+            vec![header, "Cut".to_string(), "Copy".to_string(), "Paste".to_string(), "Select All".to_string()]
+        } else {
+            vec![header, "Copy".to_string(), "Paste".to_string()]
+        };
+
+        let scroll_y = crate::widget::hover_animation::get_scroll_offset();
+        let adjusted_py = py - scroll_y;
+        crate::widget::context_menu::show(px, adjusted_py, options, target);
     }
 
     pub fn hide_context_menu(&mut self) {
-        self.context_menu.hide();
+        crate::widget::context_menu::hide();
     }
 
     pub fn hit_test_context_menu(&self, px: f32, py: f32) -> bool {
-        self.context_menu.hit_test(px, py)
+        crate::widget::context_menu::hit_test(px, py)
     }
 
     pub fn cursor_moved_context_menu(&mut self, px: f32, py: f32) -> bool {
-        self.context_menu.cursor_moved(px, py)
+        crate::widget::context_menu::cursor_moved(px, py)
     }
 
     pub fn mouse_input_context_menu(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        self.context_menu.mouse_input(button, state, px, py)
+        crate::widget::context_menu::mouse_input(button, state, px, py)
     }
 
     pub fn context_menu_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        self.context_menu.extra_quads()
+        crate::widget::context_menu::extra_quads()
     }
 
     pub fn context_menu_labels(&self) -> Vec<crate::widget::display::TextLabel> {
-        self.context_menu.text_labels()
+        crate::widget::context_menu::text_labels()
     }
 }

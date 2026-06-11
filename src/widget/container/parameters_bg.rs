@@ -150,6 +150,36 @@ impl ParametersBg {
                     font_size: 12.0,
                     color: [0xee, 0xee, 0xf0],
                 });
+            } else if ptype.starts_with("choice") {
+                labels.push(TextLabel {
+                    text: name.clone(),
+                    x: self.base.x + 8.0,
+                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
+                    font_size: 12.0,
+                    color: [0xaa, 0xaa, 0xbb],
+                });
+                labels.push(TextLabel {
+                    text: value.clone(),
+                    x: self.base.x + 106.0,
+                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
+                    font_size: 12.0,
+                    color: [0xee, 0xee, 0xf0],
+                });
+            } else if ptype == "button" {
+                labels.push(TextLabel {
+                    text: name.clone(),
+                    x: self.base.x + 8.0,
+                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
+                    font_size: 12.0,
+                    color: [0xaa, 0xaa, 0xbb],
+                });
+                labels.push(TextLabel {
+                    text: "Trigger".to_string(),
+                    x: self.base.x + 106.0,
+                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
+                    font_size: 12.0,
+                    color: [0xee, 0xee, 0xf0],
+                });
             } else {
                 labels.push(TextLabel {
                     text: format!("{}: {}", name, value),
@@ -270,81 +300,8 @@ impl Element for ParametersBg {
         px >= self.base.x && px <= self.base.x + self.base.w && py >= self.base.y && py <= self.base.y + self.base.h
     }
 
-    fn set_display_params(&mut self, params: &[(String, String, String)]) {
-        let mut layout_changed = self.display_params.len() != params.len();
-        if !layout_changed {
-            for (p_old, p_new) in self.display_params.iter().zip(params.iter()) {
-                if p_old.0 != p_new.0 || p_old.2 != p_new.2 {
-                    layout_changed = true;
-                    break;
-                }
-            }
-        }
-
-        if layout_changed {
-            self.display_params = params.to_vec();
-            self.focused_param = None;
-            self.sliders = self.display_params.iter().map(|p| {
-                if p.2.starts_with("slider") {
-                    let val = p.1.parse::<f32>().unwrap_or(0.0);
-                    let (min, max) = parse_slider_range(&p.2);
-                    let t = if max - min != 0.0 {
-                        ((val - min) / (max - min)).clamp(0.0, 1.0)
-                    } else {
-                        0.0
-                    };
-                    Some(Slider::new().with_value(t).with_range(min, max).with_readout(true))
-                } else {
-                    None
-                }
-            }).collect();
-            self.float3s = self.display_params.iter().map(|p| {
-                if p.2.starts_with("float3") {
-                    let (min, max) = parse_slider_range(&p.2);
-                    let vals = parse_float3_value(&p.1, min, max);
-                    Some(Float3::new().with_values(vals).with_range(min, max).with_label(&p.0))
-                } else {
-                    None
-                }
-            }).collect();
-            self.spinboxes = self.display_params.iter().map(|p| {
-                if p.2.starts_with("spinbox") {
-                    let (min, max, step) = parse_spinbox_range(&p.2);
-                    let val = p.1.parse::<i32>().unwrap_or(min);
-                    Some(Spinbox::new(val, min, max, step))
-                } else {
-                    None
-                }
-            }).collect();
-        } else {
-            for (i, p_new) in params.iter().enumerate() {
-                if Some(i) != self.focused_param && Some(i) != self.dragging_param {
-                    self.display_params[i].1 = p_new.1.clone();
-                    if let Some(ref mut s) = self.sliders[i] {
-                        let val = p_new.1.parse::<f32>().unwrap_or(0.0);
-                        let (min, max) = parse_slider_range(&p_new.2);
-                        let t = if max - min != 0.0 {
-                            ((val - min) / (max - min)).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        s.set_value(t);
-                    } else if let Some(ref mut f) = self.float3s[i] {
-                        let (min, max) = parse_slider_range(&p_new.2);
-                        let vals = parse_float3_value(&p_new.1, min, max);
-                        f.set_values(vals);
-                    } else if let Some(ref mut sb) = self.spinboxes[i] {
-                        if !sb.editing {
-                            let (min, _max, _step) = parse_spinbox_range(&p_new.2);
-                            let val = p_new.1.parse::<i32>().unwrap_or(min);
-                            sb.value = val;
-                        }
-                    }
-                }
-            }
-        }
-        self.update_slider_rects();
-    }
+    fn as_param_controller(&self) -> Option<&dyn ParamController> { Some(self) }
+    fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> { Some(self) }
 
     fn unfocus(&mut self) {
         if let Some(idx) = self.focused_param {
@@ -380,10 +337,6 @@ impl Element for ParametersBg {
             let child = unsafe { &mut *child_ptr };
             child.unfocus();
         }
-    }
-
-    fn node_params(&self) -> Vec<(String, String, String)> {
-        self.display_params.clone()
     }
 
     fn draggable(&self) -> bool {
@@ -568,6 +521,29 @@ impl Element for ParametersBg {
                         self.focused_param = Some(i);
                         clicked_any_focusable = true;
                         break;
+                    }
+                } else if p.2.starts_with("choice") {
+                    let box_x = self.base.x + 100.0;
+                    let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
+                    let r = rects[i];
+                    if px >= box_x && px <= box_x + box_w && py >= r.1 && py <= r.1 + r.3 {
+                        if let Some(options_str) = p.2.strip_prefix("choice:") {
+                            let options: Vec<&str> = options_str.split(',').collect();
+                            if !options.is_empty() {
+                                let cur_idx = options.iter().position(|&o| o == p.1).unwrap_or(0);
+                                let next_idx = (cur_idx + 1) % options.len();
+                                p.1 = options[next_idx].to_string();
+                                return true;
+                            }
+                        }
+                    }
+                } else if p.2 == "button" {
+                    let box_x = self.base.x + 100.0;
+                    let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
+                    let r = rects[i];
+                    if px >= box_x && px <= box_x + box_w && py >= r.1 && py <= r.1 + r.3 {
+                        p.1 = "clicked".to_string();
+                        return true;
                     }
                 } else if p.2.starts_with("spinbox") {
                     if let Some(sb) = &mut self.spinboxes[i] {
@@ -906,6 +882,28 @@ impl Element for ParametersBg {
                 quads.push((bx, by + bh - border_t, bw, border_t, border_color));
                 quads.push((bx, by, border_t, bh, border_color));
                 quads.push((bx + bw - border_t, by, border_t, bh, border_color));
+            } else if p.2.starts_with("choice") {
+                let box_x = self.base.x + 100.0;
+                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
+                quads.push((box_x, r.1, box_w, r.3, [0.08, 0.08, 0.10, 1.0]));
+                let border_color = [0.20, 0.20, 0.25, 1.0];
+                let (bx, by, bw, bh) = (box_x, r.1, box_w, r.3);
+                let border_t = 1.0;
+                quads.push((bx, by, bw, border_t, border_color));
+                quads.push((bx, by + bh - border_t, bw, border_t, border_color));
+                quads.push((bx, by, border_t, bh, border_color));
+                quads.push((bx + bw - border_t, by, border_t, bh, border_color));
+            } else if p.2 == "button" {
+                let box_x = self.base.x + 100.0;
+                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
+                quads.push((box_x, r.1, box_w, r.3, [0.15, 0.22, 0.38, 1.0]));
+                let border_color = [0.25, 0.35, 0.58, 1.0];
+                let (bx, by, bw, bh) = (box_x, r.1, box_w, r.3);
+                let border_t = 1.0;
+                quads.push((bx, by, bw, border_t, border_color));
+                quads.push((bx, by + bh - border_t, bw, border_t, border_color));
+                quads.push((bx, by, border_t, bh, border_color));
+                quads.push((bx + bw - border_t, by, border_t, bh, border_color));
             } else if p.2.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
                     quads.push((sb.base.x, sb.base.y, sb.base.w, sb.base.h, sb.color()));
@@ -1024,5 +1022,87 @@ fn collect_child_quads(widget: &dyn Element) -> Vec<(f32, f32, f32, f32, [f32; 4
         }
     }
     quads
+}
+
+impl ParamController for ParametersBg {
+    fn node_params(&self) -> Vec<(String, String, String)> {
+        self.display_params.clone()
+    }
+
+    fn set_display_params(&mut self, params: &[(String, String, String)]) {
+        let mut layout_changed = self.display_params.len() != params.len();
+        if !layout_changed {
+            for (p_old, p_new) in self.display_params.iter().zip(params.iter()) {
+                if p_old.0 != p_new.0 || p_old.2 != p_new.2 {
+                    layout_changed = true;
+                    break;
+                }
+            }
+        }
+
+        if layout_changed {
+            self.display_params = params.to_vec();
+            self.focused_param = None;
+            self.sliders = self.display_params.iter().map(|p| {
+                if p.2.starts_with("slider") {
+                    let val = p.1.parse::<f32>().unwrap_or(0.0);
+                    let (min, max) = parse_slider_range(&p.2);
+                    let t = if max - min != 0.0 {
+                        ((val - min) / (max - min)).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    Some(Slider::new().with_value(t).with_range(min, max).with_readout(true))
+                } else {
+                    None
+                }
+            }).collect();
+            self.float3s = self.display_params.iter().map(|p| {
+                if p.2.starts_with("float3") {
+                    let (min, max) = parse_slider_range(&p.2);
+                    let vals = parse_float3_value(&p.1, min, max);
+                    Some(Float3::new().with_values(vals).with_range(min, max).with_label(&p.0))
+                } else {
+                    None
+                }
+            }).collect();
+            self.spinboxes = self.display_params.iter().map(|p| {
+                if p.2.starts_with("spinbox") {
+                    let (min, max, step) = parse_spinbox_range(&p.2);
+                    let val = p.1.parse::<i32>().unwrap_or(min);
+                    Some(Spinbox::new(val, min, max, step))
+                } else {
+                    None
+                }
+            }).collect();
+        } else {
+            for (i, p_new) in params.iter().enumerate() {
+                if Some(i) != self.focused_param && Some(i) != self.dragging_param {
+                    self.display_params[i].1 = p_new.1.clone();
+                    if let Some(ref mut s) = self.sliders[i] {
+                        let val = p_new.1.parse::<f32>().unwrap_or(0.0);
+                        let (min, max) = parse_slider_range(&p_new.2);
+                        let t = if max - min != 0.0 {
+                            ((val - min) / (max - min)).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        s.set_value(t);
+                    } else if let Some(ref mut f) = self.float3s[i] {
+                        let (min, max) = parse_slider_range(&p_new.2);
+                        let vals = parse_float3_value(&p_new.1, min, max);
+                        f.set_values(vals);
+                    } else if let Some(ref mut sb) = self.spinboxes[i] {
+                        if !sb.editing {
+                            let (min, _max, _step) = parse_spinbox_range(&p_new.2);
+                            let val = p_new.1.parse::<i32>().unwrap_or(min);
+                            sb.value = val;
+                        }
+                    }
+                }
+            }
+        }
+        self.update_slider_rects();
+    }
 }
 

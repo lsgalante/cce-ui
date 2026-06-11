@@ -323,6 +323,51 @@ impl Default for TextBox {
 impl Element for TextBox {
     crate::impl_widget_base!(TextBox);
 
+    fn get_value_string(&self) -> Option<String> {
+        Some(self.text.clone())
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        let val_str = val.to_string();
+        if self.text != val_str {
+            self.text = val_str.clone();
+            self.edit_buffer = val_str;
+            self.just_changed = true;
+            self.sync_editor_state();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn take_change(&mut self) -> bool {
+        self.take_change()
+    }
+
+    fn cut_selection(&mut self) -> bool {
+        let res = self.cut_selection();
+        if res {
+            self.just_changed = true;
+        }
+        res
+    }
+
+    fn copy_selection(&self) {
+        self.copy_selection();
+    }
+
+    fn paste_from_clipboard(&mut self) -> bool {
+        let res = self.paste_from_clipboard();
+        if res {
+            self.just_changed = true;
+        }
+        res
+    }
+
+    fn select_all(&mut self) {
+        self.select_all();
+    }
+
     fn preferred_height(&self) -> Option<f32> {
         Some(crate::layout::textbox_height())
     }
@@ -446,6 +491,12 @@ impl Element for TextBox {
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if self.disabled { return false; }
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            if self.hit_test(px, py, ctx) {
+                ctx.handle_right_click(self.as_ptr(), px, py);
+                return true;
+            }
+        }
         if button != MouseButton::Left { return false; }
         if !self.hit_test(px, py, ctx) { return false; }
         match state {

@@ -14,6 +14,7 @@ pub struct Slider {
     min: f32,
     max: f32,
     pub editor_state: TextEditorState,
+    pub just_changed: bool,
 }
 
 impl Slider {
@@ -30,6 +31,7 @@ impl Slider {
             min: 0.0,
             max: 1.0,
             editor_state: TextEditorState::new(String::new()),
+            just_changed: false,
         }
     }
 
@@ -104,6 +106,38 @@ impl Slider {
 
 impl Element for Slider {
     crate::impl_widget_base!(Slider);
+
+    fn get_value_string(&self) -> Option<String> {
+        let scaled_val = self.min + self.value * (self.max - self.min);
+        Some(format!("{:.2}", scaled_val))
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        if let Ok(new_val) = val.trim().parse::<f32>() {
+            let old_val = self.value;
+            let range = self.max - self.min;
+            if range != 0.0 {
+                self.value = ((new_val - self.min) / range).clamp(0.0, 1.0);
+            } else {
+                self.value = 0.0;
+            }
+            if (self.value - old_val).abs() > 0.0001 {
+                self.just_changed = true;
+                if self.editing {
+                    let scaled_val = self.min + self.value * (self.max - self.min);
+                    self.edit_buffer = format!("{:.2}", scaled_val);
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    fn take_change(&mut self) -> bool {
+        let ret = self.just_changed;
+        self.just_changed = false;
+        ret
+    }
 
     fn color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
@@ -198,6 +232,12 @@ impl Element for Slider {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            if self.hit_test(px, py, ctx) {
+                ctx.handle_right_click(self.as_ptr(), px, py);
+                return true;
+            }
+        }
         if button != MouseButton::Left { return false; }
         
         let top = self.base.label_offset();
@@ -389,6 +429,13 @@ impl Element for Slider {
 
     fn value(&self) -> i32 { (self.value * 100.0) as i32 }
 }
+
+impl Drop for Slider {
+    fn drop(&mut self) {
+        focus::clear_if_matches(self);
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveThumb {

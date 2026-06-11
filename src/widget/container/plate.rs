@@ -4,7 +4,7 @@ use crate::widget::display::TextLabel;
 
 #[derive(Debug, Clone)]
 pub struct Plate {
-    pub base: Widget,
+    pub base: Layer,
     pub dragging: bool,
     pub drag_ox: f32,
     pub drag_oy: f32,
@@ -15,11 +15,12 @@ pub struct Plate {
     pub curved_circle: Option<(f32, f32, f32)>,
     pub network_opacity: f32,
     pub blur: bool,
-    pub children: Vec<*mut (dyn Element + 'static)>,
-    pub parent: Option<*mut (dyn Element + 'static)>,
     pub visible: bool,
     pub column_layout: bool,
     pub draggable: bool,
+    pub solid_border: Option<([f32; 4], f32)>,
+    pub selected: bool,
+    pub padding: Option<f32>,
 }
 
 impl Plate {
@@ -33,7 +34,7 @@ impl Plate {
 
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            base: Widget::new_rect(x, y, w, h),
+            base: Layer::new(x, y, w, h),
             dragging: false,
             drag_ox: 0.0,
             drag_oy: 0.0,
@@ -44,11 +45,12 @@ impl Plate {
             curved_circle: None,
             network_opacity: 1.0,
             blur: true,
-            children: Vec::new(),
-            parent: None,
             visible: true,
             column_layout: false,
             draggable: true,
+            solid_border: None,
+            selected: false,
+            padding: None,
         }
     }
 
@@ -58,7 +60,7 @@ impl Plate {
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
-        self.base.label = Some(label.to_string());
+        self.base.base.label = Some(label.to_string());
         self
     }
 
@@ -72,19 +74,48 @@ impl Plate {
         self
     }
 
+    pub fn with_solid_border(mut self, color: [f32; 4], thickness: f32) -> Self {
+        self.solid_border = Some((color, thickness));
+        self
+    }
+
+    pub fn with_padding(mut self, padding: f32) -> Self {
+        self.padding = Some(padding);
+        self
+    }
+
     pub fn set_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
         self.bounds = Some((bx, by, bw, bh));
     }
 }
 
 impl Element for Plate {
-    crate::impl_widget_base!(Plate);
+    fn base(&self) -> Option<&Widget> { Some(&self.base.base) }
+    fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base.base) }
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+    }
+
     fn is_plate(&self) -> bool { true }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+
+    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+        if self.selected {
+            Some((colors::active_theme().primary_accent, 1.5))
+        } else {
+            self.solid_border
+        }
+    }
+
+    fn set_selected(&mut self, selected: bool) {
+        self.selected = selected;
+    }
 
     fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
-        for &child_ptr in &self.children {
+        for &child_ptr in &self.base.children {
             unsafe {
                 (*child_ptr).set_modifiers(ctrl, shift, alt);
             }
@@ -97,11 +128,7 @@ impl Element for Plate {
 
     fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
-        for &child_ptr in &self.children {
-            unsafe {
-                (*child_ptr).set_visible(visible);
-            }
-        }
+        self.base.visible = visible;
     }
 
     fn color(&self) -> [f32; 4] {
@@ -175,30 +202,40 @@ impl Element for Plate {
     }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        if let Some(b) = self.base_mut() {
-            b.x = x;
-            b.y = y;
-            b.w = w;
-            b.h = h;
-        }
+        let (clamped_x, clamped_y, clamped_w, clamped_h) = if let Some(parent_ptr) = self.base.parent {
+            let (px, py, pw, ph) = unsafe { (*parent_ptr).rect() };
+            let cx = x.clamp(px, px + pw.max(0.0));
+            let cy = y.clamp(py, py + ph.max(0.0));
+            let cw = w.min((px + pw.max(0.0) - cx).max(0.0));
+            let ch = h.min((py + ph.max(0.0) - cy).max(0.0));
+            (cx, cy, cw, ch)
+        } else {
+            (x, y, w, h)
+        };
 
-        if !self.visible {
+        self.base.base.x = clamped_x;
+        self.base.base.y = clamped_y;
+        self.base.base.w = clamped_w;
+        self.base.base.h = clamped_h;
+
+        if !self.base.visible {
             return;
         }
 
-        let padding_x = crate::layout::plate_padding();
-        let padding_y = crate::layout::plate_padding();
-        let left_x = x + padding_x;
-        let available_w = (w - 2.0 * padding_x).max(1.0);
-        let start_y = y + padding_y;
-        let available_h = (h - 2.0 * padding_y).max(1.0);
+        let pad = self.padding.unwrap_or_else(|| crate::layout::plate_padding());
+        let padding_x = pad;
+        let padding_y = pad;
+        let left_x = clamped_x + padding_x;
+        let available_w = (clamped_w - 2.0 * padding_x).max(1.0);
+        let start_y = clamped_y + padding_y;
+        let available_h = (clamped_h - 2.0 * padding_y).max(1.0);
 
         let center_x = left_x + available_w / 2.0;
         let center_y = start_y + available_h / 2.0;
         let aspect_ratio = available_w / available_h;
 
         let mut active_widgets = Vec::new();
-        for &w_ptr in &self.children {
+        for &w_ptr in &self.base.children {
             let w = unsafe { &*w_ptr };
             if !w.layout_ignore() {
                 active_widgets.push(w_ptr);
@@ -215,8 +252,12 @@ impl Element for Plate {
                 let top = crate::widget::label_offset(w);
                 let use_h = if wh > 0.0 { wh } else { 24.0 + top };
 
-                w.set_rect(left_x, current_y, use_w, use_h);
-                current_y += use_h + spacing;
+                let max_y = clamped_y + clamped_h - padding_y;
+                let active_y = current_y.min(max_y);
+                let active_h = use_h.min(max_y - active_y);
+
+                w.set_rect(left_x, active_y, use_w, active_h);
+                current_y += active_h + spacing;
             }
         } else {
             let mut total_diagonal = 0.0;
@@ -239,7 +280,11 @@ impl Element for Plate {
                 let use_h = if wh > 0.0 { wh } else { 50.0 };
 
                 if i == 0 {
-                    w.set_rect(center_x - use_w / 2.0, center_y - use_h / 2.0, use_w, use_h);
+                    let cx = (center_x - use_w / 2.0).clamp(left_x, (left_x + available_w - use_w).max(left_x));
+                    let cy = (center_y - use_h / 2.0).clamp(start_y, (start_y + available_h - use_h).max(start_y));
+                    let cw = use_w.min(clamped_x + clamped_w - padding_x - cx);
+                    let ch = use_h.min(clamped_y + clamped_h - padding_y - cy);
+                    w.set_rect(cx, cy, cw, ch);
                 } else {
                     let mut ring = 1;
                     let mut ring_start = 1;
@@ -254,12 +299,15 @@ impl Element for Plate {
                             let x_offset = radius * angle.cos() * aspect_ratio;
                             let y_offset = radius * angle.sin();
 
-                            w.set_rect(
-                                center_x + x_offset - use_w / 2.0,
-                                center_y + y_offset - use_h / 2.0,
-                                use_w,
-                                use_h,
-                            );
+                            let raw_x = center_x + x_offset - use_w / 2.0;
+                            let raw_y = center_y + y_offset - use_h / 2.0;
+
+                            let cx = raw_x.clamp(left_x, (left_x + available_w - use_w).max(left_x));
+                            let cy = raw_y.clamp(start_y, (start_y + available_h - use_h).max(start_y));
+                            let cw = use_w.min(clamped_x + clamped_w - padding_x - cx);
+                            let ch = use_h.min(clamped_y + clamped_h - padding_y - cy);
+
+                            w.set_rect(cx, cy, cw, ch);
                             placed = true;
                         } else {
                             ring_start += ring_capacity;
@@ -271,13 +319,13 @@ impl Element for Plate {
         }
     }
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        self.parent
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
+        self.base.parent
     }
 
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        self.parent = parent;
-        let id = self.base.id();
+        self.base.parent = parent;
+        let id = self.base.base.id();
         if let Some(p_ptr) = parent {
             if let Some(p_base) = unsafe { (*p_ptr).base() } {
                 let p_id = p_base.id();
@@ -291,24 +339,27 @@ impl Element for Plate {
     }
 
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        self.children.clone()
+        self.base.children.clone()
     }
 
     fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
-        self.children.push(child);
-        let id = self.base.id();
+        self.base.children.push(child);
+        let id = self.base.base.id();
+        let self_ptr = self.as_ptr();
         if let Some(c_base) = unsafe { (*child).base() } {
             let c_id = c_base.id();
-            let self_ptr = self.as_ptr();
             ctx.register_widget(id, self_ptr);
             ctx.register_widget(c_id, child);
             ctx.link_ids(id, c_id);
         }
+        unsafe {
+            (*child).set_parent(Some(self_ptr), ctx);
+        }
     }
 
     fn clear_children(&mut self, ctx: &mut UiContext) {
-        self.children.clear();
-        let id = self.base.id();
+        self.base.children.clear();
+        let id = self.base.base.id();
         ctx.clear_children_ids(id);
     }
 
@@ -320,7 +371,7 @@ impl Element for Plate {
         let (px, py, pw, ph) = self.rect();
         quads.push((px, py, pw, ph, self.color()));
 
-        for &child_ptr in &self.children {
+        for &child_ptr in &self.base.children {
             let widget = unsafe { &*child_ptr };
             let c = widget.color();
             if c[3] > 0.0 {
@@ -337,16 +388,16 @@ impl Element for Plate {
             return Vec::new();
         }
         let mut labels = Vec::new();
-        if let Some(ref label) = self.base.label {
+        if let Some(ref label) = self.base.base.label {
             labels.push(TextLabel {
                 text: label.clone(),
-                x: self.base.x,
-                y: self.base.y - (12.0 + crate::layout::label_margin()),
+                x: self.base.base.x,
+                y: self.base.base.y - (12.0 + crate::layout::label_margin()),
                 font_size: 12.0,
                 color: [0x83, 0x83, 0x8a],
             });
         }
-        for &child_ptr in &self.children {
+        for &child_ptr in &self.base.children {
             let widget = unsafe { &*child_ptr };
             labels.extend(widget.text_labels());
         }
@@ -358,19 +409,19 @@ impl Element for Plate {
             return Vec::new();
         }
         let mut result = Vec::new();
-        if let Some(ref label) = self.base.label {
+        if let Some(ref label) = self.base.base.label {
             result.push((
                 TextLabel {
                     text: label.clone(),
-                    x: self.base.x,
-                    y: self.base.y - (12.0 + crate::layout::label_margin()),
+                    x: self.base.base.x,
+                    y: self.base.base.y - (12.0 + crate::layout::label_margin()),
                     font_size: 12.0,
                     color: [0x83, 0x83, 0x8a],
                 },
                 None,
             ));
         }
-        for &child_ptr in &self.children {
+        for &child_ptr in &self.base.children {
             let widget = unsafe { &*child_ptr };
             result.extend(widget.text_labels_with_bounds(ctx));
         }
@@ -382,12 +433,12 @@ impl Element for Plate {
             return Vec::new();
         }
         let mut result = Vec::new();
-        if let Some(ref label) = self.base.label {
+        if let Some(ref label) = self.base.base.label {
             result.push((
                 TextLabel {
                     text: label.clone(),
-                    x: self.base.x,
-                    y: self.base.y - (12.0 + crate::layout::label_margin()),
+                    x: self.base.base.x,
+                    y: self.base.base.y - (12.0 + crate::layout::label_margin()),
                     font_size: 12.0,
                     color: [0x83, 0x83, 0x8a],
                 },
@@ -395,31 +446,42 @@ impl Element for Plate {
                 None,
             ));
         }
-        for &child_ptr in &self.children {
+        for &child_ptr in &self.base.children {
             let widget = unsafe { &*child_ptr };
             result.extend(widget.text_labels_with_font_and_bounds(ctx));
         }
         result
     }
 
+    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut items = Vec::new();
+        for &child_ptr in &self.base.children {
+            let widget = unsafe { &*child_ptr };
+            items.extend(widget.get_text_items());
+        }
+        items
+    }
+
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         if !self.visible {
             return;
         }
-        for &child_ptr in &self.children {
+        for &child_ptr in &self.base.children {
             unsafe {
                 (*child_ptr).prepare_text(fs);
             }
         }
     }
 
-
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if !self.visible {
             return false;
         }
         let mut changed = false;
-        for &widget_ptr in &self.children {
+        for &widget_ptr in &self.base.children {
             let widget = unsafe { &mut *widget_ptr };
             if widget.is_dragging() {
                 if widget.drag_update(px, py) {
@@ -436,7 +498,7 @@ impl Element for Plate {
         if !self.visible {
             return false;
         }
-        for &widget_ptr in self.children.iter().rev() {
+        for &widget_ptr in self.base.children.iter().rev() {
             let widget = unsafe { &mut *widget_ptr };
             if widget.popover_rect().is_some() {
                 if widget.mouse_input(button, state, px, py, ctx) {
@@ -444,7 +506,7 @@ impl Element for Plate {
                 }
             }
         }
-        for &widget_ptr in self.children.iter().rev() {
+        for &widget_ptr in self.base.children.iter().rev() {
             let widget = unsafe { &mut *widget_ptr };
             if widget.mouse_input(button, state, px, py, ctx) {
                 return true;
@@ -474,7 +536,7 @@ impl Element for Plate {
         if !self.visible {
             return false;
         }
-        for &widget_ptr in &self.children {
+        for &widget_ptr in &self.base.children {
             let widget = unsafe { &mut *widget_ptr };
             if widget.keyboard_input(event, ctx) {
                 return true;
@@ -487,7 +549,7 @@ impl Element for Plate {
         if !self.visible {
             return false;
         }
-        for &widget_ptr in self.children.iter().rev() {
+        for &widget_ptr in self.base.children.iter().rev() {
             let widget = unsafe { &mut *widget_ptr };
             if widget.mouse_wheel(delta, px, py, ctx) {
                 return true;
@@ -500,7 +562,7 @@ impl Element for Plate {
         if !self.visible {
             return None;
         }
-        for &widget_ptr in self.children.iter().rev() {
+        for &widget_ptr in self.base.children.iter().rev() {
             let widget = unsafe { &*widget_ptr };
             if let Some(r) = widget.popover_rect() {
                 return Some(r);
@@ -513,7 +575,7 @@ impl Element for Plate {
         if !self.visible {
             return;
         }
-        for &widget_ptr in self.children.iter().rev() {
+        for &widget_ptr in self.base.children.iter().rev() {
             let widget = unsafe { &*widget_ptr };
             widget.render_popover(pc);
         }
@@ -524,7 +586,7 @@ impl Element for Plate {
             return false;
         }
         let mut changed = false;
-        for &widget_ptr in &self.children {
+        for &widget_ptr in &self.base.children {
             let widget = unsafe { &mut *widget_ptr };
             if widget.tick(dt, ctx) {
                 changed = true;
@@ -537,17 +599,17 @@ impl Element for Plate {
         let nx = px - self.drag_ox;
         let ny = py - self.drag_oy;
         let (nx, ny) = if let Some((bx, by, bw, bh)) = self.bounds {
-            (nx.clamp(bx, bx + bw - self.base.w), ny.clamp(by, by + bh - self.base.h))
+            (nx.clamp(bx, bx + bw - self.base.base.w), ny.clamp(by, by + bh - self.base.base.h))
         } else {
             (nx, ny)
         };
-        if (nx - self.base.x).abs() > 0.01 || (ny - self.base.y).abs() > 0.01 {
-            let dx = nx - self.base.x;
-            let dy = ny - self.base.y;
-            self.base.x = nx;
-            self.base.y = ny;
+        if (nx - self.base.base.x).abs() > 0.01 || (ny - self.base.base.y).abs() > 0.01 {
+            let dx = nx - self.base.base.x;
+            let dy = ny - self.base.base.y;
+            self.base.base.x = nx;
+            self.base.base.y = ny;
             
-            for &child_ptr in &self.children {
+            for &child_ptr in &self.base.children {
                 unsafe {
                     let (cx, cy, cw, ch) = (*child_ptr).rect();
                     (*child_ptr).set_rect(cx + dx, cy + dy, cw, ch);
@@ -560,10 +622,10 @@ impl Element for Plate {
 
     fn drag_begin(&mut self, px: f32, py: f32) {
         self.dragging = true;
-        self.drag_ox = px - self.base.x;
-        self.drag_oy = py - self.base.y;
-        self.drag_start_x = self.base.x;
-        self.drag_start_y = self.base.y;
+        self.drag_ox = px - self.base.base.x;
+        self.drag_oy = py - self.base.base.y;
+        self.drag_start_x = self.base.base.x;
+        self.drag_start_y = self.base.base.y;
     }
 
     fn drag_end(&mut self) { self.dragging = false; }

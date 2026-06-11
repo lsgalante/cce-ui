@@ -104,6 +104,11 @@ impl Element for ScrollingList {
     fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) { self.scroll_box.add_child(child, ctx); }
     fn clear_children(&mut self, ctx: &mut UiContext) { self.scroll_box.clear_children(ctx); }
 
+    fn as_scroll_controller(&self) -> Option<&dyn ScrollController> { Some(self) }
+    fn as_scroll_controller_mut(&mut self) -> Option<&mut dyn ScrollController> { Some(self) }
+}
+
+impl ScrollController for ScrollingList {
     fn update_bounds(&mut self, count: usize, viewport_y: f32, viewport_h: f32) {
         self.update_bounds(count, viewport_y, viewport_h);
     }

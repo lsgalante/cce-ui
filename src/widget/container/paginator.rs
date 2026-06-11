@@ -36,6 +36,8 @@ pub struct Paginator {
     pub context_options: Vec<String>,
     pub context_selected: usize,
     pub context_just_changed: bool,
+    pub tab_quads_cache: std::collections::HashMap<String, Vec<(f32, f32, f32, f32, [f32; 4])>>,
+    pub on_page_changed_cb: Option<Box<dyn Fn(usize) + Send + Sync>>,
 }
 
 impl Paginator {
@@ -91,6 +93,8 @@ impl Paginator {
             context_options: Vec::new(),
             context_selected: 0,
             context_just_changed: false,
+            tab_quads_cache: std::collections::HashMap::new(),
+            on_page_changed_cb: None,
         };
 
         for page in &pages {
@@ -241,6 +245,11 @@ impl Paginator {
         self
     }
 
+    pub fn on_page_changed<F: Fn(usize) + Send + Sync + 'static>(mut self, cb: F) -> Self {
+        self.on_page_changed_cb = Some(Box::new(cb));
+        self
+    }
+
     pub fn selected_page(&self) -> usize {
         self.selected_page
     }
@@ -255,6 +264,10 @@ impl Paginator {
                 
                 // Update MenuBar focus/selection
                 self.sidebar_menu.menus.set_selected(Some(page));
+
+                if let Some(ref cb) = self.on_page_changed_cb {
+                    cb(page);
+                }
             }
         }
     }
@@ -398,6 +411,12 @@ impl Paginator {
                 continue;
             }
 
+            let cache_key = format!("{}:{}:{}:{:?}:{}:{}", trimmed, w_px, h_px, color, font_fam, scale);
+            if let Some(cached_quads) = self.tab_quads_cache.get(&cache_key) {
+                self.tab_text_quads.push(cached_quads.clone());
+                continue;
+            }
+
             let svg_data = format!(
                 r##"<svg width="{}" height="{}" viewBox="0 0 {} {}" xmlns="http://www.w3.org/2000/svg">
   <text x="{}" y="{}" font-family="{}" font-size="{}" fill="{}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 {} {})">{}</text>
@@ -446,6 +465,7 @@ impl Paginator {
             if !page_quads.is_empty() {
                 eprintln!("DEBUG_PAGINATOR_EXAMPLES: {:?}", &page_quads[..5.min(page_quads.len())]);
             }
+            self.tab_quads_cache.insert(cache_key, page_quads.clone());
             self.tab_text_quads.push(page_quads);
         }
     }
@@ -490,6 +510,13 @@ impl Element for Paginator {
         }
     }
 
+    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
+        self.sidebar_menu.set_modifiers(ctrl, shift, alt);
+        if self.selected_page < self.plates.len() {
+            self.plates[self.selected_page].set_modifiers(ctrl, shift, alt);
+        }
+    }
+
     fn color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
     }
@@ -516,10 +543,6 @@ impl Element for Paginator {
         }
         let (x, y, w, h) = self.rect();
         px >= x && px <= x + w && py >= y && py <= y + h
-    }
-
-    fn is_menu_open(&self) -> bool {
-        self.sidebar_menu.is_menu_open()
     }
 
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{
@@ -961,15 +984,56 @@ impl Element for Paginator {
     fn add_child(&mut self, _child: *mut (dyn Element + 'static), ctx: &mut UiContext) {}
     fn clear_children(&mut self, ctx: &mut UiContext) {}
 
-    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
-        self.sidebar_menu.set_modifiers(ctrl, shift, alt);
-        if self.selected_page < self.plates.len() {
-            self.plates[self.selected_page].set_modifiers(ctrl, shift, alt);
+    fn as_page_selector(&self) -> Option<&dyn PageSelector> { Some(self) }
+    fn as_page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> { Some(self) }
+    fn as_menu_controller(&self) -> Option<&dyn MenuController> { Some(self) }
+    fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> { Some(self) }
+
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+        self.sidebar_menu.prepare_text(fs);
+        for plate in &mut self.plates {
+            plate.prepare_text(fs);
         }
     }
-    fn menu_names(&self) -> Vec<String> {
-        self.pages.clone()
+
+    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let mut result = Vec::new();
+        if self.tabs_rotated {
+            let font = self.widget_font();
+            for l in self.text_labels() {
+                result.push((l, font.clone(), None));
+            }
+        } else {
+            result.extend(self.sidebar_menu.text_labels_with_font_and_bounds(ctx));
+        }
+
+        if self.selected_page < self.plates.len() {
+            result.extend(self.plates[self.selected_page].text_labels_with_font_and_bounds(ctx));
+        }
+        result
     }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::menubar_font())
+    }
+
+    fn focus(&mut self) {
+        self.sidebar_menu.focus();
+    }
+
+    fn unfocus(&mut self) {
+        self.sidebar_menu.unfocus();
+    }
+
+    fn focused(&self, ctx: &UiContext) -> bool {
+        self.sidebar_menu.focused(ctx)
+    }
+}
+
+unsafe impl Send for Paginator {}
+unsafe impl Sync for Paginator {}
+
+impl PageSelector for Paginator {
     fn selected_page(&self) -> usize {
         self.selected_page()
     }
@@ -1011,21 +1075,9 @@ impl Element for Paginator {
     fn clear_page_widgets(&mut self, page_idx: usize, ctx: &mut UiContext) {
         self.clear_page_widgets(page_idx, ctx);
     }
-    fn menu_items_list(&self) -> Vec<Vec<String>> {
-        self.sidebar_menu.menu_items_list()
-    }
-    fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> {
-        self.sidebar_menu.menu_checked_list()
-    }
+}
 
-    fn get_menu_items_at(&self, px: f32, py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> {
-        if self.sidebar_mode {
-            self.sidebar_menu.get_menu_items_at(px, py)
-        } else {
-            None
-        }
-    }
-
+impl MenuController for Paginator {
     fn menu_click(&mut self) -> Option<(usize, usize)> {
         if self.sidebar_mode {
             self.sidebar_menu.menu_click()
@@ -1034,32 +1086,56 @@ impl Element for Paginator {
         }
     }
 
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
-        self.sidebar_menu.prepare_text(fs);
-        for plate in &mut self.plates {
-            plate.prepare_text(fs);
-        }
+    fn trigger_menu_click(&mut self, menu_idx: usize, item_idx: usize) {
+        self.sidebar_menu.trigger_menu_click(menu_idx, item_idx);
     }
 
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let mut result = Vec::new();
-        if self.tabs_rotated {
-            let font = self.widget_font();
-            for l in self.text_labels() {
-                result.push((l, font.clone(), None));
-            }
+    fn set_item_checked(&mut self, menu_idx: usize, item_idx: usize, checked: bool) {
+        self.sidebar_menu.set_item_checked(menu_idx, item_idx, checked);
+    }
+
+    fn set_menu_items(&mut self, menu_idx: usize, items: &[String]) {
+        self.sidebar_menu.set_menu_items(menu_idx, items);
+    }
+
+    fn is_menu_bar(&self) -> bool {
+        true
+    }
+
+    fn is_menu_open(&self) -> bool {
+        self.sidebar_menu.is_menu_open()
+    }
+
+    fn menu_items(&self) -> Vec<String> {
+        self.sidebar_menu.menu_items()
+    }
+
+    fn menu_item_checked(&self) -> Vec<Option<bool>> {
+        self.sidebar_menu.menu_item_checked()
+    }
+
+    fn is_vertical(&self) -> bool {
+        self.sidebar_menu.is_vertical()
+    }
+
+    fn menu_names(&self) -> Vec<String> {
+        self.pages.clone()
+    }
+
+    fn menu_items_list(&self) -> Vec<Vec<String>> {
+        if let Some(c) = self.sidebar_menu.as_menu_controller() {
+            c.menu_items_list()
         } else {
-            result.extend(self.sidebar_menu.text_labels_with_font_and_bounds(ctx));
+            vec![]
         }
-
-        if self.selected_page < self.plates.len() {
-            result.extend(self.plates[self.selected_page].text_labels_with_font_and_bounds(ctx));
-        }
-        result
     }
 
-    fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::menubar_font())
+    fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> {
+        if let Some(c) = self.sidebar_menu.as_menu_controller() {
+            c.menu_checked_list()
+        } else {
+            vec![]
+        }
     }
 
     fn take_context_change(&mut self) -> Option<usize> {
@@ -1075,25 +1151,20 @@ impl Element for Paginator {
         self.set_context_selected(selected);
     }
 
-    fn focus(&mut self) {
-        self.sidebar_menu.focus();
+    fn set_center_items(&mut self, center: bool) {
+        if let Some(c) = self.sidebar_menu.as_menu_controller_mut() {
+            c.set_center_items(center);
+        }
     }
 
-    fn unfocus(&mut self) {
-        self.sidebar_menu.unfocus();
-    }
-
-    fn focused(&self, ctx: &UiContext) -> bool {
-        self.sidebar_menu.focused(ctx)
-    }
-
-    fn is_menu_bar(&self) -> bool {
-        true
+    fn get_menu_items_at(&self, px: f32, py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> {
+        if let Some(c) = self.sidebar_menu.as_menu_controller() {
+            c.get_menu_items_at(px, py)
+        } else {
+            None
+        }
     }
 }
-
-unsafe impl Send for Paginator {}
-unsafe impl Sync for Paginator {}
 
 #[cfg(test)]
 mod tests {

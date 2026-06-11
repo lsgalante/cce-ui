@@ -16,6 +16,7 @@ pub struct Spinbox {
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub editor_state: TextEditorState,
+    pub just_changed: bool,
 }
 
 impl Spinbox {
@@ -36,6 +37,7 @@ impl Spinbox {
             parent: None,
             children: Vec::new(),
             editor_state: TextEditorState::new(String::new()),
+            just_changed: false,
         }
     }
 
@@ -66,6 +68,46 @@ impl Spinbox {
 impl Element for Spinbox {
     crate::impl_widget_base!(Spinbox);
 
+    fn get_value_string(&self) -> Option<String> {
+        if self.decimals > 0 {
+            let divisor = 10.0f32.powi(self.decimals as i32);
+            Some(format!("{:.width$}", self.value as f32 / divisor, width = self.decimals as usize))
+        } else {
+            Some(self.value.to_string())
+        }
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        let val = val.trim();
+        let old_val = self.value;
+        if self.decimals > 0 {
+            if let Ok(val_f) = val.parse::<f32>() {
+                let divisor = 10.0f32.powi(self.decimals as i32);
+                self.value = (val_f * divisor).round() as i32;
+                self.value = self.value.clamp(self.min, self.max);
+            }
+        } else {
+            if let Ok(val_i) = val.parse::<i32>() {
+                self.value = val_i.clamp(self.min, self.max);
+            }
+        }
+        if self.value != old_val {
+            self.just_changed = true;
+            if self.editing {
+                self.edit_buffer = self.get_value_string().unwrap_or_default();
+                self.cursor_idx = self.edit_buffer.chars().count();
+            }
+            return true;
+        }
+        false
+    }
+
+    fn take_change(&mut self) -> bool {
+        let ret = self.just_changed;
+        self.just_changed = false;
+        ret
+    }
+
     fn preferred_height(&self) -> Option<f32> {
         Some(crate::layout::spinbox_height())
     }
@@ -93,6 +135,12 @@ impl Element for Spinbox {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            if self.hit_test(px, py, ctx) {
+                ctx.handle_right_click(self.as_ptr(), px, py);
+                return true;
+            }
+        }
         if button != MouseButton::Left { return false; }
         if !self.hit_test(px, py, ctx) { return false; }
         match state {

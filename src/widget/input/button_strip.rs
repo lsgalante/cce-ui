@@ -1,5 +1,6 @@
 use crate::colors;
 use crate::widget::*;
+use crate::widget::input::get_font_db;
 
 #[derive(Debug, Clone)]
 pub struct ButtonStrip {
@@ -10,6 +11,8 @@ pub struct ButtonStrip {
     pub just_clicked: Option<usize>,
     pub hovered_idx: Option<usize>,
     pub pressed_idx: Option<usize>,
+    pub tab_text_quads: Vec<Vec<(f32, f32, f32, f32, [f32; 4])>>,
+    pub tab_quads_cache: std::collections::HashMap<String, Vec<(f32, f32, f32, f32, [f32; 4])>>,
 }
 
 impl ButtonStrip {
@@ -22,21 +25,26 @@ impl ButtonStrip {
             just_clicked: None,
             hovered_idx: None,
             pressed_idx: None,
+            tab_text_quads: Vec::new(),
+            tab_quads_cache: std::collections::HashMap::new(),
         }
     }
 
     pub fn with_buttons(mut self, buttons: Vec<String>) -> Self {
         self.buttons = buttons;
+        self.generate_rotated_labels();
         self
     }
 
     pub fn with_selected(mut self, selected: Option<usize>) -> Self {
         self.selected = selected;
+        self.generate_rotated_labels();
         self
     }
 
     pub fn with_vertical(mut self, vertical: bool) -> Self {
         self.vertical = vertical;
+        self.generate_rotated_labels();
         self
     }
 
@@ -45,7 +53,10 @@ impl ButtonStrip {
     }
 
     pub fn set_selected(&mut self, selected: Option<usize>) {
-        self.selected = selected;
+        if self.selected != selected {
+            self.selected = selected;
+            self.generate_rotated_labels();
+        }
     }
 
     pub fn take_click(&mut self) -> Option<usize> {
@@ -54,6 +65,109 @@ impl ButtonStrip {
 
     pub fn add_button(&mut self, label: &str) {
         self.buttons.push(label.to_string());
+        self.generate_rotated_labels();
+    }
+
+    pub fn generate_rotated_labels(&mut self) {
+        self.tab_text_quads.clear();
+        if !self.vertical || self.buttons.is_empty() {
+            return;
+        }
+
+        let active_color = colors::paginator_tab_label_color();
+        let active_srgb = colors::to_srgb(active_color);
+        let active_r = (active_srgb[0] * 255.0) as u8;
+        let active_g = (active_srgb[1] * 255.0) as u8;
+        let active_b = (active_srgb[2] * 255.0) as u8;
+        let inactive_r = (active_r as f32 * 0.78) as u8;
+        let inactive_g = (active_g as f32 * 0.78) as u8;
+        let inactive_b = (active_b as f32 * 0.78) as u8;
+
+        let (font_fam, font_size) = crate::layout::menubar_font_parsed();
+        let scale = crate::scale::scale_factor().max(1.0);
+
+        for (i, page_name) in self.buttons.iter().enumerate() {
+            let color = if self.selected == Some(i) {
+                [active_r, active_g, active_b]
+            } else {
+                [inactive_r, inactive_g, inactive_b]
+            };
+            let hex_color = format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]);
+
+            let trimmed = page_name.trim();
+            let has_icon = trimmed.find(' ').is_some();
+            let label_text = if let Some(space_idx) = trimmed.find(' ') {
+                trimmed.split_at(space_idx).1.trim()
+            } else {
+                trimmed
+            };
+
+            let r = self.item_rect(i);
+            let padding_y = crate::layout::paginator_tab_padding_y();
+            let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
+            let usable_h = (r.3 - y_offset).max(1.0);
+
+            let w_px = (r.2 * scale) as u32;
+            let h_px = (usable_h * scale) as u32;
+
+            if w_px == 0 || h_px == 0 {
+                self.tab_text_quads.push(Vec::new());
+                continue;
+            }
+
+            let cache_key = format!("{}:{}:{}:{:?}:{}:{}", trimmed, w_px, h_px, color, font_fam, scale);
+            if let Some(cached_quads) = self.tab_quads_cache.get(&cache_key) {
+                self.tab_text_quads.push(cached_quads.clone());
+                continue;
+            }
+
+            let svg_data = format!(
+                r##"<svg width="{}" height="{}" viewBox="0 0 {} {}" xmlns="http://www.w3.org/2000/svg">
+  <text x="{}" y="{}" font-family="{}" font-size="{}" fill="{}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 {} {})">{}</text>
+</svg>"##,
+                w_px, h_px,
+                r.2, usable_h,
+                r.2 / 2.0, usable_h / 2.0,
+                font_fam,
+                font_size,
+                hex_color,
+                r.2 / 2.0, usable_h / 2.0,
+                label_text
+            );
+
+            let opt = resvg::usvg::Options::default();
+            let fontdb = get_font_db();
+            
+            let mut page_quads = Vec::new();
+            if let Ok(tree) = resvg::usvg::Tree::from_data(svg_data.as_bytes(), &opt, fontdb) {
+                if let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(w_px, h_px) {
+                    resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+                    let pixels = pixmap.data();
+                    for row in 0..h_px {
+                        for col in 0..w_px {
+                            let idx = ((row * w_px + col) * 4) as usize;
+                            if idx + 3 < pixels.len() {
+                                let a = pixels[idx + 3] as f32 / 255.0;
+                                if a > 0.0 {
+                                    let r = ((pixels[idx] as f32 / 255.0) / a).min(1.0);
+                                    let g = ((pixels[idx + 1] as f32 / 255.0) / a).min(1.0);
+                                    let b = ((pixels[idx + 2] as f32 / 255.0) / a).min(1.0);
+                                    page_quads.push((
+                                        col as f32 / scale,
+                                        row as f32 / scale,
+                                        1.2 / scale,
+                                        1.2 / scale,
+                                        [r, g, b, a],
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            self.tab_quads_cache.insert(cache_key, page_quads.clone());
+            self.tab_text_quads.push(page_quads);
+        }
     }
 
     pub fn item_rect(&self, idx: usize) -> (f32, f32, f32, f32) {
@@ -63,8 +177,14 @@ impl ButtonStrip {
         let n = self.buttons.len() as f32;
         let (x, y, w, h) = self.rect();
         if self.vertical {
-            let btn_h = h / n;
-            (x, y + idx as f32 * btn_h, w, btn_h)
+            let spacing = 8.0;
+            let max_btn_h = if n > 1.0 {
+                (h - spacing * (n - 1.0)) / n
+            } else {
+                h
+            };
+            let btn_h = max_btn_h.min(144.0).max(0.0);
+            (x, y + idx as f32 * (btn_h + spacing), w, btn_h)
         } else {
             let btn_w = w / n;
             (x + idx as f32 * btn_w, y, btn_w, h)
@@ -74,6 +194,16 @@ impl ButtonStrip {
 
 impl Element for ButtonStrip {
     crate::impl_widget_base!(ButtonStrip);
+
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        if self.base.x != x || self.base.y != y || self.base.w != w || self.base.h != h {
+            self.base.x = x;
+            self.base.y = y;
+            self.base.w = w;
+            self.base.h = h;
+            self.generate_rotated_labels();
+        }
+    }
 
     fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         None
@@ -106,6 +236,12 @@ impl Element for ButtonStrip {
                         if self.selected != Some(pressed) {
                             self.selected = Some(pressed);
                             self.just_clicked = Some(pressed);
+                            self.generate_rotated_labels();
+                            changed = true;
+                        } else {
+                            self.selected = None;
+                            self.just_clicked = Some(pressed);
+                            self.generate_rotated_labels();
                             changed = true;
                         }
                     }
@@ -144,6 +280,30 @@ impl Element for ButtonStrip {
             if bg_color != [0.0, 0.0, 0.0, 0.0] {
                 quads.push((r.0, r.1, r.2, r.3, bg_color));
             }
+
+            if self.vertical {
+                if i < self.tab_text_quads.len() {
+                    let min_y = self.base.y;
+                    let max_y = self.base.y + self.base.h;
+                    let page_name = &self.buttons[i];
+                    let trimmed = page_name.trim();
+                    let has_icon = trimmed.find(' ').is_some();
+                    let padding_y = crate::layout::paginator_tab_padding_y();
+                    let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
+
+                    for &(qx, qy, qw, qh, qc) in &self.tab_text_quads[i] {
+                        let absolute_x = r.0 + qx;
+                        let absolute_y = r.1 + y_offset + qy;
+                        
+                        let ry1 = absolute_y.max(min_y);
+                        let ry2 = (absolute_y + qh).min(max_y);
+                        let rh = ry2 - ry1;
+                        if rh > 0.0 {
+                            quads.push((absolute_x, ry1, qw, rh, qc));
+                        }
+                    }
+                }
+            }
         }
         quads
     }
@@ -159,20 +319,23 @@ impl Element for ButtonStrip {
                 [0xa8, 0xa8, 0xb3]
             };
             if self.vertical {
-                let line_height = font_size * 1.2;
-                let label_len = btn_label.chars().count() as f32;
-                let total_h = label_len * line_height;
-                let start_y = r.1 + (r.3 - total_h) / 2.0;
-                let char_w = TextLabel::estimate_width("o", font_size);
-                let x_pos = r.0 + (r.2 - char_w) / 2.0;
-                for (char_idx, c) in btn_label.chars().enumerate() {
-                    labels.push(TextLabel {
-                        text: c.to_string(),
-                        x: x_pos,
-                        y: start_y + char_idx as f32 * line_height,
-                        font_size,
-                        color,
-                    });
+                let trimmed = btn_label.trim();
+                if let Some(space_idx) = trimmed.find(' ') {
+                    let (icon, _) = trimmed.split_at(space_idx);
+                    let icon = icon.trim();
+                    if !icon.is_empty() {
+                        let icon_font_size = 14.0;
+                        let est_icon_w = TextLabel::estimate_width(icon, icon_font_size);
+                        let padding_y = crate::layout::paginator_tab_padding_y();
+                        let icon_y = r.1 + (padding_y - 2.0).max(0.0);
+                        labels.push(TextLabel {
+                            text: icon.to_string(),
+                            x: r.0 + (r.2 - est_icon_w) / 2.0,
+                            y: icon_y,
+                            font_size: icon_font_size,
+                            color,
+                        });
+                    }
                 }
             } else {
                 let est_w = TextLabel::estimate_width(btn_label, font_size);
@@ -216,6 +379,7 @@ impl Element for ButtonStrip {
         if Some(next) != self.selected {
             self.selected = Some(next);
             self.just_clicked = Some(next);
+            self.generate_rotated_labels();
             return true;
         }
         false

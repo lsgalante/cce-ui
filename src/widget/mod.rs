@@ -179,7 +179,35 @@ pub trait Element {
         }
     }
 
-    fn label(&self) -> Option<String> { None }
+    fn label(&self) -> Option<String> {
+        self.base().and_then(|b| b.label.clone())
+    }
+
+    fn get_value_string(&self) -> Option<String> { None }
+    fn set_value_string(&mut self, _val: &str) -> bool { false }
+    fn take_change(&mut self) -> bool { false }
+
+    fn cut_selection(&mut self) -> bool {
+        if let Some(val) = self.get_value_string() {
+            clipboard::copy_to_clipboard(&val);
+            self.set_value_string("")
+        } else {
+            false
+        }
+    }
+    fn copy_selection(&self) {
+        if let Some(val) = self.get_value_string() {
+            clipboard::copy_to_clipboard(&val);
+        }
+    }
+    fn paste_from_clipboard(&mut self) -> bool {
+        if let Some(text) = clipboard::read_from_clipboard() {
+            self.set_value_string(&text)
+        } else {
+            false
+        }
+    }
+    fn select_all(&mut self) {}
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         if let Some(b) = self.base_mut() {
@@ -278,6 +306,7 @@ pub trait Element {
     }
 
     fn color(&self) -> [f32; 4];
+    fn solid_border(&self) -> Option<([f32; 4], f32)> { None }
 
     fn is_dragging(&self) -> bool { false }
     fn drag_update(&mut self, _px: f32, _py: f32) -> bool { false }
@@ -365,48 +394,27 @@ pub trait Element {
     fn set_selected(&mut self, _selected: bool) {}
     fn keyboard_input(&mut self, _event: &KeyEvent, _ctx: &mut UiContext) -> bool { false }
 
-    fn menu_click(&mut self) -> Option<(usize, usize)> { None }
-    fn get_menu_items_at(&self, _px: f32, _py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> { None }
-    fn trigger_menu_click(&mut self, _menu_idx: usize, _item_idx: usize) {}
-    fn set_item_checked(&mut self, _menu_idx: usize, _item_idx: usize, _checked: bool) {}
-    fn set_menu_items(&mut self, _menu_idx: usize, _items: &[String]) {}
-    fn is_menu_bar(&self) -> bool { false }
-    fn is_menu_open(&self) -> bool { false }
-    fn set_grid_snap(&mut self, _gx: f32, _gy: f32) {}
-    fn set_node_name(&mut self, _name: &str) {}
     fn set_visible(&mut self, _visible: bool) {}
     fn visible(&self) -> bool { true }
-    fn set_path(&mut self, _segments: &[String]) {}
-    fn path_click(&mut self) -> Option<usize> { None }
-
-    fn node_params(&self) -> Vec<(String, String, String)> { vec![] }
-    fn set_display_params(&mut self, _params: &[(String, String, String)]) {}
-
-    fn set_config_toggle(&mut self, _id: usize, _val: bool) {}
-    fn take_config_toggle(&mut self) -> Option<(usize, bool)> { None }
-    fn set_show_network_grid(&mut self, _show: bool) {}
-    fn set_config_spin(&mut self, _id: usize, _val: f32) {}
-    fn take_config_spin(&mut self) -> Option<(usize, f32)> { None }
-    fn set_grid_sizes(&mut self, _gx: f32, _gy: f32) {}
-    fn set_grid_origin(&mut self, _ox: f32, _oy: f32) {}
-    fn grid_origin(&self) -> (f32, f32) { (0.0, 0.0) }
-    fn set_skipped_sizes(&mut self, _row_h: f32, _col_w: f32) {}
-    fn set_palette_state(&mut self, _visible: bool, _query: &str, _items: &[String], _selected: usize) {}
-
-    fn set_geom_visible(&mut self, _visible: bool) {}
-    fn geom_visible(&self) -> bool { true }
-    fn take_geom_toggle(&mut self) -> bool { false }
-    fn set_spreadsheet_data(&mut self, _headers: Vec<String>, _rows: Vec<Vec<String>>) {}
     fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool { false }
+    fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
 
-    fn set_nodes(&mut self, _nodes: &[GraphNode]) {}
-    fn get_nodes(&self) -> Vec<GraphNode> { vec![] }
-    fn selected_node(&self) -> Option<usize> { None }
-    fn set_selected_node(&mut self, _idx: Option<usize>) {}
-    fn double_clicked_node(&self) -> Option<usize> { None }
-    fn clear_double_clicked_node(&mut self) {}
-    fn set_grid_snap_enabled(&mut self, _enabled: bool) {}
-    fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { None }
+    fn as_page_selector(&self) -> Option<&dyn PageSelector> { None }
+    fn as_page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> { None }
+    fn as_menu_controller(&self) -> Option<&dyn MenuController> { None }
+    fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> { None }
+    fn as_graph_controller(&self) -> Option<&dyn GraphController> { None }
+    fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> { None }
+    fn as_spreadsheet_controller(&self) -> Option<&dyn SpreadsheetController> { None }
+    fn as_spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> { None }
+    fn as_path_controller(&self) -> Option<&dyn PathController> { None }
+    fn as_path_controller_mut(&mut self) -> Option<&mut dyn PathController> { None }
+    fn as_param_controller(&self) -> Option<&dyn ParamController> { None }
+    fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> { None }
+    fn as_geom_controller(&self) -> Option<&dyn GeomController> { None }
+    fn as_geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> { None }
+    fn as_scroll_controller(&self) -> Option<&dyn ScrollController> { None }
+    fn as_scroll_controller_mut(&mut self) -> Option<&mut dyn ScrollController> { None }
 
     fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         let base = self.base()?;
@@ -465,36 +473,10 @@ pub trait Element {
     }
 
     fn z_index(&self) -> i32 { 0 }
-    fn set_center_items(&mut self, _center: bool) {}
-    fn menu_items(&self) -> Vec<String> { vec![] }
-    fn menu_item_checked(&self) -> Vec<Option<bool>> { vec![] }
-    fn is_vertical(&self) -> bool { false }
-
     fn is_plate(&self) -> bool { false }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
     fn layout_ignore(&self) -> bool { false }
-
-    fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
-    fn menu_names(&self) -> Vec<String> { vec![] }
-    fn selected_page(&self) -> usize { 0 }
-    fn set_selected_page(&mut self, _page: usize) {}
-    fn is_page_hidden(&self) -> bool { false }
-    fn set_page_hidden(&mut self, _hidden: bool) {}
-    fn set_pages(&mut self, _pages: Vec<String>) {}
-    fn set_pages_with_items(&mut self, _pages: Vec<String>, _items: Vec<Vec<String>>) {}
-    fn sidebar_w(&self) -> f32 { 0.0 }
-    fn set_sidebar_mode(&mut self, _enabled: bool) {}
-    fn set_sidebar_label(&mut self, _label: Option<String>) {}
-    fn add_widget_to_page(&mut self, _page_idx: usize, _widget: *mut (dyn Element + 'static), _ctx: &mut UiContext) {}
-    fn clear_page_widgets(&mut self, _page_idx: usize, _ctx: &mut UiContext) {}
-    fn menu_items_list(&self) -> Vec<Vec<String>> { vec![] }
-    fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> { vec![] }
     fn color_u8(&self) -> Option<[u8; 4]> { None }
-    fn update_bounds(&mut self, _count: usize, _viewport_y: f32, _viewport_h: f32) {}
-    fn get_item_draw_y(&self, _idx: usize, _offset: f32) -> Option<f32> { None }
-
-    fn take_context_change(&mut self) -> Option<usize> { None }
-    fn set_context_selected(&mut self, _selected: usize) {}
 }
 
 pub trait Control: Element {
@@ -542,7 +524,7 @@ pub use self::input::{
 pub use self::container::{
     Container, Header, ContentBg, ViewportBg, ParametersBg, ScrollingList,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
-    Paginator
+    Paginator, Switcher, Layer, Page
 };
 pub use self::display::{
     TextLabel, Label, SectionHeader, StyledLabel, TextItem, Svg, UsageBar,
@@ -550,6 +532,81 @@ pub use self::display::{
     GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
     DotStatus, PreviewLayoutMode, Sidebar, Panel, serialize_widgets
 };
+
+pub trait PageSelector {
+    fn selected_page(&self) -> usize;
+    fn set_selected_page(&mut self, page: usize);
+    fn is_page_hidden(&self) -> bool;
+    fn set_page_hidden(&mut self, hidden: bool);
+    fn set_pages(&mut self, pages: Vec<String>);
+    fn set_pages_with_items(&mut self, pages: Vec<String>, items: Vec<Vec<String>>);
+    fn sidebar_w(&self) -> f32;
+    fn set_sidebar_mode(&mut self, enabled: bool);
+    fn set_sidebar_label(&mut self, label: Option<String>);
+    fn add_widget_to_page(&mut self, page_idx: usize, widget: *mut (dyn Element + 'static), ctx: &mut UiContext);
+    fn clear_page_widgets(&mut self, page_idx: usize, ctx: &mut UiContext);
+}
+
+pub trait MenuController {
+    fn menu_click(&mut self) -> Option<(usize, usize)>;
+    fn trigger_menu_click(&mut self, menu_idx: usize, item_idx: usize);
+    fn set_item_checked(&mut self, menu_idx: usize, item_idx: usize, checked: bool);
+    fn set_menu_items(&mut self, menu_idx: usize, items: &[String]);
+    fn is_menu_bar(&self) -> bool;
+    fn is_menu_open(&self) -> bool;
+    fn menu_items(&self) -> Vec<String>;
+    fn menu_item_checked(&self) -> Vec<Option<bool>>;
+    fn is_vertical(&self) -> bool;
+    fn menu_names(&self) -> Vec<String>;
+    fn menu_items_list(&self) -> Vec<Vec<String>>;
+    fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>>;
+    fn take_context_change(&mut self) -> Option<usize>;
+    fn set_context_selected(&mut self, selected: usize);
+    fn set_center_items(&mut self, center: bool);
+    fn get_menu_items_at(&self, px: f32, py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)>;
+}
+
+pub trait GraphController {
+    fn set_nodes(&mut self, nodes: &[GraphNode]);
+    fn get_nodes(&self) -> Vec<GraphNode>;
+    fn selected_node(&self) -> Option<usize>;
+    fn set_selected_node(&mut self, idx: Option<usize>);
+    fn double_clicked_node(&self) -> Option<usize>;
+    fn clear_double_clicked_node(&mut self);
+    fn set_grid_snap_enabled(&mut self, enabled: bool);
+    fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)>;
+    fn set_grid_snap(&mut self, gx: f32, gy: f32);
+    fn set_grid_sizes(&mut self, gx: f32, gy: f32);
+    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32);
+    fn set_grid_origin(&mut self, ox: f32, oy: f32);
+    fn grid_origin(&self) -> (f32, f32);
+    fn set_show_network_grid(&mut self, show: bool);
+}
+
+pub trait SpreadsheetController {
+    fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>);
+}
+
+pub trait PathController {
+    fn set_path(&mut self, segments: &[String]);
+    fn path_click(&mut self) -> Option<usize>;
+}
+
+pub trait ParamController {
+    fn node_params(&self) -> Vec<(String, String, String)>;
+    fn set_display_params(&mut self, params: &[(String, String, String)]);
+}
+
+pub trait GeomController {
+    fn set_geom_visible(&mut self, visible: bool);
+    fn geom_visible(&self) -> bool;
+    fn take_geom_toggle(&mut self) -> bool;
+}
+
+pub trait ScrollController {
+    fn update_bounds(&mut self, count: usize, viewport_y: f32, viewport_h: f32);
+    fn get_item_draw_y(&self, idx: usize, offset: f32) -> Option<f32>;
+}
 
 pub fn label_offset(w: &dyn Element) -> f32 {
     let name = w.type_name();

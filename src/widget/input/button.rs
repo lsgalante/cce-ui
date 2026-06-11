@@ -9,13 +9,27 @@ pub enum ButtonKind {
     CopyIcon,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Button {
     base: Widget,
     pressed: bool,
     just_clicked: bool,
     kind: ButtonKind,
     pub selected: bool,
+    pub on_click_cb: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+}
+
+impl std::fmt::Debug for Button {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Button")
+            .field("base", &self.base)
+            .field("pressed", &self.pressed)
+            .field("just_clicked", &self.just_clicked)
+            .field("kind", &self.kind)
+            .field("selected", &self.selected)
+            .field("on_click_cb", &self.on_click_cb.as_ref().map(|_| "<callback>"))
+            .finish()
+    }
 }
 
 impl Button {
@@ -26,6 +40,7 @@ impl Button {
             just_clicked: false,
             kind: ButtonKind::Primary,
             selected: false,
+            on_click_cb: None,
         }
     }
 
@@ -36,6 +51,7 @@ impl Button {
             just_clicked: false,
             kind: ButtonKind::Reset,
             selected: false,
+            on_click_cb: None,
         }
     }
 
@@ -46,6 +62,7 @@ impl Button {
             just_clicked: false,
             kind: ButtonKind::ListRow,
             selected: false,
+            on_click_cb: None,
         }
     }
 
@@ -56,6 +73,7 @@ impl Button {
             just_clicked: false,
             kind: ButtonKind::CopyIcon,
             selected: false,
+            on_click_cb: None,
         }
     }
 
@@ -66,6 +84,11 @@ impl Button {
 
     pub fn with_selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    pub fn on_click<F: Fn() + Send + Sync + 'static>(mut self, cb: F) -> Self {
+        self.on_click_cb = Some(std::sync::Arc::new(cb));
         self
     }
 }
@@ -123,6 +146,9 @@ impl Element for Button {
             ElementState::Released => {
                 if self.pressed && self.hit_test(px, py, ctx) {
                     self.just_clicked = true;
+                    if let Some(ref cb) = self.on_click_cb {
+                        cb();
+                    }
                 }
                 let was = self.pressed;
                 self.pressed = false;

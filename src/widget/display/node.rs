@@ -45,6 +45,10 @@ impl Node {
     pub(crate) fn toggle_rect(&self) -> (f32, f32, f32, f32) {
         (self.x + self.w - 30.0, self.y + (self.h - 18.0) / 2.0, 18.0, 18.0)
     }
+
+    pub fn set_grid_snap(&mut self, gx: f32, gy: f32) { self.grid_snap_x = gx; self.grid_snap_y = gy; }
+    pub fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
+    pub fn set_node_name(&mut self, name: &str) { self.name = name.to_string(); }
 }
 
 impl Element for Node {
@@ -64,16 +68,16 @@ impl Element for Node {
     }
     fn unfocus(&mut self) { self.selected = false; }
 
-    fn node_params(&self) -> Vec<(String, String, String)> { self.parameters.clone() }
-    fn set_display_params(&mut self, params: &[(String, String, String)]) {
-        self.parameters = params.to_vec();
-    }
+    fn as_param_controller(&self) -> Option<&dyn ParamController> { Some(self) }
+    fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> { Some(self) }
+    fn as_geom_controller(&self) -> Option<&dyn GeomController> { Some(self) }
+    fn as_geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> { Some(self) }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         vec![TextLabel {
             text: self.name.clone(),
-            x: self.x + 8.0,
-            y: self.y + (self.h - 12.0) / 2.0,
+            x: self.x + self.w + 8.0,
+            y: self.y + (self.h - 14.0) / 2.0,
             font_size: 14.0,
             color: [0xcc, 0xcc, 0xd4],
         }]
@@ -118,10 +122,6 @@ impl Element for Node {
 
     fn is_dragging(&self) -> bool { self.dragging }
     fn draggable(&self) -> bool { !self.toggle_hovered }
-
-    fn set_grid_snap(&mut self, gx: f32, gy: f32) { self.grid_snap_x = gx; self.grid_snap_y = gy; }
-    fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
-    fn set_node_name(&mut self, name: &str) { self.name = name.to_string(); }
 
     fn drag_update(&mut self, px: f32, py: f32) -> bool {
         let nx = px - self.drag_ox;
@@ -177,6 +177,16 @@ impl Element for Node {
         quads
     }
 
+}
+
+impl ParamController for Node {
+    fn node_params(&self) -> Vec<(String, String, String)> { self.parameters.clone() }
+    fn set_display_params(&mut self, params: &[(String, String, String)]) {
+        self.parameters = params.to_vec();
+    }
+}
+
+impl GeomController for Node {
     fn set_geom_visible(&mut self, visible: bool) { self.geom_visible = visible; }
     fn geom_visible(&self) -> bool { self.geom_visible }
     fn take_geom_toggle(&mut self) -> bool { std::mem::take(&mut self.geom_toggled) }

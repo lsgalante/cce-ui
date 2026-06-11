@@ -19,20 +19,27 @@ fn serialize_single_widget(w: &dyn Element, json: &mut String) {
     // Handle children
     let dummy = crate::context::UiContext::new();
     let children = w.children(&dummy);
-    let menu_items = w.menu_items();
+    let mut menu_items = Vec::new();
+    let mut is_menu_open = false;
+    let mut is_vertical = false;
+    let mut checked_states = Vec::new();
+    if let Some(mc) = w.as_menu_controller() {
+        menu_items = mc.menu_items();
+        is_menu_open = mc.is_menu_open();
+        is_vertical = mc.is_vertical();
+        checked_states = mc.menu_item_checked();
+    }
 
-    if type_name == "Menu" && w.is_menu_open() && !menu_items.is_empty() {
+    if type_name == "Menu" && is_menu_open && !menu_items.is_empty() {
         json.push_str(",\"children\":[");
         let mut max_len = 0;
         for item in &menu_items {
             max_len = max_len.max(item.len());
         }
         let dw = (max_len as f32 * 7.5 + 40.0).max(120.0);
-        let vertical = w.is_vertical();
-        let dx = if vertical { x + width } else { x };
-        let dy = if vertical { y } else { y + height };
+        let dx = if is_vertical { x + width } else { x };
+        let dy = if is_vertical { y } else { y + height };
 
-        let checked_states = w.menu_item_checked();
         for (i, item) in menu_items.iter().enumerate() {
             if i > 0 {
                 json.push(',');

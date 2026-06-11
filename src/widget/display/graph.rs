@@ -4,6 +4,8 @@ use crate::widget::display::TextLabel;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct GraphNode {
+    #[serde(default)]
+    pub id: String,
     pub name: String,
     pub position: (f32, f32), // (column, row)
     pub parameters: Vec<(String, String, String)>, // (name, value, type)
@@ -22,6 +24,7 @@ pub struct Graph {
     skipped_col_w: f32,
     nodes: Vec<GraphNode>,
     selected_idx: Option<usize>,
+    selected_id: Option<String>,
     double_clicked_idx: Option<usize>,
     double_click_timer: Option<(std::time::Instant, usize)>,
     grid_snap_enabled: bool,
@@ -29,6 +32,7 @@ pub struct Graph {
 
     // For dragging a node
     dragging_idx: Option<usize>,
+    dragging_id: Option<String>,
     drag_ox: f32,
     drag_oy: f32,
     pub(crate) drag_node_pos: Option<(f32, f32)>,
@@ -69,11 +73,13 @@ impl Graph {
             skipped_col_w: 37.5,
             nodes: Vec::new(),
             selected_idx: None,
+            selected_id: None,
             double_clicked_idx: None,
             double_click_timer: None,
             grid_snap_enabled: false,
             node_geom_toggled: None,
             dragging_idx: None,
+            dragging_id: None,
             drag_ox: 0.0,
             drag_oy: 0.0,
             drag_node_pos: None,
@@ -103,7 +109,9 @@ impl Graph {
 
     pub fn toggle_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
         let (nx, ny, nw, nh) = self.node_rect(idx)?;
-        Some((nx + nw - 30.0, ny + (nh - 18.0) / 2.0, 18.0, 18.0))
+        let scale_f = nw / 80.0;
+        let size = (18.0 * scale_f).clamp(6.0, 50.0);
+        Some((nx + nw - size - 6.0 * scale_f, ny + (nh - size) / 2.0, size, size))
     }
 
     fn find_empty_cell(&self, start_x: f32, start_y: f32, skip_idx: Option<usize>) -> (f32, f32) {
@@ -153,39 +161,23 @@ impl Element for Graph {
         px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
     }
 
-    fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
-    fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
-    fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
-    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
-
-    fn set_nodes(&mut self, nodes: &[GraphNode]) {
-        self.nodes = nodes.to_vec();
-        if let Some(sel) = self.selected_idx {
-            if sel >= self.nodes.len() {
-                self.selected_idx = None;
-            }
-        }
-    }
-    fn get_nodes(&self) -> Vec<GraphNode> { self.nodes.clone() }
-    fn selected_node(&self) -> Option<usize> { self.selected_idx }
-    fn set_selected_node(&mut self, idx: Option<usize>) { self.selected_idx = idx; }
-    fn double_clicked_node(&self) -> Option<usize> { self.double_clicked_idx }
-    fn clear_double_clicked_node(&mut self) { self.double_clicked_idx = None; }
-    fn set_grid_snap_enabled(&mut self, enabled: bool) { self.grid_snap_enabled = enabled; }
-    fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { self.node_geom_toggled.take() }
+    fn as_graph_controller(&self) -> Option<&dyn GraphController> { Some(self) }
+    fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> { Some(self) }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         for (i, node) in self.nodes.iter().enumerate() {
-            if let Some((nx, ny, _nw, nh)) = self.node_rect(i) {
-                let lx = nx + 8.0;
-                let ly = ny + (nh - 12.0) / 2.0;
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                let scale_f = nw / 80.0;
+                let font_size = (14.0 * scale_f).clamp(6.0, 48.0);
+                let lx = nx + nw + 8.0 * scale_f;
+                let ly = ny + (nh - font_size) / 2.0;
                 if lx >= self.x && lx < self.x + self.w && ly >= self.y && ly < self.y + self.h {
                     labels.push(TextLabel {
                         text: node.name.clone(),
                         x: lx,
                         y: ly,
-                        font_size: 14.0,
+                        font_size,
                         color: [0xcc, 0xcc, 0xd4],
                     });
                 }
@@ -248,6 +240,7 @@ impl Element for Graph {
         } else {
             self.dragging_idx = None;
         }
+        self.dragging_id = None;
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
@@ -286,7 +279,9 @@ impl Element for Graph {
                             }
                             self.double_click_timer = Some((now, i));
                             self.selected_idx = Some(i);
+                            self.selected_id = Some(self.nodes[i].id.clone());
                             self.dragging_idx = Some(i);
+                            self.dragging_id = Some(self.nodes[i].id.clone());
                             self.drag_ox = px - nx;
                             self.drag_oy = py - ny;
                             self.drag_node_pos = Some((nx, ny));
@@ -296,6 +291,7 @@ impl Element for Graph {
                     }
                 }
                 self.selected_idx = None;
+                self.selected_id = None;
                 false
             }
             ElementState::Released => {
@@ -327,8 +323,9 @@ impl Element for Graph {
         };
 
         // Draw connection wires
+        let scale_f = self.grid_size_x / 80.0;
         let wire_color = [0.0, 0.75, 1.0, 0.7]; // Vibrant cyan glow
-        let wire_thickness = 3.0;
+        let wire_thickness = (3.0 * scale_f).clamp(1.0, 15.0);
         for i in 0..self.nodes.len() {
             let node = &self.nodes[i];
             if let Some((_, input_name, _)) = node.parameters.iter().find(|(name, _, _)| name.eq_ignore_ascii_case("input")) {
@@ -386,59 +383,28 @@ impl Element for Graph {
             let step_x = self.grid_size_x + self.skipped_col_w;
 
             if step_y >= 4.0 && step_x >= 4.0 {
-                let ry_start = ((self.y - self.grid_origin_y) / step_y).floor() as i32 - 1;
-                let ry_end = ((self.y + self.h - self.grid_origin_y) / step_y).ceil() as i32 + 1;
-                let ry_start = ry_start.max(-100_000);
-                let ry_end = ry_end.min(100_000);
+                let ry_start = (((self.y - self.grid_origin_y) / step_y).floor() as i32 - 1).max(-100_000);
+                let ry_end = (((self.y + self.h - self.grid_origin_y) / step_y).ceil() as i32 + 1).min(100_000);
 
-                let cx_start = ((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1;
-                let cx_end = ((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1;
-                let cx_start = cx_start.max(-100_000);
-                let cx_end = cx_end.min(100_000);
+                let cx_start = (((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1).max(-100_000);
+                let cx_end = (((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1).min(100_000);
 
                 // Draw gap color as solid background color of grid
-                quads.push((self.x, self.y, self.w, self.h, [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity]));
+                push_clipped(self.x, self.y, self.w, self.h, [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity], &mut quads);
 
                 // Draw filled cells with cell color
                 for r in ry_start..=ry_end {
-                    let y1 = self.grid_origin_y + (r as f32) * step_y;
+                    let y1 = (self.grid_origin_y + (r as f32) * step_y).round();
                     for c in cx_start..=cx_end {
-                        let x1 = self.grid_origin_x + (c as f32) * step_x;
-                        let cell_x = x1.max(self.x);
-                        let cell_y = y1.max(self.y);
-                        let cell_w = (x1 + self.grid_size_x).min(self.x + self.w) - cell_x;
-                        let cell_h = (y1 + self.grid_size_y).min(self.y + self.h) - cell_y;
-                        if cell_w > 0.0 && cell_h > 0.0 {
-                            quads.push((cell_x, cell_y, cell_w, cell_h, [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity]));
-                        }
-                    }
-                }
-
-                let grid_line_color = [0.18, 0.18, 0.22, 0.40];
-
-                for k in ry_start..=ry_end {
-                    let y1 = self.grid_origin_y + (k as f32) * step_y;
-                    let y2 = y1 + self.grid_size_y;
-                    if y1 < self.y + self.h {
-                        if y1 >= self.y {
-                            quads.push((self.x, y1, self.w, 1.0, grid_line_color));
-                        }
-                        if y2 >= self.y && y2 < self.y + self.h {
-                            quads.push((self.x, y2, self.w, 1.0, grid_line_color));
-                        }
-                    }
-                }
-
-                for k in cx_start..=cx_end {
-                    let x1 = self.grid_origin_x + (k as f32) * step_x;
-                    let x2 = x1 + self.grid_size_x;
-                    if x1 < self.x + self.w {
-                        if x1 >= self.x {
-                            quads.push((x1, self.y, 1.0, self.h, grid_line_color));
-                        }
-                        if x2 >= self.x && x2 < self.x + self.w {
-                            quads.push((x2, self.y, 1.0, self.h, grid_line_color));
-                        }
+                        let x1 = (self.grid_origin_x + (c as f32) * step_x).round();
+                        push_clipped(
+                            x1,
+                            y1,
+                            self.grid_size_x.round(),
+                            self.grid_size_y.round(),
+                            [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity],
+                            &mut quads,
+                        );
                     }
                 }
             }
@@ -446,6 +412,7 @@ impl Element for Graph {
 
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                let scale_f = nw / 80.0;
                 let bg_color = if self.dragging_idx == Some(i) {
                     colors::node_drag_color()
                 } else if self.selected_idx == Some(i) {
@@ -464,7 +431,7 @@ impl Element for Graph {
                     push_clipped(tx, ty, tw, th, btn_color, &mut quads);
 
                     if self.nodes[i].geom_visible {
-                        let inset = 3.0;
+                        let inset = 3.0 * scale_f;
                         push_clipped(tx + inset, ty + inset, tw - inset * 2.0, th - inset * 2.0, colors::TOGGLE_ON, &mut quads);
                     }
                 }
@@ -474,9 +441,7 @@ impl Element for Graph {
         quads
     }
 
-    fn grid_origin(&self) -> (f32, f32) {
-        (self.grid_origin_x, self.grid_origin_y)
-    }
+
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if self.hit_test(px, py, ctx) {
@@ -497,3 +462,58 @@ impl Element for Graph {
         }
     }
 }
+
+impl Drop for Graph {
+    fn drop(&mut self) {
+        focus::clear_if_matches(self);
+    }
+}
+
+impl GraphController for Graph {
+    fn set_nodes(&mut self, nodes: &[GraphNode]) {
+        self.nodes = nodes.to_vec();
+        
+        // Sync selected_idx from selected_id
+        if let Some(ref id) = self.selected_id {
+            self.selected_idx = self.nodes.iter().position(|n| n.id == *id);
+            if self.selected_idx.is_none() {
+                self.selected_id = None;
+            }
+        } else {
+            self.selected_idx = None;
+        }
+
+        // Sync dragging_idx from dragging_id
+        if let Some(ref id) = self.dragging_id {
+            self.dragging_idx = self.nodes.iter().position(|n| n.id == *id);
+            if self.dragging_idx.is_none() {
+                self.dragging_id = None;
+                self.drag_node_pos = None;
+            }
+        } else {
+            self.dragging_idx = None;
+            self.drag_node_pos = None;
+        }
+
+        self.double_clicked_idx = None;
+        self.double_click_timer = None;
+        self.toggle_hovered_idx = None;
+    }
+    fn get_nodes(&self) -> Vec<GraphNode> { self.nodes.clone() }
+    fn selected_node(&self) -> Option<usize> { self.selected_idx }
+    fn set_selected_node(&mut self, idx: Option<usize>) {
+        self.selected_idx = idx;
+        self.selected_id = idx.and_then(|i| self.nodes.get(i).map(|n| n.id.clone()));
+    }
+    fn double_clicked_node(&self) -> Option<usize> { self.double_clicked_idx }
+    fn clear_double_clicked_node(&mut self) { self.double_clicked_idx = None; }
+    fn set_grid_snap_enabled(&mut self, enabled: bool) { self.grid_snap_enabled = enabled; }
+    fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { self.node_geom_toggled.take() }
+    fn set_grid_snap(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
+    fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
+    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
+    fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
+    fn grid_origin(&self) -> (f32, f32) { (self.grid_origin_x, self.grid_origin_y) }
+    fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
+}
+

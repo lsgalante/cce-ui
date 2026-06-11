@@ -5,6 +5,7 @@ pub struct Checkbox {
     base: Widget,
     checked: bool,
     just_clicked: bool,
+    pub just_changed: bool,
 }
 
 impl Checkbox {
@@ -13,6 +14,7 @@ impl Checkbox {
             base: Widget::new(),
             checked: false,
             just_clicked: false,
+            just_changed: false,
         }
     }
 
@@ -33,6 +35,33 @@ impl Checkbox {
 impl Element for Checkbox {
     crate::impl_widget_base!(Checkbox);
 
+    fn get_value_string(&self) -> Option<String> {
+        Some(self.checked.to_string())
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        let val_trimmed = val.trim().to_lowercase();
+        let new_checked = if val_trimmed == "true" || val_trimmed == "1" || val_trimmed == "yes" || val_trimmed == "on" {
+            true
+        } else if val_trimmed == "false" || val_trimmed == "0" || val_trimmed == "no" || val_trimmed == "off" {
+            false
+        } else {
+            return false;
+        };
+        if self.checked != new_checked {
+            self.checked = new_checked;
+            self.just_changed = true;
+            return true;
+        }
+        false
+    }
+
+    fn take_change(&mut self) -> bool {
+        let ret = self.just_changed;
+        self.just_changed = false;
+        ret
+    }
+
     fn color(&self) -> [f32; 4] {
         let (_, _, w, _) = self.rect();
         if w > 30.0 {
@@ -51,6 +80,12 @@ impl Element for Checkbox {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            if self.hit_test(px, py, ctx) {
+                ctx.handle_right_click(self.as_ptr(), px, py);
+                return true;
+            }
+        }
         if button != MouseButton::Left { return false; }
         match state {
             ElementState::Released => {

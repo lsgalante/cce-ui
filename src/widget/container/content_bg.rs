@@ -33,10 +33,8 @@ impl Element for ContentBg {
     fn hovered(&self) -> bool { self.hovered }
     fn hit_test(&self, _px: f32, _py: f32, _ctx: &UiContext) -> bool { false }
 
-    fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
-    fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
-    fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
-    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
+    fn as_graph_controller(&self) -> Option<&dyn GraphController> { Some(self) }
+    fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> { Some(self) }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.show_network_grid || self.grid_size_x <= 0.0 || self.grid_size_y <= 0.0 {
@@ -233,4 +231,21 @@ impl Element for ContentBg {
         }
         quads
     }
+}
+
+impl GraphController for ContentBg {
+    fn set_nodes(&mut self, _nodes: &[GraphNode]) {}
+    fn get_nodes(&self) -> Vec<GraphNode> { Vec::new() }
+    fn selected_node(&self) -> Option<usize> { None }
+    fn set_selected_node(&mut self, _idx: Option<usize>) {}
+    fn double_clicked_node(&self) -> Option<usize> { None }
+    fn clear_double_clicked_node(&mut self) {}
+    fn set_grid_snap_enabled(&mut self, _enabled: bool) {}
+    fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { None }
+    fn set_grid_snap(&mut self, _gx: f32, _gy: f32) {}
+    fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
+    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
+    fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
+    fn grid_origin(&self) -> (f32, f32) { (self.grid_origin_x, self.grid_origin_y) }
+    fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
 }

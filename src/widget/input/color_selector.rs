@@ -15,6 +15,7 @@ pub struct ColorSelector {
     pub children: Vec<*mut (dyn Element + 'static)>,
     child: std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
     pub editor_state: TextEditorState,
+    pub just_changed: bool,
 }
 
 impl Clone for ColorSelector {
@@ -32,6 +33,7 @@ impl Clone for ColorSelector {
             children: self.children.clone(),
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: self.editor_state.clone(),
+            just_changed: self.just_changed,
         }
     }
 }
@@ -51,6 +53,7 @@ impl ColorSelector {
             children: Vec::new(),
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: TextEditorState::new(String::new()),
+            just_changed: false,
         }
     }
 
@@ -72,6 +75,31 @@ impl ColorSelector {
 
 impl Element for ColorSelector {
     crate::impl_widget_base!(ColorSelector);
+
+    fn get_value_string(&self) -> Option<String> {
+        Some(format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]))
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        if let Some(c) = parse_hex(val) {
+            if self.color != c {
+                self.color = c;
+                self.just_changed = true;
+                if self.editing {
+                    self.edit_buffer = format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]);
+                    self.cursor_idx = self.edit_buffer.chars().count();
+                }
+                return true;
+            }
+        }
+        false
+    }
+
+    fn take_change(&mut self) -> bool {
+        let ret = self.just_changed;
+        self.just_changed = false;
+        ret
+    }
 
     fn preferred_height(&self) -> Option<f32> {
         Some(crate::layout::color_selector_height())
@@ -95,6 +123,12 @@ impl Element for ColorSelector {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            if self.hit_test(px, py, ctx) {
+                ctx.handle_right_click(self.as_ptr(), px, py);
+                return true;
+            }
+        }
         if button != MouseButton::Left { return false; }
         if state != ElementState::Pressed { return false; }
         if !self.hit_test(px, py, ctx) { return false; }

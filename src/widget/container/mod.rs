@@ -10,6 +10,9 @@ pub mod scroll_box;
 pub mod scrolling_list;
 pub mod plate;
 pub mod paginator;
+pub mod switcher;
+pub mod layer;
+pub mod page;
 
 pub use container::Container;
 pub use header::Header;
@@ -23,3 +26,6 @@ pub use scroll_box::ScrollBox;
 pub use scrolling_list::ScrollingList;
 pub use plate::Plate;
 pub use paginator::Paginator;
+pub use switcher::Switcher;
+pub use layer::Layer;
+pub use page::Page;

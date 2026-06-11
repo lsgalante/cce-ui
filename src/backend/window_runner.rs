@@ -440,6 +440,7 @@ pub fn push_plate_bevel_vertices(
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
+    let r = r.min(ww * 0.5).min(h * 0.5);
     let highlight_color = [1.0, 1.0, 1.0, 0.15];
     let shadow_color = [0.0, 0.0, 0.0, 0.25];
 
@@ -491,6 +492,52 @@ pub fn push_plate_bevel_vertices(
     );
 }
 
+pub fn push_plate_solid_border_vertices(
+    x: f32, y: f32, ww: f32, h: f32,
+    r: f32,
+    t: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    clip_circle: [f32; 3],
+    out: &mut Vec<Vertex>,
+) {
+    let r = r.min(ww * 0.5).min(h * 0.5);
+    out.extend_from_slice(&quad_vertices_with_clip(x + r, y, ww - 2.0 * r, t, sw, sh, color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x, y + r, t, h - 2.0 * r, sw, sh, color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x + r, y + h - t, ww - 2.0 * r, t, sw, sh, color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + r, t, h - 2.0 * r, sw, sh, color, clip_circle));
+
+    let segments = 16;
+
+    push_arc_background_vertices(
+        x + r, y + r, r, t,
+        std::f32::consts::PI, 1.5 * std::f32::consts::PI,
+        sw, sh, color, segments, clip_circle,
+        out,
+    );
+
+    push_arc_background_vertices(
+        x + ww - r, y + r, r, t,
+        1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI,
+        sw, sh, color, segments, clip_circle,
+        out,
+    );
+
+    push_arc_background_vertices(
+        x + ww - r, y + h - r, r, t,
+        0.0, 0.5 * std::f32::consts::PI,
+        sw, sh, color, segments, clip_circle,
+        out,
+    );
+
+    push_arc_background_vertices(
+        x + r, y + h - r, r, t,
+        0.5 * std::f32::consts::PI, std::f32::consts::PI,
+        sw, sh, color, segments, clip_circle,
+        out,
+    );
+}
+
 pub fn widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
     let mut verts = Vec::new();
     push_widget_vertices(w, sw, sh, clip_circle, &mut verts);
@@ -506,8 +553,8 @@ pub fn push_widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, cl
         out.extend_from_slice(&quad_vertices_with_clip(x, y, ww, h, sw, sh, w.color(), clip_circle));
     }
 
-    if w.is_plate() {
-        push_plate_bevel_vertices(x, y, ww, h, 12.0, 1.5, sw, sh, clip_circle, out);
+    if let Some((color, thickness)) = w.solid_border() {
+        push_plate_solid_border_vertices(x, y, ww, h, 12.0, thickness, sw, sh, color, clip_circle, out);
     }
 }
 

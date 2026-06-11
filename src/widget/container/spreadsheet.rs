@@ -91,16 +91,8 @@ impl Element for Spreadsheet {
         self.visible
     }
 
-    fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>) {
-        self.headers = headers;
-        self.rows = rows;
-        
-        // Clamp scroll_y to new bounds
-        let content_h = self.rows.len() as f32 * 24.0;
-        let visible_h = (self.h - 24.0).max(0.0);
-        let max_scroll_y = (content_h - visible_h).max(0.0);
-        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll_y);
-    }
+    fn as_spreadsheet_controller(&self) -> Option<&dyn SpreadsheetController> { Some(self) }
+    fn as_spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> { Some(self) }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let was_hovered = self.hovered;
@@ -393,5 +385,18 @@ impl Element for Spreadsheet {
             }
         }
         labels
+    }
+}
+
+impl SpreadsheetController for Spreadsheet {
+    fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>) {
+        self.headers = headers;
+        self.rows = rows;
+        
+        // Clamp scroll_y to new bounds
+        let content_h = self.rows.len() as f32 * 24.0;
+        let visible_h = (self.h - 24.0).max(0.0);
+        let max_scroll_y = (content_h - visible_h).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll_y);
     }
 }

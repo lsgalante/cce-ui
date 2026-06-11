@@ -411,27 +411,33 @@ pub mod clipboard {
     }
 
     pub fn read_from_clipboard() -> Option<String> {
-        if let Ok(output) = std::process::Command::new("wl-paste")
+        match std::process::Command::new("wl-paste")
             .arg("-n")
             .output()
         {
-            if output.status.success() {
-                if let Ok(text) = String::from_utf8(output.stdout) {
-                    return Some(text);
+            Ok(output) => {
+                if output.status.success() {
+                    if let Ok(text) = String::from_utf8(output.stdout) {
+                        return Some(text);
+                    }
                 }
             }
+            Err(_) => {}
         }
-        if let Ok(output) = std::process::Command::new("xclip")
+        match std::process::Command::new("xclip")
             .arg("-selection")
             .arg("clipboard")
             .arg("-o")
             .output()
         {
-            if output.status.success() {
-                if let Ok(text) = String::from_utf8(output.stdout) {
-                    return Some(text);
+            Ok(output) => {
+                if output.status.success() {
+                    if let Ok(text) = String::from_utf8(output.stdout) {
+                        return Some(text);
+                    }
                 }
             }
+            Err(_) => {}
         }
         None
     }
@@ -450,7 +456,7 @@ pub mod context_menu {
         pub visible: bool,
         pub options: Vec<String>,
         pub hovered_item: Option<usize>,
-        pub target: Option<*mut TextBox>,
+        pub target: Option<*mut (dyn Element + 'static)>,
     }
 
     impl ContextMenuState {
@@ -467,11 +473,13 @@ pub mod context_menu {
             }
         }
 
-        pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, target: *mut TextBox) {
+        pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, target: *mut (dyn Element + 'static)) {
             self.x = x;
             self.y = y;
             self.options = options;
             self.h = self.options.len() as f32 * 24.0;
+            let max_len = self.options.iter().map(|s| s.len()).max().unwrap_or(0);
+            self.w = ((max_len as f32 * 7.5) + 24.0).max(120.0);
             self.visible = true;
             self.hovered_item = None;
             self.target = Some(target);
@@ -493,7 +501,7 @@ pub mod context_menu {
             self.hovered_item = None;
             if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
                 let idx = ((py - self.y) / 24.0) as usize;
-                if idx < self.options.len() {
+                if idx < self.options.len() && idx > 0 {
                     self.hovered_item = Some(idx);
                 }
             }
@@ -513,28 +521,26 @@ pub mod context_menu {
             if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
                 let idx = ((py - self.y) / 24.0) as usize;
                 if idx < self.options.len() {
-                    let opt = self.options[idx].clone();
-                    if let Some(target_ptr) = self.target {
-                        unsafe {
-                            let target = &mut *target_ptr;
-                            match opt.as_str() {
-                                "Cut" => {
-                                    if target.cut_selection() {
-                                        target.just_changed = true;
+                    if idx > 0 {
+                        let opt = self.options[idx].clone();
+                        if let Some(target_ptr) = self.target {
+                            unsafe {
+                                let target = &mut *target_ptr;
+                                match opt.as_str() {
+                                    "Cut" => {
+                                        let _ = target.cut_selection();
                                     }
-                                }
-                                "Copy" => {
-                                    target.copy_selection();
-                                }
-                                "Paste" => {
-                                    if target.paste_from_clipboard() {
-                                        target.just_changed = true;
+                                    "Copy" => {
+                                        target.copy_selection();
                                     }
+                                    "Paste" => {
+                                        let _ = target.paste_from_clipboard();
+                                    }
+                                    "Select All" => {
+                                        target.select_all();
+                                    }
+                                    _ => {}
                                 }
-                                "Select All" => {
-                                    target.select_all();
-                                }
-                                _ => {}
                             }
                         }
                     }
@@ -570,7 +576,9 @@ pub mod context_menu {
 
             for (idx, opt) in self.options.iter().enumerate() {
                 let iy = self.y + idx as f32 * 24.0 + (24.0 - 12.0) / 2.0;
-                let text_color = if self.hovered_item == Some(idx) {
+                let text_color = if idx == 0 {
+                    [0x70, 0x70, 0x78]
+                } else if self.hovered_item == Some(idx) {
                     [0xff, 0xff, 0xff]
                 } else {
                     [0xcc, 0xcc, 0xd4]
@@ -596,7 +604,7 @@ pub mod context_menu {
         CONTEXT_MENU.with(|m| m.borrow().visible)
     }
 
-    pub fn show(x: f32, y: f32, options: Vec<String>, target: *mut TextBox) {
+    pub fn show(x: f32, y: f32, options: Vec<String>, target: *mut (dyn Element + 'static)) {
         CONTEXT_MENU.with(|m| m.borrow_mut().show(x, y, options, target));
     }
 

@@ -68,20 +68,8 @@ impl Element for Breadcrumb {
         false
     }
 
-    fn set_path(&mut self, segments: &[String]) {
-        let mut s = Vec::with_capacity(segments.len().max(1));
-        if segments.is_empty() || (segments.len() == 1 && segments[0].is_empty()) {
-            s.push("/".to_string());
-        } else {
-            s.push("/".to_string());
-            for name in segments {
-                s.push(format!(" \u{203A} {}", name));
-            }
-        }
-        self.path = s;
-    }
-
-    fn path_click(&mut self) -> Option<usize> { self.clicked_seg.take() }
+    fn as_path_controller(&self) -> Option<&dyn PathController> { Some(self) }
+    fn as_path_controller_mut(&mut self) -> Option<&mut dyn PathController> { Some(self) }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
@@ -111,5 +99,14 @@ impl Element for Breadcrumb {
             cx += seg.len() as f32 * 7.5 + SEGMENT_GAP;
         }
         labels
+    }
+}
+
+impl PathController for Breadcrumb {
+    fn set_path(&mut self, segments: &[String]) {
+        self.path = segments.to_vec();
+    }
+    fn path_click(&mut self) -> Option<usize> {
+        self.clicked_seg.take()
     }
 }
