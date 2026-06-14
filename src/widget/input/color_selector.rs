@@ -5,6 +5,7 @@ use crate::widget::*;
 pub struct ColorSelector {
     pub(crate) base: Widget,
     pub color: [u8; 3],
+    pub alpha: u8,
     just_clicked: bool,
     pub editing: bool,
     pub(crate) edit_buffer: String,
@@ -16,6 +17,7 @@ pub struct ColorSelector {
     child: std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
     pub editor_state: TextEditorState,
     pub just_changed: bool,
+    pub with_alpha: bool,
 }
 
 impl Clone for ColorSelector {
@@ -23,6 +25,7 @@ impl Clone for ColorSelector {
         Self {
             base: self.base.clone(),
             color: self.color,
+            alpha: self.alpha,
             just_clicked: self.just_clicked,
             editing: self.editing,
             edit_buffer: self.edit_buffer.clone(),
@@ -34,6 +37,7 @@ impl Clone for ColorSelector {
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: self.editor_state.clone(),
             just_changed: self.just_changed,
+            with_alpha: self.with_alpha,
         }
     }
 }
@@ -43,18 +47,45 @@ impl ColorSelector {
         Self {
             base: Widget::new(),
             color,
+            alpha: 255,
             just_clicked: false,
             editing: false,
             edit_buffer: String::new(),
             cursor_idx: 0,
             font_family: crate::layout::color_selector_font(),
-            command: "clear-color-interface".to_string(),
+            command: "cce-color-interface".to_string(),
             parent: None,
             children: Vec::new(),
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
+            with_alpha: false,
         }
+    }
+
+    pub fn new_rgba(color: [u8; 4]) -> Self {
+        Self {
+            base: Widget::new(),
+            color: [color[0], color[1], color[2]],
+            alpha: color[3],
+            just_clicked: false,
+            editing: false,
+            edit_buffer: String::new(),
+            cursor_idx: 0,
+            font_family: crate::layout::color_selector_font(),
+            command: "cce-color-interface".to_string(),
+            parent: None,
+            children: Vec::new(),
+            child: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            editor_state: TextEditorState::new(String::new()),
+            just_changed: false,
+            with_alpha: true,
+        }
+    }
+
+    pub fn with_alpha(mut self, with_alpha: bool) -> Self {
+        self.with_alpha = with_alpha;
+        self
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
@@ -77,16 +108,23 @@ impl Element for ColorSelector {
     crate::impl_widget_base!(ColorSelector);
 
     fn get_value_string(&self) -> Option<String> {
-        Some(format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]))
+        if self.with_alpha {
+            Some(format!("#{:02x}{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2], self.alpha))
+        } else {
+            Some(format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]))
+        }
     }
 
     fn set_value_string(&mut self, val: &str) -> bool {
         if let Some(c) = parse_hex(val) {
-            if self.color != c {
-                self.color = c;
+            let target_color = [c[0], c[1], c[2]];
+            let target_alpha = if self.with_alpha { c[3] } else { 255 };
+            if self.color != target_color || (self.with_alpha && self.alpha != target_alpha) {
+                self.color = target_color;
+                self.alpha = target_alpha;
                 self.just_changed = true;
                 if self.editing {
-                    self.edit_buffer = format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]);
+                    self.edit_buffer = self.get_value_string().unwrap();
                     self.cursor_idx = self.edit_buffer.chars().count();
                 }
                 return true;
@@ -110,7 +148,7 @@ impl Element for ColorSelector {
     }
 
     fn color_u8(&self) -> Option<[u8; 4]> {
-        Some([self.color[0], self.color[1], self.color[2], 255])
+        Some([self.color[0], self.color[1], self.color[2], self.alpha])
     }
 
     fn color(&self) -> [f32; 4] {
@@ -118,7 +156,7 @@ impl Element for ColorSelector {
             self.color[0] as f32 / 255.0,
             self.color[1] as f32 / 255.0,
             self.color[2] as f32 / 255.0,
-            1.0,
+            self.alpha as f32 / 255.0,
         ])
     }
 
@@ -133,7 +171,7 @@ impl Element for ColorSelector {
         if state != ElementState::Pressed { return false; }
         if !self.hit_test(px, py, ctx) { return false; }
         if px >= self.base.x + self.base.w * 0.65 {
-            let hex = format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]);
+            let hex = self.get_value_string().unwrap();
             let mut child_guard = self.child.lock().unwrap();
             if let Some(mut old_child) = child_guard.take() {
                 let _ = old_child.kill();
@@ -165,7 +203,8 @@ impl Element for ColorSelector {
                         let stdout_str = String::from_utf8_lossy(&output.stdout);
                         for line in stdout_str.lines().rev() {
                             if let Some(c) = parse_hex(line.trim()) {
-                                self.color = c;
+                                self.color = [c[0], c[1], c[2]];
+                                self.alpha = if self.with_alpha { c[3] } else { 255 };
                                 self.just_clicked = true;
                                 return true;
                             }
@@ -184,7 +223,7 @@ impl Element for ColorSelector {
 
     fn focus(&mut self) {
         self.editing = true;
-        self.edit_buffer = format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]);
+        self.edit_buffer = self.get_value_string().unwrap();
         self.cursor_idx = self.edit_buffer.chars().count();
         focus::set_focused(self);
     }
@@ -193,7 +232,8 @@ impl Element for ColorSelector {
         if self.editing {
             self.editing = false;
             if let Some(c) = parse_hex(&self.edit_buffer) {
-                self.color = c;
+                self.color = [c[0], c[1], c[2]];
+                self.alpha = if self.with_alpha { c[3] } else { 255 };
             }
         }
     }
@@ -229,7 +269,8 @@ impl Element for ColorSelector {
             }
             Key::Named(NamedKey::Enter) => {
                 if let Some(c) = parse_hex(&state.buffer) {
-                    self.color = c;
+                    self.color = [c[0], c[1], c[2]];
+                    self.alpha = if self.with_alpha { c[3] } else { 255 };
                 }
                 self.editing = false;
                 handled = true;
@@ -253,7 +294,11 @@ impl Element for ColorSelector {
                             }
                             '0'..='9' | 'a'..='f' | 'A'..='F' => {
                                 let count = state.buffer.chars().count();
-                                let max_len = if state.buffer.starts_with('#') { 7 } else { 6 };
+                                let max_len = if state.buffer.starts_with('#') {
+                                    if self.with_alpha { 9 } else { 7 }
+                                } else {
+                                    if self.with_alpha { 8 } else { 6 }
+                                };
                                 if count < max_len {
                                     state.insert_text(&ch.to_ascii_lowercase().to_string());
                                     handled = true;
@@ -310,7 +355,7 @@ impl Element for ColorSelector {
             self.color[0] as f32 / 255.0,
             self.color[1] as f32 / 255.0,
             self.color[2] as f32 / 255.0,
-            1.0,
+            self.alpha as f32 / 255.0,
         ]);
         let border_w = 1.0;
         let border_c = colors::color_borders_color();
@@ -373,6 +418,41 @@ impl Element for ColorSelector {
         }
 
         add_rounded_rect(&mut quads, border_c, px, py, pw, ph, preview_radius);
+
+        if self.with_alpha {
+            add_rounded_rect(
+                &mut quads,
+                [0.8, 0.8, 0.8, 1.0],
+                px + border_w,
+                py + border_w,
+                (pw - 2.0 * border_w).max(0.0),
+                (ph - 2.0 * border_w).max(0.0),
+                (preview_radius - border_w).max(0.0),
+            );
+            
+            let grid_size = 6.0;
+            let start_x = px + border_w;
+            let start_y = py + border_w;
+            let inner_w = (pw - 2.0 * border_w).max(0.0);
+            let inner_h = (ph - 2.0 * border_w).max(0.0);
+            
+            let cols = (inner_w / grid_size).ceil() as i32;
+            let rows = (inner_h / grid_size).ceil() as i32;
+            for r in 0..rows {
+                for c in 0..cols {
+                    if (r + c) % 2 == 1 {
+                        let qx = start_x + c as f32 * grid_size;
+                        let qy = start_y + r as f32 * grid_size;
+                        let qw = grid_size.min(start_x + inner_w - qx);
+                        let qh = grid_size.min(start_y + inner_h - qy);
+                        if qw > 0.0 && qh > 0.0 {
+                            quads.push((qx, qy, qw, qh, [1.0, 1.0, 1.0, 1.0]));
+                        }
+                    }
+                }
+            }
+        }
+
         add_rounded_rect(
             &mut quads,
             linear_c,
@@ -390,7 +470,7 @@ impl Element for ColorSelector {
         if let Some(lbl) = self.control_label() {
             labels.push(lbl);
         }
-        let hex = if self.editing { self.edit_buffer.clone() } else { format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]) };
+        let hex = if self.editing { self.edit_buffer.clone() } else { self.get_value_string().unwrap() };
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         labels.push(TextLabel {
@@ -410,13 +490,22 @@ impl Drop for ColorSelector {
     }
 }
 
-fn parse_hex(s: &str) -> Option<[u8; 3]> {
+fn parse_hex(s: &str) -> Option<[u8; 4]> {
     let s = s.trim_start_matches('#');
-    if s.len() != 6 { return None; }
-    let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-    Some([r, g, b])
+    if s.len() == 6 {
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        Some([r, g, b, 255])
+    } else if s.len() == 8 {
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        let a = u8::from_str_radix(&s[6..8], 16).ok()?;
+        Some([r, g, b, a])
+    } else {
+        None
+    }
 }
 
 impl Control for ColorSelector {}
@@ -433,6 +522,7 @@ mod tests {
         let mut dummy = crate::context::UiContext::new();
         let mut cs = ColorSelector::new([255, 0, 0]);
         assert_eq!(cs.color, [255, 0, 0]);
+        assert_eq!(cs.alpha, 255);
         assert!(!cs.editing);
 
         // 1. Focus color selector
@@ -571,6 +661,66 @@ mod tests {
         assert!(handled);
         assert!(!cs.editing);
         assert_eq!(cs.color, [0xcf, 0xfb, 0x05]);
+        assert_eq!(cs.alpha, 255);
+    }
+
+    #[test]
+    fn test_colorselector_alpha_support() {
+        let mut dummy = crate::context::UiContext::new();
+        let mut cs = ColorSelector::new_rgba([255, 0, 0, 128]);
+        assert_eq!(cs.color, [255, 0, 0]);
+        assert_eq!(cs.alpha, 128);
+        assert!(cs.with_alpha);
+
+        cs.focus();
+        assert!(cs.editing);
+        assert_eq!(cs.edit_buffer, "#ff000080");
+        assert_eq!(cs.cursor_idx, 9);
+
+        let type_a_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character("a".to_string()),
+            text: Some("a".to_string()),
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        let backspace_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::Backspace),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        cs.keyboard_input(&backspace_ev, &mut dummy);
+        cs.keyboard_input(&backspace_ev, &mut dummy);
+        assert_eq!(cs.edit_buffer, "#ff0000");
+
+        let type_b_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character("b".to_string()),
+            text: Some("b".to_string()),
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        cs.keyboard_input(&type_a_ev, &mut dummy);
+        cs.keyboard_input(&type_b_ev, &mut dummy);
+        assert_eq!(cs.edit_buffer, "#ff0000ab");
+
+        let enter_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::Enter),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        cs.keyboard_input(&enter_ev, &mut dummy);
+        assert!(!cs.editing);
+        assert_eq!(cs.color, [255, 0, 0]);
+        assert_eq!(cs.alpha, 171);
     }
 }
 

@@ -106,7 +106,7 @@ impl StyledLabel {
         let metrics = glyphon::Metrics::new(physical_size, physical_size * 1.4);
         let mut buffer = glyphon::Buffer::new(fs, metrics);
         let family_enum = match family {
-            "monospace" => glyphon::Family::Monospace,
+            "monospace" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
             "sans-serif" => glyphon::Family::SansSerif,
             "serif" => glyphon::Family::Serif,
             name => glyphon::Family::Name(name),
@@ -158,11 +158,12 @@ impl StyledLabel {
             let font_size = self.buffer.metrics().font_size / scale;
             let line_y = self.buffer.layout_runs().next().map(|r| r.line_y).unwrap_or(font_size * scale * 1.05) / scale;
             let offset_y = line_y - 0.28 * font_size;
+            let padding = 4.0;
             Some((
-                x,
-                y + offset_y * scale,
-                self.w,
-                1.0 * scale,
+                x - padding,
+                y + offset_y,
+                self.w + 2.0 * padding,
+                1.0,
                 col,
             ))
         } else {

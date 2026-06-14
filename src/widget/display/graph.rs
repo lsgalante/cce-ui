@@ -2,6 +2,14 @@ use crate::colors;
 use crate::widget::*;
 use crate::widget::display::TextLabel;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PortType {
+    Input,
+    Output,
+}
+
+fn default_outputs() -> usize { 1 }
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct GraphNode {
     #[serde(default)]
@@ -10,6 +18,12 @@ pub struct GraphNode {
     pub position: (f32, f32), // (column, row)
     pub parameters: Vec<(String, String, String)>, // (name, value, type)
     pub geom_visible: bool,
+    #[serde(default)]
+    pub node_type: String,
+    #[serde(default)]
+    pub inputs: usize,
+    #[serde(default = "default_outputs")]
+    pub outputs: usize,
 }
 
 pub struct Graph {
@@ -42,8 +56,15 @@ pub struct Graph {
 
     uniform_background: bool,
     network_opacity: f32,
+    cell_opacity: f32,
+    gap_opacity: f32,
     cell_color: [f32; 3],
     gap_color: [f32; 3],
+
+    // Connection state
+    connecting_from: Option<(usize, PortType, usize)>,
+    current_mouse_pos: (f32, f32),
+    pending_connection: Option<(String, String)>,
 }
 
 impl Graph {
@@ -52,6 +73,14 @@ impl Graph {
     }
     pub fn set_network_opacity(&mut self, opacity: f32) {
         self.network_opacity = opacity;
+        self.cell_opacity = opacity;
+        self.gap_opacity = opacity;
+    }
+    pub fn set_cell_opacity(&mut self, opacity: f32) {
+        self.cell_opacity = opacity;
+    }
+    pub fn set_gap_opacity(&mut self, opacity: f32) {
+        self.gap_opacity = opacity;
     }
     pub fn set_cell_color(&mut self, color: [f32; 3]) {
         self.cell_color = color;
@@ -86,8 +115,13 @@ impl Graph {
             toggle_hovered_idx: None,
             uniform_background: false,
             network_opacity: 0.95,
+            cell_opacity: 0.95,
+            gap_opacity: 0.95,
             cell_color: [0.13, 0.13, 0.16],
             gap_color: [0.07, 0.07, 0.09],
+            connecting_from: None,
+            current_mouse_pos: (0.0, 0.0),
+            pending_connection: None,
         }
     }
 
@@ -108,6 +142,11 @@ impl Graph {
     }
 
     pub fn toggle_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
+        if let Some(node) = self.nodes.get(idx) {
+            if node.node_type == "utility" {
+                return None;
+            }
+        }
         let (nx, ny, nw, nh) = self.node_rect(idx)?;
         let scale_f = nw / 80.0;
         let size = (18.0 * scale_f).clamp(6.0, 50.0);
@@ -141,6 +180,8 @@ impl Element for Graph {
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
     }
+
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, true, true) }
 
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
@@ -184,6 +225,17 @@ impl Element for Graph {
             }
         }
         labels
+    }
+
+    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        let bounds = Some([self.x, self.y, self.x + self.w, self.y + self.h]);
+        self.text_labels().into_iter().map(|l| (l, bounds)).collect()
+    }
+
+    fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let font = self.widget_font();
+        let bounds = Some([self.x, self.y, self.x + self.w, self.y + self.h]);
+        self.text_labels().into_iter().map(|l| (l, font.clone(), bounds)).collect()
     }
 
     fn focus(&mut self) {
@@ -244,6 +296,11 @@ impl Element for Graph {
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = false;
+        if self.connecting_from.is_some() {
+            self.current_mouse_pos = (px, py);
+            changed = true;
+        }
         let was_toggle_hovered = self.toggle_hovered_idx;
         self.toggle_hovered_idx = None;
         for i in 0..self.nodes.len() {
@@ -254,13 +311,127 @@ impl Element for Graph {
                 }
             }
         }
-        was_toggle_hovered != self.toggle_hovered_idx
+        if was_toggle_hovered != self.toggle_hovered_idx {
+            changed = true;
+        }
+        changed
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            if self.connecting_from.is_some() {
+                self.connecting_from = None;
+                return true;
+            }
+        }
         if button != MouseButton::Left { return false; }
         match state {
             ElementState::Pressed => {
+                println!("DEBUG Graph::mouse_input: Pressed px={}, py={}, connecting_from={:?}", px, py, self.connecting_from);
+                // First, check direct port clicks
+                for i in (0..self.nodes.len()).rev() {
+                    if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                        let scale_f = nw / 80.0;
+                        let port_click_radius = (20.0 * scale_f).max(12.0);
+                        let port_click_radius_sq = port_click_radius * port_click_radius;
+
+                        let node = &self.nodes[i];
+                        // Check inputs (top edge)
+                        for k in 0..node.inputs {
+                            let port_x = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
+                            let port_y = ny;
+                            let dx = px - port_x;
+                            let dy = py - port_y;
+                            println!("  Checking input node={} port={} port_x={} port_y={} dist_sq={}", node.name, k, port_x, port_y, dx*dx + dy*dy);
+                            if dx * dx + dy * dy <= port_click_radius_sq {
+                                if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+                                    if src_idx != i && src_port_type == PortType::Output {
+                                        let output_node = &self.nodes[src_idx];
+                                        let input_node = &self.nodes[i];
+                                        self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                        self.connecting_from = None;
+                                        println!("  Port connection created: Input={} from Output={}", input_node.name, output_node.name);
+                                        return true;
+                                    } else {
+                                        self.connecting_from = None;
+                                        println!("  Port connection aborted (same node or incompatible ports)");
+                                        return true;
+                                    }
+                                } else {
+                                    self.connecting_from = Some((i, PortType::Input, k));
+                                    self.current_mouse_pos = (px, py);
+                                    println!("  Start connecting from Input port of node={}", node.name);
+                                    return true;
+                                }
+                            }
+                        }
+
+                        // Check outputs (bottom edge)
+                        for k in 0..node.outputs {
+                            let port_x = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
+                            let port_y = ny + nh;
+                            let dx = px - port_x;
+                            let dy = py - port_y;
+                            println!("  Checking output node={} port={} port_x={} port_y={} dist_sq={}", node.name, k, port_x, port_y, dx*dx + dy*dy);
+                            if dx * dx + dy * dy <= port_click_radius_sq {
+                                if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+                                    if src_idx != i && src_port_type == PortType::Input {
+                                        let output_node = &self.nodes[i];
+                                        let input_node = &self.nodes[src_idx];
+                                        self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                        self.connecting_from = None;
+                                        println!("  Port connection created: Input={} from Output={}", input_node.name, output_node.name);
+                                        return true;
+                                    } else {
+                                        self.connecting_from = None;
+                                        println!("  Port connection aborted (same node or incompatible ports)");
+                                        return true;
+                                    }
+                                } else {
+                                    self.connecting_from = Some((i, PortType::Output, k));
+                                    self.current_mouse_pos = (px, py);
+                                    println!("  Start connecting from Output port of node={}", node.name);
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fallback: If we are actively connecting and clicked on a target node body, connect to its closest compatible port
+                if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+                    for i in (0..self.nodes.len()).rev() {
+                        if src_idx != i {
+                            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                                println!("  Checking fallback body node={} nx={} ny={} nw={} nh={}", self.nodes[i].name, nx, ny, nw, nh);
+                                if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
+                                    let node = &self.nodes[i];
+                                    if src_port_type == PortType::Output && node.inputs > 0 {
+                                        let output_node = &self.nodes[src_idx];
+                                        let input_node = &self.nodes[i];
+                                        self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                        self.connecting_from = None;
+                                        println!("  Fallback connection created: Input={} from Output={}", input_node.name, output_node.name);
+                                        return true;
+                                    } else if src_port_type == PortType::Input && node.outputs > 0 {
+                                        let output_node = &self.nodes[i];
+                                        let input_node = &self.nodes[src_idx];
+                                        self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                        self.connecting_from = None;
+                                        println!("  Fallback connection created: Input={} from Output={}", input_node.name, output_node.name);
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if self.connecting_from.is_some() {
+                    println!("  Clearing connecting_from because it didn't hit any ports or node bodies");
+                    self.connecting_from = None;
+                }
+
                 for i in (0..self.nodes.len()).rev() {
                     if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
                         if px >= tx && px < tx + tw && py >= ty && py < ty + th {
@@ -331,9 +502,21 @@ impl Element for Graph {
             if let Some((_, input_name, _)) = node.parameters.iter().find(|(name, _, _)| name.eq_ignore_ascii_case("input")) {
                 if let Some(src_idx) = self.nodes.iter().position(|n| n.name == *input_name) {
                     if let (Some((sx, sy, sw, sh)), Some((ex, ey, ew, _eh))) = (self.node_rect(src_idx), self.node_rect(i)) {
-                        let start_x = sx + sw / 2.0;
+                        let src_outputs = self.nodes[src_idx].outputs;
+                        let target_inputs = node.inputs;
+
+                        let start_x = if src_outputs > 0 {
+                            sx + sw * 1.0 / (src_outputs + 1) as f32
+                        } else {
+                            sx + sw / 2.0
+                        };
                         let start_y = sy + sh;
-                        let end_x = ex + ew / 2.0;
+
+                        let end_x = if target_inputs > 0 {
+                            ex + ew * 1.0 / (target_inputs + 1) as f32
+                        } else {
+                            ex + ew / 2.0
+                        };
                         let end_y = ey;
 
                         let mid_y = start_y + (end_y - start_y) / 2.0;
@@ -378,6 +561,62 @@ impl Element for Graph {
             }
         }
 
+        // Draw connection wire preview if in progress
+        if let Some((node_idx, port_type, port_idx)) = self.connecting_from {
+            if let Some((nx, ny, nw, nh)) = self.node_rect(node_idx) {
+                let start_x = match port_type {
+                    PortType::Input => nx + nw * (port_idx + 1) as f32 / (self.nodes[node_idx].inputs + 1) as f32,
+                    PortType::Output => nx + nw * (port_idx + 1) as f32 / (self.nodes[node_idx].outputs + 1) as f32,
+                };
+                let start_y = match port_type {
+                    PortType::Input => ny,
+                    PortType::Output => ny + nh,
+                };
+
+                let end_x = self.current_mouse_pos.0;
+                let end_y = self.current_mouse_pos.1;
+
+                let preview_color = [1.0, 0.6, 0.0, 0.8]; // Golden orange preview
+                let mid_y = start_y + (end_y - start_y) / 2.0;
+
+                // Vertical segment 1
+                let v1_min_y = start_y.min(mid_y);
+                let v1_max_y = start_y.max(mid_y);
+                push_clipped(
+                    start_x - wire_thickness / 2.0,
+                    v1_min_y,
+                    wire_thickness,
+                    v1_max_y - v1_min_y,
+                    preview_color,
+                    &mut quads,
+                );
+
+                // Horizontal segment
+                let h_min_x = start_x.min(end_x);
+                let h_max_x = start_x.max(end_x);
+                push_clipped(
+                    h_min_x,
+                    mid_y - wire_thickness / 2.0,
+                    h_max_x - h_min_x,
+                    wire_thickness,
+                    preview_color,
+                    &mut quads,
+                );
+
+                // Vertical segment 2
+                let v2_min_y = mid_y.min(end_y);
+                let v2_max_y = mid_y.max(end_y);
+                push_clipped(
+                    end_x - wire_thickness / 2.0,
+                    v2_min_y,
+                    wire_thickness,
+                    v2_max_y - v2_min_y,
+                    preview_color,
+                    &mut quads,
+                );
+            }
+        }
+
         if self.show_network_grid && self.grid_size_x > 0.0 && self.grid_size_y > 0.0 && !self.uniform_background {
             let step_y = self.grid_size_y + self.skipped_row_h;
             let step_x = self.grid_size_x + self.skipped_col_w;
@@ -389,25 +628,66 @@ impl Element for Graph {
                 let cx_start = (((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1).max(-100_000);
                 let cx_end = (((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1).min(100_000);
 
-                // Draw gap color as solid background color of grid
-                push_clipped(self.x, self.y, self.w, self.h, [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity], &mut quads);
-
-                // Draw filled cells with cell color
+                // Draw gap rectangles and cells in a single loop with matching rounded coordinate boundaries to prevent seams
                 for r in ry_start..=ry_end {
-                    let y1 = (self.grid_origin_y + (r as f32) * step_y).round();
+                    let y_cell_start = (self.grid_origin_y + (r as f32) * step_y).round();
+                    let y_cell_end = (self.grid_origin_y + (r as f32) * step_y + self.grid_size_y).round();
+                    let y2 = (self.grid_origin_y + ((r + 1) as f32) * step_y).round();
+
+                    let cell_h = y_cell_end - y_cell_start;
+                    let gap_h = y2 - y_cell_end;
+
                     for c in cx_start..=cx_end {
-                        let x1 = (self.grid_origin_x + (c as f32) * step_x).round();
+                        let x_cell_start = (self.grid_origin_x + (c as f32) * step_x).round();
+                        let x_cell_end = (self.grid_origin_x + (c as f32) * step_x + self.grid_size_x).round();
+                        let x2 = (self.grid_origin_x + ((c + 1) as f32) * step_x).round();
+
+                        let cell_w = x_cell_end - x_cell_start;
+                        let gap_w = x2 - x_cell_end;
+
+                        // Draw right gap rectangle (shares cell height, sits to the right of the cell)
                         push_clipped(
-                            x1,
-                            y1,
-                            self.grid_size_x.round(),
-                            self.grid_size_y.round(),
-                            [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity],
+                            x_cell_end,
+                            y_cell_start,
+                            gap_w,
+                            cell_h,
+                            [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.gap_opacity],
+                            &mut quads,
+                        );
+
+                        // Draw bottom gap rectangle (shares the full step width, sits below the cell/right gap)
+                        push_clipped(
+                            x_cell_start,
+                            y_cell_end,
+                            x2 - x_cell_start,
+                            gap_h,
+                            [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.gap_opacity],
+                            &mut quads,
+                        );
+
+                        // Draw cell rectangle with the exact same bounding boundaries
+                        push_clipped(
+                            x_cell_start,
+                            y_cell_start,
+                            cell_w,
+                            cell_h,
+                            [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.cell_opacity],
                             &mut quads,
                         );
                     }
                 }
             }
+        }
+
+        if self.grid_size_x > 0.0 && self.grid_size_y > 0.0 {
+            let thickness = 2.0;
+            // X axis (horizontal) in the gap below row 0
+            let y_center = self.grid_origin_y + self.grid_size_y + self.skipped_row_h / 2.0;
+            push_clipped(self.x, y_center - thickness / 2.0, self.w, thickness, [0.0, 0.0, 0.0, 1.0], &mut quads);
+
+            // Y axis (vertical) in the gap to the left of col 0
+            let x_center = self.grid_origin_x - self.skipped_col_w / 2.0;
+            push_clipped(x_center - thickness / 2.0, self.y, thickness, self.h, [0.0, 0.0, 0.0, 1.0], &mut quads);
         }
 
         for i in 0..self.nodes.len() {
@@ -421,6 +701,23 @@ impl Element for Graph {
                     colors::node_color()
                 };
                 push_clipped(nx, ny, nw, nh, bg_color, &mut quads);
+
+                // Draw input ports on top edge
+                let port_size = (6.0 * scale_f).max(2.0);
+                let port_color = [0.1, 0.8, 0.4, 1.0]; // Bright green/emerald
+                let node = &self.nodes[i];
+                for k in 0..node.inputs {
+                    let px = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32 - port_size / 2.0;
+                    let py = ny - port_size / 2.0;
+                    push_clipped(px, py, port_size, port_size, port_color, &mut quads);
+                }
+
+                // Draw output ports on bottom edge
+                for k in 0..node.outputs {
+                    let px = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32 - port_size / 2.0;
+                    let py = ny + nh - port_size / 2.0;
+                    push_clipped(px, py, port_size, port_size, port_color, &mut quads);
+                }
 
                 if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
                     let btn_color = if self.toggle_hovered_idx == Some(i) {
@@ -515,5 +812,11 @@ impl GraphController for Graph {
     fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
     fn grid_origin(&self) -> (f32, f32) { (self.grid_origin_x, self.grid_origin_y) }
     fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
+    fn take_pending_connection(&mut self) -> Option<(String, String)> {
+        self.pending_connection.take()
+    }
+    fn cancel_connecting(&mut self) {
+        self.connecting_from = None;
+    }
 }
 

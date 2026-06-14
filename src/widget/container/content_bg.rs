@@ -248,4 +248,6 @@ impl GraphController for ContentBg {
     fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
     fn grid_origin(&self) -> (f32, f32) { (self.grid_origin_x, self.grid_origin_y) }
     fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
+    fn take_pending_connection(&mut self) -> Option<(String, String)> { None }
+    fn cancel_connecting(&mut self) {}
 }

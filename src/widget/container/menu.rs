@@ -73,7 +73,7 @@ impl MenuBar {
             menu_dropdown_checked: Vec::new(),
             vertical: false,
             focused: false,
-            z_level: 100,
+            z_level: 0,
             center_items: false,
             title_pos: None,
             title_buf: None,

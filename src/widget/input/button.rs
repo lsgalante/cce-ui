@@ -17,6 +17,10 @@ pub struct Button {
     kind: ButtonKind,
     pub selected: bool,
     pub on_click_cb: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
+    pub bg: Option<[f32; 4]>,
+    pub hover_bg: Option<[f32; 4]>,
+    pub label_color: Option<[f32; 4]>,
+    pub left_align: bool,
 }
 
 impl std::fmt::Debug for Button {
@@ -41,6 +45,10 @@ impl Button {
             kind: ButtonKind::Primary,
             selected: false,
             on_click_cb: None,
+            bg: None,
+            hover_bg: None,
+            label_color: None,
+            left_align: false,
         }
     }
 
@@ -52,6 +60,10 @@ impl Button {
             kind: ButtonKind::Reset,
             selected: false,
             on_click_cb: None,
+            bg: None,
+            hover_bg: None,
+            label_color: None,
+            left_align: false,
         }
     }
 
@@ -63,6 +75,10 @@ impl Button {
             kind: ButtonKind::ListRow,
             selected: false,
             on_click_cb: None,
+            bg: None,
+            hover_bg: None,
+            label_color: None,
+            left_align: false,
         }
     }
 
@@ -74,6 +90,10 @@ impl Button {
             kind: ButtonKind::CopyIcon,
             selected: false,
             on_click_cb: None,
+            bg: None,
+            hover_bg: None,
+            label_color: None,
+            left_align: false,
         }
     }
 
@@ -91,6 +111,26 @@ impl Button {
         self.on_click_cb = Some(std::sync::Arc::new(cb));
         self
     }
+
+    pub fn with_bg(mut self, bg: [f32; 4]) -> Self {
+        self.bg = Some(bg);
+        self
+    }
+
+    pub fn with_hover_bg(mut self, hover_bg: [f32; 4]) -> Self {
+        self.hover_bg = Some(hover_bg);
+        self
+    }
+
+    pub fn with_label_color(mut self, label_color: [f32; 4]) -> Self {
+        self.label_color = Some(label_color);
+        self
+    }
+
+    pub fn with_left_align(mut self, left_align: bool) -> Self {
+        self.left_align = left_align;
+        self
+    }
 }
 
 impl Element for Button {
@@ -98,6 +138,15 @@ impl Element for Button {
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
 
     fn color(&self) -> [f32; 4] {
+        if self.pressed || self.base.hovered {
+            if let Some(hbg) = self.hover_bg {
+                return hbg;
+            }
+        } else {
+            if let Some(bg) = self.bg {
+                return bg;
+            }
+        }
         match self.kind {
             ButtonKind::Primary => {
                 if self.pressed { colors::BUTTON_PRESS }
@@ -171,16 +220,29 @@ impl Element for Button {
             } else {
                 TextLabel::estimate_width(label, font_size)
             };
-            let color = match self.kind {
-                ButtonKind::ListRow | ButtonKind::CopyIcon => {
-                    if self.selected { [230, 230, 242] }
-                    else { [178, 178, 191] }
+            let color = if let Some(lc) = self.label_color {
+                [
+                    (lc[0] * 255.0) as u8,
+                    (lc[1] * 255.0) as u8,
+                    (lc[2] * 255.0) as u8,
+                ]
+            } else {
+                match self.kind {
+                    ButtonKind::ListRow | ButtonKind::CopyIcon => {
+                        if self.selected { [230, 230, 242] }
+                        else { [178, 178, 191] }
+                    }
+                    _ => [0xcc, 0xcc, 0xd4]
                 }
-                _ => [0xcc, 0xcc, 0xd4]
+            };
+            let x = if self.left_align {
+                self.base.x + 8.0
+            } else {
+                self.base.x + (self.base.w - est_w) / 2.0
             };
             labels.push(TextLabel {
                 text: label.clone(),
-                x: self.base.x + (self.base.w - est_w) / 2.0,
+                x,
                 y: self.base.y + (self.base.h - font_size) / 2.0 - 1.0,
                 font_size,
                 color,
@@ -194,6 +256,19 @@ impl Element for Button {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())]
+    }
+
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::button_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::button_corner_radius()
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::colors;
 use crate::widget::*;
-use crate::widget::input::{Slider, Spinbox};
+use crate::widget::input::{Slider, Spinbox, Button, Dropdown, TextBox, Checkbox};
 use crate::widget::display::{Float3, TextLabel};
 
 pub struct ParametersBg {
@@ -8,10 +8,15 @@ pub struct ParametersBg {
     display_params: Vec<(String, String, String)>,
     dragging_param: Option<usize>,
     pub focused_param: Option<usize>,
+    pub code_editor: Option<TextEditorState>,
     mouse_pos: Option<(f32, f32)>,
     sliders: Vec<Option<Slider>>,
     float3s: Vec<Option<Float3>>,
     spinboxes: Vec<Option<Spinbox>>,
+    pub buttons: Vec<Option<Button>>,
+    pub choices: Vec<Option<Dropdown>>,
+    pub texts: Vec<Option<TextBox>>,
+    pub checkboxes: Vec<Option<Checkbox>>,
     visible: bool,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub parent: Option<*mut (dyn Element + 'static)>,
@@ -24,10 +29,15 @@ impl ParametersBg {
             display_params: Vec::new(),
             dragging_param: None,
             focused_param: None,
+            code_editor: None,
             mouse_pos: None,
             sliders: Vec::new(),
             float3s: Vec::new(),
             spinboxes: Vec::new(),
+            buttons: Vec::new(),
+            choices: Vec::new(),
+            texts: Vec::new(),
+            checkboxes: Vec::new(),
             visible: true,
             children: Vec::new(),
             parent: None,
@@ -37,14 +47,25 @@ impl ParametersBg {
     pub fn get_param_rects(&self) -> Vec<(f32, f32, f32, f32)> {
         let mut rects = Vec::new();
         let mut cur_y = self.base.y + 30.0;
-        for p in &self.display_params {
+        for (i, p) in self.display_params.iter().enumerate() {
             let h = if p.2 == "code" {
-                200.0
+                let val_text = if self.focused_param == Some(i) {
+                    if let Some(ref editor) = self.code_editor {
+                        &editor.buffer
+                    } else {
+                        &p.1
+                    }
+                } else {
+                    &p.1
+                };
+                let line_count = val_text.split('\n').count();
+                let content_h = 22.0 + (line_count as f32 * 16.0) + 12.0;
+                content_h.max(200.0)
             } else if p.2 == "section" {
                 24.0
             } else if p.2.starts_with("float3") {
                 108.0
-            } else if p.2 == "text" {
+            } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") || p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
                 24.0
             } else {
                 20.0
@@ -81,6 +102,38 @@ impl ParametersBg {
                 sb.set_rect(box_x, r.1, box_w, r.3);
             }
         }
+        for (i, b_opt) in self.buttons.iter_mut().enumerate() {
+            if let Some(b) = b_opt {
+                let r = rects[i];
+                let box_x = self.base.x + 100.0;
+                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
+                b.set_rect(box_x, r.1, box_w, r.3);
+            }
+        }
+        for (i, d_opt) in self.choices.iter_mut().enumerate() {
+            if let Some(d) = d_opt {
+                let r = rects[i];
+                let box_x = self.base.x + 100.0;
+                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
+                d.set_rect(box_x, r.1, box_w, r.3);
+            }
+        }
+        for (i, tb_opt) in self.texts.iter_mut().enumerate() {
+            if let Some(tb) = tb_opt {
+                let r = rects[i];
+                let box_x = self.base.x + 100.0;
+                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
+                tb.set_rect(box_x, r.1, box_w, r.3);
+            }
+        }
+        for (i, cb_opt) in self.checkboxes.iter_mut().enumerate() {
+            if let Some(cb) = cb_opt {
+                let r = rects[i];
+                let box_x = self.base.x + 100.0;
+                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
+                cb.set_rect(box_x, r.1, box_w, r.3);
+            }
+        }
     }
 
     fn own_text_labels(&self) -> Vec<TextLabel> {
@@ -113,11 +166,27 @@ impl ParametersBg {
                 });
             } else if ptype == "code" {
                 labels.push(TextLabel {
-                    text: format!("{}:\n{}", name, value),
+                    text: format!("{}:", name),
                     x: self.base.x + 12.0,
                     y: r.1,
                     font_size: 12.0,
                     color: [0xaa, 0xaa, 0xbb],
+                });
+                let val_text = if self.focused_param == Some(i) {
+                    if let Some(ref editor) = self.code_editor {
+                        editor.buffer.clone()
+                    } else {
+                        value.clone()
+                    }
+                } else {
+                    value.clone()
+                };
+                labels.push(TextLabel {
+                    text: val_text,
+                    x: r.0 + 12.0,
+                    y: r.1 + 22.0,
+                    font_size: 12.0,
+                    color: [0xee, 0xee, 0xf0],
                 });
             } else if ptype.starts_with("spinbox") {
                 labels.push(TextLabel {
@@ -138,18 +207,9 @@ impl ParametersBg {
                     font_size: 12.0,
                     color: [0xaa, 0xaa, 0xbb],
                 });
-                let val_text = if self.focused_param == Some(i) {
-                    format!("{}|", value)
-                } else {
-                    value.clone()
-                };
-                labels.push(TextLabel {
-                    text: val_text,
-                    x: self.base.x + 106.0,
-                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
-                    font_size: 12.0,
-                    color: [0xee, 0xee, 0xf0],
-                });
+                if let Some(tb) = &self.texts[i] {
+                    labels.extend(tb.text_labels());
+                }
             } else if ptype.starts_with("choice") {
                 labels.push(TextLabel {
                     text: name.clone(),
@@ -158,14 +218,14 @@ impl ParametersBg {
                     font_size: 12.0,
                     color: [0xaa, 0xaa, 0xbb],
                 });
-                labels.push(TextLabel {
-                    text: value.clone(),
-                    x: self.base.x + 106.0,
-                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
-                    font_size: 12.0,
-                    color: [0xee, 0xee, 0xf0],
-                });
+                if let Some(d) = &self.choices[i] {
+                    labels.extend(d.text_labels());
+                }
             } else if ptype == "button" {
+                if let Some(b) = &self.buttons[i] {
+                    labels.extend(b.text_labels());
+                }
+            } else if ptype == "toggle" || ptype == "checkbox" {
                 labels.push(TextLabel {
                     text: name.clone(),
                     x: self.base.x + 8.0,
@@ -173,13 +233,9 @@ impl ParametersBg {
                     font_size: 12.0,
                     color: [0xaa, 0xaa, 0xbb],
                 });
-                labels.push(TextLabel {
-                    text: "Trigger".to_string(),
-                    x: self.base.x + 106.0,
-                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
-                    font_size: 12.0,
-                    color: [0xee, 0xee, 0xf0],
-                });
+                if let Some(cb) = &self.checkboxes[i] {
+                    labels.extend(cb.text_labels());
+                }
             } else {
                 labels.push(TextLabel {
                     text: format!("{}: {}", name, value),
@@ -246,6 +302,8 @@ fn parse_float3_value(val_str: &str, min: f32, max: f32) -> [f32; 3] {
 impl Element for ParametersBg {
     crate::impl_widget_base!(ParametersBg);
 
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         if let Some(b) = self.base_mut() {
             b.x = x;
@@ -297,7 +355,17 @@ impl Element for ParametersBg {
         if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             return false;
         }
-        px >= self.base.x && px <= self.base.x + self.base.w && py >= self.base.y && py <= self.base.y + self.base.h
+        let (x, y, w, h) = self.rect();
+        let hit_base = px >= x && px <= x + w && py >= y && py <= y + h;
+        if hit_base {
+            return true;
+        }
+        if let Some((pop_x, pop_y, pop_w, pop_h)) = self.popover_rect() {
+            if px >= pop_x && px <= pop_x + pop_w && py >= pop_y && py <= pop_y + pop_h {
+                return true;
+            }
+        }
+        false
     }
 
     fn as_param_controller(&self) -> Option<&dyn ParamController> { Some(self) }
@@ -328,6 +396,23 @@ impl Element for ParametersBg {
                         let val2 = min + f.values[2] * (max - min);
                         p.1 = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
                     }
+                } else if p.2 == "text" {
+                    if let Some(tb) = &mut self.texts[idx] {
+                        tb.unfocus();
+                        p.1 = tb.text.clone();
+                    }
+                } else if p.2.starts_with("choice") {
+                    if let Some(d) = &mut self.choices[idx] {
+                        d.unfocus();
+                        if let Some(val) = d.get_value_string() {
+                            p.1 = val;
+                        }
+                    }
+                } else if p.2 == "code" {
+                    if let Some(ref editor) = self.code_editor {
+                        p.1 = editor.buffer.clone();
+                    }
+                    self.code_editor = None;
                 }
             }
         }
@@ -465,6 +550,49 @@ impl Element for ParametersBg {
         self.base.hovered = is_hit;
         let mut changed = was != is_hit;
 
+        for sb_opt in &mut self.spinboxes {
+            if let Some(sb) = sb_opt {
+                if sb.on_cursor_moved(px, py, ctx) {
+                    changed = true;
+                }
+            }
+        }
+        for f_opt in &mut self.float3s {
+            if let Some(f) = f_opt {
+                if f.on_cursor_moved(px, py, ctx) {
+                    changed = true;
+                }
+            }
+        }
+        for b_opt in &mut self.buttons {
+            if let Some(b) = b_opt {
+                if b.on_cursor_moved(px, py, ctx) {
+                    changed = true;
+                }
+            }
+        }
+        for d_opt in &mut self.choices {
+            if let Some(d) = d_opt {
+                if d.on_cursor_moved(px, py, ctx) {
+                    changed = true;
+                }
+            }
+        }
+        for tb_opt in &mut self.texts {
+            if let Some(tb) = tb_opt {
+                if tb.on_cursor_moved(px, py, ctx) {
+                    changed = true;
+                }
+            }
+        }
+        for cb_opt in &mut self.checkboxes {
+            if let Some(cb) = cb_opt {
+                if cb.on_cursor_moved(px, py, ctx) {
+                    changed = true;
+                }
+            }
+        }
+
         for &widget_ptr in &self.children {
             let widget = unsafe { &mut *widget_ptr };
             if widget.is_dragging() {
@@ -483,11 +611,95 @@ impl Element for ParametersBg {
             return false;
         }
 
+        // 1. Check open dropdown popovers first (since they are drawn on top)
+        for (i, d_opt) in self.choices.iter_mut().enumerate() {
+            if let Some(d) = d_opt {
+                if d.popover_rect().is_some() {
+                    if d.mouse_input(button, state, px, py, ctx) {
+                        if d.take_change() {
+                            if let Some(val) = d.get_value_string() {
+                                self.display_params[i].1 = val;
+                            }
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+
         for &widget_ptr in self.children.iter().rev() {
             let widget = unsafe { &mut *widget_ptr };
             if widget.popover_rect().is_some() {
                 if widget.mouse_input(button, state, px, py, ctx) {
                     return true;
+                }
+            }
+        }
+
+        // 2. Propagate to our widgets
+        for (i, p) in self.display_params.iter_mut().enumerate() {
+            if p.2.starts_with("choice") {
+                if let Some(d) = &mut self.choices[i] {
+                    if d.mouse_input(button, state, px, py, ctx) {
+                        if d.take_change() {
+                            if let Some(val) = d.get_value_string() {
+                                p.1 = val;
+                            }
+                        }
+                        return true;
+                    }
+                }
+            } else if p.2 == "button" {
+                if let Some(b) = &mut self.buttons[i] {
+                    if b.mouse_input(button, state, px, py, ctx) {
+                        if b.take_click() {
+                            p.1 = "clicked".to_string();
+                        }
+                        return true;
+                    }
+                }
+            } else if p.2 == "text" {
+                if let Some(tb) = &mut self.texts[i] {
+                    if tb.mouse_input(button, state, px, py, ctx) {
+                        if tb.editing {
+                            self.focused_param = Some(i);
+                        } else {
+                            if self.focused_param == Some(i) {
+                                self.focused_param = None;
+                            }
+                        }
+                        if tb.take_change() {
+                            if let Some(val) = tb.get_value_string() {
+                                p.1 = val;
+                            }
+                        }
+                        return true;
+                    }
+                }
+            } else if p.2.starts_with("spinbox") {
+                if let Some(sb) = &mut self.spinboxes[i] {
+                    if sb.mouse_input(button, state, px, py, ctx) {
+                        p.1 = sb.value.to_string();
+                        if sb.editing {
+                            self.focused_param = Some(i);
+                        } else {
+                            if self.focused_param == Some(i) {
+                                self.focused_param = None;
+                            }
+                        }
+                        return true;
+                    }
+                }
+            } else if p.2 == "toggle" || p.2 == "checkbox" {
+                if let Some(cb) = &mut self.checkboxes[i] {
+                    if cb.mouse_input(button, state, px, py, ctx) {
+                        if cb.take_change() {
+                            if let Some(val) = cb.get_value_string() {
+                                p.1 = val;
+                            }
+                        }
+                        return true;
+                    }
                 }
             }
         }
@@ -510,52 +722,15 @@ impl Element for ParametersBg {
                     let r = rects[i];
                     if px >= r.0 && px <= r.0 + r.2 && py >= r.1 + 18.0 && py <= r.1 + r.3 {
                         self.focused_param = Some(i);
+                        let mut editor = TextEditorState::new(p.1.clone());
+                        let click_x = px - (r.0 + 12.0);
+                        let click_y = py - (r.1 + 22.0);
+                        let line = (click_y / 16.0).floor().max(0.0) as usize;
+                        let col = (click_x / 7.2 + 0.5).floor().max(0.0) as usize;
+                        editor.cursor_idx = map_2d_to_1d(&editor.buffer, line, col);
+                        self.code_editor = Some(editor);
                         clicked_any_focusable = true;
                         break;
-                    }
-                } else if p.2 == "text" {
-                    let box_x = self.base.x + 100.0;
-                    let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                    let r = rects[i];
-                    if px >= box_x && px <= box_x + box_w && py >= r.1 && py <= r.1 + r.3 {
-                        self.focused_param = Some(i);
-                        clicked_any_focusable = true;
-                        break;
-                    }
-                } else if p.2.starts_with("choice") {
-                    let box_x = self.base.x + 100.0;
-                    let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                    let r = rects[i];
-                    if px >= box_x && px <= box_x + box_w && py >= r.1 && py <= r.1 + r.3 {
-                        if let Some(options_str) = p.2.strip_prefix("choice:") {
-                            let options: Vec<&str> = options_str.split(',').collect();
-                            if !options.is_empty() {
-                                let cur_idx = options.iter().position(|&o| o == p.1).unwrap_or(0);
-                                let next_idx = (cur_idx + 1) % options.len();
-                                p.1 = options[next_idx].to_string();
-                                return true;
-                            }
-                        }
-                    }
-                } else if p.2 == "button" {
-                    let box_x = self.base.x + 100.0;
-                    let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                    let r = rects[i];
-                    if px >= box_x && px <= box_x + box_w && py >= r.1 && py <= r.1 + r.3 {
-                        p.1 = "clicked".to_string();
-                        return true;
-                    }
-                } else if p.2.starts_with("spinbox") {
-                    if let Some(sb) = &mut self.spinboxes[i] {
-                        if sb.mouse_input(button, state, px, py, ctx) {
-                            p.1 = sb.value.to_string();
-                            if sb.editing {
-                                self.focused_param = Some(i);
-                            } else {
-                                self.unfocus();
-                            }
-                            return true;
-                        }
                     }
                 } else if p.2.starts_with("slider") {
                     let r = rects[i];
@@ -608,44 +783,156 @@ impl Element for ParametersBg {
             if event.state == ElementState::Pressed {
                 let p = &mut self.display_params[idx];
                 if p.2 == "code" {
-                    match &event.logical_key {
-                        Key::Named(NamedKey::Backspace) => {
-                            if !p.1.is_empty() {
-                                p.1.pop();
-                                return true;
+                    if let Some(mut editor) = self.code_editor.take() {
+                        let mut changed = false;
+                        let mut handled = true;
+                        let mut should_unfocus = false;
+                        match &event.logical_key {
+                            Key::Named(NamedKey::Backspace) => {
+                                changed = editor.delete_backwards();
+                            }
+                            Key::Named(NamedKey::Delete) => {
+                                changed = editor.delete_forwards();
+                            }
+                            Key::Named(NamedKey::Enter) => {
+                                editor.insert_text("\n");
+                                changed = true;
+                            }
+                            Key::Named(NamedKey::Escape) => {
+                                should_unfocus = true;
+                            }
+                            Key::Named(NamedKey::ArrowLeft) => {
+                                editor.move_cursor_left(false);
+                            }
+                            Key::Named(NamedKey::ArrowRight) => {
+                                editor.move_cursor_right(false);
+                            }
+                            Key::Named(NamedKey::ArrowUp) => {
+                                let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                if line > 0 {
+                                    editor.cursor_idx = map_2d_to_1d(&editor.buffer, line - 1, col);
+                                }
+                            }
+                            Key::Named(NamedKey::ArrowDown) => {
+                                let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                let total_lines = editor.buffer.split('\n').count();
+                                if line + 1 < total_lines {
+                                    editor.cursor_idx = map_2d_to_1d(&editor.buffer, line + 1, col);
+                                }
+                            }
+                            Key::Named(NamedKey::Home) => {
+                                editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
+                            }
+                            Key::Named(NamedKey::End) => {
+                                editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
+                            }
+                            Key::Character(s) => {
+                                if event.ctrl {
+                                    match s.to_lowercase().as_str() {
+                                        "f" => {
+                                            editor.move_cursor_right(false);
+                                        }
+                                        "b" => {
+                                            editor.move_cursor_left(false);
+                                        }
+                                        "p" => {
+                                            let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                            if line > 0 {
+                                                editor.cursor_idx = map_2d_to_1d(&editor.buffer, line - 1, col);
+                                            }
+                                        }
+                                        "n" => {
+                                            let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                            let total_lines = editor.buffer.split('\n').count();
+                                            if line + 1 < total_lines {
+                                                editor.cursor_idx = map_2d_to_1d(&editor.buffer, line + 1, col);
+                                            }
+                                        }
+                                        "a" => {
+                                            editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
+                                        }
+                                        "e" => {
+                                            editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
+                                        }
+                                        "d" => {
+                                            changed = editor.delete_forwards();
+                                        }
+                                        "h" => {
+                                            changed = editor.delete_backwards();
+                                        }
+                                        "k" => {
+                                            let current_idx = editor.cursor_idx;
+                                            let end_idx = get_line_end(&editor.buffer, current_idx);
+                                            let chars: Vec<char> = editor.buffer.chars().collect();
+                                            if chars.is_empty() {
+                                                // do nothing
+                                            } else if current_idx < chars.len() {
+                                                let delete_end = if chars[current_idx] == '\n' {
+                                                    current_idx + 1
+                                                } else {
+                                                    end_idx
+                                                };
+                                                let mut new_buf = String::new();
+                                                for i in 0..current_idx {
+                                                    new_buf.push(chars[i]);
+                                                }
+                                                for i in delete_end..chars.len() {
+                                                    new_buf.push(chars[i]);
+                                                }
+                                                editor.buffer = new_buf;
+                                                changed = true;
+                                            }
+                                        }
+                                        _ => {
+                                            handled = false;
+                                        }
+                                    }
+                                } else {
+                                    editor.insert_text(s);
+                                    changed = true;
+                                }
+                            }
+                            _ => {
+                                handled = false;
                             }
                         }
-                        Key::Named(NamedKey::Enter) => {
-                            p.1.push('\n');
-                            return true;
+                        if changed {
+                            p.1 = editor.buffer.clone();
                         }
-                        Key::Named(NamedKey::Escape) => {
+                        if should_unfocus {
+                            p.1 = editor.buffer;
                             self.focused_param = None;
+                            self.code_editor = None;
+                        } else {
+                            self.code_editor = Some(editor);
+                        }
+                        if handled {
                             return true;
                         }
-                        Key::Character(s) => {
-                            p.1.push_str(s);
-                            return true;
-                        }
-                        _ => {}
                     }
                 } else if p.2 == "text" {
-                    match &event.logical_key {
-                        Key::Named(NamedKey::Backspace) => {
-                            if !p.1.is_empty() {
-                                p.1.pop();
-                                return true;
+                    if let Some(tb) = &mut self.texts[idx] {
+                        if tb.keyboard_input(event, ctx) {
+                            if !tb.editing {
+                                p.1 = tb.text.clone();
+                                self.focused_param = None;
+                            } else {
+                                p.1 = tb.edit_buffer.clone();
                             }
-                        }
-                        Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Escape) => {
-                            self.focused_param = None;
                             return true;
                         }
-                        Key::Character(s) => {
-                            p.1.push_str(s);
+                    }
+                } else if p.2.starts_with("choice") {
+                    if let Some(d) = &mut self.choices[idx] {
+                        if d.keyboard_input(event, ctx) {
+                            if !d.open {
+                                if let Some(val) = d.get_value_string() {
+                                    p.1 = val;
+                                }
+                                self.focused_param = None;
+                            }
                             return true;
                         }
-                        _ => {}
                     }
                 } else if p.2.starts_with("spinbox") {
                     if let Some(sb) = &mut self.spinboxes[idx] {
@@ -867,47 +1154,36 @@ impl Element for ParametersBg {
                 quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));
                 quads.push((bx, by, 1.0, bh, border_color));
                 quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));
+                if self.focused_param == Some(i) {
+                    if let Some(ref editor) = self.code_editor {
+                        let (cursor_l, cursor_c) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                        let cursor_x = r.0 + 12.0 + (cursor_c as f32 * 7.2);
+                        let cursor_y = r.1 + 22.0 + (cursor_l as f32 * 16.0) + (16.0 - 13.0) / 2.0;
+                        if cursor_y >= r.1 + 18.0 && cursor_y + 13.0 <= r.1 + r.3 {
+                            quads.push((cursor_x, cursor_y, 1.5, 13.0, [0.80, 0.80, 0.85, 1.0]));
+                        }
+                    }
+                }
             } else if p.2 == "text" {
-                let box_x = self.base.x + 100.0;
-                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                quads.push((box_x, r.1, box_w, r.3, [0.08, 0.08, 0.10, 1.0]));
-                let border_color = if self.focused_param == Some(i) {
-                    [0.25, 0.45, 0.85, 1.0]
-                } else {
-                    [0.20, 0.20, 0.25, 1.0]
-                };
-                let (bx, by, bw, bh) = (box_x, r.1, box_w, r.3);
-                let border_t = 1.0;
-                quads.push((bx, by, bw, border_t, border_color));
-                quads.push((bx, by + bh - border_t, bw, border_t, border_color));
-                quads.push((bx, by, border_t, bh, border_color));
-                quads.push((bx + bw - border_t, by, border_t, bh, border_color));
+                if let Some(tb) = &self.texts[i] {
+                    quads.extend(tb.extra_quads());
+                }
             } else if p.2.starts_with("choice") {
-                let box_x = self.base.x + 100.0;
-                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                quads.push((box_x, r.1, box_w, r.3, [0.08, 0.08, 0.10, 1.0]));
-                let border_color = [0.20, 0.20, 0.25, 1.0];
-                let (bx, by, bw, bh) = (box_x, r.1, box_w, r.3);
-                let border_t = 1.0;
-                quads.push((bx, by, bw, border_t, border_color));
-                quads.push((bx, by + bh - border_t, bw, border_t, border_color));
-                quads.push((bx, by, border_t, bh, border_color));
-                quads.push((bx + bw - border_t, by, border_t, bh, border_color));
+                if let Some(d) = &self.choices[i] {
+                    quads.extend(d.extra_quads());
+                }
             } else if p.2 == "button" {
-                let box_x = self.base.x + 100.0;
-                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                quads.push((box_x, r.1, box_w, r.3, [0.15, 0.22, 0.38, 1.0]));
-                let border_color = [0.25, 0.35, 0.58, 1.0];
-                let (bx, by, bw, bh) = (box_x, r.1, box_w, r.3);
-                let border_t = 1.0;
-                quads.push((bx, by, bw, border_t, border_color));
-                quads.push((bx, by + bh - border_t, bw, border_t, border_color));
-                quads.push((bx, by, border_t, bh, border_color));
-                quads.push((bx + bw - border_t, by, border_t, bh, border_color));
+                if let Some(b) = &self.buttons[i] {
+                    quads.extend(b.extra_quads());
+                }
             } else if p.2.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
                     quads.push((sb.base.x, sb.base.y, sb.base.w, sb.base.h, sb.color()));
                     quads.extend(sb.extra_quads());
+                }
+            } else if p.2 == "toggle" || p.2 == "checkbox" {
+                if let Some(cb) = &self.checkboxes[i] {
+                    quads.extend(cb.extra_quads());
                 }
             }
         }
@@ -953,8 +1229,21 @@ impl Element for ParametersBg {
         }
         let mut result = Vec::new();
         let font = self.widget_font();
+        let rects = self.get_param_rects();
         for l in self.own_text_labels() {
-            result.push((l, font.clone(), None));
+            let mut bounds = None;
+            let mut label_font = font.clone();
+            for (i, p) in self.display_params.iter().enumerate() {
+                if p.2 == "code" {
+                    let r = rects[i];
+                    if l.y >= r.1 + 18.0 && l.y <= r.1 + r.3 {
+                        bounds = Some([r.0 + 1.0, r.1 + 19.0, r.0 + r.2 - 1.0, r.1 + r.3 - 1.0]);
+                        label_font = Some("monospace".to_string());
+                        break;
+                    }
+                }
+            }
+            result.push((l, label_font, bounds));
         }
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
@@ -966,6 +1255,13 @@ impl Element for ParametersBg {
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
         if !self.visible {
             return None;
+        }
+        for d_opt in &self.choices {
+            if let Some(d) = d_opt {
+                if let Some(r) = d.popover_rect() {
+                    return Some(r);
+                }
+            }
         }
         for &widget_ptr in self.children.iter().rev() {
             let widget = unsafe { &*widget_ptr };
@@ -979,6 +1275,11 @@ impl Element for ParametersBg {
     fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
         if !self.visible {
             return;
+        }
+        for d_opt in &self.choices {
+            if let Some(d) = d_opt {
+                d.render_popover(pc);
+            }
         }
         for &widget_ptr in self.children.iter().rev() {
             let widget = unsafe { &*widget_ptr };
@@ -995,6 +1296,13 @@ impl Element for ParametersBg {
             let widget = unsafe { &mut *widget_ptr };
             if widget.tick(dt, ctx) {
                 changed = true;
+            }
+        }
+        for cb_opt in &mut self.checkboxes {
+            if let Some(cb) = cb_opt {
+                if cb.tick(dt, ctx) {
+                    changed = true;
+                }
             }
         }
         changed
@@ -1075,6 +1383,40 @@ impl ParamController for ParametersBg {
                     None
                 }
             }).collect();
+            self.buttons = self.display_params.iter().map(|p| {
+                if p.2 == "button" {
+                    Some(Button::new(0.0, 0.0, 0.0, 0.0).with_label(&p.0))
+                } else {
+                    None
+                }
+            }).collect();
+            self.choices = self.display_params.iter().map(|p| {
+                if p.2.starts_with("choice:") {
+                    let options_str = p.2.strip_prefix("choice:").unwrap_or("");
+                    let options: Vec<String> = options_str.split(',').map(|s| s.to_string()).collect();
+                    let selected = options.iter().position(|o| o == &p.1).unwrap_or(0);
+                    Some(Dropdown::new(options, selected))
+                } else {
+                    None
+                }
+            }).collect();
+            self.texts = self.display_params.iter().map(|p| {
+                if p.2 == "text" {
+                    Some(TextBox::new(p.1.clone()))
+                } else {
+                    None
+                }
+            }).collect();
+            self.checkboxes = self.display_params.iter().map(|p| {
+                if p.2 == "toggle" || p.2 == "checkbox" {
+                    let checked = p.1.trim().to_lowercase() == "true";
+                    let mut cb = Checkbox::new();
+                    cb.set_checked(checked);
+                    Some(cb)
+                } else {
+                    None
+                }
+            }).collect();
         } else {
             for (i, p_new) in params.iter().enumerate() {
                 if Some(i) != self.focused_param && Some(i) != self.dragging_param {
@@ -1098,6 +1440,25 @@ impl ParamController for ParametersBg {
                             let val = p_new.1.parse::<i32>().unwrap_or(min);
                             sb.value = val;
                         }
+                    } else if let Some(ref mut d) = self.choices[i] {
+                        if !d.open {
+                            if let Some(options_str) = p_new.2.strip_prefix("choice:") {
+                                let options: Vec<String> = options_str.split(',').map(|s| s.to_string()).collect();
+                                if d.options != options {
+                                    d.options = options.clone();
+                                }
+                                if let Some(idx) = options.iter().position(|o| o == &p_new.1) {
+                                    d.selected = idx;
+                                }
+                            }
+                        }
+                    } else if let Some(ref mut tb) = self.texts[i] {
+                        if !tb.editing {
+                            tb.set_value_string(&p_new.1);
+                        }
+                    } else if let Some(ref mut cb) = self.checkboxes[i] {
+                        let checked = p_new.1.trim().to_lowercase() == "true";
+                        cb.set_checked(checked);
                     }
                 }
             }
@@ -1105,4 +1466,64 @@ impl ParamController for ParametersBg {
         self.update_slider_rects();
     }
 }
+
+fn get_cursor_line_col(buffer: &str, cursor_idx: usize) -> (usize, usize) {
+    let mut cur_line = 0;
+    let mut cur_col = 0;
+    let mut count = 0;
+    for c in buffer.chars() {
+        if count == cursor_idx {
+            return (cur_line, cur_col);
+        }
+        if c == '\n' {
+            cur_line += 1;
+            cur_col = 0;
+        } else {
+            cur_col += 1;
+        }
+        count += 1;
+    }
+    (cur_line, cur_col)
+}
+
+fn map_2d_to_1d(buffer: &str, line: usize, col: usize) -> usize {
+    let mut target_line = line;
+    let lines: Vec<Vec<char>> = buffer.split('\n').map(|l| l.chars().collect()).collect();
+    if lines.is_empty() {
+        return 0;
+    }
+    if target_line >= lines.len() {
+        target_line = lines.len() - 1;
+    }
+    let mut target_col = col;
+    if target_col > lines[target_line].len() {
+        target_col = lines[target_line].len();
+    }
+    let mut index = 0;
+    for i in 0..target_line {
+        index += lines[i].len() + 1; // +1 for the '\n'
+    }
+    index += target_col;
+    index
+}
+
+fn get_line_start(buffer: &str, cursor_idx: usize) -> usize {
+    let (line, _) = get_cursor_line_col(buffer, cursor_idx);
+    map_2d_to_1d(buffer, line, 0)
+}
+
+fn get_line_end(buffer: &str, cursor_idx: usize) -> usize {
+    let (line, _) = get_cursor_line_col(buffer, cursor_idx);
+    let lines: Vec<Vec<char>> = buffer.split('\n').map(|l| l.chars().collect()).collect();
+    if lines.is_empty() {
+        return 0;
+    }
+    let line_len = if line < lines.len() {
+        lines[line].len()
+    } else {
+        lines[lines.len() - 1].len()
+    };
+    map_2d_to_1d(buffer, line, line_len)
+}
+
 

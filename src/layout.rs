@@ -52,6 +52,7 @@ static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(44.0);
 static NESTED_SECTION_LABEL_ALIGNMENT: RwLock<u8> = RwLock::new(0);
 
 static LABEL_MARGIN: RwLock<f32> = RwLock::new(6.0);
+static BUTTON_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 
 pub fn reload_config() {
     if let Some(content) = read_config() {
@@ -294,6 +295,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SLIDER_HEIGHT.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("button_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = BUTTON_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -831,6 +841,34 @@ pub fn set_color_selector_preview_corner_radius(radius: f32) {
     }
 }
 
+pub fn button_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("button_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = BUTTON_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *BUTTON_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_button_corner_radius(radius: f32) {
+    if let Ok(mut lock) = BUTTON_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
 pub fn color_selector_preview_margin() -> f32 {
     use std::sync::Once;
     static INIT: Once = Once::new();
@@ -1078,6 +1116,9 @@ pub fn set_slider_height(height: f32) {
 
 pub trait RenderTarget {
     fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32);
+    fn rect_with_radius(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, _radius: f32) {
+        self.rect(color, x, y, w, h);
+    }
     fn text(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4]);
     fn text_with_font(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], _font: &str) {
         self.text(content, x, y, size, color);
@@ -1125,8 +1166,13 @@ impl RenderTarget for PopoverCollector {
 
 pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
     w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
+    let r = if w.rounded_corners() != (false, false, false, false) {
+        w.corner_radius()
+    } else {
+        0.0
+    };
     for (qx, qy, qw, qh, qc) in w.all_quads(ctx) {
-        pc.rect(qc, qx, qy, qw, qh);
+        pc.rect_with_radius(qc, qx, qy, qw, qh, r);
     }
     let font_opt = w.widget_font();
     for (label, bounds) in w.text_labels_with_bounds(ctx) {
@@ -1288,6 +1334,31 @@ impl<'a> Row<'a> {
     }
 }
 
+fn estimate_label_width_helper(label: &str, font_size: f32, font_fam: &str) -> f32 {
+    let fam_lower = font_fam.to_lowercase();
+    let is_mono = fam_lower.contains("mono") || fam_lower.contains("courier") || fam_lower == "monospace";
+    if is_mono {
+        label.chars().count() as f32 * font_size * 0.60
+    } else {
+        let mut width = 0.0;
+        for c in label.chars() {
+            let factor = match c {
+                'i' | 'l' | 'I' | ' ' | '.' | ',' | '!' | ';' | ':' | '\'' | '"' | '(' | ')' | '[' | ']' | '-' => 0.30,
+                'f' | 'j' | 't' => 0.35,
+                'r' | 's' | 'c' | 'z' => 0.50,
+                'a' | 'b' | 'd' | 'e' | 'g' | 'h' | 'k' | 'n' | 'o' | 'p' | 'q' | 'u' | 'v' | 'x' | 'y' => 0.60,
+                'm' | 'w' | 'M' | 'W' | '&' | '@' | 'O' | 'Q' | 'G' => 0.85,
+                'A' | 'B' | 'C' | 'D' | 'H' | 'N' | 'U' | 'V' | 'X' | 'Y' => 0.75,
+                'E' | 'F' | 'K' | 'L' | 'P' | 'R' | 'S' | 'T' | 'Z' | 'J' => 0.68,
+                '0'..='9' => 0.60,
+                _ => 0.60,
+            };
+            width += factor * font_size;
+        }
+        width
+    }
+}
+
 pub struct Section {
     pub left: f32,
     pub top: f32,
@@ -1301,19 +1372,8 @@ impl Section {
     pub const DEFAULT_MARGIN_X: f32 = 12.0;
     pub const DEFAULT_ROW_GAP: f32 = 8.0;
 
-    fn estimate_label_width(label: &str, font_size: f32) -> f32 {
-        let mut width = 0.0;
-        for c in label.chars() {
-            let factor = match c {
-                'i' | 'l' | 't' | 'j' | 'f' | 'I' | ' ' | '.' | ',' | '!' | ';' | ':' | '\'' | '"' | '(' | ')' | '[' | ']' | '-' => 0.28,
-                'r' | 's' | 'J' | 'c' | 'z' => 0.42,
-                'm' | 'w' | 'M' | 'W' | '&' | '@' => 0.80,
-                'A'..='Z' => 0.68,
-                _ => 0.55,
-            };
-            width += factor * font_size;
-        }
-        width
+    fn estimate_label_width(label: &str, font_size: f32, font_fam: &str) -> f32 {
+        estimate_label_width_helper(label, font_size, font_fam)
     }
 
     pub fn padding(&self) -> f32 {
@@ -1337,7 +1397,7 @@ impl Section {
         let (font_fam, font_size_opt) = parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(if is_child { 12.0 } else { 14.0 });
         let font_color = if is_child { [0.53, 0.53, 0.60, 1.0] } else { [0.83, 0.83, 0.83, 1.0] };
-        let label_width = Self::estimate_label_width(label, font_size);
+        let label_width = Self::estimate_label_width(label, font_size, &font_fam);
         let label_x = if is_child {
             let base_x = match nested_section_label_alignment() {
                 0 => left + 12.0,
@@ -1968,19 +2028,8 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     pub const DEFAULT_MARGIN_X: f32 = 12.0;
     pub const DEFAULT_ROW_GAP: f32 = 8.0;
 
-    fn estimate_label_width(label: &str, font_size: f32) -> f32 {
-        let mut width = 0.0;
-        for c in label.chars() {
-            let factor = match c {
-                'i' | 'l' | 't' | 'j' | 'f' | 'I' | ' ' | '.' | ',' | '!' | ';' | ':' | '\'' | '"' | '(' | ')' | '[' | ']' | '-' => 0.28,
-                'r' | 's' | 'J' | 'c' | 'z' => 0.42,
-                'm' | 'w' | 'M' | 'W' | '&' | '@' => 0.80,
-                'A'..='Z' => 0.68,
-                _ => 0.55,
-            };
-            width += factor * font_size;
-        }
-        width
+    fn estimate_label_width(label: &str, font_size: f32, font_fam: &str) -> f32 {
+        estimate_label_width_helper(label, font_size, font_fam)
     }
 
     pub fn padding(&self) -> f32 {
@@ -2000,7 +2049,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let (font_fam, font_size_opt) = parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(if is_child { 12.0 } else { 14.0 });
         let font_color = if is_child { [0.53, 0.53, 0.60, 1.0] } else { [0.83, 0.83, 0.83, 1.0] };
-        let label_width = Self::estimate_label_width(label, font_size);
+        let label_width = Self::estimate_label_width(label, font_size, &font_fam);
         let label_x = if is_child {
             let base_x = match nested_section_label_alignment() {
                 0 => left + 12.0,
@@ -2199,6 +2248,23 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
         self.context.row(count, gap, h, f);
         self.context.spacing(self.spacing);
     }
+}
+
+pub fn get_system_monospace_font() -> &'static str {
+    static MONOSPACE_FONT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    MONOSPACE_FONT.get_or_init(|| {
+        if let Ok(output) = std::process::Command::new("fc-match")
+            .args(["-f", "%{family}", "monospace"])
+            .output()
+        {
+            let name = String::from_utf8_lossy(&output.stdout);
+            let parsed = name.split(',').next().unwrap_or("monospace").trim();
+            if !parsed.is_empty() {
+                return parsed.to_string();
+            }
+        }
+        "monospace".to_string()
+    })
 }
 
 #[cfg(test)]

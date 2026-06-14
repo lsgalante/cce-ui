@@ -21,7 +21,7 @@ use smithay_client_toolkit::{
 };
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface, wl_registry},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface, wl_registry, wl_region},
     Connection, QueueHandle, Proxy,
 };
 use smithay_client_toolkit::shell::xdg::popup::{Popup, PopupHandler, PopupConfigure};
@@ -70,7 +70,7 @@ fn make_text_buffer_with_font(fs: &mut FontSystem, text: &str, size: f32, font: 
     let mut attrs = Attrs::new();
     if let Some(ref font_family) = family_name {
         let family = match font_family.as_str() {
-            "monospace" => glyphon::Family::Monospace,
+            "monospace" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
             "sans-serif" => glyphon::Family::SansSerif,
             "serif" => glyphon::Family::Serif,
             name => glyphon::Family::Name(name),
@@ -548,13 +548,13 @@ pub fn push_widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, cl
     let (x, y, ww, h) = w.rect();
     let corners = w.rounded_corners();
     if corners != (false, false, false, false) {
-        push_rounded_rect_vertices_corners(x, y, ww, h, 12.0, sw, sh, w.color(), clip_circle, corners, None, out);
+        push_rounded_rect_vertices_corners(x, y, ww, h, w.corner_radius(), sw, sh, w.color(), clip_circle, corners, None, out);
     } else {
         out.extend_from_slice(&quad_vertices_with_clip(x, y, ww, h, sw, sh, w.color(), clip_circle));
     }
 
     if let Some((color, thickness)) = w.solid_border() {
-        push_plate_solid_border_vertices(x, y, ww, h, 12.0, thickness, sw, sh, color, clip_circle, out);
+        push_plate_solid_border_vertices(x, y, ww, h, w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
     }
 }
 
@@ -592,7 +592,7 @@ pub fn push_extra_quad_vertices(
         corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
     );
 
-    push_rounded_rect_vertices_corners(qx, qy, qw, qh, 12.0, sw, sh, qc, clip_circle, extra_corners, None, out);
+    push_rounded_rect_vertices_corners(qx, qy, qw, qh, w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, None, out);
 }
 
 pub fn extra_quad_vertices_clipped(
@@ -639,7 +639,7 @@ pub fn push_extra_quad_vertices_clipped(
         corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
     );
 
-    push_rounded_rect_vertices_corners(qx, qy, qw, qh, 12.0, sw, sh, qc, clip_circle, extra_corners, Some(clip), out);
+    push_rounded_rect_vertices_corners(qx, qy, qw, qh, w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, Some(clip), out);
 }
 
 pub fn circle_vertices(
@@ -812,6 +812,7 @@ pub trait Application: Sized + 'static {
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
     fn view(&mut self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, size: LogicalSize, scale: f64);
+    fn view_rounded_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
     fn view_vectors(&mut self, _vectors: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4], LineCap)>, _size: LogicalSize, _scale: f64) {}
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
     fn text_items(&self) -> &[TextItem];
@@ -1009,6 +1010,9 @@ impl<A: Application> EngineState<A> {
         let mut quads = Vec::new();
         self.inner.view(&mut quads, LogicalSize::new(logical_w, logical_h), scale_factor);
         
+        let mut rounded_quads = Vec::new();
+        self.inner.view_rounded_quads(&mut rounded_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
+        
         let mut vectors = Vec::new();
         self.inner.view_vectors(&mut vectors, LogicalSize::new(logical_w, logical_h), scale_factor);
         
@@ -1019,6 +1023,13 @@ impl<A: Application> EngineState<A> {
         let mut verts = Vec::new();
         for &(qx, qy, qw, qh, qc) in &quads {
             verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
+        }
+        for &(qx, qy, qw, qh, qr, qc) in &rounded_quads {
+            if qr > 0.1 {
+                push_rounded_rect_vertices_corners(qx, qy, qw, qh, qr, logical_w, logical_h, qc, [0.0, 0.0, 0.0], (true, true, true, true), None, &mut verts);
+            } else {
+                verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
+            }
         }
         for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
             verts.extend(vector_vertices(vx1, vy1, vx2, vy2, vthickness, logical_w, logical_h, vcolor, vcap));
@@ -1721,6 +1732,17 @@ delegate_keyboard!(@<A: Application> EngineState<A>);
 delegate_registry!(@<A: Application> EngineState<A>);
 delegate_output!(@<A: Application> EngineState<A>);
 
+impl<A: Application> wayland_client::Dispatch<wl_region::WlRegion, ()> for EngineState<A> {
+    fn event(
+        _state: &mut Self,
+        _proxy: &wl_region::WlRegion,
+        _event: wl_region::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {}
+}
+
 pub fn run<A: Application>() {
     let conn = Connection::connect_to_env().unwrap();
     let (globals, mut event_queue) = registry_queue_init(&conn).unwrap();
@@ -1777,6 +1799,15 @@ pub fn run<A: Application>() {
 
     let surface = engine_state.compositor_state.create_surface(&qh);
     surface.set_buffer_scale(scale as i32);
+
+    if settings.app_id == "cce-status-interface" {
+        let compositor = engine_state.compositor_state.wl_compositor();
+        let region = compositor.create_region(&qh, ());
+        region.add(0, 0, settings.width as i32, settings.height as i32);
+        surface.set_input_region(Some(&region));
+        region.destroy();
+    }
+
     let window = engine_state.xdg_shell_state.create_window(surface.clone(), WindowDecorations::None, &qh);
     window.set_title(&settings.title);
     window.set_app_id(&settings.app_id);

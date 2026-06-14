@@ -80,7 +80,7 @@ pub(crate) fn make_widget_text_buffer(fs: &mut glyphon::FontSystem, text: &str, 
     let mut buf = glyphon::Buffer::new(fs, metrics);
     let (family_name, _) = crate::layout::parse_font_string(font_family);
     let family = match family_name.as_str() {
-        "monospace" => glyphon::Family::Monospace,
+        "monospace" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
         "sans-serif" => glyphon::Family::SansSerif,
         "serif" => glyphon::Family::Serif,
         _ => glyphon::Family::Name(&family_name),

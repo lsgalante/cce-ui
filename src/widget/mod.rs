@@ -475,6 +475,7 @@ pub trait Element {
     fn z_index(&self) -> i32 { 0 }
     fn is_plate(&self) -> bool { false }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
+    fn corner_radius(&self) -> f32 { 12.0 }
     fn layout_ignore(&self) -> bool { false }
     fn color_u8(&self) -> Option<[u8; 4]> { None }
 }
@@ -581,6 +582,8 @@ pub trait GraphController {
     fn set_grid_origin(&mut self, ox: f32, oy: f32);
     fn grid_origin(&self) -> (f32, f32);
     fn set_show_network_grid(&mut self, show: bool);
+    fn take_pending_connection(&mut self) -> Option<(String, String)>;
+    fn cancel_connecting(&mut self);
 }
 
 pub trait SpreadsheetController {

@@ -174,7 +174,7 @@ fn widget_vertices(w: &dyn Element, sw: f32, sh: f32) -> Vec<Vertex> {
     let (x, y, ww, h) = w.rect();
     let corners = w.rounded_corners();
     if corners != (false, false, false, false) {
-        rounded_rect_vertices_corners(x, y, ww, h, 12.0, sw, sh, w.color(), corners)
+        rounded_rect_vertices_corners(x, y, ww, h, w.corner_radius(), sw, sh, w.color(), corners)
     } else {
         quad_vertices(x, y, ww, h, sw, sh, w.color()).to_vec()
     }
@@ -199,7 +199,7 @@ fn extra_quad_vertices(
         corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
     );
 
-    rounded_rect_vertices_corners(qx, qy, qw, qh, 12.0, sw, sh, qc, extra_corners)
+    rounded_rect_vertices_corners(qx, qy, qw, qh, w.corner_radius(), sw, sh, qc, extra_corners)
 }
 
 fn make_text_buffer(font_system: &mut FontSystem, text: &str, size: f32) -> Buffer {
@@ -216,7 +216,7 @@ fn make_text_buffer_with_font(font_system: &mut FontSystem, text: &str, size: f3
     let mut attrs = Attrs::new();
     if let Some(font_name) = font {
         let family = match font_name {
-            "monospace" => glyphon::Family::Monospace,
+            "monospace" => glyphon::Family::Name(clear_ui::layout::get_system_monospace_font()),
             "sans-serif" => glyphon::Family::SansSerif,
             "serif" => glyphon::Family::Serif,
             _ => glyphon::Family::Name(font_name),

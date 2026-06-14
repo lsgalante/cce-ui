@@ -91,22 +91,25 @@ impl Dropdown {
                 1.0,
             ];
             
+            let bounds = Some([self.base.x, dy, self.base.x + self.base.w, dy + dh]);
             if let Some(ref font) = self.widget_font() {
-                pc.text_with_font(
+                pc.text_with_font_and_bounds(
                     opt,
                     self.base.x + 8.0,
                     iy,
                     12.0,
                     color_f32,
                     font,
+                    bounds,
                 );
             } else {
-                pc.text(
+                pc.text_with_bounds(
                     opt,
                     self.base.x + 8.0,
                     iy,
                     12.0,
                     color_f32,
+                    bounds,
                 );
             }
         }

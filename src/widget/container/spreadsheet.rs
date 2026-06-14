@@ -41,6 +41,8 @@ impl Spreadsheet {
 }
 
 impl Element for Spreadsheet {
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }
+
     fn rect(&self) -> (f32, f32, f32, f32) {
         if !self.visible {
             (0.0, 0.0, 0.0, 0.0)

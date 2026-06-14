@@ -88,10 +88,11 @@ impl Element for Checkbox {
         }
         if button != MouseButton::Left { return false; }
         match state {
-            ElementState::Released => {
+            ElementState::Pressed => {
                 if self.hit_test(px, py, ctx) {
                     self.checked = !self.checked;
                     self.just_clicked = true;
+                    self.just_changed = true;
                     return true;
                 }
             }
@@ -218,7 +219,7 @@ impl Element for Toggle {
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if button != MouseButton::Left { return false; }
         match state {
-            ElementState::Released => {
+            ElementState::Pressed => {
                 if self.hit_test(px, py, ctx) {
                     self.toggled = !self.toggled;
                     self.just_toggled = true;
