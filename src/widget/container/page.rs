@@ -3,10 +3,90 @@ use crate::context::UiContext;
 use crate::widget::display::TextLabel;
 use super::layer::Layer;
 
+pub trait PageLayout {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)]);
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct VerticalLayout {
+    pub padding_x: f32,
+    pub padding_y: f32,
+    pub spacing: f32,
+}
+
+impl Default for VerticalLayout {
+    fn default() -> Self {
+        Self {
+            padding_x: 8.0,
+            padding_y: 10.0,
+            spacing: 8.0,
+        }
+    }
+}
+
+impl PageLayout for VerticalLayout {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)]) {
+        let padding_x = self.padding_x;
+        let padding_y = self.padding_y;
+        let left_x = x + padding_x;
+        let available_w = (w - 2.0 * padding_x).max(1.0);
+        let mut current_y = y + padding_y;
+        let spacing = self.spacing;
+
+        for &child_ptr in children {
+            let child = unsafe { &mut *child_ptr };
+            let (_, _, _, ch) = child.rect();
+            let use_h = if ch > 0.0 { ch } else { 42.0 };
+            child.set_rect(left_x, current_y, available_w, use_h);
+            current_y += use_h + spacing;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ColumnsLayout {
+    pub padding_x: f32,
+    pub padding_y: f32,
+    pub spacing: f32,
+}
+
+impl Default for ColumnsLayout {
+    fn default() -> Self {
+        Self {
+            padding_x: 8.0,
+            padding_y: 10.0,
+            spacing: 12.0,
+        }
+    }
+}
+
+impl PageLayout for ColumnsLayout {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)]) {
+        let count = children.len();
+        if count == 0 {
+            return;
+        }
+        let total_spacing = self.spacing * (count - 1) as f32;
+        let total_padding = self.padding_x * 2.0;
+        let available_w = (w - total_padding - total_spacing).max(1.0);
+        let col_w = available_w / count as f32;
+        let use_h = (h - 2.0 * self.padding_y).max(1.0);
+        let start_y = y + self.padding_y;
+
+        let mut current_x = x + self.padding_x;
+        for &child_ptr in children {
+            let child = unsafe { &mut *child_ptr };
+            child.set_rect(current_x, start_y, col_w, use_h);
+            current_x += col_w + self.spacing;
+        }
+    }
+}
+
 pub struct Page {
     pub base: Layer,
     pub visible: bool,
     pub owned_children: Vec<Box<dyn Element>>,
+    pub layout: Box<dyn PageLayout>,
 }
 
 impl std::fmt::Debug for Page {
@@ -24,7 +104,13 @@ impl Page {
             base: Layer::new(x, y, w, h),
             visible: true,
             owned_children: Vec::new(),
+            layout: Box::new(VerticalLayout::default()),
         }
+    }
+
+    pub fn with_layout(mut self, layout: Box<dyn PageLayout>) -> Self {
+        self.layout = layout;
+        self
     }
 
     pub fn add_child_owned(&mut self, child: Box<dyn Element>, ctx: &mut UiContext) {
@@ -52,20 +138,7 @@ impl Element for Page {
         if !self.visible {
             return;
         }
-        let padding_x = 8.0;
-        let padding_y = 10.0;
-        let left_x = x + padding_x;
-        let available_w = (w - 2.0 * padding_x).max(1.0);
-        let mut current_y = y + padding_y;
-        let spacing = 8.0;
-
-        for &child_ptr in &self.base.children {
-            let child = unsafe { &mut *child_ptr };
-            let (_, _, _, ch) = child.rect();
-            let use_h = if ch > 0.0 { ch } else { 42.0 };
-            child.set_rect(left_x, current_y, available_w, use_h);
-            current_y += use_h + spacing;
-        }
+        self.layout.layout(x, y, w, h, &self.base.children);
     }
 
     fn color(&self) -> [f32; 4] {
