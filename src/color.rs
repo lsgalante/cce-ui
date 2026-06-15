@@ -31,7 +31,7 @@ static COLOR_BORDERS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.2039, 0.2039, 0.25
 static NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
 static SIDEBAR_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(SIDEBAR_BG);
 static HIGHLIGHT_PRIMARY_COLOR: RwLock<[f32; 4]> = RwLock::new(HIGHLIGHT_PRIMARY);
-static PAGINATOR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
+static MENUBAR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
 static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
@@ -138,8 +138,10 @@ fn parse_and_set_colors(content: &str) {
         if let Some(c) = parse_hex(trimmed, "primary_highlight_color") {
             if let Ok(mut lock) = HIGHLIGHT_PRIMARY_COLOR.write() { *lock = [c[0], c[1], c[2], 0.12]; }
         }
-        if let Some(c) = parse_hex(trimmed, "paginator_tab_label_color") {
-            if let Ok(mut lock) = PAGINATOR_TAB_LABEL_COLOR.write() { *lock = c; }
+        if let Some(c) = parse_hex(trimmed, "menubar_tab_label_color") {
+            if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
+        } else if let Some(c) = parse_hex(trimmed, "paginator_tab_label_color") {
+            if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
         }
         if let Some(c) = parse_hex(trimmed, "toggle_enabled_color") {
             if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
@@ -283,13 +285,13 @@ pub fn set_highlight_primary_color(color: [f32; 4]) {
     }
 }
 
-pub fn paginator_tab_label_color() -> [f32; 4] {
+pub fn menubar_tab_label_color() -> [f32; 4] {
     load_colors_once();
-    *PAGINATOR_TAB_LABEL_COLOR.read().unwrap()
+    *MENUBAR_TAB_LABEL_COLOR.read().unwrap()
 }
 
-pub fn set_paginator_tab_label_color(color: [f32; 4]) {
-    if let Ok(mut lock) = PAGINATOR_TAB_LABEL_COLOR.write() {
+pub fn set_menubar_tab_label_color(color: [f32; 4]) {
+    if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() {
         *lock = color;
     }
 }

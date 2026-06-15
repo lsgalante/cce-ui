@@ -721,7 +721,7 @@ impl Element for MenuBar {
         if !self.visible {
             return Vec::new();
         }
-        let label_color = crate::colors::paginator_tab_label_color();
+        let label_color = crate::colors::menubar_tab_label_color();
         let srgb = crate::colors::to_srgb(label_color);
         let text_color = [
             (srgb[0] * 255.0) as u8,
@@ -1178,7 +1178,7 @@ impl Element for Menu {
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
-        let label_color = crate::colors::paginator_tab_label_color();
+        let label_color = crate::colors::menubar_tab_label_color();
         let srgb = crate::colors::to_srgb(label_color);
         let text_color = [
             (srgb[0] * 255.0) as u8,

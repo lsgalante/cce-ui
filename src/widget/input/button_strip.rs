@@ -74,7 +74,7 @@ impl ButtonStrip {
             return;
         }
 
-        let active_color = colors::paginator_tab_label_color();
+        let active_color = colors::menubar_tab_label_color();
         let active_srgb = colors::to_srgb(active_color);
         let active_r = (active_srgb[0] * 255.0) as u8;
         let active_g = (active_srgb[1] * 255.0) as u8;

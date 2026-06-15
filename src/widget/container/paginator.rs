@@ -371,7 +371,7 @@ impl Paginator {
     fn generate_tab_quads(&mut self) {
         self.tab_text_quads.clear();
         let (tab_w, _) = self.vertical_tab_size();
-        let active_color = colors::paginator_tab_label_color();
+        let active_color = colors::menubar_tab_label_color();
         let active_srgb = colors::to_srgb(active_color);
         let active_r = (active_srgb[0] * 255.0) as u8;
         let active_g = (active_srgb[1] * 255.0) as u8;
@@ -665,7 +665,7 @@ impl Element for Paginator {
 
             let (tab_w, _) = self.vertical_tab_size();
             let padding_y = crate::layout::paginator_tab_padding_y();
-            let active_color = colors::paginator_tab_label_color();
+            let active_color = colors::menubar_tab_label_color();
             let active_srgb = colors::to_srgb(active_color);
             let active_r = (active_srgb[0] * 255.0) as u8;
             let active_g = (active_srgb[1] * 255.0) as u8;
