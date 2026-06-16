@@ -1,4 +1,4 @@
-use clear_ui::widget::{
+use cce_ui::widget::{
     Button, Checkbox, ContentBg, Header, Panel, ProgressBar, RangeSlider, Sidebar, Slider, Spinbox,
     StatusBar, TextLabel, Toggle, Element, JsonLayoutWidget, JsonLayoutConfig,
 };
@@ -192,7 +192,7 @@ fn extra_quad_vertices(
     }
 
     let (wx, mut wy, ww, mut wh) = w.rect();
-    let top_room = clear_ui::widget::label_offset(w);
+    let top_room = cce_ui::widget::label_offset(w);
     wy += top_room;
     wh -= top_room;
     let extra_corners = (
@@ -219,7 +219,7 @@ fn make_text_buffer_with_font(font_system: &mut FontSystem, text: &str, size: f3
     let mut attrs = Attrs::new();
     if let Some(font_name) = font {
         let family = match font_name {
-            "monospace" => glyphon::Family::Name(clear_ui::layout::get_system_monospace_font()),
+            "monospace" => glyphon::Family::Name(cce_ui::layout::get_system_monospace_font()),
             "sans-serif" => glyphon::Family::SansSerif,
             "serif" => glyphon::Family::Serif,
             _ => glyphon::Family::Name(font_name),
@@ -266,18 +266,18 @@ struct State {
     scale: f64,
     json_layout: Option<JsonLayoutWidget>,
     layout_mode: bool,
-    ui_context: clear_ui::context::UiContext,
+    ui_context: cce_ui::context::UiContext,
 }
 
 impl State {
     async fn new(
-        wayland_handle: &'static clear_ui::wayland::WaylandSurfaceHandle,
+        wayland_handle: &'static cce_ui::wayland::WaylandSurfaceHandle,
         pw: u32,
         ph: u32,
         scale: f64,
         json_layout_config: Option<JsonLayoutConfig>,
     ) -> Self {
-        clear_ui::scale::set_scale_factor(scale as f32);
+        cce_ui::scale::set_scale_factor(scale as f32);
         let lw = pw as f32 / scale as f32;
         let lh = ph as f32 / scale as f32;
         let sw = lw;
@@ -455,7 +455,7 @@ impl State {
             scale,
             json_layout,
             layout_mode,
-            ui_context: clear_ui::context::UiContext::new(),
+            ui_context: cce_ui::context::UiContext::new(),
         };
 
         state.apply_layout();
@@ -466,7 +466,7 @@ impl State {
     fn apply_layout(&mut self) {
         if self.layout_mode {
             if let Some(jl) = &mut self.json_layout {
-                clear_ui::scale::set_scale_factor(self.scale as f32);
+                cce_ui::scale::set_scale_factor(self.scale as f32);
                 jl.set_rect(0.0, 0.0, self.width, self.height);
             }
         } else {
@@ -506,7 +506,7 @@ impl State {
             }
 
             // Draw popover quads on top
-            let mut popover_pc = clear_ui::layout::PopoverCollector::new();
+            let mut popover_pc = cce_ui::layout::PopoverCollector::new();
             for &i in &draw_order {
                 let w = &self.widgets[i];
                 if w.popover_rect().is_some() {
@@ -517,8 +517,8 @@ impl State {
                 verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
             }
 
-            if clear_ui::widget::context_menu::is_visible() {
-                for (qx, qy, qw, qh, qc) in clear_ui::widget::context_menu::extra_quads() {
+            if cce_ui::widget::context_menu::is_visible() {
+                for (qx, qy, qw, qh, qc) in cce_ui::widget::context_menu::extra_quads() {
                     verts.extend(quad_vertices(qx, qy, qw, qh, sw, sh, qc));
                 }
             }
@@ -636,8 +636,8 @@ impl State {
                 }
             }
 
-            if clear_ui::widget::context_menu::is_visible() {
-                for label in clear_ui::widget::context_menu::text_labels() {
+            if cce_ui::widget::context_menu::is_visible() {
+                for label in cce_ui::widget::context_menu::text_labels() {
                     widget_buffers.push(make_text_buffer(font_system, &label.text, label.font_size));
                     widget_labels.push((label, None));
                 }
@@ -671,7 +671,7 @@ impl State {
             });
         }
 
-        let mut popover_pc = clear_ui::layout::PopoverCollector::new();
+        let mut popover_pc = cce_ui::layout::PopoverCollector::new();
         let mut popover_buffers = Vec::new();
 
         if !*layout_mode {
@@ -821,14 +821,14 @@ fn demo_positions(sw: f32, sh: f32) -> Vec<(f32, f32, f32, f32)> {
 }
 
 struct PressedKey {
-    logical_key: clear_ui::widget::Key,
+    logical_key: cce_ui::widget::Key,
     text: Option<String>,
     first_pressed: std::time::Instant,
     last_repeated: std::time::Instant,
 }
 
-fn is_repeatable_key(key: &clear_ui::widget::Key) -> bool {
-    use clear_ui::widget::{Key, NamedKey};
+fn is_repeatable_key(key: &cce_ui::widget::Key) -> bool {
+    use cce_ui::widget::{Key, NamedKey};
     match key {
         Key::Named(NamedKey::Backspace) |
         Key::Named(NamedKey::Delete) |
@@ -866,7 +866,9 @@ struct AppState {
     pressed_key: Option<PressedKey>,
     key_repeat_delay: std::time::Duration,
     key_repeat_interval: std::time::Duration,
-    inspector: Option<clear_ui::protocol::zclear_inspector_v1::ZclearInspectorV1>,
+    inspector: Option<cce_ui::protocol::zclear_inspector_v1::ZclearInspectorV1>,
+    last_inspector_update: std::time::Instant,
+    last_serialized: String,
 }
 
 impl CompositorHandler for AppState {
@@ -1021,8 +1023,8 @@ impl PointerHandler for AppState {
                 PointerEventKind::Motion { .. } => {
                     if let Some(state) = &mut self.state {
                         let mut changed = false;
-                        if clear_ui::widget::context_menu::is_visible() {
-                            if clear_ui::widget::context_menu::cursor_moved(state.cursor_x, state.cursor_y) {
+                        if cce_ui::widget::context_menu::is_visible() {
+                            if cce_ui::widget::context_menu::cursor_moved(state.cursor_x, state.cursor_y) {
                                 changed = true;
                             }
                         } else if state.layout_mode {
@@ -1053,20 +1055,20 @@ impl PointerHandler for AppState {
                 }
                 PointerEventKind::Press { button, .. } => {
                     let btn = match *button {
-                        272 => clear_ui::widget::MouseButton::Left,
-                        273 => clear_ui::widget::MouseButton::Right,
-                        274 => clear_ui::widget::MouseButton::Middle,
+                        272 => cce_ui::widget::MouseButton::Left,
+                        273 => cce_ui::widget::MouseButton::Right,
+                        274 => cce_ui::widget::MouseButton::Middle,
                         _ => continue,
                     };
                     if let Some(st) = &mut self.state {
                         let mut changed = false;
-                        if clear_ui::widget::context_menu::is_visible() {
-                            if clear_ui::widget::context_menu::mouse_input(btn, clear_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y) {
+                        if cce_ui::widget::context_menu::is_visible() {
+                            if cce_ui::widget::context_menu::mouse_input(btn, cce_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y) {
                                 changed = true;
                             }
                         } else if st.layout_mode {
                             if let Some(jl) = &mut st.json_layout {
-                                if jl.mouse_input(btn, clear_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y, &mut st.ui_context) {
+                                if jl.mouse_input(btn, cce_ui::widget::ElementState::Pressed, st.cursor_x, st.cursor_y, &mut st.ui_context) {
                                     changed = true;
                                 }
                             }
@@ -1078,7 +1080,7 @@ impl PointerHandler for AppState {
                                     break;
                                 }
                             }
-                            if btn == clear_ui::widget::MouseButton::Left {
+                            if btn == cce_ui::widget::MouseButton::Left {
                                 if let Some(old) = st.focused_widget {
                                     if Some(old) != clicked_idx {
                                         st.widgets[old].unfocus();
@@ -1089,18 +1091,18 @@ impl PointerHandler for AppState {
                             if let Some(i) = clicked_idx {
                                 if st.widgets[i].mouse_input(
                                     btn,
-                                    clear_ui::widget::ElementState::Pressed,
+                                    cce_ui::widget::ElementState::Pressed,
                                     st.cursor_x,
                                     st.cursor_y,
                                     &mut st.ui_context,
                                 ) {
                                     changed = true;
                                 }
-                                if btn == clear_ui::widget::MouseButton::Left && st.widgets[i].draggable() {
+                                if btn == cce_ui::widget::MouseButton::Left && st.widgets[i].draggable() {
                                     st.widgets[i].drag_begin(st.cursor_x, st.cursor_y);
                                     st.drag_widget = Some(i);
                                 }
-                                if btn == clear_ui::widget::MouseButton::Left {
+                                if btn == cce_ui::widget::MouseButton::Left {
                                     st.widgets[i].focus();
                                     st.focused_widget = Some(i);
                                 }
@@ -1114,31 +1116,31 @@ impl PointerHandler for AppState {
                 }
                 PointerEventKind::Release { button, .. } => {
                     let btn = match *button {
-                        272 => clear_ui::widget::MouseButton::Left,
-                        273 => clear_ui::widget::MouseButton::Right,
-                        274 => clear_ui::widget::MouseButton::Middle,
+                        272 => cce_ui::widget::MouseButton::Left,
+                        273 => cce_ui::widget::MouseButton::Right,
+                        274 => cce_ui::widget::MouseButton::Middle,
                         _ => continue,
                     };
                     if let Some(st) = &mut self.state {
                         let mut changed = false;
                         let mut should_close = false;
-                        if clear_ui::widget::context_menu::is_visible() {
-                            if clear_ui::widget::context_menu::mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y) {
+                        if cce_ui::widget::context_menu::is_visible() {
+                            if cce_ui::widget::context_menu::mouse_input(btn, cce_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y) {
                                 changed = true;
                             }
                         } else if st.layout_mode {
                             let mut clicked_btn_id = None;
                             if let Some(jl) = &mut st.json_layout {
-                                if jl.mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y, &mut st.ui_context) {
+                                if jl.mouse_input(btn, cce_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y, &mut st.ui_context) {
                                     changed = true;
                                 }
-                                if btn == clear_ui::widget::MouseButton::Left {
+                                if btn == cce_ui::widget::MouseButton::Left {
                                     for w in &mut jl.widgets {
                                         let active_page = jl.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
                                         if w.page_idx != active_page {
                                             continue;
                                         }
-                                        if let Some(btn_w) = w.widget.as_any_mut().downcast_mut::<clear_ui::widget::Button>() {
+                                        if let Some(btn_w) = w.widget.as_any_mut().downcast_mut::<cce_ui::widget::Button>() {
                                             if btn_w.take_click() {
                                                 clicked_btn_id = Some(w.id.clone());
                                                 break;
@@ -1154,13 +1156,13 @@ impl PointerHandler for AppState {
                                 let mut sliders = std::collections::HashMap::new();
                                 if let Some(jl) = &st.json_layout {
                                     for w in &jl.widgets {
-                                        if let Some(cb) = w.widget.as_any().downcast_ref::<clear_ui::widget::Checkbox>() {
+                                        if let Some(cb) = w.widget.as_any().downcast_ref::<cce_ui::widget::Checkbox>() {
                                             checkboxes.insert(w.id.clone(), cb.checked());
-                                        } else if let Some(sb) = w.widget.as_any().downcast_ref::<clear_ui::widget::Spinbox>() {
+                                        } else if let Some(sb) = w.widget.as_any().downcast_ref::<cce_ui::widget::Spinbox>() {
                                             spinboxes.insert(w.id.clone(), sb.value);
-                                        } else if let Some(cs) = w.widget.as_any().downcast_ref::<clear_ui::widget::ColorSelector>() {
+                                        } else if let Some(cs) = w.widget.as_any().downcast_ref::<cce_ui::widget::ColorSelector>() {
                                             colors.insert(w.id.clone(), cs.color);
-                                        } else if let Some(sl) = w.widget.as_any().downcast_ref::<clear_ui::widget::Slider>() {
+                                        } else if let Some(sl) = w.widget.as_any().downcast_ref::<cce_ui::widget::Slider>() {
                                             sliders.insert(w.id.clone(), sl.get_scaled_value());
                                         }
                                     }
@@ -1176,7 +1178,7 @@ impl PointerHandler for AppState {
                                 should_close = true;
                             }
                         } else {
-                            if btn == clear_ui::widget::MouseButton::Left {
+                            if btn == cce_ui::widget::MouseButton::Left {
                                 if let Some(idx) = st.drag_widget {
                                     st.widgets[idx].drag_end();
                                     st.drag_widget = None;
@@ -1184,11 +1186,11 @@ impl PointerHandler for AppState {
                                 }
                             }
                             for w in &mut st.widgets {
-                                if w.mouse_input(btn, clear_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y, &mut st.ui_context) {
+                                if w.mouse_input(btn, cce_ui::widget::ElementState::Released, st.cursor_x, st.cursor_y, &mut st.ui_context) {
                                     changed = true;
                                 }
                             }
-                            if btn == clear_ui::widget::MouseButton::Left {
+                            if btn == cce_ui::widget::MouseButton::Left {
                                 let mut clicked = false;
                                 for w in &mut st.widgets {
                                     if w.take_click() {
@@ -1215,7 +1217,7 @@ impl PointerHandler for AppState {
                         let h_scroll = horizontal.absolute as f32;
                         let v_scroll = vertical.absolute as f32;
                         
-                        let delta = clear_ui::widget::MouseScrollDelta::LineDelta(-h_scroll / 10.0, -v_scroll / 10.0);
+                        let delta = cce_ui::widget::MouseScrollDelta::LineDelta(-h_scroll / 10.0, -v_scroll / 10.0);
                         let mut changed = false;
                         if !state.layout_mode {
                             for w in &mut state.widgets {
@@ -1275,7 +1277,7 @@ impl KeyboardHandler for AppState {
         _serial: u32,
         event: smithay_client_toolkit::seat::keyboard::KeyEvent,
     ) {
-        self.handle_key(event, clear_ui::widget::ElementState::Pressed);
+        self.handle_key(event, cce_ui::widget::ElementState::Pressed);
     }
 
     fn release_key(
@@ -1286,7 +1288,7 @@ impl KeyboardHandler for AppState {
         _serial: u32,
         event: smithay_client_toolkit::seat::keyboard::KeyEvent,
     ) {
-        self.handle_key(event, clear_ui::widget::ElementState::Released);
+        self.handle_key(event, cce_ui::widget::ElementState::Released);
     }
 
     fn update_modifiers(
@@ -1323,8 +1325,8 @@ impl KeyboardHandler for AppState {
 }
 
 impl AppState {
-    fn handle_key(&mut self, event: smithay_client_toolkit::seat::keyboard::KeyEvent, state: clear_ui::widget::ElementState) {
-        use clear_ui::widget::{Key, KeyEvent, NamedKey};
+    fn handle_key(&mut self, event: smithay_client_toolkit::seat::keyboard::KeyEvent, state: cce_ui::widget::ElementState) {
+        use cce_ui::widget::{Key, KeyEvent, NamedKey};
         let logical_key = match event.keysym {
             xkeysym::Keysym::Escape => Key::Named(NamedKey::Escape),
             xkeysym::Keysym::Return => Key::Named(NamedKey::Enter),
@@ -1356,7 +1358,7 @@ impl AppState {
             shift: self.shift_pressed,
         };
 
-        if state == clear_ui::widget::ElementState::Pressed {
+        if state == cce_ui::widget::ElementState::Pressed {
             if is_repeatable_key(&custom_event.logical_key) {
                 self.pressed_key = Some(PressedKey {
                     logical_key: custom_event.logical_key.clone(),
@@ -1367,7 +1369,7 @@ impl AppState {
             } else {
                 self.pressed_key = None;
             }
-        } else if state == clear_ui::widget::ElementState::Released {
+        } else if state == cce_ui::widget::ElementState::Released {
             if let Some(ref pk) = self.pressed_key {
                 if pk.logical_key == custom_event.logical_key {
                     self.pressed_key = None;
@@ -1449,11 +1451,11 @@ impl ProvidesRegistryState for AppState {
     ) {}
 }
 
-impl wayland_client::Dispatch<clear_ui::protocol::zclear_inspector_v1::ZclearInspectorV1, ()> for AppState {
+impl wayland_client::Dispatch<cce_ui::protocol::zclear_inspector_v1::ZclearInspectorV1, ()> for AppState {
     fn event(
         _state: &mut Self,
-        _proxy: &clear_ui::protocol::zclear_inspector_v1::ZclearInspectorV1,
-        _event: clear_ui::protocol::zclear_inspector_v1::Event,
+        _proxy: &cce_ui::protocol::zclear_inspector_v1::ZclearInspectorV1,
+        _event: cce_ui::protocol::zclear_inspector_v1::Event,
         _data: &(),
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
@@ -1541,12 +1543,14 @@ fn main() {
         key_repeat_delay: std::time::Duration::from_millis(500),
         key_repeat_interval: std::time::Duration::from_millis(50),
         inspector,
+        last_inspector_update: std::time::Instant::now() - std::time::Duration::from_secs(1),
+        last_serialized: String::new(),
     };
 
     // Perform a roundtrip to populate output_state with active output scales
     event_queue.roundtrip(&mut app).unwrap();
 
-    let scale = clear_ui::wayland::detect_scale_factor(&app.output_state);
+    let scale = cce_ui::wayland::detect_scale_factor(&app.output_state);
 
     let surface = app.compositor_state.create_surface(&qh);
     surface.set_buffer_scale(scale as i32);
@@ -1565,8 +1569,8 @@ fn main() {
     let ph = (win_h * scale) as u32;
 
     let window = app.xdg_shell_state.create_window(surface.clone(), WindowDecorations::None, &qh);
-    window.set_title("Clear UI - Test Window");
-    window.set_app_id("clear-ui");
+    window.set_title("CCE UI - Test Window");
+    window.set_app_id("cce-ui");
     window.set_min_size(Some((win_w as u32, win_h as u32)));
     window.commit();
 
@@ -1574,7 +1578,7 @@ fn main() {
         inspector.register_client(&surface);
     }
 
-    let wayland_handle = Box::leak(Box::new(clear_ui::wayland::WaylandSurfaceHandle {
+    let wayland_handle = Box::leak(Box::new(cce_ui::wayland::WaylandSurfaceHandle {
         display_ptr: conn.backend().display_id().as_ptr() as *mut std::ffi::c_void,
         surface_ptr: surface.id().as_ptr() as *mut std::ffi::c_void,
     }));
@@ -1631,8 +1635,8 @@ fn main() {
             if now.duration_since(pk.first_pressed) >= app.key_repeat_delay {
                 if now.duration_since(pk.last_repeated) >= app.key_repeat_interval {
                     pk.last_repeated = now;
-                    let custom_event = clear_ui::widget::KeyEvent {
-                        state: clear_ui::widget::ElementState::Pressed,
+                    let custom_event = cce_ui::widget::KeyEvent {
+                        state: cce_ui::widget::ElementState::Pressed,
                         logical_key: pk.logical_key.clone(),
                         text: pk.text.clone(),
                         repeat: true,
@@ -1686,11 +1690,20 @@ fn create_memfd_with_data(name: &str, data: &[u8]) -> std::io::Result<std::os::u
                 state.render();
                 if let Some(ref inspector) = app.inspector {
                     if let Some(ref surface) = app.surface {
-                        let json = clear_ui::widget::serialize_widgets(&state.widgets);
-                        if let Ok(raw_fd) = create_memfd_with_data("clear_ui_state", json.as_bytes()) {
-                            use std::os::unix::io::{FromRawFd, AsFd};
-                            let file = unsafe { std::fs::File::from_raw_fd(raw_fd) };
-                            inspector.update_state(surface, file.as_fd(), json.len() as u32);
+                        let json = cce_ui::widget::serialize_widgets(&state.widgets);
+                        if json != app.last_serialized {
+                            let now = std::time::Instant::now();
+                            if now.duration_since(app.last_inspector_update) >= std::time::Duration::from_millis(100) {
+                                app.last_serialized = json.clone();
+                                app.last_inspector_update = now;
+                                if let Ok(raw_fd) = create_memfd_with_data("cce_ui_state", json.as_bytes()) {
+                                    use std::os::unix::io::{FromRawFd, AsFd};
+                                    let file = unsafe { std::fs::File::from_raw_fd(raw_fd) };
+                                    inspector.update_state(surface, file.as_fd(), json.len() as u32);
+                                }
+                            } else {
+                                app.redraw = true;
+                            }
                         }
                     }
                 }

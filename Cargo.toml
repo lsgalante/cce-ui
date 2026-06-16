@@ -1,10 +1,10 @@
 [package]
-name = "clear-ui"
+name = "cce-ui"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "clear_ui"
+name = "cce_ui"
 path = "src/lib.rs"
 
 [dependencies]

@@ -1,6 +1,6 @@
 fn main() {
     let opt = resvg::usvg::Options::default();
-    let fontdb = clear_ui::widget::get_font_db();
+    let fontdb = cce_ui::widget::get_font_db();
 
     // 1. Original 32x120
     let svg_32_120 = r##"<svg width="32" height="120" xmlns="http://www.w3.org/2000/svg">

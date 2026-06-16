@@ -55,11 +55,16 @@ fn serialize_single_widget(w: &dyn Element, json: &mut String) {
         json.push_str("]}");
     } else if !children.is_empty() {
         json.push_str(",\"children\":[");
-        for (i, child_ptr) in children.iter().enumerate() {
-            if i > 0 {
-                json.push(',');
-            }
+        let mut first = true;
+        for child_ptr in &children {
             unsafe {
+                if !(**child_ptr).visible() {
+                    continue;
+                }
+                if !first {
+                    json.push(',');
+                }
+                first = false;
                 serialize_single_widget(&**child_ptr, json);
             }
         }
@@ -72,10 +77,15 @@ fn serialize_single_widget(w: &dyn Element, json: &mut String) {
 pub fn serialize_widgets(widgets: &[Box<dyn Element>]) -> String {
     let mut json = String::new();
     json.push('[');
-    for (i, w) in widgets.iter().enumerate() {
-        if i > 0 {
+    let mut first = true;
+    for w in widgets {
+        if !w.visible() {
+            continue;
+        }
+        if !first {
             json.push(',');
         }
+        first = false;
         serialize_single_widget(&**w, &mut json);
     }
     json.push(']');

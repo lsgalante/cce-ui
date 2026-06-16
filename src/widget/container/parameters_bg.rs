@@ -1,6 +1,6 @@
 use crate::colors;
 use crate::widget::*;
-use crate::widget::input::{Slider, Spinbox, Button, Dropdown, TextBox, Checkbox};
+use crate::widget::input::{Slider, Spinbox, Button, Dropdown, TextBox, Checkbox, ColorSelector};
 use crate::widget::display::{Float3, TextLabel};
 
 pub struct ParametersBg {
@@ -17,6 +17,7 @@ pub struct ParametersBg {
     pub choices: Vec<Option<Dropdown>>,
     pub texts: Vec<Option<TextBox>>,
     pub checkboxes: Vec<Option<Checkbox>>,
+    pub colors: Vec<Option<ColorSelector>>,
     visible: bool,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub parent: Option<*mut (dyn Element + 'static)>,
@@ -38,6 +39,7 @@ impl ParametersBg {
             choices: Vec::new(),
             texts: Vec::new(),
             checkboxes: Vec::new(),
+            colors: Vec::new(),
             visible: true,
             children: Vec::new(),
             parent: None,
@@ -69,6 +71,8 @@ impl ParametersBg {
                 38.0
             } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
                 42.0
+            } else if p.2.starts_with("color") {
+                40.0
             } else if p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
                 24.0
             } else {
@@ -122,6 +126,12 @@ impl ParametersBg {
             if let Some(cb) = cb_opt {
                 let r = rects[i];
                 cb.set_rect(r.0, r.1, r.2, r.3);
+            }
+        }
+        for (i, c_opt) in self.colors.iter_mut().enumerate() {
+            if let Some(c) = c_opt {
+                let r = rects[i];
+                c.set_rect(r.0, r.1, r.2, r.3);
             }
         }
     }
@@ -191,6 +201,10 @@ impl ParametersBg {
                 if let Some(cb) = &self.checkboxes[i] {
                     labels.extend(cb.text_labels());
                 }
+            } else if ptype.starts_with("color") {
+                if let Some(c) = &self.colors[i] {
+                    labels.extend(c.text_labels());
+                }
             } else {
                 labels.push(TextLabel {
                     text: format!("{}: {}", name, value),
@@ -215,6 +229,18 @@ fn parse_slider_range(ptype: &str) -> (f32, f32) {
         }
     }
     (0.0, 2.0)
+}
+
+fn parse_hex_to_rgb(s: &str) -> Option<[u8; 3]> {
+    let s = s.trim_start_matches('#');
+    if s.len() == 6 || s.len() == 8 {
+        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
+        Some([r, g, b])
+    } else {
+        None
+    }
 }
 
 fn parse_spinbox_range(ptype: &str) -> (i32, i32, i32) {
@@ -360,6 +386,13 @@ impl Element for ParametersBg {
                     if let Some(d) = &mut self.choices[idx] {
                         d.unfocus();
                         if let Some(val) = d.get_value_string() {
+                            p.1 = val;
+                        }
+                    }
+                } else if p.2.starts_with("color") {
+                    if let Some(c) = &mut self.colors[idx] {
+                        c.unfocus();
+                        if let Some(val) = c.get_value_string() {
                             p.1 = val;
                         }
                     }
@@ -547,6 +580,13 @@ impl Element for ParametersBg {
                 }
             }
         }
+        for c_opt in &mut self.colors {
+            if let Some(c) = c_opt {
+                if c.on_cursor_moved(px, py, ctx) {
+                    changed = true;
+                }
+            }
+        }
 
         for &widget_ptr in &self.children {
             let widget = unsafe { &mut *widget_ptr };
@@ -651,6 +691,22 @@ impl Element for ParametersBg {
                         if cb.take_change() {
                             if let Some(val) = cb.get_value_string() {
                                 p.1 = val;
+                            }
+                        }
+                        return true;
+                    }
+                }
+            } else if p.2.starts_with("color") {
+                if let Some(c) = &mut self.colors[i] {
+                    if c.mouse_input(button, state, px, py, ctx) {
+                        if let Some(val) = c.get_value_string() {
+                            p.1 = val;
+                        }
+                        if c.editing {
+                            self.focused_param = Some(i);
+                        } else {
+                            if self.focused_param == Some(i) {
+                                self.focused_param = None;
                             }
                         }
                         return true;
@@ -913,6 +969,18 @@ impl Element for ParametersBg {
                             return true;
                         }
                     }
+                } else if p.2.starts_with("color") {
+                    if let Some(c) = &mut self.colors[idx] {
+                        if c.keyboard_input(event, ctx) {
+                            if let Some(val) = c.get_value_string() {
+                                p.1 = val;
+                            }
+                            if !c.editing {
+                                self.focused_param = None;
+                            }
+                            return true;
+                        }
+                    }
                 } else if p.2.starts_with("float3") {
                     if let Some(f) = &mut self.float3s[idx] {
                         if f.keyboard_input(event, ctx) {
@@ -1139,6 +1207,10 @@ impl Element for ParametersBg {
             } else if p.2 == "toggle" || p.2 == "checkbox" {
                 if let Some(cb) = &self.checkboxes[i] {
                     quads.extend(cb.extra_quads());
+                }
+            } else if p.2.starts_with("color") {
+                if let Some(c) = &self.colors[i] {
+                    quads.extend(c.extra_quads());
                 }
             }
         }
@@ -1372,6 +1444,14 @@ impl ParamController for ParametersBg {
                     None
                 }
             }).collect();
+            self.colors = self.display_params.iter().map(|p| {
+                if p.2.starts_with("color") {
+                    let col = parse_hex_to_rgb(&p.1).unwrap_or([255, 255, 255]);
+                    Some(ColorSelector::new(col).with_label(&p.0))
+                } else {
+                    None
+                }
+            }).collect();
         } else {
             for (i, p_new) in params.iter().enumerate() {
                 if Some(i) != self.focused_param && Some(i) != self.dragging_param {
@@ -1414,6 +1494,10 @@ impl ParamController for ParametersBg {
                     } else if let Some(ref mut cb) = self.checkboxes[i] {
                         let checked = p_new.1.trim().to_lowercase() == "true";
                         cb.set_checked(checked);
+                    } else if let Some(ref mut c) = self.colors[i] {
+                        if !c.editing {
+                            c.set_value_string(&p_new.1);
+                        }
                     }
                 }
             }

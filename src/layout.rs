@@ -55,7 +55,7 @@ static LABEL_MARGIN: RwLock<f32> = RwLock::new(6.0);
 static BUTTON_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static SPINBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 
-/// Standard line height multiplier for text layout in clear-ui.
+/// Standard line height multiplier for text layout in cce-ui.
 pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 
 /// Standard line height based on font size.
