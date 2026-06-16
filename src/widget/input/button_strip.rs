@@ -103,7 +103,7 @@ impl ButtonStrip {
             };
 
             let r = self.item_rect(i);
-            let padding_y = crate::layout::paginator_tab_padding_y();
+            let padding_y = crate::layout::button_padding();
             let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
             let usable_h = (r.3 - y_offset).max(1.0);
 
@@ -187,7 +187,7 @@ impl ButtonStrip {
                 } else {
                     trimmed
                 };
-                let padding_y = crate::layout::paginator_tab_padding_y();
+                let padding_y = crate::layout::button_padding();
                 let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
                 let text_w = TextLabel::estimate_width(label_text, 12.0);
                 (text_w + y_offset).max(1.0)
@@ -331,7 +331,7 @@ impl Element for ButtonStrip {
                     let page_name = &self.buttons[i];
                     let trimmed = page_name.trim();
                     let has_icon = trimmed.find(' ').is_some();
-                    let padding_y = crate::layout::paginator_tab_padding_y();
+                    let padding_y = crate::layout::button_padding();
                     let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
 
                     for &(qx, qy, qw, qh, qc) in &self.tab_text_quads[i] {
@@ -369,7 +369,7 @@ impl Element for ButtonStrip {
                     if !icon.is_empty() {
                         let icon_font_size = 14.0;
                         let est_icon_w = TextLabel::estimate_width(icon, icon_font_size);
-                        let padding_y = crate::layout::paginator_tab_padding_y();
+                        let padding_y = crate::layout::button_padding();
                         let icon_y = r.1 + (padding_y - 2.0).max(0.0);
                         labels.push(TextLabel {
                             text: icon.to_string(),

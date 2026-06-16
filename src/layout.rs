@@ -45,7 +45,7 @@ static NESTED_SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
 static PAGINATOR_TAB_MARGIN_X: RwLock<f32> = RwLock::new(5.0);
 static PAGINATOR_TAB_MARGIN_Y: RwLock<f32> = RwLock::new(10.0);
 static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
-static PAGINATOR_TAB_PADDING_Y: RwLock<f32> = RwLock::new(14.0);
+static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
 
 static PLATE_PADDING: RwLock<f32> = RwLock::new(20.0);
 static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(44.0);
@@ -287,11 +287,19 @@ pub fn reload_config() {
                     }
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_y") {
+            if let Some(rest) = trimmed.strip_prefix("button_padding") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PAGINATOR_TAB_PADDING_Y.write() {
+                    if let Ok(mut lock) = BUTTON_PADDING.write() {
+                        *lock = val;
+                    }
+                }
+            } else if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_y") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = BUTTON_PADDING.write() {
                         *lock = val;
                     }
                 }
@@ -1053,32 +1061,56 @@ pub fn set_paginator_tab_padding_x(padding: f32) {
     }
 }
 
-pub fn paginator_tab_padding_y() -> f32 {
+pub fn button_padding() -> f32 {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         if let Some(content) = read_config() {
+            let mut found = false;
             for line in content.lines() {
                 let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_y") {
+                if let Some(rest) = trimmed.strip_prefix("button_padding") {
                     let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = PAGINATOR_TAB_PADDING_Y.write() {
+                        if let Ok(mut lock) = BUTTON_PADDING.write() {
                             *lock = val;
+                            found = true;
+                        }
+                    }
+                }
+            }
+            if !found {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if let Some(rest) = trimmed.strip_prefix("paginator_tab_padding_y") {
+                        let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                        let val_str = rest.trim_end_matches('"').trim();
+                        if let Ok(val) = val_str.parse::<f32>() {
+                            if let Ok(mut lock) = BUTTON_PADDING.write() {
+                                *lock = val;
+                            }
                         }
                     }
                 }
             }
         }
     });
-    *PAGINATOR_TAB_PADDING_Y.read().unwrap()
+    *BUTTON_PADDING.read().unwrap()
+}
+
+pub fn set_button_padding(padding: f32) {
+    if let Ok(mut lock) = BUTTON_PADDING.write() {
+        *lock = padding;
+    }
+}
+
+pub fn paginator_tab_padding_y() -> f32 {
+    button_padding()
 }
 
 pub fn set_paginator_tab_padding_y(padding: f32) {
-    if let Ok(mut lock) = PAGINATOR_TAB_PADDING_Y.write() {
-        *lock = padding;
-    }
+    set_button_padding(padding);
 }
 
 pub fn textbox_height() -> f32 {
