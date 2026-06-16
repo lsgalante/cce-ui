@@ -53,6 +53,7 @@ static NESTED_SECTION_LABEL_ALIGNMENT: RwLock<u8> = RwLock::new(0);
 
 static LABEL_MARGIN: RwLock<f32> = RwLock::new(6.0);
 static BUTTON_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static SPINBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 
 /// Standard line height multiplier for text layout in clear-ui.
 pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
@@ -141,6 +142,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SPINBOX_HEIGHT.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("spinbox_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = SPINBOX_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -879,6 +889,34 @@ pub fn button_corner_radius() -> f32 {
 
 pub fn set_button_corner_radius(radius: f32) {
     if let Ok(mut lock) = BUTTON_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
+pub fn spinbox_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("spinbox_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = SPINBOX_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *SPINBOX_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_spinbox_corner_radius(radius: f32) {
+    if let Ok(mut lock) = SPINBOX_CORNER_RADIUS.write() {
         *lock = radius;
     }
 }

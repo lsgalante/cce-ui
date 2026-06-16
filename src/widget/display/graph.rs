@@ -172,9 +172,74 @@ impl Graph {
         }
         (x, y)
     }
+
+    pub fn zoom_in(&mut self) {
+        if self.grid_size_x < 400.0 {
+            self.grid_size_x *= 1.1;
+            self.grid_size_y *= 1.1;
+            self.skipped_row_h *= 1.1;
+            self.skipped_col_w *= 1.1;
+        }
+    }
+
+    pub fn zoom_out(&mut self) {
+        if self.grid_size_x > 40.0 {
+            self.grid_size_x /= 1.1;
+            self.grid_size_y /= 1.1;
+            self.skipped_row_h /= 1.1;
+            self.skipped_col_w /= 1.1;
+        }
+    }
+}
+
+fn read_zoom_bindings() -> (String, String) {
+    let mut zoom_in_val = "=".to_string();
+    let mut zoom_out_val = "-".to_string();
+    let paths = [
+        "/home/lsgalante/.config/cce/config.toml",
+        "/home/lsgalante/.config/ccec/config.toml",
+    ];
+    for path in &paths {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("zoom_in") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val = rest.trim_end_matches('"').to_string();
+                    if !val.is_empty() {
+                        zoom_in_val = val;
+                    }
+                } else if let Some(rest) = trimmed.strip_prefix("zoom_out") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val = rest.trim_end_matches('"').to_string();
+                    if !val.is_empty() {
+                        zoom_out_val = val;
+                    }
+                }
+            }
+            break;
+        }
+    }
+    (zoom_in_val, zoom_out_val)
 }
 
 impl Element for Graph {
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
+        if event.state == ElementState::Pressed {
+            if let Key::Character(ref ch) = event.logical_key {
+                let (zoom_in_binding, zoom_out_binding) = read_zoom_bindings();
+                if ch == &zoom_in_binding {
+                    self.zoom_in();
+                    return true;
+                } else if ch == &zoom_out_binding {
+                    self.zoom_out();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {

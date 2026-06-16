@@ -112,6 +112,10 @@ impl Element for Spinbox {
         Some(crate::layout::spinbox_height())
     }
 
+    fn corner_radius(&self) -> f32 {
+        crate::layout::spinbox_corner_radius()
+    }
+
     fn color(&self) -> [f32; 4] { colors::SPINBOX_BG }
     fn value(&self) -> i32 { self.value }
     fn widget_font(&self) -> Option<String> { Some("monospace".to_string()) }
@@ -125,9 +129,8 @@ impl Element for Spinbox {
             self.hover_inc = false;
             return changed || was != self.base.hovered;
         }
-        let split = self.base.x + self.base.w * 0.55;
-        let hd = px >= split && px < split + self.base.w * 0.225;
-        let hi = px >= split + self.base.w * 0.225;
+        let hd = px >= self.base.x && px < self.base.x + self.base.w * 0.225;
+        let hi = px >= self.base.x + self.base.w * 0.775;
         let changed = hd != self.hover_dec || hi != self.hover_inc;
         self.hover_dec = hd;
         self.hover_inc = hi;
@@ -145,14 +148,16 @@ impl Element for Spinbox {
         if !self.hit_test(px, py, ctx) { return false; }
         match state {
             ElementState::Pressed => {
-                let split = self.base.x + self.base.w * 0.55;
-                if px >= split && px < split + self.base.w * 0.225 {
+                let btn_w = self.base.w * 0.225;
+                let split_left = self.base.x + btn_w;
+                let split_right = self.base.x + self.base.w * 0.775;
+                if px < split_left {
                     self.value = (self.value - self.step).max(self.min);
                     true
-                } else if px >= split + self.base.w * 0.225 {
+                } else if px >= split_right {
                     self.value = (self.value + self.step).min(self.max);
                     true
-                } else if px < split {
+                } else {
                     self.editing = true;
                     if self.decimals > 0 {
                         let divisor = 10.0f32.powi(self.decimals as i32);
@@ -161,14 +166,12 @@ impl Element for Spinbox {
                         self.edit_buffer = self.value.to_string();
                     }
                     let char_width = 8.4;
-                    let click_idx = (((px - (self.base.x + 4.0)) / char_width).round() as isize)
+                    let click_idx = (((px - (split_left + 4.0)) / char_width).round() as isize)
                         .max(0)
                         .min(self.edit_buffer.chars().count() as isize) as usize;
                     self.cursor_idx = click_idx;
                     focus::set_focused(self);
                     true
-                } else {
-                    false
                 }
             }
             ElementState::Released => {
@@ -284,8 +287,10 @@ impl Element for Spinbox {
         let mut quads = Vec::new();
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
-        let split = self.base.x + self.base.w * 0.55;
         let btn_w = self.base.w * 0.225;
+        let display_w = self.base.w * 0.55;
+        let split_left = self.base.x + btn_w;
+        let split_right = self.base.x + btn_w + display_w;
         let inc_col = if self.hover_inc { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
         let dec_col = if self.hover_dec { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
         
@@ -295,20 +300,20 @@ impl Element for Spinbox {
             colors::SPINBOX_DISPLAY
         };
         
-        quads.push((self.base.x, self.base.y + top, self.base.w * 0.55, visual_h, display_bg));
-        quads.push((split, self.base.y + top, btn_w, visual_h, dec_col));
-        quads.push((split + btn_w, self.base.y + top, btn_w, visual_h, inc_col));
+        quads.push((self.base.x, self.base.y + top, btn_w, visual_h, dec_col));
+        quads.push((split_left, self.base.y + top, display_w, visual_h, display_bg));
+        quads.push((split_right, self.base.y + top, btn_w, visual_h, inc_col));
         
         if self.editing {
             let border_color = [0.20, 0.50, 0.85, 1.0];
-            quads.push((self.base.x, self.base.y + top, self.base.w * 0.55, 1.0, border_color));
-            quads.push((self.base.x, self.base.y + top + visual_h - 1.0, self.base.w * 0.55, 1.0, border_color));
-            quads.push((self.base.x, self.base.y + top, 1.0, visual_h, border_color));
-            quads.push((self.base.x + self.base.w * 0.55 - 1.0, self.base.y + top, 1.0, visual_h, border_color));
+            quads.push((split_left, self.base.y + top, display_w, 1.0, border_color));
+            quads.push((split_left, self.base.y + top + visual_h - 1.0, display_w, 1.0, border_color));
+            quads.push((split_left, self.base.y + top, 1.0, visual_h, border_color));
+            quads.push((split_left + display_w - 1.0, self.base.y + top, 1.0, visual_h, border_color));
 
             let char_width = 8.4;
-            let cursor_x = self.base.x + 4.0 + (self.cursor_idx as f32 * char_width);
-            let max_cursor_x = split - 4.0;
+            let cursor_x = split_left + 4.0 + (self.cursor_idx as f32 * char_width);
+            let max_cursor_x = split_left + display_w - 4.0;
             let final_cursor_x = cursor_x.min(max_cursor_x);
             let cursor_y = self.base.y + top + (visual_h - 14.0) / 2.0;
             quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
@@ -334,9 +339,12 @@ impl Element for Spinbox {
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         
+        let btn_w = self.base.w * 0.225;
+        let split_left = self.base.x + btn_w;
+
         labels.push(TextLabel {
             text: value_text,
-            x: self.base.x + 4.0,
+            x: split_left + 4.0,
             y: self.base.y + top + (visual_h - 14.0) / 2.0 - 2.0,
             font_size: 14.0,
             color: [0xcc, 0xcc, 0xd4],
@@ -344,7 +352,7 @@ impl Element for Spinbox {
         if let Some(ref unit) = self.unit {
             labels.push(TextLabel {
                 text: unit.clone(),
-                x: self.base.x + 4.0 + 36.0,
+                x: split_left + 4.0 + 36.0,
                 y: self.base.y + top + (visual_h - 11.0) / 2.0 - 2.0,
                 font_size: 11.0,
                 color: [0x73, 0x73, 0x7a],
@@ -353,7 +361,7 @@ impl Element for Spinbox {
 
         labels.push(TextLabel {
             text: "-".to_string(),
-            x: self.base.x + self.base.w * 0.6625 - 4.0,
+            x: self.base.x + self.base.w * 0.1125 - 4.0,
             y: self.base.y + top + (visual_h - 12.0) / 2.0 - 2.0,
             font_size: 12.0,
             color: [0xcc, 0xcc, 0xd4],
