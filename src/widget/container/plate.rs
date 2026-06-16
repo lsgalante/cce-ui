@@ -16,7 +16,6 @@ pub struct Plate {
     pub network_opacity: f32,
     pub blur: bool,
     pub visible: bool,
-    pub column_layout: bool,
     pub draggable: bool,
     pub solid_border: Option<([f32; 4], f32)>,
     pub selected: bool,
@@ -46,7 +45,6 @@ impl Plate {
             network_opacity: 1.0,
             blur: true,
             visible: true,
-            column_layout: false,
             draggable: true,
             solid_border: None,
             selected: false,
@@ -242,77 +240,58 @@ impl Element for Plate {
             }
         }
 
-        if self.column_layout {
-            let mut current_y = start_y;
-            let spacing = 12.0;
-            for &w_ptr in &active_widgets {
-                let w = unsafe { &mut *w_ptr };
-                let (_, _, ww, wh) = w.rect();
-                let use_w = if ww > 0.0 { ww.min(available_w) } else { available_w };
-                let top = crate::widget::label_offset(w);
-                let use_h = if wh > 0.0 { wh } else { 24.0 + top };
+        let mut total_diagonal = 0.0;
+        let mut count = 0;
+        for &w_ptr in &active_widgets {
+            let w = unsafe { &*w_ptr };
+            let (_, _, ww, wh) = w.rect();
+            let use_w = if ww > 0.0 { ww.min(available_w) } else { available_w };
+            let use_h = if wh > 0.0 { wh } else { 50.0 };
+            total_diagonal += (use_w * use_w + use_h * use_h).sqrt();
+            count += 1;
+        }
+        let avg_diagonal = if count > 0 { total_diagonal / count as f32 } else { 100.0 };
+        let base_spacing = (avg_diagonal * 0.55).max(60.0);
 
-                let max_y = clamped_y + clamped_h - padding_y;
-                let active_y = current_y.min(max_y);
-                let active_h = use_h.min(max_y - active_y);
+        for (i, &w_ptr) in active_widgets.iter().enumerate() {
+            let w = unsafe { &mut *w_ptr };
+            let (_, _, ww, wh) = w.rect();
+            let use_w = if ww > 0.0 { ww.min(available_w) } else { available_w };
+            let use_h = if wh > 0.0 { wh } else { 50.0 };
 
-                w.set_rect(left_x, active_y, use_w, active_h);
-                current_y += active_h + spacing;
-            }
-        } else {
-            let mut total_diagonal = 0.0;
-            let mut count = 0;
-            for &w_ptr in &active_widgets {
-                let w = unsafe { &*w_ptr };
-                let (_, _, ww, wh) = w.rect();
-                let use_w = if ww > 0.0 { ww.min(available_w) } else { available_w };
-                let use_h = if wh > 0.0 { wh } else { 50.0 };
-                total_diagonal += (use_w * use_w + use_h * use_h).sqrt();
-                count += 1;
-            }
-            let avg_diagonal = if count > 0 { total_diagonal / count as f32 } else { 100.0 };
-            let base_spacing = (avg_diagonal * 0.55).max(60.0);
+            if i == 0 {
+                let cx = (center_x - use_w / 2.0).clamp(left_x, (left_x + available_w - use_w).max(left_x));
+                let cy = (center_y - use_h / 2.0).clamp(start_y, (start_y + available_h - use_h).max(start_y));
+                let cw = use_w.min(clamped_x + clamped_w - padding_x - cx);
+                let ch = use_h.min(clamped_y + clamped_h - padding_y - cy);
+                w.set_rect(cx, cy, cw, ch);
+            } else {
+                let mut ring = 1;
+                let mut ring_start = 1;
+                let mut placed = false;
+                while !placed {
+                    let ring_capacity = ring * 6;
+                    if i < ring_start + ring_capacity {
+                        let pos_in_ring = i - ring_start;
+                        let angle = (pos_in_ring as f32) * (2.0 * std::f32::consts::PI / ring_capacity as f32);
+                        let radius = (ring as f32) * base_spacing;
 
-            for (i, &w_ptr) in active_widgets.iter().enumerate() {
-                let w = unsafe { &mut *w_ptr };
-                let (_, _, ww, wh) = w.rect();
-                let use_w = if ww > 0.0 { ww.min(available_w) } else { available_w };
-                let use_h = if wh > 0.0 { wh } else { 50.0 };
+                        let x_offset = radius * angle.cos() * aspect_ratio;
+                        let y_offset = radius * angle.sin();
 
-                if i == 0 {
-                    let cx = (center_x - use_w / 2.0).clamp(left_x, (left_x + available_w - use_w).max(left_x));
-                    let cy = (center_y - use_h / 2.0).clamp(start_y, (start_y + available_h - use_h).max(start_y));
-                    let cw = use_w.min(clamped_x + clamped_w - padding_x - cx);
-                    let ch = use_h.min(clamped_y + clamped_h - padding_y - cy);
-                    w.set_rect(cx, cy, cw, ch);
-                } else {
-                    let mut ring = 1;
-                    let mut ring_start = 1;
-                    let mut placed = false;
-                    while !placed {
-                        let ring_capacity = ring * 6;
-                        if i < ring_start + ring_capacity {
-                            let pos_in_ring = i - ring_start;
-                            let angle = (pos_in_ring as f32) * (2.0 * std::f32::consts::PI / ring_capacity as f32);
-                            let radius = (ring as f32) * base_spacing;
+                        let raw_x = center_x + x_offset - use_w / 2.0;
+                        let raw_y = center_y + y_offset - use_h / 2.0;
 
-                            let x_offset = radius * angle.cos() * aspect_ratio;
-                            let y_offset = radius * angle.sin();
+                        let cx = raw_x.clamp(left_x, (left_x + available_w - use_w).max(left_x));
+                        let cy = raw_y.clamp(start_y, (start_y + available_h - use_h).max(start_y));
+                        let cw = use_w.min(clamped_x + clamped_w - padding_x - cx);
+                        let ch = use_h.min(clamped_y + clamped_h - padding_y - cy);
 
-                            let raw_x = center_x + x_offset - use_w / 2.0;
-                            let raw_y = center_y + y_offset - use_h / 2.0;
-
-                            let cx = raw_x.clamp(left_x, (left_x + available_w - use_w).max(left_x));
-                            let cy = raw_y.clamp(start_y, (start_y + available_h - use_h).max(start_y));
-                            let cw = use_w.min(clamped_x + clamped_w - padding_x - cx);
-                            let ch = use_h.min(clamped_y + clamped_h - padding_y - cy);
-
-                            w.set_rect(cx, cy, cw, ch);
-                            placed = true;
-                        } else {
-                            ring_start += ring_capacity;
-                            ring += 1;
-                        }
+                        w.set_rect(cx, cy, cw, ch);
+                        placed = true;
+                    } else {
+                        ring_start += ring_capacity;
+                        ring += 1;
                     }
                 }
             }

@@ -147,12 +147,7 @@ impl Paginator {
         (r.2, r.3)
     }
 
-    pub fn with_column_layout(mut self, enabled: bool) -> Self {
-        for plate in &mut self.plates {
-            plate.column_layout = enabled;
-        }
-        self
-    }
+
 
     pub fn with_sidebar_mode(mut self, enabled: bool) -> Self {
         self.sidebar_mode = enabled;
