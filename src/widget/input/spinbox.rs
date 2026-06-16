@@ -112,6 +112,15 @@ impl Element for Spinbox {
         Some(crate::layout::spinbox_height())
     }
 
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::spinbox_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
     fn corner_radius(&self) -> f32 {
         crate::layout::spinbox_corner_radius()
     }
