@@ -584,7 +584,10 @@ pub fn push_extra_quad_vertices(
         return;
     }
 
-    let (wx, wy, ww, wh) = w.rect();
+    let (wx, mut wy, ww, mut wh) = w.rect();
+    let top_room = crate::widget::label_offset(w);
+    wy += top_room;
+    wh -= top_room;
     let extra_corners = (
         corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
         corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,
@@ -631,7 +634,10 @@ pub fn push_extra_quad_vertices_clipped(
         return;
     }
 
-    let (wx, wy, ww, wh) = w.rect();
+    let (wx, mut wy, ww, mut wh) = w.rect();
+    let top_room = crate::widget::label_offset(w);
+    wy += top_room;
+    wh -= top_room;
     let extra_corners = (
         corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
         corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,

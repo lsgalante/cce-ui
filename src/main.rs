@@ -191,7 +191,10 @@ fn extra_quad_vertices(
         return quad_vertices(qx, qy, qw, qh, sw, sh, qc).to_vec();
     }
 
-    let (wx, wy, ww, wh) = w.rect();
+    let (wx, mut wy, ww, mut wh) = w.rect();
+    let top_room = clear_ui::widget::label_offset(w);
+    wy += top_room;
+    wh -= top_room;
     let extra_corners = (
         corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
         corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,

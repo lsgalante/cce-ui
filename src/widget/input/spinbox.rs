@@ -125,7 +125,7 @@ impl Element for Spinbox {
         crate::layout::spinbox_corner_radius()
     }
 
-    fn color(&self) -> [f32; 4] { colors::SPINBOX_BG }
+    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
     fn value(&self) -> i32 { self.value }
     fn widget_font(&self) -> Option<String> { Some("monospace".to_string()) }
 
