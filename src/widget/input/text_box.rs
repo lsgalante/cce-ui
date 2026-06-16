@@ -372,6 +372,19 @@ impl Element for TextBox {
         Some(crate::layout::textbox_height())
     }
 
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::textbox_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::textbox_corner_radius()
+    }
+
     fn rect(&self) -> (f32, f32, f32, f32) { (self.base.x, self.base.y, self.base.w, self.base.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         let final_w = if let Some(explicit_w) = self.width {
