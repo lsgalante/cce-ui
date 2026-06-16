@@ -36,6 +36,7 @@ static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
 static SCROLLINGLIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
+static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 
 
 pub fn node_color() -> [f32; 4] {
@@ -83,6 +84,8 @@ fn read_config() -> Option<String> {
 
 fn parse_and_set_colors(content: &str) {
     let mut in_transparency = false;
+    let mut parsed_scrollinglist_bg = None;
+    let mut parsed_breadcrumb_bg = None;
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed == "[transparency]" {
@@ -151,7 +154,24 @@ fn parse_and_set_colors(content: &str) {
             if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
         }
         if let Some(c) = parse_hex(trimmed, "scrollinglist_bg_color") {
-            if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() { *lock = [c[0], c[1], c[2], 0.3]; }
+            parsed_scrollinglist_bg = Some(c);
+        }
+        if let Some(c) = parse_hex(trimmed, "breadcrumb_bg_color") {
+            parsed_breadcrumb_bg = Some(c);
+        }
+    }
+    if let Some(c) = parsed_scrollinglist_bg {
+        if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
+            *lock = [c[0], c[1], c[2], 0.3];
+        }
+    }
+    if let Some(c) = parsed_breadcrumb_bg {
+        if let Ok(mut lock) = BREADCRUMB_BG_COLOR.write() {
+            *lock = [c[0], c[1], c[2], 1.0];
+        }
+    } else if let Some(c) = parsed_scrollinglist_bg {
+        if let Ok(mut lock) = BREADCRUMB_BG_COLOR.write() {
+            *lock = [c[0], c[1], c[2], 1.0];
         }
     }
 }
@@ -335,6 +355,17 @@ pub fn scrollinglist_bg_color() -> [f32; 4] {
 pub fn set_scrollinglist_bg_color(color: [f32; 4]) {
     if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
         *lock = [color[0], color[1], color[2], 0.3];
+    }
+}
+
+pub fn breadcrumb_bg_color() -> [f32; 4] {
+    load_colors_once();
+    *BREADCRUMB_BG_COLOR.read().unwrap()
+}
+
+pub fn set_breadcrumb_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = BREADCRUMB_BG_COLOR.write() {
+        *lock = [color[0], color[1], color[2], 1.0];
     }
 }
 

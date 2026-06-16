@@ -56,7 +56,10 @@ impl Element for Breadcrumb {
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
 
-    fn color(&self) -> [f32; 4] { [0.10, 0.10, 0.14, self.network_opacity] }
+    fn color(&self) -> [f32; 4] {
+        let c = crate::color::breadcrumb_bg_color();
+        [c[0], c[1], c[2], self.network_opacity]
+    }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
 
@@ -84,6 +87,7 @@ impl Element for Breadcrumb {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
+        quads.push((self.x, self.y, self.w, self.h, self.color()));
         if let Some(i) = self.hovered_seg {
             let mut cx = self.x + BREADCRUMB_PADDING;
             let segs = self.virtual_segs();
