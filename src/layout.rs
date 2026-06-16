@@ -1347,10 +1347,10 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
         }
 
         let extra_corners = (
-            corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
-            corners.1 && qx + qw >= wx + www - 0.1 && qy <= wy + 0.1,
-            corners.2 && qx + qw >= wx + www - 0.1 && qy + qh >= wy + whh - 0.1,
-            corners.3 && qx <= wx + 0.1 && qy + qh >= wy + whh - 0.1,
+            corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
+            corners.1 && qx + qw >= wx + www - 1.5 && qy <= wy + 1.5,
+            corners.2 && qx + qw >= wx + www - 1.5 && qy + qh >= wy + whh - 1.5,
+            corners.3 && qx <= wx + 1.5 && qy + qh >= wy + whh - 1.5,
         );
 
         if extra_corners == (false, false, false, false) {

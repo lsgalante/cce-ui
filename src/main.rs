@@ -196,10 +196,10 @@ fn extra_quad_vertices(
     wy += top_room;
     wh -= top_room;
     let extra_corners = (
-        corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
-        corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,
-        corners.2 && qx + qw >= wx + ww - 0.1 && qy + qh >= wy + wh - 0.1,
-        corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
+        corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
+        corners.1 && qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5,
+        corners.2 && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5,
+        corners.3 && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5,
     );
 
     rounded_rect_vertices_corners(qx, qy, qw, qh, w.corner_radius(), sw, sh, qc, extra_corners)

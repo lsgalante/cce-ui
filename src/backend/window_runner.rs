@@ -615,10 +615,10 @@ pub fn push_extra_quad_vertices(
     wy += top_room;
     wh -= top_room;
     let extra_corners = (
-        corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
-        corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,
-        corners.2 && qx + qw >= wx + ww - 0.1 && qy + qh >= wy + wh - 0.1,
-        corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
+        corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
+        corners.1 && qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5,
+        corners.2 && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5,
+        corners.3 && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5,
     );
 
     push_rounded_rect_vertices_corners(qx, qy, qw, qh, target_w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, None, out);
@@ -666,10 +666,10 @@ pub fn push_extra_quad_vertices_clipped(
     wy += top_room;
     wh -= top_room;
     let extra_corners = (
-        corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
-        corners.1 && qx + qw >= wx + ww - 0.1 && qy <= wy + 0.1,
-        corners.2 && qx + qw >= wx + ww - 0.1 && qy + qh >= wy + wh - 0.1,
-        corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
+        corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
+        corners.1 && qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5,
+        corners.2 && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5,
+        corners.3 && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5,
     );
 
     push_rounded_rect_vertices_corners(qx, qy, qw, qh, target_w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, Some(clip), out);
