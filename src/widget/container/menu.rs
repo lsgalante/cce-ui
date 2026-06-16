@@ -905,7 +905,7 @@ impl Element for MenuBar {
         // 2. Draw the context popover background and hovered item highlight
         if self.context_dropdown_open {
             if let Some((dx, dy, dw, dh)) = self.context_popover_rect() {
-                quads.push((dx, dy, dw, dh, colors::PANEL_MENU_BG));
+                quads.push((dx, dy, dw, dh, colors::popover_bg_color()));
                 if let Some(di) = self.context_hovered_item {
                     quads.push((dx, dy + di as f32 * DROPDOWN_ITEM_H, dw, DROPDOWN_ITEM_H, colors::PANEL_MENU_HOVER));
                 }
@@ -1158,7 +1158,7 @@ impl Element for Menu {
         if self.open {
             let (dx, dy, dw, dh) = self.dropdown_rect();
             if dh > 0.0 {
-                quads.push((dx, dy, dw, dh, colors::PANEL_MENU_BG));
+                quads.push((dx, dy, dw, dh, colors::popover_bg_color()));
                 if let Some(di) = self.hovered_item {
                     quads.push((dx, dy + di as f32 * DROPDOWN_ITEM_H, dw, DROPDOWN_ITEM_H, colors::PANEL_MENU_HOVER));
                 }

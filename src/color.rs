@@ -37,6 +37,7 @@ static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
 static SCROLLINGLIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
+static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 
 
 pub fn node_color() -> [f32; 4] {
@@ -86,6 +87,7 @@ fn parse_and_set_colors(content: &str) {
     let mut in_transparency = false;
     let mut parsed_scrollinglist_bg = None;
     let mut parsed_breadcrumb_bg = None;
+    let mut parsed_popover_bg = None;
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed == "[transparency]" {
@@ -159,6 +161,9 @@ fn parse_and_set_colors(content: &str) {
         if let Some(c) = parse_hex(trimmed, "breadcrumb_bg_color") {
             parsed_breadcrumb_bg = Some(c);
         }
+        if let Some(c) = parse_hex(trimmed, "popover_bg_color") {
+            parsed_popover_bg = Some(c);
+        }
     }
     if let Some(c) = parsed_scrollinglist_bg {
         if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
@@ -171,6 +176,15 @@ fn parse_and_set_colors(content: &str) {
         }
     } else if let Some(c) = parsed_scrollinglist_bg {
         if let Ok(mut lock) = BREADCRUMB_BG_COLOR.write() {
+            *lock = [c[0], c[1], c[2], 1.0];
+        }
+    }
+    if let Some(c) = parsed_popover_bg {
+        if let Ok(mut lock) = POPOVER_BG_COLOR.write() {
+            *lock = [c[0], c[1], c[2], 1.0];
+        }
+    } else if let Some(c) = parsed_scrollinglist_bg {
+        if let Ok(mut lock) = POPOVER_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 1.0];
         }
     }
@@ -369,6 +383,17 @@ pub fn set_breadcrumb_bg_color(color: [f32; 4]) {
     }
 }
 
+pub fn popover_bg_color() -> [f32; 4] {
+    load_colors_once();
+    *POPOVER_BG_COLOR.read().unwrap()
+}
+
+pub fn set_popover_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = POPOVER_BG_COLOR.write() {
+        *lock = [color[0], color[1], color[2], 1.0];
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     pub surface_bg: [f32; 4],
@@ -380,7 +405,7 @@ pub struct Theme {
 
 pub fn active_theme() -> Theme {
     Theme {
-        surface_bg: [0.10, 0.10, 0.14, 0.95],
+        surface_bg: popover_bg_color(),
         surface_border: [0.25, 0.25, 0.35, 0.8],
         primary_accent: [0.20, 0.50, 0.75, 1.0],
         press_overlay: [1.0, 1.0, 1.0, 0.15],
