@@ -127,13 +127,23 @@ pub trait Element {
     fn preferred_height(&self) -> Option<f32> { None }
 
     fn as_any(&self) -> &dyn std::any::Any {
-        panic!("as_any not implemented");
+        struct DummyAny;
+        static DUMMY: DummyAny = DummyAny;
+        &DUMMY
     }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        panic!("as_any_mut not implemented");
+        struct DummyAny;
+        thread_local! {
+            static DUMMY_MUT: std::cell::UnsafeCell<DummyAny> = std::cell::UnsafeCell::new(DummyAny);
+        }
+        DUMMY_MUT.with(|d| unsafe { &mut *d.get() })
     }
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        panic!("as_ptr not implemented");
+        struct DummyElement;
+        impl Element for DummyElement {
+            fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+        }
+        std::ptr::null_mut::<DummyElement>() as *mut (dyn Element + 'static)
     }
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {

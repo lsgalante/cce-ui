@@ -12,7 +12,7 @@ pub struct ParametersBg {
     mouse_pos: Option<(f32, f32)>,
     sliders: Vec<Option<Slider>>,
     float3s: Vec<Option<Float3>>,
-    spinboxes: Vec<Option<Spinbox>>,
+    pub spinboxes: Vec<Option<Spinbox>>,
     pub buttons: Vec<Option<Button>>,
     pub choices: Vec<Option<Dropdown>>,
     pub texts: Vec<Option<TextBox>>,
@@ -65,7 +65,11 @@ impl ParametersBg {
                 24.0
             } else if p.2.starts_with("float3") {
                 108.0
-            } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") || p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
+            } else if p.2.starts_with("slider") {
+                38.0
+            } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
+                42.0
+            } else if p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
                 24.0
             } else {
                 20.0
@@ -81,11 +85,7 @@ impl ParametersBg {
         for (i, s_opt) in self.sliders.iter_mut().enumerate() {
             if let Some(s) = s_opt {
                 let r = rects[i];
-                let track_x = self.base.x + 100.0;
-                let track_w = (self.base.w - 100.0 - 20.0).max(10.0);
-                let track_y = r.1 + 4.0;
-                let track_h = 12.0;
-                s.set_rect(track_x, track_y, track_w, track_h);
+                s.set_rect(r.0, r.1, r.2, r.3);
             }
         }
         for (i, f_opt) in self.float3s.iter_mut().enumerate() {
@@ -97,41 +97,31 @@ impl ParametersBg {
         for (i, sb_opt) in self.spinboxes.iter_mut().enumerate() {
             if let Some(sb) = sb_opt {
                 let r = rects[i];
-                let box_x = self.base.x + 100.0;
-                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                sb.set_rect(box_x, r.1, box_w, r.3);
+                sb.set_rect(r.0, r.1, r.2, r.3);
             }
         }
         for (i, b_opt) in self.buttons.iter_mut().enumerate() {
             if let Some(b) = b_opt {
                 let r = rects[i];
-                let box_x = self.base.x + 100.0;
-                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                b.set_rect(box_x, r.1, box_w, r.3);
+                b.set_rect(r.0, r.1, r.2, r.3);
             }
         }
         for (i, d_opt) in self.choices.iter_mut().enumerate() {
             if let Some(d) = d_opt {
                 let r = rects[i];
-                let box_x = self.base.x + 100.0;
-                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                d.set_rect(box_x, r.1, box_w, r.3);
+                d.set_rect(r.0, r.1, r.2, r.3);
             }
         }
         for (i, tb_opt) in self.texts.iter_mut().enumerate() {
             if let Some(tb) = tb_opt {
                 let r = rects[i];
-                let box_x = self.base.x + 100.0;
-                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                tb.set_rect(box_x, r.1, box_w, r.3);
+                tb.set_rect(r.0, r.1, r.2, r.3);
             }
         }
         for (i, cb_opt) in self.checkboxes.iter_mut().enumerate() {
             if let Some(cb) = cb_opt {
                 let r = rects[i];
-                let box_x = self.base.x + 100.0;
-                let box_w = (self.base.w - 100.0 - 16.0).max(10.0);
-                cb.set_rect(box_x, r.1, box_w, r.3);
+                cb.set_rect(r.0, r.1, r.2, r.3);
             }
         }
     }
@@ -142,13 +132,6 @@ impl ParametersBg {
         for (i, (name, value, ptype)) in self.display_params.iter().enumerate() {
             let r = rects[i];
             if ptype.starts_with("slider") {
-                labels.push(TextLabel {
-                    text: name.clone(),
-                    x: self.base.x + 8.0,
-                    y: r.1,
-                    font_size: 12.0,
-                    color: [0xaa, 0xaa, 0xbb],
-                });
                 if let Some(s) = &self.sliders[i] {
                     labels.extend(s.text_labels());
                 }
@@ -189,35 +172,14 @@ impl ParametersBg {
                     color: [0xee, 0xee, 0xf0],
                 });
             } else if ptype.starts_with("spinbox") {
-                labels.push(TextLabel {
-                    text: name.clone(),
-                    x: self.base.x + 8.0,
-                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
-                    font_size: 12.0,
-                    color: [0xaa, 0xaa, 0xbb],
-                });
                 if let Some(sb) = &self.spinboxes[i] {
                     labels.extend(sb.text_labels());
                 }
             } else if ptype == "text" {
-                labels.push(TextLabel {
-                    text: name.clone(),
-                    x: self.base.x + 8.0,
-                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
-                    font_size: 12.0,
-                    color: [0xaa, 0xaa, 0xbb],
-                });
                 if let Some(tb) = &self.texts[i] {
                     labels.extend(tb.text_labels());
                 }
             } else if ptype.starts_with("choice") {
-                labels.push(TextLabel {
-                    text: name.clone(),
-                    x: self.base.x + 8.0,
-                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
-                    font_size: 12.0,
-                    color: [0xaa, 0xaa, 0xbb],
-                });
                 if let Some(d) = &self.choices[i] {
                     labels.extend(d.text_labels());
                 }
@@ -226,13 +188,6 @@ impl ParametersBg {
                     labels.extend(b.text_labels());
                 }
             } else if ptype == "toggle" || ptype == "checkbox" {
-                labels.push(TextLabel {
-                    text: name.clone(),
-                    x: self.base.x + 8.0,
-                    y: r.1 + (r.3 - 12.0) / 2.0 - 2.0,
-                    font_size: 12.0,
-                    color: [0xaa, 0xaa, 0xbb],
-                });
                 if let Some(cb) = &self.checkboxes[i] {
                     labels.extend(cb.text_labels());
                 }
@@ -438,9 +393,9 @@ impl Element for ParametersBg {
         for (i, p) in self.display_params.iter().enumerate() {
             if p.2.starts_with("slider") {
                 let r = rects[i];
-                let row_y = r.1;
-                if py >= row_y - 2.0 && py <= row_y + 18.0 {
-                    if let Some(s) = &mut self.sliders[i] {
+                if let Some(s) = &mut self.sliders[i] {
+                    let top = crate::widget::label_offset(s);
+                    if py >= r.1 + top && py <= r.1 + r.3 {
                         s.drag_begin(px, py);
                         self.dragging_param = Some(i);
                         break;
@@ -1360,7 +1315,7 @@ impl ParamController for ParametersBg {
                     } else {
                         0.0
                     };
-                    Some(Slider::new().with_value(t).with_range(min, max).with_readout(true))
+                    Some(Slider::new().with_value(t).with_range(min, max).with_readout(true).with_label(&p.0))
                 } else {
                     None
                 }
@@ -1378,7 +1333,7 @@ impl ParamController for ParametersBg {
                 if p.2.starts_with("spinbox") {
                     let (min, max, step) = parse_spinbox_range(&p.2);
                     let val = p.1.parse::<i32>().unwrap_or(min);
-                    Some(Spinbox::new(val, min, max, step))
+                    Some(Spinbox::new(val, min, max, step).with_label(&p.0))
                 } else {
                     None
                 }
@@ -1395,14 +1350,14 @@ impl ParamController for ParametersBg {
                     let options_str = p.2.strip_prefix("choice:").unwrap_or("");
                     let options: Vec<String> = options_str.split(',').map(|s| s.to_string()).collect();
                     let selected = options.iter().position(|o| o == &p.1).unwrap_or(0);
-                    Some(Dropdown::new(options, selected))
+                    Some(Dropdown::new(options, selected).with_label(&p.0))
                 } else {
                     None
                 }
             }).collect();
             self.texts = self.display_params.iter().map(|p| {
                 if p.2 == "text" {
-                    Some(TextBox::new(p.1.clone()))
+                    Some(TextBox::new(p.1.clone()).with_label(&p.0))
                 } else {
                     None
                 }
@@ -1410,7 +1365,7 @@ impl ParamController for ParametersBg {
             self.checkboxes = self.display_params.iter().map(|p| {
                 if p.2 == "toggle" || p.2 == "checkbox" {
                     let checked = p.1.trim().to_lowercase() == "true";
-                    let mut cb = Checkbox::new();
+                    let mut cb = Checkbox::new().with_label(&p.0);
                     cb.set_checked(checked);
                     Some(cb)
                 } else {

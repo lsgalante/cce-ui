@@ -34,7 +34,7 @@ use glyphon::{
     Cache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas,
     TextBounds, TextRenderer, Viewport, Buffer, Attrs, Metrics,
 };
-use crate::widget::{TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey};
+use crate::widget::{Element, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey};
 use crate::wayland::{WaylandSurfaceHandle, detect_scale_factor};
 use crate::backend::WgpuAdapter;
 
@@ -570,6 +570,31 @@ pub fn extra_quad_vertices(
     verts
 }
 
+fn get_child_widget_for_quad<'a>(
+    w: &'a dyn crate::widget::Element,
+    qx: f32, qy: f32, qw: f32, qh: f32,
+) -> &'a dyn crate::widget::Element {
+    if let Some(pbg) = w.as_any().downcast_ref::<crate::widget::ParametersBg>() {
+        for sb_opt in &pbg.spinboxes {
+            if let Some(sb) = sb_opt {
+                let (sx, sy, sww, shh) = sb.rect();
+                if qx >= sx - 0.1 && qx + qw <= sx + sww + 0.1 && qy >= sy - 0.1 && qy + qh <= sy + shh + 0.1 {
+                    return sb;
+                }
+            }
+        }
+        for btn_opt in &pbg.buttons {
+            if let Some(btn) = btn_opt {
+                let (bx, by, bww, bhh) = btn.rect();
+                if qx >= bx - 0.1 && qx + qw <= bx + bww + 0.1 && qy >= by - 0.1 && qy + qh <= by + bhh + 0.1 {
+                    return btn;
+                }
+            }
+        }
+    }
+    w
+}
+
 pub fn push_extra_quad_vertices(
     w: &dyn crate::widget::Element,
     qx: f32, qy: f32, qw: f32, qh: f32,
@@ -578,14 +603,15 @@ pub fn push_extra_quad_vertices(
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
-    let corners = w.rounded_corners();
+    let target_w = get_child_widget_for_quad(w, qx, qy, qw, qh);
+    let corners = target_w.rounded_corners();
     if corners == (false, false, false, false) {
         out.extend_from_slice(&quad_vertices_with_clip(qx, qy, qw, qh, sw, sh, qc, clip_circle));
         return;
     }
 
-    let (wx, mut wy, ww, mut wh) = w.rect();
-    let top_room = crate::widget::label_offset(w);
+    let (wx, mut wy, ww, mut wh) = target_w.rect();
+    let top_room = crate::widget::label_offset(target_w);
     wy += top_room;
     wh -= top_room;
     let extra_corners = (
@@ -595,7 +621,7 @@ pub fn push_extra_quad_vertices(
         corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
     );
 
-    push_rounded_rect_vertices_corners(qx, qy, qw, qh, w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, None, out);
+    push_rounded_rect_vertices_corners(qx, qy, qw, qh, target_w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, None, out);
 }
 
 pub fn extra_quad_vertices_clipped(
@@ -620,7 +646,8 @@ pub fn push_extra_quad_vertices_clipped(
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
-    let corners = w.rounded_corners();
+    let target_w = get_child_widget_for_quad(w, qx, qy, qw, qh);
+    let corners = target_w.rounded_corners();
     if corners == (false, false, false, false) {
         let (cx0, cy0, cx1, cy1) = clip;
         let ix0 = qx.max(cx0);
@@ -634,8 +661,8 @@ pub fn push_extra_quad_vertices_clipped(
         return;
     }
 
-    let (wx, mut wy, ww, mut wh) = w.rect();
-    let top_room = crate::widget::label_offset(w);
+    let (wx, mut wy, ww, mut wh) = target_w.rect();
+    let top_room = crate::widget::label_offset(target_w);
     wy += top_room;
     wh -= top_room;
     let extra_corners = (
@@ -645,7 +672,7 @@ pub fn push_extra_quad_vertices_clipped(
         corners.3 && qx <= wx + 0.1 && qy + qh >= wy + wh - 0.1,
     );
 
-    push_rounded_rect_vertices_corners(qx, qy, qw, qh, w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, Some(clip), out);
+    push_rounded_rect_vertices_corners(qx, qy, qw, qh, target_w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, Some(clip), out);
 }
 
 pub fn circle_vertices(

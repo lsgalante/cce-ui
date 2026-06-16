@@ -473,6 +473,12 @@ impl Paginator {
 
 
 impl Element for Paginator {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+    }
+
     fn rect(&self) -> (f32, f32, f32, f32) {
         (self.x, self.y, self.w, self.h)
     }
