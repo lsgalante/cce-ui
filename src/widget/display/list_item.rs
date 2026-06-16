@@ -11,6 +11,57 @@ pub struct TextItem {
     pub bounds: Option<[f32; 4]>,
 }
 
+impl TextItem {
+    pub fn new(
+        fs: &mut glyphon::FontSystem,
+        text: &str,
+        size: f32,
+        x: f32,
+        y: f32,
+        color: glyphon::Color,
+        font: Option<&str>,
+        bounds: Option<[f32; 4]>,
+    ) -> Self {
+        let scale = crate::scale::scale_factor();
+        let mut font_size = size;
+        let mut family_name = None;
+
+        if let Some(font_str) = font {
+            let (parsed_family, parsed_size) = crate::layout::parse_font_string(font_str);
+            if let Some(ps) = parsed_size {
+                font_size = ps;
+            }
+            family_name = Some(parsed_family);
+        }
+
+        let physical_size = font_size * scale;
+        let metrics = glyphon::Metrics::new(physical_size, physical_size * 1.4);
+        let mut buffer = glyphon::Buffer::new(fs, metrics);
+        let mut attrs = glyphon::Attrs::new();
+
+        if let Some(ref fam) = family_name {
+            let family = match fam.as_str() {
+                "monospace" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
+                "sans-serif" => glyphon::Family::SansSerif,
+                "serif" => glyphon::Family::Serif,
+                _ => glyphon::Family::Name(fam),
+            };
+            attrs = attrs.family(family);
+        }
+
+        buffer.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
+        buffer.shape_until_scroll(fs, true);
+
+        Self {
+            buffer,
+            x,
+            y,
+            color,
+            bounds,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InteractiveListItem {
     base: Widget,
