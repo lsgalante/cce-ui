@@ -819,8 +819,23 @@ pub trait Application: Sized + 'static {
     fn render_popovers(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
     
     fn text_areas(&self, scale_f32: f32, bounds: TextBounds) -> Vec<TextArea<'_>> {
+        let mut overlay_rects = Vec::new();
+        if crate::widget::context_menu::is_visible() {
+            overlay_rects.push((
+                crate::widget::context_menu::x(),
+                crate::widget::context_menu::y(),
+                crate::widget::context_menu::w(),
+                crate::widget::context_menu::h(),
+            ));
+        }
+        for popover_ptr in crate::widget::popovers::get_active() {
+            if let Some(r) = unsafe { &*popover_ptr }.popover_rect() {
+                overlay_rects.push(r);
+            }
+        }
+
         self.text_items().iter().map(|ti| {
-            let item_bounds = if let Some([l, t, r, b]) = ti.bounds {
+            let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
                 TextBounds {
                     left: (l * scale_f32).round() as i32,
                     top: (t * scale_f32).round() as i32,
@@ -830,6 +845,41 @@ pub trait Application: Sized + 'static {
             } else {
                 bounds
             };
+
+            for &(ox, oy, ow, oh) in &overlay_rects {
+                let ol = (ox * scale_f32).round() as i32;
+                let ot = (oy * scale_f32).round() as i32;
+                let or = ((ox + ow) * scale_f32).round() as i32;
+                let ob = ((oy + oh) * scale_f32).round() as i32;
+
+                let is_overlay_text = if let Some([l, t, r, b]) = ti.bounds {
+                    (l - ox).abs() < 1.0
+                        && (t - oy).abs() < 1.0
+                        && (r - (ox + ow)).abs() < 1.0
+                        && (b - (oy + oh)).abs() < 1.0
+                } else {
+                    false
+                };
+
+                if !is_overlay_text {
+                    let tx_pixel = ti.x * scale_f32;
+                    
+                    if item_bounds.left < or
+                        && item_bounds.right > ol
+                        && item_bounds.top < ob
+                        && item_bounds.bottom > ot
+                    {
+                        if tx_pixel < ol as f32 {
+                            item_bounds.right = item_bounds.right.min(ol);
+                        } else if tx_pixel > or as f32 {
+                            item_bounds.left = item_bounds.left.max(or);
+                        } else {
+                            item_bounds.right = item_bounds.left;
+                        }
+                    }
+                }
+            }
+
             TextArea {
                 buffer: &ti.buffer,
                 left: (ti.x * scale_f32).round(),
