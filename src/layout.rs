@@ -54,6 +54,20 @@ static NESTED_SECTION_LABEL_ALIGNMENT: RwLock<u8> = RwLock::new(0);
 static LABEL_MARGIN: RwLock<f32> = RwLock::new(6.0);
 static BUTTON_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 
+/// Standard line height multiplier for text layout in clear-ui.
+pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
+
+/// Standard line height based on font size.
+pub fn line_height(font_size: f32) -> f32 {
+    font_size * TEXT_LINE_HEIGHT_MULTIPLIER
+}
+
+/// Aligns a text label's top coordinate (`y`) so it is centered vertically
+/// inside a container of height `container_h` starting at `y`.
+pub fn center_text_y(y: f32, container_h: f32, font_size: f32) -> f32 {
+    y + (container_h - line_height(font_size)) / 2.0
+}
+
 pub fn reload_config() {
     if let Some(content) = read_config() {
         let mut menubar_font_changed = false;

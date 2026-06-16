@@ -804,16 +804,15 @@ impl Element for TextBox {
                 quads.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
             } else {
                 let caret_h = self.font_size * 1.15;
-                let line_h = self.font_size * 1.333;
                 if start != end {
                     let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
                     let max_x = self.base.x + self.base.w - 6.0;
                     let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
                     quads.push((
                         highlight_x,
-                        self.base.y + top + (visual_h - line_h) / 2.0,
+                        crate::layout::center_text_y(self.base.y + top, visual_h, self.font_size),
                         highlight_w,
-                        line_h,
+                        crate::layout::line_height(self.font_size),
                         highlight_color,
                     ));
                 }
@@ -907,7 +906,7 @@ impl Element for TextBox {
             labels.push(TextLabel {
                 text: display_text,
                 x: self.base.x + 8.0,
-                y: self.base.y + top + (visual_h - self.font_size) / 2.0,
+                y: crate::layout::center_text_y(self.base.y + top, visual_h, self.font_size),
                 font_size: self.font_size,
                 color: label_color,
             });
