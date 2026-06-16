@@ -5,7 +5,7 @@ build:
 
 install: build
 	mkdir -p ~/.local/bin
-	install -m 755 target/release/clear-ui ~/.local/bin/clear-ui
+	install -m 755 ../target/release/clear-ui ~/.local/bin/clear-ui
 
 run:
 	cargo run

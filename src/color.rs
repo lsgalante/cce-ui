@@ -35,6 +35,7 @@ static MENUBAR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196
 static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
+static SCROLLINGLIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 
 
 pub fn node_color() -> [f32; 4] {
@@ -148,6 +149,9 @@ fn parse_and_set_colors(content: &str) {
         }
         if let Some(c) = parse_hex(trimmed, "toggle_disabled_color") {
             if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
+        }
+        if let Some(c) = parse_hex(trimmed, "scrollinglist_bg_color") {
+            if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() { *lock = [c[0], c[1], c[2], 0.3]; }
         }
     }
 }
@@ -320,6 +324,17 @@ pub fn toggle_off_color() -> [f32; 4] {
 pub fn set_toggle_off_color(color: [f32; 4]) {
     if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() {
         *lock = color;
+    }
+}
+
+pub fn scrollinglist_bg_color() -> [f32; 4] {
+    load_colors_once();
+    *SCROLLINGLIST_BG_COLOR.read().unwrap()
+}
+
+pub fn set_scrollinglist_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
+        *lock = [color[0], color[1], color[2], 0.3];
     }
 }
 
