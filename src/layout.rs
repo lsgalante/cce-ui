@@ -37,6 +37,7 @@ static TOGGLE_HEIGHT: RwLock<f32> = RwLock::new(44.0);
 static COLOR_SELECTOR_FONT: RwLock<String> = RwLock::new(String::new());
 static COLOR_SELECTOR_PREVIEW_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static COLOR_SELECTOR_PREVIEW_MARGIN: RwLock<f32> = RwLock::new(0.0);
+static COLOR_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static MENUBAR_FONT: RwLock<String> = RwLock::new(String::new());
 static MENUBAR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
@@ -246,6 +247,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("color_selector_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = COLOR_SELECTOR_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -879,6 +889,34 @@ pub fn color_selector_preview_corner_radius() -> f32 {
 
 pub fn set_color_selector_preview_corner_radius(radius: f32) {
     if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
+pub fn color_selector_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("color_selector_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = COLOR_SELECTOR_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *COLOR_SELECTOR_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_color_selector_corner_radius(radius: f32) {
+    if let Ok(mut lock) = COLOR_SELECTOR_CORNER_RADIUS.write() {
         *lock = radius;
     }
 }

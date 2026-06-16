@@ -143,6 +143,19 @@ impl Element for ColorSelector {
         Some(crate::layout::color_selector_height())
     }
 
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::color_selector_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::color_selector_corner_radius()
+    }
+
     fn widget_font(&self) -> Option<String> {
         Some(self.font_family.clone())
     }
