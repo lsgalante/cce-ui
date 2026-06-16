@@ -1171,6 +1171,9 @@ pub trait RenderTarget {
     fn rect_with_radius(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, _radius: f32) {
         self.rect(color, x, y, w, h);
     }
+    fn rect_with_radius_corners(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, _corners: (bool, bool, bool, bool)) {
+        self.rect_with_radius(color, x, y, w, h, radius);
+    }
     fn text(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4]);
     fn text_with_font(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], _font: &str) {
         self.text(content, x, y, size, color);
@@ -1218,13 +1221,35 @@ impl RenderTarget for PopoverCollector {
 
 pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
     w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
-    let r = if w.rounded_corners() != (false, false, false, false) {
+    let corners = w.rounded_corners();
+    let r = if corners != (false, false, false, false) {
         w.corner_radius()
     } else {
         0.0
     };
+    let (wx, mut wy, www, mut whh) = w.rect();
+    let top_room = crate::widget::label_offset(w);
+    wy += top_room;
+    whh -= top_room;
+
     for (qx, qy, qw, qh, qc) in w.all_quads(ctx) {
-        pc.rect_with_radius(qc, qx, qy, qw, qh, r);
+        if r <= 0.1 || corners == (false, false, false, false) {
+            pc.rect_with_radius_corners(qc, qx, qy, qw, qh, 0.0, (false, false, false, false));
+            continue;
+        }
+
+        let extra_corners = (
+            corners.0 && qx <= wx + 0.1 && qy <= wy + 0.1,
+            corners.1 && qx + qw >= wx + www - 0.1 && qy <= wy + 0.1,
+            corners.2 && qx + qw >= wx + www - 0.1 && qy + qh >= wy + whh - 0.1,
+            corners.3 && qx <= wx + 0.1 && qy + qh >= wy + whh - 0.1,
+        );
+
+        if extra_corners == (false, false, false, false) {
+            pc.rect_with_radius_corners(qc, qx, qy, qw, qh, 0.0, (false, false, false, false));
+        } else {
+            pc.rect_with_radius_corners(qc, qx, qy, qw, qh, r, extra_corners);
+        }
     }
     let font_opt = w.widget_font();
     for (label, bounds) in w.text_labels_with_bounds(ctx) {

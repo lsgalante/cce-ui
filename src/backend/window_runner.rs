@@ -818,7 +818,7 @@ pub trait Application: Sized + 'static {
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
     fn view(&mut self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, size: LogicalSize, scale: f64);
-    fn view_rounded_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
+    fn view_rounded_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))>, _size: LogicalSize, _scale: f64) {}
     fn view_vectors(&mut self, _vectors: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4], LineCap)>, _size: LogicalSize, _scale: f64) {}
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
     fn text_items(&self) -> &[TextItem];
@@ -1080,9 +1080,9 @@ impl<A: Application> EngineState<A> {
         for &(qx, qy, qw, qh, qc) in &quads {
             verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
         }
-        for &(qx, qy, qw, qh, qr, qc) in &rounded_quads {
+        for &(qx, qy, qw, qh, qr, qc, qcorners) in &rounded_quads {
             if qr > 0.1 {
-                push_rounded_rect_vertices_corners(qx, qy, qw, qh, qr, logical_w, logical_h, qc, [0.0, 0.0, 0.0], (true, true, true, true), None, &mut verts);
+                push_rounded_rect_vertices_corners(qx, qy, qw, qh, qr, logical_w, logical_h, qc, [0.0, 0.0, 0.0], qcorners, None, &mut verts);
             } else {
                 verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
             }
