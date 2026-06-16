@@ -1957,14 +1957,14 @@ impl LayoutStrategy for ColumnLayout {
     }
 }
 
-pub struct GridLayout {
+pub struct AdaptiveGrid {
     grid: Option<Grid>,
     min_col_width: f32,
     gap: f32,
     num_sections: Option<usize>,
 }
 
-impl GridLayout {
+impl AdaptiveGrid {
     pub fn new(min_col_width: f32, gap: f32) -> Self {
         Self {
             grid: None,
@@ -1975,7 +1975,7 @@ impl GridLayout {
     }
 }
 
-impl LayoutStrategy for GridLayout {
+impl LayoutStrategy for AdaptiveGrid {
     fn init(&mut self, left: f32, top: f32, width: f32, _height: f32) {
         let min_col_width = crate::layout::grid_min_col_width();
         let max_cols = ((width + self.gap) / (min_col_width + self.gap)).floor().max(1.0) as usize;
