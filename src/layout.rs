@@ -57,6 +57,7 @@ static BUTTON_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static SPINBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TEXTBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static FONT_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 
 /// Standard line height multiplier for text layout in cce-ui.
 pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
@@ -177,6 +178,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = FONT_SELECTOR_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("dropdown_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = DROPDOWN_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -1048,6 +1058,34 @@ pub fn set_font_selector_corner_radius(radius: f32) {
     }
 }
 
+pub fn dropdown_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("dropdown_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = DROPDOWN_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *DROPDOWN_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_dropdown_corner_radius(radius: f32) {
+    if let Ok(mut lock) = DROPDOWN_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
 pub fn color_selector_preview_margin() -> f32 {
     use std::sync::Once;
     static INIT: Once = Once::new();
@@ -1370,6 +1408,67 @@ impl RenderTarget for PopoverCollector {
     }
 }
 
+fn get_multicontrol_sub_widget_info(
+    mc: &crate::widget::input::MultiControl,
+    qx: f32, qy: f32, qw: f32, qh: f32,
+) -> Option<((bool, bool, bool, bool), f32, (f32, f32, f32, f32), f32)> {
+    // Check add_button
+    let (bx, by, bw, bh) = mc.add_button.rect();
+    if qx >= bx - 0.1 && qx + qw <= bx + bw + 0.1 && qy >= by - 0.1 && qy + qh <= by + bh + 0.1 {
+        return Some((
+            mc.add_button.rounded_corners(),
+            mc.add_button.corner_radius(),
+            (bx, by, bw, bh),
+            crate::widget::label_offset(&mc.add_button),
+        ));
+    }
+    // Check rows
+    for row in &mc.rows {
+        // key_input
+        let (kx, ky, kw, kh) = row.key_input.rect();
+        if qx >= kx - 0.1 && qx + qw <= kx + kw + 0.1 && qy >= ky - 0.1 && qy + qh <= ky + kh + 0.1 {
+            return Some((
+                row.key_input.rounded_corners(),
+                row.key_input.corner_radius(),
+                (kx, ky, kw, kh),
+                crate::widget::label_offset(&row.key_input),
+            ));
+        }
+        // type_dropdown
+        let (tx, ty, tw, th) = row.type_dropdown.rect();
+        if qx >= tx - 0.1 && qx + qw <= tx + tw + 0.1 && qy >= ty - 0.1 && qy + qh <= ty + th + 0.1 {
+            return Some((
+                row.type_dropdown.rounded_corners(),
+                row.type_dropdown.corner_radius(),
+                (tx, ty, tw, th),
+                crate::widget::label_offset(&row.type_dropdown),
+            ));
+        }
+        // remove_button
+        let (rx, ry, rw, rh) = row.remove_button.rect();
+        if qx >= rx - 0.1 && qx + qw <= rx + rw + 0.1 && qy >= ry - 0.1 && qy + qh <= ry + rh + 0.1 {
+            return Some((
+                row.remove_button.rounded_corners(),
+                row.remove_button.corner_radius(),
+                (rx, ry, rw, rh),
+                crate::widget::label_offset(&row.remove_button),
+            ));
+        }
+        // value_widget
+        let (vx, vy, vw, vh) = row.value_widget.rect();
+        if qx >= vx - 0.1 && qx + qw <= vx + vw + 0.1 && qy >= vy - 0.1 && qy + qh <= vy + vh + 0.1 {
+            let (corners, radius, label_offset) = match &row.value_widget {
+                crate::widget::input::InstancedWidget::TextBox(w) => (w.rounded_corners(), w.corner_radius(), crate::widget::label_offset(w)),
+                crate::widget::input::InstancedWidget::Spinbox(w) => (w.rounded_corners(), w.corner_radius(), crate::widget::label_offset(w)),
+                crate::widget::input::InstancedWidget::Toggle(w) => (w.rounded_corners(), w.corner_radius(), crate::widget::label_offset(w)),
+                crate::widget::input::InstancedWidget::Slider(w) => (w.rounded_corners(), w.corner_radius(), crate::widget::label_offset(w)),
+            };
+            return Some((corners, radius, (vx, vy, vw, vh), label_offset));
+        }
+    }
+    None
+}
+
 pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
     w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
     let corners = w.rounded_corners();
@@ -1384,6 +1483,24 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
     whh -= top_room;
 
     for (qx, qy, qw, qh, qc) in w.all_quads(ctx) {
+        let mut corners = corners;
+        let mut r = r;
+        let mut wx = wx;
+        let mut wy = wy;
+        let mut www = www;
+        let mut whh = whh;
+
+        if let Some(mc) = w.as_any().downcast_ref::<crate::widget::input::MultiControl>() {
+            if let Some((sub_corners, sub_radius, (sub_x, sub_y, sub_w, sub_h), sub_label_offset)) = get_multicontrol_sub_widget_info(mc, qx, qy, qw, qh) {
+                corners = sub_corners;
+                r = sub_radius;
+                wx = sub_x;
+                wy = sub_y + sub_label_offset;
+                www = sub_w;
+                whh = sub_h - sub_label_offset;
+            }
+        }
+
         if r <= 0.1 || corners == (false, false, false, false) {
             pc.rect_with_radius_corners(qc, qx, qy, qw, qh, 0.0, (false, false, false, false));
             continue;

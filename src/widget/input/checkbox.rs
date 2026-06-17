@@ -206,6 +206,10 @@ impl Toggle {
 impl Element for Toggle {
     crate::impl_widget_base!(Toggle);
 
+    fn preferred_height(&self) -> Option<f32> {
+        Some(crate::layout::toggle_height())
+    }
+
     fn get_value_string(&self) -> Option<String> {
         Some(self.toggled.to_string())
     }

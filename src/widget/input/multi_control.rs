@@ -47,6 +47,15 @@ impl InstancedWidget {
         }
     }
 
+    pub fn preferred_height(&self) -> Option<f32> {
+        match self {
+            InstancedWidget::TextBox(w) => w.preferred_height(),
+            InstancedWidget::Spinbox(w) => w.preferred_height(),
+            InstancedWidget::Toggle(w) => w.preferred_height(),
+            InstancedWidget::Slider(w) => w.preferred_height(),
+        }
+    }
+
     pub fn layout(&mut self, origin: Point, constraints: LayoutConstraints, ctx: &mut UiContext) {
         match self {
             InstancedWidget::TextBox(w) => w.layout(origin, constraints, ctx),
@@ -262,16 +271,24 @@ impl Element for MultiControl {
     crate::impl_widget_base!(MultiControl);
 
     fn preferred_height(&self) -> Option<f32> {
-        let line_h = 44.0;
         let gap_between_lines = 4.0;
         let gap_between_rows = 12.0;
-        let row_h = 2.0 * line_h + gap_between_lines;
         let add_btn_h = 36.0;
-        let total_h = if self.rows.is_empty() {
-            add_btn_h + 16.0
+
+        let key_h = crate::layout::textbox_height();
+        let type_h = crate::layout::dropdown_height();
+        let line1_h = key_h.max(type_h);
+
+        let mut total_h = 0.0;
+        if self.rows.is_empty() {
+            total_h = add_btn_h + 16.0;
         } else {
-            self.rows.len() as f32 * row_h + (self.rows.len() - 1) as f32 * gap_between_rows + add_btn_h + 24.0
-        };
+            for row in &self.rows {
+                let line2_h = row.value_widget.preferred_height().unwrap_or(44.0);
+                total_h += line1_h + gap_between_lines + line2_h;
+            }
+            total_h += (self.rows.len() - 1) as f32 * gap_between_rows + add_btn_h + 28.0;
+        }
         Some(total_h)
     }
 
@@ -285,9 +302,12 @@ impl Element for MultiControl {
 
         let pad_x = 8.0;
         let pad_y = 8.0;
-        let line_h = 44.0;
         let gap_between_lines = 4.0;
         let gap_between_rows = 12.0;
+
+        let key_h = crate::layout::textbox_height();
+        let type_h = crate::layout::dropdown_height();
+        let line1_h = key_h.max(type_h);
 
         let usable_w = (size.width - 2.0 * pad_x).max(1.0);
         let gap_x = 6.0;
@@ -304,18 +324,19 @@ impl Element for MultiControl {
         for row in &mut self.rows {
             // Line 1: Label, Type, Remove
             let key_x = origin.x + pad_x;
-            row.key_input.layout(Point { x: key_x, y: curr_y }, LayoutConstraints::new(key_w, key_w, line_h, line_h), ctx);
+            row.key_input.layout(Point { x: key_x, y: curr_y }, LayoutConstraints::new(key_w, key_w, line1_h, line1_h), ctx);
 
             let type_x = key_x + key_w + gap_x;
-            row.type_dropdown.layout(Point { x: type_x, y: curr_y }, LayoutConstraints::new(type_w, type_w, line_h, line_h), ctx);
+            row.type_dropdown.layout(Point { x: type_x, y: curr_y }, LayoutConstraints::new(type_w, type_w, line1_h, line1_h), ctx);
 
             let remove_x = type_x + type_w + gap_x;
-            row.remove_button.layout(Point { x: remove_x, y: curr_y }, LayoutConstraints::new(remove_w, remove_w, line_h, line_h), ctx);
+            row.remove_button.layout(Point { x: remove_x, y: curr_y }, LayoutConstraints::new(remove_w, remove_w, line1_h, line1_h), ctx);
 
             // Line 2: Value Control Widget
-            let value_y = curr_y + line_h + gap_between_lines;
+            let line2_h = row.value_widget.preferred_height().unwrap_or(44.0);
+            let value_y = curr_y + line1_h + gap_between_lines;
             let value_x = origin.x + pad_x;
-            row.value_widget.layout(Point { x: value_x, y: value_y }, LayoutConstraints::new(usable_w, usable_w, line_h, line_h), ctx);
+            row.value_widget.layout(Point { x: value_x, y: value_y }, LayoutConstraints::new(usable_w, usable_w, line2_h, line2_h), ctx);
 
             link_child(self_ptr, self_id, &mut row.key_input, ctx);
             link_child(self_ptr, self_id, &mut row.type_dropdown, ctx);
@@ -327,7 +348,7 @@ impl Element for MultiControl {
             }
             link_child(self_ptr, self_id, &mut row.remove_button, ctx);
 
-            curr_y += 2.0 * line_h + gap_between_lines + gap_between_rows;
+            curr_y += line1_h + gap_between_lines + line2_h + gap_between_rows;
         }
 
         // Lay out add button

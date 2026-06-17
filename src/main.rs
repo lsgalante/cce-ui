@@ -186,13 +186,81 @@ fn extra_quad_vertices(
     sw: f32, sh: f32,
     qc: [f32; 4],
 ) -> Vec<Vertex> {
-    let corners = w.rounded_corners();
+    let mut corners = w.rounded_corners();
+    let mut r = w.corner_radius();
+    let (mut wx, mut wy, mut ww, mut wh) = w.rect();
+    let mut top_room = cce_ui::widget::label_offset(w);
+
+    if let Some(mc) = w.as_any().downcast_ref::<cce_ui::widget::input::MultiControl>() {
+        // check add_button
+        let (bx, by, b_w, b_h) = mc.add_button.rect();
+        if qx >= bx - 0.1 && qx + qw <= bx + b_w + 0.1 && qy >= by - 0.1 && qy + qh <= by + b_h + 0.1 {
+            corners = mc.add_button.rounded_corners();
+            r = mc.add_button.corner_radius();
+            wx = bx;
+            wy = by;
+            ww = b_w;
+            wh = b_h;
+            top_room = cce_ui::widget::label_offset(&mc.add_button);
+        }
+        for row in &mc.rows {
+            // key_input
+            let (kx, ky, kw, kh) = row.key_input.rect();
+            if qx >= kx - 0.1 && qx + qw <= kx + kw + 0.1 && qy >= ky - 0.1 && qy + qh <= ky + kh + 0.1 {
+                corners = row.key_input.rounded_corners();
+                r = row.key_input.corner_radius();
+                wx = kx;
+                wy = ky;
+                ww = kw;
+                wh = kh;
+                top_room = cce_ui::widget::label_offset(&row.key_input);
+            }
+            // type_dropdown
+            let (tx, ty, tw, th) = row.type_dropdown.rect();
+            if qx >= tx - 0.1 && qx + qw <= tx + tw + 0.1 && qy >= ty - 0.1 && qy + qh <= ty + th + 0.1 {
+                corners = row.type_dropdown.rounded_corners();
+                r = row.type_dropdown.corner_radius();
+                wx = tx;
+                wy = ty;
+                ww = tw;
+                wh = th;
+                top_room = cce_ui::widget::label_offset(&row.type_dropdown);
+            }
+            // remove_button
+            let (rx, ry, rw, rh) = row.remove_button.rect();
+            if qx >= rx - 0.1 && qx + qw <= rx + rw + 0.1 && qy >= ry - 0.1 && qy + qh <= ry + rh + 0.1 {
+                corners = row.remove_button.rounded_corners();
+                r = row.remove_button.corner_radius();
+                wx = rx;
+                wy = ry;
+                ww = rw;
+                wh = rh;
+                top_room = cce_ui::widget::label_offset(&row.remove_button);
+            }
+            // value_widget
+            let (vx, vy, v_w, v_h) = row.value_widget.rect();
+            if qx >= vx - 0.1 && qx + qw <= vx + v_w + 0.1 && qy >= vy - 0.1 && qy + qh <= vy + v_h + 0.1 {
+                let (sub_corners, sub_radius, sub_top_room) = match &row.value_widget {
+                    cce_ui::widget::input::InstancedWidget::TextBox(w) => (w.rounded_corners(), w.corner_radius(), cce_ui::widget::label_offset(w)),
+                    cce_ui::widget::input::InstancedWidget::Spinbox(w) => (w.rounded_corners(), w.corner_radius(), cce_ui::widget::label_offset(w)),
+                    cce_ui::widget::input::InstancedWidget::Toggle(w) => (w.rounded_corners(), w.corner_radius(), cce_ui::widget::label_offset(w)),
+                    cce_ui::widget::input::InstancedWidget::Slider(w) => (w.rounded_corners(), w.corner_radius(), cce_ui::widget::label_offset(w)),
+                };
+                corners = sub_corners;
+                r = sub_radius;
+                wx = vx;
+                wy = vy;
+                ww = v_w;
+                wh = v_h;
+                top_room = sub_top_room;
+            }
+        }
+    }
+
     if corners == (false, false, false, false) {
         return quad_vertices(qx, qy, qw, qh, sw, sh, qc).to_vec();
     }
 
-    let (wx, mut wy, ww, mut wh) = w.rect();
-    let top_room = cce_ui::widget::label_offset(w);
     wy += top_room;
     wh -= top_room;
     let extra_corners = (
@@ -202,7 +270,7 @@ fn extra_quad_vertices(
         corners.3 && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5,
     );
 
-    rounded_rect_vertices_corners(qx, qy, qw, qh, w.corner_radius(), sw, sh, qc, extra_corners)
+    rounded_rect_vertices_corners(qx, qy, qw, qh, r, sw, sh, qc, extra_corners)
 }
 
 fn make_text_buffer(font_system: &mut FontSystem, text: &str, size: f32) -> Buffer {

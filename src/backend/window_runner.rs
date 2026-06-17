@@ -592,6 +592,35 @@ fn get_child_widget_for_quad<'a>(
             }
         }
     }
+    if let Some(mc) = w.as_any().downcast_ref::<crate::widget::input::MultiControl>() {
+        let (bx, by, bw, bh) = mc.add_button.rect();
+        if qx >= bx - 0.1 && qx + qw <= bx + bw + 0.1 && qy >= by - 0.1 && qy + qh <= by + bh + 0.1 {
+            return &mc.add_button;
+        }
+        for row in &mc.rows {
+            let (kx, ky, kw, kh) = row.key_input.rect();
+            if qx >= kx - 0.1 && qx + qw <= kx + kw + 0.1 && qy >= ky - 0.1 && qy + qh <= ky + kh + 0.1 {
+                return &row.key_input;
+            }
+            let (tx, ty, tw, th) = row.type_dropdown.rect();
+            if qx >= tx - 0.1 && qx + qw <= tx + tw + 0.1 && qy >= ty - 0.1 && qy + qh <= ty + th + 0.1 {
+                return &row.type_dropdown;
+            }
+            let (rx, ry, rw, rh) = row.remove_button.rect();
+            if qx >= rx - 0.1 && qx + qw <= rx + rw + 0.1 && qy >= ry - 0.1 && qy + qh <= ry + rh + 0.1 {
+                return &row.remove_button;
+            }
+            let (vx, vy, vw, vh) = row.value_widget.rect();
+            if qx >= vx - 0.1 && qx + qw <= vx + vw + 0.1 && qy >= vy - 0.1 && qy + qh <= vy + vh + 0.1 {
+                return match &row.value_widget {
+                    crate::widget::input::InstancedWidget::TextBox(w) => w,
+                    crate::widget::input::InstancedWidget::Spinbox(w) => w,
+                    crate::widget::input::InstancedWidget::Toggle(w) => w,
+                    crate::widget::input::InstancedWidget::Slider(w) => w,
+                };
+            }
+        }
+    }
     w
 }
 

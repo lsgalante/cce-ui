@@ -166,6 +166,19 @@ impl Element for Dropdown {
         Some(crate::layout::dropdown_height())
     }
 
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::dropdown_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::dropdown_corner_radius()
+    }
+
     fn widget_font(&self) -> Option<String> {
         Some(self.font_family.clone())
     }
