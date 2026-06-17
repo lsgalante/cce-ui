@@ -823,7 +823,7 @@ impl Element for TextBox {
                     let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
                     quads.push((
                         highlight_x,
-                        crate::layout::center_text_y(self.base.y + top, visual_h, self.font_size),
+                        crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
                         highlight_w,
                         crate::layout::line_height(self.font_size),
                         highlight_color,
@@ -919,7 +919,7 @@ impl Element for TextBox {
             labels.push(TextLabel {
                 text: display_text,
                 x: self.base.x + 8.0,
-                y: crate::layout::center_text_y(self.base.y + top, visual_h, self.font_size),
+                y: crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
                 font_size: self.font_size,
                 color: label_color,
             });

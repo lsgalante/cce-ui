@@ -260,12 +260,11 @@ impl Element for LayoutPreview {
                 let text_w = node.label.len() as f32 * 6.0;
                 let text_color = if self.is_active { [242, 242, 255] } else { [178, 178, 191] };
                 let tx_offset = ((node.w - text_w) / 2.0).max(1.0);
-                let ty_offset = ((node.h - text_sz) / 2.0).max(1.0);
 
                 labels.push(TextLabel {
                     text: node.label,
                     x: rect_x + tx_offset,
-                    y: rect_y + ty_offset,
+                    y: crate::layout::align_text_y(rect_y, node.h, text_sz, 0.0),
                     font_size: text_sz,
                     color: text_color,
                 });

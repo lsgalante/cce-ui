@@ -385,7 +385,7 @@ impl Element for ButtonStrip {
                 labels.push(TextLabel {
                     text: btn_label.clone(),
                     x: r.0 + (r.2 - est_w) / 2.0,
-                    y: r.1 + (r.3 - font_size) / 2.0 - 1.0,
+                    y: crate::layout::align_text_y(r.1, r.3, font_size, 0.0),
                     font_size,
                     color,
                 });

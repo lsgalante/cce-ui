@@ -47,7 +47,7 @@ impl Element for Label {
         vec![TextLabel {
             text: self.base.label.clone().unwrap_or_default(),
             x: self.base.x,
-            y: self.base.y + (self.base.h - self.font_size) / 2.0,
+            y: crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, 0.0),
             font_size: self.font_size,
             color: self.color,
         }]

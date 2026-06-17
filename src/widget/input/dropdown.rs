@@ -75,7 +75,7 @@ impl Dropdown {
         }
         
         for (idx, opt) in self.options.iter().enumerate() {
-            let iy = dy + idx as f32 * 24.0 + (24.0 - 12.0) / 2.0;
+            let iy = crate::layout::align_text_y(dy + idx as f32 * 24.0, 24.0, 12.0, 0.0);
             let text_color = if self.hovered_item == Some(idx) {
                 [0xff, 0xff, 0xff]
             } else if self.selected == idx {
@@ -345,7 +345,7 @@ impl Element for Dropdown {
         labels.push(TextLabel {
             text: selected_text,
             x: self.base.x + 8.0,
-            y: self.base.y + top + (visual_h - 12.0) / 2.0,
+            y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
             font_size: 12.0,
             color: [0xdd, 0xdd, 0xe2],
         });
@@ -353,7 +353,7 @@ impl Element for Dropdown {
         labels.push(TextLabel {
             text: "▼".to_string(),
             x: self.base.x + self.base.w - 18.0,
-            y: self.base.y + top + (visual_h - 10.0) / 2.0,
+            y: crate::layout::align_text_y(self.base.y, self.base.h, 10.0, top),
             font_size: 10.0,
             color: [0x83, 0x83, 0x8a],
         });

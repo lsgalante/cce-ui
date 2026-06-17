@@ -277,7 +277,7 @@ impl Element for Graph {
                 let scale_f = nw / 80.0;
                 let font_size = (14.0 * scale_f).clamp(6.0, 48.0);
                 let lx = nx + nw + 8.0 * scale_f;
-                let ly = ny + (nh - font_size) / 2.0;
+                let ly = crate::layout::align_text_y(ny, nh, font_size, 0.0);
                 if lx >= self.x && lx < self.x + self.w && ly >= self.y && ly < self.y + self.h {
                     labels.push(TextLabel {
                         text: node.name.clone(),

@@ -114,7 +114,7 @@ impl Element for FontSelector {
         labels.push(TextLabel {
             text: self.font_family.clone(),
             x: self.base.x + 8.0,
-            y: self.base.y + top + (visual_h - 12.0) / 2.0,
+            y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
             font_size: 12.0,
             color: [0xdd, 0xdd, 0xe2],
         });
@@ -122,7 +122,7 @@ impl Element for FontSelector {
         labels.push(TextLabel {
             text: "🔤".to_string(),
             x: self.base.x + self.base.w - 20.0,
-            y: self.base.y + top + (visual_h - 11.0) / 2.0,
+            y: crate::layout::align_text_y(self.base.y, self.base.h, 11.0, top),
             font_size: 11.0,
             color: [0x83, 0x83, 0x8a],
         });

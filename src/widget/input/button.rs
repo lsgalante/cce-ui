@@ -243,7 +243,7 @@ impl Element for Button {
             labels.push(TextLabel {
                 text: label.clone(),
                 x,
-                y: self.base.y + (self.base.h - font_size) / 2.0 - 1.0,
+                y: crate::layout::align_text_y(self.base.y, self.base.h, font_size, 0.0),
                 font_size,
                 color,
             });

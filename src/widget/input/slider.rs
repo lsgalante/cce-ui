@@ -406,7 +406,7 @@ impl Element for Slider {
         if self.show_readout {
             let readout_w = 60.0;
             let rx = self.base.x + self.base.w - readout_w;
-            let ry = self.base.y + top + (visual_h - 12.0) / 2.0;
+            let ry = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
             
             let text = if self.editing {
                 self.edit_buffer.clone()

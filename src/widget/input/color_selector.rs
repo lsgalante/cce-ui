@@ -489,7 +489,7 @@ impl Element for ColorSelector {
         labels.push(TextLabel {
             text: hex,
             x: self.base.x + 4.0,
-            y: self.base.y + top + (visual_h - 12.0) / 2.0,
+            y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
             font_size: 12.0,
             color: [0xcc, 0xcc, 0xd4],
         });

@@ -160,9 +160,9 @@ impl Element for InteractiveListItem {
         let mut labels = Vec::new();
         
         let title_y = if self.subtitle.is_some() {
-            y + (h - 22.0) / 2.0
+            crate::layout::align_text_y(y, h, 22.0, 0.0)
         } else {
-            y + (h - 12.0) / 2.0
+            crate::layout::align_text_y(y, h, 12.0, 0.0)
         };
 
         labels.push(TextLabel {

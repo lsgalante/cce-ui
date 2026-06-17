@@ -151,7 +151,7 @@ impl Element for Checkbox {
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.label {
             let font_size = 12.0;
-            let y = self.base.y + (self.base.h - font_size) / 2.0 - 1.0;
+            let y = crate::layout::align_text_y(self.base.y, self.base.h, font_size, 0.0);
             labels.push(TextLabel {
                 text: label.clone(),
                 x: self.base.x + 8.0,
@@ -206,6 +206,33 @@ impl Toggle {
 impl Element for Toggle {
     crate::impl_widget_base!(Toggle);
 
+    fn get_value_string(&self) -> Option<String> {
+        Some(self.toggled.to_string())
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        let val_trimmed = val.trim().to_lowercase();
+        let new_toggled = if val_trimmed == "true" || val_trimmed == "1" || val_trimmed == "yes" || val_trimmed == "on" {
+            true
+        } else if val_trimmed == "false" || val_trimmed == "0" || val_trimmed == "no" || val_trimmed == "off" {
+            false
+        } else {
+            return false;
+        };
+        if self.toggled != new_toggled {
+            self.toggled = new_toggled;
+            self.just_toggled = true;
+            return true;
+        }
+        false
+    }
+
+    fn take_change(&mut self) -> bool {
+        let ret = self.just_toggled;
+        self.just_toggled = false;
+        ret
+    }
+
     fn color(&self) -> [f32; 4] {
         if self.toggled {
             colors::TOGGLE_ON
@@ -243,7 +270,7 @@ impl Element for Toggle {
             labels.push(TextLabel {
                 text: label.clone(),
                 x: self.base.x + (self.base.w - est_w) / 2.0,
-                y: self.base.y + (self.base.h - font_size) / 2.0 - 1.0,
+                y: crate::layout::align_text_y(self.base.y, self.base.h, font_size, 0.0),
                 font_size,
                 color: [0xcc, 0xcc, 0xd4],
             });

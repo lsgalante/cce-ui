@@ -71,6 +71,11 @@ pub fn center_text_y(y: f32, container_h: f32, font_size: f32) -> f32 {
     y + (container_h - line_height(font_size)) / 2.0
 }
 
+/// Standardized vertical text alignment calculation based on Spinbox widget alignment.
+pub fn align_text_y(y: f32, height: f32, font_size: f32, top_offset: f32) -> f32 {
+    y + top_offset + (height - top_offset - font_size) / 2.0 - 2.0
+}
+
 pub fn reload_config() {
     if let Some(content) = read_config() {
         let mut menubar_font_changed = false;

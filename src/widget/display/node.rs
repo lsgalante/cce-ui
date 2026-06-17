@@ -77,7 +77,7 @@ impl Element for Node {
         vec![TextLabel {
             text: self.name.clone(),
             x: self.x + self.w + 8.0,
-            y: self.y + (self.h - 14.0) / 2.0,
+            y: crate::layout::align_text_y(self.y, self.h, 14.0, 0.0),
             font_size: 14.0,
             color: [0xcc, 0xcc, 0xd4],
         }]

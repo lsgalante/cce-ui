@@ -829,7 +829,7 @@ impl Element for MenuBar {
                 }
             }
             if !self.title.is_empty() {
-                let text_y = self.base.y + (self.base.h - font_size) / 2.0;
+                let text_y = crate::layout::align_text_y(self.base.y, self.base.h, font_size, 0.0);
                 labels.push(TextLabel {
                     text: display_title,
                     x: self.base.x + start_x,
