@@ -890,11 +890,6 @@ pub trait Application: Sized + 'static {
                 crate::widget::context_menu::h(),
             ));
         }
-        for popover_ptr in crate::widget::popovers::get_active() {
-            if let Some(r) = unsafe { &*popover_ptr }.popover_rect() {
-                overlay_rects.push(r);
-            }
-        }
 
         self.text_items().iter().map(|ti| {
             let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
