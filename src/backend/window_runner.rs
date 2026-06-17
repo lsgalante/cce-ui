@@ -881,15 +881,7 @@ pub trait Application: Sized + 'static {
     fn render_popovers(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
     
     fn text_areas(&self, scale_f32: f32, bounds: TextBounds) -> Vec<TextArea<'_>> {
-        let mut overlay_rects = Vec::new();
-        if crate::widget::context_menu::is_visible() {
-            overlay_rects.push((
-                crate::widget::context_menu::x(),
-                crate::widget::context_menu::y(),
-                crate::widget::context_menu::w(),
-                crate::widget::context_menu::h(),
-            ));
-        }
+        let overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
 
         self.text_items().iter().map(|ti| {
             let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
@@ -2018,32 +2010,51 @@ pub fn run<A: Application>() {
         }
 
         let active_popovers = crate::widget::popovers::get_active();
-        if !active_popovers.is_empty() {
-            let popover_widget = unsafe { &*active_popovers[0] };
-            if let Some((px, py, pw, ph)) = popover_widget.popover_rect() {
-                if engine_state.active_popup.is_none() {
-                    let wl_surface = engine_state.compositor_state.create_surface(&engine_state.qh);
-                    wl_surface.set_buffer_scale(engine_state.scale_factor as i32);
-                    
-                    let positioner = XdgPositioner::new(&engine_state.xdg_shell_state).unwrap();
-                    positioner.set_size(pw as i32, ph as i32);
-                    
+        let context_menu_visible = crate::widget::context_menu::is_visible();
+        if !active_popovers.is_empty() || context_menu_visible {
+            let (px, py, pw, ph, is_context_menu) = if !active_popovers.is_empty() {
+                let popover_widget = unsafe { &*active_popovers[0] };
+                let (x, y, w, h) = popover_widget.popover_rect().unwrap();
+                (x, y, w, h, false)
+            } else {
+                (
+                    crate::widget::context_menu::x(),
+                    crate::widget::context_menu::y(),
+                    crate::widget::context_menu::w(),
+                    crate::widget::context_menu::h(),
+                    true,
+                )
+            };
+            if engine_state.active_popup.is_none() {
+                let wl_surface = engine_state.compositor_state.create_surface(&engine_state.qh);
+                wl_surface.set_buffer_scale(engine_state.scale_factor as i32);
+                
+                let positioner = XdgPositioner::new(&engine_state.xdg_shell_state).unwrap();
+                positioner.set_size(pw as i32, ph as i32);
+                
+                if !is_context_menu {
+                    let popover_widget = unsafe { &*active_popovers[0] };
                     let (rx, ry, rw, rh) = popover_widget.rect();
                     positioner.set_anchor_rect(rx as i32, ry as i32, rw as i32, rh as i32);
                     positioner.set_anchor(Anchor::BottomLeft);
                     positioner.set_gravity(Gravity::BottomRight);
-                    positioner.set_constraint_adjustment(
-                        ConstraintAdjustment::SlideX | ConstraintAdjustment::SlideY
-                    );
-                    
-                    let parent_xdg_surface = XdgSurface::xdg_surface(engine_state.window.as_ref().unwrap());
-                    let sctk_popup = Popup::new(
-                        parent_xdg_surface,
-                        &positioner,
-                        &engine_state.qh,
-                        &engine_state.compositor_state,
-                        &engine_state.xdg_shell_state,
-                    ).unwrap();
+                } else {
+                    positioner.set_anchor_rect(px as i32, py as i32, 1, 1);
+                    positioner.set_anchor(Anchor::TopLeft);
+                    positioner.set_gravity(Gravity::BottomRight);
+                }
+                positioner.set_constraint_adjustment(
+                    ConstraintAdjustment::SlideX | ConstraintAdjustment::SlideY
+                );
+                
+                let parent_xdg_surface = XdgSurface::xdg_surface(engine_state.window.as_ref().unwrap());
+                let sctk_popup = Popup::new(
+                    parent_xdg_surface,
+                    &positioner,
+                    &engine_state.qh,
+                    &engine_state.compositor_state,
+                    &engine_state.xdg_shell_state,
+                ).unwrap();
                     
                     let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
                     let surface_ptr = sctk_popup.wl_surface().id().as_ptr() as *mut std::ffi::c_void;
@@ -2079,7 +2090,6 @@ pub fn run<A: Application>() {
                         vertex_buffer: None,
                     });
                 }
-            }
         } else {
             if engine_state.active_popup.is_some() {
                 engine_state.active_popup = None;
