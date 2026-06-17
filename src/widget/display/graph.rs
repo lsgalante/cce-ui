@@ -827,7 +827,7 @@ impl Element for Graph {
 
 impl Drop for Graph {
     fn drop(&mut self) {
-        focus::clear_if_matches(self);
+        clear_widget_references(self);
     }
 }
 

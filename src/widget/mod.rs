@@ -145,6 +145,13 @@ pub trait Element {
         }
         std::ptr::null_mut::<DummyElement>() as *mut (dyn Element + 'static)
     }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        struct DummyElement;
+        impl Element for DummyElement {
+            fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+        }
+        std::ptr::null_mut::<DummyElement>() as *mut (dyn Element + 'static)
+    }
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         match event {
@@ -526,7 +533,7 @@ pub mod editor;
 
 // Re-exports
 pub use self::editor::TextEditorState;
-pub use self::core::{Widget, focus, hover_animation, popovers, clipboard, context_menu};
+pub use self::core::{Widget, focus, hover_animation, popovers, clipboard, context_menu, clear_widget_references};
 pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, Canvas, get_font_db, ActiveThumb, FontSelector,

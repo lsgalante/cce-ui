@@ -146,7 +146,7 @@ impl Element for FontSelector {
 
 impl Drop for FontSelector {
     fn drop(&mut self) {
-        focus::clear_if_matches(self);
+        clear_widget_references(self);
     }
 }
 

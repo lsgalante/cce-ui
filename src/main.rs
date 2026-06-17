@@ -686,21 +686,8 @@ impl State {
         } else {
             for (i, w) in self.widgets.iter().enumerate() {
                 for (label, font, bounds) in w.text_labels_with_font_and_bounds(ui_context) {
-                    let mut covered = false;
-                    for (pi, pw) in self.widgets.iter().enumerate() {
-                        if pi != i {
-                            if let Some((px, py, pw_val, ph)) = pw.popover_rect() {
-                                if label.is_covered_by(px, py, pw_val, ph) {
-                                    covered = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if !covered {
-                        widget_buffers.push(make_text_buffer_with_font(font_system, &label.text, label.font_size, font.as_deref()));
-                        widget_labels.push((label, bounds));
-                    }
+                    widget_buffers.push(make_text_buffer_with_font(font_system, &label.text, label.font_size, font.as_deref()));
+                    widget_labels.push((label, bounds));
                 }
             }
 
@@ -1426,11 +1413,11 @@ impl AppState {
             shift: self.shift_pressed,
         };
 
-        if crate::widget::context_menu::is_visible() {
-            if custom_event.state == crate::widget::ElementState::Pressed
+        if cce_ui::widget::context_menu::is_visible() {
+            if custom_event.state == cce_ui::widget::ElementState::Pressed
                 && custom_event.logical_key == Key::Named(NamedKey::Escape)
             {
-                crate::widget::context_menu::hide();
+                cce_ui::widget::context_menu::hide();
                 if let Some(st) = &mut self.state {
                     st.upload_vertices();
                 }

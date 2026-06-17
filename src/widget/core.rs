@@ -612,6 +612,20 @@ pub mod context_menu {
         CONTEXT_MENU.with(|m| m.borrow_mut().hide());
     }
 
+    pub fn clear_if_matches(w: &dyn Element) {
+        CONTEXT_MENU.with(|m| {
+            let mut menu = m.borrow_mut();
+            if let Some(ptr) = menu.target {
+                let current_data = ptr as *const () as usize;
+                let query_data = w as *const dyn Element as *const () as usize;
+                if current_data == query_data {
+                    menu.target = None;
+                    menu.visible = false;
+                }
+            }
+        });
+    }
+
     pub fn x() -> f32 { CONTEXT_MENU.with(|m| m.borrow().x) }
     pub fn y() -> f32 { CONTEXT_MENU.with(|m| m.borrow().y) }
     pub fn w() -> f32 { CONTEXT_MENU.with(|m| m.borrow().w) }
@@ -707,6 +721,11 @@ impl Widget {
 }
 
 
+pub fn clear_widget_references(w: &dyn Element) {
+    focus::clear_if_matches(w);
+    context_menu::clear_if_matches(w);
+}
+
 #[macro_export]
 macro_rules! impl_widget_base {
     ($name:ident) => {
@@ -716,6 +735,9 @@ macro_rules! impl_widget_base {
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         fn as_ptr(&self) -> *mut (dyn $crate::widget::Element + 'static) {
             self as *const Self as *mut Self as *mut (dyn $crate::widget::Element + 'static)
+        }
+        fn as_ptr_mut(&mut self) -> *mut (dyn $crate::widget::Element + 'static) {
+            self as *mut Self as *mut (dyn $crate::widget::Element + 'static)
         }
     };
 }

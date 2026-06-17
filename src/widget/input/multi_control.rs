@@ -684,7 +684,7 @@ fn get_application_config_path() -> std::path::PathBuf {
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "this-application".to_string());
 
-    base_dir.join(app_name).join("this-application.toml")
+    base_dir.join(app_name).join("this-application.json")
 }
 
 fn save_config(name: &str, controls: &[InstancedControl]) {
@@ -693,89 +693,75 @@ fn save_config(name: &str, controls: &[InstancedControl]) {
         let _ = std::fs::create_dir_all(parent);
     }
 
-    let json_val = serde_json::to_string(controls).unwrap_or_else(|_| "[]".to_string());
-    let escaped_json = json_val.replace("'", "''");
-    let new_line = format!("{} = '{}'", name, escaped_json);
-
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-
-    let mut multicontrol_sec_idx = None;
-    let mut next_section_idx = None;
-    let mut key_idx = None;
-
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if trimmed == "[multicontrol]" {
-            multicontrol_sec_idx = Some(i);
-        } else if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            if multicontrol_sec_idx.is_some() && next_section_idx.is_none() {
-                next_section_idx = Some(i);
-            }
-        } else if let Some(_) = multicontrol_sec_idx {
-            if next_section_idx.is_none() {
-                if trimmed.starts_with(name) {
-                    if let Some(eq_idx) = trimmed.find('=') {
-                        if trimmed[..eq_idx].trim() == name {
-                            key_idx = Some(i);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(k_idx) = key_idx {
-        lines[k_idx] = new_line;
-    } else if let Some(m_idx) = multicontrol_sec_idx {
-        let insert_idx = next_section_idx.unwrap_or(lines.len());
-        lines.insert(insert_idx, new_line);
+    let mut map = if path.exists() {
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
+            .unwrap_or_default()
     } else {
-        if !lines.is_empty() && !lines.last().unwrap().is_empty() {
-            lines.push(String::new());
-        }
-        lines.push("[multicontrol]".to_string());
-        lines.push(new_line);
+        serde_json::Map::new()
+    };
+
+    if let Ok(json_val) = serde_json::to_value(controls) {
+        map.insert(name.to_string(), json_val);
     }
 
-    let _ = std::fs::write(&path, lines.join("\n"));
+    if let Ok(updated_content) = serde_json::to_string_pretty(&map) {
+        let _ = std::fs::write(&path, updated_content);
+    }
 }
 
 fn load_config(name: &str) -> Vec<InstancedControl> {
     let path = get_application_config_path();
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
+    
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&content) {
+                if let Some(val) = map.get(name) {
+                    if let Ok(controls) = serde_json::from_value::<Vec<InstancedControl>>(val.clone()) {
+                        return controls;
+                    }
+                }
+            }
+        }
+        return Vec::new();
+    }
 
-    let mut multicontrol_sec = false;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[multicontrol]" {
-            multicontrol_sec = true;
-        } else if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            multicontrol_sec = false;
-        } else if multicontrol_sec {
-            if trimmed.starts_with(name) {
-                if let Some(eq_idx) = trimmed.find('=') {
-                    if trimmed[..eq_idx].trim() == name {
-                        let value_part = trimmed[eq_idx + 1..].trim();
-                        let json_str = if value_part.starts_with('\'') && value_part.ends_with('\'') {
-                            &value_part[1..value_part.len() - 1]
-                        } else if value_part.starts_with('"') && value_part.ends_with('"') {
-                            &value_part[1..value_part.len() - 1]
-                        } else {
-                            value_part
-                        };
-                        let json_str = json_str.replace("''", "'");
-                        if let Ok(controls) = serde_json::from_str::<Vec<InstancedControl>>(&json_str) {
-                            return controls;
+    let toml_path = path.with_extension("toml");
+    if toml_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&toml_path) {
+            let mut multicontrol_sec = false;
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed == "[multicontrol]" {
+                    multicontrol_sec = true;
+                } else if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                    multicontrol_sec = false;
+                } else if multicontrol_sec {
+                    if trimmed.starts_with(name) {
+                        if let Some(eq_idx) = trimmed.find('=') {
+                            if trimmed[..eq_idx].trim() == name {
+                                let value_part = trimmed[eq_idx + 1..].trim();
+                                let json_str = if value_part.starts_with('\'') && value_part.ends_with('\'') {
+                                    &value_part[1..value_part.len() - 1]
+                                } else if value_part.starts_with('"') && value_part.ends_with('"') {
+                                    &value_part[1..value_part.len() - 1]
+                                } else {
+                                    value_part
+                                };
+                                let json_str = json_str.replace("''", "'");
+                                if let Ok(controls) = serde_json::from_str::<Vec<InstancedControl>>(&json_str) {
+                                    save_config(name, &controls);
+                                    let _ = std::fs::remove_file(&toml_path);
+                                    return controls;
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
+
     Vec::new()
 }
 
@@ -829,6 +815,39 @@ mod tests {
 
         let path = get_application_config_path();
         assert!(path.exists());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        if let Some(h) = old_home {
+            std::env::set_var("HOME", h);
+        }
+    }
+
+    #[test]
+    fn test_config_toml_to_json_migration() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let temp_dir = std::env::temp_dir().join("cce_test_home_migration");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", temp_dir.to_str().unwrap());
+
+        let path = get_application_config_path();
+        let toml_path = path.with_extension("toml");
+        if let Some(parent) = toml_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let toml_content = "[multicontrol]\ntest_param = '[{\"key\":\"x\",\"control_type\":\"Spinbox\",\"value\":\"5\"}]'\n";
+        std::fs::write(&toml_path, toml_content).unwrap();
+
+        let loaded = load_config("test_param");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].key, "x");
+        assert_eq!(loaded[0].value, "5");
+
+        assert!(!toml_path.exists());
+        assert!(path.exists());
+
+        let json_content = std::fs::read_to_string(&path).unwrap();
+        assert!(json_content.contains("\"test_param\""));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         if let Some(h) = old_home {

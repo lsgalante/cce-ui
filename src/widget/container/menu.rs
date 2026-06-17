@@ -923,7 +923,7 @@ impl Element for MenuBar {
 }
 impl Drop for MenuBar {
     fn drop(&mut self) {
-        focus::clear_if_matches(self);
+        clear_widget_references(self);
     }
 }
 
@@ -1334,7 +1334,7 @@ unsafe impl Sync for Menu {}
 
 impl Drop for Menu {
     fn drop(&mut self) {
-        focus::clear_if_matches(self);
+        clear_widget_references(self);
     }
 }
 

@@ -194,6 +194,6 @@ impl GeomController for Node {
 
 impl Drop for Node {
     fn drop(&mut self) {
-        focus::clear_if_matches(self);
+        clear_widget_references(self);
     }
 }

@@ -82,7 +82,7 @@ impl Element for Checkbox {
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if button == MouseButton::Right && state == ElementState::Pressed {
             if self.hit_test(px, py, ctx) {
-                ctx.handle_right_click(self.as_ptr(), px, py);
+                ctx.handle_right_click(self.as_ptr_mut(), px, py);
                 return true;
             }
         }
@@ -167,6 +167,12 @@ impl Element for Checkbox {
         if self.just_clicked { self.just_clicked = false; true } else { false }
     }
     fn value(&self) -> i32 { if self.checked { 1 } else { 0 } }
+}
+
+impl Drop for Checkbox {
+    fn drop(&mut self) {
+        clear_widget_references(self);
+    }
 }
 
 #[derive(Debug, Clone)]

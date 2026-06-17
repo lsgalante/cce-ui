@@ -506,7 +506,7 @@ impl Element for TextBox {
         if self.disabled { return false; }
         if button == MouseButton::Right && state == ElementState::Pressed {
             if self.hit_test(px, py, ctx) {
-                ctx.handle_right_click(self.as_ptr(), px, py);
+                ctx.handle_right_click(self.as_ptr_mut(), px, py);
                 return true;
             }
         }
@@ -941,7 +941,7 @@ impl Element for TextBox {
 
 impl Drop for TextBox {
     fn drop(&mut self) {
-        focus::clear_if_matches(self);
+        clear_widget_references(self);
     }
 }
 

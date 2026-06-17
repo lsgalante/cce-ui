@@ -234,7 +234,7 @@ impl Element for Slider {
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if button == MouseButton::Right && state == ElementState::Pressed {
             if self.hit_test(px, py, ctx) {
-                ctx.handle_right_click(self.as_ptr(), px, py);
+                ctx.handle_right_click(self.as_ptr_mut(), px, py);
                 return true;
             }
         }
@@ -432,7 +432,7 @@ impl Element for Slider {
 
 impl Drop for Slider {
     fn drop(&mut self) {
-        focus::clear_if_matches(self);
+        clear_widget_references(self);
     }
 }
 

@@ -310,7 +310,7 @@ impl Element for Float3 {
 
 impl Drop for Float3 {
     fn drop(&mut self) {
-        focus::clear_if_matches(self);
+        clear_widget_references(self);
     }
 }
 
