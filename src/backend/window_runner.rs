@@ -925,11 +925,25 @@ pub trait Application: Sized + 'static {
 
                 if !is_overlay_text {
                     let tx_pixel = ti.x * scale_f32;
-                    
-                    if item_bounds.left < or
-                        && item_bounds.right > ol
-                        && item_bounds.top < ob
-                        && item_bounds.bottom > ot
+                    let ty_pixel = ti.y * scale_f32;
+
+                    let mut text_w = 0.0f32;
+                    let mut run_count = 0;
+                    for run in ti.buffer.layout_runs() {
+                        text_w = text_w.max(run.line_w);
+                        run_count += 1;
+                    }
+                    let text_h = run_count as f32 * ti.buffer.metrics().line_height;
+
+                    let actual_left = tx_pixel;
+                    let actual_right = tx_pixel + text_w;
+                    let actual_top = ty_pixel;
+                    let actual_bottom = ty_pixel + text_h;
+
+                    if actual_left < or as f32
+                        && actual_right > ol as f32
+                        && actual_top < ob as f32
+                        && actual_bottom > ot as f32
                     {
                         if tx_pixel < ol as f32 {
                             item_bounds.right = item_bounds.right.min(ol);
