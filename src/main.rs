@@ -1426,6 +1426,19 @@ impl AppState {
             shift: self.shift_pressed,
         };
 
+        if crate::widget::context_menu::is_visible() {
+            if custom_event.state == crate::widget::ElementState::Pressed
+                && custom_event.logical_key == Key::Named(NamedKey::Escape)
+            {
+                crate::widget::context_menu::hide();
+                if let Some(st) = &mut self.state {
+                    st.upload_vertices();
+                }
+                self.redraw = true;
+                return;
+            }
+        }
+
         if state == cce_ui::widget::ElementState::Pressed {
             if is_repeatable_key(&custom_event.logical_key) {
                 self.pressed_key = Some(PressedKey {
