@@ -947,10 +947,8 @@ pub trait Application: Sized + 'static {
                     {
                         if tx_pixel < ol as f32 {
                             item_bounds.right = item_bounds.right.min(ol);
-                        } else if tx_pixel > or as f32 {
-                            item_bounds.left = item_bounds.left.max(or);
                         } else {
-                            item_bounds.right = item_bounds.left;
+                            item_bounds.left = item_bounds.left.max(or);
                         }
                     }
                 }
