@@ -95,6 +95,9 @@ impl Element for Plate {
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
     }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
 
     fn is_plate(&self) -> bool { true }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }

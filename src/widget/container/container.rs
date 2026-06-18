@@ -16,6 +16,12 @@ impl Element for Container {
     fn rect(&self) -> (f32, f32, f32, f32) { (0.0, 0.0, 0.0, 0.0) }
     fn set_rect(&mut self, _x: f32, _y: f32, _w: f32, _h: f32) {}
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+    }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
 
     fn focus(&mut self) {
         focus::set_focused(self);

@@ -14,6 +14,12 @@ impl Element for ViewportBg {
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
     fn color(&self) -> [f32; 4] { colors::VIEWPORT_BG }
+    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+    }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
     fn hit_test(&self, _px: f32, _py: f32, _ctx: &UiContext) -> bool { false }

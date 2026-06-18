@@ -63,6 +63,12 @@ impl Element for ScrollBox {
         self.viewport_h = h + self.viewport_offset_h;
     }
     fn color(&self) -> [f32; 4] { crate::color::scrollinglist_bg_color() }
+    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+    }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
     fn highlight_color(&self, ctx: &UiContext) -> Option<[f32; 4]> { None }

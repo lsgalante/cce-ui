@@ -36,6 +36,9 @@ impl Element for Layer {
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
     }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
 
     fn rect(&self) -> (f32, f32, f32, f32) {
         (self.base.x, self.base.y, self.base.w, self.base.h)

@@ -57,6 +57,12 @@ impl Element for ScrollingList {
     fn color(&self) -> [f32; 4] {
         self.scroll_box.color()
     }
+    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+    }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
 
     fn set_hovered(&mut self, v: bool) {
         self.scroll_box.set_hovered(v);

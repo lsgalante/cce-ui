@@ -2036,11 +2036,17 @@ pub fn run<A: Application>() {
                 if !is_context_menu {
                     let popover_widget = unsafe { &*active_popovers[0] };
                     let (rx, ry, rw, rh) = popover_widget.rect();
-                    positioner.set_anchor_rect(rx as i32, ry as i32, rw as i32, rh as i32);
+                    let scroll_y = crate::widget::hover_animation::get_scroll_offset();
+                    let screen_ry = ry - scroll_y;
+                    let ax = (rx as i32).clamp(0, (engine_state.logical_width as i32 - 1).max(0));
+                    let ay = (screen_ry as i32).clamp(0, (engine_state.logical_height as i32 - 1).max(0));
+                    positioner.set_anchor_rect(ax, ay, rw as i32, rh as i32);
                     positioner.set_anchor(Anchor::BottomLeft);
                     positioner.set_gravity(Gravity::BottomRight);
                 } else {
-                    positioner.set_anchor_rect(px as i32, py as i32, 1, 1);
+                    let ax = (px as i32).clamp(0, (engine_state.logical_width as i32 - 1).max(0));
+                    let ay = (py as i32).clamp(0, (engine_state.logical_height as i32 - 1).max(0));
+                    positioner.set_anchor_rect(ax, ay, 1, 1);
                     positioner.set_anchor(Anchor::TopLeft);
                     positioner.set_gravity(Gravity::BottomRight);
                 }
