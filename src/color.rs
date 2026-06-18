@@ -33,6 +33,7 @@ static SIDEBAR_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(SIDEBAR_BG);
 static HIGHLIGHT_PRIMARY_COLOR: RwLock<[f32; 4]> = RwLock::new(HIGHLIGHT_PRIMARY);
 static MENUBAR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
 static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
+static WINDOW_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
 static SCROLLINGLIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
@@ -98,6 +99,12 @@ fn parse_and_set_colors(content: &str) {
     if let Some(opacity) = val.pointer("/transparency/opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = OPACITY.write() {
             *lock = Some(opacity as f32);
+        }
+    }
+
+    if let Some(w_opacity) = val.pointer("/surfaces/window_opacity").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = WINDOW_OPACITY.write() {
+            *lock = Some(w_opacity as f32);
         }
     }
 
@@ -199,7 +206,7 @@ pub fn reload_colors(content: &str) {
 pub fn page_low_color() -> [f32; 4] {
     load_colors_once();
     let mut color = *PAGE_LOW_COLOR.read().unwrap();
-    if let Some(opacity) = read_opacity_if_configured() {
+    if let Some(opacity) = read_window_opacity_if_configured() {
         color[3] = opacity;
     }
     color
@@ -315,7 +322,7 @@ pub fn to_srgb(color: [f32; 4]) -> [f32; 4] {
 pub fn sidebar_bg_color() -> [f32; 4] {
     load_colors_once();
     let mut color = *SIDEBAR_BG_COLOR.read().unwrap();
-    if let Some(opacity) = read_opacity_if_configured() {
+    if let Some(opacity) = read_window_opacity_if_configured() {
         color[3] = opacity;
     }
     color
@@ -352,6 +359,11 @@ pub fn set_menubar_tab_label_color(color: [f32; 4]) {
 pub fn read_opacity_if_configured() -> Option<f32> {
     load_colors_once();
     *OPACITY.read().unwrap()
+}
+
+pub fn read_window_opacity_if_configured() -> Option<f32> {
+    load_colors_once();
+    *WINDOW_OPACITY.read().unwrap()
 }
 
 pub fn toggle_on_color() -> [f32; 4] {
