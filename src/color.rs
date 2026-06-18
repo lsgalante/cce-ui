@@ -75,8 +75,8 @@ pub fn node_drag_color() -> [f32; 4] {
 
 fn read_config() -> Option<String> {
     let paths = [
-        "/home/lsgalante/.config/cce/config.toml",
-        "/home/lsgalante/.config/ccec/config.toml",
+        "/home/lsgalante/.config/cce/config.json",
+        "/home/lsgalante/.config/ccec/config.json",
     ];
     for path in &paths {
         if let Ok(content) = std::fs::read_to_string(path) {
@@ -87,94 +87,76 @@ fn read_config() -> Option<String> {
 }
 
 fn parse_and_set_colors(content: &str) {
-    let mut in_transparency = false;
-    let mut parsed_scrollinglist_bg = None;
-    let mut parsed_breadcrumb_bg = None;
-    let mut parsed_popover_bg = None;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[transparency]" {
-            in_transparency = true;
-            continue;
+    let val: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("JSON parse error: {}", e);
+            return;
         }
-        if trimmed.starts_with('[') && in_transparency {
-            in_transparency = false;
-        }
+    };
 
-        if in_transparency && trimmed.starts_with("opacity") {
-            if let Some(val) = trimmed.split('=').nth(1) {
-                if let Ok(o) = val.trim().parse::<f32>() {
-                    if let Ok(mut lock) = OPACITY.write() {
-                        *lock = Some(o.clamp(0.0, 1.0));
-                    }
-                }
-            }
+    if let Some(opacity) = val.pointer("/transparency/opacity").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = OPACITY.write() {
+            *lock = Some(opacity as f32);
         }
-
-        // Parse hex colors helper
-        let parse_hex = |trimmed_line: &str, prefix: &str| -> Option<[f32; 4]> {
-            if let Some(rest) = trimmed_line.strip_prefix(prefix) {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                let hex = rest.trim_end_matches('"').trim().trim_start_matches('#');
-                if hex.len() >= 6 {
-                    if let (Ok(r), Ok(g), Ok(b)) = (
-                        u8::from_str_radix(&hex[0..2], 16),
-                        u8::from_str_radix(&hex[2..4], 16),
-                        u8::from_str_radix(&hex[4..6], 16),
-                    ) {
-                        let r_f = srgb_to_linear(r as f32 / 255.0);
-                        let g_f = srgb_to_linear(g as f32 / 255.0);
-                        let b_f = srgb_to_linear(b as f32 / 255.0);
-                        return Some([r_f, g_f, b_f, 1.0]);
-                    }
-                }
-            }
-            None
-        };
-
-        if let Some(c) = parse_hex(trimmed, "page_low_color") {
-            if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
-        }
-        if let Some(c) = parse_hex(trimmed, "color_borders_color") {
-            if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() { *lock = c; }
-        }
-        if let Some(c) = parse_hex(trimmed, "slider_track_color") {
-            if let Ok(mut lock) = SLIDER_TRACK_COLOR.write() { *lock = c; }
-        }
-        if let Some(c) = parse_hex(trimmed, "paginator_sidebar_color") {
-            if let Ok(mut lock) = SIDEBAR_BG_COLOR.write() { *lock = c; }
-        }
-        if let Some(c) = parse_hex(trimmed, "primary_highlight_color") {
-            if let Ok(mut lock) = HIGHLIGHT_PRIMARY_COLOR.write() { *lock = [c[0], c[1], c[2], 0.12]; }
-        }
-        if let Some(c) = parse_hex(trimmed, "menubar_tab_label_color") {
-            if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
-        } else if let Some(c) = parse_hex(trimmed, "paginator_tab_label_color") {
-            if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
-        }
-        if let Some(c) = parse_hex(trimmed, "toggle_enabled_color") {
-            if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
-        }
-        if let Some(c) = parse_hex(trimmed, "toggle_disabled_color") {
-            if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
-        }
-        if let Some(c) = parse_hex(trimmed, "scrollinglist_bg_color") {
-            parsed_scrollinglist_bg = Some(c);
-        }
-        if let Some(c) = parse_hex(trimmed, "breadcrumb_bg_color") {
-            parsed_breadcrumb_bg = Some(c);
-        }
-        if let Some(c) = parse_hex(trimmed, "popover_bg_color") {
-            parsed_popover_bg = Some(c);
-        }
-        if let Some(c) = parse_hex(trimmed, "page_color") {
-            if let Ok(mut lock) = PAGE_COLOR.write() { *lock = c; }
-        }
-        if let Some(c) = parse_hex(trimmed, "layer_color") {
-            if let Ok(mut lock) = LAYER_COLOR.write() { *lock = c; }
-        }
-
     }
+
+    let parse_hex = |hex_str: &str| -> Option<[f32; 4]> {
+        let hex = hex_str.trim().trim_start_matches('#');
+        if hex.len() >= 6 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+            ) {
+                let r_f = srgb_to_linear(r as f32 / 255.0);
+                let g_f = srgb_to_linear(g as f32 / 255.0);
+                let b_f = srgb_to_linear(b as f32 / 255.0);
+                return Some([r_f, g_f, b_f, 1.0]);
+            }
+        }
+        None
+    };
+
+    let get_color = |pointer: &str| -> Option<[f32; 4]> {
+        val.pointer(pointer).and_then(|v| v.as_str()).and_then(parse_hex)
+    };
+
+    if let Some(c) = get_color("/layout/page_low_color") {
+        if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/layout/color_borders_color") {
+        if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/layout/slider_track_color") {
+        if let Ok(mut lock) = SLIDER_TRACK_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/layout/paginator_sidebar_color") {
+        if let Ok(mut lock) = SIDEBAR_BG_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/layout/primary_highlight_color") {
+        if let Ok(mut lock) = HIGHLIGHT_PRIMARY_COLOR.write() { *lock = [c[0], c[1], c[2], 0.12]; }
+    }
+    if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
+        if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/layout/toggle_enabled_color") {
+        if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/layout/toggle_disabled_color") {
+        if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
+    }
+    let parsed_scrollinglist_bg = get_color("/layout/scrollinglist_bg_color");
+    let parsed_breadcrumb_bg = get_color("/layout/breadcrumb_bg_color");
+    let parsed_popover_bg = get_color("/layout/popover_bg_color");
+
+    if let Some(c) = get_color("/layout/page_color") {
+        if let Ok(mut lock) = PAGE_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/layout/layer_color") {
+        if let Ok(mut lock) = LAYER_COLOR.write() { *lock = c; }
+    }
+
     if let Some(c) = parsed_scrollinglist_bg {
         if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 0.3];
