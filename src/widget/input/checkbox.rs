@@ -291,7 +291,21 @@ impl Element for Toggle {
     fn take_click(&mut self) -> bool {
         if self.just_toggled { self.just_toggled = false; true } else { false }
     }
+
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::toggle_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::toggle_corner_radius()
+    }
 }
+
 
 impl Control for Checkbox {}
 impl Control for Toggle {}

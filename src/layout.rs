@@ -58,6 +58,11 @@ static SPINBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TEXTBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static FONT_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
+static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
+
+
 
 /// Standard line height multiplier for text layout in cce-ui.
 pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
@@ -191,7 +196,36 @@ pub fn reload_config() {
                     }
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("toggle_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = TOGGLE_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("plate_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = PLATE_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("plate_opacity") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = PLATE_OPACITY.write() {
+                        *lock = val;
+                    }
+                }
+            }
+
             if let Some(rest) = trimmed.strip_prefix("toggle_height") {
+
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
@@ -662,6 +696,92 @@ pub fn set_toggle_height(height: f32) {
         *lock = height;
     }
 }
+
+pub fn toggle_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("toggle_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = TOGGLE_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *TOGGLE_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_toggle_corner_radius(radius: f32) {
+    if let Ok(mut lock) = TOGGLE_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
+pub fn plate_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("plate_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = PLATE_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *PLATE_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_plate_corner_radius(radius: f32) {
+    if let Ok(mut lock) = PLATE_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
+pub fn plate_opacity() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("plate_opacity") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = PLATE_OPACITY.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *PLATE_OPACITY.read().unwrap()
+}
+
+pub fn set_plate_opacity(opacity: f32) {
+    if let Ok(mut lock) = PLATE_OPACITY.write() {
+        *lock = opacity;
+    }
+}
+
+
 
 pub fn color_selector_height() -> f32 {
     use std::sync::Once;

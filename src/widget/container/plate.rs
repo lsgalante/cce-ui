@@ -100,8 +100,19 @@ impl Element for Plate {
     }
 
     fn is_plate(&self) -> bool { true }
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::plate_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+    fn corner_radius(&self) -> f32 {
+        crate::layout::plate_corner_radius()
+    }
     fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+
 
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         if self.selected {
@@ -146,7 +157,9 @@ impl Element for Plate {
         } else {
             colors::page_low_color()
         };
+        c[3] *= crate::layout::plate_opacity();
         c[3] *= self.network_opacity;
+
         if self.blur {
             c[3] = -c[3].abs();
         }
@@ -172,7 +185,8 @@ impl Element for Plate {
             return false;
         }
         
-        let r = 12.0f32.min(w * 0.5).min(h * 0.5);
+        let r = crate::layout::plate_corner_radius().min(w * 0.5).min(h * 0.5);
+
         if r <= 0.1 {
             return true;
         }
