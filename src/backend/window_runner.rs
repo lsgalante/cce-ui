@@ -2029,9 +2029,6 @@ pub fn run<A: Application>() {
             pw = pw.ceil();
             ph = ph.ceil();
             if engine_state.active_popup.is_none() {
-                let wl_surface = engine_state.compositor_state.create_surface(&engine_state.qh);
-                wl_surface.set_buffer_scale(engine_state.scale_factor as i32);
-                
                 let positioner = XdgPositioner::new(&engine_state.xdg_shell_state).unwrap();
                 positioner.set_size(pw as i32, ph as i32);
                 
@@ -2072,6 +2069,7 @@ pub fn run<A: Application>() {
                     &engine_state.compositor_state,
                     &engine_state.xdg_shell_state,
                 ).unwrap();
+                sctk_popup.wl_surface().set_buffer_scale(engine_state.scale_factor as i32);
                     
                     let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
                     let surface_ptr = sctk_popup.wl_surface().id().as_ptr() as *mut std::ffi::c_void;
