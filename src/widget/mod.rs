@@ -494,7 +494,10 @@ pub trait Element {
 
     fn z_index(&self) -> i32 { 0 }
     fn is_plate(&self) -> bool { false }
+    fn is_page(&self) -> bool { false }
+    fn is_layer(&self) -> bool { false }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
+
     fn corner_radius(&self) -> f32 { 12.0 }
     fn layout_ignore(&self) -> bool { false }
     fn color_u8(&self) -> Option<[u8; 4]> { None }

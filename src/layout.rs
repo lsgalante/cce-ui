@@ -61,6 +61,9 @@ static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
+static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
+static LAYER_OPACITY: RwLock<f32> = RwLock::new(1.0);
+
 
 
 
@@ -223,6 +226,25 @@ pub fn reload_config() {
                     }
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("page_opacity") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = PAGE_OPACITY.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("layer_opacity") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = LAYER_OPACITY.write() {
+                        *lock = val;
+                    }
+                }
+            }
+
 
             if let Some(rest) = trimmed.strip_prefix("toggle_height") {
 
@@ -780,6 +802,63 @@ pub fn set_plate_opacity(opacity: f32) {
         *lock = opacity;
     }
 }
+
+pub fn page_opacity() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("page_opacity") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = PAGE_OPACITY.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *PAGE_OPACITY.read().unwrap()
+}
+
+pub fn set_page_opacity(opacity: f32) {
+    if let Ok(mut lock) = PAGE_OPACITY.write() {
+        *lock = opacity;
+    }
+}
+
+pub fn layer_opacity() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("layer_opacity") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = LAYER_OPACITY.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *LAYER_OPACITY.read().unwrap()
+}
+
+pub fn set_layer_opacity(opacity: f32) {
+    if let Ok(mut lock) = LAYER_OPACITY.write() {
+        *lock = opacity;
+    }
+}
+
 
 
 

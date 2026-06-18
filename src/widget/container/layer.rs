@@ -30,6 +30,8 @@ impl Layer {
 
 impl Element for Layer {
     fn base(&self) -> Option<&Widget> { Some(&self.base) }
+    fn is_layer(&self) -> bool { true }
+
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base) }
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
@@ -52,8 +54,11 @@ impl Element for Layer {
     }
 
     fn color(&self) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+        let mut c = crate::colors::layer_color();
+        c[3] *= crate::layout::layer_opacity();
+        c
     }
+
 
     fn visible(&self) -> bool {
         self.visible
@@ -98,12 +103,27 @@ impl Element for Layer {
             return Vec::new();
         }
         let mut quads = Vec::new();
+        let mut has_page_parent = false;
+        if let Some(parent_ptr) = self.parent {
+            unsafe {
+                if (*parent_ptr).is_page() {
+                    has_page_parent = true;
+                }
+            }
+        }
+        if !has_page_parent {
+            let c = self.color();
+            if c[3] > 0.0 {
+                let (x, y, w, h) = self.rect();
+                quads.push((x, y, w, h, c));
+            }
+        }
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
-            let c = widget.color();
-            if c[3] > 0.0 {
+            let cc = widget.color();
+            if cc[3] > 0.0 {
                 let (wx, wy, ww, wh) = widget.rect();
-                quads.push((wx, wy, ww, wh, c));
+                quads.push((wx, wy, ww, wh, cc));
             }
             quads.extend(widget.all_quads(ctx));
         }

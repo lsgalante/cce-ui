@@ -122,6 +122,8 @@ impl Page {
 
 impl Element for Page {
     fn base(&self) -> Option<&Widget> { Some(&self.base.base) }
+    fn is_page(&self) -> bool { true }
+
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base.base) }
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
@@ -145,8 +147,11 @@ impl Element for Page {
     }
 
     fn color(&self) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+        let mut c = crate::colors::page_color();
+        c[3] *= crate::layout::page_opacity();
+        c
     }
+
 
     fn visible(&self) -> bool {
         self.visible
@@ -189,8 +194,16 @@ impl Element for Page {
         if !self.visible {
             return Vec::new();
         }
-        self.base.all_quads(ctx)
+        let mut quads = Vec::new();
+        let c = self.color();
+        if c[3] > 0.0 {
+            let (x, y, w, h) = self.rect();
+            quads.push((x, y, w, h, c));
+        }
+        quads.extend(self.base.all_quads(ctx));
+        quads
     }
+
 
     fn text_labels(&self) -> Vec<TextLabel> {
         if !self.visible {
