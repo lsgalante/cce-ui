@@ -347,6 +347,9 @@ impl UiContext {
     }
 
     pub fn handle_right_click(&mut self, target: *mut (dyn Element + 'static), px: f32, py: f32) {
+        if target.is_null() {
+            return;
+        }
         let name = unsafe { (*target).type_name() };
         let label = unsafe { (*target).label() };
         let header = if let Some(lbl) = label {

@@ -280,6 +280,9 @@ impl Element for JsonLayoutWidget {
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
     }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
 
     fn base(&self) -> Option<&Widget> { Some(&self.base) }
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base) }

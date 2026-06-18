@@ -474,6 +474,9 @@ pub mod context_menu {
         }
 
         pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, target: *mut (dyn Element + 'static)) {
+            if target.is_null() {
+                return;
+            }
             self.x = x;
             self.y = y;
             self.options = options;
@@ -524,22 +527,24 @@ pub mod context_menu {
                     if idx > 0 {
                         let opt = self.options[idx].clone();
                         if let Some(target_ptr) = self.target {
-                            unsafe {
-                                let target = &mut *target_ptr;
-                                match opt.as_str() {
-                                    "Cut" => {
-                                        let _ = target.cut_selection();
+                            if !target_ptr.is_null() {
+                                unsafe {
+                                    let target = &mut *target_ptr;
+                                    match opt.as_str() {
+                                        "Cut" => {
+                                            let _ = target.cut_selection();
+                                        }
+                                        "Copy" => {
+                                            target.copy_selection();
+                                        }
+                                        "Paste" => {
+                                            let _ = target.paste_from_clipboard();
+                                        }
+                                        "Select All" => {
+                                            target.select_all();
+                                        }
+                                        _ => {}
                                     }
-                                    "Copy" => {
-                                        target.copy_selection();
-                                    }
-                                    "Paste" => {
-                                        let _ = target.paste_from_clipboard();
-                                    }
-                                    "Select All" => {
-                                        target.select_all();
-                                    }
-                                    _ => {}
                                 }
                             }
                         }
