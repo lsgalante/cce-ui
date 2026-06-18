@@ -2013,7 +2013,7 @@ pub fn run<A: Application>() {
         let active_popovers = crate::widget::popovers::get_active();
         let context_menu_visible = crate::widget::context_menu::is_visible();
         if !active_popovers.is_empty() || context_menu_visible {
-            let (px, py, pw, ph, is_context_menu) = if !active_popovers.is_empty() {
+            let (px, py, mut pw, mut ph, is_context_menu) = if !active_popovers.is_empty() {
                 let popover_widget = unsafe { &*active_popovers[0] };
                 let (x, y, w, h) = popover_widget.popover_rect().unwrap();
                 (x, y, w.max(1.0), h.max(1.0), false)
@@ -2026,6 +2026,8 @@ pub fn run<A: Application>() {
                     true,
                 )
             };
+            pw = pw.ceil();
+            ph = ph.ceil();
             if engine_state.active_popup.is_none() {
                 let wl_surface = engine_state.compositor_state.create_surface(&engine_state.qh);
                 wl_surface.set_buffer_scale(engine_state.scale_factor as i32);
