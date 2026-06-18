@@ -1604,13 +1604,60 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         self.redraw = true;
                     }
                 }
-                PointerEventKind::Press { button, .. } => {
+                PointerEventKind::Press { button, serial, .. } => {
                     let btn = match *button {
                         272 => MouseButton::Left,
                         273 => MouseButton::Right,
                         274 => MouseButton::Middle,
                         _ => continue,
                     };
+
+                    // Client-Side Decorations (CSD) Drag & Resize Handling
+                    if btn == MouseButton::Left {
+                        let border = 8.0f32;
+                        let mut edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None;
+                        if ly < border {
+                            if lx < border {
+                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::TopLeft;
+                            } else if lx > self.logical_width - border {
+                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::TopRight;
+                            } else {
+                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::Top;
+                            }
+                        } else if ly > self.logical_height - border {
+                            if lx < border {
+                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::BottomLeft;
+                            } else if lx > self.logical_width - border {
+                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::BottomRight;
+                            } else {
+                                edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::Bottom;
+                            }
+                        } else if lx < border {
+                            edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::Left;
+                        } else if lx > self.logical_width - border {
+                            edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::Right;
+                        }
+
+                        if edge != smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None {
+                            if let Some(ref window) = self.window {
+                                if let Some(seat) = self.seats.first() {
+                                    window.resize(seat, *serial, edge);
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // Titlebar drag check: y is in [8.0, 32.0], and x is not in the top-right button area
+                        if ly >= border && ly < 32.0 && lx < self.logical_width - 70.0 {
+                            if let Some(ref window) = self.window {
+                                if let Some(seat) = self.seats.first() {
+                                    window.move_(seat, *serial);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
                     let mut rebuild = false;
                     if let Some(msg) = self.inner.handle_mouse_input(btn, ElementState::Pressed, LogicalPosition::new(lx, ly), &mut rebuild) {
                         let mut update_rebuild = false;
