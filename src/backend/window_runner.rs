@@ -2038,15 +2038,23 @@ pub fn run<A: Application>() {
                     let (rx, ry, rw, rh) = popover_widget.rect();
                     let scroll_y = crate::widget::hover_animation::get_scroll_offset();
                     let screen_ry = ry - scroll_y;
-                    let ax = (rx as i32).clamp(0, (engine_state.logical_width as i32 - 1).max(0));
-                    let ay = (screen_ry as i32).clamp(0, (engine_state.logical_height as i32 - 1).max(0));
-                    positioner.set_anchor_rect(ax, ay, rw as i32, rh as i32);
+                    let lw = engine_state.logical_width as i32;
+                    let lh = engine_state.logical_height as i32;
+                    let ax = (rx as i32).clamp(0, (lw - 1).max(0));
+                    let ay = (screen_ry as i32).clamp(0, (lh - 1).max(0));
+                    let aw = (rw as i32).clamp(1, (lw - ax).max(1));
+                    let ah = (rh as i32).clamp(1, (lh - ay).max(1));
+                    positioner.set_anchor_rect(ax, ay, aw, ah);
                     positioner.set_anchor(Anchor::BottomLeft);
                     positioner.set_gravity(Gravity::BottomRight);
                 } else {
-                    let ax = (px as i32).clamp(0, (engine_state.logical_width as i32 - 1).max(0));
-                    let ay = (py as i32).clamp(0, (engine_state.logical_height as i32 - 1).max(0));
-                    positioner.set_anchor_rect(ax, ay, 1, 1);
+                    let lw = engine_state.logical_width as i32;
+                    let lh = engine_state.logical_height as i32;
+                    let ax = (px as i32).clamp(0, (lw - 1).max(0));
+                    let ay = (py as i32).clamp(0, (lh - 1).max(0));
+                    let aw = 1.clamp(1, (lw - ax).max(1));
+                    let ah = 1.clamp(1, (lh - ay).max(1));
+                    positioner.set_anchor_rect(ax, ay, aw, ah);
                     positioner.set_anchor(Anchor::TopLeft);
                     positioner.set_gravity(Gravity::BottomRight);
                 }

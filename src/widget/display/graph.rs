@@ -245,6 +245,9 @@ impl Element for Graph {
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
     }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, true, true) }
 

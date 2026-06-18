@@ -59,6 +59,12 @@ impl Element for Node {
         else if self.selected { colors::node_selected_color() }
         else { colors::node_color() }
     }
+    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+    }
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
+        self as *mut Self as *mut (dyn Element + 'static)
+    }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
 
