@@ -95,9 +95,10 @@ impl ButtonStrip {
             let hex_color = format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2]);
 
             let trimmed = page_name.trim();
-            let has_icon = trimmed.find(' ').is_some();
-            let label_text = if let Some(space_idx) = trimmed.find(' ') {
-                trimmed.split_at(space_idx).1.trim()
+            let space_idx = trimmed.find(' ');
+            let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
+            let label_text = if has_icon {
+                trimmed.split_at(space_idx.unwrap()).1.trim()
             } else {
                 trimmed
             };
@@ -181,9 +182,10 @@ impl ButtonStrip {
             let label = &self.buttons[i];
             let trimmed = label.trim();
             if self.vertical {
-                let has_icon = trimmed.find(' ').is_some();
-                let label_text = if let Some(space_idx) = trimmed.find(' ') {
-                    trimmed.split_at(space_idx).1.trim()
+                let space_idx = trimmed.find(' ');
+                let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
+                let label_text = if has_icon {
+                    trimmed.split_at(space_idx.unwrap()).1.trim()
                 } else {
                     trimmed
                 };
@@ -330,7 +332,8 @@ impl Element for ButtonStrip {
                     let max_y = self.base.y + self.base.h;
                     let page_name = &self.buttons[i];
                     let trimmed = page_name.trim();
-                    let has_icon = trimmed.find(' ').is_some();
+                    let space_idx = trimmed.find(' ');
+                    let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
                     let padding_y = crate::layout::button_padding();
                     let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
 
@@ -363,7 +366,10 @@ impl Element for ButtonStrip {
             };
             if self.vertical {
                 let trimmed = btn_label.trim();
-                if let Some(space_idx) = trimmed.find(' ') {
+                let space_idx = trimmed.find(' ');
+                let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
+                if has_icon {
+                    let space_idx = space_idx.unwrap();
                     let (icon, _) = trimmed.split_at(space_idx);
                     let icon = icon.trim();
                     if !icon.is_empty() {
