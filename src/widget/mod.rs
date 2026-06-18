@@ -545,7 +545,7 @@ pub use self::input::{
 pub use self::container::{
     Container, Header, ContentBg, ViewportBg, ParametersBg, ScrollingList,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
-    Paginator, Switcher, Layer, Page
+    Paginator, Switcher, Layer, Page, Window
 };
 pub use self::display::{
     TextLabel, Label, SectionHeader, StyledLabel, TextItem, Svg, UsageBar,
