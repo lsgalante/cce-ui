@@ -129,7 +129,7 @@ fn parse_and_set_colors(content: &str) {
         val.pointer(pointer).and_then(|v| v.as_str()).and_then(parse_hex)
     };
 
-    if let Some(c) = get_color("/layout/page_low_color") {
+    if let Some(c) = get_color("/surfaces/window_color").or_else(|| get_color("/layout/page_low_color")) {
         if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/color_borders_color") {
