@@ -610,6 +610,9 @@ impl Element for MultiControl {
             }
         }
         let (x, y, w, h) = self.rect();
+        if w <= 0.0 || h <= 0.0 {
+            return false;
+        }
         px >= x && px <= x + w && py >= y && py <= y + h
     }
 

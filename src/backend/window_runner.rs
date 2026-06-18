@@ -1827,6 +1827,7 @@ impl<A: Application> PopupHandler for EngineState<A> {
                 popover.unfocus();
             }
         }
+        crate::widget::context_menu::hide();
         self.active_popup = None;
         self.redraw = true;
     }
@@ -2015,13 +2016,13 @@ pub fn run<A: Application>() {
             let (px, py, pw, ph, is_context_menu) = if !active_popovers.is_empty() {
                 let popover_widget = unsafe { &*active_popovers[0] };
                 let (x, y, w, h) = popover_widget.popover_rect().unwrap();
-                (x, y, w, h, false)
+                (x, y, w.max(1.0), h.max(1.0), false)
             } else {
                 (
                     crate::widget::context_menu::x(),
                     crate::widget::context_menu::y(),
-                    crate::widget::context_menu::w(),
-                    crate::widget::context_menu::h(),
+                    crate::widget::context_menu::w().max(1.0),
+                    crate::widget::context_menu::h().max(1.0),
                     true,
                 )
             };
@@ -2070,8 +2071,8 @@ pub fn run<A: Application>() {
                     
                     let scale_f32 = engine_state.scale_factor as f32;
                     let mut popup_config = main_config.clone();
-                    popup_config.width = (pw * scale_f32) as u32;
-                    popup_config.height = (ph * scale_f32) as u32;
+                    popup_config.width = ((pw * scale_f32) as u32).max(1);
+                    popup_config.height = ((ph * scale_f32) as u32).max(1);
                     wgpu_surface.configure(device, &popup_config);
                     
                     let cache = Cache::new(device);

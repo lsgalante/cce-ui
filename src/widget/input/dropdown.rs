@@ -188,6 +188,9 @@ impl Element for Dropdown {
             return false;
         }
         let (x, y, w, h) = self.rect();
+        if w <= 0.0 || h <= 0.0 {
+            return false;
+        }
         let hx = if self.base.row_w > 0.0 { self.base.row_x } else { x };
         let hw = if self.base.row_w > 0.0 { self.base.row_w } else { w };
         if self.open {

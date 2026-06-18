@@ -247,6 +247,9 @@ pub trait Element {
             return false;
         }
         let (x, y, w, h) = self.rect();
+        if w <= 0.0 || h <= 0.0 {
+            return false;
+        }
         let (hx, hw) = if let Some(b) = self.base() {
             if b.row_w > 0.0 {
                 (b.row_x, b.row_w)
