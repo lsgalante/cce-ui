@@ -232,6 +232,7 @@ fn parse_slider_range(ptype: &str) -> (f32, f32) {
 }
 
 fn parse_hex_to_rgb(s: &str) -> Option<[u8; 3]> {
+    let s = s.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
     let s = s.trim_start_matches('#');
     if s.len() == 6 || s.len() == 8 {
         let r = u8::from_str_radix(&s[0..2], 16).ok()?;

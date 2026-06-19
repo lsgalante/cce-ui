@@ -109,7 +109,8 @@ fn parse_and_set_colors(content: &str) {
     }
 
     let parse_hex = |hex_str: &str| -> Option<[f32; 4]> {
-        let hex = hex_str.trim().trim_start_matches('#');
+        let hex = hex_str.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+        let hex = hex.trim_start_matches('#');
         if hex.len() >= 6 {
             if let (Ok(r), Ok(g), Ok(b)) = (
                 u8::from_str_radix(&hex[0..2], 16),
