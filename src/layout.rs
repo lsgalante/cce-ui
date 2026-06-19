@@ -2653,13 +2653,23 @@ impl LayoutStrategy for AdaptiveGrid {
         self.grid = Some(Grid::new(left, top, width, min_col_width, self.gap, count));
     }
 
-    fn allocate(&mut self, _ww: f32, wh: f32) -> (f32, f32, f32, f32) {
+    fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
         if let Some(ref mut grid) = self.grid {
-            let col = grid.next_column();
-            let x = grid.col_lefts[col];
-            let y = grid.col_heights[col];
-            grid.col_heights[col] += wh + grid.gap;
-            (x, y, grid.col_width, wh)
+            if ww > grid.col_width + 5.0 {
+                let y = grid.max_height();
+                let x = grid.left;
+                let allocated_w = grid.width;
+                for col_h in &mut grid.col_heights {
+                    *col_h = y + wh + grid.gap;
+                }
+                (x, y, allocated_w, wh)
+            } else {
+                let col = grid.next_column();
+                let x = grid.col_lefts[col];
+                let y = grid.col_heights[col];
+                grid.col_heights[col] += wh + grid.gap;
+                (x, y, grid.col_width, wh)
+            }
         } else {
             (0.0, 0.0, 0.0, wh)
         }
