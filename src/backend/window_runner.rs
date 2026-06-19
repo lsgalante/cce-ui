@@ -621,6 +621,26 @@ fn get_child_widget_for_quad<'a>(
             }
         }
     }
+    if let Some(kc) = w.as_any().downcast_ref::<crate::widget::input::KeybindsControl>() {
+        let (bx, by, bw, bh) = kc.add_button.rect();
+        if qx >= bx - 0.1 && qx + qw <= bx + bw + 0.1 && qy >= by - 0.1 && qy + qh <= by + bh + 0.1 {
+            return &kc.add_button;
+        }
+        for row in &kc.rows {
+            let (kx, ky, kw, kh) = row.key_input.rect();
+            if qx >= kx - 0.1 && qx + qw <= kx + kw + 0.1 && qy >= ky - 0.1 && qy + qh <= ky + kh + 0.1 {
+                return &row.key_input;
+            }
+            let (cx, cy, cw, ch) = row.cmd_input.rect();
+            if qx >= cx - 0.1 && qx + qw <= cx + cw + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + ch + 0.1 {
+                return &row.cmd_input;
+            }
+            let (rx, ry, rw, rh) = row.remove_button.rect();
+            if qx >= rx - 0.1 && qx + qw <= rx + rw + 0.1 && qy >= ry - 0.1 && qy + qh <= ry + rh + 0.1 {
+                return &row.remove_button;
+            }
+        }
+    }
     w
 }
 

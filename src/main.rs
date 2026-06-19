@@ -257,6 +257,55 @@ fn extra_quad_vertices(
         }
     }
 
+    if let Some(kc) = w.as_any().downcast_ref::<cce_ui::widget::input::KeybindsControl>() {
+        // check add_button
+        let (bx, by, b_w, b_h) = kc.add_button.rect();
+        if qx >= bx - 0.1 && qx + qw <= bx + b_w + 0.1 && qy >= by - 0.1 && qy + qh <= by + b_h + 0.1 {
+            corners = kc.add_button.rounded_corners();
+            r = kc.add_button.corner_radius();
+            wx = bx;
+            wy = by;
+            ww = b_w;
+            wh = b_h;
+            top_room = cce_ui::widget::label_offset(&kc.add_button);
+        }
+        for row in &kc.rows {
+            // key_input
+            let (kx, ky, kw, kh) = row.key_input.rect();
+            if qx >= kx - 0.1 && qx + qw <= kx + kw + 0.1 && qy >= ky - 0.1 && qy + qh <= ky + kh + 0.1 {
+                corners = row.key_input.rounded_corners();
+                r = row.key_input.corner_radius();
+                wx = kx;
+                wy = ky;
+                ww = kw;
+                wh = kh;
+                top_room = cce_ui::widget::label_offset(&row.key_input);
+            }
+            // cmd_input
+            let (cx, cy, cw, ch) = row.cmd_input.rect();
+            if qx >= cx - 0.1 && qx + qw <= cx + cw + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + ch + 0.1 {
+                corners = row.cmd_input.rounded_corners();
+                r = row.cmd_input.corner_radius();
+                wx = cx;
+                wy = cy;
+                ww = cw;
+                wh = ch;
+                top_room = cce_ui::widget::label_offset(&row.cmd_input);
+            }
+            // remove_button
+            let (rx, ry, rw, rh) = row.remove_button.rect();
+            if qx >= rx - 0.1 && qx + qw <= rx + rw + 0.1 && qy >= ry - 0.1 && qy + qh <= ry + rh + 0.1 {
+                corners = row.remove_button.rounded_corners();
+                r = row.remove_button.corner_radius();
+                wx = rx;
+                wy = ry;
+                ww = rw;
+                wh = rh;
+                top_room = cce_ui::widget::label_offset(&row.remove_button);
+            }
+        }
+    }
+
     if corners == (false, false, false, false) {
         return quad_vertices(qx, qy, qw, qh, sw, sh, qc).to_vec();
     }

@@ -544,7 +544,8 @@ pub use self::core::{Widget, focus, hover_animation, popovers, clipboard, contex
 pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, Canvas, get_font_db, ActiveThumb, FontSelector,
-    ButtonStrip, MultiControl, InstancedControl, InstancedWidget, MultiControlRow
+    ButtonStrip, MultiControl, InstancedControl, InstancedWidget, MultiControlRow,
+    KeybindsControl, KeybindRow
 };
 pub use self::container::{
     Container, Header, ContentBg, ViewportBg, ParametersBg, ScrollingList,

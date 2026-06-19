@@ -1668,6 +1668,56 @@ fn get_multicontrol_sub_widget_info(
     None
 }
 
+fn get_keybinds_control_sub_widget_info(
+    kc: &crate::widget::input::KeybindsControl,
+    qx: f32, qy: f32, qw: f32, qh: f32,
+) -> Option<((bool, bool, bool, bool), f32, (f32, f32, f32, f32), f32)> {
+    // Check add_button
+    let (bx, by, bw, bh) = kc.add_button.rect();
+    if qx >= bx - 0.1 && qx + qw <= bx + bw + 0.1 && qy >= by - 0.1 && qy + qh <= by + bh + 0.1 {
+        return Some((
+            kc.add_button.rounded_corners(),
+            kc.add_button.corner_radius(),
+            (bx, by, bw, bh),
+            crate::widget::label_offset(&kc.add_button),
+        ));
+    }
+    // Check rows
+    for row in &kc.rows {
+        // key_input
+        let (kx, ky, kw, kh) = row.key_input.rect();
+        if qx >= kx - 0.1 && qx + qw <= kx + kw + 0.1 && qy >= ky - 0.1 && qy + qh <= ky + kh + 0.1 {
+            return Some((
+                row.key_input.rounded_corners(),
+                row.key_input.corner_radius(),
+                (kx, ky, kw, kh),
+                crate::widget::label_offset(&row.key_input),
+            ));
+        }
+        // cmd_input
+        let (cx, cy, cw, ch) = row.cmd_input.rect();
+        if qx >= cx - 0.1 && qx + qw <= cx + cw + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + ch + 0.1 {
+            return Some((
+                row.cmd_input.rounded_corners(),
+                row.cmd_input.corner_radius(),
+                (cx, cy, cw, ch),
+                crate::widget::label_offset(&row.cmd_input),
+            ));
+        }
+        // remove_button
+        let (rx, ry, rw, rh) = row.remove_button.rect();
+        if qx >= rx - 0.1 && qx + qw <= rx + rw + 0.1 && qy >= ry - 0.1 && qy + qh <= ry + rh + 0.1 {
+            return Some((
+                row.remove_button.rounded_corners(),
+                row.remove_button.corner_radius(),
+                (rx, ry, rw, rh),
+                crate::widget::label_offset(&row.remove_button),
+            ));
+        }
+    }
+    None
+}
+
 pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
     w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
     let corners = w.rounded_corners();
@@ -1680,7 +1730,7 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
     let top_room = crate::widget::label_offset(w);
     wy += top_room;
     whh -= top_room;
-
+ 
     for (qx, qy, qw, qh, qc) in w.all_quads(ctx) {
         let mut corners = corners;
         let mut r = r;
@@ -1688,9 +1738,20 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
         let mut wy = wy;
         let mut www = www;
         let mut whh = whh;
-
+ 
         if let Some(mc) = w.as_any().downcast_ref::<crate::widget::input::MultiControl>() {
             if let Some((sub_corners, sub_radius, (sub_x, sub_y, sub_w, sub_h), sub_label_offset)) = get_multicontrol_sub_widget_info(mc, qx, qy, qw, qh) {
+                corners = sub_corners;
+                r = sub_radius;
+                wx = sub_x;
+                wy = sub_y + sub_label_offset;
+                www = sub_w;
+                whh = sub_h - sub_label_offset;
+            }
+        }
+
+        if let Some(kc) = w.as_any().downcast_ref::<crate::widget::input::KeybindsControl>() {
+            if let Some((sub_corners, sub_radius, (sub_x, sub_y, sub_w, sub_h), sub_label_offset)) = get_keybinds_control_sub_widget_info(kc, qx, qy, qw, qh) {
                 corners = sub_corners;
                 r = sub_radius;
                 wx = sub_x;
