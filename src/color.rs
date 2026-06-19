@@ -323,7 +323,7 @@ pub fn to_srgb(color: [f32; 4]) -> [f32; 4] {
 pub fn sidebar_bg_color() -> [f32; 4] {
     load_colors_once();
     let mut color = *SIDEBAR_BG_COLOR.read().unwrap();
-    if let Some(opacity) = read_window_opacity_if_configured() {
+    if let Some(opacity) = read_opacity_if_configured() {
         color[3] = opacity;
     }
     color
