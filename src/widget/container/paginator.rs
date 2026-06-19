@@ -720,7 +720,7 @@ impl Element for Paginator {
         labels
     }
 
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
         for l in self.text_labels() {
             labels.push((l, None));
@@ -968,15 +968,15 @@ impl Element for Paginator {
         changed
     }
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         self.parent
     }
 
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
         self.parent = parent;
     }
 
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
         let mut list = Vec::new();
         list.push(&self.sidebar_menu as *const dyn Element as *mut dyn Element);
         for plate in &self.plates {
@@ -985,8 +985,8 @@ impl Element for Paginator {
         list
     }
 
-    fn add_child(&mut self, _child: *mut (dyn Element + 'static), ctx: &mut UiContext) {}
-    fn clear_children(&mut self, ctx: &mut UiContext) {}
+    fn add_child(&mut self, _child: *mut (dyn Element + 'static), _ctx: &mut UiContext) {}
+    fn clear_children(&mut self, _ctx: &mut UiContext) {}
 
     fn as_page_selector(&self) -> Option<&dyn PageSelector> { Some(self) }
     fn as_page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> { Some(self) }

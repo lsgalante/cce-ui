@@ -74,7 +74,7 @@ impl Element for Breadcrumb {
         was != self.hovered || old != self.hovered_seg
     }
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, _py: f32, ctx: &mut UiContext) -> bool {
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, _py: f32, _ctx: &mut UiContext) -> bool {
         if button != MouseButton::Left || state != ElementState::Pressed { return false; }
         if let Some(i) = self.seg_at(px) {
             if i < self.path.len() {

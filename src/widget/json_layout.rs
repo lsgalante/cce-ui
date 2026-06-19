@@ -1,6 +1,5 @@
 use crate::widget::{
-    Element, Widget, Checkbox, Button, Label, Spinbox, ColorSelector, TextLabel, Paginator,
-    KeyEvent, MouseButton, ElementState, focus, Slider, Event, UiContext,
+    Element, Widget, Checkbox, Button, Label, Spinbox, ColorSelector, TextLabel, Paginator, MouseButton, ElementState, focus, Slider, Event, UiContext,
 };
 use serde::Deserialize;
 
@@ -387,7 +386,7 @@ impl Element for JsonLayoutWidget {
         labels
     }
 
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
         let (bx, by, bw, bh) = self.rect();
         if let Some(paginator) = &self.paginator {
@@ -446,7 +445,7 @@ impl Element for JsonLayoutWidget {
                     }
                 }
             }
-            Event::MouseButton { button, state, x, y } => {
+            Event::MouseButton { button, state, x: _, y: _ } => {
                 if *button == MouseButton::Left && *state == ElementState::Released {
                     if let Some(idx) = self.dragging_slider_idx {
                         if let Some(w) = self.widgets.get_mut(idx) {

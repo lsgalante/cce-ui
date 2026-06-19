@@ -258,7 +258,7 @@ impl Element for ButtonStrip {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
         if button != MouseButton::Left {
             return false;
         }
@@ -282,12 +282,10 @@ impl Element for ButtonStrip {
                             self.selected = Some(pressed);
                             self.just_clicked = Some(pressed);
                             self.generate_rotated_labels();
-                            changed = true;
                         } else {
                             self.selected = None;
                             self.just_clicked = Some(pressed);
                             self.generate_rotated_labels();
-                            changed = true;
                         }
                     }
                     changed = true;
@@ -406,7 +404,7 @@ impl Element for ButtonStrip {
         if self.buttons.is_empty() { return false; }
 
         let current = self.selected.unwrap_or(0);
-        let mut next = current;
+        let next;
 
         match event.logical_key {
             Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowUp) => {

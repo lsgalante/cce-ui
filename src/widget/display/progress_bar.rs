@@ -22,7 +22,7 @@ impl ProgressBar {
 
 impl Element for ProgressBar {
     crate::impl_widget_base!(ProgressBar);
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
 
     fn color(&self) -> [f32; 4] { colors::PROGRESS_BG }
 }

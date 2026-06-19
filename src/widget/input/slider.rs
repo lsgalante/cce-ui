@@ -197,7 +197,7 @@ impl Element for Slider {
 
     fn drag_end(&mut self) { self.dragging = false; }
 
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
         if !self.scroll_enabled {
             return false;
         }
@@ -304,7 +304,7 @@ impl Element for Slider {
         }
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
         if !self.editing { return false; }
         if event.state != ElementState::Pressed { return false; }
         
@@ -397,7 +397,7 @@ impl Element for Slider {
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
+        let _visual_h = self.base.h - top;
         
         if let Some(lbl) = self.control_label() {
             labels.push(lbl);

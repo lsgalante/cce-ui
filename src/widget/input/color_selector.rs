@@ -206,7 +206,7 @@ impl Element for ColorSelector {
         if self.just_clicked { self.just_clicked = false; true } else { false }
     }
 
-    fn tick(&mut self, _dt: f32, ctx: &mut UiContext) -> bool {
+    fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool {
         let mut child_opt = self.child.lock().unwrap();
         if let Some(ref mut child) = *child_opt {
             match child.try_wait() {
@@ -251,7 +251,7 @@ impl Element for ColorSelector {
         }
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
         if !self.editing { return false; }
         if event.state != ElementState::Pressed { return false; }
         
@@ -485,7 +485,7 @@ impl Element for ColorSelector {
         }
         let hex = if self.editing { self.edit_buffer.clone() } else { self.get_value_string().unwrap() };
         let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
+        let _visual_h = self.base.h - top;
         labels.push(TextLabel {
             text: hex,
             x: self.base.x + 4.0,

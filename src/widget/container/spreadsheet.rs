@@ -238,7 +238,7 @@ impl Element for Spreadsheet {
         self.scroll_velocity = 0.0;
     }
 
-    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+    fn tick(&mut self, dt: f32, _ctx: &mut UiContext) -> bool {
         if self.scroll_velocity.abs() > 0.01 {
             let content_h = self.rows.len() as f32 * 24.0;
             let visible_h = (self.h - 24.0).max(0.0);

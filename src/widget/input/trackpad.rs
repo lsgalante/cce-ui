@@ -144,7 +144,7 @@ impl Element for Trackpad {
         self.fingers.clear();
     }
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
         if button == MouseButton::Left {
             let (x, y, w, h) = self.rect();
             if px >= x && px <= x + w && py >= y && py <= y + h {

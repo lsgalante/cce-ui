@@ -98,7 +98,7 @@ impl Element for Float3 {
         self.dragging_idx = None;
     }
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
         if button != MouseButton::Left { return false; }
         let rects = self.get_row_rects();
         
@@ -149,7 +149,7 @@ impl Element for Float3 {
         false
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
         let _idx = match self.editing_idx {
             Some(i) => i,
             None => return false,

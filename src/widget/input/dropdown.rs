@@ -280,7 +280,7 @@ impl Element for Dropdown {
         self.open = false;
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
         if event.state != ElementState::Pressed { return false; }
         if !self.open {
             if let Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) = event.logical_key {
@@ -351,7 +351,7 @@ impl Element for Dropdown {
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
+        let _visual_h = self.base.h - top;
         
         if let Some(lbl) = self.control_label() {
             labels.push(lbl);

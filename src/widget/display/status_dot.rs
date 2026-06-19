@@ -29,7 +29,7 @@ impl StatusDot {
 
 impl Element for StatusDot {
     crate::impl_widget_base!(StatusDot);
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
 
     fn color(&self) -> [f32; 4] {
         match self.status {

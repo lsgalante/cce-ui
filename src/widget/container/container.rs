@@ -28,11 +28,11 @@ impl Element for Container {
     }
     fn unfocus(&mut self) {}
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) { self.parent = parent; }
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> { self.children.clone() }
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) { self.children.push(child); }
-    fn clear_children(&mut self, ctx: &mut UiContext) { self.children.clear(); }
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) { self.parent = parent; }
+    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> { self.children.clone() }
+    fn add_child(&mut self, child: *mut (dyn Element + 'static), _ctx: &mut UiContext) { self.children.push(child); }
+    fn clear_children(&mut self, _ctx: &mut UiContext) { self.children.clear(); }
 }
 
 impl Drop for Container {

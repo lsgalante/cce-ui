@@ -64,7 +64,7 @@ pub mod json_layout;
 pub use json_layout::{JsonLayoutWidget, JsonLayoutConfig, JsonWidgetConfig, JsonPageConfig, JsonWidget};
 
 use crate::colors;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
 use std::collections::HashMap;
 
 pub const DROPDOWN_ITEM_H: f32 = 22.0;

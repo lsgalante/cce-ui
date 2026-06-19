@@ -355,7 +355,7 @@ impl Element for Graph {
         self.dragging_id = None;
     }
 
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    fn on_cursor_moved(&mut self, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
         let mut changed = false;
         if self.connecting_from.is_some() {
             self.current_mouse_pos = (px, py);
@@ -377,7 +377,7 @@ impl Element for Graph {
         changed
     }
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
         if button == MouseButton::Right && state == ElementState::Pressed {
             if self.connecting_from.is_some() {
                 self.connecting_from = None;

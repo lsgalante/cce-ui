@@ -21,7 +21,7 @@ use smithay_client_toolkit::{
 };
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface, wl_registry, wl_region},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface, wl_registry, wl_region},
     Connection, QueueHandle, Proxy,
 };
 use smithay_client_toolkit::shell::xdg::popup::{Popup, PopupHandler, PopupConfigure};
@@ -31,8 +31,8 @@ use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positi
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
 use glyphon::{
-    Cache, FontSystem, Resolution, SwashCache, TextArea, TextAtlas,
-    TextBounds, TextRenderer, Viewport, Buffer, Attrs, Metrics,
+    Cache, FontSystem, Resolution, TextArea,
+    TextBounds, Viewport, Buffer, Attrs, Metrics,
 };
 use crate::widget::{Element, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey};
 use crate::wayland::{WaylandSurfaceHandle, detect_scale_factor};
@@ -1054,7 +1054,7 @@ impl<A: Application> EngineState<A> {
         let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
         let surface_ptr = surface.id().as_ptr() as *mut std::ffi::c_void;
         
-        let mut adapter = WgpuAdapter::new(display_ptr, surface_ptr, pw, ph).await;
+        let adapter = WgpuAdapter::new(display_ptr, surface_ptr, pw, ph).await;
         
         let shader = adapter.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),

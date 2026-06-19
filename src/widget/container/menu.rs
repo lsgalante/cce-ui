@@ -574,7 +574,7 @@ impl Element for MenuBar {
         self.menus.unfocus();
     }
 
-    fn focused(&self, ctx: &UiContext) -> bool {
+    fn focused(&self, _ctx: &UiContext) -> bool {
         self.focused || self.context_dropdown_open
     }
 
@@ -1255,11 +1255,11 @@ impl Element for Menu {
         }
     }
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         self.parent
     }
 
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
         self.parent = parent;
     }
 
@@ -1267,7 +1267,7 @@ impl Element for Menu {
         100
     }
 
-    fn focused(&self, ctx: &UiContext) -> bool {
+    fn focused(&self, _ctx: &UiContext) -> bool {
         self.base.focused
     }
 

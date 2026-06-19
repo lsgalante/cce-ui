@@ -1,6 +1,5 @@
 use crate::colors;
 use crate::widget::*;
-use crate::widget::focus;
 use crate::widget::input::text_box::TextBox;
 use crate::widget::input::button::Button;
 use crate::widget::TextLabel;

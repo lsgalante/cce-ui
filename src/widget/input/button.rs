@@ -135,7 +135,7 @@ impl Button {
 
 impl Element for Button {
     crate::impl_widget_base!(Button);
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
 
     fn color(&self) -> [f32; 4] {
         if self.pressed || self.base.hovered {

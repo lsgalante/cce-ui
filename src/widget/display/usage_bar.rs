@@ -32,7 +32,7 @@ impl UsageBar {
 impl Element for UsageBar {
     crate::impl_widget_base!(UsageBar);
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let (x, y, w, h) = self.rect();

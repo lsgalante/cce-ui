@@ -1,6 +1,5 @@
 use crate::colors;
 use crate::widget::*;
-use crate::widget::focus;
 use crate::widget::input::{TextBox, Spinbox, Dropdown, Button, Toggle, Slider};
 use crate::widget::TextLabel;
 
@@ -603,7 +602,7 @@ impl Element for MultiControl {
         }
     }
 
-    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
+    fn hit_test(&self, px: f32, py: f32, _ctx: &UiContext) -> bool {
         if let Some((x, y, w, h)) = self.popover_rect() {
             if px >= x && px <= x + w && py >= y && py <= y + h {
                 return true;

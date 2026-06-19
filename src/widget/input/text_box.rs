@@ -575,7 +575,7 @@ impl Element for TextBox {
         }
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
         if !self.editing || self.disabled { return false; }
         if event.state != ElementState::Pressed { return false; }
         
@@ -844,7 +844,7 @@ impl Element for TextBox {
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
+        let _visual_h = self.base.h - top;
         if let Some(lbl) = self.control_label() {
             labels.push(lbl);
         }
@@ -927,12 +927,12 @@ impl Element for TextBox {
         labels
     }
 
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         let bounds = Some([self.base.x, self.base.y, self.base.x + self.base.w, self.base.y + self.base.h]);
         self.text_labels().into_iter().map(|l| (l, bounds)).collect()
     }
 
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let font = self.widget_font();
         let bounds = Some([self.base.x, self.base.y, self.base.x + self.base.w, self.base.y + self.base.h]);
         self.text_labels().into_iter().map(|l| (l, font.clone(), bounds)).collect()

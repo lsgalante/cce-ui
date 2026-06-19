@@ -96,7 +96,7 @@ impl InteractiveListItem {
 
 impl Element for InteractiveListItem {
     crate::impl_widget_base!(InteractiveListItem);
-    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let col = self.color();

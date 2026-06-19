@@ -106,7 +106,7 @@ impl Element for FontSelector {
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
+        let _visual_h = self.base.h - top;
         if let Some(lbl) = self.control_label() {
             labels.push(lbl);
         }

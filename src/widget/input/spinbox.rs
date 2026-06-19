@@ -218,7 +218,7 @@ impl Element for Spinbox {
         }
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
         if !self.editing { return false; }
         if event.state != ElementState::Pressed { return false; }
         
@@ -346,7 +346,7 @@ impl Element for Spinbox {
         };
         
         let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
+        let _visual_h = self.base.h - top;
         
         let btn_w = self.base.w * 0.225;
         let split_left = self.base.x + btn_w;

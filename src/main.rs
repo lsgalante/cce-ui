@@ -13,7 +13,6 @@ use smithay_client_toolkit::{
     delegate_compositor, delegate_keyboard, delegate_pointer, delegate_registry,
     delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window, delegate_output,
     registry::{ProvidesRegistryState, RegistryState},
-    registry_handlers,
     output::{OutputHandler, OutputState},
     seat::{
         keyboard::KeyboardHandler,
@@ -31,7 +30,7 @@ use smithay_client_toolkit::{
 };
 use wayland_client::{
     globals::registry_queue_init,
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
     Connection, QueueHandle, Proxy,
 };
 use calloop::EventLoop;
@@ -161,6 +160,7 @@ fn rounded_rect_vertices_corners(
     verts
 }
 
+#[allow(dead_code)]
 fn rounded_rect_vertices(
     x: f32, y: f32, ww: f32, h: f32,
     r: f32,
@@ -405,7 +405,7 @@ impl State {
             ..Default::default()
         });
 
-        let surface = unsafe { instance.create_surface(wayland_handle).unwrap() };
+        let surface = instance.create_surface(wayland_handle).unwrap();
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -436,7 +436,7 @@ impl State {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
-        let mut config = wgpu::SurfaceConfiguration {
+        let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: pw,
@@ -733,7 +733,7 @@ impl State {
                 }
             }
         } else {
-            for (i, w) in self.widgets.iter().enumerate() {
+            for (_i, w) in self.widgets.iter().enumerate() {
                 for (label, font, bounds) in w.text_labels_with_font_and_bounds(ui_context) {
                     widget_buffers.push(make_text_buffer_with_font(font_system, &label.text, label.font_size, font.as_deref()));
                     widget_labels.push((label, bounds));
@@ -788,7 +788,7 @@ impl State {
             for (t, size, _x, _y, _tc, _font_opt, _bounds) in &popover_pc.texts {
                 popover_buffers.push(make_text_buffer(font_system, t, *size));
             }
-            for (buf, (_, size, x, y, tc, _font_opt, bounds)) in popover_buffers.iter().zip(popover_pc.texts.iter()) {
+            for (buf, (_, _size, x, y, tc, _font_opt, bounds)) in popover_buffers.iter().zip(popover_pc.texts.iter()) {
                 let item_bounds = if let Some([l, t, r, b]) = bounds {
                     TextBounds {
                         left: (l * scale_f32).round() as i32,

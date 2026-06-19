@@ -2624,6 +2624,7 @@ impl LayoutStrategy for ColumnLayout {
 
 pub struct AdaptiveGrid {
     grid: Option<Grid>,
+    #[allow(dead_code)]
     min_col_width: f32,
     gap: f32,
     num_sections: Option<usize>,
@@ -2749,7 +2750,7 @@ impl<'a, P: RenderTarget + Default> PageLayoutBuilder<'a, P> {
         }
     }
 
-    pub fn with_section_count(mut self, count: usize) -> Self {
+    pub fn with_section_count(self, count: usize) -> Self {
         self.strategy.set_section_count(count);
         self.strategy.init(self.cx, self.cy, self.cw, self.ch);
         self

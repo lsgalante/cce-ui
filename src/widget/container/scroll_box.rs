@@ -71,7 +71,7 @@ impl Element for ScrollBox {
     }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
-    fn highlight_color(&self, ctx: &UiContext) -> Option<[f32; 4]> { None }
+    fn highlight_color(&self, _ctx: &UiContext) -> Option<[f32; 4]> { None }
 
     fn focus(&mut self) {
         focus::set_focused(self);
@@ -152,7 +152,7 @@ impl Element for ScrollBox {
         quads
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
         if !focus::is_focused(self) {
             return false;
         }
@@ -194,11 +194,11 @@ impl Element for ScrollBox {
         }
     }
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) { self.parent = parent; }
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> { self.children.clone() }
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) { self.children.push(child); }
-    fn clear_children(&mut self, ctx: &mut UiContext) { self.children.clear(); }
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) { self.parent = parent; }
+    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> { self.children.clone() }
+    fn add_child(&mut self, child: *mut (dyn Element + 'static), _ctx: &mut UiContext) { self.children.push(child); }
+    fn clear_children(&mut self, _ctx: &mut UiContext) { self.children.clear(); }
 }
 
 impl Drop for ScrollBox {
