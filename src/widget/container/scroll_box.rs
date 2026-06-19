@@ -141,7 +141,11 @@ impl Element for ScrollBox {
 
             // Thumb
             let visible_ratio = self.viewport_h / self.content_h;
-            let thumb_h = (sb_track_h * visible_ratio).clamp(20.0, sb_track_h);
+            let thumb_h = if sb_track_h <= 20.0 {
+                sb_track_h
+            } else {
+                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+            };
             let max_scroll = (self.content_h - self.viewport_h).max(0.0);
             let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
             let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
