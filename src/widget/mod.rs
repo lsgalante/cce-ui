@@ -537,9 +537,11 @@ pub mod input;
 pub mod container;
 pub mod display;
 pub mod editor;
-
+pub mod layout_helper;
+ 
 // Re-exports
 pub use self::editor::TextEditorState;
+pub use self::layout_helper::{ColumnLayout, RowLayout};
 pub use self::core::{Widget, focus, hover_animation, popovers, clipboard, context_menu, clear_widget_references};
 pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
