@@ -1176,7 +1176,7 @@ mod tests {
 
     #[test]
     fn test_paginator_rotated_tabs() {
-        // Force initialization from ccec/config.toml so Once won't overwrite our test values
+        // Force initialization from cce/config.json so Once won't overwrite our test values
         let orig_margin_x = crate::layout::paginator_tab_margin_x();
         let orig_margin_y = crate::layout::paginator_tab_margin_y();
         let orig_padding_x = crate::layout::paginator_tab_padding_x();

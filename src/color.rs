@@ -77,7 +77,6 @@ pub fn node_drag_color() -> [f32; 4] {
 fn read_config() -> Option<String> {
     let paths = [
         "/home/lsgalante/.config/cce/config.json",
-        "/home/lsgalante/.config/ccec/config.json",
     ];
     for path in &paths {
         if let Ok(content) = std::fs::read_to_string(path) {

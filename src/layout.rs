@@ -5,7 +5,6 @@ use std::sync::RwLock;
 fn read_config() -> Option<String> {
     let paths = [
         "/home/lsgalante/.config/cce/config.json",
-        "/home/lsgalante/.config/ccec/config.json",
     ];
     for path in &paths {
         if let Ok(content) = std::fs::read_to_string(path) {
@@ -1871,14 +1870,15 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
         }
     }
     let font_opt = w.widget_font();
-    for (label, bounds) in w.text_labels_with_bounds(ctx) {
+    for (label, font, bounds) in w.text_labels_with_font_and_bounds(ctx) {
         let color_f32 = [
             label.color[0] as f32 / 255.0,
             label.color[1] as f32 / 255.0,
             label.color[2] as f32 / 255.0,
             1.0,
         ];
-        if let Some(ref font) = font_opt {
+        let active_font = font.or_else(|| font_opt.clone());
+        if let Some(ref font) = active_font {
             pc.text_with_font_and_bounds(&label.text, label.x, label.y, label.font_size, color_f32, font, bounds);
         } else {
             pc.text_with_bounds(&label.text, label.x, label.y, label.font_size, color_f32, bounds);

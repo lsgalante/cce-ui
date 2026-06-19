@@ -197,7 +197,6 @@ fn read_zoom_bindings() -> (String, String) {
     let mut zoom_out_val = "-".to_string();
     let paths = [
         "/home/lsgalante/.config/cce/config.json",
-        "/home/lsgalante/.config/ccec/config.json",
     ];
     for path in &paths {
         if let Ok(content) = std::fs::read_to_string(path) {
