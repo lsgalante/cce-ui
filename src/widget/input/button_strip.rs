@@ -290,6 +290,7 @@ impl Element for ButtonStrip {
                             changed = true;
                         }
                     }
+                    changed = true;
                 }
                 self.pressed_idx = None;
             }

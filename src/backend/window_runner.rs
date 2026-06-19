@@ -1596,7 +1596,13 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         let _ = themed_pointer.set_cursor(_conn, CursorIcon::Default);
                     }
                 }
-                PointerEventKind::Leave { .. } => {}
+                PointerEventKind::Leave { .. } => {
+                    let mut rebuild = false;
+                    self.inner.handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
+                    if rebuild {
+                        self.redraw = true;
+                    }
+                }
                 PointerEventKind::Motion { .. } => {
                     let mut rebuild = false;
                     self.inner.handle_pointer_move(LogicalPosition::new(lx, ly), &mut rebuild);
