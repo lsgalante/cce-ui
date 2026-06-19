@@ -1971,6 +1971,8 @@ pub struct Section {
     pub cw: f32,
     pub label_width: f32,
     pub is_child: bool,
+    pub grid: Grid,
+    pub last_col: usize,
 }
 
 impl Section {
@@ -2015,7 +2017,21 @@ impl Section {
             left + (cw - label_width) / 2.0
         };
         pc.text_with_font(label, label_x, top, font_size, font_color, &font_fam);
-        Self { left, top, content_y: top + font_size + 5.0, cw, label_width, is_child }
+
+        let pad = if is_child {
+            section_padding().max(8.0)
+        } else {
+            section_padding()
+        };
+        let margin_x = pad + 12.0;
+        let usable_w = (cw - 2.0 * margin_x).max(1.0);
+        let min_col_width = 130.0;
+        let gap = 8.0;
+        let max_cols = ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0) as usize;
+        let content_start_y = top + font_size + 5.0;
+        let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
+
+        Self { left, top, content_y: content_start_y, cw, label_width, is_child, grid, last_col: 0 }
     }
 
     pub fn ax(&self, x_off: f32) -> f32 {
@@ -2025,25 +2041,69 @@ impl Section {
 
     pub fn ay(&self) -> f32 { self.content_y }
 
-    pub fn spacing(&mut self, dy: f32) { self.content_y += dy; }
+    pub fn spacing(&mut self, dy: f32) {
+        self.content_y += dy;
+        for h in &mut self.grid.col_heights {
+            *h = self.content_y;
+        }
+    }
 
     pub fn text(&mut self, pc: &mut dyn RenderTarget, text: &str, x_off: f32, y_off: f32, font_size: f32, color: [f32; 4]) {
         pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
     }
 
-    pub fn widget<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, mut wh: f32, ctx: &mut UiContext) {
+    pub fn widget<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
         if let Some(pref) = w.preferred_height() {
             wh = pref;
         }
         let pad = self.padding();
-        w.set_row_rect(self.left + pad, self.cw - 2.0 * pad);
-        let x = self.ax(x_off);
-        let right_edge = self.left + self.cw - pad;
-        let clamped_w = ww.min((right_edge - x).max(0.0));
         let top_room = crate::widget::label_offset(w);
         let total_h = wh + top_room;
-        render_widget(pc, w, x, self.ay(), clamped_w, total_h, ctx);
-        self.content_y += total_h;
+
+        let name = w.type_name();
+        let span_full = name == "KeybindsControl"
+            || name == "MultiControl"
+            || name == "Trackpad"
+            || name == "Canvas"
+            || name == "UsageBar"
+            || name == "ProgressBar"
+            || name == "ButtonStrip"
+            || name == "Spreadsheet"
+            || name == "Graph";
+
+        if span_full {
+            let margin_x = pad + 12.0;
+            let x = self.left + margin_x;
+            let clamped_w = (self.cw - 2.0 * margin_x).max(0.0);
+            let max_h = self.grid.max_height().max(self.content_y);
+            let y = max_h;
+
+            w.set_row_rect(self.left + pad, self.cw - 2.0 * pad);
+            render_widget(pc, w, x, y, clamped_w, total_h, ctx);
+
+            let new_bottom = y + total_h;
+            self.content_y = new_bottom;
+            for h in &mut self.grid.col_heights {
+                *h = new_bottom;
+            }
+        } else {
+            let max_h = self.grid.max_height();
+            if self.content_y > max_h {
+                for h in &mut self.grid.col_heights {
+                    *h = self.content_y;
+                }
+            }
+
+            let col = self.grid.next_column();
+            self.last_col = col;
+            let x = self.grid.col_lefts[col];
+            let y = self.grid.col_heights[col];
+
+            w.set_row_rect(x, self.grid.col_width);
+            render_widget(pc, w, x, y, self.grid.col_width, total_h, ctx);
+            self.grid.col_heights[col] += total_h;
+            self.content_y = self.grid.max_height();
+        }
     }
 
     pub fn widget_full<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, wh: f32, ctx: &mut UiContext) {
@@ -2055,14 +2115,22 @@ impl Section {
     pub fn separator(&mut self, pc: &mut dyn RenderTarget) {
         let pad = self.padding();
         let x = self.ax(pad);
-        let y = self.ay();
+        let max_h = self.grid.max_height().max(self.content_y);
+        let y = max_h;
         pc.rect([0.18, 0.18, 0.27, 1.0], x, y, self.cw - 2.0 * pad, 1.0);
-        self.content_y += 8.0;
+        self.content_y = max_h + 8.0;
+        for h in &mut self.grid.col_heights {
+            *h = self.content_y;
+        }
     }
 
     pub fn rect(&mut self, pc: &mut dyn RenderTarget, color: [f32; 4], x_off: f32, w: f32, h: f32) {
-        pc.rect(color, self.ax(x_off), self.ay(), w, h);
-        self.content_y += h;
+        let max_h = self.grid.max_height().max(self.content_y);
+        pc.rect(color, self.ax(x_off), max_h, w, h);
+        self.content_y = max_h + h;
+        for col_h in &mut self.grid.col_heights {
+            *col_h = self.content_y;
+        }
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
@@ -2086,11 +2154,21 @@ impl Section {
     where
         F: FnMut(usize, f32, f32),
     {
+        let max_h = self.grid.max_height().max(self.content_y);
+        for col_h in &mut self.grid.col_heights {
+            *col_h = max_h;
+        }
+        self.content_y = max_h;
+
         let cols = self.row_layout(count, gap);
         for (i, &(x, w)) in cols.iter().enumerate() {
             f(i, x, w);
         }
         self.content_y += h;
+
+        for col_h in &mut self.grid.col_heights {
+            *col_h = self.content_y;
+        }
     }
 
     pub fn finish(&mut self, pc: &mut dyn RenderTarget) -> f32 {
@@ -2627,6 +2705,8 @@ pub struct SectionContext<'a, P> {
     pub label_width: f32,
     pub focused: bool,
     pub is_child: bool,
+    pub grid: Grid,
+    pub last_col: usize,
 }
 
 impl<'a, P: RenderTarget> SectionContext<'a, P> {
@@ -2667,15 +2747,31 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             left + (cw - label_width) / 2.0
         };
         pc.text_with_font(label, label_x, top, font_size, font_color, &font_fam);
+
+        let pad = if is_child {
+            section_padding().max(8.0)
+        } else {
+            section_padding()
+        };
+        let margin_x = pad + 12.0;
+        let usable_w = (cw - 2.0 * margin_x).max(1.0);
+        let min_col_width = 130.0;
+        let gap = 8.0;
+        let max_cols = ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0) as usize;
+        let content_start_y = top + font_size + 5.0;
+        let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
+
         Self {
             pc,
             left,
             top,
-            content_y: top + font_size + 5.0,
+            content_y: content_start_y,
             cw,
             label_width,
             focused,
             is_child,
+            grid,
+            last_col: 0,
         }
     }
 
@@ -2690,26 +2786,67 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
 
     pub fn spacing(&mut self, dy: f32) {
         self.content_y += dy;
+        for h in &mut self.grid.col_heights {
+            *h = self.content_y;
+        }
     }
 
     pub fn text(&mut self, text: &str, x_off: f32, y_off: f32, font_size: f32, color: [f32; 4]) {
         self.pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
     }
 
-    pub fn widget<T: Element + 'static>(&mut self, w: &mut T, x_off: f32, ww: f32, mut wh: f32, ctx: &mut UiContext) {
+    pub fn widget<T: Element + 'static>(&mut self, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
         if let Some(pref) = w.preferred_height() {
             wh = pref;
         }
         let pad = self.padding();
-        w.set_row_rect(self.left + pad, self.cw - 2.0 * pad);
-        let x = self.ax(x_off);
-        let y = self.ay();
-        let right_edge = self.left + self.cw - pad;
-        let clamped_w = ww.min((right_edge - x).max(0.0));
         let top_room = crate::widget::label_offset(w);
         let total_h = wh + top_room;
-        render_widget(self.pc, w, x, y, clamped_w, total_h, ctx);
-        self.content_y += total_h;
+
+        let name = w.type_name();
+        let span_full = name == "KeybindsControl"
+            || name == "MultiControl"
+            || name == "Trackpad"
+            || name == "Canvas"
+            || name == "UsageBar"
+            || name == "ProgressBar"
+            || name == "ButtonStrip"
+            || name == "Spreadsheet"
+            || name == "Graph";
+
+        if span_full {
+            let margin_x = pad + 12.0;
+            let x = self.left + margin_x;
+            let clamped_w = (self.cw - 2.0 * margin_x).max(0.0);
+            let max_h = self.grid.max_height().max(self.content_y);
+            let y = max_h;
+
+            w.set_row_rect(self.left + pad, self.cw - 2.0 * pad);
+            render_widget(self.pc, w, x, y, clamped_w, total_h, ctx);
+
+            let new_bottom = y + total_h;
+            self.content_y = new_bottom;
+            for h in &mut self.grid.col_heights {
+                *h = new_bottom;
+            }
+        } else {
+            let max_h = self.grid.max_height();
+            if self.content_y > max_h {
+                for h in &mut self.grid.col_heights {
+                    *h = self.content_y;
+                }
+            }
+
+            let col = self.grid.next_column();
+            self.last_col = col;
+            let x = self.grid.col_lefts[col];
+            let y = self.grid.col_heights[col];
+
+            w.set_row_rect(x, self.grid.col_width);
+            render_widget(self.pc, w, x, y, self.grid.col_width, total_h, ctx);
+            self.grid.col_heights[col] += total_h;
+            self.content_y = self.grid.max_height();
+        }
     }
 
     pub fn widget_full<T: Element + 'static>(&mut self, w: &mut T, wh: f32, ctx: &mut UiContext) {
@@ -2721,14 +2858,22 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     pub fn separator(&mut self) {
         let pad = self.padding();
         let x = self.ax(pad);
-        let y = self.ay();
+        let max_h = self.grid.max_height().max(self.content_y);
+        let y = max_h;
         self.pc.rect([0.18, 0.18, 0.27, 1.0], x, y, self.cw - 2.0 * pad, 1.0);
-        self.content_y += 8.0;
+        self.content_y = max_h + 8.0;
+        for h in &mut self.grid.col_heights {
+            *h = self.content_y;
+        }
     }
 
     pub fn rect(&mut self, color: [f32; 4], x_off: f32, w: f32, h: f32) {
-        self.pc.rect(color, self.ax(x_off), self.ay(), w, h);
-        self.content_y += h;
+        let max_h = self.grid.max_height().max(self.content_y);
+        self.pc.rect(color, self.ax(x_off), max_h, w, h);
+        self.content_y = max_h + h;
+        for col_h in &mut self.grid.col_heights {
+            *col_h = self.content_y;
+        }
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
@@ -2752,11 +2897,21 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     where
         F: FnMut(usize, f32, f32),
     {
+        let max_h = self.grid.max_height().max(self.content_y);
+        for col_h in &mut self.grid.col_heights {
+            *col_h = max_h;
+        }
+        self.content_y = max_h;
+
         let cols = self.row_layout(count, gap);
         for (i, &(x, w)) in cols.iter().enumerate() {
             f(i, x, w);
         }
         self.content_y += h;
+
+        for col_h in &mut self.grid.col_heights {
+            *col_h = self.content_y;
+        }
     }
 
     pub fn vstack(&mut self, spacing: f32) -> VStack<'_, 'a, P> {
@@ -2772,12 +2927,18 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     {
         let pad = self.padding();
         let left = self.ax(0.0) + pad;
-        let top = self.content_y;
+        let max_h = self.grid.max_height().max(self.content_y);
+        let top = max_h;
         let cw = self.cw - 2.0 * pad;
 
         let mut sub_ctx = SectionContext::new(self.pc, left, top, cw, label, focused, true);
         render_fn(&mut sub_ctx);
-        self.content_y = sub_ctx.finish();
+        let new_bottom = sub_ctx.finish();
+
+        self.content_y = new_bottom;
+        for h in &mut self.grid.col_heights {
+            *h = new_bottom;
+        }
     }
 
     pub fn finish(self) -> f32 {
@@ -3075,6 +3236,29 @@ mod tests {
         for face in db.faces() {
             println!("FAMILY: {:?}", face.families);
         }
+    }
+
+    #[test]
+    fn test_section_context_grid() {
+        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
+        let mut ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Test Section", false, false);
+        assert_eq!(ctx.left, 10.0);
+        assert_eq!(ctx.top, 20.0);
+        assert_eq!(ctx.cw, 500.0);
+
+        let mut ui_ctx = crate::context::UiContext::new();
+        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx);
+
+        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        ctx.widget(&mut w2, 12.0, 100.0, 30.0, &mut ui_ctx);
+
+        // Since cw=500, we should have multiple columns!
+        // The first widget goes into column 0, second into column 1.
+        assert_ne!(w1.x, w2.x);
+        
+        let bottom = ctx.finish();
+        assert!(bottom > 20.0);
     }
 }
 
