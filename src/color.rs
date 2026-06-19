@@ -201,7 +201,11 @@ fn load_colors_once() {
 }
 
 pub fn reload_colors(content: &str) {
-    parse_and_set_colors(content);
+    if serde_json::from_str::<serde_json::Value>(content).is_ok() {
+        parse_and_set_colors(content);
+    } else if let Some(raw) = read_config() {
+        parse_and_set_colors(&raw);
+    }
 }
 
 pub fn page_low_color() -> [f32; 4] {

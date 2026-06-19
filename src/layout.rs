@@ -4,12 +4,56 @@ use std::sync::RwLock;
 
 fn read_config() -> Option<String> {
     let paths = [
-        "/home/lsgalante/.config/cce/config.toml",
-        "/home/lsgalante/.config/ccec/config.toml",
+        "/home/lsgalante/.config/cce/config.json",
+        "/home/lsgalante/.config/ccec/config.json",
     ];
     for path in &paths {
         if let Ok(content) = std::fs::read_to_string(path) {
-            return Some(content);
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                let mut toml_like = String::new();
+                if let Some(layout) = val.get("layout").and_then(|l| l.as_object()) {
+                    for (k, v) in layout {
+                        if let Some(s) = v.as_str() {
+                            toml_like.push_str(&format!("{} = \"{}\"\n", k, s));
+                        } else if let Some(b) = v.as_bool() {
+                            toml_like.push_str(&format!("{} = {}\n", k, b));
+                        } else if let Some(n) = v.as_f64() {
+                            toml_like.push_str(&format!("{} = {}\n", k, n));
+                        } else if let Some(n) = v.as_i64() {
+                            toml_like.push_str(&format!("{} = {}\n", k, n));
+                        }
+                    }
+                }
+                if let Some(notifications) = val.get("notifications").and_then(|n| n.as_object()) {
+                    toml_like.push_str("[notifications]\n");
+                    for (k, v) in notifications {
+                        if let Some(s) = v.as_str() {
+                            toml_like.push_str(&format!("{} = \"{}\"\n", k, s));
+                        } else if let Some(b) = v.as_bool() {
+                            toml_like.push_str(&format!("{} = {}\n", k, b));
+                        } else if let Some(n) = v.as_f64() {
+                            toml_like.push_str(&format!("{} = {}\n", k, n));
+                        } else if let Some(n) = v.as_i64() {
+                            toml_like.push_str(&format!("{} = {}\n", k, n));
+                        }
+                    }
+                }
+                if let Some(transparency) = val.get("transparency").and_then(|t| t.as_object()) {
+                    toml_like.push_str("[transparency]\n");
+                    for (k, v) in transparency {
+                        if let Some(s) = v.as_str() {
+                            toml_like.push_str(&format!("{} = \"{}\"\n", k, s));
+                        } else if let Some(b) = v.as_bool() {
+                            toml_like.push_str(&format!("{} = {}\n", k, b));
+                        } else if let Some(n) = v.as_f64() {
+                            toml_like.push_str(&format!("{} = {}\n", k, n));
+                        } else if let Some(n) = v.as_i64() {
+                            toml_like.push_str(&format!("{} = {}\n", k, n));
+                        }
+                    }
+                }
+                return Some(toml_like);
+            }
         }
     }
     None
