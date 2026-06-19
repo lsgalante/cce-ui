@@ -42,6 +42,7 @@ static MENUBAR_FONT: RwLock<String> = RwLock::new(String::new());
 static MENUBAR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
 static NESTED_SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
+static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
 
 static PAGINATOR_TAB_MARGIN_X: RwLock<f32> = RwLock::new(5.0);
 static PAGINATOR_TAB_MARGIN_Y: RwLock<f32> = RwLock::new(10.0);
@@ -320,6 +321,14 @@ pub fn reload_config() {
                 let rest = mod_rest(rest);
                 let font = rest.trim().to_string();
                 if let Ok(mut lock) = NESTED_SECTION_LABEL_FONT.write() {
+                    *lock = font;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("breadcrumb_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                if let Ok(mut lock) = BREADCRUMB_FONT.write() {
                     *lock = font;
                 }
             }
@@ -1085,6 +1094,44 @@ pub fn nested_section_label_font() -> String {
 
 pub fn set_nested_section_label_font(font: &str) {
     if let Ok(mut lock) = NESTED_SECTION_LABEL_FONT.write() {
+        *lock = font.to_string();
+    }
+}
+
+pub fn breadcrumb_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("breadcrumb_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = rest.trim();
+                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
+                        &rest[1..rest.len() - 1]
+                    } else {
+                        rest
+                    };
+                    font = val_str.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = BREADCRUMB_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = BREADCRUMB_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn set_breadcrumb_font(font: &str) {
+    if let Ok(mut lock) = BREADCRUMB_FONT.write() {
         *lock = font.to_string();
     }
 }

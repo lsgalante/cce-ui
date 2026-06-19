@@ -88,6 +88,15 @@ impl Element for Breadcrumb {
     fn as_path_controller(&self) -> Option<&dyn PathController> { Some(self) }
     fn as_path_controller_mut(&mut self) -> Option<&mut dyn PathController> { Some(self) }
 
+    fn widget_font(&self) -> Option<String> {
+        let font = crate::layout::breadcrumb_font();
+        if font.is_empty() {
+            None
+        } else {
+            Some(font)
+        }
+    }
+
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
         quads.push((self.x, self.y, self.w, self.h, self.color()));
