@@ -4,7 +4,9 @@ use crate::widget::display::TextLabel;
 
 #[derive(Debug, Clone)]
 pub struct Window {
-    pub base: Layer,
+    pub base: Widget,
+    pub children: Vec<*mut (dyn Element + 'static)>,
+    pub parent: Option<*mut (dyn Element + 'static)>,
     pub border_color: Option<[f32; 4]>,
     pub border_thickness: f32,
     pub radius: f32,
@@ -15,7 +17,9 @@ pub struct Window {
 impl Window {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            base: Layer::new(x, y, w, h),
+            base: Widget::new_rect(x, y, w, h),
+            children: Vec::new(),
+            parent: None,
             border_color: None,
             border_thickness: 1.0,
             radius: 12.0,
@@ -43,11 +47,11 @@ impl Window {
 
 impl Element for Window {
     fn base(&self) -> Option<&Widget> {
-        Some(&self.base.base)
+        Some(&self.base)
     }
 
     fn base_mut(&mut self) -> Option<&mut Widget> {
-        Some(&mut self.base.base)
+        Some(&mut self.base)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -67,11 +71,14 @@ impl Element for Window {
     }
 
     fn rect(&self) -> (f32, f32, f32, f32) {
-        self.base.rect()
+        (self.base.x, self.base.y, self.base.w, self.base.h)
     }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.base.set_rect(x, y, w, h);
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h;
     }
 
     fn color(&self) -> [f32; 4] {
@@ -84,13 +91,12 @@ impl Element for Window {
 
     fn set_visible(&mut self, visible: bool) {
         self.visible = visible;
-        self.base.visible = visible;
     }
 
     fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
-        let id = self.base.base.id();
-        let self_ptr = self.as_ptr();
-        self.base.children.push(child);
+        let id = self.base.id();
+        let self_ptr = self.as_ptr_mut();
+        self.children.push(child);
         unsafe {
             if let Some(c_id) = (*child).base().map(|b| b.id()) {
                 ctx.register_widget(c_id, child);
@@ -101,23 +107,25 @@ impl Element for Window {
     }
 
     fn clear_children(&mut self, ctx: &mut UiContext) {
-        self.base.clear_children(ctx);
+        self.children.clear();
+        let id = self.base.id();
+        ctx.clear_children_ids(id);
     }
 
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        self.base.children(ctx)
+    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+        self.children.clone()
     }
 
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        self.base.set_parent(parent, ctx);
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
+        self.parent = parent;
     }
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        self.base.parent(ctx)
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
+        self.parent
     }
 
     fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
-        for &child_ptr in &self.base.children {
+        for &child_ptr in &self.children {
             unsafe {
                 (*child_ptr).set_modifiers(ctrl, shift, alt);
             }
@@ -150,24 +158,64 @@ impl Element for Window {
             let (wx, wy, ww, wh) = self.rect();
             quads.push((wx, wy, ww, wh, bg_color));
         }
-        quads.extend(self.base.all_quads(ctx));
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            let cc = widget.color();
+            if cc[3] > 0.0 {
+                let (wx, wy, ww, wh) = widget.rect();
+                quads.push((wx, wy, ww, wh, cc));
+            }
+            quads.extend(widget.all_quads(ctx));
+        }
         quads
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
-        self.base.text_labels()
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut labels = Vec::new();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            labels.extend(widget.text_labels());
+        }
+        labels
     }
 
     fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        self.base.text_labels_with_bounds(ctx)
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            result.extend(widget.text_labels_with_bounds(ctx));
+        }
+        result
     }
 
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        self.base.text_labels_with_font_and_bounds(ctx)
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            result.extend(widget.text_labels_with_font_and_bounds(ctx));
+        }
+        result
     }
 
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        self.base.get_text_items()
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            result.extend(widget.get_text_items());
+        }
+        result
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
@@ -204,6 +252,10 @@ impl Element for Window {
         }
         true
     }
+
+    fn is_window(&self) -> bool {
+        true
+    }
 }
 
 impl Drop for Window {
@@ -234,11 +286,11 @@ mod tests {
     fn test_window_visibility() {
         let mut win = Window::new(0.0, 0.0, 100.0, 100.0);
         assert!(win.visible());
-        assert!(win.base.visible);
+        assert!(win.visible);
 
         win.set_visible(false);
         assert!(!win.visible());
-        assert!(!win.base.visible);
+        assert!(!win.visible);
     }
 
     #[test]

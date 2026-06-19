@@ -1842,11 +1842,11 @@ impl<A: Application> wayland_client::Dispatch<wl_registry::WlRegistry, GlobalLis
     ) {}
 }
 
-impl<A: Application> wayland_client::Dispatch<crate::protocol::zclear_inspector_v1::ZclearInspectorV1, ()> for EngineState<A> {
+impl<A: Application> wayland_client::Dispatch<crate::protocol::zcce_inspector_v1::ZcceInspectorV1, ()> for EngineState<A> {
     fn event(
         _state: &mut Self,
-        _proxy: &crate::protocol::zclear_inspector_v1::ZclearInspectorV1,
-        _event: crate::protocol::zclear_inspector_v1::Event,
+        _proxy: &crate::protocol::zcce_inspector_v1::ZcceInspectorV1,
+        _event: crate::protocol::zcce_inspector_v1::Event,
         _data: &(),
         _conn: &Connection,
         _qh: &QueueHandle<Self>,

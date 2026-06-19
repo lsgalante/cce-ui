@@ -921,7 +921,7 @@ struct AppState {
     pressed_key: Option<PressedKey>,
     key_repeat_delay: std::time::Duration,
     key_repeat_interval: std::time::Duration,
-    inspector: Option<cce_ui::protocol::zclear_inspector_v1::ZclearInspectorV1>,
+    inspector: Option<cce_ui::protocol::zcce_inspector_v1::ZcceInspectorV1>,
     last_inspector_update: std::time::Instant,
     last_serialized: String,
 }
@@ -1519,11 +1519,11 @@ impl ProvidesRegistryState for AppState {
     ) {}
 }
 
-impl wayland_client::Dispatch<cce_ui::protocol::zclear_inspector_v1::ZclearInspectorV1, ()> for AppState {
+impl wayland_client::Dispatch<cce_ui::protocol::zcce_inspector_v1::ZcceInspectorV1, ()> for AppState {
     fn event(
         _state: &mut Self,
-        _proxy: &cce_ui::protocol::zclear_inspector_v1::ZclearInspectorV1,
-        _event: cce_ui::protocol::zclear_inspector_v1::Event,
+        _proxy: &cce_ui::protocol::zcce_inspector_v1::ZcceInspectorV1,
+        _event: cce_ui::protocol::zcce_inspector_v1::Event,
         _data: &(),
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
