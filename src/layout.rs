@@ -2139,7 +2139,7 @@ impl Section {
     pub fn spacing(&mut self, dy: f32) {
         self.content_y += dy;
         for h in &mut self.grid.col_heights {
-            *h = self.content_y;
+            *h += dy;
         }
     }
 
@@ -2897,7 +2897,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     pub fn spacing(&mut self, dy: f32) {
         self.content_y += dy;
         for h in &mut self.grid.col_heights {
-            *h = self.content_y;
+            *h += dy;
         }
     }
 
@@ -3422,6 +3422,29 @@ mod tests {
 
         // The two child sections should be rendered side-by-side in different columns, so sub_left_1 != sub_left_2.
         assert_ne!(sub_left_1, sub_left_2);
+    }
+
+    #[test]
+    fn test_section_context_spacing_preserves_columns() {
+        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
+        let mut ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Test Section", false, false);
+        assert_eq!(ctx.grid.col_heights.len(), 2);
+
+        let mut ui_ctx = crate::context::UiContext::new();
+        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx); // placed in col 0
+
+        let height_col_0_before = ctx.grid.col_heights[0];
+        let height_col_1_before = ctx.grid.col_heights[1];
+        assert_ne!(height_col_0_before, height_col_1_before);
+
+        ctx.spacing(12.0);
+
+        let height_col_0_after = ctx.grid.col_heights[0];
+        let height_col_1_after = ctx.grid.col_heights[1];
+        assert_eq!(height_col_0_after, height_col_0_before + 12.0);
+        assert_eq!(height_col_1_after, height_col_1_before + 12.0);
+        assert_ne!(height_col_0_after, height_col_1_after);
     }
 }
 
