@@ -2121,7 +2121,7 @@ impl Section {
         let max_cols = if is_child {
             1
         } else {
-            ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0) as usize
+            ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0).min(2.0) as usize
         };
         let content_start_y = top + font_size + 5.0;
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
@@ -2866,7 +2866,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let max_cols = if is_child {
             1
         } else {
-            ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0) as usize
+            ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0).min(2.0) as usize
         };
         let content_start_y = top + font_size + 5.0;
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
@@ -3407,7 +3407,7 @@ mod tests {
     fn test_parent_section_side_by_side_child_sections() {
         let mut mock_pc = MockRenderTarget { rects: Vec::new() };
         let mut parent_ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Parent Section", false, false);
-        assert!(parent_ctx.grid.col_heights.len() >= 2);
+        assert_eq!(parent_ctx.grid.col_heights.len(), 2);
 
         let mut sub_left_1 = 0.0;
         let mut sub_left_2 = 0.0;
