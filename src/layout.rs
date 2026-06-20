@@ -2118,7 +2118,11 @@ impl Section {
         let usable_w = (cw - 2.0 * margin_x).max(1.0);
         let min_col_width = 130.0;
         let gap = 8.0;
-        let max_cols = ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0) as usize;
+        let max_cols = if is_child {
+            1
+        } else {
+            ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0) as usize
+        };
         let content_start_y = top + font_size + 5.0;
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
 
@@ -2859,7 +2863,11 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let usable_w = (cw - 2.0 * margin_x).max(1.0);
         let min_col_width = 130.0;
         let gap = 8.0;
-        let max_cols = ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0) as usize;
+        let max_cols = if is_child {
+            1
+        } else {
+            ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0) as usize
+        };
         let content_start_y = top + font_size + 5.0;
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
 
@@ -3028,18 +3036,33 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         F: FnMut(&mut SectionContext<'_, P>),
     {
         let pad = self.padding();
-        let left = self.ax(0.0) + pad;
-        let max_h = self.grid.max_height().max(self.content_y);
-        let top = max_h;
-        let cw = self.cw - 2.0 * pad;
+        let (left, top, cw, is_side_by_side) = if self.grid.col_heights.len() >= 2 {
+            let col = self.grid.next_column();
+            self.last_col = col;
+            let x = self.grid.col_lefts[col];
+            let y = self.grid.col_heights[col];
+            (x, y, self.grid.col_width, true)
+        } else {
+            let left = self.ax(0.0) + pad;
+            let max_h = self.grid.max_height().max(self.content_y);
+            let top = max_h;
+            let cw = self.cw - 2.0 * pad;
+            (left, top, cw, false)
+        };
 
         let mut sub_ctx = SectionContext::new(self.pc, left, top, cw, label, focused, true);
         render_fn(&mut sub_ctx);
         let new_bottom = sub_ctx.finish();
 
-        self.content_y = new_bottom;
-        for h in &mut self.grid.col_heights {
-            *h = new_bottom;
+        if is_side_by_side {
+            let col = self.last_col;
+            self.grid.col_heights[col] = new_bottom;
+            self.content_y = self.grid.max_height();
+        } else {
+            self.content_y = new_bottom;
+            for h in &mut self.grid.col_heights {
+                *h = new_bottom;
+            }
         }
     }
 
@@ -3361,6 +3384,44 @@ mod tests {
         
         let bottom = ctx.finish();
         assert!(bottom > 20.0);
+    }
+
+    #[test]
+    fn test_child_section_single_column_controls() {
+        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
+        let mut ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Test Child Section", false, true);
+        assert_eq!(ctx.grid.col_heights.len(), 1);
+        
+        let mut ui_ctx = crate::context::UiContext::new();
+        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx);
+
+        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        ctx.widget(&mut w2, 12.0, 100.0, 30.0, &mut ui_ctx);
+
+        // Since it's a child section, we should have a single column only, so w1.x == w2.x.
+        assert_eq!(w1.x, w2.x);
+    }
+
+    #[test]
+    fn test_parent_section_side_by_side_child_sections() {
+        let mut mock_pc = MockRenderTarget { rects: Vec::new() };
+        let mut parent_ctx = SectionContext::new(&mut mock_pc, 10.0, 20.0, 500.0, "Parent Section", false, false);
+        assert!(parent_ctx.grid.col_heights.len() >= 2);
+
+        let mut sub_left_1 = 0.0;
+        let mut sub_left_2 = 0.0;
+
+        parent_ctx.add_section("Child Section 1", false, |subsec1| {
+            sub_left_1 = subsec1.left;
+        });
+
+        parent_ctx.add_section("Child Section 2", false, |subsec2| {
+            sub_left_2 = subsec2.left;
+        });
+
+        // The two child sections should be rendered side-by-side in different columns, so sub_left_1 != sub_left_2.
+        assert_ne!(sub_left_1, sub_left_2);
     }
 }
 
