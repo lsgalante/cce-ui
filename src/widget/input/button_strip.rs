@@ -105,7 +105,7 @@ impl ButtonStrip {
 
             let r = self.item_rect(i);
             let padding_y = crate::layout::button_padding();
-            let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
+            let y_offset = if has_icon { padding_y + 12.0 } else { 0.0 };
             let usable_h = (r.3 - y_offset).max(1.0);
 
             let w_px = (r.2 * scale) as u32;
@@ -190,9 +190,12 @@ impl ButtonStrip {
                 } else {
                     trimmed
                 };
-                let y_offset = if has_icon { 2.0 * padding + 12.0 } else { 0.0 };
                 let text_w = TextLabel::estimate_width(label_text, font_size);
-                (text_w + y_offset + 2.0 * padding).max(1.0)
+                if has_icon {
+                    (text_w + 12.0 + 3.0 * padding).max(1.0)
+                } else {
+                    (text_w + 2.0 * padding).max(1.0)
+                }
             } else {
                 let text_w = TextLabel::estimate_width(label, font_size);
                 (text_w + 2.0 * padding).max(1.0)
@@ -326,7 +329,7 @@ impl Element for ButtonStrip {
                     let space_idx = trimmed.find(' ');
                     let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
                     let padding_y = crate::layout::button_padding();
-                    let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
+                    let y_offset = if has_icon { padding_y + 12.0 } else { 0.0 };
 
                     for &(qx, qy, qw, qh, qc) in &self.tab_text_quads[i] {
                         let absolute_x = r.0 + qx;
