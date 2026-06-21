@@ -175,7 +175,6 @@ impl ButtonStrip {
         if self.buttons.is_empty() || idx >= self.buttons.len() {
             return (0.0, 0.0, 0.0, 0.0);
         }
-        let n = self.buttons.len() as f32;
         let (x, y, w, h) = self.rect();
 
         let get_button_weight = |i: usize| -> f32 {
@@ -192,31 +191,25 @@ impl ButtonStrip {
                 let padding_y = crate::layout::button_padding();
                 let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
                 let text_w = TextLabel::estimate_width(label_text, 12.0);
-                (text_w + y_offset).max(1.0)
+                (text_w + y_offset + 2.0 * padding_y).max(1.0)
             } else {
+                let padding_x = crate::layout::paginator_tab_padding_x();
                 let text_w = TextLabel::estimate_width(label, 12.0);
-                text_w.max(1.0)
+                (text_w + 2.0 * padding_x).max(1.0)
             }
         };
 
         let mut weights = Vec::new();
-        let mut total_weight = 0.0;
         for i in 0..self.buttons.len() {
-            let wt = get_button_weight(i);
-            weights.push(wt);
-            total_weight += wt;
+            weights.push(get_button_weight(i));
         }
 
         if self.vertical {
             let spacing = 8.0;
-            let total_spacing = spacing * (n - 1.0);
-            let available_h = (h - total_spacing).max(0.0);
-            
             let mut current_y = y;
             let mut btn_h = 0.0;
             for i in 0..=idx {
-                let share = if total_weight > 0.0 { weights[i] / total_weight } else { 1.0 / n };
-                btn_h = share * available_h;
+                btn_h = weights[i];
                 if i < idx {
                     current_y += btn_h + spacing;
                 }
@@ -226,8 +219,7 @@ impl ButtonStrip {
             let mut current_x = x;
             let mut btn_w = 0.0;
             for i in 0..=idx {
-                let share = if total_weight > 0.0 { weights[i] / total_weight } else { 1.0 / n };
-                btn_w = share * w;
+                btn_w = weights[i];
                 if i < idx {
                     current_x += btn_w;
                 }
