@@ -95,7 +95,7 @@ fn parse_and_set_colors(content: &str) {
         }
     };
 
-    if let Some(opacity) = val.pointer("/transparency/opacity").and_then(|v| v.as_f64()) {
+    if let Some(opacity) = val.pointer("/layout/menubar_opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = OPACITY.write() {
             *lock = Some(opacity as f32);
         }
