@@ -87,8 +87,6 @@ static SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
 static NESTED_SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
 static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
 
-static PAGINATOR_TAB_MARGIN_X: RwLock<f32> = RwLock::new(5.0);
-static PAGINATOR_TAB_MARGIN_Y: RwLock<f32> = RwLock::new(10.0);
 static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
 static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
 
@@ -398,35 +396,6 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_MARGIN.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("paginator_tab_margin_x") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PAGINATOR_TAB_MARGIN_X.write() {
-                        *lock = val;
-                    }
-                }
-            } else if let Some(rest) = trimmed.strip_prefix("paginator_tab_margin") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PAGINATOR_TAB_MARGIN_X.write() {
-                        *lock = val;
-                    }
-                    if let Ok(mut lock) = PAGINATOR_TAB_MARGIN_Y.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("paginator_tab_margin_y") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = PAGINATOR_TAB_MARGIN_Y.write() {
                         *lock = val;
                     }
                 }
@@ -1403,81 +1372,7 @@ pub fn set_color_selector_preview_margin(margin: f32) {
     }
 }
 
-pub fn paginator_tab_margin_x() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            let mut general_margin = None;
-            let mut x_margin = None;
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("paginator_tab_margin_x") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        x_margin = Some(val);
-                    }
-                } else if let Some(rest) = trimmed.strip_prefix("paginator_tab_margin") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        general_margin = Some(val);
-                    }
-                }
-            }
-            let val = x_margin.or(general_margin).unwrap_or(5.0);
-            if let Ok(mut lock) = PAGINATOR_TAB_MARGIN_X.write() {
-                *lock = val;
-            }
-        }
-    });
-    *PAGINATOR_TAB_MARGIN_X.read().unwrap()
-}
 
-pub fn set_paginator_tab_margin_x(margin: f32) {
-    if let Ok(mut lock) = PAGINATOR_TAB_MARGIN_X.write() {
-        *lock = margin;
-    }
-}
-
-pub fn paginator_tab_margin_y() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            let mut general_margin = None;
-            let mut y_margin = None;
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("paginator_tab_margin_y") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        y_margin = Some(val);
-                    }
-                } else if let Some(rest) = trimmed.strip_prefix("paginator_tab_margin") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        general_margin = Some(val);
-                    }
-                }
-            }
-            let val = y_margin.or(general_margin).unwrap_or(10.0);
-            if let Ok(mut lock) = PAGINATOR_TAB_MARGIN_Y.write() {
-                *lock = val;
-            }
-        }
-    });
-    *PAGINATOR_TAB_MARGIN_Y.read().unwrap()
-}
-
-pub fn set_paginator_tab_margin_y(margin: f32) {
-    if let Ok(mut lock) = PAGINATOR_TAB_MARGIN_Y.write() {
-        *lock = margin;
-    }
-}
 
 pub fn paginator_tab_padding_x() -> f32 {
     use std::sync::Once;

@@ -1240,7 +1240,7 @@ impl PointerHandler for AppState {
                                 }
                                 if btn == cce_ui::widget::MouseButton::Left {
                                     for w in &mut jl.widgets {
-                                        let active_page = jl.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+                                        let active_page = 0;
                                         if w.page_idx != active_page {
                                             continue;
                                         }

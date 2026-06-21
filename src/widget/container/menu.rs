@@ -1511,7 +1511,7 @@ impl PageSelector for MenuBar {
 
     fn sidebar_w(&self) -> f32 {
         let padding_x = crate::layout::paginator_tab_padding_x();
-        let margin_x = crate::layout::paginator_tab_margin_x();
+        let margin_x = 5.0;
         if self.vertical {
             (12.0 + 2.0 * padding_x).max(24.0) + 2.0 * margin_x
         } else {

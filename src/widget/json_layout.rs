@@ -1,5 +1,5 @@
 use crate::widget::{
-    Element, Widget, Checkbox, Button, Label, Spinbox, ColorSelector, TextLabel, Paginator, MouseButton, ElementState, focus, Slider, Event, UiContext,
+    Element, Widget, Checkbox, Button, Label, Spinbox, ColorSelector, TextLabel, MouseButton, ElementState, Slider, Event, UiContext,
 };
 use serde::Deserialize;
 
@@ -51,7 +51,6 @@ pub struct JsonWidget {
 pub struct JsonLayoutWidget {
     base: Widget,
     pub widgets: Vec<JsonWidget>,
-    pub paginator: Option<Paginator>,
     pub dragging_slider_idx: Option<usize>,
     pub page_scroll_y: Vec<f32>,
     pub page_total_heights: Vec<f32>,
@@ -61,7 +60,6 @@ impl JsonLayoutWidget {
     pub fn new(config: &JsonLayoutConfig) -> Self {
         let mut widgets = Vec::new();
         let mut page_titles = Vec::new();
-        let mut paginator = None;
 
         if let Some(ref pages_conf) = config.pages {
             for (page_idx, page) in pages_conf.iter().enumerate() {
@@ -131,7 +129,6 @@ impl JsonLayoutWidget {
                     });
                 }
             }
-            paginator = Some(Paginator::new(56.0, page_titles));
         } else if let Some(ref widgets_conf) = config.widgets {
             for (idx, w_conf) in widgets_conf.iter().enumerate() {
                 let id = w_conf.id.clone().unwrap_or_else(|| format!("widget_{}", idx));
@@ -202,7 +199,6 @@ impl JsonLayoutWidget {
         Self {
             base: Widget::new(),
             widgets,
-            paginator,
             dragging_slider_idx: None,
             page_scroll_y: vec![0.0; 16],
             page_total_heights: vec![0.0; 16],
@@ -210,14 +206,10 @@ impl JsonLayoutWidget {
     }
 
     pub fn layout_children(&mut self) {
-        let (bx, by, bw, bh) = self.rect();
-        if let Some(paginator) = &mut self.paginator {
-            paginator.set_rect(bx, by, bw, bh);
-        }
+        let (bx, by, bw, _) = self.rect();
 
-        let has_paginator = self.paginator.is_some();
-        let pad_x = if has_paginator { 76.0 } else { 16.0 };
-        let usable_w = if has_paginator { bw - pad_x - 16.0 } else { bw - 2.0 * 16.0 };
+        let pad_x = 16.0;
+        let usable_w = bw - 2.0 * 16.0;
         
         let mut page_current_y = vec![16.0; 16]; // support up to 16 pages
         let spacing = 12.0;
@@ -299,12 +291,7 @@ impl Element for JsonLayoutWidget {
 
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
         let mut changed = false;
-        if let Some(paginator) = &mut self.paginator {
-            if paginator.tick(dt, ctx) {
-                changed = true;
-            }
-        }
-        let active_page = self.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+        let active_page = 0;
         for w in &mut self.widgets {
             if w.page_idx != active_page {
                 continue;
@@ -318,19 +305,10 @@ impl Element for JsonLayoutWidget {
 
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        if let Some(paginator) = &self.paginator {
-            quads.extend(paginator.all_quads(ctx));
-            if let Some(hq) = paginator.highlight_quad(ctx) {
-                if !quads.contains(&hq) {
-                    quads.push(hq);
-                }
-            }
-        }
 
-        let active_page = self.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+        let active_page = 0;
         let (bx, by, bw, bh) = self.rect();
-        let has_paginator = self.paginator.is_some();
-        let pad_x = if has_paginator { 76.0 } else { 16.0 };
+        let pad_x = 16.0;
         let min_x = bx + pad_x - 4.0;
         let max_x = bx + bw;
         let min_y = by;
@@ -365,11 +343,7 @@ impl Element for JsonLayoutWidget {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        if let Some(paginator) = &self.paginator {
-            labels.extend(paginator.text_labels());
-        }
-
-        let active_page = self.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+        let active_page = 0;
 
         for w in &self.widgets {
             if w.page_idx != active_page {
@@ -389,15 +363,9 @@ impl Element for JsonLayoutWidget {
     fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
         let (bx, by, bw, bh) = self.rect();
-        if let Some(paginator) = &self.paginator {
-            for l in paginator.text_labels() {
-                labels.push((l, None));
-            }
-        }
 
-        let active_page = self.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
-        let has_paginator = self.paginator.is_some();
-        let pad_x = if has_paginator { 76.0 } else { 16.0 };
+        let active_page = 0;
+        let pad_x = 16.0;
         let content_bounds = Some([bx + pad_x - 4.0, by, bx + bw, by + bh]);
 
         for w in &self.widgets {
@@ -422,16 +390,6 @@ impl Element for JsonLayoutWidget {
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         let mut changed = false;
-
-        if let Some(paginator) = &mut self.paginator {
-            if paginator.handle_event(event, ctx) {
-                if paginator.take_click() {
-                    focus::clear_focus();
-                    self.layout_children();
-                }
-                changed = true;
-            }
-        }
 
         match event {
             Event::PointerMove { x, y } => {
@@ -459,7 +417,7 @@ impl Element for JsonLayoutWidget {
             _ => {}
         }
 
-        let active_page = self.paginator.as_ref().map(|p| p.selected_page()).unwrap_or(0);
+        let active_page = 0;
         for (idx, w) in self.widgets.iter_mut().enumerate() {
             if w.page_idx != active_page {
                 continue;
@@ -535,11 +493,6 @@ impl Element for JsonLayoutWidget {
         }
 
         if let Event::Tick(dt) = event {
-            if let Some(paginator) = &mut self.paginator {
-                if paginator.tick(*dt, ctx) {
-                    changed = true;
-                }
-            }
             for w in &mut self.widgets {
                 if w.page_idx != active_page {
                     continue;
