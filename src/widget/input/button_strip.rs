@@ -180,6 +180,8 @@ impl ButtonStrip {
         let get_button_weight = |i: usize| -> f32 {
             let label = &self.buttons[i];
             let trimmed = label.trim();
+            let font_size = crate::layout::menubar_font_parsed().1;
+            let padding = crate::layout::button_padding();
             if self.vertical {
                 let space_idx = trimmed.find(' ');
                 let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
@@ -188,14 +190,12 @@ impl ButtonStrip {
                 } else {
                     trimmed
                 };
-                let padding_y = crate::layout::button_padding();
-                let y_offset = if has_icon { 2.0 * padding_y + 12.0 } else { 0.0 };
-                let text_w = TextLabel::estimate_width(label_text, 12.0);
-                (text_w + y_offset + 2.0 * padding_y).max(1.0)
+                let y_offset = if has_icon { 2.0 * padding + 12.0 } else { 0.0 };
+                let text_w = TextLabel::estimate_width(label_text, font_size);
+                (text_w + y_offset + 2.0 * padding).max(1.0)
             } else {
-                let padding_x = crate::layout::paginator_tab_padding_x();
-                let text_w = TextLabel::estimate_width(label, 12.0);
-                (text_w + 2.0 * padding_x).max(1.0)
+                let text_w = TextLabel::estimate_width(label, font_size);
+                (text_w + 2.0 * padding).max(1.0)
             }
         };
 

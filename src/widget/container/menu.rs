@@ -354,7 +354,6 @@ impl Element for MenuBar {
         let font_setting = crate::layout::menubar_font();
         let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
-        let char_w = 7.5 * (font_size / 12.0);
 
         if self.vertical {
             let mut cy = 16.0;
@@ -381,7 +380,7 @@ impl Element for MenuBar {
             let mut dummy = crate::context::UiContext::new();
             self.menus.set_parent(Some(parent_ptr), &mut dummy);
         } else {
-            let padding_x = crate::layout::paginator_tab_padding_x();
+            let padding = crate::layout::button_padding();
             let mut cx = 8.0;
             if self.center_items {
                 let mut total_width = 8.0;
@@ -390,11 +389,12 @@ impl Element for MenuBar {
                     if !self.context_options.is_empty() {
                         display_title.push_str(" ▼");
                     }
-                    total_width += display_title.len() as f32 * char_w + 24.0;
+                    total_width += TextLabel::estimate_width(&display_title, font_size) + 24.0;
                 }
                 let mut btn_strip_w = 0.0;
                 for btn_label in &self.menus.buttons {
-                    btn_strip_w += btn_label.len() as f32 * char_w + 2.0 * padding_x;
+                    let text_w = TextLabel::estimate_width(btn_label, font_size);
+                    btn_strip_w += text_w + 2.0 * padding;
                 }
                 total_width += btn_strip_w;
                 if self.base.w > total_width {
@@ -406,11 +406,12 @@ impl Element for MenuBar {
                 if !self.context_options.is_empty() {
                     display_title.push_str(" ▼");
                 }
-                cx += display_title.len() as f32 * char_w + 24.0;
+                cx += TextLabel::estimate_width(&display_title, font_size) + 24.0;
             }
             let mut btn_strip_w = 0.0;
             for btn_label in &self.menus.buttons {
-                btn_strip_w += btn_label.len() as f32 * char_w + 2.0 * padding_x;
+                let text_w = TextLabel::estimate_width(btn_label, font_size);
+                btn_strip_w += text_w + 2.0 * padding;
             }
             let menus_x = (clamped_x + cx).clamp(clamped_x, clamped_x + clamped_w);
             let menus_w = btn_strip_w.min(clamped_x + clamped_w - menus_x);
