@@ -43,6 +43,7 @@ static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.
 static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
+static WINDOW_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 
 
 
@@ -106,6 +107,12 @@ fn parse_and_set_colors(content: &str) {
     if let Some(w_opacity) = val.pointer("/surfaces/window_opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = WINDOW_OPACITY.write() {
             *lock = Some(w_opacity as f32);
+        }
+    }
+
+    if let Some(radius) = val.pointer("/surfaces/window_corner_radius").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = WINDOW_CORNER_RADIUS.write() {
+            *lock = radius as f32;
         }
     }
 
@@ -469,6 +476,17 @@ pub fn popover_bg_color() -> [f32; 4] {
 pub fn set_popover_bg_color(color: [f32; 4]) {
     if let Ok(mut lock) = POPOVER_BG_COLOR.write() {
         *lock = [color[0], color[1], color[2], 1.0];
+    }
+}
+
+pub fn window_corner_radius() -> f32 {
+    load_colors_once();
+    *WINDOW_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_window_corner_radius(radius: f32) {
+    if let Ok(mut lock) = WINDOW_CORNER_RADIUS.write() {
+        *lock = radius;
     }
 }
 

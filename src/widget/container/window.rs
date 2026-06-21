@@ -22,7 +22,7 @@ impl Window {
             parent: None,
             border_color: None,
             border_thickness: 1.0,
-            radius: 12.0,
+            radius: crate::color::window_corner_radius(),
             background_color: None,
             visible: true,
         }
