@@ -2584,6 +2584,7 @@ pub trait LayoutStrategy {
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32);
     fn set_section_count(&mut self, _count: usize) {}
     fn get_column_width(&self) -> Option<f32> { None }
+    fn get_gap(&self) -> f32 { 20.0 }
 }
 
 pub struct ColumnLayout {
@@ -2624,6 +2625,10 @@ impl LayoutStrategy for ColumnLayout {
     fn get_column_width(&self) -> Option<f32> {
         Some(self.width)
     }
+
+    fn get_gap(&self) -> f32 {
+        self.gap
+    }
 }
 
 pub struct AdaptiveGrid {
@@ -2659,7 +2664,12 @@ impl LayoutStrategy for AdaptiveGrid {
 
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
         if let Some(ref mut grid) = self.grid {
-            if ww > grid.col_width + 5.0 {
+            let num_cols = grid.col_heights.len();
+            let num_cols_spanned = (((ww + grid.gap) / (grid.col_width + grid.gap)).round() as usize)
+                .min(num_cols)
+                .max(1);
+
+            if num_cols_spanned >= num_cols {
                 let y = grid.max_height();
                 let x = grid.left;
                 let allocated_w = grid.width;
@@ -2667,12 +2677,35 @@ impl LayoutStrategy for AdaptiveGrid {
                     *col_h = y + wh + grid.gap;
                 }
                 (x, y, allocated_w, wh)
-            } else {
+            } else if num_cols_spanned == 1 {
                 let col = grid.next_column();
                 let x = grid.col_lefts[col];
                 let y = grid.col_heights[col];
                 grid.col_heights[col] += wh + grid.gap;
                 (x, y, grid.col_width, wh)
+            } else {
+                let n = num_cols_spanned;
+                let mut best_start_col = 0;
+                let mut min_max_h = f32::MAX;
+                for c in 0..=(num_cols - n) {
+                    let mut max_h = 0.0f32;
+                    for i in 0..n {
+                        if grid.col_heights[c + i] > max_h {
+                            max_h = grid.col_heights[c + i];
+                        }
+                    }
+                    if max_h < min_max_h {
+                        min_max_h = max_h;
+                        best_start_col = c;
+                    }
+                }
+                let x = grid.col_lefts[best_start_col];
+                let y = min_max_h;
+                let allocated_w = n as f32 * grid.col_width + (n - 1) as f32 * grid.gap;
+                for i in 0..n {
+                    grid.col_heights[best_start_col + i] = y + wh + grid.gap;
+                }
+                (x, y, allocated_w, wh)
             }
         } else {
             (0.0, 0.0, 0.0, wh)
@@ -2685,6 +2718,10 @@ impl LayoutStrategy for AdaptiveGrid {
 
     fn get_column_width(&self) -> Option<f32> {
         self.grid.as_ref().map(|g| g.col_width)
+    }
+
+    fn get_gap(&self) -> f32 {
+        self.gap
     }
 }
 
@@ -2799,6 +2836,16 @@ impl<'a, P: RenderTarget + Default> PageLayoutBuilder<'a, P> {
         render_fn(&mut real_ctx);
         real_ctx.finish();
         self.idx += 1;
+    }
+
+    pub fn add_section_spanned<F>(&mut self, final_pc: &mut P, label: &str, span: usize, focused: bool, render_fn: F)
+    where
+        F: FnMut(&mut SectionContext<'_, P>),
+    {
+        let col_width = self.strategy.get_column_width().unwrap_or(self.section_width);
+        let gap = self.strategy.get_gap();
+        let width = span as f32 * col_width + (span - 1) as f32 * gap;
+        self.add_section_with_width(final_pc, width, label, focused, render_fn);
     }
 }
 
