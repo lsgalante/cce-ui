@@ -37,6 +37,8 @@ static WINDOW_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
 static SCROLLINGLIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
+static SCROLLINGLIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
+static SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
 static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
@@ -110,7 +112,20 @@ fn parse_and_set_colors(content: &str) {
     let parse_hex = |hex_str: &str| -> Option<[f32; 4]> {
         let hex = hex_str.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
         let hex = hex.trim_start_matches('#');
-        if hex.len() >= 6 {
+        if hex.len() >= 8 {
+            if let (Ok(r), Ok(g), Ok(b), Ok(a)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+                u8::from_str_radix(&hex[6..8], 16),
+            ) {
+                let r_f = srgb_to_linear(r as f32 / 255.0);
+                let g_f = srgb_to_linear(g as f32 / 255.0);
+                let b_f = srgb_to_linear(b as f32 / 255.0);
+                let a_f = a as f32 / 255.0;
+                return Some([r_f, g_f, b_f, a_f]);
+            }
+        } else if hex.len() >= 6 {
             if let (Ok(r), Ok(g), Ok(b)) = (
                 u8::from_str_radix(&hex[0..2], 16),
                 u8::from_str_radix(&hex[2..4], 16),
@@ -167,6 +182,16 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = parsed_scrollinglist_bg {
         if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 0.3];
+        }
+    }
+    if let Some(c) = get_color("/layout/scrollinglist_entry_bg_color") {
+        if let Ok(mut lock) = SCROLLINGLIST_ENTRY_BG_COLOR.write() {
+            *lock = c;
+        }
+    }
+    if let Some(c) = get_color("/layout/scrollinglist_entry_highlight_color") {
+        if let Ok(mut lock) = SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR.write() {
+            *lock = c;
         }
     }
     if let Some(c) = parsed_breadcrumb_bg {
@@ -400,6 +425,28 @@ pub fn scrollinglist_bg_color() -> [f32; 4] {
 pub fn set_scrollinglist_bg_color(color: [f32; 4]) {
     if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
         *lock = [color[0], color[1], color[2], 0.3];
+    }
+}
+
+pub fn scrollinglist_entry_bg_color() -> [f32; 4] {
+    load_colors_once();
+    *SCROLLINGLIST_ENTRY_BG_COLOR.read().unwrap()
+}
+
+pub fn set_scrollinglist_entry_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = SCROLLINGLIST_ENTRY_BG_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn scrollinglist_entry_highlight_color() -> [f32; 4] {
+    load_colors_once();
+    *SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR.read().unwrap()
+}
+
+pub fn set_scrollinglist_entry_highlight_color(color: [f32; 4]) {
+    if let Ok(mut lock) = SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR.write() {
+        *lock = color;
     }
 }
 
