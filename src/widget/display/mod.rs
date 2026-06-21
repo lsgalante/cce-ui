@@ -17,6 +17,7 @@ pub mod layout_preview;
 pub mod font_preview;
 pub mod info_box;
 pub mod status_dot;
+pub mod preview;
 
 pub use self::text_label::TextLabel;
 pub(crate) use self::text_label::make_widget_text_buffer;
@@ -38,3 +39,4 @@ pub use self::layout_preview::{PreviewLayoutMode, LayoutPreview};
 pub use self::font_preview::FontPreview;
 pub use self::info_box::InfoBox;
 pub use self::status_dot::{DotStatus, StatusDot};
+pub use self::preview::PreviewState;
