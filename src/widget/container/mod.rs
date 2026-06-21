@@ -13,6 +13,7 @@ pub mod switcher;
 pub mod layer;
 pub mod page;
 pub mod window;
+pub mod paginator;
 
 pub use container::Container;
 pub use header::Header;
@@ -29,3 +30,4 @@ pub use switcher::Switcher;
 pub use layer::Layer;
 pub use page::Page;
 pub use window::Window;
+pub use paginator::Paginator;
