@@ -17,6 +17,7 @@ pub struct Paginator {
     pub pages: Vec<String>,
     parent: Option<*mut (dyn Element + 'static)>,
     pub on_page_changed_cb: Option<Box<dyn Fn(usize) + Send + Sync>>,
+    pub just_clicked: Option<usize>,
 }
 
 impl Paginator {
@@ -53,6 +54,7 @@ impl Paginator {
             pages,
             parent: None,
             on_page_changed_cb: None,
+            just_clicked: None,
         }
     }
 
@@ -69,6 +71,14 @@ impl Paginator {
     }
 
     pub fn with_tab_y_offset(self, _offset: f32) -> Self {
+        self
+    }
+
+    pub fn with_title(self, _title: &str) -> Self {
+        self
+    }
+
+    pub fn with_vertical(self, _vertical: bool) -> Self {
         self
     }
 
@@ -220,6 +230,7 @@ impl Element for Paginator {
             changed = true;
             if let Some(idx) = self.sidebar_menu.take_click() {
                 self.set_selected_page(idx);
+                self.just_clicked = Some(idx);
             }
         }
         for (i, plate) in self.plates.iter_mut().enumerate() {
@@ -314,6 +325,14 @@ impl Element for Paginator {
         Some(self)
     }
 
+    fn as_menu_controller(&self) -> Option<&dyn MenuController> {
+        Some(self)
+    }
+
+    fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> {
+        Some(self)
+    }
+
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
         quads.extend(self.sidebar_menu.extra_quads());
@@ -324,6 +343,71 @@ impl Element for Paginator {
         }
         quads
     }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = false;
+        if self.sidebar_menu.mouse_wheel(delta, px, py, ctx) {
+            changed = true;
+        }
+        for (i, plate) in self.plates.iter_mut().enumerate() {
+            if i == self.selected_page && !self.page_hidden {
+                if plate.mouse_wheel(delta, px, py, ctx) {
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        let mut changed = false;
+        if self.sidebar_menu.keyboard_input(event, ctx) {
+            changed = true;
+        }
+        for (i, plate) in self.plates.iter_mut().enumerate() {
+            if i == self.selected_page && !self.page_hidden {
+                if plate.keyboard_input(event, ctx) {
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+        self.sidebar_menu.prepare_text(fs);
+        for (i, plate) in self.plates.iter_mut().enumerate() {
+            if i == self.selected_page && !self.page_hidden {
+                plate.prepare_text(fs);
+            }
+        }
+    }
+
+    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        self.sidebar_menu.highlight_quad(ctx)
+    }
+}
+
+impl MenuController for Paginator {
+    fn menu_click(&mut self) -> Option<(usize, usize)> {
+        self.just_clicked.take().map(|idx| (idx, 0))
+    }
+
+    fn trigger_menu_click(&mut self, _menu_idx: usize, _item_idx: usize) {}
+    fn set_item_checked(&mut self, _menu_idx: usize, _item_idx: usize, _checked: bool) {}
+    fn set_menu_items(&mut self, _menu_idx: usize, _items: &[String]) {}
+    fn is_menu_bar(&self) -> bool { false }
+    fn is_menu_open(&self) -> bool { false }
+    fn menu_items(&self) -> Vec<String> { Vec::new() }
+    fn menu_item_checked(&self) -> Vec<Option<bool>> { Vec::new() }
+    fn is_vertical(&self) -> bool { true }
+    fn menu_names(&self) -> Vec<String> { Vec::new() }
+    fn menu_items_list(&self) -> Vec<Vec<String>> { Vec::new() }
+    fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> { Vec::new() }
+    fn take_context_change(&mut self) -> Option<usize> { None }
+    fn set_context_selected(&mut self, _selected: usize) {}
+    fn set_center_items(&mut self, _center: bool) {}
+    fn get_menu_items_at(&self, _px: f32, _py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> { None }
 }
 
 impl Drop for Paginator {
