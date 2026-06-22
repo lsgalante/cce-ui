@@ -154,18 +154,29 @@ impl Element for Window {
         }
         let mut quads = Vec::new();
         let bg_color = self.color();
+        let (wx, wy, ww, wh) = self.rect();
         if bg_color[3] != 0.0 {
-            let (wx, wy, ww, wh) = self.rect();
             quads.push((wx, wy, ww, wh, bg_color));
         }
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
+            let mut child_quads = Vec::new();
             let cc = widget.color();
             if cc[3] > 0.0 {
-                let (wx, wy, ww, wh) = widget.rect();
-                quads.push((wx, wy, ww, wh, cc));
+                let (cx, cy, cw, ch) = widget.rect();
+                child_quads.push((cx, cy, cw, ch, cc));
             }
-            quads.extend(widget.all_quads(ctx));
+            child_quads.extend(widget.all_quads(ctx));
+
+            for (qx, qy, qw, qh, qc) in child_quads {
+                let x0 = qx.max(wx);
+                let y0 = qy.max(wy);
+                let x1 = (qx + qw).min(wx + ww);
+                let y1 = (qy + qh).min(wy + wh);
+                if x1 > x0 && y1 > y0 {
+                    quads.push((x0, y0, x1 - x0, y1 - y0, qc));
+                }
+            }
         }
         quads
     }
@@ -187,9 +198,25 @@ impl Element for Window {
             return Vec::new();
         }
         let mut result = Vec::new();
+        let (wx, wy, ww, wh) = self.rect();
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
-            result.extend(widget.text_labels_with_bounds(ctx));
+            for (label, bounds) in widget.text_labels_with_bounds(ctx) {
+                let cb = if let Some(b) = bounds {
+                    let cx0 = b[0].max(wx);
+                    let cy0 = b[1].max(wy);
+                    let cx1 = b[2].min(wx + ww);
+                    let cy1 = b[3].min(wy + wh);
+                    if cx1 > cx0 && cy1 > cy0 {
+                        Some([cx0, cy0, cx1, cy1])
+                    } else {
+                        continue;
+                    }
+                } else {
+                    Some([wx, wy, wx + ww, wy + wh])
+                };
+                result.push((label, cb));
+            }
         }
         result
     }
@@ -199,9 +226,25 @@ impl Element for Window {
             return Vec::new();
         }
         let mut result = Vec::new();
+        let (wx, wy, ww, wh) = self.rect();
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
-            result.extend(widget.text_labels_with_font_and_bounds(ctx));
+            for (label, font, bounds) in widget.text_labels_with_font_and_bounds(ctx) {
+                let cb = if let Some(b) = bounds {
+                    let cx0 = b[0].max(wx);
+                    let cy0 = b[1].max(wy);
+                    let cx1 = b[2].min(wx + ww);
+                    let cy1 = b[3].min(wy + wh);
+                    if cx1 > cx0 && cy1 > cy0 {
+                        Some([cx0, cy0, cx1, cy1])
+                    } else {
+                        continue;
+                    }
+                } else {
+                    Some([wx, wy, wx + ww, wy + wh])
+                };
+                result.push((label, font, cb));
+            }
         }
         result
     }

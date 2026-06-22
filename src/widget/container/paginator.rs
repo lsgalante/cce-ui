@@ -21,8 +21,25 @@ pub struct Paginator {
 }
 
 impl Paginator {
-    pub fn new(sidebar_w: f32, pages: Vec<String>) -> Self {
+    pub fn new(pages: Vec<String>) -> Self {
         let num_pages = pages.len();
+
+        let temp_paginator = Self {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 0.0,
+            sidebar_menu: ButtonStrip::new(0.0, 0.0, 0.0, 0.0),
+            plates: Vec::new(),
+            selected_page: 0,
+            page_hidden: false,
+            sidebar_w: 0.0,
+            pages: pages.clone(),
+            parent: None,
+            on_page_changed_cb: None,
+            just_clicked: None,
+        };
+        let sidebar_w = temp_paginator.sidebar_w();
 
         let mut sidebar_menu = ButtonStrip::new(0.0, 0.0, sidebar_w, 0.0)
             .with_vertical(true)
