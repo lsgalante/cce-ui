@@ -7,6 +7,7 @@ pub mod engine;
 pub mod scale;
 pub mod backend;
 pub mod context;
+pub mod process;
 
 pub mod colors {
     pub use crate::color::*;
