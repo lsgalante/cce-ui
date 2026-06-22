@@ -20,7 +20,7 @@ impl TextLabel {
                 _ => 0.52,
             };
         }
-        (weight_sum * font_size * 1.15).ceil()
+        (weight_sum * font_size * 1.30).ceil()
     }
 
     pub fn curved_layout(
