@@ -1,5 +1,6 @@
 pub mod color;
 pub mod widget;
+pub mod config;
 pub mod layout;
 pub mod wayland;
 pub mod protocol;
