@@ -189,7 +189,26 @@ impl Element for ColorSelector {
             if let Some(mut old_child) = child_guard.take() {
                 let _ = old_child.kill();
             }
-            if let Ok(child) = std::process::Command::new(&self.command)
+
+            let cmd_path = if let Ok(mut exe_path) = std::env::current_exe() {
+                exe_path.pop(); // remove executable name
+                let local_path = exe_path.join(&self.command);
+                if local_path.exists() {
+                    local_path.to_string_lossy().into_owned()
+                } else {
+                    let home = std::env::var("HOME").unwrap_or_default();
+                    let local_bin = std::path::Path::new(&home).join(".local/bin").join(&self.command);
+                    if local_bin.exists() {
+                        local_bin.to_string_lossy().into_owned()
+                    } else {
+                        self.command.clone()
+                    }
+                }
+            } else {
+                self.command.clone()
+            };
+
+            if let Ok(child) = std::process::Command::new(&cmd_path)
                 .arg(&hex)
                 .stdout(std::process::Stdio::piped())
                 .spawn()
