@@ -136,7 +136,33 @@ impl PageSelector for Paginator {
     }
 
     fn sidebar_w(&self) -> f32 {
-        self.sidebar_w
+        if self.pages.is_empty() {
+            return self.sidebar_w;
+        }
+        let font_size = crate::layout::menubar_font_parsed().1;
+        let padding = crate::layout::button_padding();
+        
+        let mut max_w = 0.0;
+        for label in &self.pages {
+            let trimmed = label.trim();
+            let space_idx = trimmed.find(' ');
+            let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
+            let content_w = if has_icon {
+                let space_idx = space_idx.unwrap();
+                let (icon, _) = trimmed.split_at(space_idx);
+                let icon = icon.trim();
+                let icon_font_size = 14.0;
+                let est_icon_w = TextLabel::estimate_width(icon, icon_font_size);
+                est_icon_w.max(font_size)
+            } else {
+                font_size
+            };
+            let w = content_w + 2.0 * padding;
+            if w > max_w {
+                max_w = w;
+            }
+        }
+        max_w.max(1.0)
     }
 
     fn set_sidebar_mode(&mut self, _enabled: bool) {}
@@ -170,10 +196,11 @@ impl Element for Paginator {
         self.w = w;
         self.h = h;
 
-        self.sidebar_menu.set_rect(x, y, self.sidebar_w, h);
+        let sidebar_w = self.sidebar_w();
+        self.sidebar_menu.set_rect(x, y, sidebar_w, h);
 
-        let page_x = x + self.sidebar_w;
-        let page_w = (w - self.sidebar_w).max(0.0);
+        let page_x = x + sidebar_w;
+        let page_w = (w - sidebar_w).max(0.0);
         for (i, plate) in self.plates.iter_mut().enumerate() {
             plate.set_rect(page_x, y, page_w, h);
             plate.visible = (i == self.selected_page) && !self.page_hidden;
