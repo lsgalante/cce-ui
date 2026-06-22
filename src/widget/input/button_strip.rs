@@ -13,6 +13,7 @@ pub struct ButtonStrip {
     pub pressed_idx: Option<usize>,
     pub tab_text_quads: Vec<Vec<(f32, f32, f32, f32, [f32; 4])>>,
     pub tab_quads_cache: std::collections::HashMap<String, Vec<(f32, f32, f32, f32, [f32; 4])>>,
+    pub last_padding: Option<f32>,
 }
 
 impl ButtonStrip {
@@ -27,6 +28,7 @@ impl ButtonStrip {
             pressed_idx: None,
             tab_text_quads: Vec::new(),
             tab_quads_cache: std::collections::HashMap::new(),
+            last_padding: None,
         }
     }
 
@@ -69,6 +71,9 @@ impl ButtonStrip {
     }
 
     pub fn generate_rotated_labels(&mut self) {
+        let current_padding = crate::layout::button_padding();
+        self.last_padding = Some(current_padding);
+
         self.tab_text_quads.clear();
         if !self.vertical || self.buttons.is_empty() {
             return;
@@ -243,6 +248,15 @@ impl Element for ButtonStrip {
             self.base.h = h;
             self.generate_rotated_labels();
         }
+    }
+
+    fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool {
+        let current_padding = crate::layout::button_padding();
+        if self.last_padding != Some(current_padding) {
+            self.generate_rotated_labels();
+            return true;
+        }
+        false
     }
 
     fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
