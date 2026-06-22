@@ -671,6 +671,7 @@ pub struct Widget {
     pub row_w: f32,
     pub focused: bool,
     pub id: std::cell::Cell<Option<crate::widget::WidgetId>>,
+    pub dirty: bool,
 }
 
 impl Widget {
@@ -686,6 +687,7 @@ impl Widget {
             row_w: 0.0,
             focused: false,
             id: std::cell::Cell::new(None),
+            dirty: true,
         }
     }
 
@@ -701,6 +703,7 @@ impl Widget {
             row_w: 0.0,
             focused: false,
             id: std::cell::Cell::new(None),
+            dirty: true,
         }
     }
 

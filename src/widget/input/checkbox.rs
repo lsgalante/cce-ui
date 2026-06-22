@@ -276,7 +276,7 @@ impl Element for Toggle {
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.label {
             let font_size = 12.0;
-            let est_w = TextLabel::estimate_width(label, font_size);
+            let est_w = crate::widget::display::measure_text(label, font_size);
             labels.push(TextLabel {
                 text: label.clone(),
                 x: self.base.x + (self.base.w - est_w) / 2.0,

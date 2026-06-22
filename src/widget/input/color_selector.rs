@@ -357,7 +357,7 @@ impl Element for ColorSelector {
         if self.editing {
             let font_size = 12.0;
             let cursor_text: String = self.edit_buffer.chars().take(self.cursor_idx).collect();
-            let text_w = TextLabel::estimate_width(&cursor_text, font_size);
+            let text_w = crate::widget::display::measure_text(&cursor_text, font_size);
             let caret_x = self.base.x + 4.0 + text_w;
             let caret_h = font_size * 1.15;
             let caret_y = self.base.y + top + (visual_h - caret_h) / 2.0;

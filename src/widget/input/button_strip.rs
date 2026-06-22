@@ -14,8 +14,6 @@ pub struct ButtonStrip {
     pub tab_text_quads: Vec<Vec<(f32, f32, f32, f32, [f32; 4])>>,
     pub tab_quads_cache: std::collections::HashMap<String, Vec<(f32, f32, f32, f32, [f32; 4])>>,
     pub last_padding: Option<f32>,
-    pub tab_exact_widths: std::collections::HashMap<String, f32>,
-    pub needs_relayout: bool,
 }
 
 impl ButtonStrip {
@@ -31,8 +29,6 @@ impl ButtonStrip {
             tab_text_quads: Vec::new(),
             tab_quads_cache: std::collections::HashMap::new(),
             last_padding: None,
-            tab_exact_widths: std::collections::HashMap::new(),
-            needs_relayout: false,
         }
     }
 
@@ -154,17 +150,13 @@ impl ButtonStrip {
                 if let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(w_px, h_px) {
                     resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
                     let pixels = pixmap.data();
-                    let mut first_row = None;
-                    let mut last_row = None;
-
+                    
                     for row in 0..h_px {
-                        let mut row_has_pixel = false;
                         for col in 0..w_px {
                             let idx = ((row * w_px + col) * 4) as usize;
                             if idx + 3 < pixels.len() {
                                 let a = pixels[idx + 3] as f32 / 255.0;
                                 if a > 0.0 {
-                                    row_has_pixel = true;
                                     let r = ((pixels[idx] as f32 / 255.0) / a).min(1.0);
                                     let g = ((pixels[idx + 1] as f32 / 255.0) / a).min(1.0);
                                     let b = ((pixels[idx + 2] as f32 / 255.0) / a).min(1.0);
@@ -177,21 +169,6 @@ impl ButtonStrip {
                                     ));
                                 }
                             }
-                        }
-                        if row_has_pixel {
-                            if first_row.is_none() {
-                                first_row = Some(row);
-                            }
-                            last_row = Some(row);
-                        }
-                    }
-
-                    if let (Some(first), Some(last)) = (first_row, last_row) {
-                        let exact_h = (last - first + 1) as f32 / scale;
-                        let cached = self.tab_exact_widths.get(label_text);
-                        if cached != Some(&exact_h) {
-                            self.tab_exact_widths.insert(label_text.to_string(), exact_h);
-                            self.needs_relayout = true;
                         }
                     }
                 }
@@ -210,7 +187,9 @@ impl ButtonStrip {
         let get_button_weight = |i: usize| -> f32 {
             let label = &self.buttons[i];
             let trimmed = label.trim();
-            let font_size = crate::layout::menubar_font_parsed().1;
+            let font_info = crate::layout::menubar_font_parsed();
+            let font_fam = font_info.0;
+            let font_size = font_info.1;
             let padding = crate::layout::button_padding();
             if self.vertical {
                 let space_idx = trimmed.find(' ');
@@ -220,15 +199,14 @@ impl ButtonStrip {
                 } else {
                     trimmed
                 };
-                let text_w = self.tab_exact_widths.get(label_text).copied()
-                    .unwrap_or_else(|| TextLabel::estimate_width(label_text, font_size));
+                let text_w = crate::widget::display::measure_text_width(label_text, &font_fam, font_size);
                 if has_icon {
                     (text_w + 12.0 + 3.0 * padding).max(1.0)
                 } else {
                     (text_w + 2.0 * padding).max(1.0)
                 }
             } else {
-                let text_w = TextLabel::estimate_width(label, font_size);
+                let text_w = crate::widget::display::measure_text_width(label, &font_fam, font_size);
                 (text_w + 2.0 * padding).max(1.0)
             }
         };
@@ -238,8 +216,8 @@ impl ButtonStrip {
             weights.push(get_button_weight(i));
         }
 
+        let spacing = crate::layout::button_strip_spacing();
         if self.vertical {
-            let spacing = 8.0;
             let mut current_y = y;
             let mut btn_h = 0.0;
             for i in 0..=idx {
@@ -255,7 +233,7 @@ impl ButtonStrip {
             for i in 0..=idx {
                 btn_w = weights[i];
                 if i < idx {
-                    current_x += btn_w;
+                    current_x += btn_w + spacing;
                 }
             }
             (current_x, y, btn_w, h)
@@ -281,10 +259,6 @@ impl Element for ButtonStrip {
         let current_padding = crate::layout::button_padding();
         if self.last_padding != Some(current_padding) {
             self.generate_rotated_labels();
-            changed = true;
-        }
-        if self.needs_relayout {
-            self.needs_relayout = false;
             changed = true;
         }
         changed
@@ -395,7 +369,9 @@ impl Element for ButtonStrip {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        let font_size = 12.0;
+        let font_info = crate::layout::menubar_font_parsed();
+        let font_fam = font_info.0;
+        let font_size = font_info.1;
         for (i, btn_label) in self.buttons.iter().enumerate() {
             let r = self.item_rect(i);
             let color = if Some(i) == self.selected {
@@ -413,7 +389,7 @@ impl Element for ButtonStrip {
                     let icon = icon.trim();
                     if !icon.is_empty() {
                         let icon_font_size = 14.0;
-                        let est_icon_w = TextLabel::estimate_width(icon, icon_font_size);
+                        let est_icon_w = crate::widget::display::measure_text_width(icon, &font_fam, icon_font_size);
                         let padding_y = crate::layout::button_padding();
                         let icon_y = r.1 + (padding_y - 2.0).max(0.0);
                         labels.push(TextLabel {
@@ -426,7 +402,7 @@ impl Element for ButtonStrip {
                     }
                 }
             } else {
-                let est_w = TextLabel::estimate_width(btn_label, font_size);
+                let est_w = crate::widget::display::measure_text_width(btn_label, &font_fam, font_size);
                 labels.push(TextLabel {
                     text: btn_label.clone(),
                     x: r.0 + (r.2 - est_w) / 2.0,

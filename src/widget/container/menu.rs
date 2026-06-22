@@ -352,8 +352,9 @@ impl Element for MenuBar {
         let parent_ptr = self as *mut MenuBar as *mut (dyn Element + 'static);
 
         let font_setting = crate::layout::menubar_font();
-        let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
-        let font_size = font_size_opt.unwrap_or(12.0);
+        let font_info = crate::layout::parse_font_string(&font_setting);
+        let font_fam = font_info.0;
+        let font_size = font_info.1.unwrap_or(12.0);
 
         if self.vertical {
             let mut cy = 16.0;
@@ -381,6 +382,7 @@ impl Element for MenuBar {
             self.menus.set_parent(Some(parent_ptr), &mut dummy);
         } else {
             let padding = crate::layout::button_padding();
+            let spacing = crate::layout::button_strip_spacing();
             let mut cx = 8.0;
             if self.center_items {
                 let mut total_width = 8.0;
@@ -389,12 +391,15 @@ impl Element for MenuBar {
                     if !self.context_options.is_empty() {
                         display_title.push_str(" ▼");
                     }
-                    total_width += TextLabel::estimate_width(&display_title, font_size) + 24.0;
+                    total_width += crate::widget::display::measure_text_width(&display_title, &font_fam, font_size) + 24.0;
                 }
                 let mut btn_strip_w = 0.0;
-                for btn_label in &self.menus.buttons {
-                    let text_w = TextLabel::estimate_width(btn_label, font_size);
+                for (i, btn_label) in self.menus.buttons.iter().enumerate() {
+                    let text_w = crate::widget::display::measure_text_width(btn_label, &font_fam, font_size);
                     btn_strip_w += text_w + 2.0 * padding;
+                    if i > 0 {
+                        btn_strip_w += spacing;
+                    }
                 }
                 total_width += btn_strip_w;
                 if self.base.w > total_width {
@@ -406,12 +411,15 @@ impl Element for MenuBar {
                 if !self.context_options.is_empty() {
                     display_title.push_str(" ▼");
                 }
-                cx += TextLabel::estimate_width(&display_title, font_size) + 24.0;
+                cx += crate::widget::display::measure_text_width(&display_title, &font_fam, font_size) + 24.0;
             }
             let mut btn_strip_w = 0.0;
-            for btn_label in &self.menus.buttons {
-                let text_w = TextLabel::estimate_width(btn_label, font_size);
+            for (i, btn_label) in self.menus.buttons.iter().enumerate() {
+                let text_w = crate::widget::display::measure_text_width(btn_label, &font_fam, font_size);
                 btn_strip_w += text_w + 2.0 * padding;
+                if i > 0 {
+                    btn_strip_w += spacing;
+                }
             }
             let menus_x = (clamped_x + cx).clamp(clamped_x, clamped_x + clamped_w);
             let menus_w = btn_strip_w.min(clamped_x + clamped_w - menus_x);
@@ -739,7 +747,7 @@ impl Element for MenuBar {
                 let start_y = self.base.y + 16.0;
                 for (i, c) in label.chars().enumerate() {
                     let char_str = c.to_string();
-                    let char_w = TextLabel::estimate_width(&char_str, font_size);
+                    let char_w = crate::widget::display::measure_text(&char_str, font_size);
                     let x_pos = self.base.x + (self.base.w - char_w) / 2.0;
                     let y_pos = start_y + i as f32 * line_height;
                     labels.push(TextLabel {
@@ -797,7 +805,7 @@ impl Element for MenuBar {
                     start_y += label_h + 20.0;
                 }
                 let line_height = font_size * 1.2;
-                let char_w = TextLabel::estimate_width("o", font_size);
+                let char_w = crate::widget::display::measure_text("o", font_size);
                 let x_pos = self.base.x + (self.base.w - char_w) / 2.0;
                 let mut display_title_vertical = self.title.clone();
                 if !self.context_options.is_empty() {
@@ -1203,7 +1211,7 @@ impl Element for Menu {
             let label_len = title.chars().count() as f32;
             let total_h = label_len * line_height;
             let start_y = self.base.y + (self.base.h - total_h) / 2.0;
-            let char_w = TextLabel::estimate_width("o", font_size);
+            let char_w = crate::widget::display::measure_text("o", font_size);
             let x_pos = self.base.x + (self.base.w - char_w) / 2.0;
             for (i, c) in title.chars().enumerate() {
                 let char_str = c.to_string();

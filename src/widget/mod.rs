@@ -126,6 +126,26 @@ pub trait Element {
     fn base_mut(&mut self) -> Option<&mut Widget> { None }
     fn preferred_height(&self) -> Option<f32> { None }
 
+    fn mark_dirty(&mut self, ctx: &mut UiContext) {
+        let mut parent_id = None;
+        if let Some(b) = self.base_mut() {
+            if b.dirty {
+                return;
+            }
+            b.dirty = true;
+            parent_id = b.id.get();
+        }
+        if let Some(id) = parent_id {
+            if let Some(&p_id) = ctx.layout_tree.parents.get(&id) {
+                if let Some(&parent_ptr) = ctx.widget_registry.get(&p_id) {
+                    unsafe {
+                        (*parent_ptr).mark_dirty(ctx);
+                    }
+                }
+            }
+        }
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         struct DummyAny;
         static DUMMY: DummyAny = DummyAny;

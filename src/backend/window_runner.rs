@@ -1473,8 +1473,14 @@ impl<A: Application> OutputHandler for EngineState<A> {
         &mut self.output_state
     }
     
-    fn new_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {}
-    fn update_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {}
+    fn new_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {
+        let scale = crate::wayland::detect_scale_factor(&self.output_state);
+        crate::scale::set_scale_factor(scale as f32);
+    }
+    fn update_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {
+        let scale = crate::wayland::detect_scale_factor(&self.output_state);
+        crate::scale::set_scale_factor(scale as f32);
+    }
     fn output_destroyed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {}
 }
 
@@ -1788,6 +1794,22 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
     ) {
         self.ctrl_pressed = modifiers.ctrl;
         self.shift_pressed = modifiers.shift;
+    }
+
+    fn update_repeat_info(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _keyboard: &wl_keyboard::WlKeyboard,
+        info: smithay_client_toolkit::seat::keyboard::RepeatInfo,
+    ) {
+        match info {
+            smithay_client_toolkit::seat::keyboard::RepeatInfo::Repeat { rate, delay } => {
+                // Store/expose delay/rate if required by the application
+                let _ = (rate, delay);
+            }
+            smithay_client_toolkit::seat::keyboard::RepeatInfo::Disable => {}
+        }
     }
 }
 

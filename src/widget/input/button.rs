@@ -218,7 +218,7 @@ impl Element for Button {
             let est_w = if label == "📋" {
                 12.0
             } else {
-                TextLabel::estimate_width(label, font_size)
+                crate::widget::display::measure_text(label, font_size)
             };
             let color = if let Some(lc) = self.label_color {
                 [

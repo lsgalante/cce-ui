@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::widget::{Element, WidgetId, LayoutTree, Key, MouseButton, ElementState};
+use crate::widget::{Element, WidgetId, LayoutTree, Key, MouseButton, ElementState, Event};
 use crate::widget::core::hover_animation::HoverState;
 use crate::widget::core::context_menu::ContextMenuState;
 
@@ -26,6 +26,75 @@ impl UiContext {
             hover_state: HoverState::new(),
             cursor_pos: (0.0, 0.0),
             context_menu: ContextMenuState::new(),
+        }
+    }
+
+    pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
+        if root.is_null() {
+            return false;
+        }
+        unsafe {
+            // For KeyInput, send directly to focused widget if it exists
+            if let Event::KeyInput(_) = event {
+                if let Some(focused) = self.focused_widget {
+                    if (*focused).handle_event(event, self) {
+                        (*focused).mark_dirty(self);
+                        return true;
+                    }
+                }
+            }
+
+            let mut handled = false;
+            let children = (*root).children(self);
+            
+            match event {
+                Event::PointerMove { .. } => {
+                    for child in children.into_iter().rev() {
+                        if self.propagate_event(event, child) {
+                            handled = true;
+                        }
+                    }
+                    if (*root).handle_event(event, self) {
+                        (*root).mark_dirty(self);
+                        handled = true;
+                    }
+                }
+                _ => {
+                    for child in children.into_iter().rev() {
+                        if self.propagate_event(event, child) {
+                            return true;
+                        }
+                    }
+                    if (*root).handle_event(event, self) {
+                        (*root).mark_dirty(self);
+                        return true;
+                    }
+                }
+            }
+            handled
+        }
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        for &ptr in self.widget_registry.values() {
+            unsafe {
+                if let Some(b) = (*ptr).base() {
+                    if b.dirty {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    pub fn clear_dirty(&mut self) {
+        for &ptr in self.widget_registry.values() {
+            unsafe {
+                if let Some(b) = (*ptr).base_mut() {
+                    b.dirty = false;
+                }
+            }
         }
     }
 

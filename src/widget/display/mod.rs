@@ -18,6 +18,7 @@ pub mod font_preview;
 pub mod info_box;
 pub mod status_dot;
 pub mod preview;
+pub mod text_sizer;
 
 pub use self::text_label::TextLabel;
 pub(crate) use self::text_label::make_widget_text_buffer;
@@ -40,3 +41,4 @@ pub use self::font_preview::FontPreview;
 pub use self::info_box::InfoBox;
 pub use self::status_dot::{DotStatus, StatusDot};
 pub use self::preview::PreviewState;
+pub use self::text_sizer::{measure_text_width, measure_text};

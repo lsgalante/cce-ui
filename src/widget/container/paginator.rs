@@ -139,7 +139,9 @@ impl PageSelector for Paginator {
         if self.pages.is_empty() {
             return self.sidebar_w;
         }
-        let font_size = crate::layout::menubar_font_parsed().1;
+        let font_info = crate::layout::menubar_font_parsed();
+        let font_fam = font_info.0;
+        let font_size = font_info.1;
         let padding = crate::layout::button_padding();
         
         let mut max_w = 0.0;
@@ -152,7 +154,7 @@ impl PageSelector for Paginator {
                 let (icon, _) = trimmed.split_at(space_idx);
                 let icon = icon.trim();
                 let icon_font_size = 14.0;
-                let est_icon_w = TextLabel::estimate_width(icon, icon_font_size);
+                let est_icon_w = crate::widget::display::measure_text_width(icon, &font_fam, icon_font_size);
                 est_icon_w.max(font_size)
             } else {
                 font_size

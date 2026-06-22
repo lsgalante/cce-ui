@@ -89,6 +89,7 @@ static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
 
 static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
 static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
+static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 
 static PLATE_PADDING: RwLock<f32> = RwLock::new(20.0);
 static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(44.0);
@@ -422,6 +423,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = BUTTON_PADDING.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("button_strip_spacing") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = BUTTON_STRIP_SPACING.write() {
                         *lock = val;
                     }
                 }
@@ -1446,6 +1456,34 @@ pub fn set_button_padding(padding: f32) {
     }
 }
 
+pub fn button_strip_spacing() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("button_strip_spacing") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = BUTTON_STRIP_SPACING.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *BUTTON_STRIP_SPACING.read().unwrap()
+}
+
+pub fn set_button_strip_spacing(spacing: f32) {
+    if let Ok(mut lock) = BUTTON_STRIP_SPACING.write() {
+        *lock = spacing;
+    }
+}
+
 pub fn paginator_tab_padding_y() -> f32 {
     button_padding()
 }
@@ -1557,6 +1595,8 @@ pub trait RenderTarget {
     fn text_with_font_and_bounds(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], font: &str, _bounds: Option<[f32; 4]>) {
         self.text_with_font(content, x, y, size, color, font);
     }
+    fn push_clip_rect(&mut self, _x: f32, _y: f32, _w: f32, _h: f32) {}
+    fn pop_clip_rect(&mut self) {}
 }
 
 pub struct PopoverCollector {
@@ -2480,6 +2520,70 @@ pub trait LayoutStrategy {
     fn set_section_count(&mut self, _count: usize) {}
     fn get_column_width(&self) -> Option<f32> { None }
     fn get_gap(&self) -> f32 { 20.0 }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlexDirection {
+    Row,
+    Column,
+}
+
+pub struct FlexLayout {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+    direction: FlexDirection,
+    spacing: f32,
+    current_x: f32,
+    current_y: f32,
+}
+
+impl FlexLayout {
+    pub fn new(direction: FlexDirection, spacing: f32) -> Self {
+        Self {
+            left: 0.0,
+            top: 0.0,
+            width: 0.0,
+            height: 0.0,
+            direction,
+            spacing,
+            current_x: 0.0,
+            current_y: 0.0,
+        }
+    }
+}
+
+impl LayoutStrategy for FlexLayout {
+    fn init(&mut self, left: f32, top: f32, width: f32, height: f32) {
+        self.left = left;
+        self.top = top;
+        self.width = width;
+        self.height = height;
+        self.current_x = left;
+        self.current_y = top;
+    }
+
+    fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
+        match self.direction {
+            FlexDirection::Row => {
+                let rx = self.current_x;
+                let ry = self.current_y;
+                self.current_x += ww + self.spacing;
+                (rx, ry, ww, wh)
+            }
+            FlexDirection::Column => {
+                let rx = self.current_x;
+                let ry = self.current_y;
+                self.current_y += wh + self.spacing;
+                (rx, ry, ww, wh)
+            }
+        }
+    }
+
+    fn get_gap(&self) -> f32 {
+        self.spacing
+    }
 }
 
 pub struct ColumnLayout {

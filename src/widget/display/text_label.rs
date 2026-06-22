@@ -34,8 +34,9 @@ impl TextLabel {
         color: [u8; 3],
     ) -> Vec<TextLabel> {
         let mut labels = Vec::new();
+        let font_fam = crate::layout::menubar_font_parsed().0;
         let char_widths: Vec<f32> = text.chars().map(|c| {
-            Self::estimate_width(&c.to_string(), font_size)
+            crate::widget::display::measure_text_width(&c.to_string(), &font_fam, font_size)
         }).collect();
         let total_width: f32 = char_widths.iter().sum();
         
@@ -64,9 +65,9 @@ impl TextLabel {
         }
         labels
     }
-
+ 
     pub fn is_covered_by(&self, px: f32, py: f32, pw: f32, ph: f32) -> bool {
-        let text_w = Self::estimate_width(&self.text, self.font_size);
+        let text_w = crate::widget::display::measure_text(&self.text, self.font_size);
         let x_overlap = self.x <= px + pw && (self.x + text_w) >= px;
         let y_overlap = self.y <= py + ph && (self.y + self.font_size) >= py;
         x_overlap && y_overlap
