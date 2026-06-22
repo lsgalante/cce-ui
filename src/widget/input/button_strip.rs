@@ -14,6 +14,8 @@ pub struct ButtonStrip {
     pub tab_text_quads: Vec<Vec<(f32, f32, f32, f32, [f32; 4])>>,
     pub tab_quads_cache: std::collections::HashMap<String, Vec<(f32, f32, f32, f32, [f32; 4])>>,
     pub last_padding: Option<f32>,
+    pub tab_exact_widths: std::collections::HashMap<String, f32>,
+    pub needs_relayout: bool,
 }
 
 impl ButtonStrip {
@@ -29,6 +31,8 @@ impl ButtonStrip {
             tab_text_quads: Vec::new(),
             tab_quads_cache: std::collections::HashMap::new(),
             last_padding: None,
+            tab_exact_widths: std::collections::HashMap::new(),
+            needs_relayout: false,
         }
     }
 
@@ -149,12 +153,17 @@ impl ButtonStrip {
                 if let Some(mut pixmap) = resvg::tiny_skia::Pixmap::new(w_px, h_px) {
                     resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
                     let pixels = pixmap.data();
+                    let mut first_row = None;
+                    let mut last_row = None;
+
                     for row in 0..h_px {
+                        let mut row_has_pixel = false;
                         for col in 0..w_px {
                             let idx = ((row * w_px + col) * 4) as usize;
                             if idx + 3 < pixels.len() {
                                 let a = pixels[idx + 3] as f32 / 255.0;
                                 if a > 0.0 {
+                                    row_has_pixel = true;
                                     let r = ((pixels[idx] as f32 / 255.0) / a).min(1.0);
                                     let g = ((pixels[idx + 1] as f32 / 255.0) / a).min(1.0);
                                     let b = ((pixels[idx + 2] as f32 / 255.0) / a).min(1.0);
@@ -167,6 +176,21 @@ impl ButtonStrip {
                                     ));
                                 }
                             }
+                        }
+                        if row_has_pixel {
+                            if first_row.is_none() {
+                                first_row = Some(row);
+                            }
+                            last_row = Some(row);
+                        }
+                    }
+
+                    if let (Some(first), Some(last)) = (first_row, last_row) {
+                        let exact_h = (last - first + 1) as f32 / scale;
+                        let cached = self.tab_exact_widths.get(label_text);
+                        if cached != Some(&exact_h) {
+                            self.tab_exact_widths.insert(label_text.to_string(), exact_h);
+                            self.needs_relayout = true;
                         }
                     }
                 }
@@ -195,7 +219,8 @@ impl ButtonStrip {
                 } else {
                     trimmed
                 };
-                let text_w = TextLabel::estimate_width(label_text, font_size);
+                let text_w = self.tab_exact_widths.get(label_text).copied()
+                    .unwrap_or_else(|| TextLabel::estimate_width(label_text, font_size));
                 if has_icon {
                     (text_w + 12.0 + 3.0 * padding).max(1.0)
                 } else {
@@ -251,12 +276,17 @@ impl Element for ButtonStrip {
     }
 
     fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool {
+        let mut changed = false;
         let current_padding = crate::layout::button_padding();
         if self.last_padding != Some(current_padding) {
             self.generate_rotated_labels();
-            return true;
+            changed = true;
         }
-        false
+        if self.needs_relayout {
+            self.needs_relayout = false;
+            changed = true;
+        }
+        changed
     }
 
     fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
