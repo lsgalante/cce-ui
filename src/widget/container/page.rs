@@ -113,6 +113,11 @@ impl Page {
         self
     }
 
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.base.label = Some(label.to_string());
+        self
+    }
+
     pub fn add_child_owned(&mut self, child: Box<dyn Element>, ctx: &mut UiContext) {
         let ptr = &*child as *const (dyn Element + 'static) as *mut (dyn Element + 'static);
         self.owned_children.push(child);

@@ -2051,7 +2051,10 @@ pub fn run<A: Application>() {
     let mut last_title = settings.title.clone();
     let mut last_tick = std::time::Instant::now();
     loop {
-        event_loop.dispatch(std::time::Duration::from_millis(16), &mut engine_state).unwrap();
+        if let Err(e) = event_loop.dispatch(std::time::Duration::from_millis(16), &mut engine_state) {
+            eprintln!("[window_runner] Event loop error: {:?}", e);
+            break;
+        }
         if engine_state.exit {
             break;
         }

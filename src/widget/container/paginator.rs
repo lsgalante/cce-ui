@@ -2,7 +2,7 @@ use crate::colors;
 use crate::widget::*;
 use crate::widget::input::ButtonStrip;
 use crate::widget::display::TextLabel;
-use super::plate::Plate;
+use super::page::Page;
 
 pub struct Paginator {
     x: f32,
@@ -10,11 +10,11 @@ pub struct Paginator {
     w: f32,
     h: f32,
     pub sidebar_menu: ButtonStrip,
-    pub plates: Vec<Plate>,
+    pub pages: Vec<Page>,
     pub selected_page: usize,
     pub page_hidden: bool,
     pub sidebar_w: f32,
-    pub pages: Vec<String>,
+    pub page_labels: Vec<String>,
     parent: Option<*mut (dyn Element + 'static)>,
     pub on_page_changed_cb: Option<Box<dyn Fn(usize) + Send + Sync>>,
     pub just_clicked: Option<usize>,
@@ -30,11 +30,11 @@ impl Paginator {
             w: 0.0,
             h: 0.0,
             sidebar_menu: ButtonStrip::new(0.0, 0.0, 0.0, 0.0),
-            plates: Vec::new(),
+            pages: Vec::new(),
             selected_page: 0,
             page_hidden: false,
             sidebar_w: 0.0,
-            pages: pages.clone(),
+            page_labels: pages.clone(),
             parent: None,
             on_page_changed_cb: None,
             just_clicked: None,
@@ -48,14 +48,14 @@ impl Paginator {
             sidebar_menu.set_selected(Some(0));
         }
 
-        let mut plates = Vec::new();
+        let mut pages_containers = Vec::new();
         for _ in 0..num_pages {
-            let mut plate = Plate::new(0.0, 0.0, 0.0, 0.0).with_draggable(false);
-            plate.visible = false;
-            plates.push(plate);
+            let mut page = Page::new(0.0, 0.0, 0.0, 0.0);
+            page.visible = false;
+            pages_containers.push(page);
         }
         if num_pages > 0 {
-            plates[0].visible = true;
+            pages_containers[0].visible = true;
         }
 
         Self {
@@ -64,11 +64,11 @@ impl Paginator {
             w: 0.0,
             h: 0.0,
             sidebar_menu,
-            plates,
+            pages: pages_containers,
             selected_page: 0,
             page_hidden: false,
             sidebar_w,
-            pages,
+            page_labels: pages,
             parent: None,
             on_page_changed_cb: None,
             just_clicked: None,
@@ -111,11 +111,11 @@ impl PageSelector for Paginator {
     }
 
     fn set_selected_page(&mut self, page: usize) {
-        if page < self.plates.len() {
+        if page < self.pages.len() {
             self.selected_page = page;
             self.sidebar_menu.set_selected(Some(page));
-            for (i, plate) in self.plates.iter_mut().enumerate() {
-                plate.visible = i == page;
+            for (i, page_item) in self.pages.iter_mut().enumerate() {
+                page_item.visible = i == page;
             }
             if let Some(ref cb) = self.on_page_changed_cb {
                 cb(page);
@@ -132,19 +132,19 @@ impl PageSelector for Paginator {
     }
 
     fn set_pages(&mut self, pages: Vec<String>) {
-        self.pages = pages.clone();
+        self.page_labels = pages.clone();
         self.sidebar_menu.buttons = pages.clone();
         self.sidebar_menu.generate_rotated_labels();
 
-        self.plates.clear();
+        self.pages.clear();
         for _ in 0..pages.len() {
-            let mut plate = Plate::new(0.0, 0.0, 0.0, 0.0).with_draggable(false);
-            plate.visible = false;
-            self.plates.push(plate);
+            let mut page = Page::new(0.0, 0.0, 0.0, 0.0);
+            page.visible = false;
+            self.pages.push(page);
         }
-        if !self.plates.is_empty() {
-            let idx = self.selected_page.min(self.plates.len() - 1);
-            self.plates[idx].visible = true;
+        if !self.pages.is_empty() {
+            let idx = self.selected_page.min(self.pages.len() - 1);
+            self.pages[idx].visible = true;
         }
     }
 
@@ -153,7 +153,7 @@ impl PageSelector for Paginator {
     }
 
     fn sidebar_w(&self) -> f32 {
-        if self.pages.is_empty() {
+        if self.page_labels.is_empty() {
             return self.sidebar_w;
         }
         let font_info = crate::layout::menubar_font_parsed();
@@ -162,7 +162,7 @@ impl PageSelector for Paginator {
         let padding = crate::layout::button_padding();
         
         let mut max_w = 0.0;
-        for label in &self.pages {
+        for label in &self.page_labels {
             let trimmed = label.trim();
             let space_idx = trimmed.find(' ');
             let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
@@ -189,17 +189,14 @@ impl PageSelector for Paginator {
     fn set_sidebar_label(&mut self, _label: Option<String>) {}
 
     fn add_widget_to_page(&mut self, page_idx: usize, widget: *mut (dyn Element + 'static), ctx: &mut UiContext) {
-        if page_idx < self.plates.len() {
-            self.plates[page_idx].add_child(widget, ctx);
-            unsafe {
-                (*widget).set_parent(Some(&mut self.plates[page_idx] as *mut _), ctx);
-            }
+        if page_idx < self.pages.len() {
+            self.pages[page_idx].add_child(widget, ctx);
         }
     }
 
     fn clear_page_widgets(&mut self, page_idx: usize, ctx: &mut UiContext) {
-        if page_idx < self.plates.len() {
-            self.plates[page_idx].clear_children(ctx);
+        if page_idx < self.pages.len() {
+            self.pages[page_idx].clear_children(ctx);
         }
     }
 }
@@ -220,7 +217,7 @@ impl Element for Paginator {
 
         let page_x = x + sidebar_w;
         let page_w = (w - sidebar_w).max(0.0);
-        for (i, plate) in self.plates.iter_mut().enumerate() {
+        for (i, plate) in self.pages.iter_mut().enumerate() {
             plate.set_rect(page_x, y, page_w, h);
             plate.visible = (i == self.selected_page) && !self.page_hidden;
         }
@@ -249,7 +246,7 @@ impl Element for Paginator {
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
         let mut childs = Vec::new();
         childs.push(&self.sidebar_menu as &dyn Element as *const (dyn Element + 'static) as *mut (dyn Element + 'static));
-        for plate in &self.plates {
+        for plate in &self.pages {
             childs.push(plate as &dyn Element as *const (dyn Element + 'static) as *mut (dyn Element + 'static));
         }
         childs
@@ -260,7 +257,7 @@ impl Element for Paginator {
         if self.sidebar_menu.cursor_moved(px, py, ctx) {
             changed = true;
         }
-        for (i, plate) in self.plates.iter_mut().enumerate() {
+        for (i, plate) in self.pages.iter_mut().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 if plate.cursor_moved(px, py, ctx) {
                     changed = true;
@@ -279,7 +276,7 @@ impl Element for Paginator {
                 self.just_clicked = Some(idx);
             }
         }
-        for (i, plate) in self.plates.iter_mut().enumerate() {
+        for (i, plate) in self.pages.iter_mut().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 if plate.mouse_input(button, state, px, py, ctx) {
                     changed = true;
@@ -294,7 +291,7 @@ impl Element for Paginator {
         if self.sidebar_menu.tick(dt, ctx) {
             changed = true;
         }
-        for (i, plate) in self.plates.iter_mut().enumerate() {
+        for (i, plate) in self.pages.iter_mut().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 if plate.tick(dt, ctx) {
                     changed = true;
@@ -311,7 +308,7 @@ impl Element for Paginator {
             quads.push((self.x, self.y, self.w, self.h, c));
         }
         quads.extend(self.sidebar_menu.all_quads(ctx));
-        for (i, plate) in self.plates.iter().enumerate() {
+        for (i, plate) in self.pages.iter().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 quads.extend(plate.all_quads(ctx));
             }
@@ -322,7 +319,7 @@ impl Element for Paginator {
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         labels.extend(self.sidebar_menu.text_labels());
-        for (i, plate) in self.plates.iter().enumerate() {
+        for (i, plate) in self.pages.iter().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 labels.extend(plate.text_labels());
             }
@@ -333,7 +330,7 @@ impl Element for Paginator {
     fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
         labels.extend(self.sidebar_menu.text_labels_with_bounds(ctx));
-        for (i, plate) in self.plates.iter().enumerate() {
+        for (i, plate) in self.pages.iter().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 labels.extend(plate.text_labels_with_bounds(ctx));
             }
@@ -344,7 +341,7 @@ impl Element for Paginator {
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
         labels.extend(self.sidebar_menu.text_labels_with_font_and_bounds(ctx));
-        for (i, plate) in self.plates.iter().enumerate() {
+        for (i, plate) in self.pages.iter().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 labels.extend(plate.text_labels_with_font_and_bounds(ctx));
             }
@@ -355,7 +352,7 @@ impl Element for Paginator {
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
         let mut items = Vec::new();
         items.extend(self.sidebar_menu.get_text_items());
-        for (i, plate) in self.plates.iter().enumerate() {
+        for (i, plate) in self.pages.iter().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 items.extend(plate.get_text_items());
             }
@@ -382,7 +379,7 @@ impl Element for Paginator {
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
         quads.extend(self.sidebar_menu.extra_quads());
-        for (i, plate) in self.plates.iter().enumerate() {
+        for (i, plate) in self.pages.iter().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 quads.extend(plate.extra_quads());
             }
@@ -395,7 +392,7 @@ impl Element for Paginator {
         if self.sidebar_menu.mouse_wheel(delta, px, py, ctx) {
             changed = true;
         }
-        for (i, plate) in self.plates.iter_mut().enumerate() {
+        for (i, plate) in self.pages.iter_mut().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 if plate.mouse_wheel(delta, px, py, ctx) {
                     changed = true;
@@ -410,7 +407,7 @@ impl Element for Paginator {
         if self.sidebar_menu.keyboard_input(event, ctx) {
             changed = true;
         }
-        for (i, plate) in self.plates.iter_mut().enumerate() {
+        for (i, plate) in self.pages.iter_mut().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 if plate.keyboard_input(event, ctx) {
                     changed = true;
@@ -422,7 +419,7 @@ impl Element for Paginator {
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         self.sidebar_menu.prepare_text(fs);
-        for (i, plate) in self.plates.iter_mut().enumerate() {
+        for (i, plate) in self.pages.iter_mut().enumerate() {
             if i == self.selected_page && !self.page_hidden {
                 plate.prepare_text(fs);
             }
