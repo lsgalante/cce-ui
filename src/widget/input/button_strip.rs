@@ -113,9 +113,8 @@ impl ButtonStrip {
             let y_offset = if has_icon { padding_y + 12.0 } else { 0.0 };
             let usable_h = (r.3 - y_offset).max(1.0);
 
-            let vertical_buffer = 8.0;
             let w_px = (r.2 * scale) as u32;
-            let h_px = ((usable_h + 2.0 * vertical_buffer) * scale) as u32;
+            let h_px = (usable_h * scale) as u32;
 
             if w_px == 0 || h_px == 0 {
                 self.tab_text_quads.push(Vec::new());
@@ -133,12 +132,12 @@ impl ButtonStrip {
   <text x="{}" y="{}" font-family="{}" font-size="{}" fill="{}" text-anchor="middle" dominant-baseline="middle" transform="rotate(-90 {} {})">{}</text>
 </svg>"##,
                 w_px, h_px,
-                r.2, usable_h + 2.0 * vertical_buffer,
-                r.2 / 2.0, usable_h / 2.0 + vertical_buffer,
+                r.2, usable_h,
+                r.2 / 2.0, usable_h / 2.0,
                 font_fam,
                 font_size,
                 hex_color,
-                r.2 / 2.0, usable_h / 2.0 + vertical_buffer,
+                r.2 / 2.0, usable_h / 2.0,
                 label_text
             );
 
@@ -348,7 +347,7 @@ impl Element for ButtonStrip {
 
                     for &(qx, qy, qw, qh, qc) in &self.tab_text_quads[i] {
                         let absolute_x = r.0 + qx;
-                        let absolute_y = r.1 + y_offset + qy - 8.0;
+                        let absolute_y = r.1 + y_offset + qy;
                         
                         let ry1 = absolute_y.max(min_y);
                         let ry2 = (absolute_y + qh).min(max_y);
