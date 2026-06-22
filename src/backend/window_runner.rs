@@ -21,7 +21,7 @@ use smithay_client_toolkit::{
 };
 use wayland_client::{
     globals::{registry_queue_init, GlobalList},
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface, wl_registry, wl_region},
+    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface, wl_registry, wl_region, wl_callback},
     Connection, QueueHandle, Proxy,
 };
 use smithay_client_toolkit::shell::xdg::popup::{Popup, PopupHandler, PopupConfigure};
@@ -1034,6 +1034,7 @@ pub struct EngineState<A: Application> {
     
     pub exit: bool,
     pub redraw: bool,
+    pub frame_callback_pending: bool,
     pub first_configure_received: bool,
     pub ctrl_pressed: bool,
     pub shift_pressed: bool,
@@ -1279,6 +1280,11 @@ impl<A: Application> EngineState<A> {
             }
         }
         
+        if let Some(ref surface) = self.surface {
+            let _callback = surface.frame(&self.qh, ());
+            self.frame_callback_pending = true;
+        }
+
         adapter.queue.submit(std::iter::once(encoder.finish()));
         output.present();
         
@@ -1534,6 +1540,7 @@ impl<A: Application> WindowHandler for EngineState<A> {
             self.resize(w, h);
         }
         self.redraw = true;
+        self.frame_callback_pending = false;
         self.first_configure_received = true;
     }
     
@@ -1950,6 +1957,21 @@ impl<A: Application> wayland_client::Dispatch<wl_region::WlRegion, ()> for Engin
     ) {}
 }
 
+impl<A: Application> wayland_client::Dispatch<wl_callback::WlCallback, ()> for EngineState<A> {
+    fn event(
+        state: &mut Self,
+        _proxy: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            state.frame_callback_pending = false;
+        }
+    }
+}
+
 pub fn run<A: Application>() {
     let conn = Connection::connect_to_env().unwrap();
     let (globals, mut event_queue) = registry_queue_init(&conn).unwrap();
@@ -1990,6 +2012,7 @@ pub fn run<A: Application>() {
         logical_height: settings.height as f32,
         exit: false,
         redraw: false,
+        frame_callback_pending: false,
         first_configure_received: false,
         ctrl_pressed: false,
         shift_pressed: false,
@@ -2210,7 +2233,7 @@ pub fn run<A: Application>() {
             }
         }
 
-        if engine_state.redraw {
+        if engine_state.redraw && !engine_state.frame_callback_pending {
             engine_state.redraw = false;
             if engine_state.first_configure_received {
                 engine_state.render();
