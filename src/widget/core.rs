@@ -457,6 +457,7 @@ pub mod context_menu {
         pub options: Vec<String>,
         pub hovered_item: Option<usize>,
         pub target: Option<*mut (dyn Element + 'static)>,
+        pub header_count: usize,
     }
 
     impl ContextMenuState {
@@ -470,10 +471,11 @@ pub mod context_menu {
                 options: Vec::new(),
                 hovered_item: None,
                 target: None,
+                header_count: 0,
             }
         }
 
-        pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, target: *mut (dyn Element + 'static)) {
+        pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn Element + 'static)) {
             if target.is_null() {
                 return;
             }
@@ -486,6 +488,7 @@ pub mod context_menu {
             self.visible = true;
             self.hovered_item = None;
             self.target = Some(target);
+            self.header_count = header_count;
         }
 
         pub fn hide(&mut self) {
@@ -504,7 +507,7 @@ pub mod context_menu {
             self.hovered_item = None;
             if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
                 let idx = ((py - self.y) / 24.0) as usize;
-                if idx < self.options.len() && idx > 0 {
+                if idx < self.options.len() && idx >= self.header_count {
                     self.hovered_item = Some(idx);
                 }
             }
@@ -524,7 +527,7 @@ pub mod context_menu {
             if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
                 let idx = ((py - self.y) / 24.0) as usize;
                 if idx < self.options.len() {
-                    if idx > 0 {
+                    if idx >= self.header_count {
                         let opt = self.options[idx].clone();
                         if let Some(target_ptr) = self.target {
                             if !target_ptr.is_null() {
@@ -581,7 +584,7 @@ pub mod context_menu {
 
             for (idx, opt) in self.options.iter().enumerate() {
                 let iy = self.y + idx as f32 * 24.0 + (24.0 - 12.0) / 2.0;
-                let text_color = if idx == 0 {
+                let text_color = if idx < self.header_count {
                     [0x70, 0x70, 0x78]
                 } else if self.hovered_item == Some(idx) {
                     [0xff, 0xff, 0xff]
@@ -609,8 +612,8 @@ pub mod context_menu {
         CONTEXT_MENU.with(|m| m.borrow().visible)
     }
 
-    pub fn show(x: f32, y: f32, options: Vec<String>, target: *mut (dyn Element + 'static)) {
-        CONTEXT_MENU.with(|m| m.borrow_mut().show(x, y, options, target));
+    pub fn show(x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn Element + 'static)) {
+        CONTEXT_MENU.with(|m| m.borrow_mut().show(x, y, options, header_count, target));
     }
 
     pub fn hide() {
@@ -672,6 +675,8 @@ pub struct Widget {
     pub focused: bool,
     pub id: std::cell::Cell<Option<crate::widget::WidgetId>>,
     pub dirty: bool,
+    pub config_file: Option<String>,
+    pub config_key: Option<String>,
 }
 
 impl Widget {
@@ -688,6 +693,8 @@ impl Widget {
             focused: false,
             id: std::cell::Cell::new(None),
             dirty: true,
+            config_file: None,
+            config_key: None,
         }
     }
 
@@ -704,6 +711,8 @@ impl Widget {
             focused: false,
             id: std::cell::Cell::new(None),
             dirty: true,
+            config_file: None,
+            config_key: None,
         }
     }
 

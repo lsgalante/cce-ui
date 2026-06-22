@@ -39,6 +39,12 @@ impl Dropdown {
         self
     }
 
+    pub fn with_config(mut self, file: &str, key: &str) -> Self {
+        self.base.config_file = Some(file.to_string());
+        self.base.config_key = Some(key.to_string());
+        self
+    }
+
     pub fn set_label(&mut self, label: &str) {
         self.base.label = Some(label.to_string());
     }
@@ -436,6 +442,29 @@ mod tests {
         assert!(!dd.open);
         assert_eq!(dd.selected, 1);
         assert!(dd.take_change());
+    }
+
+    #[test]
+    fn test_dropdown_context_menu_with_config() {
+        let mut dummy = crate::context::UiContext::new();
+        let options = vec!["Option A".to_string(), "Option B".to_string()];
+        let mut dd = Dropdown::new(options, 0).with_config("path/to/config.json", "some_key");
+        dd.set_rect(10.0, 10.0, 100.0, 24.0);
+
+        assert!(!crate::widget::context_menu::is_visible());
+
+        // Right click dropdown
+        let handled = dd.mouse_input(MouseButton::Right, ElementState::Pressed, 50.0, 20.0, &mut dummy);
+        assert!(handled);
+
+        assert!(crate::widget::context_menu::is_visible());
+        let menu_options = crate::widget::context_menu::options();
+        assert!(menu_options.len() >= 3);
+        assert_eq!(menu_options[1], "File: path/to/config.json");
+        assert_eq!(menu_options[2], "Key: some_key");
+
+        crate::widget::context_menu::hide();
+        assert!(!crate::widget::context_menu::is_visible());
     }
 }
 

@@ -93,6 +93,12 @@ impl ColorSelector {
         self
     }
 
+    pub fn with_config(mut self, file: &str, key: &str) -> Self {
+        self.base.config_file = Some(file.to_string());
+        self.base.config_key = Some(key.to_string());
+        self
+    }
+
     pub fn with_font_family(mut self, font_family: &str) -> Self {
         self.font_family = font_family.to_string();
         self

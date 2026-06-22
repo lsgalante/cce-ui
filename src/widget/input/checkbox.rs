@@ -23,6 +23,12 @@ impl Checkbox {
         self
     }
 
+    pub fn with_config(mut self, file: &str, key: &str) -> Self {
+        self.base.config_file = Some(file.to_string());
+        self.base.config_key = Some(key.to_string());
+        self
+    }
+
     pub fn set_checked(&mut self, checked: bool) {
         self.checked = checked;
     }
@@ -193,6 +199,12 @@ impl Toggle {
 
     pub fn with_label(mut self, label: &str) -> Self {
         self.base.label = Some(label.to_string());
+        self
+    }
+
+    pub fn with_config(mut self, file: &str, key: &str) -> Self {
+        self.base.config_file = Some(file.to_string());
+        self.base.config_key = Some(key.to_string());
         self
     }
 

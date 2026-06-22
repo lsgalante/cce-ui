@@ -27,6 +27,12 @@ impl FontSelector {
         self
     }
 
+    pub fn with_config(mut self, file: &str, key: &str) -> Self {
+        self.base.config_file = Some(file.to_string());
+        self.base.config_key = Some(key.to_string());
+        self
+    }
+
     pub fn take_change(&mut self) -> bool {
         let changed = self.just_changed;
         self.just_changed = false;

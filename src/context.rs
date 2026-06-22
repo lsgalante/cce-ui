@@ -410,8 +410,8 @@ impl UiContext {
         crate::widget::context_menu::is_visible()
     }
 
-    pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, target: *mut (dyn Element + 'static)) {
-        crate::widget::context_menu::show(x, y, options, target);
+    pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn Element + 'static)) {
+        crate::widget::context_menu::show(x, y, options, header_count, target);
     }
 
     pub fn handle_right_click(&mut self, target: *mut (dyn Element + 'static), px: f32, py: f32) {
@@ -426,15 +426,32 @@ impl UiContext {
             format!("[{}]", name)
         };
 
-        let options = if name == "TextBox" {
-            vec![header, "Cut".to_string(), "Copy".to_string(), "Paste".to_string(), "Select All".to_string()]
+        let mut config_info = None;
+        if let Some(b) = unsafe { (*target).base() } {
+            if let (Some(ref file), Some(ref key)) = (&b.config_file, &b.config_key) {
+                config_info = Some((file.clone(), key.clone()));
+            }
+        }
+
+        let mut options = Vec::new();
+        options.push(header);
+        let mut header_count = 1;
+
+        if let Some((file, key)) = config_info {
+            options.push(format!("File: {}", file));
+            options.push(format!("Key: {}", key));
+            header_count = 3;
+        }
+
+        if name == "TextBox" {
+            options.extend(vec!["Cut".to_string(), "Copy".to_string(), "Paste".to_string(), "Select All".to_string()]);
         } else {
-            vec![header, "Copy".to_string(), "Paste".to_string()]
-        };
+            options.extend(vec!["Copy".to_string(), "Paste".to_string()]);
+        }
 
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let adjusted_py = py - scroll_y;
-        crate::widget::context_menu::show(px, adjusted_py, options, target);
+        crate::widget::context_menu::show(px, adjusted_py, options, header_count, target);
     }
 
     pub fn hide_context_menu(&mut self) {
