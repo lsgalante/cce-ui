@@ -4,6 +4,13 @@ use crate::context::UiContext;
 use crate::layout::{RenderTarget, SectionContext};
 use crate::color;
 
+#[derive(Debug, Clone, Default)]
+pub struct ImagePreviewData {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<[u8; 4]>,
+}
+
 pub struct PreviewState {
     pub base: Widget,
     pub visible: bool,
@@ -17,6 +24,7 @@ pub struct PreviewState {
     pub file_type: String,
     pub target: String, // for symlinks
     pub content_preview: Option<String>,
+    pub image_preview: Option<ImagePreviewData>,
     pub scroll_line: usize,
 }
 
@@ -35,6 +43,7 @@ impl Default for PreviewState {
             file_type: String::new(),
             target: String::new(),
             content_preview: None,
+            image_preview: None,
             scroll_line: 0,
         }
     }
@@ -55,6 +64,7 @@ impl std::fmt::Debug for PreviewState {
             .field("file_type", &self.file_type)
             .field("target", &self.target)
             .field("content_preview", &self.content_preview)
+            .field("image_preview", &self.image_preview)
             .field("scroll_line", &self.scroll_line)
             .finish()
     }
@@ -75,6 +85,7 @@ impl Clone for PreviewState {
             file_type: self.file_type.clone(),
             target: self.target.clone(),
             content_preview: self.content_preview.clone(),
+            image_preview: self.image_preview.clone(),
             scroll_line: self.scroll_line,
         }
     }
@@ -245,7 +256,67 @@ impl PreviewState {
         let bg_color = color::scrollinglist_bg_color();
         canvas.rect(bg_color, cx + 12.0, cy + 32.0, cw - 24.0, half_h - 40.0);
 
-        if let Some(content) = &self.content_preview {
+        if let Some(image_data) = &self.image_preview {
+            let box_w = cw - 24.0;
+            let box_h = half_h - 40.0;
+            let img_w = image_data.width as f32;
+            let img_h = image_data.height as f32;
+            
+            let scale_x = box_w / img_w;
+            let scale_y = box_h / img_h;
+            let scale = scale_x.min(scale_y).min(4.0).max(1.0);
+            
+            let draw_w = img_w * scale;
+            let draw_h = img_h * scale;
+            
+            let start_x = cx + 12.0 + (box_w - draw_w) * 0.5;
+            let start_y = cy + 32.0 + (box_h - draw_h) * 0.5;
+            
+            for row in 0..image_data.height {
+                let mut col = 0;
+                while col < image_data.width {
+                    let idx = (row * image_data.width + col) as usize;
+                    if idx >= image_data.pixels.len() {
+                        break;
+                    }
+                    let pixel = image_data.pixels[idx];
+                    let r = pixel[0];
+                    let g = pixel[1];
+                    let b = pixel[2];
+                    let a = pixel[3];
+                    
+                    let mut run_len = 1;
+                    while col + run_len < image_data.width {
+                        let next_idx = (row * image_data.width + col + run_len) as usize;
+                        if next_idx >= image_data.pixels.len() {
+                            break;
+                        }
+                        if image_data.pixels[next_idx] == pixel {
+                            run_len += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    let alpha = a as f32 / 255.0;
+                    if alpha > 0.0 {
+                        let rf = r as f32 / 255.0;
+                        let gf = g as f32 / 255.0;
+                        let bf = b as f32 / 255.0;
+                        
+                        canvas.rect(
+                            [rf, gf, bf, alpha],
+                            start_x + col as f32 * scale,
+                            start_y + row as f32 * scale,
+                            run_len as f32 * scale,
+                            scale,
+                        );
+                    }
+                    
+                    col += run_len;
+                }
+            }
+        } else if let Some(content) = &self.content_preview {
             let mut text_y = cy + 44.0;
             for line in content.lines().skip(self.scroll_line) {
                 if text_y + 14.0 > cy + half_h - 16.0 {

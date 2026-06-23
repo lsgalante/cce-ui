@@ -40,5 +40,5 @@ pub use self::layout_preview::{PreviewLayoutMode, LayoutPreview};
 pub use self::font_preview::FontPreview;
 pub use self::info_box::InfoBox;
 pub use self::status_dot::{DotStatus, StatusDot};
-pub use self::preview::PreviewState;
+pub use self::preview::{PreviewState, ImagePreviewData};
 pub use self::text_sizer::{measure_text_width, measure_text};
