@@ -1683,7 +1683,8 @@ impl<A: Application> PointerHandler for EngineState<A> {
 
                         if edge != smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None {
                             if let Some(ref window) = self.window {
-                                if let Some(seat) = self.seats.first() {
+                                let seat_owned = self.seats.first().cloned().or_else(|| self.seat_state.seats().next());
+                                if let Some(ref seat) = seat_owned {
                                     window.resize(seat, *serial, edge);
                                     continue;
                                 }
@@ -1702,7 +1703,8 @@ impl<A: Application> PointerHandler for EngineState<A> {
 
                         if should_move {
                             if let Some(ref window) = self.window {
-                                if let Some(seat) = self.seats.first() {
+                                let seat_owned = self.seats.first().cloned().or_else(|| self.seat_state.seats().next());
+                                if let Some(ref seat) = seat_owned {
                                     window.move_(seat, *serial);
                                     continue;
                                 }
