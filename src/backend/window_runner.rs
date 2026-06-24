@@ -1702,7 +1702,8 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     };
 
                     // Client-Side Decorations (CSD) Drag & Resize Handling
-                    if btn == MouseButton::Left {
+                    let is_status_bar = self.inner.settings().app_id == "cce-status-interface";
+                    if btn == MouseButton::Left && !is_status_bar {
                         let border = 8.0f32;
                         let mut edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None;
                         if ly < border {
