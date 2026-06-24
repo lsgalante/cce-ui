@@ -477,4 +477,25 @@ impl UiContext {
     pub fn context_menu_labels(&self) -> Vec<crate::widget::display::TextLabel> {
         crate::widget::context_menu::text_labels()
     }
+
+    pub fn is_movable_window_at(&self, px: f32, py: f32) -> bool {
+        let mut hit_window = false;
+        for &ptr in self.widget_registry.values() {
+            unsafe {
+                if !ptr.is_null() {
+                    let w = &*ptr;
+                    if w.hit_test(px, py, self) {
+                        if w.is_window() {
+                            if w.is_movable_window() {
+                                hit_window = true;
+                            }
+                        } else {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        hit_window
+    }
 }

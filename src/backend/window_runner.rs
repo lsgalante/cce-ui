@@ -900,6 +900,10 @@ pub trait Application: Sized + 'static {
     fn text_items(&self) -> &[TextItem];
     fn render_popovers(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
     
+    fn ui_context(&self) -> Option<&crate::context::UiContext> {
+        None
+    }
+    
     fn text_areas(&self, scale_f32: f32, bounds: TextBounds) -> Vec<TextArea<'_>> {
         let overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
 
@@ -1687,7 +1691,16 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         }
 
                         // Titlebar drag check: y is in [8.0, 32.0], and x is not in the top-right button area
+                        let mut should_move = false;
                         if ly >= border && ly < 32.0 && lx < self.logical_width - 70.0 {
+                            should_move = true;
+                        } else if let Some(ctx) = self.inner.ui_context() {
+                            if ctx.is_movable_window_at(lx, ly) {
+                                should_move = true;
+                            }
+                        }
+
+                        if should_move {
                             if let Some(ref window) = self.window {
                                 if let Some(seat) = self.seats.first() {
                                     window.move_(seat, *serial);

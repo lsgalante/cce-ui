@@ -12,6 +12,7 @@ pub struct Window {
     pub radius: f32,
     pub background_color: Option<[f32; 4]>,
     pub visible: bool,
+    pub movable: bool,
 }
 
 impl Window {
@@ -25,7 +26,13 @@ impl Window {
             radius: crate::color::window_corner_radius(),
             background_color: None,
             visible: true,
+            movable: true,
         }
+    }
+
+    pub fn with_movable(mut self, movable: bool) -> Self {
+        self.movable = movable;
+        self
     }
 
     pub fn with_border(mut self, color: [f32; 4], thickness: f32) -> Self {
@@ -299,6 +306,10 @@ impl Element for Window {
     fn is_window(&self) -> bool {
         true
     }
+
+    fn is_movable_window(&self) -> bool {
+        self.movable
+    }
 }
 
 impl Drop for Window {
@@ -323,6 +334,10 @@ mod tests {
         assert_eq!(win.solid_border(), Some(([1.0, 0.0, 0.0, 1.0], 2.5)));
         assert_eq!(win.corner_radius(), 8.0);
         assert_eq!(win.rounded_corners(), (true, true, true, true));
+        assert!(win.is_movable_window());
+
+        let non_movable_win = win.with_movable(false);
+        assert!(!non_movable_win.is_movable_window());
     }
 
     #[test]

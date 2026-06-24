@@ -1744,6 +1744,10 @@ fn get_keybinds_control_sub_widget_info(
 }
 
 pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
+    let id = w.base().map(|b| b.id());
+    if let Some(w_id) = id {
+        ctx.register_widget(w_id, w.as_ptr_mut());
+    }
     w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
     let corners = w.rounded_corners();
     let r = if corners != (false, false, false, false) {
