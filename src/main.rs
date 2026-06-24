@@ -1110,6 +1110,11 @@ impl PointerHandler for AppState {
         events: &[smithay_client_toolkit::seat::pointer::PointerEvent],
     ) {
         use smithay_client_toolkit::seat::pointer::PointerEventKind;
+        let mut coalesced_h = 0.0f64;
+        let mut coalesced_v = 0.0f64;
+        let mut discrete_h = 0;
+        let mut discrete_v = 0;
+        let mut has_scroll = false;
         for event in events {
             let (x, y) = event.position;
             if let Some(state) = &mut self.state {
@@ -1317,30 +1322,45 @@ impl PointerHandler for AppState {
                     }
                 }
                 PointerEventKind::Axis { horizontal, vertical, .. } => {
-                    if let Some(state) = &mut self.state {
-                        let h_scroll = horizontal.absolute as f32;
-                        let v_scroll = vertical.absolute as f32;
-                        
-                        let delta = cce_ui::widget::MouseScrollDelta::LineDelta(-h_scroll / 10.0, -v_scroll / 10.0);
-                        let mut changed = false;
-                        if !state.layout_mode {
-                            for w in &mut state.widgets {
-                                if w.mouse_wheel(&delta, state.cursor_x, state.cursor_y, &mut state.ui_context) {
-                                    changed = true;
-                                }
-                            }
-                        } else {
-                            if let Some(jl) = &mut state.json_layout {
-                                if jl.mouse_wheel(&delta, state.cursor_x, state.cursor_y, &mut state.ui_context) {
-                                    changed = true;
-                                }
-                            }
-                        }
-                        if changed {
-                            state.upload_vertices();
-                            self.redraw = true;
+                    coalesced_h += horizontal.absolute;
+                    coalesced_v += vertical.absolute;
+                    discrete_h += horizontal.discrete;
+                    discrete_v += vertical.discrete;
+                    has_scroll = true;
+                }
+            }
+        }
+
+        if has_scroll {
+            if let Some(state) = &mut self.state {
+                let delta = if discrete_h == 0 && discrete_v == 0 {
+                    cce_ui::widget::MouseScrollDelta::PixelDelta(cce_ui::widget::Position {
+                        x: -coalesced_h,
+                        y: -coalesced_v,
+                    })
+                } else {
+                    let h_lines = if discrete_h != 0 { discrete_h as f32 } else { coalesced_h as f32 / 10.0 };
+                    let v_lines = if discrete_v != 0 { discrete_v as f32 } else { coalesced_v as f32 / 10.0 };
+                    cce_ui::widget::MouseScrollDelta::LineDelta(-h_lines, -v_lines)
+                };
+
+                let mut changed = false;
+                if !state.layout_mode {
+                    for w in &mut state.widgets {
+                        if w.mouse_wheel(&delta, state.cursor_x, state.cursor_y, &mut state.ui_context) {
+                            changed = true;
                         }
                     }
+                } else {
+                    if let Some(jl) = &mut state.json_layout {
+                        if jl.mouse_wheel(&delta, state.cursor_x, state.cursor_y, &mut state.ui_context) {
+                            changed = true;
+                        }
+                    }
+                }
+                if changed {
+                    state.upload_vertices();
+                    self.redraw = true;
                 }
             }
         }

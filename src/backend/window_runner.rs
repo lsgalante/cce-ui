@@ -34,7 +34,7 @@ use glyphon::{
     Cache, FontSystem, Resolution, TextArea,
     TextBounds, Viewport, Buffer, Attrs, Metrics,
 };
-use crate::widget::{Element, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey};
+use crate::widget::{Element, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey, Position};
 use crate::wayland::{WaylandSurfaceHandle, detect_scale_factor};
 use crate::backend::WgpuAdapter;
 
@@ -51,7 +51,18 @@ pub struct ActivePopup {
     pub vertex_buffer: Option<wgpu::Buffer>,
 }
 
-fn make_text_buffer_with_font(fs: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
+#[derive(Hash, PartialEq, Eq, Clone)]
+struct BufferCacheKey {
+    text: String,
+    size_milli: u32,
+    font: Option<String>,
+}
+
+std::thread_local! {
+    static BUFFER_CACHE: std::cell::RefCell<std::collections::HashMap<BufferCacheKey, Buffer>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
     let scale = crate::scale::scale_factor();
     let mut font_size = size;
     let mut family_name = None;
@@ -65,6 +76,21 @@ fn make_text_buffer_with_font(fs: &mut FontSystem, text: &str, size: f32, font: 
     }
 
     let physical_size = font_size * scale;
+    let size_key = (physical_size * 1000.0).round() as u32;
+    let key = BufferCacheKey {
+        text: text.to_string(),
+        size_milli: size_key,
+        font: family_name.clone(),
+    };
+
+    let cached = BUFFER_CACHE.with(|cache| {
+        cache.borrow().get(&key).cloned()
+    });
+
+    if let Some(buf) = cached {
+        return buf;
+    }
+
     let metrics = Metrics::new(physical_size, physical_size * 1.4);
     let mut buf = Buffer::new(fs, metrics);
     let mut attrs = Attrs::new();
@@ -79,7 +105,20 @@ fn make_text_buffer_with_font(fs: &mut FontSystem, text: &str, size: f32, font: 
     }
     buf.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
     buf.shape_until_scroll(fs, true);
+
+    BUFFER_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() > 2000 {
+            cache.clear();
+        }
+        cache.insert(key, buf.clone());
+    });
+
     buf
+}
+
+fn make_text_buffer_with_font(fs: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
+    get_text_buffer(fs, text, size, font)
 }
 
 #[repr(C)]
@@ -1615,6 +1654,13 @@ impl<A: Application> PointerHandler for EngineState<A> {
         events: &[smithay_client_toolkit::seat::pointer::PointerEvent],
     ) {
         use smithay_client_toolkit::seat::pointer::PointerEventKind;
+        let mut coalesced_h = 0.0f64;
+        let mut coalesced_v = 0.0f64;
+        let mut discrete_h = 0;
+        let mut discrete_v = 0;
+        let mut has_scroll = false;
+        let (mut last_lx, mut last_ly) = (0.0f32, 0.0f32);
+
         for event in events {
             let (x, y) = event.position;
             let mut lx = x as f32;
@@ -1744,15 +1790,34 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     }
                 }
                 PointerEventKind::Axis { horizontal, vertical, .. } => {
-                    let h_scroll = horizontal.absolute as f32;
-                    let v_scroll = vertical.absolute as f32;
-                    let delta = MouseScrollDelta::LineDelta(-h_scroll / 10.0, -v_scroll / 10.0);
-                    let mut rebuild = false;
-                    self.inner.handle_mouse_wheel(&delta, LogicalPosition::new(lx, ly), &mut rebuild);
-                    if rebuild {
-                        self.redraw = true;
-                    }
+                    coalesced_h += horizontal.absolute;
+                    coalesced_v += vertical.absolute;
+                    discrete_h += horizontal.discrete;
+                    discrete_v += vertical.discrete;
+                    last_lx = lx;
+                    last_ly = ly;
+                    has_scroll = true;
                 }
+            }
+        }
+
+        if has_scroll {
+            let delta = if discrete_h == 0 && discrete_v == 0 {
+                // Pixel scroll event from touchpad / smooth mouse
+                MouseScrollDelta::PixelDelta(Position {
+                    x: -coalesced_h,
+                    y: -coalesced_v,
+                })
+            } else {
+                // Discrete scroll event (e.g. wheel clicks)
+                let h_lines = if discrete_h != 0 { discrete_h as f32 } else { coalesced_h as f32 / 10.0 };
+                let v_lines = if discrete_v != 0 { discrete_v as f32 } else { coalesced_v as f32 / 10.0 };
+                MouseScrollDelta::LineDelta(-h_lines, -v_lines)
+            };
+            let mut rebuild = false;
+            self.inner.handle_mouse_wheel(&delta, LogicalPosition::new(last_lx, last_ly), &mut rebuild);
+            if rebuild {
+                self.redraw = true;
             }
         }
     }
