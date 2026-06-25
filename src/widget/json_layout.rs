@@ -19,6 +19,7 @@ pub struct JsonWidgetConfig {
     pub value_f32: Option<f32>,
     pub min_f32: Option<f32>,
     pub max_f32: Option<f32>,
+    pub target_page: Option<usize>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -46,6 +47,7 @@ pub struct JsonWidget {
     pub h: f32,
     pub label_text: Option<TextLabel>,
     pub page_idx: usize,
+    pub target_page: Option<usize>,
 }
 
 pub struct JsonLayoutWidget {
@@ -54,6 +56,7 @@ pub struct JsonLayoutWidget {
     pub dragging_slider_idx: Option<usize>,
     pub page_scroll_y: Vec<f32>,
     pub page_total_heights: Vec<f32>,
+    pub active_page: usize,
 }
 
 impl JsonLayoutWidget {
@@ -126,6 +129,7 @@ impl JsonLayoutWidget {
                         h: 0.0,
                         label_text: None,
                         page_idx,
+                        target_page: w_conf.target_page,
                     });
                 }
             }
@@ -192,6 +196,7 @@ impl JsonLayoutWidget {
                     h: 0.0,
                     label_text: None,
                     page_idx: 0,
+                    target_page: w_conf.target_page,
                 });
             }
         }
@@ -202,6 +207,7 @@ impl JsonLayoutWidget {
             dragging_slider_idx: None,
             page_scroll_y: vec![0.0; 16],
             page_total_heights: vec![0.0; 16],
+            active_page: 0,
         }
     }
 
@@ -291,7 +297,7 @@ impl Element for JsonLayoutWidget {
 
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
         let mut changed = false;
-        let active_page = 0;
+        let active_page = self.active_page;
         for w in &mut self.widgets {
             if w.page_idx != active_page {
                 continue;
@@ -306,7 +312,7 @@ impl Element for JsonLayoutWidget {
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
 
-        let active_page = 0;
+        let active_page = self.active_page;
         let (bx, by, bw, bh) = self.rect();
         let pad_x = 16.0;
         let min_x = bx + pad_x - 4.0;
@@ -343,7 +349,7 @@ impl Element for JsonLayoutWidget {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        let active_page = 0;
+        let active_page = self.active_page;
 
         for w in &self.widgets {
             if w.page_idx != active_page {
@@ -364,7 +370,7 @@ impl Element for JsonLayoutWidget {
         let mut labels = Vec::new();
         let (bx, by, bw, bh) = self.rect();
 
-        let active_page = 0;
+        let active_page = self.active_page;
         let pad_x = 16.0;
         let content_bounds = Some([bx + pad_x - 4.0, by, bx + bw, by + bh]);
 
@@ -417,7 +423,8 @@ impl Element for JsonLayoutWidget {
             _ => {}
         }
 
-        let active_page = 0;
+        let active_page = self.active_page;
+        let mut page_switch = None;
         for (idx, w) in self.widgets.iter_mut().enumerate() {
             if w.page_idx != active_page {
                 continue;
@@ -466,7 +473,20 @@ impl Element for JsonLayoutWidget {
                 if w.widget.handle_event(event, ctx) {
                     changed = true;
                 }
+                if w.widget_type == "button" {
+                    if let Some(btn) = w.widget.as_any_mut().downcast_mut::<Button>() {
+                        if w.target_page.is_some() && btn.take_click() {
+                            page_switch = Some(w.target_page.unwrap());
+                        }
+                    }
+                }
             }
+        }
+
+        if let Some(target) = page_switch {
+            self.active_page = target;
+            self.layout_children();
+            changed = true;
         }
 
         if let Event::MouseWheel { delta, x, y } = event {
