@@ -89,7 +89,11 @@ impl Element for Window {
     }
 
     fn color(&self) -> [f32; 4] {
-        self.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0])
+        let mut base_color = self.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]);
+        if base_color[3] > 0.001 {
+            base_color[3] = crate::color::active_window_opacity();
+        }
+        base_color
     }
 
     fn visible(&self) -> bool {

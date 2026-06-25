@@ -938,6 +938,9 @@ pub trait Application: Sized + 'static {
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
     fn text_items(&self) -> &[TextItem];
     fn render_popovers(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
+    fn input_regions(&self) -> Option<Vec<(i32, i32, i32, i32)>> {
+        None
+    }
     
     fn ui_context(&self) -> Option<&crate::context::UiContext> {
         None
@@ -1184,6 +1187,18 @@ impl<A: Application> EngineState<A> {
         
         let mut quads = Vec::new();
         self.inner.view(&mut quads, LogicalSize::new(logical_w, logical_h), scale_factor);
+
+        if let Some(ref surface) = self.surface {
+            if let Some(regions) = self.inner.input_regions() {
+                let compositor = self.compositor_state.wl_compositor();
+                let wl_region = compositor.create_region(&self.qh, ());
+                for &(rx, ry, rw, rh) in &regions {
+                    wl_region.add(rx, ry, rw, rh);
+                }
+                surface.set_input_region(Some(&wl_region));
+                wl_region.destroy();
+            }
+        }
         
         let mut rounded_quads = Vec::new();
         self.inner.view_rounded_quads(&mut rounded_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
@@ -1571,6 +1586,11 @@ impl<A: Application> WindowHandler for EngineState<A> {
         configure: WindowConfigure,
         _serial: u32,
     ) {
+        let is_fs = configure.is_fullscreen();
+        let is_max = configure.is_maximized();
+        crate::scale::set_fullscreen(is_fs);
+        crate::scale::set_maximized(is_max);
+
         let (w, h) = configure.new_size;
         if let (Some(w), Some(h)) = (w, h) {
             let width = w.get();
@@ -2068,6 +2088,7 @@ pub fn run<A: Application>() {
 
     let inner = A::new(&qh, sender.clone());
     let settings = inner.settings();
+    crate::scale::set_app_id(settings.app_id.clone());
 
     let mut engine_state = EngineState {
         registry_state: RegistryState::new(&globals),

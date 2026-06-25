@@ -508,3 +508,94 @@ pub fn active_theme() -> Theme {
         hover_overlay: [1.0, 1.0, 1.0, 0.08],
     }
 }
+
+pub fn active_window_mode() -> String {
+    let app_id = crate::scale::app_id();
+    if app_id.is_empty() {
+        return "floating".to_string();
+    }
+
+    let config_path = "/home/lsgalante/.config/cce/config.json";
+    let content = match std::fs::read_to_string(config_path) {
+        Ok(c) => c,
+        Err(_) => return "floating".to_string(),
+    };
+    let val: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return "floating".to_string(),
+    };
+
+    if let Some(mode_rules) = val.get("mode_rule").and_then(|r| r.as_array()) {
+        for rule in mode_rules {
+            if rule.get("app_id").and_then(|id| id.as_str()) == Some(&app_id) {
+                if let Some(mode) = rule.get("mode").and_then(|m| m.as_str()) {
+                    return mode.to_string();
+                }
+            }
+        }
+    }
+
+    let mut default_tile_mode = "cascade".to_string();
+    if let Some(tag_layouts) = val.get("tag_layout").and_then(|l| l.as_array()) {
+        for tl in tag_layouts {
+            if tl.get("tag").and_then(|t| t.as_u64()) == Some(1) {
+                if let Some(m) = tl.get("mode").and_then(|m| m.as_str()) {
+                    default_tile_mode = m.to_string();
+                }
+            }
+        }
+    }
+
+    if crate::scale::is_fullscreen() {
+        return "fullscreen".to_string();
+    }
+    if crate::scale::is_maximized() {
+        return default_tile_mode;
+    }
+
+    "floating".to_string()
+}
+
+pub fn active_window_opacity() -> f32 {
+    let mode = active_window_mode();
+    let config_path = "/home/lsgalante/.config/cce/config.json";
+    let content = match std::fs::read_to_string(config_path) {
+        Ok(c) => c,
+        Err(_) => return 0.9,
+    };
+    let val: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return 0.9,
+    };
+
+    let key = match mode.as_str() {
+        "fullscreen" => "fullscreen_opacity",
+        "cascade" => "cascade_opacity",
+        "grid" => "grid_opacity",
+        "floating" => "floating_opacity",
+        "side-panel" | "pinned" => "pinned_opacity",
+        "popup" => "popup_opacity",
+        _ => "window_opacity",
+    };
+
+    if let Some(opacity) = val.pointer(&format!("/layout/{}", key)).and_then(|v| v.as_f64()) {
+        return opacity as f32;
+    }
+
+    // Fallbacks if not present:
+    match key {
+        "fullscreen_opacity" => 0.95,
+        "cascade_opacity" => 0.05,
+        "grid_opacity" => 0.05,
+        "floating_opacity" => 0.9,
+        "pinned_opacity" => 0.05,
+        "popup_opacity" => 0.20,
+        _ => {
+            val.pointer("/surfaces/window_opacity")
+                .and_then(|v| v.as_f64())
+                .map(|v| v as f32)
+                .unwrap_or(0.9)
+        }
+    }
+}
+
