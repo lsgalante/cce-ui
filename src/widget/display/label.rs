@@ -102,18 +102,7 @@ impl StyledLabel {
 
     pub fn new_with_family(fs: &mut glyphon::FontSystem, text: &str, size: f32, color: [f32; 4], family: &str) -> Self {
         let scale = crate::scale::scale_factor();
-        let physical_size = size * scale;
-        let metrics = glyphon::Metrics::new(physical_size, physical_size * 1.4);
-        let mut buffer = glyphon::Buffer::new(fs, metrics);
-        let family_enum = match family {
-            "monospace" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
-            "sans-serif" => glyphon::Family::SansSerif,
-            "serif" => glyphon::Family::Serif,
-            name => glyphon::Family::Name(name),
-        };
-        let attrs = glyphon::Attrs::new().family(family_enum);
-        buffer.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
-        buffer.shape_until_scroll(fs, true);
+        let buffer = crate::backend::window_runner::get_text_buffer(fs, text, size, Some(family));
         let w = buffer.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0) / scale;
         let g_color = glyphon::Color::rgb(
             (color[0] * 255.0) as u8,

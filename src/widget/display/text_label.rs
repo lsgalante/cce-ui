@@ -75,19 +75,5 @@ impl TextLabel {
 }
 
 pub(crate) fn make_widget_text_buffer(fs: &mut glyphon::FontSystem, text: &str, size: f32, font_family: &str) -> glyphon::Buffer {
-    let scale = crate::scale::scale_factor();
-    let physical_size = size * scale;
-    let metrics = glyphon::Metrics::new(physical_size, physical_size * 1.4);
-    let mut buf = glyphon::Buffer::new(fs, metrics);
-    let (family_name, _) = crate::layout::parse_font_string(font_family);
-    let family = match family_name.as_str() {
-        "monospace" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
-        "sans-serif" => glyphon::Family::SansSerif,
-        "serif" => glyphon::Family::Serif,
-        _ => glyphon::Family::Name(&family_name),
-    };
-    let attrs = glyphon::Attrs::new().family(family);
-    buf.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
-    buf.shape_until_scroll(fs, true);
-    buf
+    crate::backend::window_runner::get_text_buffer(fs, text, size, Some(font_family))
 }
