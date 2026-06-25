@@ -288,6 +288,15 @@ impl Element for Paginator {
     }
 
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+        // Register internal children in the widget registry so hit tests correctly block dragging and reach buttons
+        let menu_ptr = &mut self.sidebar_menu as *mut ButtonStrip;
+        ctx.register_widget(self.sidebar_menu.base.id(), menu_ptr);
+
+        for plate in &mut self.pages {
+            let plate_ptr = plate as *mut Page;
+            ctx.register_widget(plate.base.base.id(), plate_ptr);
+        }
+
         let mut changed = false;
         if self.sidebar_menu.tick(dt, ctx) {
             changed = true;
