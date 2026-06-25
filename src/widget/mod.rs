@@ -516,8 +516,8 @@ pub trait Element {
     fn is_plate(&self) -> bool { false }
     fn is_page(&self) -> bool { false }
     fn is_layer(&self) -> bool { false }
-    fn is_window(&self) -> bool { false }
-    fn is_movable_window(&self) -> bool { false }
+    fn is_backplate(&self) -> bool { false }
+    fn is_movable_backplate(&self) -> bool { false }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
 
     fn corner_radius(&self) -> f32 { 12.0 }
@@ -573,7 +573,7 @@ pub use self::input::{
 pub use self::container::{
     Container, Header, ContentBg, ViewportBg, ParametersBg, ScrollingList,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
-    Switcher, Layer, Page, Window, Paginator
+    Switcher, Layer, Page, Backplate, Paginator
 };
 pub use self::display::{
     TextLabel, Label, SectionHeader, StyledLabel, TextItem, Svg, UsageBar,

@@ -3,7 +3,7 @@ use crate::context::UiContext;
 use crate::widget::display::TextLabel;
 
 #[derive(Debug, Clone)]
-pub struct Window {
+pub struct Backplate {
     pub base: Widget,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub parent: Option<*mut (dyn Element + 'static)>,
@@ -15,7 +15,7 @@ pub struct Window {
     pub movable: bool,
 }
 
-impl Window {
+impl Backplate {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
             base: Widget::new_rect(x, y, w, h),
@@ -23,7 +23,7 @@ impl Window {
             parent: None,
             border_color: None,
             border_thickness: 1.0,
-            radius: crate::color::window_corner_radius(),
+            radius: crate::color::backplate_corner_radius(),
             background_color: None,
             visible: true,
             movable: true,
@@ -52,7 +52,7 @@ impl Window {
     }
 }
 
-impl Element for Window {
+impl Element for Backplate {
     fn base(&self) -> Option<&Widget> {
         Some(&self.base)
     }
@@ -91,7 +91,7 @@ impl Element for Window {
     fn color(&self) -> [f32; 4] {
         let mut base_color = self.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]);
         if base_color[3] > 0.001 {
-            base_color[3] = crate::color::active_window_opacity();
+            base_color[3] = crate::color::active_backplate_opacity();
         }
         base_color
     }
@@ -307,16 +307,16 @@ impl Element for Window {
         true
     }
 
-    fn is_window(&self) -> bool {
+    fn is_backplate(&self) -> bool {
         true
     }
 
-    fn is_movable_window(&self) -> bool {
+    fn is_movable_backplate(&self) -> bool {
         self.movable
     }
 }
 
-impl Drop for Window {
+impl Drop for Backplate {
     fn drop(&mut self) {
         clear_widget_references(self);
     }
@@ -327,8 +327,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_window_creation_and_builders() {
-        let win = Window::new(10.0, 20.0, 100.0, 200.0)
+    fn test_backplate_creation_and_builders() {
+        let win = Backplate::new(10.0, 20.0, 100.0, 200.0)
             .with_background([0.1, 0.2, 0.3, 0.4])
             .with_border([1.0, 0.0, 0.0, 1.0], 2.5)
             .with_radius(8.0);
@@ -338,15 +338,15 @@ mod tests {
         assert_eq!(win.solid_border(), Some(([1.0, 0.0, 0.0, 1.0], 2.5)));
         assert_eq!(win.corner_radius(), 8.0);
         assert_eq!(win.rounded_corners(), (true, true, true, true));
-        assert!(win.is_movable_window());
+        assert!(win.is_movable_backplate());
 
         let non_movable_win = win.with_movable(false);
-        assert!(!non_movable_win.is_movable_window());
+        assert!(!non_movable_win.is_movable_backplate());
     }
 
     #[test]
-    fn test_window_visibility() {
-        let mut win = Window::new(0.0, 0.0, 100.0, 100.0);
+    fn test_backplate_visibility() {
+        let mut win = Backplate::new(0.0, 0.0, 100.0, 100.0);
         assert!(win.visible());
         assert!(win.visible);
 
@@ -356,9 +356,9 @@ mod tests {
     }
 
     #[test]
-    fn test_window_children_and_parent() {
+    fn test_backplate_children_and_parent() {
         let mut ctx = UiContext::new();
-        let mut win = Window::new(0.0, 0.0, 100.0, 100.0);
+        let mut win = Backplate::new(0.0, 0.0, 100.0, 100.0);
         let child = Layer::new(10.0, 10.0, 50.0, 50.0);
 
         assert_eq!(win.children(&ctx).len(), 0);
@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(win.children(&ctx).len(), 1);
         assert_eq!(unsafe { (*win.children(&ctx)[0]).rect() }, (10.0, 10.0, 50.0, 50.0));
 
-        // Child's parent should point to Window
+        // Child's parent should point to Backplate
         assert_eq!(unsafe { (*child.as_ptr()).parent(&ctx) }, Some(win.as_ptr()));
 
         win.clear_children(&mut ctx);

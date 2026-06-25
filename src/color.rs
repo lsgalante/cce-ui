@@ -33,7 +33,7 @@ static SIDEBAR_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(SIDEBAR_BG);
 static HIGHLIGHT_PRIMARY_COLOR: RwLock<[f32; 4]> = RwLock::new(HIGHLIGHT_PRIMARY);
 static MENUBAR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
 static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
-static WINDOW_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
+static BACKPLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
 static SCROLLINGLIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
@@ -43,7 +43,7 @@ static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.
 static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
-static WINDOW_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
+static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 
 
 
@@ -104,14 +104,14 @@ fn parse_and_set_colors(content: &str) {
         }
     }
 
-    if let Some(w_opacity) = val.pointer("/surfaces/window_opacity").and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = WINDOW_OPACITY.write() {
+    if let Some(w_opacity) = val.pointer("/surfaces/backplate_opacity").or_else(|| val.pointer("/surfaces/window_opacity")).and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = BACKPLATE_OPACITY.write() {
             *lock = Some(w_opacity as f32);
         }
     }
 
-    if let Some(radius) = val.pointer("/surfaces/window_corner_radius").and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = WINDOW_CORNER_RADIUS.write() {
+    if let Some(radius) = val.pointer("/surfaces/backplate_corner_radius").or_else(|| val.pointer("/surfaces/window_corner_radius")).and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
             *lock = radius as f32;
         }
     }
@@ -151,7 +151,7 @@ fn parse_and_set_colors(content: &str) {
         val.pointer(pointer).and_then(|v| v.as_str()).and_then(parse_hex)
     };
 
-    if let Some(c) = get_color("/surfaces/window_color").or_else(|| get_color("/layout/page_low_color")) {
+    if let Some(c) = get_color("/surfaces/backplate_color").or_else(|| get_color("/surfaces/window_color")).or_else(|| get_color("/layout/page_low_color")) {
         if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/color_borders_color") {
@@ -242,7 +242,7 @@ pub fn reload_colors(content: &str) {
 pub fn page_low_color() -> [f32; 4] {
     load_colors_once();
     let mut color = *PAGE_LOW_COLOR.read().unwrap();
-    if let Some(opacity) = read_window_opacity_if_configured() {
+    if let Some(opacity) = read_backplate_opacity_if_configured() {
         color[3] = opacity;
     }
     color
@@ -397,9 +397,9 @@ pub fn read_opacity_if_configured() -> Option<f32> {
     *OPACITY.read().unwrap()
 }
 
-pub fn read_window_opacity_if_configured() -> Option<f32> {
+pub fn read_backplate_opacity_if_configured() -> Option<f32> {
     load_colors_once();
-    *WINDOW_OPACITY.read().unwrap()
+    *BACKPLATE_OPACITY.read().unwrap()
 }
 
 pub fn toggle_on_color() -> [f32; 4] {
@@ -479,13 +479,13 @@ pub fn set_popover_bg_color(color: [f32; 4]) {
     }
 }
 
-pub fn window_corner_radius() -> f32 {
+pub fn backplate_corner_radius() -> f32 {
     load_colors_once();
-    *WINDOW_CORNER_RADIUS.read().unwrap()
+    *BACKPLATE_CORNER_RADIUS.read().unwrap()
 }
 
-pub fn set_window_corner_radius(radius: f32) {
-    if let Ok(mut lock) = WINDOW_CORNER_RADIUS.write() {
+pub fn set_backplate_corner_radius(radius: f32) {
+    if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
         *lock = radius;
     }
 }
@@ -556,7 +556,7 @@ pub fn active_window_mode() -> String {
     "floating".to_string()
 }
 
-pub fn active_window_opacity() -> f32 {
+pub fn active_backplate_opacity() -> f32 {
     let mode = active_window_mode();
     let config_path = "/home/lsgalante/.config/cce/config.json";
     let content = match std::fs::read_to_string(config_path) {
@@ -591,7 +591,8 @@ pub fn active_window_opacity() -> f32 {
         "pinned_opacity" => 0.05,
         "popup_opacity" => 0.20,
         _ => {
-            val.pointer("/surfaces/window_opacity")
+            val.pointer("/surfaces/backplate_opacity")
+                .or_else(|| val.pointer("/surfaces/window_opacity"))
                 .and_then(|v| v.as_f64())
                 .map(|v| v as f32)
                 .unwrap_or(0.9)

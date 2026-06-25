@@ -12,7 +12,7 @@ pub mod plate;
 pub mod switcher;
 pub mod layer;
 pub mod page;
-pub mod window;
+pub mod backplate;
 pub mod paginator;
 
 pub use container::Container;
@@ -29,5 +29,5 @@ pub use plate::Plate;
 pub use switcher::Switcher;
 pub use layer::Layer;
 pub use page::Page;
-pub use window::Window;
+pub use backplate::Backplate;
 pub use paginator::Paginator;

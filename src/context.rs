@@ -478,16 +478,16 @@ impl UiContext {
         crate::widget::context_menu::text_labels()
     }
 
-    pub fn is_movable_window_at(&self, px: f32, py: f32) -> bool {
-        let mut hit_window = false;
+    pub fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
+        let mut hit_backplate = false;
         for &ptr in self.widget_registry.values() {
             unsafe {
                 if !ptr.is_null() {
                     let w = &*ptr;
                     if w.hit_test(px, py, self) {
-                        if w.is_window() {
-                            if w.is_movable_window() {
-                                hit_window = true;
+                        if w.is_backplate() {
+                            if w.is_movable_backplate() {
+                                hit_backplate = true;
                             }
                         } else {
                             return false;
@@ -496,6 +496,6 @@ impl UiContext {
                 }
             }
         }
-        hit_window
+        hit_backplate
     }
 }

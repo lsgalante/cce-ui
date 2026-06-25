@@ -946,9 +946,9 @@ pub trait Application: Sized + 'static {
         None
     }
 
-    fn is_movable_window_at(&self, px: f32, py: f32) -> bool {
+    fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
         if let Some(ctx) = self.ui_context() {
-            ctx.is_movable_window_at(px, py)
+            ctx.is_movable_backplate_at(px, py)
         } else {
             false
         }
@@ -1770,7 +1770,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         let mut should_move = false;
                         if ly >= border && ly < 32.0 && lx < self.logical_width - 70.0 {
                             should_move = true;
-                        } else if self.inner.is_movable_window_at(lx, ly) {
+                        } else if self.inner.is_movable_backplate_at(lx, ly) {
                             should_move = true;
                         }
 
