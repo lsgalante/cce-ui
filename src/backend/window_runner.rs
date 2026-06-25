@@ -1095,6 +1095,7 @@ pub struct EngineState<A: Application> {
     pub pressed_key: Option<PressedKey>,
     pub sender: calloop::channel::Sender<A::Message>,
     pub active_popup: Option<ActivePopup>,
+    pub current_cursor_icon: Option<CursorIcon>,
     pub qh: QueueHandle<EngineState<A>>,
 }
 
@@ -1703,11 +1704,39 @@ impl<A: Application> PointerHandler for EngineState<A> {
             
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
+                    let is_status_bar = self.inner.settings().app_id == "cce-status-interface";
+                    let mut cursor_icon = CursorIcon::Default;
+                    if !is_status_bar {
+                        let border = 8.0f32;
+                        if ly < border {
+                            if lx < border {
+                                cursor_icon = CursorIcon::NwResize;
+                            } else if lx > self.logical_width - border {
+                                cursor_icon = CursorIcon::NeResize;
+                            } else {
+                                cursor_icon = CursorIcon::NResize;
+                            }
+                        } else if ly > self.logical_height - border {
+                            if lx < border {
+                                cursor_icon = CursorIcon::SwResize;
+                            } else if lx > self.logical_width - border {
+                                cursor_icon = CursorIcon::SeResize;
+                            } else {
+                                cursor_icon = CursorIcon::SResize;
+                            }
+                        } else if lx < border {
+                            cursor_icon = CursorIcon::WResize;
+                        } else if lx > self.logical_width - border {
+                            cursor_icon = CursorIcon::EResize;
+                        }
+                    }
+                    self.current_cursor_icon = Some(cursor_icon);
                     if let Some(ref themed_pointer) = self.pointer {
-                        let _ = themed_pointer.set_cursor(_conn, CursorIcon::Default);
+                        let _ = themed_pointer.set_cursor(_conn, cursor_icon);
                     }
                 }
                 PointerEventKind::Leave { .. } => {
+                    self.current_cursor_icon = None;
                     let mut rebuild = false;
                     self.inner.handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
                     if rebuild {
@@ -1719,6 +1748,40 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     self.inner.handle_pointer_move(LogicalPosition::new(lx, ly), &mut rebuild);
                     if rebuild {
                         self.redraw = true;
+                    }
+
+                    let is_status_bar = self.inner.settings().app_id == "cce-status-interface";
+                    let mut cursor_icon = CursorIcon::Default;
+                    if !is_status_bar {
+                        let border = 8.0f32;
+                        if ly < border {
+                            if lx < border {
+                                cursor_icon = CursorIcon::NwResize;
+                            } else if lx > self.logical_width - border {
+                                cursor_icon = CursorIcon::NeResize;
+                            } else {
+                                cursor_icon = CursorIcon::NResize;
+                            }
+                        } else if ly > self.logical_height - border {
+                            if lx < border {
+                                cursor_icon = CursorIcon::SwResize;
+                            } else if lx > self.logical_width - border {
+                                cursor_icon = CursorIcon::SeResize;
+                            } else {
+                                cursor_icon = CursorIcon::SResize;
+                            }
+                        } else if lx < border {
+                            cursor_icon = CursorIcon::WResize;
+                        } else if lx > self.logical_width - border {
+                            cursor_icon = CursorIcon::EResize;
+                        }
+                    }
+
+                    if self.current_cursor_icon != Some(cursor_icon) {
+                        self.current_cursor_icon = Some(cursor_icon);
+                        if let Some(ref themed_pointer) = self.pointer {
+                            let _ = themed_pointer.set_cursor(_conn, cursor_icon);
+                        }
                     }
                 }
                 PointerEventKind::Press { button, serial, .. } => {
@@ -2127,6 +2190,7 @@ pub fn run<A: Application>() {
         pressed_key: None,
         sender,
         active_popup: None,
+        current_cursor_icon: None,
         qh: qh.clone(),
     };
 
