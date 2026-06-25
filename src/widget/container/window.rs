@@ -334,7 +334,7 @@ mod tests {
             .with_radius(8.0);
 
         assert_eq!(win.rect(), (10.0, 20.0, 100.0, 200.0));
-        assert_eq!(win.color(), [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(win.background_color, Some([0.1, 0.2, 0.3, 0.4]));
         assert_eq!(win.solid_border(), Some(([1.0, 0.0, 0.0, 1.0], 2.5)));
         assert_eq!(win.corner_radius(), 8.0);
         assert_eq!(win.rounded_corners(), (true, true, true, true));
