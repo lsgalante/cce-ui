@@ -180,10 +180,10 @@ impl Element for Page {
         if !self.visible {
             return;
         }
-        let content_h = self.layout.layout(x, y, w, h, &self.base.children);
-        self.content_h = content_h;
+        let layout_content_h = self.layout.layout(x, y, w, h, &self.base.children);
+        self.content_h = self.content_h.max(layout_content_h);
 
-        let max_scroll = (content_h - h).max(0.0);
+        let max_scroll = (self.content_h - h).max(0.0);
         self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
 
         // Position the scroll bar
@@ -191,19 +191,10 @@ impl Element for Page {
         let sb_padding = 2.0;
         let sb_x = x + w - sb_w - sb_padding;
         self.scroll_bar.set_rect(sb_x, y + 4.0, sb_w, h - 8.0);
-        self.scroll_bar.update(self.scroll_y, content_h, h);
+        self.scroll_bar.update(self.scroll_y, self.content_h, h);
         
         let self_ptr = self as *mut Page as *mut (dyn Element + 'static);
         self.scroll_bar.parent = Some(self_ptr);
-
-        if self.scroll_y > 0.0 {
-            // Apply scroll offset to children
-            for &child_ptr in &self.base.children {
-                let child = unsafe { &mut *child_ptr };
-                let (cx, cy, cw, ch) = child.rect();
-                child.set_rect(cx, cy - self.scroll_y, cw, ch);
-            }
-        }
     }
 
     fn color(&self) -> [f32; 4] {

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::widget::{Element, WidgetId, LayoutTree, Key, MouseButton, ElementState, Event};
+use crate::widget::{Element, WidgetId, LayoutTree, Key, MouseButton, ElementState, Event, ScrollBar};
 use crate::widget::core::hover_animation::HoverState;
 use crate::widget::core::context_menu::ContextMenuState;
 
@@ -76,7 +76,23 @@ impl UiContext {
             match event {
                 Event::PointerMove { .. } | Event::Tick(_) => {
                     for child in children.into_iter().rev() {
-                        if self.propagate_event(event, child) {
+                        let mut adjusted_event = event.clone();
+                        if (*root).is_page() {
+                            if let Some(page) = (*root).as_any().downcast_ref::<crate::widget::Page>() {
+                                let sb_ptr = &page.scroll_bar as *const ScrollBar as *mut ScrollBar as *mut (dyn Element + 'static);
+                                if std::ptr::addr_eq(child, sb_ptr) {
+                                    match &mut adjusted_event {
+                                        Event::PointerMove { y, .. }
+                                        | Event::MouseButton { y, .. }
+                                        | Event::MouseWheel { y, .. } => {
+                                            *y -= page.scroll_y;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        if self.propagate_event(&adjusted_event, child) {
                             handled = true;
                         }
                     }
@@ -87,7 +103,23 @@ impl UiContext {
                 }
                 _ => {
                     for child in children.into_iter().rev() {
-                        if self.propagate_event(event, child) {
+                        let mut adjusted_event = event.clone();
+                        if (*root).is_page() {
+                            if let Some(page) = (*root).as_any().downcast_ref::<crate::widget::Page>() {
+                                let sb_ptr = &page.scroll_bar as *const ScrollBar as *mut ScrollBar as *mut (dyn Element + 'static);
+                                if std::ptr::addr_eq(child, sb_ptr) {
+                                    match &mut adjusted_event {
+                                        Event::PointerMove { y, .. }
+                                        | Event::MouseButton { y, .. }
+                                        | Event::MouseWheel { y, .. } => {
+                                            *y -= page.scroll_y;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                        if self.propagate_event(&adjusted_event, child) {
                             return true;
                         }
                     }
