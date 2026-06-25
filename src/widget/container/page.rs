@@ -4,7 +4,7 @@ use crate::widget::display::TextLabel;
 use super::layer::Layer;
 
 pub trait PageLayout {
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)]);
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)]) -> f32;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -25,7 +25,7 @@ impl Default for VerticalLayout {
 }
 
 impl PageLayout for VerticalLayout {
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)]) {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)]) -> f32 {
         let padding_x = self.padding_x;
         let padding_y = self.padding_y;
         let left_x = x + padding_x;
@@ -40,6 +40,7 @@ impl PageLayout for VerticalLayout {
             child.set_rect(left_x, current_y, available_w, use_h);
             current_y += use_h + spacing;
         }
+        current_y - y
     }
 }
 
@@ -61,10 +62,10 @@ impl Default for ColumnsLayout {
 }
 
 impl PageLayout for ColumnsLayout {
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)]) {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)]) -> f32 {
         let count = children.len();
         if count == 0 {
-            return;
+            return 0.0;
         }
         let total_spacing = self.spacing * (count - 1) as f32;
         let total_padding = self.padding_x * 2.0;
@@ -79,6 +80,7 @@ impl PageLayout for ColumnsLayout {
             child.set_rect(current_x, start_y, col_w, use_h);
             current_x += col_w + self.spacing;
         }
+        use_h + 2.0 * self.padding_y
     }
 }
 
@@ -87,6 +89,9 @@ pub struct Page {
     pub visible: bool,
     pub owned_children: Vec<Box<dyn Element>>,
     pub layout: Box<dyn PageLayout>,
+    pub scroll_y: f32,
+    pub content_h: f32,
+    pub scroll_bar: ScrollBar,
 }
 
 impl std::fmt::Debug for Page {
@@ -94,6 +99,8 @@ impl std::fmt::Debug for Page {
         f.debug_struct("Page")
             .field("base", &self.base)
             .field("visible", &self.visible)
+            .field("scroll_y", &self.scroll_y)
+            .field("content_h", &self.content_h)
             .finish()
     }
 }
@@ -105,6 +112,9 @@ impl Page {
             visible: true,
             owned_children: Vec::new(),
             layout: Box::new(VerticalLayout::default()),
+            scroll_y: 0.0,
+            content_h: 0.0,
+            scroll_bar: ScrollBar::new(),
         }
     }
 
@@ -122,6 +132,28 @@ impl Page {
         let ptr = &*child as *const (dyn Element + 'static) as *mut (dyn Element + 'static);
         self.owned_children.push(child);
         self.add_child(ptr, ctx);
+    }
+}
+
+fn clip_quad(
+    quad: (f32, f32, f32, f32, [f32; 4]),
+    bounds: (f32, f32, f32, f32),
+) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+    let (qx, qy, qw, qh, qc) = quad;
+    let (bx, by, bw, bh) = bounds;
+
+    let x1 = qx.max(bx);
+    let y1 = qy.max(by);
+    let x2 = (qx + qw).min(bx + bw);
+    let y2 = (qy + qh).min(by + bh);
+
+    let w = x2 - x1;
+    let h = y2 - y1;
+
+    if w > 0.0 && h > 0.0 {
+        Some((x1, y1, w, h, qc))
+    } else {
+        None
     }
 }
 
@@ -148,7 +180,30 @@ impl Element for Page {
         if !self.visible {
             return;
         }
-        self.layout.layout(x, y, w, h, &self.base.children);
+        let content_h = self.layout.layout(x, y, w, h, &self.base.children);
+        self.content_h = content_h;
+
+        let max_scroll = (content_h - h).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+
+        // Position the scroll bar
+        let sb_w = 6.0;
+        let sb_padding = 2.0;
+        let sb_x = x + w - sb_w - sb_padding;
+        self.scroll_bar.set_rect(sb_x, y + 4.0, sb_w, h - 8.0);
+        self.scroll_bar.update(self.scroll_y, content_h, h);
+        
+        let self_ptr = self as *mut Page as *mut (dyn Element + 'static);
+        self.scroll_bar.parent = Some(self_ptr);
+
+        if self.scroll_y > 0.0 {
+            // Apply scroll offset to children
+            for &child_ptr in &self.base.children {
+                let child = unsafe { &mut *child_ptr };
+                let (cx, cy, cw, ch) = child.rect();
+                child.set_rect(cx, cy - self.scroll_y, cw, ch);
+            }
+        }
     }
 
     fn color(&self) -> [f32; 4] {
@@ -156,7 +211,6 @@ impl Element for Page {
         c[3] *= crate::layout::page_opacity();
         c
     }
-
 
     fn visible(&self) -> bool {
         self.visible
@@ -184,7 +238,13 @@ impl Element for Page {
     }
 
     fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        self.base.children(ctx)
+        let mut list = self.base.children(ctx);
+        let (_, _, _, h) = self.rect();
+        if self.content_h > h {
+            let sb_ptr = &self.scroll_bar as *const ScrollBar as *mut ScrollBar as *mut (dyn Element + 'static);
+            list.push(sb_ptr);
+        }
+        list
     }
 
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
@@ -201,34 +261,96 @@ impl Element for Page {
         }
         let mut quads = Vec::new();
         let c = self.color();
+        let bounds = self.rect();
         if c[3] > 0.0 {
-            let (x, y, w, h) = self.rect();
-            quads.push((x, y, w, h, c));
+            quads.push((bounds.0, bounds.1, bounds.2, bounds.3, c));
         }
-        quads.extend(self.base.all_quads(ctx));
+        
+        for q in self.base.all_quads(ctx) {
+            if let Some(clipped) = clip_quad(q, bounds) {
+                quads.push(clipped);
+            }
+        }
+
+        if self.content_h > bounds.3 {
+            quads.extend(self.scroll_bar.all_quads(ctx));
+        }
+
         quads
     }
-
 
     fn text_labels(&self) -> Vec<TextLabel> {
         if !self.visible {
             return Vec::new();
         }
-        self.base.text_labels()
+        let (_, py, _, ph) = self.rect();
+        let mut result = Vec::new();
+        for label in self.base.text_labels() {
+            if label.y >= py && label.y + label.font_size <= py + ph {
+                result.push(label);
+            }
+        }
+        result
     }
 
     fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         if !self.visible {
             return Vec::new();
         }
-        self.base.text_labels_with_bounds(ctx)
+        let (px, py, pw, ph) = self.rect();
+        let page_bounds = [px, py, px + pw, py + ph];
+
+        let mut result = Vec::new();
+        for (label, bounds) in self.base.text_labels_with_bounds(ctx) {
+            let intersected_bounds = if let Some([l, t, r, b]) = bounds {
+                let il = l.max(page_bounds[0]);
+                let it = t.max(page_bounds[1]);
+                let ir = r.min(page_bounds[2]);
+                let ib = b.min(page_bounds[3]);
+                if il < ir && it < ib {
+                    Some([il, it, ir, ib])
+                } else {
+                    continue;
+                }
+            } else {
+                if label.y + label.font_size < py || label.y > py + ph {
+                    continue;
+                }
+                Some(page_bounds)
+            };
+            result.push((label, intersected_bounds));
+        }
+        result
     }
 
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         if !self.visible {
             return Vec::new();
         }
-        self.base.text_labels_with_font_and_bounds(ctx)
+        let (px, py, pw, ph) = self.rect();
+        let page_bounds = [px, py, px + pw, py + ph];
+
+        let mut result = Vec::new();
+        for (label, font, bounds) in self.base.text_labels_with_font_and_bounds(ctx) {
+            let intersected_bounds = if let Some([l, t, r, b]) = bounds {
+                let il = l.max(page_bounds[0]);
+                let it = t.max(page_bounds[1]);
+                let ir = r.min(page_bounds[2]);
+                let ib = b.min(page_bounds[3]);
+                if il < ir && it < ib {
+                    Some([il, it, ir, ib])
+                } else {
+                    continue;
+                }
+            } else {
+                if label.y + label.font_size < py || label.y > py + ph {
+                    continue;
+                }
+                Some(page_bounds)
+            };
+            result.push((label, font, intersected_bounds));
+        }
+        result
     }
 
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
@@ -243,5 +365,29 @@ impl Element for Page {
             return false;
         }
         self.base.hit_test(px, py, ctx)
+    }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if !self.visible {
+            return false;
+        }
+        if self.hit_test(px, py, ctx) {
+            let scroll_speed = 24.0;
+            let dy = match delta {
+                MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
+                MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+            };
+            let old_scroll = self.scroll_y;
+            let (x, y, w, h) = self.rect();
+            let max_scroll = (self.content_h - h).max(0.0);
+            self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
+            self.scroll_bar.scroll_y = self.scroll_y;
+            if (self.scroll_y - old_scroll).abs() > 0.01 {
+                self.set_rect(x, y, w, h);
+                self.mark_dirty(ctx);
+                return true;
+            }
+        }
+        false
     }
 }

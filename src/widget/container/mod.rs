@@ -14,6 +14,7 @@ pub mod layer;
 pub mod page;
 pub mod backplate;
 pub mod paginator;
+pub mod scroll_bar;
 
 pub use container::Container;
 pub use header::Header;
@@ -31,3 +32,4 @@ pub use layer::Layer;
 pub use page::Page;
 pub use backplate::Backplate;
 pub use paginator::Paginator;
+pub use scroll_bar::ScrollBar;

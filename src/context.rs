@@ -34,6 +34,32 @@ impl UiContext {
             return false;
         }
         unsafe {
+            let mut out_of_bounds = false;
+            if (*root).is_page() {
+                let mut scrollbar_dragging = false;
+                if let Some(page) = (*root).as_any().downcast_ref::<crate::widget::Page>() {
+                    if page.scroll_bar.dragging {
+                        scrollbar_dragging = true;
+                    }
+                }
+                
+                if !scrollbar_dragging {
+                    if let Event::PointerMove { x, y }
+                    | Event::MouseButton { x, y, .. }
+                    | Event::MouseWheel { delta: _, x, y } = event
+                    {
+                        let (rx, ry, rw, rh) = (*root).rect();
+                        if *x < rx || *x > rx + rw || *y < ry || *y > ry + rh {
+                            out_of_bounds = true;
+                        }
+                    }
+                }
+            }
+
+            if out_of_bounds {
+                return false;
+            }
+
             // For KeyInput, send directly to focused widget if it exists
             if let Event::KeyInput(_) = event {
                 if let Some(focused) = self.focused_widget {
@@ -48,7 +74,7 @@ impl UiContext {
             let children = (*root).children(self);
             
             match event {
-                Event::PointerMove { .. } => {
+                Event::PointerMove { .. } | Event::Tick(_) => {
                     for child in children.into_iter().rev() {
                         if self.propagate_event(event, child) {
                             handled = true;

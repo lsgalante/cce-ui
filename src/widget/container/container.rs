@@ -24,6 +24,25 @@ impl Element for Container {
         self as *mut Self as *mut (dyn Element + 'static)
     }
 
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let dx = x - self.base.x;
+        let dy = y - self.base.y;
+
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h;
+
+        if dx.abs() > 0.001 || dy.abs() > 0.001 {
+            for &child in &self.children {
+                unsafe {
+                    let (cx, cy, cw, ch) = (*child).rect();
+                    (*child).set_rect(cx + dx, cy + dy, cw, ch);
+                }
+            }
+        }
+    }
+
     fn measure(&self, constraints: LayoutConstraints, ctx: &UiContext) -> Size {
         let mut max_w = 0.0f32;
         let mut max_h = 0.0f32;
