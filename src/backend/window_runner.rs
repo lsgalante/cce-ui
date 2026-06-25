@@ -1287,7 +1287,7 @@ impl<A: Application> EngineState<A> {
             }
             Err(wgpu::SurfaceError::Timeout) => return,
             Err(e) => {
-                eprintln!("Surface error: {e:?}");
+                log::error!("Surface error: {e:?}");
                 return;
             }
         };
@@ -1433,7 +1433,7 @@ impl<A: Application> EngineState<A> {
                     }
                     Err(wgpu::SurfaceError::Timeout) => return,
                     Err(e) => {
-                        eprintln!("Popup surface error: {e:?}");
+                        log::error!("Popup surface error: {e:?}");
                         return;
                     }
                 };
@@ -2177,7 +2177,7 @@ pub fn run<A: Application>() {
     let mut last_tick = std::time::Instant::now();
     loop {
         if let Err(e) = event_loop.dispatch(std::time::Duration::from_millis(16), &mut engine_state) {
-            eprintln!("[window_runner] Event loop error: {:?}", e);
+            log::error!("[window_runner] Event loop error: {:?}", e);
             break;
         }
         if engine_state.exit {

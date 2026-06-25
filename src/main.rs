@@ -855,7 +855,7 @@ impl State {
             }
             Err(wgpu::SurfaceError::Timeout) => return,
             Err(e) => {
-                eprintln!("Surface error: {e:?}");
+                log::error!("Surface error: {e:?}");
                 return;
             }
         };
@@ -1636,13 +1636,13 @@ fn main() {
                         json_layout_config = Some(cfg);
                     }
                     Err(e) => {
-                        eprintln!("Failed to parse JSON layout: {}", e);
+                        log::error!("Failed to parse JSON layout: {}", e);
                         std::process::exit(1);
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Failed to read JSON layout from stdin: {}", e);
+                log::error!("Failed to read JSON layout from stdin: {}", e);
                 std::process::exit(1);
             }
         }

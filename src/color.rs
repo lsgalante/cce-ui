@@ -93,7 +93,7 @@ fn parse_and_set_colors(content: &str) {
     let val: serde_json::Value = match serde_json::from_str(content) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("JSON parse error: {}", e);
+            log::error!("JSON parse error: {}", e);
             return;
         }
     };

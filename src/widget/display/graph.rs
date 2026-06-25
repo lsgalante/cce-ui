@@ -386,7 +386,7 @@ impl Element for Graph {
         if button != MouseButton::Left { return false; }
         match state {
             ElementState::Pressed => {
-                println!("DEBUG Graph::mouse_input: Pressed px={}, py={}, connecting_from={:?}", px, py, self.connecting_from);
+                log::debug!("Graph::mouse_input: Pressed px={}, py={}, connecting_from={:?}", px, py, self.connecting_from);
                 // First, check direct port clicks
                 for i in (0..self.nodes.len()).rev() {
                     if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
@@ -401,7 +401,7 @@ impl Element for Graph {
                             let port_y = ny;
                             let dx = px - port_x;
                             let dy = py - port_y;
-                            println!("  Checking input node={} port={} port_x={} port_y={} dist_sq={}", node.name, k, port_x, port_y, dx*dx + dy*dy);
+                            log::debug!("  Checking input node={} port={} port_x={} port_y={} dist_sq={}", node.name, k, port_x, port_y, dx*dx + dy*dy);
                             if dx * dx + dy * dy <= port_click_radius_sq {
                                 if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
                                     if src_idx != i && src_port_type == PortType::Output {
@@ -409,17 +409,17 @@ impl Element for Graph {
                                         let input_node = &self.nodes[i];
                                         self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
                                         self.connecting_from = None;
-                                        println!("  Port connection created: Input={} from Output={}", input_node.name, output_node.name);
+                                        log::debug!("  Port connection created: Input={} from Output={}", input_node.name, output_node.name);
                                         return true;
                                     } else {
                                         self.connecting_from = None;
-                                        println!("  Port connection aborted (same node or incompatible ports)");
+                                        log::debug!("  Port connection aborted (same node or incompatible ports)");
                                         return true;
                                     }
                                 } else {
                                     self.connecting_from = Some((i, PortType::Input, k));
                                     self.current_mouse_pos = (px, py);
-                                    println!("  Start connecting from Input port of node={}", node.name);
+                                    log::debug!("  Start connecting from Input port of node={}", node.name);
                                     return true;
                                 }
                             }
@@ -431,7 +431,7 @@ impl Element for Graph {
                             let port_y = ny + nh;
                             let dx = px - port_x;
                             let dy = py - port_y;
-                            println!("  Checking output node={} port={} port_x={} port_y={} dist_sq={}", node.name, k, port_x, port_y, dx*dx + dy*dy);
+                            log::debug!("  Checking output node={} port={} port_x={} port_y={} dist_sq={}", node.name, k, port_x, port_y, dx*dx + dy*dy);
                             if dx * dx + dy * dy <= port_click_radius_sq {
                                 if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
                                     if src_idx != i && src_port_type == PortType::Input {
@@ -439,17 +439,17 @@ impl Element for Graph {
                                         let input_node = &self.nodes[src_idx];
                                         self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
                                         self.connecting_from = None;
-                                        println!("  Port connection created: Input={} from Output={}", input_node.name, output_node.name);
+                                        log::debug!("  Port connection created: Input={} from Output={}", input_node.name, output_node.name);
                                         return true;
                                     } else {
                                         self.connecting_from = None;
-                                        println!("  Port connection aborted (same node or incompatible ports)");
+                                        log::debug!("  Port connection aborted (same node or incompatible ports)");
                                         return true;
                                     }
                                 } else {
                                     self.connecting_from = Some((i, PortType::Output, k));
                                     self.current_mouse_pos = (px, py);
-                                    println!("  Start connecting from Output port of node={}", node.name);
+                                    log::debug!("  Start connecting from Output port of node={}", node.name);
                                     return true;
                                 }
                             }
@@ -462,7 +462,7 @@ impl Element for Graph {
                     for i in (0..self.nodes.len()).rev() {
                         if src_idx != i {
                             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
-                                println!("  Checking fallback body node={} nx={} ny={} nw={} nh={}", self.nodes[i].name, nx, ny, nw, nh);
+                                log::debug!("  Checking fallback body node={} nx={} ny={} nw={} nh={}", self.nodes[i].name, nx, ny, nw, nh);
                                 if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
                                     let node = &self.nodes[i];
                                     if src_port_type == PortType::Output && node.inputs > 0 {
@@ -470,14 +470,14 @@ impl Element for Graph {
                                         let input_node = &self.nodes[i];
                                         self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
                                         self.connecting_from = None;
-                                        println!("  Fallback connection created: Input={} from Output={}", input_node.name, output_node.name);
+                                        log::debug!("  Fallback connection created: Input={} from Output={}", input_node.name, output_node.name);
                                         return true;
                                     } else if src_port_type == PortType::Input && node.outputs > 0 {
                                         let output_node = &self.nodes[i];
                                         let input_node = &self.nodes[src_idx];
                                         self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
                                         self.connecting_from = None;
-                                        println!("  Fallback connection created: Input={} from Output={}", input_node.name, output_node.name);
+                                        log::debug!("  Fallback connection created: Input={} from Output={}", input_node.name, output_node.name);
                                         return true;
                                     }
                                 }
@@ -487,7 +487,7 @@ impl Element for Graph {
                 }
 
                 if self.connecting_from.is_some() {
-                    println!("  Clearing connecting_from because it didn't hit any ports or node bodies");
+                    log::debug!("  Clearing connecting_from because it didn't hit any ports or node bodies");
                     self.connecting_from = None;
                 }
 

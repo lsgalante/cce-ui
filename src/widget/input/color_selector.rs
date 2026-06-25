@@ -251,7 +251,7 @@ impl Element for ColorSelector {
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    eprintln!("Error checking color selector child process: {:?}", e);
+                    log::error!("Error checking color selector child process: {:?}", e);
                     *child_opt = None;
                 }
             }
