@@ -569,6 +569,21 @@ pub fn active_backplate_opacity() -> f32 {
     };
 
     let key = match mode.as_str() {
+        "fullscreen" => "fullscreen_backplate_opacity",
+        "cascade" => "cascade_backplate_opacity",
+        "grid" => "grid_backplate_opacity",
+        "floating" => "floating_backplate_opacity",
+        "side-panel" | "pinned" => "pinned_backplate_opacity",
+        "popup" => "popup_backplate_opacity",
+        _ => "window_backplate_opacity",
+    };
+
+    if let Some(opacity) = val.pointer(&format!("/layout/{}", key)).and_then(|v| v.as_f64()) {
+        return opacity as f32;
+    }
+
+    // Fallback to legacy key:
+    let legacy_key = match mode.as_str() {
         "fullscreen" => "fullscreen_opacity",
         "cascade" => "cascade_opacity",
         "grid" => "grid_opacity",
@@ -578,18 +593,18 @@ pub fn active_backplate_opacity() -> f32 {
         _ => "window_opacity",
     };
 
-    if let Some(opacity) = val.pointer(&format!("/layout/{}", key)).and_then(|v| v.as_f64()) {
+    if let Some(opacity) = val.pointer(&format!("/layout/{}", legacy_key)).and_then(|v| v.as_f64()) {
         return opacity as f32;
     }
 
     // Fallbacks if not present:
     match key {
-        "fullscreen_opacity" => 0.95,
-        "cascade_opacity" => 0.05,
-        "grid_opacity" => 0.05,
-        "floating_opacity" => 0.9,
-        "pinned_opacity" => 0.05,
-        "popup_opacity" => 0.20,
+        "fullscreen_backplate_opacity" | "fullscreen_opacity" => 0.95,
+        "cascade_backplate_opacity" | "cascade_opacity" => 0.05,
+        "grid_backplate_opacity" | "grid_opacity" => 0.05,
+        "floating_backplate_opacity" | "floating_opacity" => 0.9,
+        "pinned_backplate_opacity" | "pinned_opacity" => 0.05,
+        "popup_backplate_opacity" | "popup_opacity" => 0.20,
         _ => {
             val.pointer("/surfaces/backplate_opacity")
                 .or_else(|| val.pointer("/surfaces/window_opacity"))
