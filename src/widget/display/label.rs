@@ -40,6 +40,7 @@ impl Label {
 
 impl Element for Label {
     crate::impl_widget_base!(Label);
+    fn blocks_backplate_drag(&self) -> bool { false }
 
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
 
@@ -69,6 +70,7 @@ impl SectionHeader {
 
 impl Element for SectionHeader {
     crate::impl_widget_base!(SectionHeader);
+    fn blocks_backplate_drag(&self) -> bool { false }
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         vec![(self.base.x + 8.0, self.base.y + 22.0, self.base.w - 16.0, 1.0, [0.18, 0.18, 0.27, 1.0])]

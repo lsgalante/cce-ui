@@ -15,6 +15,7 @@ impl Container {
 
 impl Element for Container {
     fn base(&self) -> Option<&Widget> { Some(&self.base) }
+    fn blocks_backplate_drag(&self) -> bool { false }
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base) }
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {

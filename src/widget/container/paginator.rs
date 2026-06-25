@@ -205,6 +205,7 @@ impl Element for Paginator {
     fn rect(&self) -> (f32, f32, f32, f32) {
         (self.x, self.y, self.w, self.h)
     }
+    fn blocks_backplate_drag(&self) -> bool { false }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.x = x;

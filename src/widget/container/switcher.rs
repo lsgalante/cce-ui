@@ -37,6 +37,7 @@ impl Switcher {
 
 impl Element for Switcher {
     crate::impl_widget_base!(Switcher);
+    fn blocks_backplate_drag(&self) -> bool { false }
 
     fn visible(&self) -> bool {
         self.visible

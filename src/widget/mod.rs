@@ -518,6 +518,7 @@ pub trait Element {
     fn is_layer(&self) -> bool { false }
     fn is_backplate(&self) -> bool { false }
     fn is_movable_backplate(&self) -> bool { false }
+    fn blocks_backplate_drag(&self) -> bool { true }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
 
     fn corner_radius(&self) -> f32 { 12.0 }

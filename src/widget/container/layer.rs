@@ -31,6 +31,7 @@ impl Layer {
 impl Element for Layer {
     fn base(&self) -> Option<&Widget> { Some(&self.base) }
     fn is_layer(&self) -> bool { true }
+    fn blocks_backplate_drag(&self) -> bool { false }
 
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base) }
     fn as_any(&self) -> &dyn std::any::Any { self }

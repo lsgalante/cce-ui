@@ -160,6 +160,7 @@ fn clip_quad(
 impl Element for Page {
     fn base(&self) -> Option<&Widget> { Some(&self.base.base) }
     fn is_page(&self) -> bool { true }
+    fn blocks_backplate_drag(&self) -> bool { false }
 
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base.base) }
     fn as_any(&self) -> &dyn std::any::Any { self }

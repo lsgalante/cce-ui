@@ -547,7 +547,7 @@ impl UiContext {
                             if w.is_movable_backplate() {
                                 hit_backplate = true;
                             }
-                        } else {
+                        } else if w.blocks_backplate_drag() {
                             return false;
                         }
                     }
