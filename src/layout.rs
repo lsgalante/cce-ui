@@ -2014,11 +2014,7 @@ impl Section {
     }
 
     pub fn padding(&self) -> f32 {
-        if self.is_child {
-            section_padding().max(8.0)
-        } else {
-            section_padding()
-        }
+        section_padding()
     }
 
     pub fn new(pc: &mut dyn RenderTarget, left: f32, top: f32, cw: f32, label: &str) -> Self {
@@ -2048,11 +2044,7 @@ impl Section {
         };
         pc.text_with_font(label, label_x, top, font_size, font_color, &font_fam);
 
-        let pad = if is_child {
-            section_padding().max(8.0)
-        } else {
-            section_padding()
-        };
+        let pad = section_padding();
         let margin_x = pad + 12.0;
         let usable_w = (cw - 2.0 * margin_x).max(1.0);
         let min_col_width = 130.0;
@@ -3176,11 +3168,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     }
 
     pub fn padding(&self) -> f32 {
-        if self.is_child {
-            section_padding().max(8.0)
-        } else {
-            section_padding()
-        }
+        section_padding()
     }
 
     pub fn new(pc: &'a mut P, left: f32, top: f32, cw: f32, label: &str, focused: bool, is_child: bool) -> Self {
@@ -3206,11 +3194,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         };
         pc.text_with_font(label, label_x, top, font_size, font_color, &font_fam);
 
-        let pad = if is_child {
-            section_padding().max(8.0)
-        } else {
-            section_padding()
-        };
+        let pad = section_padding();
         let margin_x = pad + 12.0;
         let usable_w = (cw - 2.0 * margin_x).max(1.0);
         let min_col_width = 130.0;
