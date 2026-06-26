@@ -567,6 +567,55 @@ impl Element for RangeSlider {
         self.active_thumb = None;
     }
 
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
+        let top = self.base.label_offset();
+        let visual_h = self.base.h - top;
+        let (sx, sy, sw, _) = self.rect();
+        if px >= sx && px <= sx + sw && py >= sy + top && py <= sy + top + visual_h {
+            let thumb_size = visual_h * 0.9;
+            let range = sw - thumb_size;
+            let thumb_low_x = sx + self.value_low * range;
+            let thumb_high_x = sx + self.value_high * range;
+            let center_low = thumb_low_x + thumb_size / 2.0;
+            let center_high = thumb_high_x + thumb_size / 2.0;
+
+            let dist_low = (px - center_low).abs();
+            let dist_high = (px - center_high).abs();
+
+            let scroll_amount = match delta {
+                MouseScrollDelta::LineDelta(_x, y) => *y,
+                MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
+            };
+            let step = 0.02;
+
+            let adjust_low = if dist_low < dist_high {
+                true
+            } else if dist_high < dist_low {
+                false
+            } else {
+                // dist_low == dist_high, e.g. when both thumbs are at the same value
+                // If scroll decreases the value, adjust Low so it can move down.
+                // Otherwise, adjust High so it can move up.
+                scroll_amount > 0.0
+            };
+
+            if adjust_low {
+                let new_val = (self.value_low - scroll_amount * step).clamp(0.0, self.value_high);
+                if (new_val - self.value_low).abs() > 0.0001 {
+                    self.value_low = new_val;
+                    return true;
+                }
+            } else {
+                let new_val = (self.value_high - scroll_amount * step).clamp(self.value_low, 1.0);
+                if (new_val - self.value_high).abs() > 0.0001 {
+                    self.value_high = new_val;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
@@ -686,6 +735,55 @@ mod tests {
         rs.drag_update(150.0, 20.0); // drag past high
         assert_eq!(rs.values().0, 0.5); // constrained
         rs.drag_end();
+    }
+
+    #[test]
+    fn test_rangeslider_mouse_wheel() {
+        let mut rs = RangeSlider::new().with_values(0.3, 0.7);
+        rs.set_rect(10.0, 10.0, 200.0, 20.0);
+        let mut dummy_ctx = crate::context::UiContext::new();
+
+        // Thumb size = h * 0.9 = 18.0
+        // Range = w - thumb_size = 182.0
+        // Low thumb center: x + 0.3 * 182.0 + 9.0 = 10.0 + 54.6 + 9.0 = 73.6
+        // High thumb center: x + 0.7 * 182.0 + 9.0 = 10.0 + 127.4 + 9.0 = 146.4
+
+        // Scroll near low thumb (px = 75.0, py = 20.0)
+        // Scroll UP: LineDelta(0.0, 1.0). (value_low - 1.0 * 0.02) = 0.28.
+        let delta = MouseScrollDelta::LineDelta(0.0, 1.0);
+        let handled = rs.mouse_wheel(&delta, 75.0, 20.0, &mut dummy_ctx);
+        assert!(handled);
+        assert!((rs.values().0 - 0.28).abs() < 0.001);
+        assert_eq!(rs.values().1, 0.7); // high unchanged
+
+        // Scroll near high thumb (px = 145.0, py = 20.0)
+        // Scroll DOWN: LineDelta(0.0, -1.0). (value_high - (-1.0) * 0.02) = 0.72.
+        let delta_down = MouseScrollDelta::LineDelta(0.0, -1.0);
+        let handled = rs.mouse_wheel(&delta_down, 145.0, 20.0, &mut dummy_ctx);
+        assert!(handled);
+        assert!((rs.values().1 - 0.72).abs() < 0.001);
+        assert!((rs.values().0 - 0.28).abs() < 0.001); // low unchanged
+
+        // Scroll when both are at 0.5 (rs is updated to 0.5, 0.5)
+        rs.set_values(0.5, 0.5);
+        // Center: 110.0. Scroll at px = 110.0.
+        // Scroll UP (decrease): LineDelta(0.0, 1.0).
+        // Since it's a decrease (scroll_amount > 0), adjust_low should be true.
+        // new_val for low = (0.5 - 0.02) = 0.48.
+        let handled = rs.mouse_wheel(&delta, 110.0, 20.0, &mut dummy_ctx);
+        assert!(handled);
+        assert!((rs.values().0 - 0.48).abs() < 0.001);
+        assert_eq!(rs.values().1, 0.5); // high unchanged
+
+        // Reset both to 0.5
+        rs.set_values(0.5, 0.5);
+        // Scroll DOWN (increase): LineDelta(0.0, -1.0).
+        // Since it's an increase (scroll_amount < 0), adjust_low should be false.
+        // new_val for high = (0.5 - (-0.02)) = 0.52.
+        let handled = rs.mouse_wheel(&delta_down, 110.0, 20.0, &mut dummy_ctx);
+        assert!(handled);
+        assert_eq!(rs.values().0, 0.5); // low unchanged
+        assert!((rs.values().1 - 0.52).abs() < 0.001);
     }
 }
 
