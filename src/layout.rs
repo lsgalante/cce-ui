@@ -2945,9 +2945,16 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     }
 
     pub fn spacing(&mut self, dy: f32) {
-        self.content_y += dy;
-        for h in &mut self.grid.col_heights {
-            *h += dy;
+        if self.grid.col_heights.len() >= 2 {
+            if self.last_col < self.grid.col_heights.len() {
+                self.grid.col_heights[self.last_col] += dy;
+            }
+            self.content_y = self.grid.max_height();
+        } else {
+            self.content_y += dy;
+            for h in &mut self.grid.col_heights {
+                *h += dy;
+            }
         }
     }
 
@@ -3493,7 +3500,7 @@ mod tests {
         let height_col_0_after = ctx.grid.col_heights[0];
         let height_col_1_after = ctx.grid.col_heights[1];
         assert_eq!(height_col_0_after, height_col_0_before + 12.0);
-        assert_eq!(height_col_1_after, height_col_1_before + 12.0);
+        assert_eq!(height_col_1_after, height_col_1_before);
         assert_ne!(height_col_0_after, height_col_1_after);
     }
 }

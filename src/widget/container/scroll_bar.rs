@@ -2,14 +2,10 @@ use crate::widget::*;
 use crate::context::UiContext;
 
 pub struct ScrollBar {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+    pub base: Widget,
     pub scroll_y: f32,
     pub content_h: f32,
     pub viewport_h: f32,
-    pub hovered: bool,
     pub dragging: bool,
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
@@ -18,14 +14,10 @@ pub struct ScrollBar {
 impl std::fmt::Debug for ScrollBar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ScrollBar")
-            .field("x", &self.x)
-            .field("y", &self.y)
-            .field("w", &self.w)
-            .field("h", &self.h)
+            .field("base", &self.base)
             .field("scroll_y", &self.scroll_y)
             .field("content_h", &self.content_h)
             .field("viewport_h", &self.viewport_h)
-            .field("hovered", &self.hovered)
             .field("dragging", &self.dragging)
             .finish()
     }
@@ -34,14 +26,10 @@ impl std::fmt::Debug for ScrollBar {
 impl Clone for ScrollBar {
     fn clone(&self) -> Self {
         Self {
-            x: self.x,
-            y: self.y,
-            w: self.w,
-            h: self.h,
+            base: self.base.clone(),
             scroll_y: self.scroll_y,
             content_h: self.content_h,
             viewport_h: self.viewport_h,
-            hovered: self.hovered,
             dragging: self.dragging,
             parent: self.parent,
             children: self.children.clone(),
@@ -51,15 +39,13 @@ impl Clone for ScrollBar {
 
 impl ScrollBar {
     pub fn new() -> Self {
+        let mut base = Widget::new();
+        base.w = 6.0;
         Self {
-            x: 0.0,
-            y: 0.0,
-            w: 6.0,
-            h: 0.0,
+            base,
             scroll_y: 0.0,
             content_h: 0.0,
             viewport_h: 0.0,
-            hovered: false,
             dragging: false,
             parent: None,
             children: Vec::new(),
@@ -73,13 +59,13 @@ impl ScrollBar {
     }
 
     pub fn get_thumb_rect(&self) -> Option<(f32, f32, f32, f32)> {
-        if self.content_h <= self.viewport_h || self.viewport_h <= 0.0 || self.h <= 0.0 {
+        if self.content_h <= self.viewport_h || self.viewport_h <= 0.0 || self.base.h <= 0.0 {
             return None;
         }
-        let sb_x = self.x;
-        let sb_w = self.w;
-        let sb_track_h = self.h;
-        let sb_track_y = self.y;
+        let sb_x = self.base.x;
+        let sb_w = self.base.w;
+        let sb_track_h = self.base.h;
+        let sb_track_y = self.base.y;
 
         let visible_ratio = self.viewport_h / self.content_h;
         let thumb_h = if sb_track_h <= 20.0 {
@@ -96,41 +82,10 @@ impl ScrollBar {
 }
 
 impl Element for ScrollBar {
-    fn base(&self) -> Option<&Widget> { None }
-    fn base_mut(&mut self) -> Option<&mut Widget> { None }
-
-    fn rect(&self) -> (f32, f32, f32, f32) {
-        (self.x, self.y, self.w, self.h)
-    }
-
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.x = x;
-        self.y = y;
-        self.w = w;
-        self.h = h;
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
-    }
-
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
+    crate::impl_widget_base!(ScrollBar);
 
     fn color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
-    }
-
-    fn set_hovered(&mut self, hovered: bool) {
-        self.hovered = hovered;
-    }
-
-    fn hovered(&self) -> bool {
-        self.hovered
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
@@ -138,21 +93,21 @@ impl Element for ScrollBar {
             return false;
         }
         let hit_margin = 6.0;
-        px >= self.x - hit_margin && px <= self.x + self.w + hit_margin && py >= self.y && py <= self.y + self.h
+        px >= self.base.x - hit_margin && px <= self.base.x + self.base.w + hit_margin && py >= self.base.y && py <= self.base.y + self.base.h
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = false;
         let is_hit = self.hit_test(px, py, ctx);
-        if self.hovered != is_hit {
-            self.hovered = is_hit;
+        if self.base.hovered != is_hit {
+            self.base.hovered = is_hit;
             changed = true;
         }
 
         if self.dragging {
             if let Some((_, _, _, thumb_h)) = self.get_thumb_rect() {
-                let sb_track_y = self.y;
-                let sb_track_h = self.h;
+                let sb_track_y = self.base.y;
+                let sb_track_h = self.base.h;
                 let track_scroll_range = sb_track_h - thumb_h;
                 if track_scroll_range > 0.0 {
                     let mouse_y_in_track = (py - sb_track_y).clamp(0.0, sb_track_h);
@@ -202,13 +157,13 @@ impl Element for ScrollBar {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        if self.content_h > self.viewport_h && self.h > 0.0 {
-            quads.push((self.x, self.y, self.w, self.h, [0.15, 0.15, 0.20, 0.3]));
+        if self.content_h > self.viewport_h && self.base.h > 0.0 {
+            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, [0.15, 0.15, 0.20, 0.3]));
 
             if let Some((sb_x, thumb_y, sb_w, thumb_h)) = self.get_thumb_rect() {
                 let thumb_color = if self.dragging {
                     [0.70, 0.70, 0.75, 0.6]
-                } else if self.hovered {
+                } else if self.base.hovered {
                     [0.65, 0.65, 0.70, 0.5]
                 } else {
                     [0.60, 0.60, 0.65, 0.4]

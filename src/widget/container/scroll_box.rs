@@ -2,14 +2,13 @@ use crate::widget::*;
 
 #[derive(Debug, Clone)]
 pub struct ScrollBox {
-    x: f32, y: f32, w: f32, h: f32,
+    pub base: Widget,
     pub scroll_y: f32,
     pub content_h: f32,
     pub viewport_y: f32,
     pub viewport_h: f32,
     viewport_offset_y: f32,
     viewport_offset_h: f32,
-    hovered: bool,
     pub show_border: bool,
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
@@ -18,14 +17,13 @@ pub struct ScrollBox {
 impl ScrollBox {
     pub fn new() -> Self {
         Self {
-            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            base: Widget::new(),
             scroll_y: 0.0,
             content_h: 0.0,
             viewport_y: 0.0,
             viewport_h: 0.0,
             viewport_offset_y: 0.0,
             viewport_offset_h: 0.0,
-            hovered: false,
             show_border: true,
             parent: None,
             children: Vec::new(),
@@ -36,8 +34,8 @@ impl ScrollBox {
         self.content_h = content_h;
         self.viewport_y = viewport_y;
         self.viewport_h = viewport_h;
-        self.viewport_offset_y = viewport_y - self.y;
-        self.viewport_offset_h = viewport_h - self.h;
+        self.viewport_offset_y = viewport_y - self.base.y;
+        self.viewport_offset_h = viewport_h - self.base.h;
         let max_scroll = (content_h - viewport_h).max(0.0);
         self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
     }
@@ -53,25 +51,17 @@ impl ScrollBox {
 }
 
 impl Element for ScrollBox {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
+    crate::impl_widget_base!(ScrollBox);
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.x = x;
-        self.y = y;
-        self.w = w;
-        self.h = h;
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h;
         self.viewport_y = y + self.viewport_offset_y;
         self.viewport_h = h + self.viewport_offset_h;
     }
     fn color(&self) -> [f32; 4] { crate::color::scrollinglist_bg_color() }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
-    fn highlight_color(&self, _ctx: &UiContext) -> Option<[f32; 4]> { None }
 
     fn focus(&mut self) {
         focus::set_focused(self);
@@ -89,9 +79,9 @@ impl Element for ScrollBox {
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let was = self.hovered;
-        self.hovered = self.hit_test(px, py, ctx);
-        was != self.hovered
+        let was = self.base.hovered;
+        self.base.hovered = self.hit_test(px, py, ctx);
+        was != self.base.hovered
     }
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
@@ -114,24 +104,24 @@ impl Element for ScrollBox {
         let mut quads = Vec::new();
         
         // Background
-        quads.push((self.x, self.y, self.w, self.h, crate::color::scrollinglist_bg_color()));
+        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, crate::color::scrollinglist_bg_color()));
 
         // Border lines
         let box_border_color = if focus::is_focused(self) {
             [0.30, 0.50, 0.32, 1.0] // Focused green
-        } else if self.hovered {
+        } else if self.base.hovered {
             [0.25, 0.25, 0.35, 1.0] // Hovered
         } else {
             [0.18, 0.18, 0.24, 1.0] // Default
         };
-        quads.push((self.x, self.y, self.w, 1.0, box_border_color)); // Top
-        quads.push((self.x, self.y + self.h - 1.0, self.w, 1.0, box_border_color)); // Bottom
-        quads.push((self.x, self.y, 1.0, self.h, box_border_color)); // Left
-        quads.push((self.x + self.w - 1.0, self.y, 1.0, self.h, box_border_color)); // Right
+        quads.push((self.base.x, self.base.y, self.base.w, 1.0, box_border_color)); // Top
+        quads.push((self.base.x, self.base.y + self.base.h - 1.0, self.base.w, 1.0, box_border_color)); // Bottom
+        quads.push((self.base.x, self.base.y, 1.0, self.base.h, box_border_color)); // Left
+        quads.push((self.base.x + self.base.w - 1.0, self.base.y, 1.0, self.base.h, box_border_color)); // Right
 
         // Scrollbar
         if self.content_h > self.viewport_h {
-            let sb_x = self.x + self.w - 8.0;
+            let sb_x = self.base.x + self.base.w - 8.0;
             let sb_w = 4.0;
             let sb_track_h = self.viewport_h - 8.0;
             let sb_track_y = self.viewport_y + 4.0;
