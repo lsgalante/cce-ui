@@ -393,6 +393,18 @@ impl Element for Switcher {
         Vec::new()
     }
 
+    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
+        if let Some(idx) = self.active_index {
+            if idx < self.children.len() {
+                return unsafe { (*self.children[idx]).extra_circles() };
+            }
+        }
+        Vec::new()
+    }
+
     fn as_menu_controller(&self) -> Option<&dyn MenuController> { Some(self) }
     fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> { Some(self) }
 }

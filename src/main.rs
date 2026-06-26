@@ -60,6 +60,40 @@ impl Vertex {
     }
 }
 
+fn circle_vertices(
+    cx: f32, cy: f32, r: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    segments: usize,
+) -> Vec<Vertex> {
+    let mut verts = Vec::with_capacity(segments * 3);
+    for i in 0..segments {
+        let a1 = i as f32 * 2.0 * std::f32::consts::PI / segments as f32;
+        let a2 = (i + 1) as f32 * 2.0 * std::f32::consts::PI / segments as f32;
+        let x1 = cx + r * a1.cos();
+        let y1 = cy + r * a1.sin();
+        let x2 = cx + r * a2.cos();
+        let y2 = cy + r * a2.sin();
+
+        verts.push(Vertex {
+            position: [(cx / sw) * 2.0 - 1.0, 1.0 - (cy / sh) * 2.0],
+            color,
+            clip_circle: [0.0, 0.0, 0.0],
+        });
+        verts.push(Vertex {
+            position: [(x1 / sw) * 2.0 - 1.0, 1.0 - (y1 / sh) * 2.0],
+            color,
+            clip_circle: [0.0, 0.0, 0.0],
+        });
+        verts.push(Vertex {
+            position: [(x2 / sw) * 2.0 - 1.0, 1.0 - (y2 / sh) * 2.0],
+            color,
+            clip_circle: [0.0, 0.0, 0.0],
+        });
+    }
+    verts
+}
+
 fn quad_vertices(
     x: f32, y: f32, w: f32, h: f32,
     surface_w: f32, surface_h: f32,
@@ -652,6 +686,9 @@ impl State {
                 for (qx, qy, qw, qh, qc) in jl.extra_quads() {
                     verts.extend(extra_quad_vertices(jl, qx, qy, qw, qh, sw, sh, qc));
                 }
+                for (cx, cy, r, qc) in jl.extra_circles() {
+                    verts.extend(circle_vertices(cx, cy, r, sw, sh, qc, 16));
+                }
             }
         } else {
             let mut draw_order: Vec<usize> = (0..self.widgets.len()).collect();
@@ -661,6 +698,9 @@ impl State {
                 verts.extend(widget_vertices(w.as_ref(), sw, sh));
                 for (qx, qy, qw, qh, qc) in w.extra_quads() {
                     verts.extend(extra_quad_vertices(w.as_ref(), qx, qy, qw, qh, sw, sh, qc));
+                }
+                for (cx, cy, r, qc) in w.extra_circles() {
+                    verts.extend(circle_vertices(cx, cy, r, sw, sh, qc, 16));
                 }
             }
 

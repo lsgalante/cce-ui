@@ -417,6 +417,7 @@ pub trait Element {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { Vec::new() }
     fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> { Vec::new() }
+    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> { Vec::new() }
     
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = self.extra_quads();

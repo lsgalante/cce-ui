@@ -65,6 +65,7 @@ pub struct Graph {
     connecting_from: Option<(usize, PortType, usize)>,
     current_mouse_pos: (f32, f32),
     pending_connection: Option<(String, String)>,
+    hovered_port: Option<(usize, PortType, usize)>,
 }
 
 impl Graph {
@@ -122,6 +123,7 @@ impl Graph {
             connecting_from: None,
             current_mouse_pos: (0.0, 0.0),
             pending_connection: None,
+            hovered_port: None,
         }
     }
 
@@ -354,6 +356,19 @@ impl Element for Graph {
         self.dragging_id = None;
     }
 
+    fn handle_event(&mut self, event: &crate::widget::Event, _ctx: &mut UiContext) -> bool {
+        match event {
+            crate::widget::Event::MouseLeave => {
+                let changed = self.hovered_port.is_some() || self.toggle_hovered_idx.is_some();
+                self.hovered_port = None;
+                self.toggle_hovered_idx = None;
+                return changed;
+            }
+            _ => {}
+        }
+        false
+    }
+
     fn on_cursor_moved(&mut self, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
         let mut changed = false;
         if self.connecting_from.is_some() {
@@ -362,15 +377,41 @@ impl Element for Graph {
         }
         let was_toggle_hovered = self.toggle_hovered_idx;
         self.toggle_hovered_idx = None;
+        
+        let was_hovered_port = self.hovered_port;
+        self.hovered_port = None;
+
         for i in 0..self.nodes.len() {
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                let scale_f = nw / 80.0;
+                let hit_radius = (6.0 * scale_f).max(2.0) * 1.5;
+                let node = &self.nodes[i];
+                
+                for k in 0..node.inputs {
+                    let cx = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
+                    let cy = ny;
+                    if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
+                        self.hovered_port = Some((i, PortType::Input, k));
+                    }
+                }
+                
+                for k in 0..node.outputs {
+                    let cx = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
+                    let cy = ny + nh;
+                    if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
+                        self.hovered_port = Some((i, PortType::Output, k));
+                    }
+                }
+            }
+
             if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
                 if px >= tx && px < tx + tw && py >= ty && py < ty + th {
                     self.toggle_hovered_idx = Some(i);
-                    break;
                 }
             }
         }
-        if was_toggle_hovered != self.toggle_hovered_idx {
+        
+        if was_toggle_hovered != self.toggle_hovered_idx || was_hovered_port != self.hovered_port {
             changed = true;
         }
         changed
@@ -761,23 +802,6 @@ impl Element for Graph {
                 };
                 push_clipped(nx, ny, nw, nh, bg_color, &mut quads);
 
-                // Draw input ports on top edge
-                let port_size = (6.0 * scale_f).max(2.0);
-                let port_color = [0.1, 0.8, 0.4, 1.0]; // Bright green/emerald
-                let node = &self.nodes[i];
-                for k in 0..node.inputs {
-                    let px = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32 - port_size / 2.0;
-                    let py = ny - port_size / 2.0;
-                    push_clipped(px, py, port_size, port_size, port_color, &mut quads);
-                }
-
-                // Draw output ports on bottom edge
-                for k in 0..node.outputs {
-                    let px = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32 - port_size / 2.0;
-                    let py = ny + nh - port_size / 2.0;
-                    push_clipped(px, py, port_size, port_size, port_color, &mut quads);
-                }
-
                 if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
                     let btn_color = if self.toggle_hovered_idx == Some(i) {
                         colors::TOGGLE_HOVER
@@ -795,6 +819,63 @@ impl Element for Graph {
         }
 
         quads
+    }
+
+    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
+        let mut circles = Vec::new();
+        let min_x = self.x;
+        let min_y = self.y;
+        let max_x = self.x + self.w;
+        let max_y = self.y + self.h;
+
+        let mut push_circle_clipped = |cx: f32, cy: f32, r: f32, color: [f32; 4]| {
+            if cx >= min_x && cx <= max_x && cy >= min_y && cy <= max_y {
+                circles.push((cx, cy, r, color));
+            }
+        };
+
+        for i in 0..self.nodes.len() {
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                let scale_f = nw / 80.0;
+                let port_size = (6.0 * scale_f).max(2.0);
+                let base_r = port_size / 2.0;
+
+                let node = &self.nodes[i];
+                
+                // Input ports (top edge)
+                for k in 0..node.inputs {
+                    let cx = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
+                    let cy = ny;
+                    
+                    let is_hovered = self.hovered_port == Some((i, PortType::Input, k));
+                    let is_connecting = self.connecting_from == Some((i, PortType::Input, k));
+                    
+                    let (r, color) = if is_hovered || is_connecting {
+                        (base_r * 1.4, [0.0, 1.0, 0.9, 1.0]) // neon cyan glow
+                    } else {
+                        (base_r, [0.1, 0.8, 0.4, 1.0])
+                    };
+                    push_circle_clipped(cx, cy, r, color);
+                }
+
+                // Output ports (bottom edge)
+                for k in 0..node.outputs {
+                    let cx = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
+                    let cy = ny + nh;
+                    
+                    let is_hovered = self.hovered_port == Some((i, PortType::Output, k));
+                    let is_connecting = self.connecting_from == Some((i, PortType::Output, k));
+                    
+                    let (r, color) = if is_hovered || is_connecting {
+                        (base_r * 1.4, [0.0, 1.0, 0.9, 1.0]) // neon cyan glow
+                    } else {
+                        (base_r, [0.1, 0.8, 0.4, 1.0])
+                    };
+                    push_circle_clipped(cx, cy, r, color);
+                }
+            }
+        }
+        circles
     }
 
 
@@ -828,6 +909,7 @@ impl Drop for Graph {
 impl GraphController for Graph {
     fn set_nodes(&mut self, nodes: &[GraphNode]) {
         self.nodes = nodes.to_vec();
+        self.hovered_port = None;
         
         // Sync selected_idx from selected_id
         if let Some(ref id) = self.selected_id {

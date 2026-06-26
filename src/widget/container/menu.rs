@@ -665,6 +665,13 @@ impl Element for MenuBar {
         self.menus.extra_arcs()
     }
 
+    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
+        self.menus.extra_circles()
+    }
+
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         if !self.visible {
             return;
