@@ -933,7 +933,13 @@ impl State {
             Ok(t) => t,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 self.surface.configure(&self.device, &self.config);
-                return;
+                match self.surface.get_current_texture() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        log::error!("Surface error after configure: {e:?}");
+                        return;
+                    }
+                }
             }
             Err(wgpu::SurfaceError::Timeout) => return,
             Err(e) => {

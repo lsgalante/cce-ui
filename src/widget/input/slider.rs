@@ -24,7 +24,7 @@ impl Slider {
             dragging: false,
             value: 0.5,
             drag_offset: 0.0,
-            scroll_enabled: false,
+            scroll_enabled: true,
             show_readout: false,
             editing: false,
             edit_buffer: String::new(),

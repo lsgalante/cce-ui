@@ -1292,7 +1292,13 @@ impl<A: Application> EngineState<A> {
             Ok(t) => t,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 adapter.surface.configure(&adapter.device, &adapter.config);
-                return;
+                match adapter.surface.get_current_texture() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        log::error!("Surface error after configure: {e:?}");
+                        return;
+                    }
+                }
             }
             Err(wgpu::SurfaceError::Timeout) => return,
             Err(e) => {
@@ -1438,7 +1444,13 @@ impl<A: Application> EngineState<A> {
                     Ok(t) => t,
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                         popup.wgpu_surface.configure(&adapter.device, &popup.config);
-                        return;
+                        match popup.wgpu_surface.get_current_texture() {
+                            Ok(t) => t,
+                            Err(e) => {
+                                log::error!("Popup surface error after configure: {e:?}");
+                                return;
+                            }
+                        }
                     }
                     Err(wgpu::SurfaceError::Timeout) => return,
                     Err(e) => {
