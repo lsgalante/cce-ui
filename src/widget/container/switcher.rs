@@ -128,6 +128,25 @@ impl Element for Switcher {
         }
     }
 
+    fn layout(&mut self, origin: Point, constraints: LayoutConstraints, ctx: &mut UiContext) {
+        let size = self.measure(constraints, ctx);
+        self.set_rect(origin.x, origin.y, size.width, size.height);
+
+        if self.visible {
+            if let Some(idx) = self.active_index {
+                if idx < self.children.len() {
+                    unsafe {
+                        (*self.children[idx]).layout(
+                            Point { x: self.base.x, y: self.base.y },
+                            LayoutConstraints::new(self.base.w, self.base.w, self.base.h, self.base.h),
+                            ctx,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
         if !self.visible {
             return false;
