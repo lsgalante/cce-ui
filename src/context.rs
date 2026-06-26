@@ -752,7 +752,7 @@ impl UiContext {
 
     pub fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
         let mut hit_backplate = false;
-        let scroll_y = self.get_scroll_offset();
+        let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let mut candidate_ids = self.spatial_grid.query(px, py).to_vec();
         if scroll_y != 0.0 {
             candidate_ids.extend_from_slice(self.spatial_grid.query(px, py + scroll_y));

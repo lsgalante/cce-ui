@@ -5,17 +5,13 @@ use crate::widget::display::TextLabel;
 use super::page::Page;
 
 pub struct Paginator {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+    pub base: Widget,
     pub sidebar_menu: ButtonStrip,
     pub pages: Vec<Page>,
     pub selected_page: usize,
     pub page_hidden: bool,
     pub sidebar_w: f32,
     pub page_labels: Vec<String>,
-    parent: Option<*mut (dyn Element + 'static)>,
     pub on_page_changed_cb: Option<Box<dyn Fn(usize) + Send + Sync>>,
     pub just_clicked: Option<usize>,
 }
@@ -25,17 +21,13 @@ impl Paginator {
         let num_pages = pages.len();
 
         let temp_paginator = Self {
-            x: 0.0,
-            y: 0.0,
-            w: 0.0,
-            h: 0.0,
+            base: Widget::new_rect(0.0, 0.0, 0.0, 0.0),
             sidebar_menu: ButtonStrip::new(0.0, 0.0, 0.0, 0.0),
             pages: Vec::new(),
             selected_page: 0,
             page_hidden: false,
             sidebar_w: 0.0,
             page_labels: pages.clone(),
-            parent: None,
             on_page_changed_cb: None,
             just_clicked: None,
         };
@@ -59,17 +51,13 @@ impl Paginator {
         }
 
         Self {
-            x: 0.0,
-            y: 0.0,
-            w: 0.0,
-            h: 0.0,
+            base: Widget::new_rect(0.0, 0.0, 0.0, 0.0),
             sidebar_menu,
             pages: pages_containers,
             selected_page: 0,
             page_hidden: false,
             sidebar_w,
             page_labels: pages,
-            parent: None,
             on_page_changed_cb: None,
             just_clicked: None,
         }
@@ -202,16 +190,22 @@ impl PageSelector for Paginator {
 }
 
 impl Element for Paginator {
+    crate::impl_widget_base!(Paginator);
+
     fn rect(&self) -> (f32, f32, f32, f32) {
-        (self.x, self.y, self.w, self.h)
+        (self.base.x, self.base.y, self.base.w, self.base.h)
     }
     fn blocks_backplate_drag(&self) -> bool { false }
 
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.x = x;
-        self.y = y;
-        self.w = w;
-        self.h = h;
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h;
 
         let sidebar_w = self.sidebar_w();
         self.sidebar_menu.set_rect(x, y, sidebar_w, h);
@@ -226,22 +220,6 @@ impl Element for Paginator {
 
     fn color(&self) -> [f32; 4] {
         colors::sidebar_bg_color()
-    }
-
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
-    }
-
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
-
-    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        self.parent
-    }
-
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
-        self.parent = parent;
     }
 
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
@@ -327,7 +305,7 @@ impl Element for Paginator {
         let mut quads = Vec::new();
         let c = self.color();
         if c[3] > 0.0 {
-            quads.push((self.x, self.y, self.w, self.h, c));
+            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, c));
         }
         quads.extend(self.sidebar_menu.all_quads(ctx));
         for (i, plate) in self.pages.iter().enumerate() {
