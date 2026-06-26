@@ -201,6 +201,23 @@ impl Element for Paginator {
         true
     }
 
+    fn layout(&mut self, origin: Point, constraints: LayoutConstraints, ctx: &mut UiContext) {
+        let size = self.measure(constraints, ctx);
+        self.set_rect(origin.x, origin.y, size.width, size.height);
+
+        let parent_id = self.base.id();
+
+        let menu_ptr = &mut self.sidebar_menu as *mut ButtonStrip;
+        ctx.register_widget(self.sidebar_menu.base.id(), menu_ptr);
+        ctx.link_ids(parent_id, self.sidebar_menu.base.id());
+
+        for plate in &mut self.pages {
+            let plate_ptr = plate as *mut Page;
+            ctx.register_widget(plate.base.base.id(), plate_ptr);
+            ctx.link_ids(parent_id, plate.base.base.id());
+        }
+    }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.x = x;
         self.base.y = y;

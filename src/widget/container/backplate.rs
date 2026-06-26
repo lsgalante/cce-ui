@@ -373,4 +373,30 @@ mod tests {
         win.clear_children(&mut ctx);
         assert_eq!(win.children(&ctx).len(), 0);
     }
+
+    struct TestRenderTarget;
+    impl crate::layout::RenderTarget for TestRenderTarget {
+        fn rect(&mut self, _color: [f32; 4], _x: f32, _y: f32, _w: f32, _h: f32) {}
+        fn text(&mut self, _content: &str, _x: f32, _y: f32, _size: f32, _color: [f32; 4]) {}
+    }
+
+    #[test]
+    fn test_paginator_blocks_backplate_drag() {
+        let mut ctx = UiContext::new();
+        let mut win = Backplate::new(0.0, 0.0, 800.0, 600.0);
+        let mut paginator = Paginator::new(vec!["Page 1".to_string(), "Page 2".to_string()]);
+        
+        win.add_child(paginator.as_ptr_mut(), &mut ctx);
+        
+        // Let's set the rect
+        crate::layout::render_widget(&mut TestRenderTarget, &mut paginator, 0.0, 0.0, 54.0, 600.0, &mut ctx);
+        
+        // Let's tick to register children
+        ctx.tick(0.016);
+        ctx.clear_dirty(); // This triggers rebuild_spatial_grid()
+        
+        // Now, click in the sidebar at x=10, y=20
+        let is_movable = ctx.is_movable_backplate_at(10.0, 20.0);
+        assert!(!is_movable, "Clicking the sidebar should block backplate drag!");
+    }
 }
