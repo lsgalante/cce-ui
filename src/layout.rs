@@ -3315,8 +3315,12 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             let x = self.grid.col_lefts[col];
             let y = self.grid.col_heights[col];
 
-            w.set_row_rect(x, self.grid.col_width);
-            render_widget(self.pc, w, x, y, self.grid.col_width, total_h, ctx);
+            let pad = self.padding();
+            let aligned_x = x + pad;
+            let aligned_w = (self.grid.col_width - 2.0 * pad).max(0.0);
+
+            w.set_row_rect(aligned_x, aligned_w);
+            render_widget(self.pc, w, aligned_x, y, aligned_w, total_h, ctx);
             self.grid.col_heights[col] += total_h;
             self.content_y = self.grid.max_height();
         }
