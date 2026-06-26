@@ -69,7 +69,7 @@ use std::collections::HashMap;
 
 pub const DROPDOWN_ITEM_H: f32 = 22.0;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WidgetId(pub usize);
 
 pub static NEXT_WIDGET_ID: AtomicUsize = AtomicUsize::new(1);
@@ -78,6 +78,33 @@ pub static NEXT_WIDGET_ID: AtomicUsize = AtomicUsize::new(1);
 pub struct LayoutTree {
     pub parents: HashMap<WidgetId, WidgetId>,
     pub children: HashMap<WidgetId, Vec<WidgetId>>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct WidgetPtr(pub *mut (dyn Element + 'static));
+
+impl WidgetPtr {
+    pub fn is_null(&self) -> bool {
+        self.0.is_null()
+    }
+    pub fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+        self.0
+    }
+}
+
+impl std::ops::Deref for WidgetPtr {
+    type Target = dyn Element + 'static;
+    fn deref(&self) -> &Self::Target {
+        assert!(!self.0.is_null(), "Attempted to dereference a null WidgetPtr!");
+        unsafe { &*self.0 }
+    }
+}
+
+impl std::ops::DerefMut for WidgetPtr {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        assert!(!self.0.is_null(), "Attempted to dereference a null WidgetPtr!");
+        unsafe { &mut *self.0 }
+    }
 }
 
 pub use crate::context::UiContext;
@@ -470,6 +497,8 @@ pub trait Element {
     fn set_visible(&mut self, _visible: bool) {}
     fn visible(&self) -> bool { true }
     fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool { false }
+    fn wants_tick(&self) -> bool { false }
+    fn is_child_visible(&self, _child_id: WidgetId) -> bool { true }
     fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
 
     fn as_page_selector(&self) -> Option<&dyn PageSelector> { None }

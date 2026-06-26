@@ -322,19 +322,55 @@ fn extra_quad_vertices(
     rounded_rect_vertices_corners(qx, qy, qw, qh, r, sw, sh, qc, extra_corners)
 }
 
+#[derive(Hash, PartialEq, Eq, Clone)]
+struct BufferCacheKey {
+    text: String,
+    size_milli: u32,
+    font: Option<String>,
+}
+
+std::thread_local! {
+    static BUFFER_CACHE: std::cell::RefCell<std::collections::HashMap<BufferCacheKey, Buffer>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 fn make_text_buffer(font_system: &mut FontSystem, text: &str, size: f32) -> Buffer {
-    let metrics = Metrics::new(size, size * 1.4);
-    let mut buffer = Buffer::new(font_system, metrics);
-    buffer.set_text(font_system, text, Attrs::new(), glyphon::Shaping::Advanced);
-    buffer.shape_until_scroll(font_system, true);
-    buffer
+    make_text_buffer_with_font(font_system, text, size, None)
 }
 
 fn make_text_buffer_with_font(font_system: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
-    let metrics = Metrics::new(size, size * 1.4);
+    let scale = cce_ui::scale::scale_factor();
+    let mut font_size = size;
+    let mut family_name = None;
+
+    if let Some(font_str) = font {
+        let (parsed_family, parsed_size) = cce_ui::layout::parse_font_string(font_str);
+        if let Some(ps) = parsed_size {
+            font_size = ps;
+        }
+        family_name = Some(parsed_family);
+    }
+
+    let physical_size = font_size * scale;
+    let size_key = (physical_size * 1000.0).round() as u32;
+
+    let key = BufferCacheKey {
+        text: text.to_string(),
+        size_milli: size_key,
+        font: family_name.clone(),
+    };
+
+    let cached = BUFFER_CACHE.with(|cache| {
+        cache.borrow().get(&key).cloned()
+    });
+
+    if let Some(buf) = cached {
+        return buf;
+    }
+
+    let metrics = Metrics::new(physical_size, physical_size * 1.4);
     let mut buffer = Buffer::new(font_system, metrics);
     let mut attrs = Attrs::new();
-    if let Some(font_name) = font {
+    if let Some(font_name) = family_name.as_deref() {
         let family = match font_name {
             "monospace" => glyphon::Family::Name(cce_ui::layout::get_system_monospace_font()),
             "sans-serif" => glyphon::Family::SansSerif,
@@ -345,8 +381,14 @@ fn make_text_buffer_with_font(font_system: &mut FontSystem, text: &str, size: f3
     }
     buffer.set_text(font_system, text, attrs, glyphon::Shaping::Advanced);
     buffer.shape_until_scroll(font_system, true);
+
+    BUFFER_CACHE.with(|cache| {
+        cache.borrow_mut().insert(key, buffer.clone());
+    });
+
     buffer
 }
+
 
 struct State {
     surface: wgpu::Surface<'static>,
@@ -1747,20 +1789,7 @@ fn main() {
         last_tick = now;
 
         if let Some(ref mut st) = app.state {
-            let mut tick_changed = false;
-            if st.layout_mode {
-                if let Some(ref mut jl) = &mut st.json_layout {
-                    if jl.tick(dt, &mut st.ui_context) {
-                        tick_changed = true;
-                    }
-                }
-            } else {
-                for w in &mut st.widgets {
-                    if w.tick(dt, &mut st.ui_context) {
-                        tick_changed = true;
-                    }
-                }
-            }
+            let tick_changed = st.ui_context.tick(dt);
             if tick_changed {
                 st.upload_vertices();
                 app.redraw = true;

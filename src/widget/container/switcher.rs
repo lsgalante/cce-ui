@@ -68,6 +68,17 @@ impl Element for Switcher {
         self.children.clone()
     }
 
+    fn is_child_visible(&self, child_id: WidgetId) -> bool {
+        if let Some(idx) = self.active_index {
+            if idx < self.children.len() {
+                if let Some(b) = unsafe { (*self.children[idx]).base() } {
+                    return b.id() == child_id;
+                }
+            }
+        }
+        false
+    }
+
     fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
         self.children.push(child);
         let id = self.base.id();

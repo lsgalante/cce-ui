@@ -309,6 +309,10 @@ impl Element for JsonLayoutWidget {
         changed
     }
 
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
 

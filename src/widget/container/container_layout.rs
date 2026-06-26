@@ -1,22 +1,36 @@
 use crate::widget::*;
 use crate::context::UiContext;
 
-pub trait ContainerLayout: std::fmt::Debug {
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32;
-    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size;
-    fn box_clone(&self) -> Box<dyn ContainerLayout>;
+pub trait ContainerLayout: crate::layout::LayoutStrategy {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout>;
 }
 
 impl Clone for Box<dyn ContainerLayout> {
     fn clone(&self) -> Self {
-        self.box_clone()
+        self.box_clone_container()
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct OverlayLayout;
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OverlayLayout {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
 
-impl ContainerLayout for OverlayLayout {
+impl crate::layout::LayoutStrategy for OverlayLayout {
+    fn init(&mut self, left: f32, top: f32, width: f32, height: f32) {
+        self.left = left;
+        self.top = top;
+        self.width = width;
+        self.height = height;
+    }
+
+    fn allocate(&mut self, _ww: f32, _wh: f32) -> (f32, f32, f32, f32) {
+        (self.left, self.top, self.width, self.height)
+    }
+
     fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], _ctx: &mut UiContext) -> f32 {
         for &child_ptr in children {
             unsafe {
@@ -42,7 +56,13 @@ impl ContainerLayout for OverlayLayout {
         }
     }
 
-    fn box_clone(&self) -> Box<dyn ContainerLayout> {
+    fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
+        Box::new(*self)
+    }
+}
+
+impl ContainerLayout for OverlayLayout {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
         Box::new(*self)
     }
 }
@@ -64,7 +84,26 @@ impl Default for VerticalLayout {
     }
 }
 
-impl ContainerLayout for VerticalLayout {
+impl crate::layout::LayoutStrategy for VerticalLayout {
+    fn init(&mut self, left: f32, top: f32, _width: f32, _height: f32) {
+        let ptr = self as *const Self as usize;
+        crate::layout::VERTICAL_STATES.with(|m| m.borrow_mut().insert(ptr, (left, top + self.padding_y)));
+    }
+
+    fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
+        let ptr = self as *const Self as usize;
+        let (left, mut current_y) = crate::layout::VERTICAL_STATES.with(|m| m.borrow().get(&ptr).copied().unwrap_or((0.0, 0.0)));
+        let x = left + self.padding_x;
+        let y = current_y;
+        current_y += wh + self.spacing;
+        crate::layout::VERTICAL_STATES.with(|m| m.borrow_mut().insert(ptr, (left, current_y)));
+        (x, y, ww, wh)
+    }
+
+    fn get_gap(&self) -> f32 {
+        self.spacing
+    }
+
     fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], _ctx: &mut UiContext) -> f32 {
         let left_x = x + self.padding_x;
         let available_w = (w - 2.0 * self.padding_x).max(1.0);
@@ -104,7 +143,13 @@ impl ContainerLayout for VerticalLayout {
         }
     }
 
-    fn box_clone(&self) -> Box<dyn ContainerLayout> {
+    fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
+        Box::new(*self)
+    }
+}
+
+impl ContainerLayout for VerticalLayout {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
         Box::new(*self)
     }
 }
@@ -117,7 +162,44 @@ pub struct GridLayout {
     pub padding_y: f32,
 }
 
-impl ContainerLayout for GridLayout {
+impl crate::layout::LayoutStrategy for GridLayout {
+    fn init(&mut self, left: f32, top: f32, width: f32, _height: f32) {
+        let count = self.columns.max(1);
+        let usable_w = (width - 2.0 * self.padding_x).max(1.0);
+        let grid = crate::layout::Grid::new(
+            left + self.padding_x,
+            top + self.padding_y,
+            usable_w,
+            usable_w / count as f32,
+            self.gap,
+            count,
+        );
+        let ptr = self as *const Self as usize;
+        crate::layout::save_grid_state(ptr, grid);
+    }
+
+    fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
+        let ptr = self as *const Self as usize;
+        crate::layout::mutate_grid_state(ptr, |grid| {
+            let col = grid.next_column();
+            let x = grid.col_lefts[col];
+            let y = grid.col_heights[col];
+            grid.col_heights[col] += wh + grid.gap;
+            (x, y, grid.col_width, wh)
+        }).unwrap_or((0.0, 0.0, ww, wh))
+    }
+
+    fn get_column_width(&self) -> Option<f32> {
+        let ptr = self as *const Self as usize;
+        crate::layout::GRID_STATES.with(|m| {
+            m.borrow().get(&ptr).map(|g| g.col_width)
+        })
+    }
+
+    fn get_gap(&self) -> f32 {
+        self.gap
+    }
+
     fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], _ctx: &mut UiContext) -> f32 {
         let count = children.len();
         if count == 0 {
@@ -187,7 +269,13 @@ impl ContainerLayout for GridLayout {
         }
     }
 
-    fn box_clone(&self) -> Box<dyn ContainerLayout> {
+    fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
+        Box::new(*self)
+    }
+}
+
+impl ContainerLayout for GridLayout {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
         Box::new(*self)
     }
 }
@@ -200,7 +288,44 @@ pub struct AdaptiveGridLayout {
     pub padding_y: f32,
 }
 
-impl ContainerLayout for AdaptiveGridLayout {
+impl crate::layout::LayoutStrategy for AdaptiveGridLayout {
+    fn init(&mut self, left: f32, top: f32, width: f32, _height: f32) {
+        let usable_w = (width - 2.0 * self.padding_x).max(1.0);
+        let cols = (((usable_w + self.gap) / (self.min_col_width + self.gap)).floor().max(1.0)) as usize;
+        let grid = crate::layout::Grid::new(
+            left + self.padding_x,
+            top + self.padding_y,
+            usable_w,
+            self.min_col_width,
+            self.gap,
+            cols,
+        );
+        let ptr = self as *const Self as usize;
+        crate::layout::save_grid_state(ptr, grid);
+    }
+
+    fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
+        let ptr = self as *const Self as usize;
+        crate::layout::mutate_grid_state(ptr, |grid| {
+            let col = grid.next_column();
+            let x = grid.col_lefts[col];
+            let y = grid.col_heights[col];
+            grid.col_heights[col] += wh + grid.gap;
+            (x, y, grid.col_width, wh)
+        }).unwrap_or((0.0, 0.0, ww, wh))
+    }
+
+    fn get_column_width(&self) -> Option<f32> {
+        let ptr = self as *const Self as usize;
+        crate::layout::GRID_STATES.with(|m| {
+            m.borrow().get(&ptr).map(|g| g.col_width)
+        })
+    }
+
+    fn get_gap(&self) -> f32 {
+        self.gap
+    }
+
     fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
         let usable_w = (w - 2.0 * self.padding_x).max(1.0);
         let cols = (((usable_w + self.gap) / (self.min_col_width + self.gap)).floor().max(1.0)) as usize;
@@ -225,7 +350,13 @@ impl ContainerLayout for AdaptiveGridLayout {
         grid.measure(constraints, children, ctx)
     }
 
-    fn box_clone(&self) -> Box<dyn ContainerLayout> {
+    fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
+        Box::new(*self)
+    }
+}
+
+impl ContainerLayout for AdaptiveGridLayout {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
         Box::new(*self)
     }
 }

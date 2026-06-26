@@ -265,6 +265,10 @@ impl Element for Spreadsheet {
         }
     }
 
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.visible {
             return Vec::new();

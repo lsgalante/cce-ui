@@ -3,6 +3,52 @@ use crate::widget::{Element, WidgetId, LayoutTree, Key, MouseButton, ElementStat
 use crate::widget::core::hover_animation::HoverState;
 use crate::widget::core::context_menu::ContextMenuState;
 
+pub struct SpatialGrid {
+    pub cell_size: f32,
+    pub cells: HashMap<(i32, i32), Vec<WidgetId>>,
+}
+
+impl SpatialGrid {
+    pub fn new(cell_size: f32) -> Self {
+        Self {
+            cell_size,
+            cells: HashMap::new(),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.cells.clear();
+    }
+
+    pub fn insert(&mut self, id: WidgetId, rect: (f32, f32, f32, f32)) {
+        let (x, y, w, h) = rect;
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let start_x = (x / self.cell_size).floor() as i32;
+        let end_x = ((x + w) / self.cell_size).floor() as i32;
+        let start_y = (y / self.cell_size).floor() as i32;
+        let end_y = ((y + h) / self.cell_size).floor() as i32;
+
+        let start_x = start_x.max(-1000);
+        let end_x = end_x.min(1000);
+        let start_y = start_y.max(-1000);
+        let end_y = end_y.min(1000);
+
+        for cx in start_x..=end_x {
+            for cy in start_y..=end_y {
+                self.cells.entry((cx, cy)).or_default().push(id);
+            }
+        }
+    }
+
+    pub fn query(&self, px: f32, py: f32) -> &[WidgetId] {
+        let cx = (px / self.cell_size).floor() as i32;
+        let cy = (py / self.cell_size).floor() as i32;
+        self.cells.get(&(cx, cy)).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+}
+
 pub struct UiContext {
     pub layout_tree: LayoutTree,
     pub widget_registry: HashMap<WidgetId, *mut (dyn Element + 'static)>,
@@ -15,6 +61,9 @@ pub struct UiContext {
     pub drag_start_pos: Option<(f32, f32)>,
     pub drag_target: Option<WidgetId>,
     pub is_dragging: bool,
+    pub any_dirty: bool,
+    pub tick_receivers: Vec<WidgetId>,
+    pub spatial_grid: SpatialGrid,
 }
 
 impl UiContext {
@@ -34,6 +83,9 @@ impl UiContext {
             drag_start_pos: None,
             drag_target: None,
             is_dragging: false,
+            any_dirty: false,
+            tick_receivers: Vec::new(),
+            spatial_grid: SpatialGrid::new(100.0),
         }
     }
 
@@ -47,6 +99,9 @@ impl UiContext {
 
     pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
         if root.is_null() {
+            return false;
+        }
+        if let Event::Tick(_) = event {
             return false;
         }
         unsafe {
@@ -218,19 +273,11 @@ impl UiContext {
     }
 
     pub fn is_dirty(&self) -> bool {
-        for &ptr in self.widget_registry.values() {
-            unsafe {
-                if let Some(b) = (*ptr).base() {
-                    if b.dirty {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
+        self.any_dirty
     }
 
     pub fn clear_dirty(&mut self) {
+        self.any_dirty = false;
         for &ptr in self.widget_registry.values() {
             unsafe {
                 if let Some(b) = (*ptr).base_mut() {
@@ -238,6 +285,75 @@ impl UiContext {
                 }
             }
         }
+        self.rebuild_spatial_grid();
+    }
+
+    pub fn rebuild_spatial_grid(&mut self) {
+        self.spatial_grid.clear();
+        for (&id, &ptr) in &self.widget_registry {
+            unsafe {
+                if !ptr.is_null() {
+                    let rect = (*ptr).rect();
+                    self.spatial_grid.insert(id, rect);
+                }
+            }
+        }
+    }
+
+    pub fn register_tick_receiver(&mut self, id: WidgetId) {
+        if !self.tick_receivers.contains(&id) {
+            self.tick_receivers.push(id);
+        }
+    }
+
+    pub fn unregister_tick_receiver(&mut self, id: WidgetId) {
+        self.tick_receivers.retain(|&x| x != id);
+    }
+
+    pub fn is_widget_visible(&self, id: WidgetId) -> bool {
+        let mut curr = id;
+        loop {
+            if let Some(w_ptr) = self.widget_registry.get(&curr) {
+                unsafe {
+                    if !(*(*w_ptr)).visible() {
+                        return false;
+                    }
+                }
+            } else {
+                return false;
+            }
+            if let Some(&parent_id) = self.layout_tree.parents.get(&curr) {
+                if let Some(parent_ptr) = self.widget_registry.get(&parent_id) {
+                    unsafe {
+                        if !(*(*parent_ptr)).is_child_visible(curr) {
+                            return false;
+                        }
+                    }
+                }
+                curr = parent_id;
+            } else {
+                break;
+            }
+        }
+        true
+    }
+
+    pub fn tick(&mut self, dt: f32) -> bool {
+        let mut changed = false;
+        let ids = self.tick_receivers.clone();
+        for id in ids {
+            if self.is_widget_visible(id) {
+                if let Some(ptr) = self.widget_registry.get(&id).copied() {
+                    unsafe {
+                        if (*ptr).tick(dt, self) {
+                            (*ptr).mark_dirty(self);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        changed
     }
 
     // --- Focus management ---
@@ -375,6 +491,11 @@ impl UiContext {
     // --- Registry ---
     pub fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn Element + 'static)) {
         self.widget_registry.insert(id, ptr);
+        unsafe {
+            if !ptr.is_null() && (*ptr).wants_tick() {
+                self.register_tick_receiver(id);
+            }
+        }
     }
 
     pub fn link_ids(&mut self, parent: WidgetId, child: WidgetId) {
@@ -404,6 +525,7 @@ impl UiContext {
         self.layout_tree.parents.clear();
         self.layout_tree.children.clear();
         self.widget_registry.clear();
+        self.tick_receivers.clear();
     }
 
     // --- Popovers ---
@@ -630,17 +752,31 @@ impl UiContext {
 
     pub fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
         let mut hit_backplate = false;
-        for &ptr in self.widget_registry.values() {
-            unsafe {
-                if !ptr.is_null() {
-                    let w = &*ptr;
-                    if w.hit_test(px, py, self) {
-                        if w.is_backplate() {
-                            if w.is_movable_backplate() {
-                                hit_backplate = true;
+        let scroll_y = self.get_scroll_offset();
+        let mut candidate_ids = self.spatial_grid.query(px, py).to_vec();
+        if scroll_y != 0.0 {
+            candidate_ids.extend_from_slice(self.spatial_grid.query(px, py + scroll_y));
+            candidate_ids.sort_unstable();
+            candidate_ids.dedup();
+        }
+        for &id in &candidate_ids {
+            if let Some(&ptr) = self.widget_registry.get(&id) {
+                unsafe {
+                    if !ptr.is_null() {
+                        let w = &*ptr;
+                        let is_hit = if w.is_backplate() {
+                            w.hit_test(px, py, self)
+                        } else {
+                            w.hit_test(px, py, self) || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self))
+                        };
+                        if is_hit {
+                            if w.is_backplate() {
+                                if w.is_movable_backplate() {
+                                    hit_backplate = true;
+                                }
+                            } else if w.blocks_backplate_drag() {
+                                return false;
                             }
-                        } else if w.blocks_backplate_drag() {
-                            return false;
                         }
                     }
                 }

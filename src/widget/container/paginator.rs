@@ -253,6 +253,18 @@ impl Element for Paginator {
         childs
     }
 
+    fn is_child_visible(&self, child_id: WidgetId) -> bool {
+        if self.sidebar_menu.base.id() == child_id {
+            return true;
+        }
+        if let Some(plate) = self.pages.get(self.selected_page) {
+            if !self.page_hidden && plate.base.base.id() == child_id {
+                return true;
+            }
+        }
+        false
+    }
+
     fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = false;
         if self.sidebar_menu.cursor_moved(px, py, ctx) {

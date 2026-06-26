@@ -15,7 +15,7 @@ impl Container {
             parent: None,
             children: Vec::new(),
             base: Widget::new(),
-            layout: Box::new(OverlayLayout),
+            layout: Box::new(OverlayLayout::default()),
         }
     }
 

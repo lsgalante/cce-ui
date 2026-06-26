@@ -264,6 +264,10 @@ impl Element for ButtonStrip {
         changed
     }
 
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         None
     }

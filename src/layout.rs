@@ -2358,6 +2358,7 @@ impl SplitterLayout {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Grid {
     pub left: f32,
     pub top: f32,
@@ -2458,6 +2459,7 @@ impl CircularPaneLayout {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Radial {
     pub center_x: f32,
     pub center_y: f32,
@@ -2529,12 +2531,45 @@ impl Radial {
     }
 }
 
-pub trait LayoutStrategy {
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    pub static GRID_STATES: RefCell<HashMap<usize, Grid>> = RefCell::new(HashMap::new());
+    pub static OVERLAY_STATES: RefCell<HashMap<usize, (f32, f32, f32, f32)>> = RefCell::new(HashMap::new());
+    pub static VERTICAL_STATES: RefCell<HashMap<usize, (f32, f32)>> = RefCell::new(HashMap::new());
+}
+
+pub fn save_grid_state(ptr: usize, grid: Grid) {
+    GRID_STATES.with(|m| m.borrow_mut().insert(ptr, grid));
+}
+
+pub fn mutate_grid_state<F, R>(ptr: usize, mut f: F) -> Option<R>
+where
+    F: FnMut(&mut Grid) -> R,
+{
+    GRID_STATES.with(|m| {
+        let mut map = m.borrow_mut();
+        map.get_mut(&ptr).map(|grid| f(grid))
+    })
+}
+
+pub trait LayoutStrategy: std::fmt::Debug {
     fn init(&mut self, left: f32, top: f32, width: f32, height: f32);
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32);
     fn set_section_count(&mut self, _count: usize) {}
     fn get_column_width(&self) -> Option<f32> { None }
     fn get_gap(&self) -> f32 { 20.0 }
+
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &mut crate::context::UiContext) -> f32;
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size;
+    fn box_clone(&self) -> Box<dyn LayoutStrategy>;
+}
+
+impl Clone for Box<dyn LayoutStrategy> {
+    fn clone(&self) -> Self {
+        self.box_clone()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2543,6 +2578,7 @@ pub enum FlexDirection {
     Column,
 }
 
+#[derive(Debug, Clone)]
 pub struct FlexLayout {
     left: f32,
     top: f32,
@@ -2599,8 +2635,86 @@ impl LayoutStrategy for FlexLayout {
     fn get_gap(&self) -> f32 {
         self.spacing
     }
+
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+        let mut cur_x = x;
+        let mut cur_y = y;
+        match self.direction {
+            FlexDirection::Row => {
+                for &child_ptr in children {
+                    unsafe {
+                        let child = &mut *child_ptr;
+                        let child_w = child.rect().2;
+                        let child_h = child.preferred_height().unwrap_or(child.rect().3);
+                        let use_h = if child_h > 0.0 { child_h } else { h };
+                        child.set_rect(cur_x, cur_y, child_w, use_h);
+                        cur_x += child_w + self.spacing;
+                    }
+                }
+                (cur_x - x).max(0.0)
+            }
+            FlexDirection::Column => {
+                for &child_ptr in children {
+                    unsafe {
+                        let child = &mut *child_ptr;
+                        let child_h = child.preferred_height().unwrap_or(child.rect().3);
+                        let use_h = if child_h > 0.0 { child_h } else { 44.0 };
+                        child.set_rect(x, cur_y, w, use_h);
+                        cur_y += use_h + self.spacing;
+                    }
+                }
+                (cur_y - y).max(0.0)
+            }
+        }
+    }
+
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
+        match self.direction {
+            FlexDirection::Row => {
+                let mut total_w = 0.0f32;
+                let mut max_h = 0.0f32;
+                for (i, &child_ptr) in children.iter().enumerate() {
+                    unsafe {
+                        let size = (*child_ptr).measure(constraints, ctx);
+                        total_w += size.width;
+                        max_h = max_h.max(size.height);
+                        if i > 0 {
+                            total_w += self.spacing;
+                        }
+                    }
+                }
+                crate::widget::Size {
+                    width: total_w.clamp(constraints.min_width, constraints.max_width),
+                    height: max_h.clamp(constraints.min_height, constraints.max_height),
+                }
+            }
+            FlexDirection::Column => {
+                let mut total_h = 0.0f32;
+                let mut max_w = 0.0f32;
+                for (i, &child_ptr) in children.iter().enumerate() {
+                    unsafe {
+                        let size = (*child_ptr).measure(constraints, ctx);
+                        total_h += size.height;
+                        max_w = max_w.max(size.width);
+                        if i > 0 {
+                            total_h += self.spacing;
+                        }
+                    }
+                }
+                crate::widget::Size {
+                    width: max_w.clamp(constraints.min_width, constraints.max_width),
+                    height: total_h.clamp(constraints.min_height, constraints.max_height),
+                }
+            }
+        }
+    }
+
+    fn box_clone(&self) -> Box<dyn LayoutStrategy> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Debug, Clone)]
 pub struct ColumnLayout {
     left: f32,
     top: f32,
@@ -2643,8 +2757,46 @@ impl LayoutStrategy for ColumnLayout {
     fn get_gap(&self) -> f32 {
         self.gap
     }
+
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+        let mut cur_y = y;
+        for &child_ptr in children {
+            unsafe {
+                let child = &mut *child_ptr;
+                let child_h = child.preferred_height().unwrap_or(child.rect().3);
+                let use_h = if child_h > 0.0 { child_h } else { 44.0 };
+                child.set_rect(x, cur_y, w, use_h);
+                cur_y += use_h + self.gap;
+            }
+        }
+        (cur_y - y).max(0.0)
+    }
+
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
+        let mut total_h = 0.0f32;
+        let mut max_w = 0.0f32;
+        for (i, &child_ptr) in children.iter().enumerate() {
+            unsafe {
+                let size = (*child_ptr).measure(constraints, ctx);
+                total_h += size.height;
+                max_w = max_w.max(size.width);
+                if i > 0 {
+                    total_h += self.gap;
+                }
+            }
+        }
+        crate::widget::Size {
+            width: max_w.clamp(constraints.min_width, constraints.max_width),
+            height: total_h.clamp(constraints.min_height, constraints.max_height),
+        }
+    }
+
+    fn box_clone(&self) -> Box<dyn LayoutStrategy> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Debug, Clone)]
 pub struct AdaptiveGrid {
     grid: Option<Grid>,
     #[allow(dead_code)]
@@ -2737,8 +2889,94 @@ impl LayoutStrategy for AdaptiveGrid {
     fn get_gap(&self) -> f32 {
         self.gap
     }
+
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+        let usable_w = w.max(1.0);
+        let min_col_width = crate::layout::grid_min_col_width();
+        let cols = (((usable_w + self.gap) / (min_col_width + self.gap)).floor().max(1.0)) as usize;
+        let count = if let Some(n) = self.num_sections {
+            n.min(cols).max(1)
+        } else {
+            cols
+        };
+
+        let total_gap = self.gap * (count - 1) as f32;
+        let available_w = (w - total_gap).max(1.0);
+        let col_w = available_w / count as f32;
+        
+        let mut col_heights = vec![y; count];
+
+        for &child_ptr in children {
+            unsafe {
+                let child = &mut *child_ptr;
+                let ch = child.preferred_height().unwrap_or(child.rect().3);
+                let use_h = if ch > 0.0 { ch } else { 44.0 };
+                
+                let mut min_col = 0;
+                let mut min_h = col_heights[0];
+                for i in 1..count {
+                    if col_heights[i] < min_h {
+                        min_h = col_heights[i];
+                        min_col = i;
+                    }
+                }
+                
+                let cx = x + min_col as f32 * (col_w + self.gap);
+                let cy = col_heights[min_col];
+                child.set_rect(cx, cy, col_w, use_h);
+                col_heights[min_col] += use_h + self.gap;
+            }
+        }
+        
+        let max_h = col_heights.iter().cloned().fold(0.0f32, |a, b| a.max(b));
+        (max_h - y).max(0.0)
+    }
+
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
+        let usable_w = constraints.max_width.max(1.0);
+        let min_col_width = crate::layout::grid_min_col_width();
+        let cols = (((usable_w + self.gap) / (min_col_width + self.gap)).floor().max(1.0)) as usize;
+        let count = if let Some(n) = self.num_sections {
+            n.min(cols).max(1)
+        } else {
+            cols
+        };
+
+        let mut col_heights = vec![0.0f32; count];
+        let total_gap = self.gap * (count - 1) as f32;
+        let available_w = (constraints.max_width - total_gap).max(1.0);
+        let col_w = available_w / count as f32;
+        
+        let child_constraints = crate::widget::LayoutConstraints::new(col_w, col_w, constraints.min_height, constraints.max_height);
+
+        for &child_ptr in children {
+            unsafe {
+                let size = (*child_ptr).measure(child_constraints, ctx);
+                let mut min_col = 0;
+                let mut min_h = col_heights[0];
+                for i in 1..count {
+                    if col_heights[i] < min_h {
+                        min_h = col_heights[i];
+                        min_col = i;
+                    }
+                }
+                col_heights[min_col] += size.height + self.gap;
+            }
+        }
+        
+        let max_h = col_heights.iter().cloned().fold(0.0f32, |a, b| a.max(b));
+        crate::widget::Size {
+            width: constraints.max_width,
+            height: max_h.clamp(constraints.min_height, constraints.max_height),
+        }
+    }
+
+    fn box_clone(&self) -> Box<dyn LayoutStrategy> {
+        Box::new(self.clone())
+    }
 }
 
+#[derive(Debug, Clone)]
 pub struct RadialLayout {
     radial: Option<Radial>,
     aspect_ratio: f32,
@@ -2779,6 +3017,59 @@ impl LayoutStrategy for RadialLayout {
         } else {
             (0.0, 0.0, ww, wh)
         }
+    }
+
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+        let cx = x + w / 2.0;
+        let cy = y + h / 2.0;
+        let aspect = if self.aspect_ratio > 0.0 {
+            self.aspect_ratio
+        } else {
+            let screen_aspect = (w / h.max(1.0)).max(0.1);
+            1.0 + (screen_aspect - 1.0) * 0.4
+        };
+        let radial = Radial::new(cx, cy, aspect, self.base_spacing);
+        for (idx, &child_ptr) in children.iter().enumerate() {
+            unsafe {
+                let child = &mut *child_ptr;
+                let cw = child.rect().2;
+                let ch = child.preferred_height().unwrap_or(child.rect().3);
+                let use_h = if ch > 0.0 { ch } else { 44.0 };
+                let (rx, ry, rw, rh) = radial.widget_rect(idx, cw, use_h);
+                child.set_rect(rx, ry, rw, rh);
+            }
+        }
+        h
+    }
+
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
+        let cx = constraints.max_width / 2.0;
+        let cy = constraints.max_height / 2.0;
+        let aspect = if self.aspect_ratio > 0.0 {
+            self.aspect_ratio
+        } else {
+            let screen_aspect = (constraints.max_width / constraints.max_height.max(1.0)).max(0.1);
+            1.0 + (screen_aspect - 1.0) * 0.4
+        };
+        let radial = Radial::new(cx, cy, aspect, self.base_spacing);
+        let mut max_w = 0.0f32;
+        let mut max_h = 0.0f32;
+        for (idx, &child_ptr) in children.iter().enumerate() {
+            unsafe {
+                let size = (*child_ptr).measure(constraints, ctx);
+                let (rx, ry, rw, rh) = radial.widget_rect(idx, size.width, size.height);
+                max_w = max_w.max(rx + rw);
+                max_h = max_h.max(ry + rh);
+            }
+        }
+        crate::widget::Size {
+            width: max_w.clamp(constraints.min_width, constraints.max_width),
+            height: max_h.clamp(constraints.min_height, constraints.max_height),
+        }
+    }
+
+    fn box_clone(&self) -> Box<dyn LayoutStrategy> {
+        Box::new(self.clone())
     }
 }
 
@@ -3228,6 +3519,30 @@ pub fn get_system_monospace_font() -> &'static str {
         }
         "monospace".to_string()
     })
+}
+
+impl crate::widget::ContainerLayout for FlexLayout {
+    fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
+        Box::new(self.clone())
+    }
+}
+
+impl crate::widget::ContainerLayout for ColumnLayout {
+    fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
+        Box::new(self.clone())
+    }
+}
+
+impl crate::widget::ContainerLayout for AdaptiveGrid {
+    fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
+        Box::new(self.clone())
+    }
+}
+
+impl crate::widget::ContainerLayout for RadialLayout {
+    fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
+        Box::new(self.clone())
+    }
 }
 
 #[cfg(test)]

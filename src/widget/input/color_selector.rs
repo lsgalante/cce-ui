@@ -259,6 +259,10 @@ impl Element for ColorSelector {
         false
     }
 
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn focus(&mut self) {
         self.editing = true;
         self.edit_buffer = self.get_value_string().unwrap();
