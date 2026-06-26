@@ -2065,7 +2065,7 @@ impl Section {
         let content_start_y = top + font_size + 5.0;
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
 
-        Self { left, top, content_y: content_start_y, cw, label_width, is_child, grid, last_col: 0 }
+        Self { left, top, content_y: content_start_y, cw, label_width, is_child, grid, last_col: usize::MAX }
     }
 
     pub fn ax(&self, x_off: f32) -> f32 {
@@ -2076,9 +2076,20 @@ impl Section {
     pub fn ay(&self) -> f32 { self.content_y }
 
     pub fn spacing(&mut self, dy: f32) {
-        self.content_y += dy;
-        for h in &mut self.grid.col_heights {
-            *h += dy;
+        if self.grid.col_heights.len() >= 2 {
+            if self.last_col == usize::MAX {
+                for h in &mut self.grid.col_heights {
+                    *h += dy;
+                }
+            } else if self.last_col < self.grid.col_heights.len() {
+                self.grid.col_heights[self.last_col] += dy;
+            }
+            self.content_y = self.grid.max_height();
+        } else {
+            self.content_y += dy;
+            for h in &mut self.grid.col_heights {
+                *h += dy;
+            }
         }
     }
 
@@ -2931,7 +2942,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             focused,
             is_child,
             grid,
-            last_col: 0,
+            last_col: usize::MAX,
         }
     }
 
@@ -2946,7 +2957,11 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
 
     pub fn spacing(&mut self, dy: f32) {
         if self.grid.col_heights.len() >= 2 {
-            if self.last_col < self.grid.col_heights.len() {
+            if self.last_col == usize::MAX {
+                for h in &mut self.grid.col_heights {
+                    *h += dy;
+                }
+            } else if self.last_col < self.grid.col_heights.len() {
                 self.grid.col_heights[self.last_col] += dy;
             }
             self.content_y = self.grid.max_height();
