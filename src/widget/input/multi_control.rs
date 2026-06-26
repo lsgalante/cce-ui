@@ -418,7 +418,7 @@ impl Element for MultiControl {
             let dy = by + bh;
             let dh = 4.0 * 24.0;
             match event {
-                Event::PointerMove { x, y } => {
+                Event::PointerMove { x, y, .. } => {
                     if *x >= bx && *x <= bx + bw && *y >= dy && *y <= dy + dh {
                         let idx = ((*y - dy) / 24.0).floor() as usize;
                         if idx < 4 {
@@ -428,7 +428,7 @@ impl Element for MultiControl {
                     }
                     self.add_popover_hovered_idx = None;
                 }
-                Event::MouseButton { button, state, x, y } => {
+                Event::MouseButton { button, state, x, y, .. } => {
                     if *button == MouseButton::Left && *state == ElementState::Pressed {
                         if *x >= bx && *x <= bx + bw && *y >= dy && *y <= dy + dh {
                             let idx = ((*y - dy) / 24.0).floor() as usize;
@@ -559,7 +559,7 @@ impl Element for MultiControl {
 
         if !handled {
             match event {
-                Event::PointerMove { x, y } => {
+                Event::PointerMove { x, y, .. } => {
                     let is_hit = self.hit_test(*x, *y, ctx);
                     let was = self.hovered();
                     self.set_hovered(is_hit);
@@ -581,7 +581,7 @@ impl Element for MultiControl {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.handle_event(&Event::MouseButton { button, state, x: px, y: py }, ctx)
+        self.handle_event(&Event::MouseButton { button, state, x: px, y: py, local_x: px, local_y: py }, ctx)
     }
 
     fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
@@ -589,7 +589,7 @@ impl Element for MultiControl {
     }
 
     fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.handle_event(&Event::PointerMove { x: px, y: py }, ctx)
+        self.handle_event(&Event::PointerMove { x: px, y: py, local_x: px, local_y: py }, ctx)
     }
 
     fn unfocus(&mut self) {

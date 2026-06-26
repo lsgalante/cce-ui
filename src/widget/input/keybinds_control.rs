@@ -311,7 +311,7 @@ impl Element for KeybindsControl {
 
         if !handled {
             match event {
-                Event::PointerMove { x, y } => {
+                Event::PointerMove { x, y, .. } => {
                     let is_hit = self.hit_test(*x, *y, ctx);
                     let was = self.hovered();
                     self.set_hovered(is_hit);
@@ -333,7 +333,7 @@ impl Element for KeybindsControl {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.handle_event(&Event::MouseButton { button, state, x: px, y: py }, ctx)
+        self.handle_event(&Event::MouseButton { button, state, x: px, y: py, local_x: px, local_y: py }, ctx)
     }
 
     fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
@@ -341,7 +341,7 @@ impl Element for KeybindsControl {
     }
 
     fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.handle_event(&Event::PointerMove { x: px, y: py }, ctx)
+        self.handle_event(&Event::PointerMove { x: px, y: py, local_x: px, local_y: py }, ctx)
     }
 
     fn unfocus(&mut self) {

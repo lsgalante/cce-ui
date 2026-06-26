@@ -398,7 +398,7 @@ impl Element for JsonLayoutWidget {
         let mut changed = false;
 
         match event {
-            Event::PointerMove { x, y } => {
+            Event::PointerMove { x, y, .. } => {
                 if let Some(idx) = self.dragging_slider_idx {
                     if let Some(w) = self.widgets.get_mut(idx) {
                         if let Some(sl) = w.widget.as_any_mut().downcast_mut::<Slider>() {
@@ -409,7 +409,7 @@ impl Element for JsonLayoutWidget {
                     }
                 }
             }
-            Event::MouseButton { button, state, x: _, y: _ } => {
+            Event::MouseButton { button, state, x: _, y: _, .. } => {
                 if *button == MouseButton::Left && *state == ElementState::Released {
                     if let Some(idx) = self.dragging_slider_idx {
                         if let Some(w) = self.widgets.get_mut(idx) {
@@ -430,7 +430,7 @@ impl Element for JsonLayoutWidget {
                 continue;
             }
 
-            if let Event::MouseButton { button, state, x, y } = event {
+            if let Event::MouseButton { button, state, x, y, .. } = event {
                 if *button == MouseButton::Left && *state == ElementState::Pressed {
                     let hit = *x >= w.x && *x <= w.x + w.w && *y >= w.y && *y <= w.y + w.h;
                     if hit && w.widget_type == "slider" {
@@ -441,7 +441,7 @@ impl Element for JsonLayoutWidget {
 
             if w.widget_type == "checkbox" {
                 match event {
-                    Event::PointerMove { x, y } => {
+                    Event::PointerMove { x, y, .. } => {
                         if let Some(cb) = w.widget.as_any_mut().downcast_mut::<Checkbox>() {
                             let was = cb.hovered();
                             let hit = *x >= w.x && *x <= w.x + w.w && *y >= w.y && *y <= w.y + w.h;
@@ -451,7 +451,7 @@ impl Element for JsonLayoutWidget {
                             }
                         }
                     }
-                    Event::MouseButton { button, state, x, y } => {
+                    Event::MouseButton { button, state, x, y, .. } => {
                         if *button == MouseButton::Left {
                             let hit = *x >= w.x && *x <= w.x + w.w && *y >= w.y && *y <= w.y + w.h;
                             if hit {
@@ -489,7 +489,7 @@ impl Element for JsonLayoutWidget {
             changed = true;
         }
 
-        if let Event::MouseWheel { delta, x, y } = event {
+        if let Event::MouseWheel { delta, x, y, .. } = event {
             let (bx, by, bw, bh) = self.rect();
             if *x >= bx && *x <= bx + bw && *y >= by && *y <= by + bh {
                 if active_page < self.page_total_heights.len() {
@@ -533,10 +533,10 @@ impl Element for JsonLayoutWidget {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.handle_event(&Event::MouseButton { button, state, x: px, y: py }, ctx)
+        self.handle_event(&Event::MouseButton { button, state, x: px, y: py, local_x: px, local_y: py }, ctx)
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.handle_event(&Event::PointerMove { x: px, y: py }, ctx)
+        self.handle_event(&Event::PointerMove { x: px, y: py, local_x: px, local_y: py }, ctx)
     }
 }

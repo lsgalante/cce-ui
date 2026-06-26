@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::widget::{Element, WidgetId, LayoutTree, Key, MouseButton, ElementState, Event, ScrollBar};
+use crate::widget::{Element, WidgetId, LayoutTree, Key, MouseButton, ElementState, Event};
 use crate::widget::core::hover_animation::HoverState;
 use crate::widget::core::context_menu::ContextMenuState;
 
@@ -11,6 +11,10 @@ pub struct UiContext {
     pub hover_state: HoverState,
     pub cursor_pos: (f32, f32),
     pub context_menu: ContextMenuState,
+    pub active_grab: Option<WidgetId>,
+    pub drag_start_pos: Option<(f32, f32)>,
+    pub drag_target: Option<WidgetId>,
+    pub is_dragging: bool,
 }
 
 impl UiContext {
@@ -26,7 +30,19 @@ impl UiContext {
             hover_state: HoverState::new(),
             cursor_pos: (0.0, 0.0),
             context_menu: ContextMenuState::new(),
+            active_grab: None,
+            drag_start_pos: None,
+            drag_target: None,
+            is_dragging: false,
         }
+    }
+
+    pub fn get_widget(&self, id: WidgetId) -> Option<&(dyn Element + 'static)> {
+        self.widget_registry.get(&id).map(|&ptr| unsafe { &*ptr })
+    }
+
+    pub fn get_widget_mut(&mut self, id: WidgetId) -> Option<&mut (dyn Element + 'static)> {
+        self.widget_registry.get(&id).map(|&ptr| unsafe { &mut *ptr })
     }
 
     pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
@@ -34,30 +50,86 @@ impl UiContext {
             return false;
         }
         unsafe {
-            let mut out_of_bounds = false;
-            if (*root).is_page() {
-                let mut scrollbar_dragging = false;
-                if let Some(page) = (*root).as_any().downcast_ref::<crate::widget::Page>() {
-                    if page.scroll_bar.dragging {
-                        scrollbar_dragging = true;
+            // Track drag gestures based on mouse events
+            match event {
+                Event::MouseButton { button, state, x, y, .. } if *button == MouseButton::Left => {
+                    if *state == ElementState::Pressed {
+                        self.drag_start_pos = Some((*x, *y));
+                        self.is_dragging = false;
+                        self.drag_target = None;
+                    } else if *state == ElementState::Released {
+                        if self.is_dragging {
+                            if let Some(target_id) = self.drag_target {
+                                if let Some(target_ptr) = self.widget_registry.get(&target_id).copied() {
+                                    (*target_ptr).handle_event(&Event::DragEnd, self);
+                                    (*target_ptr).mark_dirty(self);
+                                }
+                            }
+                            self.active_grab = None;
+                        }
+                        self.drag_start_pos = None;
+                        self.drag_target = None;
+                        self.is_dragging = false;
                     }
                 }
-                
-                if !scrollbar_dragging {
-                    if let Event::PointerMove { x, y }
-                    | Event::MouseButton { x, y, .. }
-                    | Event::MouseWheel { delta: _, x, y } = event
-                    {
-                        let (rx, ry, rw, rh) = (*root).rect();
-                        if *x < rx || *x > rx + rw || *y < ry || *y > ry + rh {
-                            out_of_bounds = true;
+                Event::PointerMove { x, y, .. } => {
+                    if let Some((sx, sy)) = self.drag_start_pos {
+                        if let Some(target_id) = self.drag_target {
+                            if self.is_dragging {
+                                let dx = *x - sx;
+                                let dy = *y - sy;
+                                if let Some(target_ptr) = self.widget_registry.get(&target_id).copied() {
+                                    let (cx, cy, _, _) = (*target_ptr).rect();
+                                    let drag_evt = Event::DragUpdate { dx, dy, x: *x, y: *y, local_x: *x - cx, local_y: *y - cy };
+                                    let adjusted = (*root).transform_event_for_child(target_ptr, drag_evt, self);
+                                    (*target_ptr).handle_event(&adjusted, self);
+                                    (*target_ptr).mark_dirty(self);
+                                }
+                            } else {
+                                let dx = *x - sx;
+                                let dy = *y - sy;
+                                if (dx * dx + dy * dy).sqrt() > 3.0 {
+                                    self.is_dragging = true;
+                                    self.active_grab = Some(target_id);
+                                    if let Some(target_ptr) = self.widget_registry.get(&target_id).copied() {
+                                        (*target_ptr).handle_event(&Event::DragStart { start_x: sx, start_y: sy }, self);
+                                        (*target_ptr).mark_dirty(self);
+                                    }
+                                }
+                            }
                         }
+                    }
+                }
+                _ => {}
+            }
+
+            // Normal grab redirection for mouse events if active
+            if let Some(grabbed_id) = self.active_grab {
+                if let Event::PointerMove { .. }
+                | Event::MouseButton { .. }
+                | Event::MouseWheel { .. }
+                | Event::DragStart { .. }
+                | Event::DragUpdate { .. }
+                | Event::DragEnd = event
+                {
+                    if let Some(grabbed_ptr) = self.widget_registry.get(&grabbed_id).copied() {
+                        let handled = (*grabbed_ptr).handle_event(event, self);
+                        if handled {
+                            (*grabbed_ptr).mark_dirty(self);
+                        }
+                        return handled;
                     }
                 }
             }
 
-            if out_of_bounds {
+            if (*root).check_out_of_bounds(event, self) {
                 return false;
+            }
+
+            // 1. Capture Phase: parent intercepts
+            if (*root).capture_event(event, self) {
+                (*root).mark_dirty(self);
+                return true;
             }
 
             // For KeyInput, send directly to focused widget if it exists
@@ -72,26 +144,31 @@ impl UiContext {
 
             let mut handled = false;
             let children = (*root).children(self);
-            
+
+            // Determine if we should record a drag target candidate
+            let mut check_drag_target = false;
+            if let Event::MouseButton { button, state, .. } = event {
+                if *button == MouseButton::Left && *state == ElementState::Pressed {
+                    check_drag_target = true;
+                }
+            }
+
             match event {
                 Event::PointerMove { .. } | Event::Tick(_) => {
                     for child in children.into_iter().rev() {
-                        let mut adjusted_event = event.clone();
-                        if (*root).is_page() {
-                            if let Some(page) = (*root).as_any().downcast_ref::<crate::widget::Page>() {
-                                let sb_ptr = &page.scroll_bar as *const ScrollBar as *mut ScrollBar as *mut (dyn Element + 'static);
-                                if std::ptr::addr_eq(child, sb_ptr) {
-                                    match &mut adjusted_event {
-                                        Event::PointerMove { y, .. }
-                                        | Event::MouseButton { y, .. }
-                                        | Event::MouseWheel { y, .. } => {
-                                            *y -= page.scroll_y;
-                                        }
-                                        _ => {}
-                                    }
-                                }
+                        let (cx, cy, _, _) = (*child).rect();
+                        let mut local_adjusted = event.clone();
+                        match &mut local_adjusted {
+                            Event::PointerMove { local_x, local_y, .. }
+                            | Event::MouseButton { local_x, local_y, .. }
+                            | Event::MouseWheel { local_x, local_y, .. }
+                            | Event::DragUpdate { local_x, local_y, .. } => {
+                                *local_x -= cx;
+                                *local_y -= cy;
                             }
+                            _ => {}
                         }
+                        let adjusted_event = (*root).transform_event_for_child(child, local_adjusted, self);
                         if self.propagate_event(&adjusted_event, child) {
                             handled = true;
                         }
@@ -103,28 +180,35 @@ impl UiContext {
                 }
                 _ => {
                     for child in children.into_iter().rev() {
-                        let mut adjusted_event = event.clone();
-                        if (*root).is_page() {
-                            if let Some(page) = (*root).as_any().downcast_ref::<crate::widget::Page>() {
-                                let sb_ptr = &page.scroll_bar as *const ScrollBar as *mut ScrollBar as *mut (dyn Element + 'static);
-                                if std::ptr::addr_eq(child, sb_ptr) {
-                                    match &mut adjusted_event {
-                                        Event::PointerMove { y, .. }
-                                        | Event::MouseButton { y, .. }
-                                        | Event::MouseWheel { y, .. } => {
-                                            *y -= page.scroll_y;
-                                        }
-                                        _ => {}
-                                    }
+                        let (cx, cy, _, _) = (*child).rect();
+                        let mut local_adjusted = event.clone();
+                        match &mut local_adjusted {
+                            Event::PointerMove { local_x, local_y, .. }
+                            | Event::MouseButton { local_x, local_y, .. }
+                            | Event::MouseWheel { local_x, local_y, .. }
+                            | Event::DragUpdate { local_x, local_y, .. } => {
+                                *local_x -= cx;
+                                *local_y -= cy;
+                            }
+                            _ => {}
+                        }
+                        let adjusted_event = (*root).transform_event_for_child(child, local_adjusted, self);
+                        if self.propagate_event(&adjusted_event, child) {
+                            if check_drag_target {
+                                if let Some(b) = (*child).base() {
+                                    self.drag_target = Some(b.id());
                                 }
                             }
-                        }
-                        if self.propagate_event(&adjusted_event, child) {
                             return true;
                         }
                     }
                     if (*root).handle_event(event, self) {
                         (*root).mark_dirty(self);
+                        if check_drag_target {
+                            if let Some(b) = (*root).base() {
+                                self.drag_target = Some(b.id());
+                            }
+                        }
                         return true;
                     }
                 }
@@ -171,11 +255,18 @@ impl UiContext {
             if old_data != new_data {
                 unsafe {
                     (*old_ptr).unfocus();
+                    (*old_ptr).handle_event(&Event::FocusOut, self);
                 }
                 self.focused_widget = Some(new_ptr);
+                unsafe {
+                    (*new_ptr).handle_event(&Event::FocusIn, self);
+                }
             }
         } else {
             self.focused_widget = Some(new_ptr);
+            unsafe {
+                (*new_ptr).handle_event(&Event::FocusIn, self);
+            }
         }
     }
 
@@ -197,6 +288,7 @@ impl UiContext {
         if let Some(ptr) = self.focused_widget.take() {
             unsafe {
                 (*ptr).unfocus();
+                (*ptr).handle_event(&Event::FocusOut, self);
             }
         }
     }

@@ -170,6 +170,38 @@ impl Element for Page {
     fn is_page(&self) -> bool { true }
     fn blocks_backplate_drag(&self) -> bool { false }
 
+    fn check_out_of_bounds(&self, event: &Event, _ctx: &UiContext) -> bool {
+        if self.scroll_bar.dragging {
+            return false;
+        }
+        if let Event::PointerMove { x, y, .. }
+        | Event::MouseButton { x, y, .. }
+        | Event::MouseWheel { x, y, .. } = event
+        {
+            let (rx, ry, rw, rh) = self.rect();
+            if *x < rx || *x > rx + rw || *y < ry || *y > ry + rh {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn transform_event_for_child(&self, child: *mut (dyn Element + 'static), mut event: Event, _ctx: &UiContext) -> Event {
+        let sb_ptr = &self.scroll_bar as *const ScrollBar as *mut ScrollBar as *mut (dyn Element + 'static);
+        if std::ptr::addr_eq(child, sb_ptr) {
+            match &mut event {
+                Event::PointerMove { y, local_y, .. }
+                | Event::MouseButton { y, local_y, .. }
+                | Event::MouseWheel { y, local_y, .. } => {
+                    *y -= self.scroll_y;
+                    *local_y -= self.scroll_y;
+                }
+                _ => {}
+            }
+        }
+        event
+    }
+
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base.base) }
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }

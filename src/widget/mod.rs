@@ -84,11 +84,19 @@ pub use crate::context::UiContext;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    PointerMove { x: f32, y: f32 },
-    MouseButton { button: MouseButton, state: ElementState, x: f32, y: f32 },
-    MouseWheel { delta: MouseScrollDelta, x: f32, y: f32 },
+    PointerMove { x: f32, y: f32, local_x: f32, local_y: f32 },
+    MouseButton { button: MouseButton, state: ElementState, x: f32, y: f32, local_x: f32, local_y: f32 },
+    MouseWheel { delta: MouseScrollDelta, x: f32, y: f32, local_x: f32, local_y: f32 },
     KeyInput(KeyEvent),
     Tick(f32),
+
+    MouseEnter,
+    MouseLeave,
+    DragStart { start_x: f32, start_y: f32 },
+    DragUpdate { dx: f32, dy: f32, x: f32, y: f32, local_x: f32, local_y: f32 },
+    DragEnd,
+    FocusIn,
+    FocusOut,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -125,6 +133,18 @@ pub trait Element {
     fn base(&self) -> Option<&Widget> { None }
     fn base_mut(&mut self) -> Option<&mut Widget> { None }
     fn preferred_height(&self) -> Option<f32> { None }
+
+    fn check_out_of_bounds(&self, _event: &Event, _ctx: &UiContext) -> bool {
+        false
+    }
+
+    fn transform_event_for_child(&self, _child: *mut (dyn Element + 'static), event: Event, _ctx: &UiContext) -> Event {
+        event
+    }
+
+    fn capture_event(&mut self, _event: &Event, _ctx: &mut UiContext) -> bool {
+        false
+    }
 
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
         let mut parent_id = None;
@@ -175,13 +195,13 @@ pub trait Element {
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         match event {
-            Event::PointerMove { x, y } => {
+            Event::PointerMove { x, y, .. } => {
                 self.cursor_moved(*x, *y, ctx)
             }
-            Event::MouseButton { button, state, x, y } => {
+            Event::MouseButton { button, state, x, y, .. } => {
                 self.mouse_input(*button, *state, *x, *y, ctx)
             }
-            Event::MouseWheel { delta, x, y } => {
+            Event::MouseWheel { delta, x, y, .. } => {
                 self.mouse_wheel(delta, *x, *y, ctx)
             }
             Event::KeyInput(key_event) => {
@@ -190,6 +210,7 @@ pub trait Element {
             Event::Tick(dt) => {
                 self.tick(*dt, ctx)
             }
+            _ => false,
         }
     }
 
@@ -286,7 +307,10 @@ pub trait Element {
         ctx.set_cursor_pos(px, py);
         if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
             let was = self.hovered();
-            self.set_hovered(false);
+            if was {
+                self.set_hovered(false);
+                self.handle_event(&Event::MouseLeave, ctx);
+            }
             return was;
         }
         self.on_cursor_moved(px, py, ctx)
@@ -297,7 +321,16 @@ pub trait Element {
             let was = self.hovered();
             let is_hit = self.hit_test(px, py, ctx);
             self.set_hovered(is_hit);
-            was != is_hit
+            if was != is_hit {
+                if is_hit {
+                    self.handle_event(&Event::MouseEnter, ctx);
+                } else {
+                    self.handle_event(&Event::MouseLeave, ctx);
+                }
+                was != is_hit
+            } else {
+                false
+            }
         } else {
             false
         }
