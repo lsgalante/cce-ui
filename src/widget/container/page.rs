@@ -4,7 +4,7 @@ use crate::widget::display::TextLabel;
 use super::layer::Layer;
 
 pub trait PageLayout {
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)]) -> f32;
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -25,7 +25,7 @@ impl Default for VerticalLayout {
 }
 
 impl PageLayout for VerticalLayout {
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)]) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
         let padding_x = self.padding_x;
         let padding_y = self.padding_y;
         let left_x = x + padding_x;
@@ -37,7 +37,11 @@ impl PageLayout for VerticalLayout {
             let child = unsafe { &mut *child_ptr };
             let (_, _, _, ch) = child.rect();
             let use_h = if ch > 0.0 { ch } else { 42.0 };
-            child.set_rect(left_x, current_y, available_w, use_h);
+            child.layout(
+                Point { x: left_x, y: current_y },
+                LayoutConstraints::new(available_w, available_w, use_h, use_h),
+                ctx,
+            );
             current_y += use_h + spacing;
         }
         current_y - y
@@ -62,7 +66,7 @@ impl Default for ColumnsLayout {
 }
 
 impl PageLayout for ColumnsLayout {
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)]) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
         let count = children.len();
         if count == 0 {
             return 0.0;
@@ -77,7 +81,11 @@ impl PageLayout for ColumnsLayout {
         let mut current_x = x + self.padding_x;
         for &child_ptr in children {
             let child = unsafe { &mut *child_ptr };
-            child.set_rect(current_x, start_y, col_w, use_h);
+            child.layout(
+                Point { x: current_x, y: start_y },
+                LayoutConstraints::new(col_w, col_w, use_h, use_h),
+                ctx,
+            );
             current_x += col_w + self.spacing;
         }
         use_h + 2.0 * self.padding_y
@@ -178,24 +186,28 @@ impl Element for Page {
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.set_rect(x, y, w, h);
-        if !self.visible {
-            return;
-        }
-        let layout_content_h = self.layout.layout(x, y, w, h, &self.base.children);
-        self.content_h = self.content_h.max(layout_content_h);
+    }
 
-        let max_scroll = (self.content_h - h).max(0.0);
-        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
-
-        // Position the scroll bar
-        let sb_w = 6.0;
-        let sb_padding = 2.0;
-        let sb_x = x + w - sb_w - sb_padding;
-        self.scroll_bar.set_rect(sb_x, y + 4.0, sb_w, h - 8.0);
-        self.scroll_bar.update(self.scroll_y, self.content_h, h);
+    fn layout(&mut self, origin: Point, constraints: LayoutConstraints, ctx: &mut UiContext) {
+        let size = self.measure(constraints, ctx);
+        self.set_rect(origin.x, origin.y, size.width, size.height);
         
-        let self_ptr = self as *mut Page as *mut (dyn Element + 'static);
-        self.scroll_bar.parent = Some(self_ptr);
+        if self.visible {
+            let layout_content_h = self.layout.layout(origin.x, origin.y, size.width, size.height, &self.base.children, ctx);
+            self.content_h = self.content_h.max(layout_content_h);
+
+            let max_scroll = (self.content_h - size.height).max(0.0);
+            self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+
+            let sb_w = 6.0;
+            let sb_padding = 2.0;
+            let sb_x = origin.x + size.width - sb_w - sb_padding;
+            self.scroll_bar.set_rect(sb_x, origin.y + 4.0, sb_w, size.height - 8.0);
+            self.scroll_bar.update(self.scroll_y, self.content_h, size.height);
+            
+            let self_ptr = self as *mut Page as *mut (dyn Element + 'static);
+            self.scroll_bar.parent = Some(self_ptr);
+        }
     }
 
     fn color(&self) -> [f32; 4] {

@@ -1,4 +1,6 @@
 pub mod container;
+pub mod container_layout;
+pub mod section_container;
 pub mod header;
 pub mod content_bg;
 pub mod viewport_bg;
@@ -17,6 +19,8 @@ pub mod paginator;
 pub mod scroll_bar;
 
 pub use container::Container;
+pub use container_layout::{ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout};
+pub use section_container::SectionContainer;
 pub use header::Header;
 pub use content_bg::ContentBg;
 pub use viewport_bg::ViewportBg;

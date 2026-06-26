@@ -1,15 +1,27 @@
 use crate::widget::*;
+use super::container_layout::{ContainerLayout, OverlayLayout};
 
 #[derive(Clone)]
 pub struct Container {
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub base: Widget,
+    pub layout: Box<dyn ContainerLayout>,
 }
 
 impl Container {
     pub fn new() -> Self {
-        Self { parent: None, children: Vec::new(), base: Widget::new() }
+        Self {
+            parent: None,
+            children: Vec::new(),
+            base: Widget::new(),
+            layout: Box::new(OverlayLayout),
+        }
+    }
+
+    pub fn with_layout<L: ContainerLayout + 'static>(mut self, layout: L) -> Self {
+        self.layout = Box::new(layout);
+        self
     }
 }
 
@@ -45,29 +57,13 @@ impl Element for Container {
     }
 
     fn measure(&self, constraints: LayoutConstraints, ctx: &UiContext) -> Size {
-        let mut max_w = 0.0f32;
-        let mut max_h = 0.0f32;
-        for &child in &self.children {
-            unsafe {
-                let size = (*child).measure(constraints, ctx);
-                max_w = max_w.max(size.width);
-                max_h = max_h.max(size.height);
-            }
-        }
-        Size {
-            width: max_w.clamp(constraints.min_width, constraints.max_width),
-            height: max_h.clamp(constraints.min_height, constraints.max_height),
-        }
+        self.layout.measure(constraints, &self.children, ctx)
     }
 
     fn layout(&mut self, origin: Point, constraints: LayoutConstraints, ctx: &mut UiContext) {
         let size = self.measure(constraints, ctx);
         self.set_rect(origin.x, origin.y, size.width, size.height);
-        for &child in &self.children {
-            unsafe {
-                (*child).layout(origin, constraints, ctx);
-            }
-        }
+        self.layout.layout(origin.x, origin.y, size.width, size.height, &self.children, ctx);
     }
 
     fn focus(&mut self) {

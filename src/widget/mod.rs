@@ -572,7 +572,8 @@ pub use self::input::{
     KeybindsControl, KeybindRow
 };
 pub use self::container::{
-    Container, Header, ContentBg, ViewportBg, ParametersBg, ScrollingList,
+    Container, ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
+    SectionContainer, Header, ContentBg, ViewportBg, ParametersBg, ScrollingList,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
     Switcher, Layer, Page, Backplate, Paginator, ScrollBar
 };
