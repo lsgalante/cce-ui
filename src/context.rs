@@ -64,6 +64,9 @@ pub struct UiContext {
     pub any_dirty: bool,
     pub tick_receivers: Vec<WidgetId>,
     pub spatial_grid: SpatialGrid,
+    pub last_scroll_time: Option<std::time::Instant>,
+    pub scroll_initiate_widget_id: Option<WidgetId>,
+    pub scroll_gesture_new: bool,
 }
 
 impl UiContext {
@@ -86,6 +89,9 @@ impl UiContext {
             any_dirty: false,
             tick_receivers: Vec::new(),
             spatial_grid: SpatialGrid::new(100.0),
+            last_scroll_time: None,
+            scroll_initiate_widget_id: None,
+            scroll_gesture_new: false,
         }
     }
 
@@ -98,6 +104,24 @@ impl UiContext {
     }
 
     pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
+        if let Event::MouseWheel { .. } = event {
+            let now = std::time::Instant::now();
+            let is_new_gesture = match self.last_scroll_time {
+                None => true,
+                Some(last) => now.duration_since(last).as_millis() > 250,
+            };
+            if is_new_gesture {
+                self.scroll_initiate_widget_id = None;
+                self.scroll_gesture_new = true;
+            } else {
+                self.scroll_gesture_new = false;
+            }
+            self.last_scroll_time = Some(now);
+        }
+        self.propagate_event_impl(event, root)
+    }
+
+    fn propagate_event_impl(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
         if root.is_null() {
             return false;
         }
@@ -224,7 +248,7 @@ impl UiContext {
                             _ => {}
                         }
                         let adjusted_event = (*root).transform_event_for_child(child, local_adjusted, self);
-                        if self.propagate_event(&adjusted_event, child) {
+                        if self.propagate_event_impl(&adjusted_event, child) {
                             handled = true;
                         }
                     }
@@ -248,7 +272,7 @@ impl UiContext {
                             _ => {}
                         }
                         let adjusted_event = (*root).transform_event_for_child(child, local_adjusted, self);
-                        if self.propagate_event(&adjusted_event, child) {
+                        if self.propagate_event_impl(&adjusted_event, child) {
                             if check_drag_target {
                                 if let Some(b) = (*child).base() {
                                     self.drag_target = Some(b.id());

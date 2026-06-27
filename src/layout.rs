@@ -188,6 +188,15 @@ pub fn reload_config() {
                     }
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("grid_gap") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = GRID_GAP.write() {
+                        *lock = val;
+                    }
+                }
+            }
             if let Some(rest) = trimmed.strip_prefix("section_padding") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
@@ -663,6 +672,36 @@ pub fn grid_min_col_width() -> f32 {
 pub fn set_grid_min_col_width(width: f32) {
     if let Ok(mut lock) = GRID_MIN_COL_WIDTH.write() {
         *lock = width;
+    }
+}
+
+static GRID_GAP: RwLock<f32> = RwLock::new(8.0);
+
+pub fn grid_gap() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("grid_gap") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = GRID_GAP.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *GRID_GAP.read().unwrap()
+}
+
+pub fn set_grid_gap(gap: f32) {
+    if let Ok(mut lock) = GRID_GAP.write() {
+        *lock = gap;
     }
 }
 
@@ -2793,6 +2832,7 @@ pub struct AdaptiveGrid {
     grid: Option<Grid>,
     #[allow(dead_code)]
     min_col_width: f32,
+    #[allow(dead_code)]
     gap: f32,
     num_sections: Option<usize>,
 }
@@ -2811,13 +2851,14 @@ impl AdaptiveGrid {
 impl LayoutStrategy for AdaptiveGrid {
     fn init(&mut self, left: f32, top: f32, width: f32, _height: f32) {
         let min_col_width = crate::layout::grid_min_col_width();
-        let max_cols = ((width + self.gap) / (min_col_width + self.gap)).floor().max(1.0) as usize;
+        let gap = crate::layout::grid_gap();
+        let max_cols = ((width + gap) / (min_col_width + gap)).floor().max(1.0) as usize;
         let count = if let Some(n) = self.num_sections {
             n.min(max_cols).max(1)
         } else {
             max_cols
         };
-        self.grid = Some(Grid::new(left, top, width, min_col_width, self.gap, count));
+        self.grid = Some(Grid::new(left, top, width, min_col_width, gap, count));
     }
 
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
@@ -2879,20 +2920,21 @@ impl LayoutStrategy for AdaptiveGrid {
     }
 
     fn get_gap(&self) -> f32 {
-        self.gap
+        crate::layout::grid_gap()
     }
 
     fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
         let usable_w = w.max(1.0);
         let min_col_width = crate::layout::grid_min_col_width();
-        let cols = (((usable_w + self.gap) / (min_col_width + self.gap)).floor().max(1.0)) as usize;
+        let gap = crate::layout::grid_gap();
+        let cols = (((usable_w + gap) / (min_col_width + gap)).floor().max(1.0)) as usize;
         let count = if let Some(n) = self.num_sections {
             n.min(cols).max(1)
         } else {
             cols
         };
 
-        let total_gap = self.gap * (count - 1) as f32;
+        let total_gap = gap * (count - 1) as f32;
         let available_w = (w - total_gap).max(1.0);
         let col_w = available_w / count as f32;
         
@@ -2913,10 +2955,10 @@ impl LayoutStrategy for AdaptiveGrid {
                     }
                 }
                 
-                let cx = x + min_col as f32 * (col_w + self.gap);
+                let cx = x + min_col as f32 * (col_w + gap);
                 let cy = col_heights[min_col];
                 child.set_rect(cx, cy, col_w, use_h);
-                col_heights[min_col] += use_h + self.gap;
+                col_heights[min_col] += use_h + gap;
             }
         }
         
@@ -2927,7 +2969,8 @@ impl LayoutStrategy for AdaptiveGrid {
     fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
         let usable_w = constraints.max_width.max(1.0);
         let min_col_width = crate::layout::grid_min_col_width();
-        let cols = (((usable_w + self.gap) / (min_col_width + self.gap)).floor().max(1.0)) as usize;
+        let gap = crate::layout::grid_gap();
+        let cols = (((usable_w + gap) / (min_col_width + gap)).floor().max(1.0)) as usize;
         let count = if let Some(n) = self.num_sections {
             n.min(cols).max(1)
         } else {
@@ -2935,7 +2978,7 @@ impl LayoutStrategy for AdaptiveGrid {
         };
 
         let mut col_heights = vec![0.0f32; count];
-        let total_gap = self.gap * (count - 1) as f32;
+        let total_gap = gap * (count - 1) as f32;
         let available_w = (constraints.max_width - total_gap).max(1.0);
         let col_w = available_w / count as f32;
         
@@ -2952,7 +2995,7 @@ impl LayoutStrategy for AdaptiveGrid {
                         min_col = i;
                     }
                 }
-                col_heights[min_col] += size.height + self.gap;
+                col_heights[min_col] += size.height + gap;
             }
         }
         
@@ -3157,6 +3200,8 @@ pub struct SectionContext<'a, P> {
     pub is_child: bool,
     pub grid: Grid,
     pub last_col: usize,
+    pub content_start_y: f32,
+    pub row_gap: f32,
 }
 
 impl<'a, P: RenderTarget> SectionContext<'a, P> {
@@ -3218,7 +3263,18 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             is_child,
             grid,
             last_col: usize::MAX,
+            content_start_y,
+            row_gap: Self::DEFAULT_ROW_GAP,
         }
+    }
+
+    pub fn with_row_gap(mut self, gap: f32) -> Self {
+        self.row_gap = gap;
+        self
+    }
+
+    pub fn set_row_gap(&mut self, gap: f32) {
+        self.row_gap = gap;
     }
 
     pub fn ax(&self, x_off: f32) -> f32 {
@@ -3249,7 +3305,16 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     }
 
     pub fn text(&mut self, text: &str, x_off: f32, y_off: f32, font_size: f32, color: [f32; 4]) {
-        self.pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
+        let mut y = self.content_y + y_off;
+        if y > self.content_start_y {
+            y += self.row_gap;
+        }
+        self.pc.text(text, self.ax(x_off), y, font_size, color);
+        let new_bottom = y + font_size + 4.0;
+        self.content_y = new_bottom;
+        for h in &mut self.grid.col_heights {
+            *h = new_bottom;
+        }
     }
 
     pub fn widget<T: Element + 'static>(&mut self, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
@@ -3275,7 +3340,10 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             let margin_x = pad + 12.0;
             let x = self.left + margin_x;
             let clamped_w = (self.cw - 2.0 * margin_x).max(0.0);
-            let max_h = self.grid.max_height().max(self.content_y);
+            let mut max_h = self.grid.max_height().max(self.content_y);
+            if max_h > self.content_start_y {
+                max_h += self.row_gap;
+            }
             let y = max_h;
 
             w.set_row_rect(self.left + pad, self.cw - 2.0 * pad);
@@ -3297,7 +3365,10 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             let col = self.grid.next_column();
             self.last_col = col;
             let x = self.grid.col_lefts[col];
-            let y = self.grid.col_heights[col];
+            let mut y = self.grid.col_heights[col];
+            if y > self.content_start_y {
+                y += self.row_gap;
+            }
 
             let pad = self.padding();
             let aligned_x = x + pad;
@@ -3305,7 +3376,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
 
             w.set_row_rect(aligned_x, aligned_w);
             render_widget(self.pc, w, aligned_x, y, aligned_w, total_h, ctx);
-            self.grid.col_heights[col] += total_h;
+            self.grid.col_heights[col] = y + total_h;
             self.content_y = self.grid.max_height();
         }
     }
@@ -3391,11 +3462,17 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             let col = self.grid.next_column();
             self.last_col = col;
             let x = self.grid.col_lefts[col];
-            let y = self.grid.col_heights[col];
+            let mut y = self.grid.col_heights[col];
+            if y > self.content_start_y {
+                y += self.row_gap;
+            }
             (x, y, self.grid.col_width, true)
         } else {
             let left = self.ax(0.0) + pad;
-            let max_h = self.grid.max_height().max(self.content_y);
+            let mut max_h = self.grid.max_height().max(self.content_y);
+            if max_h > self.content_start_y {
+                max_h += self.row_gap;
+            }
             let top = max_h;
             let cw = self.cw - 2.0 * pad;
             (left, top, cw, false)

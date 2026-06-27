@@ -134,6 +134,9 @@ pub struct MultiControlRow {
     pub type_dropdown: Dropdown,
     pub value_widget: InstancedWidget,
     pub remove_button: Button,
+    pub layout_y: f32,
+    pub layout_height: f32,
+    pub natural_y: f32,
 }
 
 impl MultiControlRow {
@@ -182,6 +185,9 @@ impl MultiControlRow {
             type_dropdown,
             value_widget,
             remove_button,
+            layout_y: 0.0,
+            layout_height: 0.0,
+            natural_y: 0.0,
         }
     }
 }
@@ -195,6 +201,10 @@ pub struct MultiControl {
     pub just_changed: bool,
     pub add_popover_open: bool,
     pub add_popover_hovered_idx: Option<usize>,
+    pub active_drag_index: Option<usize>,
+    pub drag_start_mouse_y: f32,
+    pub drag_y_offset: f32,
+    pub hovered_drag_index: Option<usize>,
 }
 
 impl MultiControl {
@@ -207,6 +217,10 @@ impl MultiControl {
             just_changed: false,
             add_popover_open: false,
             add_popover_hovered_idx: None,
+            active_drag_index: None,
+            drag_start_mouse_y: 0.0,
+            drag_y_offset: 0.0,
+            hovered_drag_index: None,
         };
         mc.load_from_config();
         mc
@@ -248,6 +262,58 @@ impl MultiControl {
             InstancedControl { key, control_type, value }
         }).collect();
         save_config(name, &controls);
+    }
+
+    pub fn get_drag_handle_quads(&self, idx: usize, theme: colors::Theme) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        if idx >= self.rows.len() {
+            return quads;
+        }
+        let row = &self.rows[idx];
+        let (rx, _, _, _) = self.rect();
+        let pad_x = 8.0;
+        let drag_handle_w = 20.0;
+        
+        let key_h = crate::layout::textbox_height();
+        let type_h = crate::layout::dropdown_height();
+        let line1_h = key_h.max(type_h);
+        
+        let grip_center_y = row.layout_y + line1_h * 0.5;
+        let grip_center_x = rx + pad_x + drag_handle_w * 0.5;
+        
+        // Let's decide color based on hover / drag state
+        let color = if Some(idx) == self.active_drag_index {
+            theme.primary_accent
+        } else if Some(idx) == self.hovered_drag_index {
+            [
+                (theme.primary_accent[0] + 0.1).min(1.0),
+                (theme.primary_accent[1] + 0.1).min(1.0),
+                (theme.primary_accent[2] + 0.1).min(1.0),
+                0.8
+            ]
+        } else {
+            [
+                theme.surface_border[0],
+                theme.surface_border[1],
+                theme.surface_border[2],
+                0.5
+            ]
+        };
+
+        // Let's draw 3 horizontal bars for the grip
+        let bar_w = 10.0;
+        let bar_h = 2.0;
+        let bar_gap = 2.0;
+        let total_grip_h = 3.0 * bar_h + 2.0 * bar_gap;
+        let start_y = grip_center_y - total_grip_h * 0.5;
+        let start_x = grip_center_x - bar_w * 0.5;
+
+        for i in 0..3 {
+            let y = start_y + i as f32 * (bar_h + bar_gap);
+            quads.push((start_x, y, bar_w, bar_h, color));
+        }
+
+        quads
     }
 }
 
@@ -308,7 +374,11 @@ impl Element for MultiControl {
         let type_h = crate::layout::dropdown_height();
         let line1_h = key_h.max(type_h);
 
-        let usable_w = (size.width - 2.0 * pad_x).max(1.0);
+        let drag_handle_w = 20.0;
+        let drag_gap_x = 6.0;
+        let left_shift = drag_handle_w + drag_gap_x;
+
+        let usable_w = (size.width - 2.0 * pad_x - left_shift).max(1.0);
         let gap_x = 6.0;
         let top_usable_w = usable_w - 2.0 * gap_x;
 
@@ -320,21 +390,44 @@ impl Element for MultiControl {
         let self_ptr = self.as_ptr();
         let self_id = self.base.id();
 
-        for row in &mut self.rows {
+        // Calculate rows area height for clamping
+        let mut total_rows_h = 0.0;
+        for (i, row) in self.rows.iter().enumerate() {
+            let line2_h = row.value_widget.preferred_height().unwrap_or(44.0);
+            let row_h = line1_h + gap_between_lines + line2_h;
+            total_rows_h += row_h;
+            if i < self.rows.len() - 1 {
+                total_rows_h += gap_between_rows;
+            }
+        }
+        let top_limit = origin.y + pad_y;
+        let bottom_limit = top_limit + total_rows_h;
+
+        for (i, row) in self.rows.iter_mut().enumerate() {
+            let line2_h = row.value_widget.preferred_height().unwrap_or(44.0);
+            let row_h = line1_h + gap_between_lines + line2_h;
+            row.layout_height = row_h;
+            row.natural_y = curr_y;
+
+            let mut row_y = curr_y;
+            if Some(i) == self.active_drag_index {
+                row_y = (curr_y + self.drag_y_offset).clamp(top_limit, (bottom_limit - row_h).max(top_limit));
+            }
+            row.layout_y = row_y;
+
             // Line 1: Label, Type, Remove
-            let key_x = origin.x + pad_x;
-            row.key_input.layout(Point { x: key_x, y: curr_y }, LayoutConstraints::new(key_w, key_w, line1_h, line1_h), ctx);
+            let key_x = origin.x + pad_x + left_shift;
+            row.key_input.layout(Point { x: key_x, y: row_y }, LayoutConstraints::new(key_w, key_w, line1_h, line1_h), ctx);
 
             let type_x = key_x + key_w + gap_x;
-            row.type_dropdown.layout(Point { x: type_x, y: curr_y }, LayoutConstraints::new(type_w, type_w, line1_h, line1_h), ctx);
+            row.type_dropdown.layout(Point { x: type_x, y: row_y }, LayoutConstraints::new(type_w, type_w, line1_h, line1_h), ctx);
 
             let remove_x = type_x + type_w + gap_x;
-            row.remove_button.layout(Point { x: remove_x, y: curr_y }, LayoutConstraints::new(remove_w, remove_w, line1_h, line1_h), ctx);
+            row.remove_button.layout(Point { x: remove_x, y: row_y }, LayoutConstraints::new(remove_w, remove_w, line1_h, line1_h), ctx);
 
             // Line 2: Value Control Widget
-            let line2_h = row.value_widget.preferred_height().unwrap_or(44.0);
-            let value_y = curr_y + line1_h + gap_between_lines;
-            let value_x = origin.x + pad_x;
+            let value_y = row_y + line1_h + gap_between_lines;
+            let value_x = origin.x + pad_x + left_shift;
             row.value_widget.layout(Point { x: value_x, y: value_y }, LayoutConstraints::new(usable_w, usable_w, line2_h, line2_h), ctx);
 
             link_child(self_ptr, self_id, &mut row.key_input, ctx);
@@ -347,13 +440,13 @@ impl Element for MultiControl {
             }
             link_child(self_ptr, self_id, &mut row.remove_button, ctx);
 
-            curr_y += line1_h + gap_between_lines + line2_h + gap_between_rows;
+            curr_y += row_h + gap_between_rows;
         }
 
         // Lay out add button
         let add_btn_w = 120.0f32.min(usable_w);
         let add_btn_h = 36.0;
-        let add_x = origin.x + pad_x;
+        let add_x = origin.x + pad_x + left_shift;
         self.add_button.layout(Point { x: add_x, y: curr_y }, LayoutConstraints::new(add_btn_w, add_btn_w, add_btn_h, add_btn_h), ctx);
         link_child(self_ptr, self_id, &mut self.add_button, ctx);
     }
@@ -366,11 +459,48 @@ impl Element for MultiControl {
             }
         }
 
-        for row in &self.rows {
+        let theme = colors::active_theme();
+
+        // 1. Draw all non-dragged rows first
+        for (idx, row) in self.rows.iter().enumerate() {
+            if Some(idx) == self.active_drag_index {
+                continue;
+            }
+            let handle_quads = self.get_drag_handle_quads(idx, theme);
+            quads.extend(handle_quads);
+
             quads.extend(row.key_input.all_quads(ctx));
             quads.extend(row.type_dropdown.all_quads(ctx));
             quads.extend(row.value_widget.all_quads(ctx));
             quads.extend(row.remove_button.all_quads(ctx));
+        }
+
+        // 2. Draw active dragged row on top!
+        if let Some(idx) = self.active_drag_index {
+            if idx < self.rows.len() {
+                let row = &self.rows[idx];
+                
+                let (rx, _, rw, _) = self.rect();
+                let row_y = row.layout_y;
+                let row_h = row.layout_height;
+                let pad_x = 8.0;
+                let bg_color = [theme.surface_bg[0], theme.surface_bg[1], theme.surface_bg[2], 0.95];
+                let border_color = theme.primary_accent;
+                
+                // Add a backing plate/shadow for the dragged row
+                quads.push((rx + pad_x, row_y - 2.0, rw - 2.0 * pad_x, row_h + 4.0, [0.0, 0.0, 0.0, 0.25])); // shadow
+                quads.push((rx + pad_x, row_y - 1.0, rw - 2.0 * pad_x, row_h + 2.0, bg_color)); // background
+                quads.push((rx + pad_x, row_y - 1.0, rw - 2.0 * pad_x, 1.0, border_color)); // top border
+                quads.push((rx + pad_x, row_y + row_h + 1.0, rw - 2.0 * pad_x, 1.0, border_color)); // bottom border
+
+                let handle_quads = self.get_drag_handle_quads(idx, theme);
+                quads.extend(handle_quads);
+
+                quads.extend(row.key_input.all_quads(ctx));
+                quads.extend(row.type_dropdown.all_quads(ctx));
+                quads.extend(row.value_widget.all_quads(ctx));
+                quads.extend(row.remove_button.all_quads(ctx));
+            }
         }
 
         quads.extend(self.add_button.all_quads(ctx));
@@ -383,12 +513,28 @@ impl Element for MultiControl {
 
     fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
-        for row in &self.rows {
+        // 1. Draw non-dragged first
+        for (idx, row) in self.rows.iter().enumerate() {
+            if Some(idx) == self.active_drag_index {
+                continue;
+            }
             labels.extend(row.key_input.text_labels_with_bounds(ctx));
             labels.extend(row.type_dropdown.text_labels_with_bounds(ctx));
             labels.extend(row.value_widget.text_labels_with_bounds(ctx));
             labels.extend(row.remove_button.text_labels_with_bounds(ctx));
         }
+
+        // 2. Draw active dragged row last (on top)
+        if let Some(idx) = self.active_drag_index {
+            if idx < self.rows.len() {
+                let row = &self.rows[idx];
+                labels.extend(row.key_input.text_labels_with_bounds(ctx));
+                labels.extend(row.type_dropdown.text_labels_with_bounds(ctx));
+                labels.extend(row.value_widget.text_labels_with_bounds(ctx));
+                labels.extend(row.remove_button.text_labels_with_bounds(ctx));
+            }
+        }
+
         labels.extend(self.add_button.text_labels_with_bounds(ctx));
         labels
     }
@@ -400,11 +546,26 @@ impl Element for MultiControl {
             labels.push((l, font.clone(), None));
         }
 
-        for row in &self.rows {
+        // 1. Draw non-dragged first
+        for (idx, row) in self.rows.iter().enumerate() {
+            if Some(idx) == self.active_drag_index {
+                continue;
+            }
             labels.extend(row.key_input.text_labels_with_font_and_bounds(ctx));
             labels.extend(row.type_dropdown.text_labels_with_font_and_bounds(ctx));
             labels.extend(row.value_widget.text_labels_with_font_and_bounds(ctx));
             labels.extend(row.remove_button.text_labels_with_font_and_bounds(ctx));
+        }
+
+        // 2. Draw active dragged row last (on top)
+        if let Some(idx) = self.active_drag_index {
+            if idx < self.rows.len() {
+                let row = &self.rows[idx];
+                labels.extend(row.key_input.text_labels_with_font_and_bounds(ctx));
+                labels.extend(row.type_dropdown.text_labels_with_font_and_bounds(ctx));
+                labels.extend(row.value_widget.text_labels_with_font_and_bounds(ctx));
+                labels.extend(row.remove_button.text_labels_with_font_and_bounds(ctx));
+            }
         }
 
         labels.extend(self.add_button.text_labels_with_font_and_bounds(ctx));
@@ -466,6 +627,128 @@ impl Element for MultiControl {
         }
 
         let mut handled = false;
+
+        // 1.5 Handle drag events and drag handle interactions
+        let mut drag_handled = false;
+        match event {
+            Event::PointerMove { x, y, .. } => {
+                let (rx, _, _, _) = self.rect();
+                let pad_x = 8.0;
+                let drag_handle_w = 20.0;
+                let old_hovered = self.hovered_drag_index;
+                self.hovered_drag_index = None;
+                
+                if *x >= rx + pad_x && *x <= rx + pad_x + drag_handle_w {
+                    for (i, row) in self.rows.iter().enumerate() {
+                        if *y >= row.layout_y && *y <= row.layout_y + row.layout_height {
+                            self.hovered_drag_index = Some(i);
+                            break;
+                        }
+                    }
+                }
+                
+                if old_hovered != self.hovered_drag_index {
+                    drag_handled = true;
+                }
+            }
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x, y, .. } => {
+                let (rx, _, _, _) = self.rect();
+                let pad_x = 8.0;
+                let drag_handle_w = 20.0;
+                if *x >= rx + pad_x && *x <= rx + pad_x + drag_handle_w {
+                    for (i, row) in self.rows.iter().enumerate() {
+                        if *y >= row.layout_y && *y <= row.layout_y + row.layout_height {
+                            self.active_drag_index = Some(i);
+                            self.drag_start_mouse_y = *y;
+                            self.drag_y_offset = 0.0;
+                            drag_handled = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            Event::DragStart { .. } => {
+                if self.active_drag_index.is_some() {
+                    drag_handled = true;
+                }
+            }
+            Event::DragUpdate { y, .. } => {
+                if let Some(mut i) = self.active_drag_index {
+                    self.drag_y_offset = *y - self.drag_start_mouse_y;
+                    
+                    let gap = 12.0; // gap_between_rows
+                    let mut swapped = true;
+                    while swapped {
+                        swapped = false;
+                        let row_h = self.rows[i].layout_height;
+                        let mid_y = self.rows[i].natural_y + self.drag_y_offset + row_h * 0.5;
+                        
+                        if i > 0 {
+                            let mid_above = self.rows[i-1].natural_y + self.rows[i-1].layout_height * 0.5;
+                            if mid_y < mid_above {
+                                self.drag_start_mouse_y -= self.rows[i-1].layout_height + gap;
+                                self.rows.swap(i, i-1);
+                                
+                                // Recalculate natural_y for all rows to prevent infinite swap loops
+                                let top_limit = self.rect().1 + 8.0;
+                                let mut curr_y = top_limit;
+                                for r in &mut self.rows {
+                                    r.natural_y = curr_y;
+                                    curr_y += r.layout_height + gap;
+                                }
+
+                                i -= 1;
+                                self.active_drag_index = Some(i);
+                                self.drag_y_offset = *y - self.drag_start_mouse_y;
+                                swapped = true;
+                                continue;
+                            }
+                        }
+                        if i < self.rows.len() - 1 {
+                            let mid_below = self.rows[i+1].natural_y + self.rows[i+1].layout_height * 0.5;
+                            if mid_y > mid_below {
+                                self.drag_start_mouse_y += self.rows[i+1].layout_height + gap;
+                                self.rows.swap(i, i+1);
+                                
+                                // Recalculate natural_y for all rows to prevent infinite swap loops
+                                let top_limit = self.rect().1 + 8.0;
+                                let mut curr_y = top_limit;
+                                for r in &mut self.rows {
+                                    r.natural_y = curr_y;
+                                    curr_y += r.layout_height + gap;
+                                }
+
+                                i += 1;
+                                self.active_drag_index = Some(i);
+                                self.drag_y_offset = *y - self.drag_start_mouse_y;
+                                swapped = true;
+                                continue;
+                            }
+                        }
+                    }
+                    drag_handled = true;
+                }
+            }
+            Event::DragEnd | Event::MouseButton { button: MouseButton::Left, state: ElementState::Released, .. } => {
+                if self.active_drag_index.is_some() {
+                    self.active_drag_index = None;
+                    self.drag_y_offset = 0.0;
+                    self.save_to_config();
+                    self.just_changed = true;
+                    drag_handled = true;
+                }
+            }
+            _ => {}
+        }
+        
+        if drag_handled {
+            return true;
+        }
+
+        // If we are actively dragging, swallow all other events
+        if self.active_drag_index.is_some() {
+            return true;
+        }
 
         // 2. Intercept row dropdown open popovers first
         for row in &mut self.rows {
@@ -896,6 +1179,76 @@ mod tests {
             InstancedWidget::Toggle(_) => {},
             _ => panic!("Expected Toggle widget"),
         }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        if let Some(h) = old_home {
+            std::env::set_var("HOME", h);
+        }
+    }
+
+    #[test]
+    fn test_multicontrol_drag_reorder() {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        let mut dummy = crate::context::UiContext::new();
+        let temp_dir = std::env::temp_dir().join("cce_test_home_drag");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let old_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", temp_dir.to_str().unwrap());
+
+        let mut mc = MultiControl::new("test_mc_drag".to_string());
+        // Add two rows
+        mc.rows.push(MultiControlRow::new("param1".to_string(), "Spinbox".to_string(), "10".to_string()));
+        mc.rows.push(MultiControlRow::new("param2".to_string(), "TextBox".to_string(), "val".to_string()));
+        mc.save_to_config();
+
+        // Perform initial layout
+        mc.set_rect(10.0, 10.0, 300.0, 250.0);
+        mc.layout(Point { x: 10.0, y: 10.0 }, LayoutConstraints::new(300.0, 300.0, 250.0, 250.0), &mut dummy);
+
+        assert_eq!(mc.rows[0].key_input.get_value_string().unwrap(), "param1");
+        assert_eq!(mc.rows[1].key_input.get_value_string().unwrap(), "param2");
+
+        // Click on the drag handle of the first row (param1)
+        // Drag handle x is in: rx + pad_x (10 + 8 = 18) to rx + pad_x + drag_handle_w (18 + 20 = 38).
+        // Let's click at x = 25, y = mc.rows[0].layout_y + 5.
+        let click_x = 25.0;
+        let click_y = mc.rows[0].layout_y + 5.0;
+
+        let handled_press = mc.mouse_input(MouseButton::Left, ElementState::Pressed, click_x, click_y, &mut dummy);
+        assert!(handled_press);
+        assert_eq!(mc.active_drag_index, Some(0));
+
+        // Drag down to swap with the second row (param2)
+        // Row 1 starts around natural_y + height + gap. Let's move mouse to mid-point of row 1.
+        let target_y = mc.rows[1].natural_y + mc.rows[1].layout_height * 0.5 + 5.0;
+        
+        let drag_update_evt = Event::DragUpdate {
+            dx: 0.0,
+            dy: target_y - click_y,
+            x: click_x,
+            y: target_y,
+            local_x: click_x - 10.0,
+            local_y: target_y - 10.0,
+        };
+        let handled_drag = mc.handle_event(&drag_update_evt, &mut dummy);
+        assert!(handled_drag);
+
+        // Verify that the swap occurred!
+        assert_eq!(mc.active_drag_index, Some(1));
+        assert_eq!(mc.rows[0].key_input.get_value_string().unwrap(), "param2");
+        assert_eq!(mc.rows[1].key_input.get_value_string().unwrap(), "param1");
+
+        // End drag
+        let handled_end = mc.handle_event(&Event::DragEnd, &mut dummy);
+        assert!(handled_end);
+        assert_eq!(mc.active_drag_index, None);
+
+        // Load config from disk and verify the new order is persisted!
+        let loaded = load_config("test_mc_drag");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].key, "param2");
+        assert_eq!(loaded[1].key, "param1");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
         if let Some(h) = old_home {

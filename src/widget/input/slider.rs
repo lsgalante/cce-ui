@@ -203,9 +203,15 @@ impl Element for Slider {
 
     fn drag_end(&mut self) { self.dragging = false; }
 
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if !self.scroll_enabled {
             return false;
+        }
+        let my_id = self.base.id();
+        if !ctx.scroll_gesture_new {
+            if ctx.scroll_initiate_widget_id != Some(my_id) {
+                return false;
+            }
         }
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
@@ -219,6 +225,9 @@ impl Element for Slider {
             (sx, sw)
         };
         if px >= track_x && px <= track_x + track_w && py >= sy + top && py <= sy + top + visual_h {
+            if ctx.scroll_gesture_new {
+                ctx.scroll_initiate_widget_id = Some(my_id);
+            }
             let scroll_amount = match delta {
                 MouseScrollDelta::LineDelta(_x, y) => *y,
                 MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
@@ -231,8 +240,8 @@ impl Element for Slider {
                     let scaled_val = self.min + self.value * (self.max - self.min);
                     self.edit_buffer = format!("{:.2}", scaled_val);
                 }
-                return true;
             }
+            return true;
         }
         false
     }
@@ -567,11 +576,20 @@ impl Element for RangeSlider {
         self.active_thumb = None;
     }
 
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        let my_id = self.base.id();
+        if !ctx.scroll_gesture_new {
+            if ctx.scroll_initiate_widget_id != Some(my_id) {
+                return false;
+            }
+        }
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         let (sx, sy, sw, _) = self.rect();
         if px >= sx && px <= sx + sw && py >= sy + top && py <= sy + top + visual_h {
+            if ctx.scroll_gesture_new {
+                ctx.scroll_initiate_widget_id = Some(my_id);
+            }
             let thumb_size = visual_h * 0.9;
             let range = sw - thumb_size;
             let thumb_low_x = sx + self.value_low * range;
@@ -603,15 +621,14 @@ impl Element for RangeSlider {
                 let new_val = (self.value_low - scroll_amount * step).clamp(0.0, self.value_high);
                 if (new_val - self.value_low).abs() > 0.0001 {
                     self.value_low = new_val;
-                    return true;
                 }
             } else {
                 let new_val = (self.value_high - scroll_amount * step).clamp(self.value_low, 1.0);
                 if (new_val - self.value_high).abs() > 0.0001 {
                     self.value_high = new_val;
-                    return true;
                 }
             }
+            return true;
         }
         false
     }
@@ -742,6 +759,7 @@ mod tests {
         let mut rs = RangeSlider::new().with_values(0.3, 0.7);
         rs.set_rect(10.0, 10.0, 200.0, 20.0);
         let mut dummy_ctx = crate::context::UiContext::new();
+        dummy_ctx.scroll_gesture_new = true;
 
         // Thumb size = h * 0.9 = 18.0
         // Range = w - thumb_size = 182.0
@@ -785,5 +803,38 @@ mod tests {
         assert_eq!(rs.values().0, 0.5); // low unchanged
         assert!((rs.values().1 - 0.52).abs() < 0.001);
     }
-}
 
+    #[test]
+    fn test_slider_scroll_initiation() {
+        let mut slider1 = Slider::new();
+        slider1.set_rect(10.0, 10.0, 200.0, 20.0);
+        let id1 = slider1.base.id();
+
+        let mut slider2 = Slider::new();
+        slider2.set_rect(10.0, 40.0, 200.0, 20.0);
+        let _id2 = slider2.base.id();
+
+        let mut ctx = crate::context::UiContext::new();
+
+        // 1. Initial scroll event on slider1
+        // This is a new gesture (last_scroll_time is None)
+        ctx.scroll_gesture_new = true;
+        ctx.scroll_initiate_widget_id = None;
+        let delta = MouseScrollDelta::LineDelta(0.0, 1.0);
+        
+        let handled = slider1.mouse_wheel(&delta, 50.0, 15.0, &mut ctx);
+        assert!(handled);
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(id1));
+
+        // 2. Subsequent scroll event in the same gesture (elapsed < 250ms), but the mouse moved over slider2
+        ctx.scroll_gesture_new = false;
+        // The mouse wheel event is now routed to slider2
+        let handled2 = slider2.mouse_wheel(&delta, 50.0, 45.0, &mut ctx);
+        // slider2 must reject the event because it wasn't the initiator
+        assert!(!handled2);
+        
+        // 3. Subsequent scroll event routed to slider1 (the initiator)
+        let handled1 = slider1.mouse_wheel(&delta, 50.0, 15.0, &mut ctx);
+        assert!(handled1);
+    }
+}

@@ -179,7 +179,8 @@ impl Element for Page {
         | Event::MouseWheel { x, y, .. } = event
         {
             let (rx, ry, rw, rh) = self.rect();
-            if *x < rx || *x > rx + rw || *y < ry || *y > ry + rh {
+            let screen_y = *y - self.scroll_y;
+            if *x < rx || *x > rx + rw || screen_y < ry || screen_y > ry + rh {
                 return true;
             }
         }
@@ -396,11 +397,13 @@ impl Element for Page {
         self.base.get_text_items()
     }
 
-    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
+    fn hit_test(&self, px: f32, py: f32, _ctx: &UiContext) -> bool {
         if !self.visible {
             return false;
         }
-        self.base.hit_test(px, py, ctx)
+        let (rx, ry, rw, rh) = self.rect();
+        let screen_y = py - self.scroll_y;
+        screen_y >= ry && screen_y <= ry + rh && px >= rx && px <= rx + rw
     }
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
@@ -427,3 +430,69 @@ impl Element for Page {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_page_bounds_scrolled() {
+        let ctx = UiContext::new();
+        let mut page = Page::new(0.0, 0.0, 800.0, 600.0);
+        
+        // 1. Unscrolled check
+        assert_eq!(page.scroll_y, 0.0);
+        
+        // Inside page boundaries (unscrolled)
+        let event_in = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 100.0,
+            y: 200.0,
+            local_x: 100.0,
+            local_y: 200.0,
+        };
+        assert!(!page.check_out_of_bounds(&event_in, &ctx));
+        assert!(page.hit_test(100.0, 200.0, &ctx));
+
+        // Outside page boundaries (unscrolled)
+        let event_out = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 100.0,
+            y: 700.0,
+            local_x: 100.0,
+            local_y: 700.0,
+        };
+        assert!(page.check_out_of_bounds(&event_out, &ctx));
+        assert!(!page.hit_test(100.0, 700.0, &ctx));
+
+        // 2. Scrolled check (scrolled down by 300px)
+        page.scroll_y = 300.0;
+
+        // Pointer virtual y = 500.0 (which translates to screen y = 200.0, inside page height of 600)
+        let event_scrolled_in = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 100.0,
+            y: 500.0,
+            local_x: 100.0,
+            local_y: 500.0,
+        };
+        assert!(!page.check_out_of_bounds(&event_scrolled_in, &ctx));
+        assert!(page.hit_test(100.0, 500.0, &ctx));
+
+        // Pointer virtual y = 1000.0 (which translates to screen y = 700.0, outside page height of 600)
+        let event_scrolled_out = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 100.0,
+            y: 1000.0,
+            local_x: 100.0,
+            local_y: 1000.0,
+        };
+        assert!(page.check_out_of_bounds(&event_scrolled_out, &ctx));
+        assert!(!page.hit_test(100.0, 1000.0, &ctx));
+    }
+}
+
