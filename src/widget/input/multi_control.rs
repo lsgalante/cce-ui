@@ -964,10 +964,14 @@ fn get_application_config_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
     let base_dir = std::path::PathBuf::from(home).join(".config").join("cce");
 
-    let app_name = std::env::current_exe()
+    let mut app_name = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .unwrap_or_else(|| "this-application".to_string());
+
+    if app_name.ends_with(" (deleted)") {
+        app_name = app_name[..app_name.len() - " (deleted)".len()].to_string();
+    }
 
     base_dir.join(app_name).join("this-application.json")
 }
