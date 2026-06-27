@@ -582,6 +582,13 @@ pub fn active_backplate_opacity() -> f32 {
         return opacity as f32;
     }
 
+    // Modern surfaces fallback:
+    if let Some(opacity) = val.pointer("/surfaces/backplate_opacity")
+        .or_else(|| val.pointer("/surfaces/window_opacity"))
+        .and_then(|v| v.as_f64()) {
+        return opacity as f32;
+    }
+
     // Fallback to legacy key:
     let legacy_key = match mode.as_str() {
         "fullscreen" => "fullscreen_opacity",
@@ -605,13 +612,7 @@ pub fn active_backplate_opacity() -> f32 {
         "floating_backplate_opacity" | "floating_opacity" => 0.9,
         "pinned_backplate_opacity" | "pinned_opacity" => 0.05,
         "popup_backplate_opacity" | "popup_opacity" => 0.20,
-        _ => {
-            val.pointer("/surfaces/backplate_opacity")
-                .or_else(|| val.pointer("/surfaces/window_opacity"))
-                .and_then(|v| v.as_f64())
-                .map(|v| v as f32)
-                .unwrap_or(0.9)
-        }
+        _ => 0.9,
     }
 }
 
