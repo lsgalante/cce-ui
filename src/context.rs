@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::widget::{Element, WidgetId, LayoutTree, Key, MouseButton, ElementState, Event};
+use crate::widget::{Element, WidgetId, LayoutTree, Key, NamedKey, MouseButton, ElementState, Event};
 use crate::widget::core::hover_animation::HoverState;
 use crate::widget::core::context_menu::ContextMenuState;
 
@@ -119,6 +119,40 @@ impl UiContext {
                     self.scroll_gesture_new = false;
                 }
                 self.last_scroll_time = Some(now);
+            }
+        }
+        if let Event::KeyInput(ref key_event) = event {
+            let is_scroll_key = match &key_event.logical_key {
+                Key::Named(NamedKey::PageUp)
+                | Key::Named(NamedKey::PageDown)
+                | Key::Named(NamedKey::Home)
+                | Key::Named(NamedKey::End)
+                | Key::Named(NamedKey::ArrowUp)
+                | Key::Named(NamedKey::ArrowDown) => true,
+                _ => false,
+            };
+            if is_scroll_key {
+                let mut handled = false;
+                if let Some(focused) = self.focused_widget {
+                    unsafe {
+                        if (*focused).handle_event(event, self) {
+                            (*focused).mark_dirty(self);
+                            handled = true;
+                        }
+                    }
+                }
+                if handled {
+                    return true;
+                }
+                let (cx, cy) = self.cursor_pos;
+                if let Some(scrollable) = self.find_hovered_scrollable(root, cx, cy) {
+                    unsafe {
+                        if (*scrollable).handle_event(event, self) {
+                            (*scrollable).mark_dirty(self);
+                            return true;
+                        }
+                    }
+                }
             }
         }
         self.propagate_event_impl(event, root)
@@ -810,5 +844,28 @@ impl UiContext {
             }
         }
         hit_backplate
+    }
+
+    fn find_hovered_scrollable(&self, root: *mut (dyn Element + 'static), cx: f32, cy: f32) -> Option<*mut (dyn Element + 'static)> {
+        unsafe {
+            if root.is_null() {
+                return None;
+            }
+            if !(*root).visible() {
+                return None;
+            }
+            if !(*root).hit_test(cx, cy, self) {
+                return None;
+            }
+            for child in (*root).children(self).into_iter().rev() {
+                if let Some(scrollable) = self.find_hovered_scrollable(child, cx, cy) {
+                    return Some(scrollable);
+                }
+            }
+            if (*root).is_scrollable() {
+                return Some(root);
+            }
+        }
+        None
     }
 }

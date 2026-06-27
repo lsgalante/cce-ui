@@ -52,6 +52,7 @@ impl ScrollBox {
 
 impl Element for ScrollBox {
     crate::impl_widget_base!(ScrollBox);
+    fn is_scrollable(&self) -> bool { true }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.x = x;
@@ -162,7 +163,8 @@ impl Element for ScrollBox {
             found
         };
 
-        if !has_focus {
+        let is_hovered = self.hit_test(ctx.cursor_pos.0, ctx.cursor_pos.1, ctx);
+        if !has_focus && !is_hovered {
             return false;
         }
         if event.state != ElementState::Pressed {
@@ -347,5 +349,31 @@ mod tests {
         };
         assert!(sb.keyboard_input(&event_home, &mut ctx));
         assert_eq!(sb.scroll_y, 0.0);
+    }
+
+    #[test]
+    fn test_scroll_box_non_focused_hovered_scrolling() {
+        let mut sb = ScrollBox::new();
+        sb.set_rect(10.0, 20.0, 100.0, 100.0);
+        sb.update_bounds(300.0, 20.0, 100.0); // max_scroll = 200.0
+
+        let mut ctx = UiContext::new();
+        ctx.register_widget(sb.base.id(), &mut sb);
+        
+        // Set cursor position over the scroll box
+        ctx.set_cursor_pos(50.0, 50.0);
+
+        let event_down = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::ArrowDown),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+
+        let root_ptr = &mut sb as *mut ScrollBox as *mut (dyn Element + 'static);
+        assert!(ctx.propagate_event(&Event::KeyInput(event_down), root_ptr));
+        assert_eq!(sb.scroll_y, 24.0);
     }
 }

@@ -41,6 +41,7 @@ impl Spreadsheet {
 }
 
 impl Element for Spreadsheet {
+    fn is_scrollable(&self) -> bool { true }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)

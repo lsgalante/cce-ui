@@ -168,6 +168,7 @@ fn clip_quad(
 impl Element for Page {
     fn base(&self) -> Option<&Widget> { Some(&self.base.base) }
     fn is_page(&self) -> bool { true }
+    fn is_scrollable(&self) -> bool { true }
     fn blocks_backplate_drag(&self) -> bool { false }
 
     fn check_out_of_bounds(&self, event: &Event, _ctx: &UiContext) -> bool {
