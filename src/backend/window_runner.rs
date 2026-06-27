@@ -2015,6 +2015,10 @@ impl<A: Application> EngineState<A> {
             xkeysym::Keysym::Tab => Key::Named(NamedKey::Tab),
             xkeysym::Keysym::Delete => Key::Named(NamedKey::Delete),
             xkeysym::Keysym::space => Key::Named(NamedKey::Space),
+            xkeysym::Keysym::Page_Up => Key::Named(NamedKey::PageUp),
+            xkeysym::Keysym::Page_Down => Key::Named(NamedKey::PageDown),
+            xkeysym::Keysym::Home => Key::Named(NamedKey::Home),
+            xkeysym::Keysym::End => Key::Named(NamedKey::End),
             _ => {
                 if let Some(ref text) = event.utf8 {
                     Key::Character(text.clone())
