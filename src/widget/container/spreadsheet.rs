@@ -398,6 +398,46 @@ impl Element for Spreadsheet {
         }
         labels
     }
+
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
+        if !self.visible {
+            return false;
+        }
+        if event.state != ElementState::Pressed {
+            return false;
+        }
+        let content_h = self.rows.len() as f32 * 24.0;
+        let visible_h = (self.h - 24.0).max(0.0);
+        if visible_h <= 0.0 || content_h <= visible_h {
+            return false;
+        }
+
+        let max_scroll_y = content_h - visible_h;
+        let old_scroll_y = self.scroll_y;
+        match &event.logical_key {
+            Key::Named(NamedKey::ArrowDown) => {
+                self.scroll_y = (self.scroll_y + 24.0).clamp(0.0, max_scroll_y);
+            }
+            Key::Named(NamedKey::ArrowUp) => {
+                self.scroll_y = (self.scroll_y - 24.0).clamp(0.0, max_scroll_y);
+            }
+            Key::Named(NamedKey::PageDown) => {
+                self.scroll_y = (self.scroll_y + visible_h).clamp(0.0, max_scroll_y);
+            }
+            Key::Named(NamedKey::PageUp) => {
+                self.scroll_y = (self.scroll_y - visible_h).clamp(0.0, max_scroll_y);
+            }
+            Key::Named(NamedKey::Home) => {
+                self.scroll_y = 0.0;
+            }
+            Key::Named(NamedKey::End) => {
+                self.scroll_y = max_scroll_y;
+            }
+            _ => return false,
+        }
+
+        (self.scroll_y - old_scroll_y).abs() > 0.01
+    }
 }
 
 impl SpreadsheetController for Spreadsheet {

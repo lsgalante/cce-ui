@@ -1,5 +1,6 @@
 use crate::widget::{
     Element, Widget, Checkbox, Button, Label, Spinbox, ColorSelector, TextLabel, MouseButton, ElementState, Slider, Event, UiContext,
+    Key, NamedKey,
 };
 use serde::Deserialize;
 
@@ -507,6 +508,44 @@ impl Element for JsonLayoutWidget {
                         };
                         let old_scroll = self.page_scroll_y[active_page];
                         self.page_scroll_y[active_page] = (old_scroll + scroll_amount).clamp(0.0, max_scroll_y);
+                        if (self.page_scroll_y[active_page] - old_scroll).abs() > 0.01 {
+                            self.layout_children();
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Event::KeyInput(key_event) = event {
+            if key_event.state == ElementState::Pressed {
+                if active_page < self.page_total_heights.len() {
+                    let total_height = self.page_total_heights[active_page];
+                    let (_, _, _, bh) = self.rect();
+                    let max_scroll_y = (total_height - bh).max(0.0);
+                    if max_scroll_y > 0.0 {
+                        let old_scroll = self.page_scroll_y[active_page];
+                        match &key_event.logical_key {
+                            Key::Named(NamedKey::PageDown) => {
+                                self.page_scroll_y[active_page] = (old_scroll + bh).clamp(0.0, max_scroll_y);
+                            }
+                            Key::Named(NamedKey::PageUp) => {
+                                self.page_scroll_y[active_page] = (old_scroll - bh).clamp(0.0, max_scroll_y);
+                            }
+                            Key::Named(NamedKey::Home) => {
+                                self.page_scroll_y[active_page] = 0.0;
+                            }
+                            Key::Named(NamedKey::End) => {
+                                self.page_scroll_y[active_page] = max_scroll_y;
+                            }
+                            Key::Named(NamedKey::ArrowDown) => {
+                                self.page_scroll_y[active_page] = (old_scroll + 24.0).clamp(0.0, max_scroll_y);
+                            }
+                            Key::Named(NamedKey::ArrowUp) => {
+                                self.page_scroll_y[active_page] = (old_scroll - 24.0).clamp(0.0, max_scroll_y);
+                            }
+                            _ => {}
+                        }
                         if (self.page_scroll_y[active_page] - old_scroll).abs() > 0.01 {
                             self.layout_children();
                             changed = true;

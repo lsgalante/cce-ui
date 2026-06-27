@@ -429,6 +429,52 @@ impl Element for Page {
         }
         false
     }
+
+    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        if !self.visible {
+            return false;
+        }
+        if event.state != ElementState::Pressed {
+            return false;
+        }
+        let (x, y, w, h) = self.rect();
+        let max_scroll = (self.content_h - h).max(0.0);
+        if max_scroll <= 0.0 {
+            return false;
+        }
+
+        let old_scroll = self.scroll_y;
+        match &event.logical_key {
+            Key::Named(NamedKey::ArrowDown) => {
+                self.scroll_y = (self.scroll_y + 24.0).clamp(0.0, max_scroll);
+            }
+            Key::Named(NamedKey::ArrowUp) => {
+                self.scroll_y = (self.scroll_y - 24.0).clamp(0.0, max_scroll);
+            }
+            Key::Named(NamedKey::PageDown) => {
+                self.scroll_y = (self.scroll_y + h).clamp(0.0, max_scroll);
+            }
+            Key::Named(NamedKey::PageUp) => {
+                self.scroll_y = (self.scroll_y - h).clamp(0.0, max_scroll);
+            }
+            Key::Named(NamedKey::Home) => {
+                self.scroll_y = 0.0;
+            }
+            Key::Named(NamedKey::End) => {
+                self.scroll_y = max_scroll;
+            }
+            _ => return false,
+        }
+
+        self.scroll_bar.scroll_y = self.scroll_y;
+        if (self.scroll_y - old_scroll).abs() > 0.01 {
+            self.set_rect(x, y, w, h);
+            self.mark_dirty(ctx);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -493,6 +539,74 @@ mod tests {
         };
         assert!(page.check_out_of_bounds(&event_scrolled_out, &ctx));
         assert!(!page.hit_test(100.0, 1000.0, &ctx));
+    }
+
+    #[test]
+    fn test_page_keyboard_input() {
+        let mut page = Page::new(0.0, 0.0, 800.0, 600.0);
+        page.content_h = 1000.0; // max_scroll = 400.0
+        
+        let mut ctx = UiContext::new();
+        
+        // 1. ArrowDown
+        let event_down = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::ArrowDown),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(page.keyboard_input(&event_down, &mut ctx));
+        assert_eq!(page.scroll_y, 24.0);
+
+        // 2. PageDown
+        let event_pgdown = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::PageDown),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(page.keyboard_input(&event_pgdown, &mut ctx));
+        assert_eq!(page.scroll_y, 400.0);
+
+        // 3. PageUp
+        let event_pgup = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::PageUp),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(page.keyboard_input(&event_pgup, &mut ctx));
+        assert_eq!(page.scroll_y, 0.0);
+
+        // 4. End
+        let event_end = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::End),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(page.keyboard_input(&event_end, &mut ctx));
+        assert_eq!(page.scroll_y, 400.0);
+
+        // 5. Home
+        let event_home = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::Home),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(page.keyboard_input(&event_home, &mut ctx));
+        assert_eq!(page.scroll_y, 0.0);
     }
 }
 

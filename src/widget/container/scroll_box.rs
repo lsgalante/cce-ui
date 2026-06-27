@@ -146,24 +146,38 @@ impl Element for ScrollBox {
         quads
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
-        if !focus::is_focused(self) {
+    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        let self_addr = self as *const Self as *const () as usize;
+        let has_focus = ctx.is_focused_addr(self_addr) || {
+            let mut current = ctx.focused_widget;
+            let mut found = false;
+            while let Some(ptr) = current {
+                let ptr_addr = ptr as *const () as usize;
+                if ptr_addr == self_addr {
+                    found = true;
+                    break;
+                }
+                current = unsafe { (*ptr).parent(ctx) };
+            }
+            found
+        };
+
+        if !has_focus {
             return false;
         }
         if event.state != ElementState::Pressed {
             return false;
         }
+        let max_scroll = (self.content_h - self.viewport_h).max(0.0);
         if event.ctrl {
             match &event.logical_key {
                 Key::Character(c) if c == "n" || c == "N" => {
                     let old_scroll = self.scroll_y;
-                    let max_scroll = (self.content_h - self.viewport_h).max(0.0);
                     self.scroll_y = (self.scroll_y + 24.0).clamp(0.0, max_scroll);
                     (self.scroll_y - old_scroll).abs() > 0.01
                 }
                 Key::Character(c) if c == "p" || c == "P" => {
                     let old_scroll = self.scroll_y;
-                    let max_scroll = (self.content_h - self.viewport_h).max(0.0);
                     self.scroll_y = (self.scroll_y - 24.0).clamp(0.0, max_scroll);
                     (self.scroll_y - old_scroll).abs() > 0.01
                 }
@@ -173,14 +187,32 @@ impl Element for ScrollBox {
             match &event.logical_key {
                 Key::Named(NamedKey::ArrowDown) => {
                     let old_scroll = self.scroll_y;
-                    let max_scroll = (self.content_h - self.viewport_h).max(0.0);
                     self.scroll_y = (self.scroll_y + 24.0).clamp(0.0, max_scroll);
                     (self.scroll_y - old_scroll).abs() > 0.01
                 }
                 Key::Named(NamedKey::ArrowUp) => {
                     let old_scroll = self.scroll_y;
-                    let max_scroll = (self.content_h - self.viewport_h).max(0.0);
                     self.scroll_y = (self.scroll_y - 24.0).clamp(0.0, max_scroll);
+                    (self.scroll_y - old_scroll).abs() > 0.01
+                }
+                Key::Named(NamedKey::PageDown) => {
+                    let old_scroll = self.scroll_y;
+                    self.scroll_y = (self.scroll_y + self.viewport_h).clamp(0.0, max_scroll);
+                    (self.scroll_y - old_scroll).abs() > 0.01
+                }
+                Key::Named(NamedKey::PageUp) => {
+                    let old_scroll = self.scroll_y;
+                    self.scroll_y = (self.scroll_y - self.viewport_h).clamp(0.0, max_scroll);
+                    (self.scroll_y - old_scroll).abs() > 0.01
+                }
+                Key::Named(NamedKey::Home) => {
+                    let old_scroll = self.scroll_y;
+                    self.scroll_y = 0.0;
+                    (self.scroll_y - old_scroll).abs() > 0.01
+                }
+                Key::Named(NamedKey::End) => {
+                    let old_scroll = self.scroll_y;
+                    self.scroll_y = max_scroll;
                     (self.scroll_y - old_scroll).abs() > 0.01
                 }
                 _ => false,
@@ -244,5 +276,76 @@ mod tests {
         // Screen draw y = 20 + 60 - 50 = 30
         // 30 >= 22.0 and 30 + 24 <= 118.0, so it should return Some(30.0)
         assert_eq!(sb.get_item_draw_y(60.0, 24.0), Some(30.0));
+    }
+
+    #[test]
+    fn test_scroll_box_keyboard_input() {
+        let mut sb = ScrollBox::new();
+        sb.set_rect(10.0, 20.0, 100.0, 100.0);
+        sb.update_bounds(300.0, 20.0, 100.0); // max_scroll = 200.0
+        
+        let mut ctx = UiContext::new();
+        // Focus the scroll box
+        ctx.set_focused(&mut sb);
+        
+        // 1. ArrowDown key
+        let event_down = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::ArrowDown),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(sb.keyboard_input(&event_down, &mut ctx));
+        assert_eq!(sb.scroll_y, 24.0);
+
+        // 2. PageDown key
+        let event_pgdown = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::PageDown),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(sb.keyboard_input(&event_pgdown, &mut ctx));
+        assert_eq!(sb.scroll_y, 124.0);
+
+        // 3. End key
+        let event_end = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::End),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(sb.keyboard_input(&event_end, &mut ctx));
+        assert_eq!(sb.scroll_y, 200.0); // clamps at max_scroll = 200.0
+
+        // 4. PageUp key
+        let event_pgup = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::PageUp),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(sb.keyboard_input(&event_pgup, &mut ctx));
+        assert_eq!(sb.scroll_y, 100.0);
+
+        // 5. Home key
+        let event_home = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::Home),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        assert!(sb.keyboard_input(&event_home, &mut ctx));
+        assert_eq!(sb.scroll_y, 0.0);
     }
 }
