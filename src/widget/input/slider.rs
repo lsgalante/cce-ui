@@ -236,6 +236,7 @@ impl Element for Slider {
             let new_val = (self.value - scroll_amount * step).clamp(0.0, 1.0);
             if (new_val - self.value).abs() > 0.0001 {
                 self.value = new_val;
+                self.just_changed = true;
                 if self.editing {
                     let scaled_val = self.min + self.value * (self.max - self.min);
                     self.edit_buffer = format!("{:.2}", scaled_val);
