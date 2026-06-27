@@ -106,17 +106,20 @@ impl UiContext {
     pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
         if let Event::MouseWheel { .. } = event {
             let now = std::time::Instant::now();
-            let is_new_gesture = match self.last_scroll_time {
-                None => true,
-                Some(last) => now.duration_since(last).as_millis() > 250,
+            let elapsed_ms = match self.last_scroll_time {
+                None => 999999,
+                Some(last) => now.duration_since(last).as_millis(),
             };
-            if is_new_gesture {
-                self.scroll_initiate_widget_id = None;
-                self.scroll_gesture_new = true;
-            } else {
-                self.scroll_gesture_new = false;
+            if elapsed_ms >= 5 {
+                let is_new_gesture = elapsed_ms > 250;
+                if is_new_gesture {
+                    self.scroll_initiate_widget_id = None;
+                    self.scroll_gesture_new = true;
+                } else {
+                    self.scroll_gesture_new = false;
+                }
+                self.last_scroll_time = Some(now);
             }
-            self.last_scroll_time = Some(now);
         }
         self.propagate_event_impl(event, root)
     }
