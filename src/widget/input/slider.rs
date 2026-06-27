@@ -174,6 +174,7 @@ impl Element for Slider {
             let new_val = raw.clamp(0.0, 1.0);
             if (new_val - self.value).abs() > 0.001 {
                 self.value = new_val;
+                self.just_changed = true;
                 if self.editing {
                     let scaled_val = self.min + self.value * (self.max - self.min);
                     self.edit_buffer = format!("{:.2}", scaled_val);
@@ -309,6 +310,7 @@ impl Element for Slider {
     fn unfocus(&mut self) {
         if self.editing {
             self.editing = false;
+            let old_val = self.value;
             if let Ok(new_val) = self.edit_buffer.parse::<f32>() {
                 let range = self.max - self.min;
                 if range != 0.0 {
@@ -316,6 +318,9 @@ impl Element for Slider {
                 } else {
                     self.value = 0.0;
                 }
+            }
+            if (self.value - old_val).abs() > 0.0001 {
+                self.just_changed = true;
             }
         }
     }

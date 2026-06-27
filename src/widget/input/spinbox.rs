@@ -167,10 +167,18 @@ impl Element for Spinbox {
                 let split_left = self.base.x + btn_w;
                 let split_right = self.base.x + self.base.w * 0.775;
                 if px < split_left {
+                    let old_val = self.value;
                     self.value = (self.value - self.step).max(self.min);
+                    if self.value != old_val {
+                        self.just_changed = true;
+                    }
                     true
                 } else if px >= split_right {
+                    let old_val = self.value;
                     self.value = (self.value + self.step).min(self.max);
+                    if self.value != old_val {
+                        self.just_changed = true;
+                    }
                     true
                 } else {
                     self.editing = true;
@@ -210,6 +218,7 @@ impl Element for Spinbox {
     fn unfocus(&mut self) {
         if self.editing {
             self.editing = false;
+            let old_val = self.value;
             if self.decimals > 0 {
                 if let Ok(val_f) = self.edit_buffer.parse::<f32>() {
                     let divisor = 10.0f32.powi(self.decimals as i32);
@@ -220,6 +229,9 @@ impl Element for Spinbox {
                 if let Ok(val) = self.edit_buffer.parse::<i32>() {
                     self.value = val.clamp(self.min, self.max);
                 }
+            }
+            if self.value != old_val {
+                self.just_changed = true;
             }
         }
     }
@@ -250,6 +262,7 @@ impl Element for Spinbox {
                 handled = state.move_cursor_right(false);
             }
             Key::Named(NamedKey::Enter) => {
+                let old_val = self.value;
                 if self.decimals > 0 {
                     if let Ok(val_f) = state.buffer.parse::<f32>() {
                         let divisor = 10.0f32.powi(self.decimals as i32);
@@ -260,6 +273,9 @@ impl Element for Spinbox {
                     if let Ok(val) = state.buffer.parse::<i32>() {
                         self.value = val.clamp(self.min, self.max);
                     }
+                }
+                if self.value != old_val {
+                    self.just_changed = true;
                 }
                 self.editing = false;
                 handled = true;
