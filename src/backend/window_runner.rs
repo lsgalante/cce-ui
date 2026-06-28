@@ -695,6 +695,12 @@ pub fn push_extra_quad_vertices(
     let corners = target_w.rounded_corners();
     if corners == (false, false, false, false) {
         out.extend_from_slice(&quad_vertices_with_clip(qx, qy, qw, qh, sw, sh, qc, clip_circle));
+        if let Some((color, thickness)) = target_w.solid_border() {
+            let (wx, wy, ww, wh) = target_w.rect();
+            if (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - ww).abs() < 0.1 && (qh - wh).abs() < 0.1 {
+                push_plate_solid_border_vertices(qx, qy, qw, qh, target_w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+            }
+        }
         return;
     }
 
@@ -710,6 +716,16 @@ pub fn push_extra_quad_vertices(
     );
 
     push_rounded_rect_vertices_corners(qx, qy, qw, qh, target_w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, None, out);
+
+    if let Some((color, thickness)) = target_w.solid_border() {
+        let (rx, mut ry, rw, mut rh) = target_w.rect();
+        let top = crate::widget::label_offset(target_w);
+        ry += top;
+        rh -= top;
+        if (qx - rx).abs() < 0.1 && (qy - ry).abs() < 0.1 && (qw - rw).abs() < 0.1 && (qh - rh).abs() < 0.1 {
+            push_plate_solid_border_vertices(qx, qy, qw, qh, target_w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+        }
+    }
 }
 
 pub fn extra_quad_vertices_clipped(
@@ -746,6 +762,12 @@ pub fn push_extra_quad_vertices_clipped(
             return;
         }
         out.extend_from_slice(&quad_vertices_with_clip(ix0, iy0, ix1 - ix0, iy1 - iy0, sw, sh, qc, clip_circle));
+        if let Some((color, thickness)) = target_w.solid_border() {
+            let (wx, wy, ww, wh) = target_w.rect();
+            if (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - ww).abs() < 0.1 && (qh - wh).abs() < 0.1 {
+                push_plate_solid_border_vertices(qx, qy, qw, qh, target_w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+            }
+        }
         return;
     }
 
@@ -761,6 +783,16 @@ pub fn push_extra_quad_vertices_clipped(
     );
 
     push_rounded_rect_vertices_corners(qx, qy, qw, qh, target_w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, Some(clip), out);
+
+    if let Some((color, thickness)) = target_w.solid_border() {
+        let (rx, mut ry, rw, mut rh) = target_w.rect();
+        let top = crate::widget::label_offset(target_w);
+        ry += top;
+        rh -= top;
+        if (qx - rx).abs() < 0.1 && (qy - ry).abs() < 0.1 && (qw - rw).abs() < 0.1 && (qh - rh).abs() < 0.1 {
+            push_plate_solid_border_vertices(qx, qy, qw, qh, target_w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+        }
+    }
 }
 
 pub fn circle_vertices(

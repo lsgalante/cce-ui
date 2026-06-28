@@ -293,7 +293,7 @@ impl Element for Toggle {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        Vec::new()
+        vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())]
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
