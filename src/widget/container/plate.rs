@@ -365,14 +365,20 @@ impl Element for Plate {
         }
         let mut quads = Vec::new();
         let (px, py, pw, ph) = self.rect();
-        quads.push((px, py, pw, ph, self.color()));
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if !(r1 || r2 || r3 || r4) {
+            quads.push((px, py, pw, ph, self.color()));
+        }
 
         for &child_ptr in &self.base.children {
             let widget = unsafe { &*child_ptr };
-            let c = widget.color();
-            if c[3] > 0.0 {
-                let (wx, wy, ww, wh) = widget.rect();
-                quads.push((wx, wy, ww, wh, c));
+            let (cr1, cr2, cr3, cr4) = widget.rounded_corners();
+            if !(cr1 || cr2 || cr3 || cr4) {
+                let c = widget.color();
+                if c[3] > 0.0 {
+                    let (wx, wy, ww, wh) = widget.rect();
+                    quads.push((wx, wy, ww, wh, c));
+                }
             }
             quads.extend(widget.all_quads(ctx));
         }

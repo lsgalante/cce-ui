@@ -170,16 +170,22 @@ impl Element for Backplate {
         let mut quads = Vec::new();
         let bg_color = self.color();
         let (wx, wy, ww, wh) = self.rect();
-        if bg_color[3] != 0.0 {
-            quads.push((wx, wy, ww, wh, bg_color));
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if !(r1 || r2 || r3 || r4) {
+            if bg_color[3] != 0.0 {
+                quads.push((wx, wy, ww, wh, bg_color));
+            }
         }
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
             let mut child_quads = Vec::new();
             let cc = widget.color();
-            if cc[3] > 0.0 {
-                let (cx, cy, cw, ch) = widget.rect();
-                child_quads.push((cx, cy, cw, ch, cc));
+            let (cr1, cr2, cr3, cr4) = widget.rounded_corners();
+            if !(cr1 || cr2 || cr3 || cr4) {
+                if cc[3] > 0.0 {
+                    let (cx, cy, cw, ch) = widget.rect();
+                    child_quads.push((cx, cy, cw, ch, cc));
+                }
             }
             child_quads.extend(widget.all_quads(ctx));
 

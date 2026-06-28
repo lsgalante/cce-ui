@@ -420,11 +420,33 @@ pub trait Element {
     fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> { Vec::new() }
     
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            return Vec::new();
+        }
         let mut quads = self.extra_quads();
         if let Some(hq) = self.highlight_quad(ctx) {
             if hq.4 != colors::HIGHLIGHT_SECONDARY {
                 quads.push(hq);
             }
+        }
+        quads
+    }
+
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            let (x, y, w, h) = self.rect();
+            let radius = self.corner_radius();
+            let c = self.color();
+            if c[3] > 0.0 {
+                quads.push((x, y, w, h, radius, c, (r1, r2, r3, r4)));
+            }
+        }
+        for &child_ptr in &self.children(ctx) {
+            let widget = unsafe { &*child_ptr };
+            quads.extend(widget.all_rounded_quads(ctx));
         }
         quads
     }
