@@ -23,7 +23,7 @@ impl Backplate {
             parent: None,
             border_color: None,
             border_thickness: 1.0,
-            radius: crate::color::backplate_corner_radius(),
+            radius: -1.0,
             background_color: None,
             visible: true,
             movable: true,
@@ -148,11 +148,15 @@ impl Element for Backplate {
     }
 
     fn corner_radius(&self) -> f32 {
-        self.radius
+        if self.radius < 0.0 {
+            crate::color::backplate_corner_radius()
+        } else {
+            self.radius
+        }
     }
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        if self.radius > 0.1 {
+        if self.corner_radius() > 0.1 {
             (true, true, true, true)
         } else {
             (false, false, false, false)
@@ -280,7 +284,7 @@ impl Element for Backplate {
         if px < x || px >= x + w || py < y || py >= y + h {
             return false;
         }
-        let r = self.radius.min(w * 0.5).min(h * 0.5);
+        let r = self.corner_radius().min(w * 0.5).min(h * 0.5);
         if r <= 0.1 {
             return true;
         }
