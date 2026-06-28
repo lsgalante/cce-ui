@@ -89,7 +89,7 @@ impl Element for Backplate {
     }
 
     fn color(&self) -> [f32; 4] {
-        let mut base_color = self.background_color.unwrap_or([0.0, 0.0, 0.0, 0.0]);
+        let mut base_color = self.background_color.unwrap_or_else(|| crate::color::page_low_color());
         if base_color[3] > 0.001 {
             base_color[3] = crate::color::active_backplate_opacity();
         }
