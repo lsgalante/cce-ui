@@ -108,6 +108,20 @@ static TOGGLE_FONT: RwLock<String> = RwLock::new(String::new());
 static TOGGLE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static FONT_SELECTOR_FONT: RwLock<String> = RwLock::new(String::new());
 static FONT_SELECTOR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static BUTTON_STRIP_FONT: RwLock<String> = RwLock::new(String::new());
+static BUTTON_STRIP_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static BUTTON_FONT: RwLock<String> = RwLock::new(String::new());
+static BUTTON_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static LABEL_FONT: RwLock<String> = RwLock::new(String::new());
+static LABEL_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static DROPDOWN_FONT: RwLock<String> = RwLock::new(String::new());
+static DROPDOWN_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static TEXTBOX_FONT: RwLock<String> = RwLock::new(String::new());
+static TEXTBOX_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static SPINBOX_FONT: RwLock<String> = RwLock::new(String::new());
+static SPINBOX_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static SLIDER_FONT: RwLock<String> = RwLock::new(String::new());
+static SLIDER_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -140,6 +154,13 @@ pub fn reload_config() {
         let mut menubar_font_changed = false;
         let mut toggle_font_changed = false;
         let mut font_selector_font_changed = false;
+        let mut button_strip_font_changed = false;
+        let mut button_font_changed = false;
+        let mut label_font_changed = false;
+        let mut dropdown_font_changed = false;
+        let mut textbox_font_changed = false;
+        let mut spinbox_font_changed = false;
+        let mut slider_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("label_margin") {
@@ -537,6 +558,111 @@ pub fn reload_config() {
                     font_selector_font_changed = true;
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("button_strip_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    button_strip_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("button_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = BUTTON_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    button_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("label_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = LABEL_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    label_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("dropdown_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = DROPDOWN_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    dropdown_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("textbox_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = TEXTBOX_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    textbox_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("spinbox_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = SPINBOX_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    spinbox_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("slider_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = SLIDER_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    slider_font_changed = true;
+                }
+            }
         }
         if menubar_font_changed {
             if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
@@ -550,6 +676,41 @@ pub fn reload_config() {
         }
         if font_selector_font_changed {
             if let Ok(mut lock) = FONT_SELECTOR_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if button_strip_font_changed {
+            if let Ok(mut lock) = BUTTON_STRIP_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if button_font_changed {
+            if let Ok(mut lock) = BUTTON_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if label_font_changed {
+            if let Ok(mut lock) = LABEL_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if dropdown_font_changed {
+            if let Ok(mut lock) = DROPDOWN_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if textbox_font_changed {
+            if let Ok(mut lock) = TEXTBOX_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if spinbox_font_changed {
+            if let Ok(mut lock) = SPINBOX_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if slider_font_changed {
+            if let Ok(mut lock) = SLIDER_FONT_CACHED.write() {
                 *lock = None;
             }
         }
@@ -1305,6 +1466,377 @@ pub fn set_font_selector_font(font: &str) {
         *lock = font.to_string();
     }
     if let Ok(mut lock) = FONT_SELECTOR_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Button Strip Font
+pub fn button_strip_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("button_strip_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = BUTTON_STRIP_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn button_strip_font_parsed() -> (String, f32) {
+    if let Ok(lock) = BUTTON_STRIP_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = button_strip_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = BUTTON_STRIP_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_button_strip_font(font: &str) {
+    if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = BUTTON_STRIP_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Button Font
+pub fn button_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("button_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = BUTTON_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = BUTTON_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn button_font_parsed() -> (String, f32) {
+    if let Ok(lock) = BUTTON_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = button_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = BUTTON_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_button_font(font: &str) {
+    if let Ok(mut lock) = BUTTON_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = BUTTON_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Label Font
+pub fn label_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("label_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = LABEL_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = LABEL_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn label_font_parsed() -> (String, f32) {
+    if let Ok(lock) = LABEL_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = label_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = LABEL_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_label_font(font: &str) {
+    if let Ok(mut lock) = LABEL_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = LABEL_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Dropdown Font
+pub fn dropdown_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("dropdown_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = DROPDOWN_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = DROPDOWN_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn dropdown_font_parsed() -> (String, f32) {
+    if let Ok(lock) = DROPDOWN_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = dropdown_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = DROPDOWN_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_dropdown_font(font: &str) {
+    if let Ok(mut lock) = DROPDOWN_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = DROPDOWN_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Textbox Font
+pub fn textbox_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("textbox_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = TEXTBOX_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = TEXTBOX_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn textbox_font_parsed() -> (String, f32) {
+    if let Ok(lock) = TEXTBOX_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = textbox_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = TEXTBOX_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_textbox_font(font: &str) {
+    if let Ok(mut lock) = TEXTBOX_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = TEXTBOX_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Spinbox Font
+pub fn spinbox_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "monospace".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("spinbox_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = SPINBOX_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = SPINBOX_FONT.read().unwrap();
+    if lock.is_empty() {
+        "monospace".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn spinbox_font_parsed() -> (String, f32) {
+    if let Ok(lock) = SPINBOX_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = spinbox_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = SPINBOX_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_spinbox_font(font: &str) {
+    if let Ok(mut lock) = SPINBOX_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = SPINBOX_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Slider Font
+pub fn slider_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("slider_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = SLIDER_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = SLIDER_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn slider_font_parsed() -> (String, f32) {
+    if let Ok(lock) = SLIDER_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = slider_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = SLIDER_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_slider_font(font: &str) {
+    if let Ok(mut lock) = SLIDER_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = SLIDER_FONT_CACHED.write() {
         *lock = None;
     }
 }

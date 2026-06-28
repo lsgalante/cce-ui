@@ -133,7 +133,7 @@ impl Element for Spinbox {
 
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
     fn value(&self) -> i32 { self.value }
-    fn widget_font(&self) -> Option<String> { Some("monospace".to_string()) }
+    fn widget_font(&self) -> Option<String> { Some(crate::layout::spinbox_font()) }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let was = self.base.hovered;

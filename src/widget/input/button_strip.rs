@@ -88,7 +88,7 @@ impl ButtonStrip {
         let inactive_g = (active_g as f32 * 0.78) as u8;
         let inactive_b = (active_b as f32 * 0.78) as u8;
 
-        let (font_fam, font_size) = crate::layout::menubar_font_parsed();
+        let (font_fam, font_size) = crate::layout::button_strip_font_parsed();
         let scale = crate::scale::scale_factor().max(1.0);
 
         for (i, page_name) in self.buttons.iter().enumerate() {
@@ -187,7 +187,7 @@ impl ButtonStrip {
         let get_button_weight = |i: usize| -> f32 {
             let label = &self.buttons[i];
             let trimmed = label.trim();
-            let font_info = crate::layout::menubar_font_parsed();
+            let font_info = crate::layout::button_strip_font_parsed();
             let font_fam = font_info.0;
             let font_size = font_info.1;
             let padding = crate::layout::button_padding();
@@ -373,7 +373,7 @@ impl Element for ButtonStrip {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        let font_info = crate::layout::menubar_font_parsed();
+        let font_info = crate::layout::button_strip_font_parsed();
         let font_fam = font_info.0;
         let font_size = font_info.1;
         for (i, btn_label) in self.buttons.iter().enumerate() {
@@ -451,6 +451,10 @@ impl Element for ButtonStrip {
             return true;
         }
         false
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::button_strip_font())
     }
 }
 

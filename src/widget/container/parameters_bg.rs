@@ -284,6 +284,10 @@ fn parse_float3_value(val_str: &str, min: f32, max: f32) -> [f32; 3] {
 impl Element for ParametersBg {
     crate::impl_widget_base!(ParametersBg);
 
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::label_font())
+    }
+
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {

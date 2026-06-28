@@ -467,7 +467,7 @@ impl Element for TextBox {
 
     fn draggable(&self) -> bool { !self.disabled }
     fn is_dragging(&self) -> bool { self.dragging }
-    fn widget_font(&self) -> Option<String> { Some(self.font_family.clone()) }
+    fn widget_font(&self) -> Option<String> { Some(crate::layout::textbox_font()) }
 
     fn drag_begin(&mut self, _px: f32, _py: f32) {
         if self.disabled || !self.editing { return; }

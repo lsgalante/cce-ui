@@ -186,7 +186,7 @@ impl Element for Dropdown {
     }
 
     fn widget_font(&self) -> Option<String> {
-        Some(self.font_family.clone())
+        Some(crate::layout::dropdown_font())
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {

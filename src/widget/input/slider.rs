@@ -113,6 +113,10 @@ impl Slider {
 impl Element for Slider {
     crate::impl_widget_base!(Slider);
 
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::slider_font())
+    }
+
     fn get_value_string(&self) -> Option<String> {
         let scaled_val = self.min + self.value * (self.max - self.min);
         Some(format!("{:.2}", scaled_val))

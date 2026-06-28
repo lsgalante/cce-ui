@@ -272,6 +272,10 @@ impl Element for Button {
         }
     }
 
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::button_font())
+    }
+
     fn corner_radius(&self) -> f32 {
         crate::layout::button_corner_radius()
     }
