@@ -103,6 +103,9 @@ static FONT_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static SLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static TOGGLE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
+static TOGGLE_FONT: RwLock<String> = RwLock::new(String::new());
+static TOGGLE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -133,6 +136,7 @@ pub fn align_text_y(y: f32, height: f32, font_size: f32, top_offset: f32) -> f32
 pub fn reload_config() {
     if let Some(content) = read_config() {
         let mut menubar_font_changed = false;
+        let mut toggle_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("label_margin") {
@@ -491,9 +495,38 @@ pub fn reload_config() {
                     }
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("toggle_border_width") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = TOGGLE_BORDER_WIDTH.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("toggle_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = TOGGLE_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    toggle_font_changed = true;
+                }
+            }
         }
         if menubar_font_changed {
             if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if toggle_font_changed {
+            if let Ok(mut lock) = TOGGLE_FONT_CACHED.write() {
                 *lock = None;
             }
         }
@@ -827,6 +860,34 @@ pub fn set_toggle_corner_radius(radius: f32) {
     }
 }
 
+pub fn toggle_border_width() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("toggle_border_width") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = TOGGLE_BORDER_WIDTH.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *TOGGLE_BORDER_WIDTH.read().unwrap()
+}
+
+pub fn set_toggle_border_width(width: f32) {
+    if let Ok(mut lock) = TOGGLE_BORDER_WIDTH.write() {
+        *lock = width;
+    }
+}
+
 pub fn slider_corner_radius() -> f32 {
     use std::sync::Once;
     static INIT: Once = Once::new();
@@ -1117,6 +1178,58 @@ pub fn set_menubar_font(font: &str) {
         *lock = font.to_string();
     }
     if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+pub fn toggle_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("toggle_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = TOGGLE_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = TOGGLE_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn toggle_font_parsed() -> (String, f32) {
+    if let Ok(lock) = TOGGLE_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = toggle_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = TOGGLE_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_toggle_font(font: &str) {
+    if let Ok(mut lock) = TOGGLE_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = TOGGLE_FONT_CACHED.write() {
         *lock = None;
     }
 }

@@ -36,6 +36,7 @@ static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static BACKPLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
+static TOGGLE_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.22, 1.0]);
 static SCROLLINGLIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static SCROLLINGLIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
 static SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
@@ -174,6 +175,9 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/layout/toggle_disabled_color") {
         if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/layout/toggle_bg_color") {
+        if let Ok(mut lock) = TOGGLE_BG_COLOR.write() { *lock = c; }
     }
     let parsed_scrollinglist_bg = get_color("/layout/scrollinglist_bg_color");
     let parsed_breadcrumb_bg = get_color("/layout/breadcrumb_bg_color");
@@ -420,6 +424,17 @@ pub fn toggle_off_color() -> [f32; 4] {
 
 pub fn set_toggle_off_color(color: [f32; 4]) {
     if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn toggle_bg_color() -> [f32; 4] {
+    load_colors_once();
+    *TOGGLE_BG_COLOR.read().unwrap()
+}
+
+pub fn set_toggle_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = TOGGLE_BG_COLOR.write() {
         *lock = color;
     }
 }

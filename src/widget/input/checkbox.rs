@@ -256,13 +256,25 @@ impl Element for Toggle {
     }
 
     fn color(&self) -> [f32; 4] {
-        if self.toggled {
-            colors::TOGGLE_ON
-        } else if self.base.hovered {
-            colors::TOGGLE_HOVER
+        colors::toggle_bg_color()
+    }
+
+    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+        let border_color = if self.toggled {
+            colors::toggle_on_color()
         } else {
-            colors::TOGGLE_OFF
+            colors::toggle_off_color()
+        };
+        let border_w = crate::layout::toggle_border_width();
+        if border_w > 0.0 {
+            Some((border_color, border_w))
+        } else {
+            None
         }
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::toggle_font())
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
@@ -288,7 +300,8 @@ impl Element for Toggle {
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.label {
             let font_size = 12.0;
-            let est_w = crate::widget::display::measure_text(label, font_size);
+            let font_fam = crate::layout::toggle_font_parsed().0;
+            let est_w = crate::widget::display::measure_text_width(label, &font_fam, font_size);
             labels.push(TextLabel {
                 text: label.clone(),
                 x: self.base.x + (self.base.w - est_w) / 2.0,
