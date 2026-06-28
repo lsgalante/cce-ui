@@ -220,10 +220,11 @@ impl Element for Button {
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.label {
             let font_size = 12.0;
+            let font_family = self.widget_font().unwrap_or_else(|| "sans-serif".to_string());
             let est_w = if label == "📋" {
                 12.0
             } else {
-                crate::widget::display::measure_text(label, font_size)
+                crate::widget::display::measure_text_width(label, &font_family, font_size)
             };
             let color = if let Some(lc) = self.label_color {
                 [
@@ -240,7 +241,16 @@ impl Element for Button {
                     _ => [0xcc, 0xcc, 0xd4]
                 }
             };
-            let x = match self.justify {
+            let justify = if self.kind == ButtonKind::ListRow {
+                match crate::layout::scrollinglist_justification() {
+                    0 => Justification::Left,
+                    2 => Justification::Right,
+                    _ => Justification::Center,
+                }
+            } else {
+                self.justify
+            };
+            let x = match justify {
                 Justification::Left => self.base.x + 8.0,
                 Justification::Right => self.base.x + self.base.w - est_w - 8.0,
                 Justification::Center => self.base.x + (self.base.w - est_w) / 2.0,
@@ -273,7 +283,11 @@ impl Element for Button {
     }
 
     fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::button_font())
+        if self.kind == ButtonKind::ListRow {
+            Some(crate::layout::scrollinglist_font())
+        } else {
+            Some(crate::layout::button_font())
+        }
     }
 
     fn corner_radius(&self) -> f32 {
