@@ -2865,7 +2865,7 @@ impl Section {
         pc.text_with_font(label, label_x, top, font_size, font_color, &font_fam);
 
         let pad = section_padding();
-        let margin_x = pad + 12.0;
+        let margin_x = 2.0 * pad + 12.0;
         let usable_w = (cw - 2.0 * margin_x).max(1.0);
         let min_col_width = 130.0;
         let gap = 8.0;
@@ -2929,7 +2929,7 @@ impl Section {
             || name == "Graph";
 
         if span_full {
-            let margin_x = pad + 12.0;
+            let margin_x = 2.0 * pad + 12.0;
             let x = self.left + margin_x;
             let clamped_w = (self.cw - 2.0 * margin_x).max(0.0);
             let max_h = self.grid.max_height().max(self.content_y);
@@ -2991,7 +2991,7 @@ impl Section {
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
-        let margin_x = self.padding() + 12.0;
+        let margin_x = 2.0 * self.padding() + 12.0;
         let usable_w = self.cw - 2.0 * margin_x;
         if count == 0 {
             return Vec::new();
@@ -3079,10 +3079,11 @@ impl Section {
             pc.rect(border, left_edge, y, w, 1.0);
         }
 
-        pc.rect(border, x, y + h + 12.0, w, 1.0);
-        pc.rect(border, x, y, 1.0, h + 12.0);
-        pc.rect(border, x + w - 1.0, y, 1.0, h + 12.0);
-        self.content_y + 20.0
+        let extra_bottom = pad + 12.0;
+        pc.rect(border, x, y + h + extra_bottom, w, 1.0);
+        pc.rect(border, x, y, 1.0, h + extra_bottom);
+        pc.rect(border, x + w - 1.0, y, 1.0, h + extra_bottom);
+        self.content_y + extra_bottom + 8.0
     }
 
     pub fn vstack<'a>(&'a mut self, pc: &'a mut dyn RenderTarget, spacing: f32) -> SectionVStack<'a> {
@@ -4021,7 +4022,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         pc.text_with_font(label, label_x, top, font_size, font_color, &font_fam);
 
         let pad = section_padding();
-        let margin_x = pad + 12.0;
+        let margin_x = 2.0 * pad + 12.0;
         let usable_w = (cw - 2.0 * margin_x).max(1.0);
         let min_col_width = 130.0;
         let gap = 8.0;
@@ -4118,7 +4119,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             || name == "Graph";
 
         if span_full {
-            let margin_x = pad + 12.0;
+            let margin_x = 2.0 * pad + 12.0;
             let x = self.left + margin_x;
             let clamped_w = (self.cw - 2.0 * margin_x).max(0.0);
             let mut max_h = self.grid.max_height().max(self.content_y);
@@ -4151,9 +4152,8 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
                 y += self.row_gap;
             }
 
-            let pad = self.padding();
-            let aligned_x = x + pad;
-            let aligned_w = (self.grid.col_width - 2.0 * pad).max(0.0);
+            let aligned_x = x;
+            let aligned_w = self.grid.col_width;
 
             w.set_row_rect(aligned_x, aligned_w);
             render_widget(self.pc, w, aligned_x, y, aligned_w, total_h, ctx);
@@ -4190,7 +4190,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
-        let margin_x = self.padding() + 12.0;
+        let margin_x = 2.0 * self.padding() + 12.0;
         let usable_w = self.cw - 2.0 * margin_x;
         if count == 0 {
             return Vec::new();
@@ -4322,10 +4322,11 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             self.pc.rect(border, left_edge, y, w, 1.0);
         }
 
-        self.pc.rect(border, x, y + h + 12.0, w, 1.0);
-        self.pc.rect(border, x, y, 1.0, h + 12.0);
-        self.pc.rect(border, x + w - 1.0, y, 1.0, h + 12.0);
-        self.content_y + 20.0
+        let extra_bottom = pad + 12.0;
+        self.pc.rect(border, x, y + h + extra_bottom, w, 1.0);
+        self.pc.rect(border, x, y, 1.0, h + extra_bottom);
+        self.pc.rect(border, x + w - 1.0, y, 1.0, h + extra_bottom);
+        self.content_y + extra_bottom + 8.0
     }
 }
 
