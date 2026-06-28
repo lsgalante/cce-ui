@@ -48,7 +48,7 @@ impl Element for FontSelector {
     }
 
     fn widget_font(&self) -> Option<String> {
-        Some(self.font_family.clone())
+        Some(crate::layout::font_selector_font())
     }
 
     fn color(&self) -> [f32; 4] {

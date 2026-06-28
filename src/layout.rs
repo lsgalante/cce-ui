@@ -106,6 +106,8 @@ static SLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
 static TOGGLE_FONT: RwLock<String> = RwLock::new(String::new());
 static TOGGLE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static FONT_SELECTOR_FONT: RwLock<String> = RwLock::new(String::new());
+static FONT_SELECTOR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -137,6 +139,7 @@ pub fn reload_config() {
     if let Some(content) = read_config() {
         let mut menubar_font_changed = false;
         let mut toggle_font_changed = false;
+        let mut font_selector_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("label_margin") {
@@ -519,6 +522,21 @@ pub fn reload_config() {
                     toggle_font_changed = true;
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("font_selector_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    font_selector_font_changed = true;
+                }
+            }
         }
         if menubar_font_changed {
             if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
@@ -527,6 +545,11 @@ pub fn reload_config() {
         }
         if toggle_font_changed {
             if let Ok(mut lock) = TOGGLE_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if font_selector_font_changed {
+            if let Ok(mut lock) = FONT_SELECTOR_FONT_CACHED.write() {
                 *lock = None;
             }
         }
@@ -1233,6 +1256,59 @@ pub fn set_toggle_font(font: &str) {
         *lock = None;
     }
 }
+
+pub fn font_selector_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("font_selector_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = FONT_SELECTOR_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn font_selector_font_parsed() -> (String, f32) {
+    if let Ok(lock) = FONT_SELECTOR_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = font_selector_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = FONT_SELECTOR_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_font_selector_font(font: &str) {
+    if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = FONT_SELECTOR_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
 
 pub fn section_label_font() -> String {
     use std::sync::Once;
