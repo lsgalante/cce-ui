@@ -34,13 +34,47 @@ pub fn update_json_in_memory(val_obj: &mut Value, key: &str, value: &str, defaul
     updated
 }
 
+fn perform_rolling_backup(path: &str) {
+    if path != "/home/lsgalante/.config/cce/config.json" {
+        return;
+    }
+    if !std::path::Path::new(path).exists() {
+        return;
+    }
+    let backup_dir = "/home/lsgalante/.config/cce/backups";
+    if let Err(_) = fs::create_dir_all(backup_dir) {
+        return;
+    }
+    for i in (1..=4).rev() {
+        let src = format!("{}/config.json.{}.bak", backup_dir, i);
+        let dst = format!("{}/config.json.{}.bak", backup_dir, i + 1);
+        if std::path::Path::new(&src).exists() {
+            let _ = fs::rename(src, dst);
+        }
+    }
+    let dst = format!("{}/config.json.1.bak", backup_dir);
+    let _ = fs::copy(path, dst);
+}
+
+fn safe_write(path: &str, content: &str) -> bool {
+    perform_rolling_backup(path);
+    let temp_path = format!("{}.tmp", path);
+    if fs::write(&temp_path, content).is_ok() {
+        if fs::rename(&temp_path, path).is_ok() {
+            return true;
+        }
+        let _ = fs::remove_file(&temp_path);
+    }
+    false
+}
+
 pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &str) -> bool {
     let content = fs::read_to_string(path).unwrap_or_default();
     let mut val: Value = serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
     
     if update_json_in_memory(&mut val, key, value, default_section) {
         if let Ok(updated_str) = serde_json::to_string_pretty(&val) {
-            return fs::write(path, updated_str).is_ok();
+            return safe_write(path, &updated_str);
         }
     }
     false
