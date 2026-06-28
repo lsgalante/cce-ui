@@ -153,6 +153,19 @@ impl Element for Slider {
         Some(crate::layout::slider_height())
     }
 
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::slider_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::slider_corner_radius()
+    }
+
     fn draggable(&self) -> bool { true }
     fn is_dragging(&self) -> bool { self.dragging }
 
@@ -511,6 +524,19 @@ impl Element for RangeSlider {
 
     fn preferred_height(&self) -> Option<f32> {
         Some(crate::layout::slider_height())
+    }
+
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::slider_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::slider_corner_radius()
     }
 
     fn draggable(&self) -> bool { true }

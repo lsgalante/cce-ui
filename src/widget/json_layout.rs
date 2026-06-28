@@ -23,10 +23,19 @@ pub struct JsonWidgetConfig {
     pub target_page: Option<usize>,
 }
 
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum Justification {
+    Left,
+    Center,
+    Right,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct JsonPageConfig {
     pub title: String,
     pub widgets: Vec<JsonWidgetConfig>,
+    pub justify: Option<Justification>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -35,6 +44,7 @@ pub struct JsonLayoutConfig {
     pub height: Option<u32>,
     pub widgets: Option<Vec<JsonWidgetConfig>>,
     pub pages: Option<Vec<JsonPageConfig>>,
+    pub justify: Option<Justification>,
 }
 
 pub struct JsonWidget {
@@ -68,6 +78,7 @@ impl JsonLayoutWidget {
         if let Some(ref pages_conf) = config.pages {
             for (page_idx, page) in pages_conf.iter().enumerate() {
                 page_titles.push(page.title.clone());
+                let page_justify = page.justify.unwrap_or(Justification::Center);
                 for (idx, w_conf) in page.widgets.iter().enumerate() {
                     let id = w_conf.id.clone().unwrap_or_else(|| format!("widget_{}_{}", page_idx, idx));
                     let widget_type = w_conf.widget_type.clone();
@@ -82,7 +93,11 @@ impl JsonLayoutWidget {
                             Box::new(cb)
                         }
                         "button" => {
-                            Box::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label(&text))
+                            Box::new(Button::new(0.0, 0.0, 0.0, 0.0)
+                                .with_label(&text)
+                                .with_justify(page_justify)
+                                .with_bg([0.0, 0.0, 0.0, 0.0])
+                                .with_hover_bg([0.20, 0.35, 0.65, 0.9]))
                         }
                         "label" => {
                             Box::new(Label::new(&text).with_font_size(13.0).with_color([0xcc, 0xcc, 0xd4]))
@@ -135,6 +150,7 @@ impl JsonLayoutWidget {
                 }
             }
         } else if let Some(ref widgets_conf) = config.widgets {
+            let global_justify = config.justify.unwrap_or(Justification::Center);
             for (idx, w_conf) in widgets_conf.iter().enumerate() {
                 let id = w_conf.id.clone().unwrap_or_else(|| format!("widget_{}", idx));
                 let widget_type = w_conf.widget_type.clone();
@@ -149,7 +165,11 @@ impl JsonLayoutWidget {
                         Box::new(cb)
                     }
                     "button" => {
-                        Box::new(Button::new(0.0, 0.0, 0.0, 0.0).with_label(&text))
+                        Box::new(Button::new(0.0, 0.0, 0.0, 0.0)
+                            .with_label(&text)
+                            .with_justify(global_justify)
+                            .with_bg([0.0, 0.0, 0.0, 0.0])
+                            .with_hover_bg([0.20, 0.35, 0.65, 0.9]))
                     }
                     "label" => {
                         Box::new(Label::new(&text).with_font_size(13.0).with_color([0xcc, 0xcc, 0xd4]))

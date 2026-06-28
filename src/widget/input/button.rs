@@ -20,7 +20,7 @@ pub struct Button {
     pub bg: Option<[f32; 4]>,
     pub hover_bg: Option<[f32; 4]>,
     pub label_color: Option<[f32; 4]>,
-    pub left_align: bool,
+    pub justify: Justification,
 }
 
 impl std::fmt::Debug for Button {
@@ -48,7 +48,7 @@ impl Button {
             bg: None,
             hover_bg: None,
             label_color: None,
-            left_align: false,
+            justify: Justification::Center,
         }
     }
 
@@ -63,7 +63,7 @@ impl Button {
             bg: None,
             hover_bg: None,
             label_color: None,
-            left_align: false,
+            justify: Justification::Center,
         }
     }
 
@@ -78,7 +78,7 @@ impl Button {
             bg: None,
             hover_bg: None,
             label_color: None,
-            left_align: false,
+            justify: Justification::Center,
         }
     }
 
@@ -93,7 +93,7 @@ impl Button {
             bg: None,
             hover_bg: None,
             label_color: None,
-            left_align: false,
+            justify: Justification::Center,
         }
     }
 
@@ -128,7 +128,12 @@ impl Button {
     }
 
     pub fn with_left_align(mut self, left_align: bool) -> Self {
-        self.left_align = left_align;
+        self.justify = if left_align { Justification::Left } else { Justification::Center };
+        self
+    }
+
+    pub fn with_justify(mut self, justify: Justification) -> Self {
+        self.justify = justify;
         self
     }
 }
@@ -235,10 +240,10 @@ impl Element for Button {
                     _ => [0xcc, 0xcc, 0xd4]
                 }
             };
-            let x = if self.left_align {
-                self.base.x + 8.0
-            } else {
-                self.base.x + (self.base.w - est_w) / 2.0
+            let x = match self.justify {
+                Justification::Left => self.base.x + 8.0,
+                Justification::Right => self.base.x + self.base.w - est_w - 8.0,
+                Justification::Center => self.base.x + (self.base.w - est_w) / 2.0,
             };
             labels.push(TextLabel {
                 text: label.clone(),

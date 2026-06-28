@@ -61,7 +61,7 @@ pub struct KeyEvent {
 }
 
 pub mod json_layout;
-pub use json_layout::{JsonLayoutWidget, JsonLayoutConfig, JsonWidgetConfig, JsonPageConfig, JsonWidget};
+pub use json_layout::{JsonLayoutWidget, JsonLayoutConfig, JsonWidgetConfig, JsonPageConfig, JsonWidget, Justification};
 
 use crate::colors;
 use std::sync::atomic::AtomicUsize;

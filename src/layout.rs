@@ -102,6 +102,7 @@ static TEXTBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static FONT_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static SLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -481,6 +482,15 @@ pub fn reload_config() {
                     }
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("slider_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = SLIDER_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
         }
         if menubar_font_changed {
             if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
@@ -813,6 +823,34 @@ pub fn toggle_corner_radius() -> f32 {
 
 pub fn set_toggle_corner_radius(radius: f32) {
     if let Ok(mut lock) = TOGGLE_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
+pub fn slider_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("slider_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = SLIDER_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *SLIDER_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_slider_corner_radius(radius: f32) {
+    if let Ok(mut lock) = SLIDER_CORNER_RADIUS.write() {
         *lock = radius;
     }
 }
