@@ -614,6 +614,22 @@ fn get_child_widget_for_quad<'a>(
     qx: f32, qy: f32, qw: f32, qh: f32,
 ) -> &'a dyn crate::widget::Element {
     if let Some(pbg) = w.as_any().downcast_ref::<crate::widget::ParametersBg>() {
+        for s_opt in &pbg.sliders {
+            if let Some(s) = s_opt {
+                let (sx, sy, sww, shh) = s.rect();
+                if qx >= sx - 0.1 && qx + qw <= sx + sww + 0.1 && qy >= sy - 0.1 && qy + qh <= sy + shh + 0.1 {
+                    return s;
+                }
+            }
+        }
+        for f_opt in &pbg.float3s {
+            if let Some(f) = f_opt {
+                let (fx, fy, fww, fhh) = f.rect();
+                if qx >= fx - 0.1 && qx + qw <= fx + fww + 0.1 && qy >= fy - 0.1 && qy + qh <= fy + fhh + 0.1 {
+                    return f;
+                }
+            }
+        }
         for sb_opt in &pbg.spinboxes {
             if let Some(sb) = sb_opt {
                 let (sx, sy, sww, shh) = sb.rect();
@@ -628,6 +644,45 @@ fn get_child_widget_for_quad<'a>(
                 if qx >= bx - 0.1 && qx + qw <= bx + bww + 0.1 && qy >= by - 0.1 && qy + qh <= by + bhh + 0.1 {
                     return btn;
                 }
+            }
+        }
+        for ch_opt in &pbg.choices {
+            if let Some(ch) = ch_opt {
+                let (cx, cy, cww, chh) = ch.rect();
+                if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
+                    return ch;
+                }
+            }
+        }
+        for t_opt in &pbg.texts {
+            if let Some(t) = t_opt {
+                let (tx, ty, tww, thh) = t.rect();
+                if qx >= tx - 0.1 && qx + qw <= tx + tww + 0.1 && qy >= ty - 0.1 && qy + qh <= ty + thh + 0.1 {
+                    return t;
+                }
+            }
+        }
+        for cb_opt in &pbg.checkboxes {
+            if let Some(cb) = cb_opt {
+                let (cx, cy, cww, chh) = cb.rect();
+                if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
+                    return cb;
+                }
+            }
+        }
+        for c_opt in &pbg.colors {
+            if let Some(c) = c_opt {
+                let (cx, cy, cww, chh) = c.rect();
+                if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
+                    return c;
+                }
+            }
+        }
+        for &child_ptr in &pbg.children {
+            let child = unsafe { &*child_ptr };
+            let (cx, cy, cww, chh) = child.rect();
+            if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
+                return child;
             }
         }
     }
