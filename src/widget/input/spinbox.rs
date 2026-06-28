@@ -69,6 +69,10 @@ impl Spinbox {
         self.decimals = decimals;
         self
     }
+
+    pub fn range(&self) -> (i32, i32) {
+        (self.min, self.max)
+    }
 }
 
 impl Element for Spinbox {
@@ -405,6 +409,10 @@ impl Element for Spinbox {
             color: [0xcc, 0xcc, 0xd4],
         });
         labels
+    }
+
+    fn layout_ignore(&self) -> bool {
+        true
     }
 }
 
