@@ -1,5 +1,7 @@
 use crate::widget::*;
 use super::scroll_box::ScrollBox;
+pub use crate::widget::input::font_selector::FontSelector;
+
 
 // Generic text item layout wrapper
 #[derive(Debug, Clone)]
