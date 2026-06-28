@@ -466,6 +466,10 @@ impl Element for Slider {
     }
 
     fn value(&self) -> i32 { (self.value * 100.0) as i32 }
+
+    fn layout_ignore(&self) -> bool {
+        true
+    }
 }
 
 impl Drop for Slider {

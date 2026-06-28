@@ -293,6 +293,10 @@ impl Element for Button {
     fn corner_radius(&self) -> f32 {
         crate::layout::button_corner_radius()
     }
+
+    fn layout_ignore(&self) -> bool {
+        true
+    }
 }
 
 pub enum PageButton {

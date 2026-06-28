@@ -227,6 +227,10 @@ impl Element for ScrollBox {
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> { self.children.clone() }
     fn add_child(&mut self, child: *mut (dyn Element + 'static), _ctx: &mut UiContext) { self.children.push(child); }
     fn clear_children(&mut self, _ctx: &mut UiContext) { self.children.clear(); }
+
+    fn layout_ignore(&self) -> bool {
+        true
+    }
 }
 
 impl Drop for ScrollBox {

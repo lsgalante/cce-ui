@@ -395,6 +395,10 @@ impl Element for Dropdown {
     fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
         Dropdown::render_popover(self, pc);
     }
+
+    fn layout_ignore(&self) -> bool {
+        true
+    }
 }
 
 impl Drop for Dropdown {
