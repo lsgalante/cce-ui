@@ -13,8 +13,8 @@ pub struct KeybindRow {
 
 impl KeybindRow {
     pub fn new(binding: String, command: String) -> Self {
-        let key_input = TextBox::new(binding);
-        let cmd_input = TextBox::new(command);
+        let key_input = TextBox::new(binding).with_placeholder("e.g. super+shift+q");
+        let cmd_input = TextBox::new(command).with_placeholder("e.g. close");
         let remove_button = Button::new(0.0, 0.0, 0.0, 0.0).with_label("Remove");
         Self {
             key_input,
