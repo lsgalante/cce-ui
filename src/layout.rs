@@ -1980,11 +1980,6 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
             }
         }
 
-        if r <= 0.1 || corners == (false, false, false, false) {
-            pc.rect_with_radius_corners(qc, qx, qy, qw, qh, 0.0, (false, false, false, false));
-            continue;
-        }
-
         let extra_corners = (
             corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
             corners.1 && qx + qw >= wx + www - 1.5 && qy <= wy + 1.5,
@@ -1992,10 +1987,37 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
             corners.3 && qx <= wx + 1.5 && qy + qh >= wy + whh - 1.5,
         );
 
-        if extra_corners == (false, false, false, false) {
-            pc.rect_with_radius_corners(qc, qx, qy, qw, qh, 0.0, (false, false, false, false));
+        let (resolved_r, resolved_corners) = if r <= 0.1 || corners == (false, false, false, false) || extra_corners == (false, false, false, false) {
+            (0.0, (false, false, false, false))
         } else {
-            pc.rect_with_radius_corners(qc, qx, qy, qw, qh, r, extra_corners);
+            (r, extra_corners)
+        };
+
+        // Check if this quad is the background quad for a widget with a solid border
+        let mut border_drawn = false;
+        let is_bg_quad = (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - www).abs() < 0.1 && (qh - whh).abs() < 0.1;
+        if is_bg_quad {
+            if let Some((border_color, thickness)) = w.solid_border() {
+                if thickness > 0.0 {
+                    // Draw full size border quad
+                    pc.rect_with_radius_corners(border_color, qx, qy, qw, qh, resolved_r, resolved_corners);
+                    // Draw inset background quad on top
+                    pc.rect_with_radius_corners(
+                        qc,
+                        qx + thickness,
+                        qy + thickness,
+                        (qw - 2.0 * thickness).max(0.0),
+                        (qh - 2.0 * thickness).max(0.0),
+                        (resolved_r - thickness).max(0.0),
+                        resolved_corners,
+                    );
+                    border_drawn = true;
+                }
+            }
+        }
+
+        if !border_drawn {
+            pc.rect_with_radius_corners(qc, qx, qy, qw, qh, resolved_r, resolved_corners);
         }
     }
     let font_opt = w.widget_font();
