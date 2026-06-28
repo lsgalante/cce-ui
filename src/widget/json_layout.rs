@@ -362,8 +362,15 @@ impl Element for JsonLayoutWidget {
             if w.page_idx != active_page {
                 continue;
             }
-            push_clipped(w.widget.rect().0, w.widget.rect().1, w.widget.rect().2, w.widget.rect().3, w.widget.color(), &mut quads);
+            let (wx, wy, ww, wh) = w.widget.rect();
+            let has_rounded = w.widget.rounded_corners() != (false, false, false, false);
+            if !has_rounded {
+                push_clipped(wx, wy, ww, wh, w.widget.color(), &mut quads);
+            }
             for q in w.widget.all_quads(ctx) {
+                if has_rounded && (q.0 - wx).abs() < 0.1 && (q.1 - wy).abs() < 0.1 && (q.2 - ww).abs() < 0.1 && (q.3 - wh).abs() < 0.1 {
+                    continue;
+                }
                 push_clipped(q.0, q.1, q.2, q.3, q.4, &mut quads);
             }
             if let Some(hq) = w.widget.highlight_quad(ctx) {

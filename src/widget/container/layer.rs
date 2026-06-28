@@ -121,12 +121,14 @@ impl Element for Layer {
         }
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
-            let cc = widget.color();
-            if cc[3] > 0.0 {
-                let (wx, wy, ww, wh) = widget.rect();
-                quads.push((wx, wy, ww, wh, cc));
+            let (wx, wy, ww, wh) = widget.rect();
+            let has_rounded = widget.rounded_corners() != (false, false, false, false);
+            for (qx, qy, qw, qh, qc) in widget.all_quads(ctx) {
+                if has_rounded && (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - ww).abs() < 0.1 && (qh - wh).abs() < 0.1 {
+                    continue;
+                }
+                quads.push((qx, qy, qw, qh, qc));
             }
-            quads.extend(widget.all_quads(ctx));
         }
         quads
     }

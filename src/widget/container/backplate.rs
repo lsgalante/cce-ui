@@ -179,15 +179,14 @@ impl Element for Backplate {
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
             let mut child_quads = Vec::new();
-            let cc = widget.color();
-            let (cr1, cr2, cr3, cr4) = widget.rounded_corners();
-            if !(cr1 || cr2 || cr3 || cr4) {
-                if cc[3] > 0.0 {
-                    let (cx, cy, cw, ch) = widget.rect();
-                    child_quads.push((cx, cy, cw, ch, cc));
+            let (cx, cy, cw, ch) = widget.rect();
+            let has_rounded = widget.rounded_corners() != (false, false, false, false);
+            for (qx, qy, qw, qh, qc) in widget.all_quads(ctx) {
+                if has_rounded && (qx - cx).abs() < 0.1 && (qy - cy).abs() < 0.1 && (qw - cw).abs() < 0.1 && (qh - ch).abs() < 0.1 {
+                    continue;
                 }
+                child_quads.push((qx, qy, qw, qh, qc));
             }
-            child_quads.extend(widget.all_quads(ctx));
 
             for (qx, qy, qw, qh, qc) in child_quads {
                 let x0 = qx.max(wx);

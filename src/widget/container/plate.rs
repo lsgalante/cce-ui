@@ -372,15 +372,14 @@ impl Element for Plate {
 
         for &child_ptr in &self.base.children {
             let widget = unsafe { &*child_ptr };
-            let (cr1, cr2, cr3, cr4) = widget.rounded_corners();
-            if !(cr1 || cr2 || cr3 || cr4) {
-                let c = widget.color();
-                if c[3] > 0.0 {
-                    let (wx, wy, ww, wh) = widget.rect();
-                    quads.push((wx, wy, ww, wh, c));
+            let (wx, wy, ww, wh) = widget.rect();
+            let has_rounded = widget.rounded_corners() != (false, false, false, false);
+            for (qx, qy, qw, qh, qc) in widget.all_quads(ctx) {
+                if has_rounded && (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - ww).abs() < 0.1 && (qh - wh).abs() < 0.1 {
+                    continue;
                 }
+                quads.push((qx, qy, qw, qh, qc));
             }
-            quads.extend(widget.all_quads(ctx));
         }
         quads
     }

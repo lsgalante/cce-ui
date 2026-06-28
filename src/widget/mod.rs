@@ -420,10 +420,6 @@ pub trait Element {
     fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> { Vec::new() }
     
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if r1 || r2 || r3 || r4 {
-            return Vec::new();
-        }
         let mut quads = self.extra_quads();
         if let Some(hq) = self.highlight_quad(ctx) {
             if hq.4 != colors::HIGHLIGHT_SECONDARY {
