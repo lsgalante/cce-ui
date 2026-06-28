@@ -1,4 +1,5 @@
 use crate::widget::*;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct FontSelector {
@@ -8,6 +9,7 @@ pub struct FontSelector {
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pressed: bool,
+    child: Arc<Mutex<Option<std::process::Child>>>,
 }
 
 impl FontSelector {
@@ -19,6 +21,7 @@ impl FontSelector {
             parent: None,
             children: Vec::new(),
             pressed: false,
+            child: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -67,18 +70,23 @@ impl Element for FontSelector {
             ElementState::Released => {
                 if self.pressed && self.hit_test(px, py, ctx) {
                     self.pressed = false;
-                    let output = std::process::Command::new("/home/lsgalante/.local/bin/cce-fonts")
-                        .arg("--select")
-                        .arg(&self.font_family)
-                        .output();
-                    if let Ok(out) = output {
-                        if out.status.success() {
-                            let stdout = String::from_utf8_lossy(&out.stdout);
-                            let trimmed = stdout.trim().to_string();
-                            if !trimmed.is_empty() && trimmed != self.font_family {
-                                self.font_family = trimmed;
-                                self.just_changed = true;
-                            }
+                    let mut child_guard = self.child.lock().unwrap();
+                    if child_guard.is_none() {
+                        let home = std::env::var("HOME").unwrap_or_default();
+                        let local_fonts = std::path::Path::new(&home).join(".local/bin/cce-fonts");
+                        let cmd_path = if local_fonts.exists() {
+                            local_fonts.to_string_lossy().into_owned()
+                        } else {
+                            "cce-fonts".to_string()
+                        };
+                        if let Ok(child) = std::process::Command::new(&cmd_path)
+                            .arg("--select")
+                            .arg(&self.font_family)
+                            .stdout(std::process::Stdio::piped())
+                            .spawn()
+                        {
+                            *child_guard = Some(child);
+                            ctx.register_tick_receiver(self.base.id());
                         }
                     }
                     return true;
@@ -86,6 +94,35 @@ impl Element for FontSelector {
                 let was = self.pressed;
                 self.pressed = false;
                 return was;
+            }
+        }
+        false
+    }
+
+    fn tick(&mut self, _dt: f32, ctx: &mut UiContext) -> bool {
+        let mut child_guard = self.child.lock().unwrap();
+        if let Some(ref mut child) = *child_guard {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let child_val = child_guard.take().unwrap();
+                    ctx.unregister_tick_receiver(self.base.id());
+                    if status.success() {
+                        if let Ok(output) = child_val.wait_with_output() {
+                            let stdout = String::from_utf8_lossy(&output.stdout);
+                            let trimmed = stdout.trim().to_string();
+                            if !trimmed.is_empty() && trimmed != self.font_family {
+                                self.font_family = trimmed;
+                                self.just_changed = true;
+                                return true;
+                            }
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    *child_guard = None;
+                    ctx.unregister_tick_receiver(self.base.id());
+                }
             }
         }
         false
