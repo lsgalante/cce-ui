@@ -123,6 +123,9 @@ static SPINBOX_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static SLIDER_FONT: RwLock<String> = RwLock::new(String::new());
 static SLIDER_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
+static SCROLLINGLIST_FONT: RwLock<String> = RwLock::new(String::new());
+static SCROLLINGLIST_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static SCROLLINGLIST_JUSTIFICATION: RwLock<u8> = RwLock::new(0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static LAYER_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -161,6 +164,7 @@ pub fn reload_config() {
         let mut textbox_font_changed = false;
         let mut spinbox_font_changed = false;
         let mut slider_font_changed = false;
+        let mut scrollinglist_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("label_margin") {
@@ -663,6 +667,30 @@ pub fn reload_config() {
                     slider_font_changed = true;
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("scrollinglist_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = SCROLLINGLIST_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    scrollinglist_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("scrollinglist_justification") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<u8>() {
+                    if let Ok(mut lock) = SCROLLINGLIST_JUSTIFICATION.write() {
+                        *lock = val;
+                    }
+                }
+            }
         }
         if menubar_font_changed {
             if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
@@ -711,6 +739,11 @@ pub fn reload_config() {
         }
         if slider_font_changed {
             if let Ok(mut lock) = SLIDER_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if scrollinglist_font_changed {
+            if let Ok(mut lock) = SCROLLINGLIST_FONT_CACHED.write() {
                 *lock = None;
             }
         }
@@ -1679,6 +1712,88 @@ pub fn set_dropdown_font(font: &str) {
     }
     if let Ok(mut lock) = DROPDOWN_FONT_CACHED.write() {
         *lock = None;
+    }
+}
+
+// ScrollingList Font
+pub fn scrollinglist_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("scrollinglist_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = SCROLLINGLIST_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = SCROLLINGLIST_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn scrollinglist_font_parsed() -> (String, f32) {
+    if let Ok(lock) = SCROLLINGLIST_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = scrollinglist_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = SCROLLINGLIST_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_scrollinglist_font(font: &str) {
+    if let Ok(mut lock) = SCROLLINGLIST_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = SCROLLINGLIST_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// ScrollingList Justification
+pub fn scrollinglist_justification() -> u8 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("scrollinglist_justification") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<u8>() {
+                        if let Ok(mut lock) = SCROLLINGLIST_JUSTIFICATION.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *SCROLLINGLIST_JUSTIFICATION.read().unwrap()
+}
+
+pub fn set_scrollinglist_justification(just: u8) {
+    if let Ok(mut lock) = SCROLLINGLIST_JUSTIFICATION.write() {
+        *lock = just;
     }
 }
 
