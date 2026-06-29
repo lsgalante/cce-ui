@@ -845,6 +845,32 @@ impl UiContext {
         hit_backplate
     }
 
+    pub fn is_widget_at(&self, px: f32, py: f32) -> bool {
+        let scroll_y = crate::widget::hover_animation::get_scroll_offset();
+        let mut candidate_ids = self.spatial_grid.query(px, py).to_vec();
+        if scroll_y != 0.0 {
+            candidate_ids.extend_from_slice(self.spatial_grid.query(px, py + scroll_y));
+            candidate_ids.sort_unstable();
+            candidate_ids.dedup();
+        }
+        for &id in &candidate_ids {
+            if let Some(&ptr) = self.widget_registry.get(&id) {
+                unsafe {
+                    if !ptr.is_null() {
+                        let w = &*ptr;
+                        if !w.is_backplate() {
+                            let is_hit = w.hit_test(px, py, self) || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self));
+                            if is_hit && w.blocks_backplate_drag() {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     fn find_hovered_scrollable(&self, root: *mut (dyn Element + 'static), cx: f32, cy: f32) -> Option<*mut (dyn Element + 'static)> {
         unsafe {
             if root.is_null() {

@@ -1930,7 +1930,13 @@ impl<A: Application> PointerHandler for EngineState<A> {
 
                         // Titlebar drag check: y is in [8.0, 32.0], and x is not in the top-right button area
                         let mut should_move = false;
-                        if ly >= border && ly < 32.0 && lx < self.logical_width - 70.0 {
+                        let mut is_widget = false;
+                        if let Some(ctx) = self.inner.ui_context() {
+                            if ctx.is_widget_at(lx, ly) {
+                                is_widget = true;
+                            }
+                        }
+                        if !is_widget && ly >= border && ly < 32.0 && lx < self.logical_width - 70.0 {
                             should_move = true;
                         } else if self.inner.is_movable_backplate_at(lx, ly) {
                             should_move = true;
