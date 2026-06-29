@@ -345,14 +345,13 @@ impl Element for TreeList {
                 let separator_color = [0.15, 0.15, 0.19, 1.0];
                 quads.push((list_left + 180.0, draw_y, 1.0, draw_h, separator_color));
                 quads.push((list_left + 235.0, draw_y, 1.0, draw_h, separator_color));
-                quads.push((list_left + 370.0, draw_y, 1.0, draw_h, separator_color));
 
-                // Color preview in 4th column (only when not selected)
+                // Color preview in 3rd column next to value string (only when not selected)
                 if Some(*original_idx) != self.selected_key_idx {
                     if let serde_json::Value::String(s) = val {
                         if s.starts_with('#') {
                             if let Some(rgba) = parse_hex_f32(s) {
-                                let preview_x = list_left + 380.0;
+                                let preview_x = list_left + 245.0;
                                 let preview_y = row_y + 4.0;
                                 let preview_bottom = (row_y + 20.0).min(list_bottom);
                                 let preview_draw_y = preview_y.max(list_top);
@@ -451,9 +450,21 @@ impl Element for TreeList {
                     }
 
                     if Some(*original_idx) != self.selected_key_idx {
+                        let is_color = if let serde_json::Value::String(s) = val {
+                            s.starts_with('#')
+                        } else {
+                            false
+                        };
+                        
+                        let label_x = if is_color {
+                            list_left + 267.0
+                        } else {
+                            list_left + 245.0
+                        };
+
                         labels.push(TextLabel {
                             text: display_val,
-                            x: list_left + 245.0,
+                            x: label_x,
                             y: row_y + 6.0,
                             font_size: 12.0,
                             color: [0x83, 0x83, 0x8a],
