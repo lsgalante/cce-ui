@@ -586,7 +586,6 @@ impl UiContext {
         self.layout_tree.parents.clear();
         self.layout_tree.children.clear();
         self.widget_registry.clear();
-        self.tick_receivers.clear();
     }
 
     // --- Popovers ---
