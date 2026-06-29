@@ -133,11 +133,82 @@ pub fn update_json_in_memory(val_obj: &mut Value, key: &str, value: &str, defaul
     updated
 }
 
+pub fn map_legacy_key(key: &str, section: &str) -> (String, String, Option<String>) {
+    let parts: Vec<&str> = key.split('.').collect();
+    if parts.len() == 3 {
+        return (parts[0].to_string(), parts[1].to_string(), Some(parts[2].to_string()));
+    } else if parts.len() == 2 {
+        return (parts[0].to_string(), parts[1].to_string(), None);
+    }
+    
+    if section == "layout" {
+        match key {
+            "border_color" => ("style".to_string(), "border".to_string(), Some("color".to_string())),
+            "border_width" => ("style".to_string(), "border".to_string(), Some("width".to_string())),
+            "border_blur" => ("style".to_string(), "border".to_string(), Some("blur".to_string())),
+            "border_font_size" => ("style".to_string(), "border".to_string(), Some("font_size".to_string())),
+            "fullscreen_border_width" => ("style".to_string(), "border".to_string(), Some("fullscreen_border_width".to_string())),
+            "cascade_border_width" => ("style".to_string(), "border".to_string(), Some("cascade_border_width".to_string())),
+            "grid_border_width" => ("style".to_string(), "border".to_string(), Some("grid_border_width".to_string())),
+            "floating_border_width" => ("style".to_string(), "border".to_string(), Some("floating_border_width".to_string())),
+            
+            "background_color" => ("style".to_string(), "background".to_string(), Some("color".to_string())),
+            
+            "button_font" => ("style".to_string(), "button".to_string(), Some("font".to_string())),
+            "button_padding" => ("style".to_string(), "button".to_string(), Some("padding".to_string())),
+            
+            "button_strip_font" => ("style".to_string(), "button_strip".to_string(), Some("font".to_string())),
+            "button_strip_spacing" => ("style".to_string(), "button_strip".to_string(), Some("spacing".to_string())),
+            
+            "dropdown_height" => ("style".to_string(), "dropdown".to_string(), Some("height".to_string())),
+            "font_selector_height" => ("style".to_string(), "font_selector".to_string(), Some("height".to_string())),
+            "label_font" => ("style".to_string(), "label".to_string(), Some("font".to_string())),
+            
+            "slider_height" => ("style".to_string(), "slider".to_string(), Some("height".to_string())),
+            "slider_corner_radius" => ("style".to_string(), "slider".to_string(), Some("corner_radius".to_string())),
+            
+            "spinbox_height" => ("style".to_string(), "spinbox".to_string(), Some("height".to_string())),
+            "textbox_height" => ("style".to_string(), "textbox".to_string(), Some("height".to_string())),
+            
+            "toggle_font" => ("style".to_string(), "toggle".to_string(), Some("font".to_string())),
+            "toggle_height" => ("style".to_string(), "toggle".to_string(), Some("height".to_string())),
+            "toggle_border_width" => ("style".to_string(), "toggle".to_string(), Some("border_width".to_string())),
+            "toggle_disabled_color" => ("style".to_string(), "toggle".to_string(), Some("disabled_color".to_string())),
+            
+            "status_normal_color" => ("style".to_string(), "status".to_string(), Some("normal_color".to_string())),
+            "status_box_opacity" => ("style".to_string(), "status".to_string(), Some("box_opacity".to_string())),
+            
+            "primary_highlight_color" => ("style".to_string(), "highlight".to_string(), Some("primary".to_string())),
+            
+            "window_opacity" => ("style".to_string(), "window".to_string(), Some("opacity".to_string())),
+            "floating_backplate_opacity" => ("style".to_string(), "window".to_string(), Some("floating_backplate_opacity".to_string())),
+            "window_blur" => ("style".to_string(), "window".to_string(), Some("blur".to_string())),
+            "page_opacity" => ("style".to_string(), "window".to_string(), Some("page_opacity".to_string())),
+            "page_margin" => ("style".to_string(), "window".to_string(), Some("page_margin".to_string())),
+            "plate_padding" => ("style".to_string(), "window".to_string(), Some("plate_padding".to_string())),
+            "transition_duration" => ("style".to_string(), "window".to_string(), Some("transition_duration".to_string())),
+            
+            "overlay_behavior" => ("style".to_string(), "overlay".to_string(), Some("behavior".to_string())),
+            "overlay_width" => ("style".to_string(), "overlay".to_string(), Some("width".to_string())),
+            "overlay_position" => ("style".to_string(), "overlay".to_string(), Some("position".to_string())),
+            "overlay_border_gap" => ("style".to_string(), "overlay".to_string(), Some("border_gap".to_string())),
+            
+            "last_page" => ("style".to_string(), "editor".to_string(), Some("last_page".to_string())),
+            
+            _ => (section.to_string(), key.to_string(), None),
+        }
+    } else {
+        (section.to_string(), key.to_string(), None)
+    }
+}
+
 pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, default_section: &str) -> bool {
-    let section_node = if let Some(node) = doc.nodes_mut().iter_mut().find(|n| n.name().value() == default_section) {
+    let (target_section, target_node, target_prop) = map_legacy_key(key, default_section);
+    
+    let section_node = if let Some(node) = doc.nodes_mut().iter_mut().find(|n| n.name().value() == target_section) {
         node
     } else {
-        if let Ok(new_node) = format!("{}\n", default_section).parse::<kdl::KdlNode>() {
+        if let Ok(new_node) = format!("{}\n", target_section).parse::<kdl::KdlNode>() {
             doc.nodes_mut().push(new_node);
             doc.nodes_mut().last_mut().unwrap()
         } else {
@@ -147,10 +218,10 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
 
     let children = section_node.ensure_children();
 
-    let child_node = if let Some(child) = children.nodes_mut().iter_mut().find(|n| n.name().value() == key) {
+    let child_node = if let Some(child) = children.nodes_mut().iter_mut().find(|n| n.name().value() == target_node) {
         child
     } else {
-        if let Ok(new_child) = format!("{}\n", key).parse::<kdl::KdlNode>() {
+        if let Ok(new_child) = format!("{}\n", target_node).parse::<kdl::KdlNode>() {
             children.nodes_mut().push(new_child);
             children.nodes_mut().last_mut().unwrap()
         } else {
@@ -175,12 +246,35 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
         (kdl::KdlValue::String(s), None)
     };
 
-    child_node.entries_mut().clear();
-    let mut entry = kdl::KdlEntry::new(kdl_val);
-    if let Some(ty) = kdl_ty {
-        entry.set_ty(ty);
+    if let Some(prop_name) = target_prop {
+        let mut found = false;
+        for entry in child_node.entries_mut() {
+            if let Some(id) = entry.name() {
+                if id.value() == prop_name {
+                    *entry = kdl::KdlEntry::new_prop(prop_name.clone(), kdl_val.clone());
+                    if let Some(ty) = kdl_ty {
+                        entry.set_ty(ty);
+                    }
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if !found {
+            let mut entry = kdl::KdlEntry::new_prop(prop_name, kdl_val);
+            if let Some(ty) = kdl_ty {
+                entry.set_ty(ty);
+            }
+            child_node.entries_mut().push(entry);
+        }
+    } else {
+        child_node.entries_mut().clear();
+        let mut entry = kdl::KdlEntry::new(kdl_val);
+        if let Some(ty) = kdl_ty {
+            entry.set_ty(ty);
+        }
+        child_node.entries_mut().push(entry);
     }
-    child_node.entries_mut().push(entry);
 
     true
 }
@@ -250,4 +344,25 @@ pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &
         return safe_write(path, &updated_str);
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_nested_parsing() {
+        let content = "style {\n    status box_opacity=(f64)0.75\n}\n";
+        let val = parse_kdl_to_json(content);
+        println!("val = {:?}", val);
+        let (sec, node, prop) = map_legacy_key("status_box_opacity", "layout");
+        assert_eq!(sec, "style");
+        assert_eq!(node, "status");
+        assert_eq!(prop, Some("box_opacity".to_string()));
+        
+        let sec_val = val.get(&sec).unwrap();
+        let node_val = sec_val.get(&node).unwrap();
+        let prop_val = node_val.get(prop.as_ref().unwrap()).unwrap();
+        assert_eq!(prop_val.as_f64().unwrap(), 0.75);
+    }
 }

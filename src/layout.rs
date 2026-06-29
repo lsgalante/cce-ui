@@ -2,54 +2,95 @@ use crate::widget::Element;
 use crate::context::UiContext;
 use std::sync::RwLock;
 
+fn flatten_map_json(val: &serde_json::Value, prefix: &str, toml_like: &mut String) {
+    match val {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let next_prefix = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{}.{}", prefix, k)
+                };
+                flatten_map_json(v, &next_prefix, toml_like);
+            }
+        }
+        _ => {
+            let flat_key = match prefix {
+                "style.border.color" => "border_color",
+                "style.border.width" => "border_width",
+                "style.border.blur" => "border_blur",
+                "style.border.font_size" => "border_font_size",
+                "style.border.fullscreen_border_width" => "fullscreen_border_width",
+                "style.border.cascade_border_width" => "cascade_border_width",
+                "style.border.grid_border_width" => "grid_border_width",
+                "style.border.floating_border_width" => "floating_border_width",
+                "style.background.color" => "background_color",
+                "style.button.font" => "button_font",
+                "style.button.padding" => "button_padding",
+                "style.button_strip.font" => "button_strip_font",
+                "style.button_strip.spacing" => "button_strip_spacing",
+                "style.dropdown.height" => "dropdown_height",
+                "style.font_selector.height" => "font_selector_height",
+                "style.label.font" => "label_font",
+                "style.slider.height" => "slider_height",
+                "style.slider.corner_radius" => "slider_corner_radius",
+                "style.spinbox.height" => "spinbox_height",
+                "style.textbox.height" => "textbox_height",
+                "style.toggle.font" => "toggle_font",
+                "style.toggle.height" => "toggle_height",
+                "style.toggle.border_width" => "toggle_border_width",
+                "style.toggle.disabled_color" => "toggle_disabled_color",
+                "style.status.normal_color" => "status_normal_color",
+                "style.status.box_opacity" => "status_box_opacity",
+                "style.highlight.primary" => "primary_highlight_color",
+                "style.window.opacity" => "window_opacity",
+                "style.window.floating_backplate_opacity" => "floating_backplate_opacity",
+                "style.window.blur" => "window_blur",
+                "style.window.page_opacity" => "page_opacity",
+                "style.window.page_margin" => "page_margin",
+                "style.window.plate_padding" => "plate_padding",
+                "style.window.transition_duration" => "transition_duration",
+                "style.overlay.behavior" => "overlay_behavior",
+                "style.overlay.width" => "overlay_width",
+                "style.overlay.position" => "overlay_position",
+                "style.overlay.border_gap" => "overlay_border_gap",
+                "style.editor.last_page" => "last_page",
+                
+                other => {
+                    if let Some(rest) = other.strip_prefix("layout.") {
+                        rest
+                    } else if let Some(rest) = other.strip_prefix("transparency.") {
+                        rest
+                    } else {
+                        if let Some(idx) = other.find('.') {
+                            &other[idx + 1..]
+                        } else {
+                            other
+                        }
+                    }
+                }
+            };
+            
+            if let Some(s) = val.as_str() {
+                toml_like.push_str(&format!("{} = \"{}\"\n", flat_key, s));
+            } else if let Some(b) = val.as_bool() {
+                toml_like.push_str(&format!("{} = {}\n", flat_key, b));
+            } else if let Some(n) = val.as_f64() {
+                toml_like.push_str(&format!("{} = {}\n", flat_key, n));
+            } else if let Some(n) = val.as_i64() {
+                toml_like.push_str(&format!("{} = {}\n", flat_key, n));
+            }
+        }
+    }
+}
+
 fn read_config() -> Option<String> {
     let path = crate::config::get_config_path();
     if let Ok(content) = std::fs::read_to_string(&path) {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                let mut toml_like = String::new();
-                if let Some(layout) = val.get("layout").and_then(|l| l.as_object()) {
-                    for (k, v) in layout {
-                        if let Some(s) = v.as_str() {
-                            toml_like.push_str(&format!("{} = \"{}\"\n", k, s));
-                        } else if let Some(b) = v.as_bool() {
-                            toml_like.push_str(&format!("{} = {}\n", k, b));
-                        } else if let Some(n) = v.as_f64() {
-                            toml_like.push_str(&format!("{} = {}\n", k, n));
-                        } else if let Some(n) = v.as_i64() {
-                            toml_like.push_str(&format!("{} = {}\n", k, n));
-                        }
-                    }
-                }
-                if let Some(notifications) = val.get("notifications").and_then(|n| n.as_object()) {
-                    toml_like.push_str("[notifications]\n");
-                    for (k, v) in notifications {
-                        if let Some(s) = v.as_str() {
-                            toml_like.push_str(&format!("{} = \"{}\"\n", k, s));
-                        } else if let Some(b) = v.as_bool() {
-                            toml_like.push_str(&format!("{} = {}\n", k, b));
-                        } else if let Some(n) = v.as_f64() {
-                            toml_like.push_str(&format!("{} = {}\n", k, n));
-                        } else if let Some(n) = v.as_i64() {
-                            toml_like.push_str(&format!("{} = {}\n", k, n));
-                        }
-                    }
-                }
-                if let Some(transparency) = val.get("transparency").and_then(|t| t.as_object()) {
-                    toml_like.push_str("[transparency]\n");
-                    for (k, v) in transparency {
-                        if let Some(s) = v.as_str() {
-                            toml_like.push_str(&format!("{} = \"{}\"\n", k, s));
-                        } else if let Some(b) = v.as_bool() {
-                            toml_like.push_str(&format!("{} = {}\n", k, b));
-                        } else if let Some(n) = v.as_f64() {
-                            toml_like.push_str(&format!("{} = {}\n", k, n));
-                        } else if let Some(n) = v.as_i64() {
-                            toml_like.push_str(&format!("{} = {}\n", k, n));
-                        }
-                    }
-                }
-                return Some(toml_like);
-        }
+        let val = crate::config::parse_kdl_to_json(&content);
+        let mut toml_like = String::new();
+        flatten_map_json(&val, "", &mut toml_like);
+        return Some(toml_like);
     }
     None
 }
