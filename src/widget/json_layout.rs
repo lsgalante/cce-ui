@@ -531,8 +531,8 @@ impl Element for JsonLayoutWidget {
                     let max_scroll_y = (total_height - visible_h).max(0.0);
                     if max_scroll_y > 0.0 {
                         let scroll_amount = match delta {
-                            crate::widget::MouseScrollDelta::LineDelta(_x, y) => *y * 24.0,
-                            crate::widget::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                            crate::widget::MouseScrollDelta::LineDelta(_x, y) => -*y * 24.0,
+                            crate::widget::MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
                         };
                         let old_scroll = self.page_scroll_y[active_page];
                         self.page_scroll_y[active_page] = (old_scroll + scroll_amount).clamp(0.0, max_scroll_y);

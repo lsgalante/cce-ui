@@ -86,44 +86,22 @@ fn read_config() -> Option<String> {
     None
 }
 
-fn get_config_val<'a>(val: &'a serde_json::Value, pointer: &str) -> Option<&'a serde_json::Value> {
-    if let Some(v) = val.pointer(pointer) {
-        return Some(v);
-    }
-    let parts: Vec<&str> = pointer.trim_start_matches('/').split('/').collect();
-    if parts.len() == 2 {
-        let section = parts[0];
-        let key = parts[1];
-        let (target_sec, target_node, target_prop) = crate::config::map_legacy_key(key, section);
-        if let Some(sec_val) = val.get(&target_sec) {
-            if let Some(node_val) = sec_val.get(&target_node) {
-                if let Some(prop_name) = target_prop {
-                    return node_val.get(&prop_name);
-                } else {
-                    return Some(node_val);
-                }
-            }
-        }
-    }
-    None
-}
-
 fn parse_and_set_colors(content: &str) {
     let val = crate::config::parse_kdl_to_json(content);
 
-    if let Some(opacity) = get_config_val(&val, "/layout/menubar_opacity").and_then(|v| v.as_f64()) {
+    if let Some(opacity) = val.pointer("/layout/menubar_opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = OPACITY.write() {
             *lock = Some(opacity as f32);
         }
     }
 
-    if let Some(w_opacity) = get_config_val(&val, "/surfaces/backplate_opacity").or_else(|| get_config_val(&val, "/surfaces/window_opacity")).and_then(|v| v.as_f64()) {
+    if let Some(w_opacity) = val.pointer("/surfaces/backplate_opacity").or_else(|| val.pointer("/style/window/opacity")).and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = BACKPLATE_OPACITY.write() {
             *lock = Some(w_opacity as f32);
         }
     }
 
-    if let Some(radius) = get_config_val(&val, "/surfaces/backplate_corner_radius").or_else(|| get_config_val(&val, "/surfaces/window_corner_radius")).and_then(|v| v.as_f64()) {
+    if let Some(radius) = val.pointer("/surfaces/backplate_corner_radius").or_else(|| val.pointer("/style/window/corner_radius")).and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
             *lock = radius as f32;
         }
@@ -161,7 +139,7 @@ fn parse_and_set_colors(content: &str) {
     };
 
     let get_color = |pointer: &str| -> Option<[f32; 4]> {
-        get_config_val(&val, pointer).and_then(|v| v.as_str()).and_then(parse_hex)
+        val.pointer(pointer).and_then(|v| v.as_str()).and_then(parse_hex)
     };
 
     if let Some(c) = get_color("/surfaces/backplate_color").or_else(|| get_color("/surfaces/window_color")).or_else(|| get_color("/layout/page_low_color")) {
@@ -176,7 +154,7 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/layout/paginator_sidebar_color") {
         if let Ok(mut lock) = SIDEBAR_BG_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/layout/primary_highlight_color") {
+    if let Some(c) = get_color("/style/highlight/primary") {
         if let Ok(mut lock) = HIGHLIGHT_PRIMARY_COLOR.write() { *lock = [c[0], c[1], c[2], 0.12]; }
     }
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
@@ -185,7 +163,7 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/layout/toggle_enabled_color") {
         if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/layout/toggle_disabled_color") {
+    if let Some(c) = get_color("/style/toggle/disabled_color") {
         if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/toggle_bg_color") {
@@ -595,13 +573,13 @@ pub fn active_backplate_opacity() -> f32 {
         _ => "window_backplate_opacity",
     };
 
-    if let Some(opacity) = get_config_val(&val, &format!("/layout/{}", key)).and_then(|v| v.as_f64()) {
+    if let Some(opacity) = val.pointer(&format!("/style/window/{}", key)).and_then(|v| v.as_f64()) {
         return opacity as f32;
     }
 
     // Modern surfaces fallback:
-    if let Some(opacity) = get_config_val(&val, "/surfaces/backplate_opacity")
-        .or_else(|| get_config_val(&val, "/surfaces/window_opacity"))
+    if let Some(opacity) = val.pointer("/surfaces/backplate_opacity")
+        .or_else(|| val.pointer("/style/window/opacity"))
         .and_then(|v| v.as_f64()) {
         return opacity as f32;
     }
@@ -617,7 +595,7 @@ pub fn active_backplate_opacity() -> f32 {
         _ => "window_opacity",
     };
 
-    if let Some(opacity) = get_config_val(&val, &format!("/layout/{}", legacy_key)).and_then(|v| v.as_f64()) {
+    if let Some(opacity) = val.pointer(&format!("/style/window/{}", legacy_key)).and_then(|v| v.as_f64()) {
         return opacity as f32;
     }
 

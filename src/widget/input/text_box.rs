@@ -512,6 +512,9 @@ impl Element for TextBox {
         if self.disabled { return false; }
         if button == MouseButton::Right && state == ElementState::Pressed {
             if self.hit_test(px, py, ctx) {
+                if !self.editing {
+                    self.focus();
+                }
                 ctx.handle_right_click(self.as_ptr_mut(), px, py);
                 return true;
             }
@@ -1098,6 +1101,23 @@ mod tests {
         assert_eq!(tb.edit_buffer, "Rust World");
         assert_eq!(tb.cursor_idx, 4);
         assert_eq!(tb.select_anchor, None);
+    }
+
+    #[test]
+    fn test_textbox_right_click_context_menu() {
+        let mut dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new("Context Menu Text".to_string());
+        tb.set_rect(10.0, 10.0, 200.0, 30.0);
+
+        // Hide context menu initially
+        dummy.hide_context_menu();
+        assert!(!dummy.is_context_menu_visible());
+
+        // Right click on textbox
+        let clicked = tb.mouse_input(MouseButton::Right, ElementState::Pressed, 50.0, 20.0, &mut dummy);
+        assert!(clicked);
+        assert!(dummy.is_context_menu_visible());
+        assert!(tb.editing);
     }
 }
 
