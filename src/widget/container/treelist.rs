@@ -429,7 +429,12 @@ impl Element for TreeList {
                         }
                         serde_json::Value::String(s) => {
                             if s.starts_with('#') {
-                                Some("color")
+                                let s_clean = s.trim_start_matches('#');
+                                if s_clean.len() == 8 {
+                                    Some("rgba")
+                                } else {
+                                    Some("rgb")
+                                }
                             } else if name == "font" || name.ends_with("_font") || name.ends_with(".font") {
                                 Some("font")
                             } else {

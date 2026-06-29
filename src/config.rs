@@ -174,7 +174,9 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
     let (kdl_val, kdl_ty) = if let Ok(b) = value.parse::<bool>() {
         (kdl::KdlValue::Bool(b), Some("bool"))
     } else if value.starts_with('#') {
-        (kdl::KdlValue::String(value.to_string()), Some("color"))
+        let s_clean = value.trim_start_matches('#');
+        let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
+        (kdl::KdlValue::String(value.to_string()), Some(ty))
     } else if value.contains('.') {
         if let Ok(f) = value.parse::<f64>() {
             (kdl::KdlValue::Base10Float(f), Some("f64"))

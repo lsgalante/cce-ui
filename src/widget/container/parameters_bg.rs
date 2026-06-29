@@ -71,7 +71,7 @@ impl ParametersBg {
                 38.0
             } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
                 42.0
-            } else if p.2.starts_with("color") {
+            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                 40.0
             } else if p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
                 24.0
@@ -201,7 +201,7 @@ impl ParametersBg {
                 if let Some(cb) = &self.checkboxes[i] {
                     labels.extend(cb.text_labels());
                 }
-            } else if ptype.starts_with("color") {
+            } else if ptype.starts_with("color") || ptype == "rgb" || ptype == "rgba" {
                 if let Some(c) = &self.colors[i] {
                     labels.extend(c.text_labels());
                 }
@@ -394,7 +394,7 @@ impl Element for ParametersBg {
                             p.1 = val;
                         }
                     }
-                } else if p.2.starts_with("color") {
+                } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                     if let Some(c) = &mut self.colors[idx] {
                         c.unfocus();
                         if let Some(val) = c.get_value_string() {
@@ -701,7 +701,7 @@ impl Element for ParametersBg {
                         return true;
                     }
                 }
-            } else if p.2.starts_with("color") {
+            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                 if let Some(c) = &mut self.colors[i] {
                     if c.mouse_input(button, state, px, py, ctx) {
                         if let Some(val) = c.get_value_string() {
@@ -974,7 +974,7 @@ impl Element for ParametersBg {
                             return true;
                         }
                     }
-                } else if p.2.starts_with("color") {
+                } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                     if let Some(c) = &mut self.colors[idx] {
                         if c.keyboard_input(event, ctx) {
                             if let Some(val) = c.get_value_string() {
@@ -1213,7 +1213,7 @@ impl Element for ParametersBg {
                 if let Some(cb) = &self.checkboxes[i] {
                     quads.extend(cb.extra_quads());
                 }
-            } else if p.2.starts_with("color") {
+            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                 if let Some(c) = &self.colors[i] {
                     quads.extend(c.extra_quads());
                 }
@@ -1450,7 +1450,7 @@ impl ParamController for ParametersBg {
                 }
             }).collect();
             self.colors = self.display_params.iter().map(|p| {
-                if p.2.starts_with("color") {
+                if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                     let col = parse_hex_to_rgb(&p.1).unwrap_or([255, 255, 255]);
                     Some(ColorSelector::new(col).with_label(&p.0))
                 } else {

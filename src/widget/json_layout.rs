@@ -113,7 +113,7 @@ impl JsonLayoutWidget {
                             }
                             Box::new(sb)
                         }
-                        "color" => {
+                        "color" | "rgb" | "rgba" => {
                             let col = w_conf.color.unwrap_or([255, 255, 255]);
                             let cs = ColorSelector::new(col).with_label(&text);
                             Box::new(cs)
@@ -185,7 +185,7 @@ impl JsonLayoutWidget {
                         }
                         Box::new(sb)
                     }
-                    "color" => {
+                    "color" | "rgb" | "rgba" => {
                         let col = w_conf.color.unwrap_or([255, 255, 255]);
                         let cs = ColorSelector::new(col).with_label(&text);
                         Box::new(cs)
@@ -272,7 +272,7 @@ impl JsonLayoutWidget {
                     "button" => 24.0 + top_room,
                     "label" => 18.0 + top_room,
                     "spinbox" => crate::layout::spinbox_height() + top_room,
-                    "color" => crate::layout::color_selector_height() + top_room,
+                    "color" | "rgb" | "rgba" => crate::layout::color_selector_height() + top_room,
                     "slider" => 22.0 + top_room,
                     _ => 24.0,
                 };
