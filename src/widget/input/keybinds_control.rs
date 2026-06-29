@@ -15,7 +15,15 @@ impl KeybindRow {
     pub fn new(binding: String, command: String) -> Self {
         let key_input = TextBox::new(binding).with_placeholder("e.g. super+shift+q");
         let cmd_input = TextBox::new(command).with_placeholder("e.g. close");
-        let remove_button = Button::new(0.0, 0.0, 0.0, 0.0).with_label("Remove");
+        
+        let remove_svg = Svg::from_file("/home/lsgalante/Dropbox/cce/cce-icons/svg/x.svg", 0.0, 0.0, 14.0, 14.0);
+        let mut remove_button = Button::new(0.0, 0.0, 0.0, 0.0);
+        if let Some(svg) = remove_svg {
+            remove_button = remove_button.with_svg(svg);
+        } else {
+            remove_button = remove_button.with_label("Remove");
+        }
+        
         Self {
             key_input,
             cmd_input,
@@ -171,9 +179,9 @@ impl Element for KeybindsControl {
         let gap_x = 6.0;
         let row_usable_w = usable_w - 2.0 * gap_x;
 
-        let key_w = row_usable_w * 0.36;
-        let cmd_w = row_usable_w * 0.49;
-        let remove_w = row_usable_w * 0.15;
+        let key_w = row_usable_w * 0.38;
+        let cmd_w = row_usable_w * 0.50;
+        let remove_w = row_usable_w * 0.12;
 
         let mut curr_y = origin.y + pad_y;
         let self_ptr = self.as_ptr();

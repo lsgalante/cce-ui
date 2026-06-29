@@ -21,6 +21,7 @@ pub struct Button {
     pub hover_bg: Option<[f32; 4]>,
     pub label_color: Option<[f32; 4]>,
     pub justify: Justification,
+    pub svg: Option<Svg>,
 }
 
 impl std::fmt::Debug for Button {
@@ -49,6 +50,7 @@ impl Button {
             hover_bg: None,
             label_color: None,
             justify: Justification::Center,
+            svg: None,
         }
     }
 
@@ -64,6 +66,7 @@ impl Button {
             hover_bg: None,
             label_color: None,
             justify: Justification::Center,
+            svg: None,
         }
     }
 
@@ -79,6 +82,7 @@ impl Button {
             hover_bg: None,
             label_color: None,
             justify: Justification::Center,
+            svg: None,
         }
     }
 
@@ -94,11 +98,17 @@ impl Button {
             hover_bg: None,
             label_color: None,
             justify: Justification::Center,
+            svg: None,
         }
     }
 
     pub fn with_label(mut self, label: &str) -> Self {
         self.base.label = Some(label.to_string());
+        self
+    }
+
+    pub fn with_svg(mut self, svg: Svg) -> Self {
+        self.svg = Some(svg);
         self
     }
 
@@ -217,6 +227,9 @@ impl Element for Button {
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
+        if self.svg.is_some() {
+            return Vec::new();
+        }
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.label {
             let font_size = 12.0;
@@ -270,7 +283,17 @@ impl Element for Button {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())]
+        let mut quads = vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())];
+        if let Some(ref svg) = self.svg {
+            let svg_x = self.base.x + (self.base.w - svg.w) / 2.0;
+            let svg_y = self.base.y + (self.base.h - svg.h) / 2.0;
+            let dx = svg_x - svg.x;
+            let dy = svg_y - svg.y;
+            for q in &svg.quads {
+                quads.push((q.0 + dx, q.1 + dy, q.2, q.3, q.4));
+            }
+        }
+        quads
     }
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {

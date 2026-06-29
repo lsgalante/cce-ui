@@ -610,4 +610,8 @@ impl Element for JsonLayoutWidget {
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         self.handle_event(&Event::PointerMove { x: px, y: py, local_x: px, local_y: py }, ctx)
     }
+
+    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+        self.widgets.iter().map(|w| w.widget.as_ptr()).collect()
+    }
 }

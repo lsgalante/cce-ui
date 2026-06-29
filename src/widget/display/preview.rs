@@ -247,18 +247,21 @@ impl PreviewState {
         }
 
         let half_h = ch * 0.5;
+        let pad = crate::layout::section_padding();
 
         // 1. Top pane: File Preview Section
         let mut preview_sec = SectionContext::new(&mut canvas, cx + 4.0, cy + 12.0, cw - 8.0, "Preview", false, false);
-        preview_sec.content_y = cy + half_h - 20.0;
+        let rect_y = cy + pad + 31.0;
+        let rect_h = half_h - 2.0 * pad - 43.0;
+        preview_sec.content_y = cy + half_h - pad - 12.0;
         preview_sec.finish();
 
         let bg_color = color::scrollinglist_bg_color();
-        canvas.rect(bg_color, cx + 12.0, cy + 32.0, cw - 24.0, half_h - 40.0);
+        canvas.rect(bg_color, cx + 12.0, rect_y, cw - 24.0, rect_h);
 
         if let Some(image_data) = &self.image_preview {
             let box_w = cw - 24.0;
-            let box_h = half_h - 40.0;
+            let box_h = rect_h;
             let img_w = image_data.width as f32;
             let img_h = image_data.height as f32;
             
@@ -270,7 +273,7 @@ impl PreviewState {
             let draw_h = img_h * scale;
             
             let start_x = cx + 12.0 + (box_w - draw_w) * 0.5;
-            let start_y = cy + 32.0 + (box_h - draw_h) * 0.5;
+            let start_y = rect_y + (box_h - draw_h) * 0.5;
             
             for row in 0..image_data.height {
                 let mut col = 0;
@@ -317,9 +320,9 @@ impl PreviewState {
                 }
             }
         } else if let Some(content) = &self.content_preview {
-            let mut text_y = cy + 44.0;
+            let mut text_y = rect_y + 12.0;
             for line in content.lines().skip(self.scroll_line) {
-                if text_y + 14.0 > cy + half_h - 16.0 {
+                if text_y + 14.0 > rect_y + rect_h - 8.0 {
                     break;
                 }
                 let limit = (((cw - 40.0) / 6.8).floor() as usize).max(20);
@@ -334,7 +337,7 @@ impl PreviewState {
                 text_y += 15.0;
             }
         } else {
-            canvas.text("No preview available", cx + 20.0, cy + 44.0, 11.0, text_dim);
+            canvas.text("No preview available", cx + 20.0, rect_y + 12.0, 11.0, text_dim);
         }
 
         // 2. Bottom pane: Details Section
@@ -349,7 +352,7 @@ impl PreviewState {
             ("Modified", &self.modified),
         ];
 
-        let details_content_start_y = bottom_y + 19.0;
+        let details_content_start_y = bottom_y + pad + 19.0;
         let mut details_content_end_y = details_content_start_y + 36.0 + details.len() as f32 * 20.0;
         if !self.target.is_empty() {
             details_content_end_y += 24.0;

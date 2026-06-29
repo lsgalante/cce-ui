@@ -2989,7 +2989,7 @@ impl Section {
         } else {
             ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0).min(2.0) as usize
         };
-        let content_start_y = top + font_size + 5.0;
+        let content_start_y = top + pad + 19.0;
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
 
         Self { left, top, content_y: content_start_y, cw, label_width, is_child, grid, last_col: usize::MAX }
@@ -4146,7 +4146,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         } else {
             ((usable_w + gap) / (min_col_width + gap)).floor().max(1.0).min(2.0) as usize
         };
-        let content_start_y = top + font_size + 5.0;
+        let content_start_y = top + pad + 19.0;
         let grid = Grid::new(left + margin_x, content_start_y, usable_w, min_col_width, gap, max_cols);
 
         Self {
@@ -4588,7 +4588,7 @@ mod tests {
         stack.add_widget(&mut w1, 50.0, 30.0, &mut dummy);
 
         // Standard margin should be applied
-        assert_eq!(w1.x, 30.0);
+        assert_eq!(w1.x, 38.0);
         assert_eq!(w1.y, start_y);
 
         let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
