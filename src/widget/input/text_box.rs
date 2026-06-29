@@ -763,7 +763,7 @@ impl Element for TextBox {
             quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, bg_color));
         }
 
-        if self.editing {
+        if self.editing || self.select_anchor.is_some() {
             let char_width = self.font_size * 0.6;
             let line_height = self.font_size * 1.333;
             
@@ -816,11 +816,13 @@ impl Element for TextBox {
                     }
                 }
                 
-                let caret_h = self.font_size * 1.15;
-                let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
-                let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width);
-                let cursor_y = self.base.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0;
-                quads.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+                if self.editing {
+                    let caret_h = self.font_size * 1.15;
+                    let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
+                    let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width);
+                    let cursor_y = self.base.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0;
+                    quads.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+                }
             } else {
                 let caret_h = self.font_size * 1.15;
                 if start != end {
@@ -836,11 +838,13 @@ impl Element for TextBox {
                     ));
                 }
 
-                let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width);
-                let max_cursor_x = self.base.x + self.base.w - 6.0;
-                let final_cursor_x = cursor_x.min(max_cursor_x);
-                let cursor_y = self.base.y + top + (visual_h - caret_h) / 2.0;
-                quads.push((final_cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+                if self.editing {
+                    let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width);
+                    let max_cursor_x = self.base.x + self.base.w - 6.0;
+                    let final_cursor_x = cursor_x.min(max_cursor_x);
+                    let cursor_y = self.base.y + top + (visual_h - caret_h) / 2.0;
+                    quads.push((final_cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+                }
             }
         }
 
