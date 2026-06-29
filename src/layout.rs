@@ -48,7 +48,7 @@ fn flatten_map_json(val: &serde_json::Value, prefix: &str, toml_like: &mut Strin
                 "style.overlay.position" => "overlay_position",
                 "style.overlay.border_gap" => "overlay_border_gap",
                 "style.editor.last_page" => "last_page",
-                "style.surfaces.desktop.background" => "desktop_background",
+                "style.surfaces.desktop.background_color" => "desktop_background_color",
                 "style.surfaces.desktop.grid_color" => "desktop_grid_color",
                 "style.surfaces.desktop.line_width" => "desktop_line_width",
                 "style.surfaces.plate.padding" => "plate_padding",
