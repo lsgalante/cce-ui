@@ -294,6 +294,7 @@ pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &
 mod tests {
     use super::*;
     
+
     #[test]
     fn test_nested_parsing() {
         let content = "style {\n    status box_opacity=(f64)0.75\n}\n";
