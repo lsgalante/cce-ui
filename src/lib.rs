@@ -9,6 +9,7 @@ pub mod scale;
 pub mod backend;
 pub mod context;
 pub mod process;
+pub mod file_dialog;
 
 pub mod colors {
     pub use crate::color::*;
