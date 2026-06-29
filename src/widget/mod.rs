@@ -658,7 +658,7 @@ pub use self::container::{
     Container, ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     SectionContainer, Header, ContentBg, ViewportBg, ParametersBg, ScrollingList,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
-    Switcher, Layer, Page, Backplate, Paginator, ScrollBar
+    Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement
 };
 pub use self::display::{
     TextLabel, Label, SectionHeader, StyledLabel, TextItem, Svg, UsageBar,

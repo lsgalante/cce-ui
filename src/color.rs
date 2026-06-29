@@ -45,8 +45,37 @@ static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0])
 static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
+static BUTTON_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new(BUTTON_IDLE);
 
+pub fn button_background_color() -> [f32; 4] {
+    *BUTTON_BACKGROUND_COLOR.read().unwrap()
+}
 
+pub fn set_button_background_color(color: [f32; 4]) {
+    if let Ok(mut lock) = BUTTON_BACKGROUND_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn button_hover_color() -> [f32; 4] {
+    let base = button_background_color();
+    [
+        (base[0] + 0.10).min(1.0),
+        (base[1] + 0.12).min(1.0),
+        (base[2] + 0.13).min(1.0),
+        (base[3] + 0.20).min(1.0),
+    ]
+}
+
+pub fn button_press_color() -> [f32; 4] {
+    let base = button_background_color();
+    [
+        (base[0] - 0.08).max(0.0),
+        (base[1] - 0.12).max(0.0),
+        (base[2] - 0.15).max(0.0),
+        (base[3] + 0.40).min(1.0),
+    ]
+}
 
 pub fn node_color() -> [f32; 4] {
     *NODE_COLOR.read().unwrap()
@@ -95,13 +124,13 @@ fn parse_and_set_colors(content: &str) {
         }
     }
 
-    if let Some(w_opacity) = val.pointer("/surfaces/backplate_opacity").or_else(|| val.pointer("/style/window/opacity")).and_then(|v| v.as_f64()) {
+    if let Some(w_opacity) = val.pointer("/style/surfaces/plate/opacity").or_else(|| val.pointer("/surfaces/backplate_opacity")).or_else(|| val.pointer("/style/window/opacity")).and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = BACKPLATE_OPACITY.write() {
             *lock = Some(w_opacity as f32);
         }
     }
 
-    if let Some(radius) = val.pointer("/surfaces/backplate_corner_radius").or_else(|| val.pointer("/style/window/corner_radius")).and_then(|v| v.as_f64()) {
+    if let Some(radius) = val.pointer("/style/surfaces/plate/corner_radius").or_else(|| val.pointer("/surfaces/backplate_corner_radius")).or_else(|| val.pointer("/style/window/corner_radius")).and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
             *lock = radius as f32;
         }
@@ -142,7 +171,7 @@ fn parse_and_set_colors(content: &str) {
         val.pointer(pointer).and_then(|v| v.as_str()).and_then(parse_hex)
     };
 
-    if let Some(c) = get_color("/surfaces/backplate_color").or_else(|| get_color("/surfaces/window_color")).or_else(|| get_color("/layout/page_low_color")) {
+    if let Some(c) = get_color("/style/surfaces/plate/background").or_else(|| get_color("/surfaces/backplate_color")).or_else(|| get_color("/surfaces/window_color")).or_else(|| get_color("/layout/page_low_color")) {
         if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/color_borders_color") {
@@ -156,6 +185,9 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/highlight/primary") {
         if let Ok(mut lock) = HIGHLIGHT_PRIMARY_COLOR.write() { *lock = [c[0], c[1], c[2], 0.12]; }
+    }
+    if let Some(c) = get_color("/style/button/background").or_else(|| get_color("/layout/button_background_color")) {
+        if let Ok(mut lock) = BUTTON_BACKGROUND_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
         if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
@@ -578,7 +610,8 @@ pub fn active_backplate_opacity() -> f32 {
     }
 
     // Modern surfaces fallback:
-    if let Some(opacity) = val.pointer("/surfaces/backplate_opacity")
+    if let Some(opacity) = val.pointer("/style/surfaces/plate/opacity")
+        .or_else(|| val.pointer("/surfaces/backplate_opacity"))
         .or_else(|| val.pointer("/style/window/opacity"))
         .and_then(|v| v.as_f64()) {
         return opacity as f32;

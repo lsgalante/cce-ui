@@ -164,9 +164,9 @@ impl Element for Button {
         }
         match self.kind {
             ButtonKind::Primary => {
-                if self.pressed { colors::BUTTON_PRESS }
-                else if self.base.hovered { colors::BUTTON_HOVER }
-                else { colors::BUTTON_IDLE }
+                if self.pressed { colors::button_press_color() }
+                else if self.base.hovered { colors::button_hover_color() }
+                else { colors::button_background_color() }
             }
             ButtonKind::Reset => {
                 if self.pressed { colors::RESET_BTN_PRESS }

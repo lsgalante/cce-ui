@@ -17,6 +17,7 @@ pub mod page;
 pub mod backplate;
 pub mod paginator;
 pub mod scroll_bar;
+pub mod treelist;
 
 pub use container::Container;
 pub use container_layout::{ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout};
@@ -37,3 +38,4 @@ pub use page::Page;
 pub use backplate::Backplate;
 pub use paginator::Paginator;
 pub use scroll_bar::ScrollBar;
+pub use treelist::{TreeList, TreeElement};
