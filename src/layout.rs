@@ -16,14 +16,6 @@ fn flatten_map_json(val: &serde_json::Value, prefix: &str, toml_like: &mut Strin
         }
         _ => {
             let flat_key = match prefix {
-                "style.border.color" => "border_color",
-                "style.border.width" => "border_width",
-                "style.border.blur" => "border_blur",
-                "style.border.font_size" => "border_font_size",
-                "style.border.fullscreen_border_width" => "fullscreen_border_width",
-                "style.border.cascade_border_width" => "cascade_border_width",
-                "style.border.grid_border_width" => "grid_border_width",
-                "style.border.floating_border_width" => "floating_border_width",
                 "style.background.color" => "background_color",
                 "style.button.font" => "button_font",
                 "style.button.padding" => "button_padding",
