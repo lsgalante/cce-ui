@@ -340,6 +340,32 @@ impl Element for TreeList {
             
             quads.push((list_left + 1.0, draw_y, list_width - 9.0, draw_h, bg_color));
             
+            // Draw column separator lines and color preview for Leaf rows
+            if let TreeElement::Leaf { ref val, original_idx, .. } = item {
+                let separator_color = [0.15, 0.15, 0.19, 1.0];
+                quads.push((list_left + 180.0, draw_y, 1.0, draw_h, separator_color));
+                quads.push((list_left + 235.0, draw_y, 1.0, draw_h, separator_color));
+                quads.push((list_left + 370.0, draw_y, 1.0, draw_h, separator_color));
+
+                // Color preview in 4th column (only when not selected)
+                if Some(*original_idx) != self.selected_key_idx {
+                    if let serde_json::Value::String(s) = val {
+                        if s.starts_with('#') {
+                            if let Some(rgba) = parse_hex_f32(s) {
+                                let preview_x = list_left + 380.0;
+                                let preview_y = row_y + 4.0;
+                                let preview_bottom = (row_y + 20.0).min(list_bottom);
+                                let preview_draw_y = preview_y.max(list_top);
+                                let preview_draw_h = preview_bottom - preview_draw_y;
+                                if preview_draw_h > 0.0 {
+                                    quads.push((preview_x, preview_draw_y, 16.0, preview_draw_h, rgba));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if row_y + self.item_height <= list_bottom {
                 quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 9.0, 1.0, [0.13, 0.13, 0.17, 1.0]));
             }
@@ -466,6 +492,25 @@ impl Element for TreeList {
 
     fn clear_children(&mut self, _ctx: &mut UiContext) {
         self.children.clear();
+    }
+}
+
+fn parse_hex_f32(s: &str) -> Option<[f32; 4]> {
+    let s = s.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+    let s = s.trim_start_matches('#');
+    if s.len() == 6 {
+        let r = u8::from_str_radix(&s[0..2], 16).ok()? as f32 / 255.0;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()? as f32 / 255.0;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()? as f32 / 255.0;
+        Some([r, g, b, 1.0])
+    } else if s.len() == 8 {
+        let r = u8::from_str_radix(&s[0..2], 16).ok()? as f32 / 255.0;
+        let g = u8::from_str_radix(&s[2..4], 16).ok()? as f32 / 255.0;
+        let b = u8::from_str_radix(&s[4..6], 16).ok()? as f32 / 255.0;
+        let a = u8::from_str_radix(&s[6..8], 16).ok()? as f32 / 255.0;
+        Some([r, g, b, a])
+    } else {
+        None
     }
 }
 
