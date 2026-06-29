@@ -53,6 +53,7 @@ impl ScrollBox {
 impl Element for ScrollBox {
     crate::impl_widget_base!(ScrollBox);
     fn is_scrollable(&self) -> bool { true }
+    fn blocks_backplate_drag(&self) -> bool { true }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.x = x;

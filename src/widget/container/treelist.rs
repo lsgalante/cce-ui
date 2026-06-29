@@ -186,6 +186,10 @@ impl TreeList {
 impl Element for TreeList {
     crate::impl_widget_base!(TreeList);
 
+    fn blocks_backplate_drag(&self) -> bool {
+        true
+    }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.x = x;
         self.base.y = y;
@@ -467,3 +471,55 @@ impl Element for TreeList {
 
 unsafe impl Send for TreeList {}
 unsafe impl Sync for TreeList {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::widget::container::Backplate;
+    use crate::context::UiContext;
+
+    #[test]
+    fn test_treelist_blocks_backplate_drag() {
+        let mut ctx = UiContext::new();
+        let mut win = Backplate::new(0.0, 0.0, 800.0, 600.0).with_movable(true);
+        let mut tree_list = TreeList::new();
+        tree_list.set_rect(10.0, 52.0, 380.0, 500.0);
+        
+        ctx.register_widget(win.base().unwrap().id(), win.as_ptr_mut());
+        win.add_child(tree_list.as_ptr_mut(), &mut ctx);
+        
+        // Let's tick and clear dirty to build the spatial grid
+        ctx.tick(0.016);
+        ctx.clear_dirty();
+        
+        // Now, click at x=100, y=200, which is inside tree_list rect
+        let is_movable = ctx.is_movable_backplate_at(100.0, 200.0);
+        assert!(!is_movable, "Clicking the TreeList should block backplate drag!");
+    }
+
+    #[test]
+    fn test_exact_app_layout_blocks_drag() {
+        let mut ctx = UiContext::new();
+        let mut root_window = Backplate::new(0.0, 0.0, 800.0, 600.0).with_movable(true);
+        let mut tree_list = TreeList::new();
+        
+        // 1. Initial register (like in view)
+        ctx.register_widget(root_window.base().unwrap().id(), root_window.as_ptr_mut());
+        ctx.register_widget(tree_list.base().unwrap().id(), tree_list.as_ptr_mut());
+        root_window.add_child(tree_list.as_ptr_mut(), &mut ctx);
+        ctx.rebuild_spatial_grid();
+        
+        // 2. Set rect (like in view)
+        root_window.set_rect(0.0, 0.0, 800.0, 600.0);
+        let list_top = 52.0;
+        let list_bottom = 600.0 - 180.0;
+        let list_height = list_bottom - list_top;
+        tree_list.set_rect(10.0, list_top, 380.0, list_height);
+        
+        ctx.rebuild_spatial_grid();
+        
+        // 3. Test click at logical x=100.0, y=200.0
+        let is_movable = ctx.is_movable_backplate_at(100.0, 200.0);
+        assert!(!is_movable, "Clicking TreeList under exact app layout should block backplate drag!");
+    }
+}
