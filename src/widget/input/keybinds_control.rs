@@ -53,7 +53,8 @@ impl KeybindsControl {
     }
 
     pub fn load_from_config(&mut self) {
-        let content = std::fs::read_to_string("/home/lsgalante/.config/cce/config.json").unwrap_or_default();
+        let path = crate::config::get_config_path();
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
         let val: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
         let mut loaded = Vec::new();
         if let Some(arr) = val.get("keybind").and_then(|k| k.as_array()) {
@@ -82,8 +83,11 @@ impl KeybindsControl {
     }
 
     pub fn save_to_config(&self) {
-        let path = "/home/lsgalante/.config/cce/config.json";
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let path = crate::config::get_config_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
         let mut val: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
         
         let mut keybinds = Vec::new();
@@ -123,7 +127,7 @@ impl KeybindsControl {
         }
         
         if let Ok(updated_str) = serde_json::to_string_pretty(&val) {
-            let _ = std::fs::write(path, updated_str);
+            let _ = std::fs::write(&path, updated_str);
         }
     }
 }

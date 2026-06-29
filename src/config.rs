@@ -34,30 +34,49 @@ pub fn update_json_in_memory(val_obj: &mut Value, key: &str, value: &str, defaul
     updated
 }
 
+pub fn get_config_path() -> std::path::PathBuf {
+    let dir = if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg_config.is_empty() {
+            std::path::PathBuf::from(xdg_config)
+        } else {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
+            std::path::PathBuf::from(home).join(".config")
+        }
+    } else {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
+        std::path::PathBuf::from(home).join(".config")
+    };
+    dir.join("cce").join("config.json")
+}
+
 fn perform_rolling_backup(path: &str) {
-    if path != "/home/lsgalante/.config/cce/config.json" {
+    let config_path = get_config_path();
+    if std::path::Path::new(path) != config_path {
         return;
     }
     if !std::path::Path::new(path).exists() {
         return;
     }
-    let backup_dir = "/home/lsgalante/.config/cce/backups";
-    if let Err(_) = fs::create_dir_all(backup_dir) {
+    let backup_dir = config_path.parent().unwrap().join("backups");
+    if let Err(_) = fs::create_dir_all(&backup_dir) {
         return;
     }
     for i in (1..=4).rev() {
-        let src = format!("{}/config.json.{}.bak", backup_dir, i);
-        let dst = format!("{}/config.json.{}.bak", backup_dir, i + 1);
-        if std::path::Path::new(&src).exists() {
+        let src = backup_dir.join(format!("config.json.{}.bak", i));
+        let dst = backup_dir.join(format!("config.json.{}.bak", i + 1));
+        if src.exists() {
             let _ = fs::rename(src, dst);
         }
     }
-    let dst = format!("{}/config.json.1.bak", backup_dir);
+    let dst = backup_dir.join("config.json.1.bak");
     let _ = fs::copy(path, dst);
 }
 
 fn safe_write(path: &str, content: &str) -> bool {
     perform_rolling_backup(path);
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     let temp_path = format!("{}.tmp", path);
     if fs::write(&temp_path, content).is_ok() {
         if fs::rename(&temp_path, path).is_ok() {

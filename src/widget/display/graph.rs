@@ -197,20 +197,15 @@ impl Graph {
 fn read_zoom_bindings() -> (String, String) {
     let mut zoom_in_val = "=".to_string();
     let mut zoom_out_val = "-".to_string();
-    let paths = [
-        "/home/lsgalante/.config/cce/config.json",
-    ];
-    for path in &paths {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(zoom_in) = val.pointer("/layout/zoom_in").and_then(|v| v.as_str()) {
-                    zoom_in_val = zoom_in.to_string();
-                }
-                if let Some(zoom_out) = val.pointer("/layout/zoom_out").and_then(|v| v.as_str()) {
-                    zoom_out_val = zoom_out.to_string();
-                }
+    let path = crate::config::get_config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(zoom_in) = val.pointer("/layout/zoom_in").and_then(|v| v.as_str()) {
+                zoom_in_val = zoom_in.to_string();
             }
-            break;
+            if let Some(zoom_out) = val.pointer("/layout/zoom_out").and_then(|v| v.as_str()) {
+                zoom_out_val = zoom_out.to_string();
+            }
         }
     }
     (zoom_in_val, zoom_out_val)

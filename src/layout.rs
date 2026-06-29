@@ -3,12 +3,9 @@ use crate::context::UiContext;
 use std::sync::RwLock;
 
 fn read_config() -> Option<String> {
-    let paths = [
-        "/home/lsgalante/.config/cce/config.json",
-    ];
-    for path in &paths {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+    let path = crate::config::get_config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
                 let mut toml_like = String::new();
                 if let Some(layout) = val.get("layout").and_then(|l| l.as_object()) {
                     for (k, v) in layout {
@@ -52,7 +49,6 @@ fn read_config() -> Option<String> {
                     }
                 }
                 return Some(toml_like);
-            }
         }
     }
     None

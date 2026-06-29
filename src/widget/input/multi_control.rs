@@ -961,8 +961,13 @@ impl Element for MultiControl {
 impl Control for MultiControl {}
 
 fn get_application_config_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
-    let base_dir = std::path::PathBuf::from(home).join(".config").join("cce");
+    let base_dir = crate::config::get_config_path()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
+            std::path::PathBuf::from(home).join(".config").join("cce")
+        });
 
     let mut app_name = std::env::current_exe()
         .ok()

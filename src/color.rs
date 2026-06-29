@@ -79,13 +79,9 @@ pub fn node_drag_color() -> [f32; 4] {
 }
 
 fn read_config() -> Option<String> {
-    let paths = [
-        "/home/lsgalante/.config/cce/config.json",
-    ];
-    for path in &paths {
-        if let Ok(content) = std::fs::read_to_string(path) {
-            return Some(content);
-        }
+    let path = crate::config::get_config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        return Some(content);
     }
     None
 }
@@ -530,8 +526,8 @@ pub fn active_window_mode() -> String {
         return "floating".to_string();
     }
 
-    let config_path = "/home/lsgalante/.config/cce/config.json";
-    let content = match std::fs::read_to_string(config_path) {
+    let config_path = crate::config::get_config_path();
+    let content = match std::fs::read_to_string(&config_path) {
         Ok(c) => c,
         Err(_) => return "floating".to_string(),
     };
@@ -573,8 +569,8 @@ pub fn active_window_mode() -> String {
 
 pub fn active_backplate_opacity() -> f32 {
     let mode = active_window_mode();
-    let config_path = "/home/lsgalante/.config/cce/config.json";
-    let content = match std::fs::read_to_string(config_path) {
+    let config_path = crate::config::get_config_path();
+    let content = match std::fs::read_to_string(&config_path) {
         Ok(c) => c,
         Err(_) => return 0.9,
     };
