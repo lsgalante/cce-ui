@@ -154,13 +154,67 @@ impl Element for FontSelector {
             labels.push(lbl);
         }
 
-        labels.push(TextLabel {
-            text: self.font_family.clone(),
-            x: self.base.x + 8.0,
-            y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
-            font_size: 12.0,
-            color: [0xdd, 0xdd, 0xe2],
-        });
+        let max_w = self.base.w - 33.0;
+        let full_w = TextLabel::estimate_width(&self.font_family, 12.0);
+        let text_y = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
+
+        if full_w <= max_w {
+            labels.push(TextLabel {
+                text: self.font_family.clone(),
+                x: self.base.x + 8.0,
+                y: text_y,
+                font_size: 12.0,
+                color: [0xdd, 0xdd, 0xe2],
+            });
+        } else {
+            // Find prefix that fits in max_w - 30.0
+            let target_prefix_w = max_w - 30.0;
+            let mut prefix = String::new();
+            for c in self.font_family.chars() {
+                let mut test_prefix = prefix.clone();
+                test_prefix.push(c);
+                if TextLabel::estimate_width(&test_prefix, 12.0) > target_prefix_w {
+                    break;
+                }
+                prefix.push(c);
+            }
+            
+            // Draw prefix
+            let prefix_w = TextLabel::estimate_width(&prefix, 12.0);
+            labels.push(TextLabel {
+                text: prefix.clone(),
+                x: self.base.x + 8.0,
+                y: text_y,
+                font_size: 12.0,
+                color: [0xdd, 0xdd, 0xe2],
+            });
+
+            // Gather the next 5 fading characters
+            let remaining: Vec<char> = self.font_family.chars().skip(prefix.chars().count()).collect();
+            let fade_colors = [
+                [187, 187, 193],
+                [154, 154, 160],
+                [120, 120, 128],
+                [87, 87, 95],
+                [53, 53, 62],
+            ];
+            let mut cur_x = self.base.x + 8.0 + prefix_w;
+            for i in 0..5 {
+                if i < remaining.len() {
+                    let c = remaining[i];
+                    let c_str = c.to_string();
+                    let c_w = TextLabel::estimate_width(&c_str, 12.0);
+                    labels.push(TextLabel {
+                        text: c_str,
+                        x: cur_x,
+                        y: text_y,
+                        font_size: 12.0,
+                        color: fade_colors[i],
+                    });
+                    cur_x += c_w;
+                }
+            }
+        }
 
         labels.push(TextLabel {
             text: "🔤".to_string(),
@@ -171,6 +225,29 @@ impl Element for FontSelector {
         });
 
         labels
+    }
+
+    fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let font = self.widget_font();
+        let top = self.base.label_offset();
+        let clip_right = self.base.x + self.base.w - 24.0;
+        let bounds = Some([self.base.x, self.base.y + top, clip_right, self.base.y + self.base.h]);
+        
+        let labels = self.text_labels();
+        let count = labels.len();
+        labels.into_iter().enumerate().map(|(idx, l)| {
+            let has_control = self.control_label().is_some();
+            let is_font_label = if has_control {
+                idx > 0 && idx < count - 1
+            } else {
+                idx < count - 1
+            };
+            if is_font_label {
+                (l, font.clone(), bounds)
+            } else {
+                (l, font.clone(), None)
+            }
+        }).collect()
     }
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {
