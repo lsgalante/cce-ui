@@ -214,11 +214,12 @@ impl Element for ColorSelector {
                 self.command.clone()
             };
 
-            if let Ok(child) = std::process::Command::new(&cmd_path)
-                .arg(&hex)
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-            {
+            let mut cmd = std::process::Command::new(&cmd_path);
+            cmd.arg(&hex);
+            if self.with_alpha {
+                cmd.arg("--alpha");
+            }
+            if let Ok(child) = cmd.stdout(std::process::Stdio::piped()).spawn() {
                 *child_guard = Some(child);
             }
             return true;
@@ -244,6 +245,7 @@ impl Element for ColorSelector {
                                 self.color = [c[0], c[1], c[2]];
                                 self.alpha = if self.with_alpha { c[3] } else { 255 };
                                 self.just_clicked = true;
+                                self.just_changed = true;
                                 return true;
                             }
                         }
