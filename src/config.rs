@@ -1,6 +1,105 @@
 use std::fs;
 use serde_json::Value;
 
+fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for node in doc.nodes() {
+        let name = node.name().value().to_string();
+        
+        let mut node_map = serde_json::Map::new();
+        let mut has_props = false;
+        for entry in node.entries() {
+            if let Some(prop_name) = entry.name() {
+                has_props = true;
+                let j_val = match entry.value() {
+                    kdl::KdlValue::Bool(b) => serde_json::Value::Bool(*b),
+                    kdl::KdlValue::Base2(i) |
+                    kdl::KdlValue::Base8(i) |
+                    kdl::KdlValue::Base10(i) |
+                    kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
+                    kdl::KdlValue::Base10Float(f) => {
+                        if let Some(num) = serde_json::Number::from_f64(*f) {
+                            serde_json::Value::Number(num)
+                        } else {
+                            serde_json::Value::Null
+                        }
+                    }
+                    kdl::KdlValue::String(s) |
+                    kdl::KdlValue::RawString(s) => serde_json::Value::String(s.clone()),
+                    kdl::KdlValue::Null => serde_json::Value::Null,
+                };
+                node_map.insert(prop_name.value().to_string(), j_val);
+            }
+        }
+
+        let val = if let Some(children) = node.children() {
+            kdl_to_json(children)
+        } else if has_props {
+            serde_json::Value::Object(node_map)
+        } else if let Some(entry) = node.entries().first() {
+            match entry.value() {
+                kdl::KdlValue::Bool(b) => serde_json::Value::Bool(*b),
+                kdl::KdlValue::Base2(i) |
+                kdl::KdlValue::Base8(i) |
+                kdl::KdlValue::Base10(i) |
+                kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
+                kdl::KdlValue::Base10Float(f) => {
+                    if let Some(num) = serde_json::Number::from_f64(*f) {
+                        serde_json::Value::Number(num)
+                    } else {
+                        serde_json::Value::Null
+                    }
+                }
+                kdl::KdlValue::String(s) |
+                kdl::KdlValue::RawString(s) => serde_json::Value::String(s.clone()),
+                kdl::KdlValue::Null => serde_json::Value::Null,
+            }
+        } else {
+            serde_json::Value::Null
+        };
+
+        if let Some(existing) = map.remove(&name) {
+            match existing {
+                serde_json::Value::Array(mut arr) => {
+                    arr.push(val);
+                    map.insert(name, serde_json::Value::Array(arr));
+                }
+                other => {
+                    map.insert(name, serde_json::Value::Array(vec![other, val]));
+                }
+            }
+        } else {
+            let list_names = ["keybind", "pointer_bind", "gesture_bind", "mode_rule", "tag_layout", "startup", "device"];
+            if list_names.contains(&name.as_str()) {
+                map.insert(name, serde_json::Value::Array(vec![val]));
+            } else {
+                map.insert(name, val);
+            }
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+pub fn parse_kdl_to_json(content: &str) -> serde_json::Value {
+    if let Ok(doc) = content.parse::<kdl::KdlDocument>() {
+        let val = kdl_to_json(&doc);
+        if let Some(obj) = val.as_object() {
+            if obj.is_empty() && (content.trim().starts_with('{') || content.trim().starts_with('[')) {
+                if let Ok(j) = serde_json::from_str::<serde_json::Value>(content) {
+                    return j;
+                }
+            }
+        }
+        val
+    } else {
+        if let Ok(j) = serde_json::from_str::<serde_json::Value>(content) {
+            j
+        } else {
+            serde_json::json!({})
+        }
+    }
+}
+
 pub fn update_json_in_memory(val_obj: &mut Value, key: &str, value: &str, default_section: &str) -> bool {
     let j_val = if let Ok(parsed_val) = serde_json::from_str::<Value>(value) {
         parsed_val
@@ -34,6 +133,58 @@ pub fn update_json_in_memory(val_obj: &mut Value, key: &str, value: &str, defaul
     updated
 }
 
+pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, default_section: &str) -> bool {
+    let section_node = if let Some(node) = doc.nodes_mut().iter_mut().find(|n| n.name().value() == default_section) {
+        node
+    } else {
+        if let Ok(new_node) = format!("{}\n", default_section).parse::<kdl::KdlNode>() {
+            doc.nodes_mut().push(new_node);
+            doc.nodes_mut().last_mut().unwrap()
+        } else {
+            return false;
+        }
+    };
+
+    let children = section_node.ensure_children();
+
+    let child_node = if let Some(child) = children.nodes_mut().iter_mut().find(|n| n.name().value() == key) {
+        child
+    } else {
+        if let Ok(new_child) = format!("{}\n", key).parse::<kdl::KdlNode>() {
+            children.nodes_mut().push(new_child);
+            children.nodes_mut().last_mut().unwrap()
+        } else {
+            return false;
+        }
+    };
+
+    let (kdl_val, kdl_ty) = if let Ok(b) = value.parse::<bool>() {
+        (kdl::KdlValue::Bool(b), Some("bool"))
+    } else if value.starts_with('#') {
+        (kdl::KdlValue::String(value.to_string()), Some("color"))
+    } else if value.contains('.') {
+        if let Ok(f) = value.parse::<f64>() {
+            (kdl::KdlValue::Base10Float(f), Some("f64"))
+        } else {
+            (kdl::KdlValue::String(value.to_string()), None)
+        }
+    } else if let Ok(i) = value.parse::<i64>() {
+        (kdl::KdlValue::Base10(i), Some("i64"))
+    } else {
+        let s = value.trim_matches('"').to_string();
+        (kdl::KdlValue::String(s), None)
+    };
+
+    child_node.entries_mut().clear();
+    let mut entry = kdl::KdlEntry::new(kdl_val);
+    if let Some(ty) = kdl_ty {
+        entry.set_ty(ty);
+    }
+    child_node.entries_mut().push(entry);
+
+    true
+}
+
 pub fn get_config_path() -> std::path::PathBuf {
     let dir = if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg_config.is_empty() {
@@ -46,7 +197,7 @@ pub fn get_config_path() -> std::path::PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
         std::path::PathBuf::from(home).join(".config")
     };
-    dir.join("cce").join("config.json")
+    dir.join("cce").join("config.kdl")
 }
 
 fn perform_rolling_backup(path: &str) {
@@ -62,13 +213,13 @@ fn perform_rolling_backup(path: &str) {
         return;
     }
     for i in (1..=4).rev() {
-        let src = backup_dir.join(format!("config.json.{}.bak", i));
-        let dst = backup_dir.join(format!("config.json.{}.bak", i + 1));
+        let src = backup_dir.join(format!("config.kdl.{}.bak", i));
+        let dst = backup_dir.join(format!("config.kdl.{}.bak", i + 1));
         if src.exists() {
             let _ = fs::rename(src, dst);
         }
     }
-    let dst = backup_dir.join("config.json.1.bak");
+    let dst = backup_dir.join("config.kdl.1.bak");
     let _ = fs::copy(path, dst);
 }
 
@@ -89,12 +240,14 @@ fn safe_write(path: &str, content: &str) -> bool {
 
 pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &str) -> bool {
     let content = fs::read_to_string(path).unwrap_or_default();
-    let mut val: Value = serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
+    let mut doc = match content.parse::<kdl::KdlDocument>() {
+        Ok(d) => d,
+        Err(_) => kdl::KdlDocument::new(),
+    };
     
-    if update_json_in_memory(&mut val, key, value, default_section) {
-        if let Ok(updated_str) = serde_json::to_string_pretty(&val) {
-            return safe_write(path, &updated_str);
-        }
+    if update_kdl_in_memory(&mut doc, key, value, default_section) {
+        let updated_str = doc.to_string();
+        return safe_write(path, &updated_str);
     }
     false
 }
