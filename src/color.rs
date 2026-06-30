@@ -118,24 +118,6 @@ fn read_config() -> Option<String> {
 fn parse_and_set_colors(content: &str) {
     let val = crate::config::parse_kdl_to_json(content);
 
-    if let Some(opacity) = val.pointer("/layout/menubar_opacity").and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = OPACITY.write() {
-            *lock = Some(opacity as f32);
-        }
-    }
-
-    if let Some(w_opacity) = val.pointer("/style/surfaces/plate/opacity").or_else(|| val.pointer("/surfaces/backplate_opacity")).or_else(|| val.pointer("/style/window/opacity")).and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = BACKPLATE_OPACITY.write() {
-            *lock = Some(w_opacity as f32);
-        }
-    }
-
-    if let Some(radius) = val.pointer("/style/surfaces/plate/corner_radius").or_else(|| val.pointer("/surfaces/backplate_corner_radius")).or_else(|| val.pointer("/style/window/corner_radius")).and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
-            *lock = radius as f32;
-        }
-    }
-
     let parse_hex = |hex_str: &str| -> Option<[f32; 4]> {
         let hex = hex_str.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
         let hex = hex.trim_start_matches('#');
@@ -171,8 +153,21 @@ fn parse_and_set_colors(content: &str) {
         val.pointer(pointer).and_then(|v| v.as_str()).and_then(parse_hex)
     };
 
-    if let Some(c) = get_color("/style/surfaces/plate/background").or_else(|| get_color("/surfaces/backplate_color")).or_else(|| get_color("/surfaces/window_color")).or_else(|| get_color("/layout/page_low_color")) {
+    if let Some(opacity) = val.pointer("/layout/menubar_opacity").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = OPACITY.write() {
+            *lock = Some(opacity as f32);
+        }
+    }
+
+    if let Some(radius) = val.pointer("/style/surfaces/backplate/corner_radius").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
+            *lock = radius as f32;
+        }
+    }
+
+    if let Some(c) = get_color("/style/surfaces/backplate/color") {
         if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = BACKPLATE_OPACITY.write() { *lock = Some(c[3]); }
     }
     if let Some(c) = get_color("/layout/color_borders_color") {
         if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() { *lock = c; }
@@ -587,60 +582,6 @@ pub fn active_window_mode() -> String {
 }
 
 pub fn active_backplate_opacity() -> f32 {
-    let mode = active_window_mode();
-    let config_path = crate::config::get_config_path();
-    let content = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(_) => return 0.9,
-    };
-    let val = crate::config::parse_kdl_to_json(&content);
-
-    let key = match mode.as_str() {
-        "fullscreen" => "fullscreen_backplate_opacity",
-        "cascade" => "cascade_backplate_opacity",
-        "grid" => "grid_backplate_opacity",
-        "floating" => "floating_backplate_opacity",
-        "side-panel" | "pinned" => "pinned_backplate_opacity",
-        "popup" => "popup_backplate_opacity",
-        _ => "window_backplate_opacity",
-    };
-
-    if let Some(opacity) = val.pointer(&format!("/style/window/{}", key)).and_then(|v| v.as_f64()) {
-        return opacity as f32;
-    }
-
-    // Modern surfaces fallback:
-    if let Some(opacity) = val.pointer("/style/surfaces/plate/opacity")
-        .or_else(|| val.pointer("/surfaces/backplate_opacity"))
-        .or_else(|| val.pointer("/style/window/opacity"))
-        .and_then(|v| v.as_f64()) {
-        return opacity as f32;
-    }
-
-    // Fallback to legacy key:
-    let legacy_key = match mode.as_str() {
-        "fullscreen" => "fullscreen_opacity",
-        "cascade" => "cascade_opacity",
-        "grid" => "grid_opacity",
-        "floating" => "floating_opacity",
-        "side-panel" | "pinned" => "pinned_opacity",
-        "popup" => "popup_opacity",
-        _ => "window_opacity",
-    };
-
-    if let Some(opacity) = val.pointer(&format!("/style/window/{}", legacy_key)).and_then(|v| v.as_f64()) {
-        return opacity as f32;
-    }
-
-    // Fallbacks if not present:
-    match key {
-        "fullscreen_backplate_opacity" | "fullscreen_opacity" => 0.95,
-        "cascade_backplate_opacity" | "cascade_opacity" => 0.05,
-        "grid_backplate_opacity" | "grid_opacity" => 0.05,
-        "floating_backplate_opacity" | "floating_opacity" => 0.9,
-        "pinned_backplate_opacity" | "pinned_opacity" => 0.05,
-        "popup_backplate_opacity" | "popup_opacity" => 0.20,
-        _ => 0.9,
-    }
+    page_low_color()[3]
 }
 
