@@ -456,3 +456,26 @@ impl Control for Spinbox {}
 unsafe impl Send for Spinbox {}
 unsafe impl Sync for Spinbox {}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spinbox_click() {
+        let mut ui_context = UiContext::new();
+        let mut sb = Spinbox::new(0, -100, 100, 1);
+        sb.set_rect(10.0, 20.0, 100.0, 26.0);
+
+        // Click on the decrease button (-)
+        let handled = sb.mouse_input(
+            MouseButton::Left,
+            ElementState::Pressed,
+            75.0,
+            33.0,
+            &mut ui_context
+        );
+        assert!(handled);
+        assert_eq!(sb.value, -1);
+    }
+}
+
