@@ -2,7 +2,7 @@ use crate::widget::Element;
 use crate::context::UiContext;
 use std::sync::RwLock;
 
-fn flatten_map_json(val: &serde_json::Value, prefix: &str, toml_like: &mut String) {
+fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props: &mut String) {
     match val {
         serde_json::Value::Object(map) => {
             for (k, v) in map {
@@ -11,12 +11,11 @@ fn flatten_map_json(val: &serde_json::Value, prefix: &str, toml_like: &mut Strin
                 } else {
                     format!("{}.{}", prefix, k)
                 };
-                flatten_map_json(v, &next_prefix, toml_like);
+                flatten_json_to_flat_props(v, &next_prefix, flat_props);
             }
         }
         _ => {
             let flat_key = match prefix {
-                "style.background.color" => "background_color",
                 "style.button.font" => "button_font",
                 "style.button.padding" => "button_padding",
                 "style.button_strip.font" => "button_strip_font",
@@ -73,13 +72,13 @@ fn flatten_map_json(val: &serde_json::Value, prefix: &str, toml_like: &mut Strin
             };
             
             if let Some(s) = val.as_str() {
-                toml_like.push_str(&format!("{} = \"{}\"\n", flat_key, s));
+                flat_props.push_str(&format!("{} = \"{}\"\n", flat_key, s));
             } else if let Some(b) = val.as_bool() {
-                toml_like.push_str(&format!("{} = {}\n", flat_key, b));
+                flat_props.push_str(&format!("{} = {}\n", flat_key, b));
             } else if let Some(n) = val.as_f64() {
-                toml_like.push_str(&format!("{} = {}\n", flat_key, n));
+                flat_props.push_str(&format!("{} = {}\n", flat_key, n));
             } else if let Some(n) = val.as_i64() {
-                toml_like.push_str(&format!("{} = {}\n", flat_key, n));
+                flat_props.push_str(&format!("{} = {}\n", flat_key, n));
             }
         }
     }
@@ -89,9 +88,9 @@ fn read_config() -> Option<String> {
     let path = crate::config::get_config_path();
     if let Ok(content) = std::fs::read_to_string(&path) {
         let val = crate::config::parse_kdl_to_json(&content);
-        let mut toml_like = String::new();
-        flatten_map_json(&val, "", &mut toml_like);
-        return Some(toml_like);
+        let mut flat_props = String::new();
+        flatten_json_to_flat_props(&val, "", &mut flat_props);
+        return Some(flat_props);
     }
     None
 }
