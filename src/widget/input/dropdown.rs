@@ -396,6 +396,10 @@ impl Element for Dropdown {
         Dropdown::render_popover(self, pc);
     }
 
+    fn z_index(&self) -> i32 {
+        if self.open { 100 } else { 0 }
+    }
+
     fn layout_ignore(&self) -> bool {
         true
     }

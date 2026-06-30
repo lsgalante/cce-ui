@@ -259,7 +259,8 @@ impl UiContext {
             }
 
             let mut handled = false;
-            let children = (*root).children(self);
+            let mut children = (*root).children(self);
+            children.sort_by_key(|&child_ptr| (*child_ptr).z_index());
 
             // Determine if we should record a drag target candidate
             let mut check_drag_target = false;
@@ -618,6 +619,23 @@ impl UiContext {
                     if let Some((x, y, width, height)) = popover.popover_rect() {
                         if px >= x && px <= x + width && py >= y && py <= y + height {
                             return true;
+                        }
+                    }
+                }
+            }
+        }
+        for &ptr in self.widget_registry.values() {
+            let current_data = ptr as *const () as usize;
+            if query_address == current_data {
+                continue;
+            }
+            unsafe {
+                if let Some(w) = ptr.as_ref() {
+                    if w.visible() {
+                        if let Some((x, y, width, height)) = w.popover_rect() {
+                            if px >= x && px <= x + width && py >= y && py <= y + height {
+                                return true;
+                            }
                         }
                     }
                 }
