@@ -26,6 +26,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.slider.height" => "slider_height",
                 "style.slider.corner_radius" => "slider_corner_radius",
                 "style.spinbox.height" => "spinbox_height",
+                "style.spinbox.button_padding" => "spinbox_button_padding",
                 "style.textbox.height" => "textbox_height",
                 "style.toggle.font" => "toggle_font",
                 "style.toggle.height" => "toggle_height",
@@ -109,6 +110,7 @@ pub fn parse_font_string(s: &str) -> (String, Option<f32>) {
 
 static SECTION_PADDING: RwLock<f32> = RwLock::new(8.0);
 static SPINBOX_HEIGHT: RwLock<f32> = RwLock::new(26.0);
+static SPINBOX_BUTTON_PADDING: RwLock<f32> = RwLock::new(0.0);
 static COLOR_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(22.0);
 static TEXTBOX_HEIGHT: RwLock<f32> = RwLock::new(44.0);
 static FONT_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(44.0);
@@ -281,6 +283,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SPINBOX_HEIGHT.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("spinbox_button_padding") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = SPINBOX_BUTTON_PADDING.write() {
                         *lock = val;
                     }
                 }
@@ -2217,6 +2228,34 @@ pub fn spinbox_corner_radius() -> f32 {
 pub fn set_spinbox_corner_radius(radius: f32) {
     if let Ok(mut lock) = SPINBOX_CORNER_RADIUS.write() {
         *lock = radius;
+    }
+}
+
+pub fn spinbox_button_padding() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("spinbox_button_padding") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = SPINBOX_BUTTON_PADDING.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *SPINBOX_BUTTON_PADDING.read().unwrap()
+}
+
+pub fn set_spinbox_button_padding(padding: f32) {
+    if let Ok(mut lock) = SPINBOX_BUTTON_PADDING.write() {
+        *lock = padding;
     }
 }
 
