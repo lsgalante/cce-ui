@@ -171,24 +171,39 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
         }
     };
 
-    let (kdl_val, kdl_ty) = if let Ok(b) = value.parse::<bool>() {
-        (kdl::KdlValue::Bool(b), Some("bool"))
+    let existing_ty = if let Some(ref prop_name) = target_prop {
+        child_node.entries().iter()
+            .find(|e| e.name().map(|n| n.value()) == Some(prop_name))
+            .and_then(|e| e.ty().map(|t| t.value().to_string()))
+    } else {
+        child_node.entries().first()
+            .and_then(|e| e.ty().map(|t| t.value().to_string()))
+    };
+
+    let (kdl_val, mut kdl_ty) = if let Ok(b) = value.parse::<bool>() {
+        (kdl::KdlValue::Bool(b), Some("bool".to_string()))
     } else if value.starts_with('#') {
         let s_clean = value.trim_start_matches('#');
         let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
-        (kdl::KdlValue::String(value.to_string()), Some(ty))
+        (kdl::KdlValue::String(value.to_string()), Some(ty.to_string()))
     } else if value.contains('.') {
         if let Ok(f) = value.parse::<f64>() {
-            (kdl::KdlValue::Base10Float(f), Some("f64"))
+            (kdl::KdlValue::Base10Float(f), Some("f64".to_string()))
         } else {
             (kdl::KdlValue::String(value.to_string()), None)
         }
     } else if let Ok(i) = value.parse::<i64>() {
-        (kdl::KdlValue::Base10(i), Some("i64"))
+        (kdl::KdlValue::Base10(i), Some("i64".to_string()))
     } else {
         let s = value.trim_matches('"').to_string();
         (kdl::KdlValue::String(s), None)
     };
+
+    if let Some(ref ext_ty) = existing_ty {
+        if ext_ty.starts_with("menu:") {
+            kdl_ty = Some(ext_ty.clone());
+        }
+    }
 
     if let Some(prop_name) = target_prop {
         let mut found = false;
@@ -196,8 +211,8 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
             if let Some(id) = entry.name() {
                 if id.value() == prop_name {
                     *entry = kdl::KdlEntry::new_prop(prop_name.clone(), kdl_val.clone());
-                    if let Some(ty) = kdl_ty {
-                        entry.set_ty(ty);
+                    if let Some(ref ty) = kdl_ty {
+                        entry.set_ty(ty.as_str());
                     }
                     found = true;
                     break;
@@ -206,16 +221,16 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
         }
         if !found {
             let mut entry = kdl::KdlEntry::new_prop(prop_name, kdl_val);
-            if let Some(ty) = kdl_ty {
-                entry.set_ty(ty);
+            if let Some(ref ty) = kdl_ty {
+                entry.set_ty(ty.as_str());
             }
             child_node.entries_mut().push(entry);
         }
     } else {
         child_node.entries_mut().clear();
         let mut entry = kdl::KdlEntry::new(kdl_val);
-        if let Some(ty) = kdl_ty {
-            entry.set_ty(ty);
+        if let Some(ref ty) = kdl_ty {
+            entry.set_ty(ty.as_str());
         }
         child_node.entries_mut().push(entry);
     }
@@ -290,6 +305,26 @@ pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &
     false
 }
 
+pub fn get_kdl_type_annotation(kdl_content: &str, key_path: &str) -> Option<String> {
+    let doc: kdl::KdlDocument = kdl_content.parse().ok()?;
+    let (target_section, target_node, target_prop) = parse_config_path(key_path, "");
+    
+    // Find the section node
+    let section_node = doc.nodes().iter().find(|n| n.name().value() == target_section)?;
+    
+    // Find the child node
+    let children = section_node.children()?;
+    let child_node = children.nodes().iter().find(|n| n.name().value() == target_node)?;
+    
+    if let Some(prop_name) = target_prop {
+        let entry = child_node.entries().iter().find(|e| e.name().map(|n| n.value()) == Some(&prop_name))?;
+        entry.ty().map(|t| t.value().to_string())
+    } else {
+        let entry = child_node.entries().first()?;
+        entry.ty().map(|t| t.value().to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,5 +344,15 @@ mod tests {
         let node_val = sec_val.get(&node).unwrap();
         let prop_val = node_val.get(prop.as_ref().unwrap()).unwrap();
         assert_eq!(prop_val.as_f64().unwrap(), 0.75);
+    }
+
+    #[test]
+    fn test_get_kdl_type_annotation() {
+        let content = "input {\n    accel_profile (\"menu:flat,adaptive,none,custom\")\"flat\"\n    gestures pinch=(bool)true\n}\n";
+        let ty1 = get_kdl_type_annotation(content, "input.accel_profile");
+        assert_eq!(ty1, Some("menu:flat,adaptive,none,custom".to_string()));
+        
+        let ty2 = get_kdl_type_annotation(content, "input.gestures.pinch");
+        assert_eq!(ty2, Some("bool".to_string()));
     }
 }
