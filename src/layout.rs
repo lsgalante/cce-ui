@@ -4871,5 +4871,12 @@ mod tests {
         assert_eq!(height_col_1_after, height_col_1_before);
         assert_ne!(height_col_0_after, height_col_1_after);
     }
+
+    #[test]
+    fn test_spinbox_button_padding_config() {
+        let padding = spinbox_button_padding();
+        println!("Parsed spinbox button padding: {}", padding);
+        assert_eq!(padding, 2.0);
+    }
 }
 
