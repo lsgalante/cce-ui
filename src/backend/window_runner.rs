@@ -2414,10 +2414,15 @@ pub fn run<A: Application>() {
 
         let active_popovers = crate::widget::popovers::get_active();
         let context_menu_visible = crate::widget::context_menu::is_visible();
-        if !active_popovers.is_empty() || context_menu_visible {
-            let (px, py, mut pw, mut ph, is_context_menu) = if !active_popovers.is_empty() {
-                let popover_widget = unsafe { &*active_popovers[0] };
-                let (x, y, w, h) = popover_widget.popover_rect().unwrap();
+
+        let mut active_popover_rect = None;
+        if !active_popovers.is_empty() {
+            let popover_widget = unsafe { &*active_popovers[0] };
+            active_popover_rect = popover_widget.popover_rect();
+        }
+
+        if active_popover_rect.is_some() || context_menu_visible {
+            let (px, py, mut pw, mut ph, is_context_menu) = if let Some((x, y, w, h)) = active_popover_rect {
                 (x, y, w.max(1.0), h.max(1.0), false)
             } else {
                 (
