@@ -2836,6 +2836,7 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
     }
     if w.popover_rect().is_some() {
         ctx.register_popover(w);
+        crate::widget::popovers::register(w);
     }
 }
 
