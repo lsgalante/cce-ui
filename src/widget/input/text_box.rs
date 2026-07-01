@@ -782,6 +782,12 @@ impl Element for TextBox {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let has_rounded = r1 || r2 || r3 || r4;
+        if has_rounded {
+            return quads;
+        }
+        
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         if self.disabled {
@@ -880,8 +886,7 @@ impl Element for TextBox {
                         quads.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, cursor_color));
                     }
                 }
-            }
- else {
+            } else {
                 let caret_h = self.font_size * 1.15;
                 if start != end {
                     let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
@@ -906,6 +911,139 @@ impl Element for TextBox {
             }
         }
 
+        quads
+    }
+
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let has_rounded = r1 || r2 || r3 || r4;
+        if !has_rounded {
+            for &child_ptr in &self.children(ctx) {
+                let widget = unsafe { &*child_ptr };
+                quads.extend(widget.all_rounded_quads(ctx));
+            }
+            return quads;
+        }
+
+        let top = self.base.label_offset();
+        let visual_h = self.base.h - top;
+        let radius = self.corner_radius();
+        
+        let bg_color = if self.editing {
+            [0.06, 0.10, 0.18, 1.0]
+        } else {
+            [0.08, 0.08, 0.12, 1.0]
+        };
+        let border_color = if self.editing {
+            [0.20, 0.50, 0.85, 1.0]
+        } else if self.base.hovered {
+            [0.25, 0.25, 0.35, 1.0]
+        } else {
+            [0.18, 0.18, 0.24, 1.0]
+        };
+        
+        if self.draw_bg_border {
+            quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, border_color, (r1, r2, r3, r4)));
+            quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, radius - 1.0, bg_color, (r1, r2, r3, r4)));
+        }
+
+        if self.editing || self.select_anchor.is_some() {
+            let char_width = self.font_size * 0.6;
+            let line_height = self.font_size * 1.333;
+            
+            let highlight_color = [0.20, 0.50, 0.85, 0.3];
+            let cursor_color = if self.draw_bg_border {
+                [0.80, 0.80, 0.85, 1.0]
+            } else {
+                [0.10, 0.10, 0.15, 1.0]
+            };
+
+            let start = self.select_anchor.unwrap_or(self.cursor_idx).min(self.cursor_idx);
+            let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
+
+            if self.multiline {
+                let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                let (_lines, index_map) = self.wrap_text(max_chars);
+
+                let view_top = self.base.y + top;
+                let view_bottom = self.base.y + self.base.h;
+
+                if start != end {
+                    let start_pos = index_map[start.min(index_map.len() - 1)];
+                    let end_pos = index_map[end.min(index_map.len() - 1)];
+                    
+                    for line_idx in start_pos.0..=end_pos.0 {
+                        let mut line_start_col = None;
+                        let mut line_end_col = None;
+                        for idx in start..end {
+                            if idx < index_map.len() {
+                                let (l, c) = index_map[idx];
+                                if l == line_idx {
+                                    if line_start_col.is_none() || c < line_start_col.unwrap() {
+                                        line_start_col = Some(c);
+                                    }
+                                    if line_end_col.is_none() || c > line_end_col.unwrap() {
+                                        line_end_col = Some(c);
+                                    }
+                                }
+                            }
+                        }
+                        if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
+                            let highlight_x = self.base.x + 8.0 + (sc as f32 * char_width);
+                            let highlight_w = (ec - sc + 1) as f32 * char_width;
+                            let highlight_y = self.base.y + top + 8.0 + (line_idx as f32 * line_height) - self.scroll_y;
+                            let clipped_y = highlight_y.max(view_top);
+                            let clipped_bottom = (highlight_y + line_height).min(view_bottom);
+                            if clipped_y < clipped_bottom {
+                                quads.push((highlight_x, clipped_y, highlight_w, clipped_bottom - clipped_y, 0.0, highlight_color, (false, false, false, false)));
+                            }
+                        }
+                    }
+                }
+                
+                if self.editing {
+                    let caret_h = self.font_size * 1.15;
+                    let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
+                    let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width);
+                    let cursor_y = self.base.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
+                    let clipped_y = cursor_y.max(view_top);
+                    let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
+                    if clipped_y < clipped_bottom {
+                        quads.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, 0.0, cursor_color, (false, false, false, false)));
+                    }
+                }
+            } else {
+                let caret_h = self.font_size * 1.15;
+                if start != end {
+                    let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
+                    let max_x = self.base.x + self.base.w - 6.0;
+                    let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
+                    quads.push((
+                        highlight_x,
+                        crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
+                        highlight_w,
+                        crate::layout::line_height(self.font_size),
+                        0.0,
+                        highlight_color,
+                        (false, false, false, false),
+                    ));
+                }
+
+                if self.editing {
+                    let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width);
+                    let max_cursor_x = self.base.x + self.base.w - 6.0;
+                    let final_cursor_x = cursor_x.min(max_cursor_x);
+                    let cursor_y = self.base.y + top + (visual_h - caret_h) / 2.0;
+                    quads.push((final_cursor_x, cursor_y, 1.5, caret_h, 0.0, cursor_color, (false, false, false, false)));
+                }
+            }
+        }
+        
+        for &child_ptr in &self.children(ctx) {
+            let widget = unsafe { &*child_ptr };
+            quads.extend(widget.all_rounded_quads(ctx));
+        }
         quads
     }
 
@@ -1196,6 +1334,27 @@ mod tests {
         assert!(clicked);
         assert!(dummy.is_context_menu_visible());
         assert!(tb.editing);
+     }
+
+    #[test]
+    fn test_textbox_multiline_selection_highlight() {
+        let dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new("Line 1\nLine 2\nLine 3".to_string()).with_multiline(true);
+        tb.set_rect(10.0, 10.0, 200.0, 100.0);
+        tb.select_anchor = Some(7); // starts at "Line 2"
+        tb.cursor_idx = 13;        // ends at end of "Line 2"
+        
+        let has_rounded = tb.rounded_corners() != (false, false, false, false);
+        let has_highlight = if has_rounded {
+            let rounded = tb.all_rounded_quads(&dummy);
+            println!("Rounded quads: {:?}", rounded);
+            rounded.iter().any(|q| q.5 == [0.20, 0.50, 0.85, 0.3])
+        } else {
+            let extra = tb.extra_quads();
+            println!("Extra quads: {:?}", extra);
+            extra.iter().any(|q| q.4 == [0.20, 0.50, 0.85, 0.3])
+        };
+        assert!(has_highlight, "Should have a highlight quad!");
     }
 }
 
