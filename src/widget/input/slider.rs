@@ -231,18 +231,8 @@ impl Element for Slider {
                 return false;
             }
         }
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let (sx, sy, sw, _) = self.rect();
-        let (track_x, track_w) = if self.show_readout {
-            let readout_w = 60.0;
-            let gap = 8.0;
-            let tw = (sw - readout_w - gap).max(10.0);
-            (sx, tw)
-        } else {
-            (sx, sw)
-        };
-        if px >= track_x && px <= track_x + track_w && py >= sy + top && py <= sy + top + visual_h {
+        let (sx, sy, sw, sh) = self.rect();
+        if px >= sx && px <= sx + sw && py >= sy && py <= sy + sh {
             if ctx.scroll_gesture_new {
                 ctx.scroll_initiate_widget_id = Some(my_id);
             }
