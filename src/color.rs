@@ -68,6 +68,9 @@ static TREE_TYPE_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.78, 0.47, 0.87, 1
 static TREE_VALUE_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.51, 0.51, 0.54, 1.0]);
 static TREE_SEPARATOR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.19, 1.0]);
 
+static SCROLLBAR_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.20, 0.3]);
+static SCROLLBAR_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new([0.60, 0.60, 0.65, 0.4]);
+
 pub fn button_background_color() -> [f32; 4] {
     *BUTTON_BACKGROUND_COLOR.read().unwrap()
 }
@@ -309,6 +312,12 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/data/tree/separator_color") {
         if let Ok(mut lock) = TREE_SEPARATOR_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/scrollbar/track_color") {
+        if let Ok(mut lock) = SCROLLBAR_TRACK_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/scrollbar/thumb_color") {
+        if let Ok(mut lock) = SCROLLBAR_THUMB_COLOR.write() { *lock = c; }
     }
 }
 
@@ -696,4 +705,9 @@ pub fn set_tree_leaf_text_selected_color(c: [f32; 4]) { if let Ok(mut lock) = TR
 pub fn set_tree_type_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_TYPE_TEXT_COLOR.write() { *lock = c; } }
 pub fn set_tree_value_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_VALUE_TEXT_COLOR.write() { *lock = c; } }
 pub fn set_tree_separator_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SEPARATOR_COLOR.write() { *lock = c; } }
+
+pub fn scrollbar_track_color() -> [f32; 4] { *SCROLLBAR_TRACK_COLOR.read().unwrap() }
+pub fn set_scrollbar_track_color(c: [f32; 4]) { if let Ok(mut lock) = SCROLLBAR_TRACK_COLOR.write() { *lock = c; } }
+pub fn scrollbar_thumb_color() -> [f32; 4] { *SCROLLBAR_THUMB_COLOR.read().unwrap() }
+pub fn set_scrollbar_thumb_color(c: [f32; 4]) { if let Ok(mut lock) = SCROLLBAR_THUMB_COLOR.write() { *lock = c; } }
 

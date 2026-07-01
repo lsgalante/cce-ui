@@ -101,6 +101,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.label.font" => "label_font",
                 "style.control.slider.height" => "slider_height",
                 "style.control.slider.corner_radius" => "slider_corner_radius",
+                "style.control.scrollbar.width" => "scrollbar_width",
                 "style.control.spinbox.height" => "spinbox_height",
                 "style.control.spinbox.button_padding" => "spinbox_button_padding",
                 "style.control.spinbox.corner_radius" => "spinbox_corner_radius",
@@ -210,6 +211,7 @@ static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
 static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
 static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
+static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
 
 static PLATE_PADDING: RwLock<f32> = RwLock::new(20.0);
 static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(44.0);
@@ -369,6 +371,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SECTION_PADDING.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("scrollbar_width") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
                         *lock = val;
                     }
                 }
@@ -2264,6 +2275,34 @@ pub fn spinbox_button_padding() -> f32 {
         }
     });
     *SPINBOX_BUTTON_PADDING.read().unwrap()
+}
+
+pub fn scrollbar_width() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("scrollbar_width") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *SCROLLBAR_WIDTH.read().unwrap()
+}
+
+pub fn set_scrollbar_width(width: f32) {
+    if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
+        *lock = width;
+    }
 }
 
 pub fn set_spinbox_button_padding(padding: f32) {

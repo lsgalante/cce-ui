@@ -116,13 +116,13 @@ impl Element for ScrollBox {
 
         // Scrollbar
         if self.content_h > self.viewport_h {
-            let sb_x = self.base.x + self.base.w - 8.0;
-            let sb_w = 4.0;
+            let sb_w = crate::layout::scrollbar_width();
+            let sb_x = self.base.x + self.base.w - sb_w - 4.0;
             let sb_track_h = self.viewport_h - 8.0;
             let sb_track_y = self.viewport_y + 4.0;
 
             // Track
-            quads.push((sb_x, sb_track_y, sb_w, sb_track_h, [0.15, 0.15, 0.20, 0.3]));
+            quads.push((sb_x, sb_track_y, sb_w, sb_track_h, crate::color::scrollbar_track_color()));
 
             // Thumb
             let visible_ratio = self.viewport_h / self.content_h;
@@ -135,7 +135,7 @@ impl Element for ScrollBox {
             let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
             let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
 
-            quads.push((sb_x, thumb_y, sb_w, thumb_h, [0.60, 0.60, 0.65, 0.4]));
+            quads.push((sb_x, thumb_y, sb_w, thumb_h, crate::color::scrollbar_thumb_color()));
         }
 
         quads
