@@ -436,7 +436,7 @@ pub trait Element {
             let (x, y, w, h) = self.rect();
             let radius = self.corner_radius();
             let c = self.color();
-            if c[3] > 0.0 {
+            if c[3].abs() > 0.001 {
                 quads.push((x, y, w, h, radius, c, (r1, r2, r3, r4)));
             }
         }
