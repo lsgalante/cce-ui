@@ -129,6 +129,8 @@ pub struct TreeList {
     pub right_clicked_section: Option<String>,
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
+    pub last_scroll_y: f32,
+    pub scrollbar_activity_timer: f32,
 }
 
 impl TreeList {
@@ -146,6 +148,8 @@ impl TreeList {
             right_clicked_section: None,
             parent: None,
             children: Vec::new(),
+            last_scroll_y: 0.0,
+            scrollbar_activity_timer: 0.0,
         }
     }
 
@@ -183,6 +187,15 @@ impl TreeList {
     pub fn take_clicked_item(&mut self) -> Option<TreeElement> {
         self.clicked_item.take()
     }
+
+    pub fn check_scroll_activity(&mut self, ctx: &mut UiContext) {
+        if (self.scroll_box.scroll_y - self.last_scroll_y).abs() > 0.01 {
+            self.scrollbar_activity_timer = 1.0;
+            ctx.register_tick_receiver(self.base.id());
+            self.last_scroll_y = self.scroll_box.scroll_y;
+            self.mark_dirty(ctx);
+        }
+    }
 }
 
 impl Element for TreeList {
@@ -201,6 +214,7 @@ impl Element for TreeList {
         
         let content_h = self.items.len() as f32 * self.item_height;
         self.scroll_box.update_bounds(content_h, y, h);
+        self.last_scroll_y = self.scroll_box.scroll_y;
     }
 
     fn color(&self) -> [f32; 4] {
@@ -240,6 +254,7 @@ impl Element for TreeList {
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = self.scroll_box.mouse_input(button, state, px, py, ctx);
+        self.check_scroll_activity(ctx);
 
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
@@ -361,18 +376,31 @@ impl Element for TreeList {
     }
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.scroll_box.mouse_wheel(delta, px, py, ctx)
+        let changed = self.scroll_box.mouse_wheel(delta, px, py, ctx);
+        self.check_scroll_activity(ctx);
+        changed
+    }
+
+    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+        if self.scrollbar_activity_timer > 0.0 {
+            self.scrollbar_activity_timer = (self.scrollbar_activity_timer - dt).max(0.0);
+            if self.scrollbar_activity_timer <= 0.0 {
+                ctx.unregister_tick_receiver(self.base.id());
+            }
+            true
+        } else {
+            false
+        }
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = self.scroll_box.extra_quads();
         let (r1, r2, r3, r4) = self.rounded_corners();
         let has_rounded = r1 || r2 || r3 || r4;
         if has_rounded {
-            if !quads.is_empty() {
-                quads.remove(0);
-            }
+            return Vec::new();
         }
+
+        let mut quads = self.scroll_box.extra_quads();
 
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
@@ -600,12 +628,37 @@ impl Element for TreeList {
         let radius = self.corner_radius();
         let (x, y, w, h) = self.rect();
         
+        let opacity = crate::layout::tree_opacity();
+        let apply_opacity = |mut c: [f32; 4]| -> [f32; 4] {
+            c[3] *= opacity;
+            c
+        };
+
         // 1. Draw container border and background
         if let Some((border_color, thickness)) = self.solid_border() {
-            quads.push((x, y, w, h, radius, border_color, (r1, r2, r3, r4)));
-            quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, crate::color::tree_background_color(), (r1, r2, r3, r4)));
+            quads.push((x, y, w, h, radius, apply_opacity(border_color), (r1, r2, r3, r4)));
+            quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, apply_opacity(crate::color::tree_background_color()), (r1, r2, r3, r4)));
         } else {
-            quads.push((x, y, w, h, radius, crate::color::tree_background_color(), (r1, r2, r3, r4)));
+            quads.push((x, y, w, h, radius, apply_opacity(crate::color::tree_background_color()), (r1, r2, r3, r4)));
+        }
+
+        // Helper to collect scrollbar quads
+        let get_scrollbar_quads = || {
+            let mut sb_quads = Vec::new();
+            let scroll_quads = self.scroll_box.extra_quads();
+            if scroll_quads.len() > 1 {
+                for q in &scroll_quads[1..] {
+                    sb_quads.push((q.0, q.1, q.2, q.3, 0.0, q.4, (false, false, false, false)));
+                }
+            }
+            sb_quads
+        };
+
+        let show_on_top = self.scrollbar_activity_timer > 0.0;
+
+        // If NOT on top, draw scrollbar first (behind items)
+        if !show_on_top {
+            quads.extend(get_scrollbar_quads());
         }
 
         // 2. Draw items (row backgrounds, separator lines, color previews)
@@ -646,12 +699,12 @@ impl Element for TreeList {
                 }
             };
             
-            quads.push((list_left + 1.0, draw_y, list_width - 9.0, draw_h, 0.0, bg_color, (false, false, false, false)));
+            quads.push((list_left + 1.0, draw_y, list_width - 9.0, draw_h, 0.0, apply_opacity(bg_color), (false, false, false, false)));
             
             if let TreeElement::Leaf { ref val, original_idx, .. } = item {
                 let separator_color = crate::color::tree_separator_color();
-                quads.push((list_left + 180.0, draw_y, 1.0, draw_h, 0.0, separator_color, (false, false, false, false)));
-                quads.push((list_left + 235.0, draw_y, 1.0, draw_h, 0.0, separator_color, (false, false, false, false)));
+                quads.push((list_left + 180.0, draw_y, 1.0, draw_h, 0.0, apply_opacity(separator_color), (false, false, false, false)));
+                quads.push((list_left + 235.0, draw_y, 1.0, draw_h, 0.0, apply_opacity(separator_color), (false, false, false, false)));
 
                 if Some(*original_idx) != self.selected_key_idx {
                     if let serde_json::Value::String(s) = val {
@@ -672,16 +725,13 @@ impl Element for TreeList {
             }
 
             if row_y + self.item_height <= list_bottom {
-                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 9.0, 1.0, 0.0, [0.13, 0.13, 0.17, 1.0], (false, false, false, false)));
+                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 9.0, 1.0, 0.0, apply_opacity([0.13, 0.13, 0.17, 1.0]), (false, false, false, false)));
             }
         }
 
-        // 3. Draw scrollbar track and thumb
-        let scroll_quads = self.scroll_box.extra_quads();
-        if scroll_quads.len() > 1 {
-            for q in &scroll_quads[1..] {
-                quads.push((q.0, q.1, q.2, q.3, 0.0, q.4, (false, false, false, false)));
-            }
+        // If on top, draw scrollbar last
+        if show_on_top {
+            quads.extend(get_scrollbar_quads());
         }
 
         for &child_ptr in &self.children(ctx) {

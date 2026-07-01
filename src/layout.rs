@@ -125,6 +125,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.overlay.border_gap" => "overlay_border_gap",
                 "style.editor.last_page" | "style.data.editor.last_page" => "last_page",
                 "style.data.tree.corner_radius" => "tree_corner_radius",
+                "style.data.tree.opacity" => "tree_opacity",
+                "style.data.tree.blur" => "tree_blur",
                 "style.surface.desktop.gap_color" => "desktop_gap_color",
                 "style.surface.desktop.cell_color" => "desktop_cell_color",
                 "style.surface.desktop.gap_width" => "desktop_gap_width",
@@ -212,6 +214,8 @@ static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
 static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
+static TREE_OPACITY: RwLock<f32> = RwLock::new(1.0);
+static TREE_BLUR: RwLock<f32> = RwLock::new(0.0);
 
 static PLATE_PADDING: RwLock<f32> = RwLock::new(20.0);
 static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(44.0);
@@ -380,6 +384,24 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("tree_opacity") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = TREE_OPACITY.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("tree_blur") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = TREE_BLUR.write() {
                         *lock = val;
                     }
                 }
@@ -2302,6 +2324,62 @@ pub fn scrollbar_width() -> f32 {
 pub fn set_scrollbar_width(width: f32) {
     if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
         *lock = width;
+    }
+}
+
+pub fn tree_opacity() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("tree_opacity") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = TREE_OPACITY.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *TREE_OPACITY.read().unwrap()
+}
+
+pub fn set_tree_opacity(opacity: f32) {
+    if let Ok(mut lock) = TREE_OPACITY.write() {
+        *lock = opacity;
+    }
+}
+
+pub fn tree_blur() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("tree_blur") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = TREE_BLUR.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *TREE_BLUR.read().unwrap()
+}
+
+pub fn set_tree_blur(blur: f32) {
+    if let Ok(mut lock) = TREE_BLUR.write() {
+        *lock = blur;
     }
 }
 
