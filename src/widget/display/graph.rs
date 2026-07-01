@@ -292,7 +292,8 @@ impl Element for Graph {
                 let font_size = (14.0 * scale_f).clamp(6.0, 48.0);
                 let lx = nx + nw + 8.0 * scale_f;
                 let ly = crate::layout::align_text_y(ny, nh, font_size, 0.0);
-                if lx >= self.x && lx < self.x + self.w && ly >= self.y && ly < self.y + self.h {
+                let text_w = TextLabel::estimate_width(&node.name, font_size);
+                if lx + text_w >= self.x && lx < self.x + self.w && ly + font_size >= self.y && ly < self.y + self.h {
                     labels.push(TextLabel {
                         text: node.name.clone(),
                         x: lx,
