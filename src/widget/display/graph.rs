@@ -56,8 +56,6 @@ pub struct Graph {
 
     uniform_background: bool,
     network_opacity: f32,
-    cell_opacity: f32,
-    gap_opacity: f32,
     cell_color: [f32; 3],
     gap_color: [f32; 3],
 
@@ -74,14 +72,6 @@ impl Graph {
     }
     pub fn set_network_opacity(&mut self, opacity: f32) {
         self.network_opacity = opacity;
-        self.cell_opacity = opacity;
-        self.gap_opacity = opacity;
-    }
-    pub fn set_cell_opacity(&mut self, opacity: f32) {
-        self.cell_opacity = opacity;
-    }
-    pub fn set_gap_opacity(&mut self, opacity: f32) {
-        self.gap_opacity = opacity;
     }
     pub fn set_cell_color(&mut self, color: [f32; 3]) {
         self.cell_color = color;
@@ -91,22 +81,31 @@ impl Graph {
     }
 
     pub fn new() -> Self {
+        crate::layout::lazy_init_style_registry();
+
+        let grid_size_x = crate::layout::graph_spacing_x();
+        let grid_size_y = crate::layout::graph_spacing_y();
+        let grid_snap_enabled = crate::layout::graph_grid_snap();
+
+        let cell_col = crate::color::graph_cell_color();
+        let gap_col = crate::color::graph_gap_color();
+
         Self {
             x: 0.0, y: 0.0, w: 0.0, h: 0.0,
             hovered: false,
             show_network_grid: false,
-            grid_size_x: 150.0,
-            grid_size_y: 75.0,
+            grid_size_x,
+            grid_size_y,
             grid_origin_x: 0.0,
             grid_origin_y: 0.0,
-            skipped_row_h: 37.5,
-            skipped_col_w: 37.5,
+            skipped_row_h: grid_size_y / 2.0,
+            skipped_col_w: grid_size_x / 2.0,
             nodes: Vec::new(),
             selected_idx: None,
             selected_id: None,
             double_clicked_idx: None,
             double_click_timer: None,
-            grid_snap_enabled: false,
+            grid_snap_enabled,
             node_geom_toggled: None,
             dragging_idx: None,
             dragging_id: None,
@@ -115,11 +114,9 @@ impl Graph {
             drag_node_pos: None,
             toggle_hovered_idx: None,
             uniform_background: false,
-            network_opacity: 0.95,
-            cell_opacity: 0.95,
-            gap_opacity: 0.95,
-            cell_color: [0.13, 0.13, 0.16],
-            gap_color: [0.07, 0.07, 0.09],
+            network_opacity: crate::color::graph_opacity(),
+            cell_color: cell_col,
+            gap_color: gap_col,
             connecting_from: None,
             current_mouse_pos: (0.0, 0.0),
             pending_connection: None,
@@ -141,6 +138,17 @@ impl Graph {
             )
         };
         Some((nx, ny, self.grid_size_x, self.grid_size_y))
+    }
+
+    pub fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool {
+        for i in 0..self.nodes.len() {
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                if (qx - nx).abs() < 0.1 && (qy - ny).abs() < 0.1 && (qw - nw).abs() < 0.1 && (qh - nh).abs() < 0.1 {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn toggle_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
@@ -239,15 +247,30 @@ impl Element for Graph {
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, true, true) }
 
+
+
+    fn paint(&mut self, ctx: &mut UiContext) {
+        if let Some(hq) = self.highlight_quad(ctx) {
+            if hq.4 == colors::HIGHLIGHT_SECONDARY {
+                ctx.register_hovered(hq.0, hq.1, hq.2, hq.3, hq.4);
+            }
+        }
+    }
+
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
 
     fn color(&self) -> [f32; 4] {
-        if self.uniform_background {
-            [0.10, 0.10, 0.13, self.network_opacity]
+        let mut c = if self.uniform_background {
+            [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity]
         } else {
-            [0.0, 0.0, 0.0, 0.0]
+            [0.0, 0.0, 0.0, 0.01 * self.network_opacity]
+        };
+        let blur_val = crate::layout::graph_blur();
+        if blur_val > 0.0 {
+            c[3] = -blur_val.abs() * self.network_opacity;
         }
+        c
     }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
@@ -376,10 +399,12 @@ impl Element for Graph {
         let was_hovered_port = self.hovered_port;
         self.hovered_port = None;
 
+        let wire_act_r = crate::layout::graph_wire_activation_radius();
+
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
-                let hit_radius = (6.0 * scale_f).max(2.0) * 1.5;
+                let hit_radius = (wire_act_r * scale_f).max(2.0);
                 let node = &self.nodes[i];
                 
                 for k in 0..node.inputs {
@@ -590,7 +615,7 @@ impl Element for Graph {
 
         // Draw connection wires
         let scale_f = self.grid_size_x / 80.0;
-        let wire_color = [0.0, 0.75, 1.0, 0.7]; // Vibrant cyan glow
+        let wire_color = [0.0, 0.75, 1.0, 0.7 * self.network_opacity]; // Vibrant cyan glow
         let wire_thickness = (3.0 * scale_f).clamp(1.0, 15.0);
         for i in 0..self.nodes.len() {
             let node = &self.nodes[i];
@@ -746,7 +771,7 @@ impl Element for Graph {
                             y_cell_start,
                             gap_w,
                             cell_h,
-                            [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.gap_opacity],
+                            [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity],
                             &mut quads,
                         );
 
@@ -756,7 +781,7 @@ impl Element for Graph {
                             y_cell_end,
                             x2 - x_cell_start,
                             gap_h,
-                            [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.gap_opacity],
+                            [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity],
                             &mut quads,
                         );
 
@@ -766,7 +791,7 @@ impl Element for Graph {
                             y_cell_start,
                             cell_w,
                             cell_h,
-                            [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.cell_opacity],
+                            [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity],
                             &mut quads,
                         );
                     }
@@ -778,36 +803,42 @@ impl Element for Graph {
             let thickness = 2.0;
             // X axis (horizontal) in the gap below row 0
             let y_center = self.grid_origin_y + self.grid_size_y + self.skipped_row_h / 2.0;
-            push_clipped(self.x, y_center - thickness / 2.0, self.w, thickness, [0.0, 0.0, 0.0, 1.0], &mut quads);
+            push_clipped(self.x, y_center - thickness / 2.0, self.w, thickness, [0.0, 0.0, 0.0, 1.0 * self.network_opacity], &mut quads);
 
             // Y axis (vertical) in the gap to the left of col 0
             let x_center = self.grid_origin_x - self.skipped_col_w / 2.0;
-            push_clipped(x_center - thickness / 2.0, self.y, thickness, self.h, [0.0, 0.0, 0.0, 1.0], &mut quads);
+            push_clipped(x_center - thickness / 2.0, self.y, thickness, self.h, [0.0, 0.0, 0.0, 1.0 * self.network_opacity], &mut quads);
         }
 
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
-                let bg_color = if self.dragging_idx == Some(i) {
+                let mut bg_color = if self.dragging_idx == Some(i) {
                     colors::node_drag_color()
                 } else if self.selected_idx == Some(i) {
                     colors::node_selected_color()
                 } else {
                     colors::node_color()
                 };
-                push_clipped(nx, ny, nw, nh, bg_color, &mut quads);
+                bg_color[3] *= self.network_opacity;
+                if nx + nw > min_x && nx < max_x && ny + nh > min_y && ny < max_y {
+                    quads.push((nx, ny, nw, nh, bg_color));
+                }
 
                 if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
-                    let btn_color = if self.toggle_hovered_idx == Some(i) {
+                    let mut btn_color = if self.toggle_hovered_idx == Some(i) {
                         colors::TOGGLE_HOVER
                     } else {
                         colors::TOGGLE_OFF
                     };
+                    btn_color[3] *= self.network_opacity;
                     push_clipped(tx, ty, tw, th, btn_color, &mut quads);
 
                     if self.nodes[i].geom_visible {
                         let inset = 3.0 * scale_f;
-                        push_clipped(tx + inset, ty + inset, tw - inset * 2.0, th - inset * 2.0, colors::TOGGLE_ON, &mut quads);
+                        let mut toggle_on_color = colors::TOGGLE_ON;
+                        toggle_on_color[3] *= self.network_opacity;
+                        push_clipped(tx + inset, ty + inset, tw - inset * 2.0, th - inset * 2.0, toggle_on_color, &mut quads);
                     }
                 }
             }
@@ -829,10 +860,16 @@ impl Element for Graph {
             }
         };
 
+        let w_size = crate::layout::graph_wire_size();
+        let mut w_color = colors::graph_wire_color();
+        let mut w_hl_color = colors::graph_wire_highlight_color();
+        w_color[3] *= self.network_opacity;
+        w_hl_color[3] *= self.network_opacity;
+
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
-                let port_size = (6.0 * scale_f).max(2.0);
+                let port_size = (w_size * scale_f).max(2.0);
                 let base_r = port_size / 2.0;
 
                 let node = &self.nodes[i];
@@ -846,9 +883,9 @@ impl Element for Graph {
                     let is_connecting = self.connecting_from == Some((i, PortType::Input, k));
                     
                     let (r, color) = if is_hovered || is_connecting {
-                        (base_r * 1.4, [0.0, 1.0, 0.9, 1.0]) // neon cyan glow
+                        (base_r * 1.4, w_hl_color)
                     } else {
-                        (base_r, [0.1, 0.8, 0.4, 1.0])
+                        (base_r, w_color)
                     };
                     push_circle_clipped(cx, cy, r, color);
                 }
@@ -862,9 +899,9 @@ impl Element for Graph {
                     let is_connecting = self.connecting_from == Some((i, PortType::Output, k));
                     
                     let (r, color) = if is_hovered || is_connecting {
-                        (base_r * 1.4, [0.0, 1.0, 0.9, 1.0]) // neon cyan glow
+                        (base_r * 1.4, w_hl_color)
                     } else {
-                        (base_r, [0.1, 0.8, 0.4, 1.0])
+                        (base_r, w_color)
                     };
                     push_circle_clipped(cx, cy, r, color);
                 }
@@ -953,6 +990,9 @@ impl GraphController for Graph {
     }
     fn cancel_connecting(&mut self) {
         self.connecting_from = None;
+    }
+    fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool {
+        self.is_node_rect(qx, qy, qw, qh)
     }
 }
 

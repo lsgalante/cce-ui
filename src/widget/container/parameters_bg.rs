@@ -1023,7 +1023,7 @@ impl Element for ParametersBg {
             if p.2.starts_with("slider") {
                 let r = rects[i];
                 let row_y = r.1;
-                if py >= row_y - 2.0 && py <= row_y + 18.0 && px >= self.base.x && px <= self.base.x + self.base.w {
+                if py >= row_y - 2.0 && py <= row_y + r.3 && px >= self.base.x && px <= self.base.x + self.base.w {
                     if let Some(s) = &mut self.sliders[i] {
                         let was_scroll = s.scroll_enabled;
                         s.set_scroll(true);

@@ -29,6 +29,8 @@ static SLIDER_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_TRACK);
 static PAGE_LOW_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0600316, 0.0600316, 0.080219, 1.0]);
 static COLOR_BORDERS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.2039, 0.2039, 0.2530, 1.0]);
 static NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
+static NODE_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_SELECTED);
+static NODE_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_DRAG);
 static SIDEBAR_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(SIDEBAR_BG);
 static HIGHLIGHT_PRIMARY_COLOR: RwLock<[f32; 4]> = RwLock::new(HIGHLIGHT_PRIMARY);
 static MENUBAR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
@@ -71,6 +73,17 @@ static TREE_SEPARATOR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.19, 1
 static SCROLLBAR_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.20, 0.3]);
 static SCROLLBAR_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new([0.60, 0.60, 0.65, 0.4]);
 
+static GRAPH_CELL_COLOR: RwLock<[f32; 3]> = RwLock::new([0.13, 0.13, 0.16]);
+static GRAPH_GAP_COLOR: RwLock<[f32; 3]> = RwLock::new([0.07, 0.07, 0.09]);
+static GRAPH_OPACITY: RwLock<f32> = RwLock::new(0.95);
+
+static GRAPH_NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
+static GRAPH_NODE_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_SELECTED);
+static GRAPH_NODE_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_DRAG);
+
+static GRAPH_WIRE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.1, 0.8, 0.4, 1.0]);
+static GRAPH_WIRE_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 1.0, 0.9, 1.0]);
+
 pub fn button_background_color() -> [f32; 4] {
     *BUTTON_BACKGROUND_COLOR.read().unwrap()
 }
@@ -83,25 +96,32 @@ pub fn set_button_background_color(color: [f32; 4]) {
 
 pub fn button_hover_color() -> [f32; 4] {
     let base = button_background_color();
+    let mut oklab = linear_srgb_to_oklab([base[0], base[1], base[2]]);
+    oklab[0] = (oklab[0] + 0.05).min(1.0); // increase lightness slightly
+    let rgb = oklab_to_linear_srgb(oklab);
     [
-        (base[0] + 0.10).min(1.0),
-        (base[1] + 0.12).min(1.0),
-        (base[2] + 0.13).min(1.0),
+        rgb[0].clamp(0.0, 1.0),
+        rgb[1].clamp(0.0, 1.0),
+        rgb[2].clamp(0.0, 1.0),
         (base[3] + 0.20).min(1.0),
     ]
 }
 
 pub fn button_press_color() -> [f32; 4] {
     let base = button_background_color();
+    let mut oklab = linear_srgb_to_oklab([base[0], base[1], base[2]]);
+    oklab[0] = (oklab[0] - 0.07).max(0.0); // decrease lightness
+    let rgb = oklab_to_linear_srgb(oklab);
     [
-        (base[0] - 0.08).max(0.0),
-        (base[1] - 0.12).max(0.0),
-        (base[2] - 0.15).max(0.0),
+        rgb[0].clamp(0.0, 1.0),
+        rgb[1].clamp(0.0, 1.0),
+        rgb[2].clamp(0.0, 1.0),
         (base[3] + 0.40).min(1.0),
     ]
 }
 
 pub fn node_color() -> [f32; 4] {
+    load_colors_once();
     *NODE_COLOR.read().unwrap()
 }
 
@@ -112,23 +132,25 @@ pub fn set_node_color(color: [f32; 4]) {
 }
 
 pub fn node_selected_color() -> [f32; 4] {
-    let base = node_color();
-    [
-        (base[0] + 0.10).min(1.0),
-        (base[1] + 0.20).min(1.0),
-        (base[2] + 0.20).min(1.0),
-        base[3]
-    ]
+    load_colors_once();
+    *NODE_SELECTED_COLOR.read().unwrap()
+}
+
+pub fn set_node_selected_color(color: [f32; 4]) {
+    if let Ok(mut lock) = NODE_SELECTED_COLOR.write() {
+        *lock = color;
+    }
 }
 
 pub fn node_drag_color() -> [f32; 4] {
-    let base = node_color();
-    [
-        (base[0] + 0.20).min(1.0),
-        (base[1] + 0.35).min(1.0),
-        (base[2] + 0.30).min(1.0),
-        base[3]
-    ]
+    load_colors_once();
+    *NODE_DRAG_COLOR.read().unwrap()
+}
+
+pub fn set_node_drag_color(color: [f32; 4]) {
+    if let Ok(mut lock) = NODE_DRAG_COLOR.write() {
+        *lock = color;
+    }
 }
 
 fn read_config() -> Option<String> {
@@ -265,6 +287,34 @@ fn parse_and_set_colors(content: &str) {
         }
     }
 
+    if let Some(c) = get_color("/style/surface/graph/cell_color") {
+        if let Ok(mut lock) = GRAPH_CELL_COLOR.write() { *lock = [c[0], c[1], c[2]]; }
+    }
+    if let Some(c) = get_color("/style/surface/graph/gap_color") {
+        if let Ok(mut lock) = GRAPH_GAP_COLOR.write() { *lock = [c[0], c[1], c[2]]; }
+    }
+    if let Some(c) = get_color("/style/surface/graph/node/color") {
+        if let Ok(mut lock) = GRAPH_NODE_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = NODE_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/surface/graph/node/selected_color") {
+        if let Ok(mut lock) = GRAPH_NODE_SELECTED_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = NODE_SELECTED_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/surface/graph/node/drag_color") {
+        if let Ok(mut lock) = GRAPH_NODE_DRAG_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = NODE_DRAG_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/surface/graph/node/wire_color") {
+        if let Ok(mut lock) = GRAPH_WIRE_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/surface/graph/node/wire_highlight_color") {
+        if let Ok(mut lock) = GRAPH_WIRE_HIGHLIGHT_COLOR.write() { *lock = c; }
+    }
+    if let Some(opacity) = val.pointer("/style/surface/graph/opacity").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = GRAPH_OPACITY.write() { *lock = opacity as f32; }
+    }
+
     if let Some(c) = get_color("/style/data/tree/background_color") {
         if let Ok(mut lock) = TREE_BACKGROUND_COLOR.write() { *lock = c; }
     }
@@ -333,6 +383,94 @@ fn load_colors_once() {
 
 pub fn reload_colors(content: &str) {
     parse_and_set_colors(content);
+}
+
+pub fn graph_wire_color() -> [f32; 4] {
+    load_colors_once();
+    *GRAPH_WIRE_COLOR.read().unwrap()
+}
+
+pub fn set_graph_wire_color(color: [f32; 4]) {
+    if let Ok(mut lock) = GRAPH_WIRE_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_wire_highlight_color() -> [f32; 4] {
+    load_colors_once();
+    *GRAPH_WIRE_HIGHLIGHT_COLOR.read().unwrap()
+}
+
+pub fn set_graph_wire_highlight_color(color: [f32; 4]) {
+    if let Ok(mut lock) = GRAPH_WIRE_HIGHLIGHT_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_node_color() -> [f32; 4] {
+    load_colors_once();
+    *GRAPH_NODE_COLOR.read().unwrap()
+}
+
+pub fn set_graph_node_color(color: [f32; 4]) {
+    if let Ok(mut lock) = GRAPH_NODE_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_node_selected_color() -> [f32; 4] {
+    load_colors_once();
+    *GRAPH_NODE_SELECTED_COLOR.read().unwrap()
+}
+
+pub fn set_graph_node_selected_color(color: [f32; 4]) {
+    if let Ok(mut lock) = GRAPH_NODE_SELECTED_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_node_drag_color() -> [f32; 4] {
+    load_colors_once();
+    *GRAPH_NODE_DRAG_COLOR.read().unwrap()
+}
+
+pub fn set_graph_node_drag_color(color: [f32; 4]) {
+    if let Ok(mut lock) = GRAPH_NODE_DRAG_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_cell_color() -> [f32; 3] {
+    load_colors_once();
+    *GRAPH_CELL_COLOR.read().unwrap()
+}
+
+pub fn set_graph_cell_color(color: [f32; 3]) {
+    if let Ok(mut lock) = GRAPH_CELL_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_gap_color() -> [f32; 3] {
+    load_colors_once();
+    *GRAPH_GAP_COLOR.read().unwrap()
+}
+
+pub fn set_graph_gap_color(color: [f32; 3]) {
+    if let Ok(mut lock) = GRAPH_GAP_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_opacity() -> f32 {
+    load_colors_once();
+    *GRAPH_OPACITY.read().unwrap()
+}
+
+pub fn set_graph_opacity(opacity: f32) {
+    if let Ok(mut lock) = GRAPH_OPACITY.write() {
+        *lock = opacity;
+    }
 }
 
 pub fn page_low_color() -> [f32; 4] {
@@ -426,11 +564,19 @@ pub const TEXT_HEADER: [f32; 4] = [0.90, 0.90, 0.95, 1.0];
 pub const TEXT_ACCENT: [f32; 4] = [0.56, 0.83, 0.56, 1.0];
 
 pub fn srgb_to_linear(c: f32) -> f32 {
-    c.powf(2.2)
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
 }
 
 pub fn linear_to_srgb(c: f32) -> f32 {
-    c.powf(1.0 / 2.2)
+    if c <= 0.0031308 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 pub fn to_linear(color: [f32; 4]) -> [f32; 4] {
@@ -448,6 +594,54 @@ pub fn to_srgb(color: [f32; 4]) -> [f32; 4] {
         linear_to_srgb(color[1]),
         linear_to_srgb(color[2]),
         color[3],
+    ]
+}
+
+pub fn to_linear_rgb(color: [f32; 3]) -> [f32; 3] {
+    [
+        srgb_to_linear(color[0]),
+        srgb_to_linear(color[1]),
+        srgb_to_linear(color[2]),
+    ]
+}
+
+pub fn to_srgb_rgb(color: [f32; 3]) -> [f32; 3] {
+    [
+        linear_to_srgb(color[0]),
+        linear_to_srgb(color[1]),
+        linear_to_srgb(color[2]),
+    ]
+}
+
+pub fn linear_srgb_to_oklab(rgb: [f32; 3]) -> [f32; 3] {
+    let l = 0.4122214708 * rgb[0] + 0.5363325363 * rgb[1] + 0.0514459929 * rgb[2];
+    let m = 0.2119034982 * rgb[0] + 0.6806995451 * rgb[1] + 0.1073969566 * rgb[2];
+    let s = 0.0883024619 * rgb[0] + 0.2817188376 * rgb[1] + 0.6299787005 * rgb[2];
+
+    let l_ = l.max(0.0).powf(1.0 / 3.0);
+    let m_ = m.max(0.0).powf(1.0 / 3.0);
+    let s_ = s.max(0.0).powf(1.0 / 3.0);
+
+    [
+        0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+        1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+        0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_,
+    ]
+}
+
+pub fn oklab_to_linear_srgb(lab: [f32; 3]) -> [f32; 3] {
+    let l_ = lab[0] + 0.3963377774 * lab[1] + 0.2158037573 * lab[2];
+    let m_ = lab[0] - 0.1055613458 * lab[1] - 0.0638541728 * lab[2];
+    let s_ = lab[0] - 0.0894841775 * lab[1] - 1.2914855480 * lab[2];
+
+    let l = l_ * l_ * l_;
+    let m = m_ * m_ * m_;
+    let s = s_ * s_ * s_;
+
+    [
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
     ]
 }
 

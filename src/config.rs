@@ -18,7 +18,21 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
                     kdl::KdlValue::Base10(i) |
                     kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
                     kdl::KdlValue::Base10Float(f) => {
-                        if let Some(num) = serde_json::Number::from_f64(*f) {
+                        let mut val_f = *f;
+                        if let Some(ty) = entry.ty() {
+                            let ty_str = ty.value();
+                            if ty_str.starts_with("f64:") {
+                                let range_str = ty_str.trim_start_matches("f64:");
+                                if let Some(dash_idx) = range_str.find('-') {
+                                    let min_str = &range_str[..dash_idx].trim();
+                                    let max_str = &range_str[dash_idx + 1..].trim();
+                                    if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
+                                        val_f = val_f.clamp(min_f, max_f);
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(num) = serde_json::Number::from_f64(val_f) {
                             serde_json::Value::Number(num)
                         } else {
                             serde_json::Value::Null
@@ -46,7 +60,21 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
                                 kdl::KdlValue::Base10(i) |
                                 kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
                                 kdl::KdlValue::Base10Float(f) => {
-                                    if let Some(num) = serde_json::Number::from_f64(*f) {
+                                    let mut val_f = *f;
+                                    if let Some(ty) = entry.ty() {
+                                        let ty_str = ty.value();
+                                        if ty_str.starts_with("f64:") {
+                                            let range_str = ty_str.trim_start_matches("f64:");
+                                            if let Some(dash_idx) = range_str.find('-') {
+                                                let min_str = &range_str[..dash_idx].trim();
+                                                let max_str = &range_str[dash_idx + 1..].trim();
+                                                if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
+                                                    val_f = val_f.clamp(min_f, max_f);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let Some(num) = serde_json::Number::from_f64(val_f) {
                                         serde_json::Value::Number(num)
                                     } else {
                                         serde_json::Value::Null
@@ -79,7 +107,21 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
                 kdl::KdlValue::Base10(i) |
                 kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
                 kdl::KdlValue::Base10Float(f) => {
-                    if let Some(num) = serde_json::Number::from_f64(*f) {
+                    let mut val_f = *f;
+                    if let Some(ty) = entry.ty() {
+                        let ty_str = ty.value();
+                        if ty_str.starts_with("f64:") {
+                            let range_str = ty_str.trim_start_matches("f64:");
+                            if let Some(dash_idx) = range_str.find('-') {
+                                let min_str = &range_str[..dash_idx].trim();
+                                let max_str = &range_str[dash_idx + 1..].trim();
+                                if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
+                                    val_f = val_f.clamp(min_f, max_f);
+                                }
+                            }
+                        }
+                    }
+                    if let Some(num) = serde_json::Number::from_f64(val_f) {
                         serde_json::Value::Number(num)
                     } else {
                         serde_json::Value::Null
@@ -403,6 +445,12 @@ pub fn write_keybindings_to_kdl(path: &str, keybinds: &[serde_json::Value]) -> b
             let action = obj.get("action").and_then(|a| a.as_str()).unwrap_or("");
             let command = obj.get("command").and_then(|c| c.as_str()).unwrap_or("");
 
+            let full_key = if mods.is_empty() {
+                key.to_string()
+            } else {
+                format!("{}+{}", mods, key)
+            };
+
             block_str.push_str("    bind");
             if !action.is_empty() {
                 block_str.push_str(&format!(" action={:?}", action));
@@ -410,11 +458,8 @@ pub fn write_keybindings_to_kdl(path: &str, keybinds: &[serde_json::Value]) -> b
             if !command.is_empty() {
                 block_str.push_str(&format!(" command={:?}", command));
             }
-            if !key.is_empty() {
-                block_str.push_str(&format!(" key={:?}", key));
-            }
-            if !mods.is_empty() {
-                block_str.push_str(&format!(" mods={:?}", mods));
+            if !full_key.is_empty() {
+                block_str.push_str(&format!(" key=(keybind){:?}", full_key));
             }
             block_str.push('\n');
         }
@@ -492,4 +537,107 @@ mod tests {
         let ty2 = get_kdl_type_annotation(content, "input.touchpad.gestures.pinch");
         assert_eq!(ty2, Some("bool".to_string()));
     }
+}
+
+pub fn value_to_kdl(key: &str, val: &serde_json::Value, indent: usize) -> String {
+    let indent_str = "    ".repeat(indent);
+    match val {
+        serde_json::Value::Object(map) => {
+            let has_objects = map.values().any(|v| v.is_object());
+            if has_objects {
+                let mut out = format!("{}{} {{\n", indent_str, key);
+                for (k, v) in map {
+                    out.push_str(&value_to_kdl(k, v, indent + 1));
+                }
+                out.push_str(&format!("{}}}\n", indent_str));
+                out
+            } else {
+                let mut prop_parts = Vec::new();
+                for (prop_name, prop_val) in map {
+                    let (val_str, val_ty) = match prop_val {
+                        serde_json::Value::Bool(b) => (b.to_string(), Some("bool")),
+                        serde_json::Value::Number(num) => {
+                            if num.is_f64() {
+                                (num.to_string(), Some("f64"))
+                            } else {
+                                (num.to_string(), Some("i64"))
+                            }
+                        }
+                        serde_json::Value::String(s) => {
+                            if s.starts_with('#') {
+                                let s_clean = s.trim_start_matches('#');
+                                let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
+                                (format!("\"{}\"", s), Some(ty))
+                            } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") {
+                                (format!("\"{}\"", s), Some("keybind"))
+                            } else {
+                                (format!("\"{}\"", s), None)
+                            }
+                        }
+                        _ => (prop_val.to_string(), None),
+                    };
+                    if let Some(ty) = val_ty {
+                        prop_parts.push(format!("{}=({}){}", prop_name, ty, val_str));
+                    } else {
+                        prop_parts.push(format!("{}={}", prop_name, val_str));
+                    }
+                }
+                format!("{}{} {}\n", indent_str, key, prop_parts.join(" "))
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            let mut out = String::new();
+            for item in arr {
+                out.push_str(&value_to_kdl(key, item, indent));
+            }
+            out
+        }
+        _ => {
+            let (val_str, val_ty) = match val {
+                serde_json::Value::Bool(b) => (b.to_string(), Some("bool")),
+                serde_json::Value::Number(num) => {
+                    if num.is_f64() {
+                        (num.to_string(), Some("f64"))
+                    } else {
+                        (num.to_string(), Some("i64"))
+                    }
+                }
+                serde_json::Value::String(s) => {
+                    if s.starts_with('#') {
+                        let s_clean = s.trim_start_matches('#');
+                        let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
+                        (format!("\"{}\"", s), Some(ty))
+                    } else if key == "key" || key == "keybind" || key == "shortcut" || key.ends_with("_key") || key.ends_with(".key") || key.ends_with(".keybind") {
+                        (format!("\"{}\"", s), Some("keybind"))
+                    } else {
+                        (format!("\"{}\"", s), None)
+                    }
+                }
+                _ => (val.to_string(), None),
+            };
+            if let Some(ty) = val_ty {
+                format!("{}{} ({}){}\n", indent_str, key, ty, val_str)
+            } else {
+                format!("{}{} {}\n", indent_str, key, val_str)
+            }
+        }
+    }
+}
+
+pub fn json_to_kdl_string(val: &serde_json::Value) -> String {
+    let mut out = String::new();
+    if let serde_json::Value::Object(map) = val {
+        for (sec_name, sec_val) in map {
+            if let serde_json::Value::Object(sec_map) = sec_val {
+                out.push_str(&format!("{} {{\n", sec_name));
+                for (k, v) in sec_map {
+                    out.push_str(&value_to_kdl(k, v, 1));
+                }
+                out.push_str("}\n");
+            } else {
+                out.push_str(&value_to_kdl(sec_name, sec_val, 0));
+            }
+        }
+    }
+    out
 }

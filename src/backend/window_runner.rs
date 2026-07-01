@@ -932,6 +932,15 @@ pub fn push_extra_quad_vertices(
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
+    if let Some(graph) = w.as_any().downcast_ref::<crate::widget::display::Graph>() {
+        if graph.is_node_rect(qx, qy, qw, qh) {
+            let r = crate::layout::graph_node_corner_radius();
+            let extra_radii = crate::widget::CornerRadii::new(r, r, r, r);
+            push_rounded_rect_vertices_corners(qx, qy, qw, qh, extra_radii, sw, sh, qc, clip_circle, None, out);
+            return;
+        }
+    }
+
     let target_w = get_child_widget_for_quad(w, qx, qy, qw, qh);
     let radii = target_w.corner_radii();
     if radii.top_left <= 0.1 && radii.top_right <= 0.1 && radii.bottom_right <= 0.1 && radii.bottom_left <= 0.1 {
@@ -991,6 +1000,15 @@ pub fn push_extra_quad_vertices_clipped(
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
+    if let Some(graph) = w.as_any().downcast_ref::<crate::widget::display::Graph>() {
+        if graph.is_node_rect(qx, qy, qw, qh) {
+            let r = crate::layout::graph_node_corner_radius();
+            let extra_radii = crate::widget::CornerRadii::new(r, r, r, r);
+            push_rounded_rect_vertices_corners(qx, qy, qw, qh, extra_radii, sw, sh, qc, clip_circle, Some(clip), out);
+            return;
+        }
+    }
+
     let target_w = get_child_widget_for_quad(w, qx, qy, qw, qh);
     let radii = target_w.corner_radii();
     if radii.top_left <= 0.1 && radii.top_right <= 0.1 && radii.bottom_right <= 0.1 && radii.bottom_left <= 0.1 {
@@ -1223,6 +1241,10 @@ pub trait Application: Sized + 'static {
         None
     }
 
+    fn ui_context_mut(&mut self) -> Option<&mut crate::context::UiContext> {
+        None
+    }
+
     fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
         if let Some(ctx) = self.ui_context() {
             ctx.is_movable_backplate_at(px, py)
@@ -1369,6 +1391,8 @@ pub struct EngineState<A: Application> {
     pub first_configure_received: bool,
     pub ctrl_pressed: bool,
     pub shift_pressed: bool,
+    pub alt_pressed: bool,
+    pub logo_pressed: bool,
     pub pressed_key: Option<PressedKey>,
     pub sender: calloop::channel::Sender<A::Message>,
     pub active_popup: Option<ActivePopup>,
@@ -2274,6 +2298,8 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
     ) {
         self.ctrl_pressed = modifiers.ctrl;
         self.shift_pressed = modifiers.shift;
+        self.alt_pressed = modifiers.alt;
+        self.logo_pressed = modifiers.logo;
     }
 
     fn update_repeat_info(
@@ -2310,6 +2336,10 @@ impl<A: Application> EngineState<A> {
             xkeysym::Keysym::Page_Down => Key::Named(NamedKey::PageDown),
             xkeysym::Keysym::Home => Key::Named(NamedKey::Home),
             xkeysym::Keysym::End => Key::Named(NamedKey::End),
+            xkeysym::Keysym::Super_L | xkeysym::Keysym::Super_R => Key::Named(NamedKey::Super),
+            xkeysym::Keysym::Alt_L | xkeysym::Keysym::Alt_R => Key::Named(NamedKey::Alt),
+            xkeysym::Keysym::Control_L | xkeysym::Keysym::Control_R => Key::Named(NamedKey::Control),
+            xkeysym::Keysym::Shift_L | xkeysym::Keysym::Shift_R => Key::Named(NamedKey::Shift),
             _ => {
                 if let Some(ref text) = event.utf8 {
                     Key::Character(text.clone())
@@ -2347,6 +2377,13 @@ impl<A: Application> EngineState<A> {
                     self.pressed_key = None;
                 }
             }
+        }
+
+        if let Some(ctx) = self.inner.ui_context_mut() {
+            ctx.ctrl_pressed = self.ctrl_pressed;
+            ctx.shift_pressed = self.shift_pressed;
+            ctx.alt_pressed = self.alt_pressed;
+            ctx.logo_pressed = self.logo_pressed;
         }
 
         let mut rebuild = false;
@@ -2494,6 +2531,8 @@ pub fn run<A: Application>() {
         first_configure_received: false,
         ctrl_pressed: false,
         shift_pressed: false,
+        alt_pressed: false,
+        logo_pressed: false,
         pressed_key: None,
         sender,
         active_popup: None,
@@ -2594,6 +2633,14 @@ pub fn run<A: Application>() {
                         ctrl: engine_state.ctrl_pressed,
                         shift: engine_state.shift_pressed,
                     };
+
+                    if let Some(ctx) = engine_state.inner.ui_context_mut() {
+                        ctx.ctrl_pressed = engine_state.ctrl_pressed;
+                        ctx.shift_pressed = engine_state.shift_pressed;
+                        ctx.alt_pressed = engine_state.alt_pressed;
+                        ctx.logo_pressed = engine_state.logo_pressed;
+                    }
+
                     let mut key_rebuild = false;
                     if let Some(msg) = engine_state.inner.handle_key_input(&custom_event, &mut key_rebuild) {
                         let mut update_rebuild = false;

@@ -544,6 +544,8 @@ impl Element for TreeList {
                                 } else {
                                     Some("rgb")
                                 }
+                            } else if name == "key" || name == "keybind" || name == "shortcut" || name.ends_with("_key") || name.ends_with(".key") || name.ends_with(".keybind") || name.ends_with(".shortcut") {
+                                Some("keybind")
                             } else if name == "font" || name.ends_with("_font") || name.ends_with(".font") {
                                 Some("font")
                             } else {
@@ -971,5 +973,22 @@ mod tests {
             println!("Quad {}: {:?}", i, q);
         }
         assert!(quads.len() > 1, "Should have more than 1 quad!");
+    }
+
+    #[test]
+    fn test_keybind_label() {
+        let mut tree_list = TreeList::new();
+        tree_list.set_rect(10.0, 52.0, 380.0, 500.0);
+        tree_list.set_flat_keys(vec![
+            ("input.key_bindings[0].key".to_string(), serde_json::Value::String("super+q".to_string()))
+        ]);
+        
+        let labels = tree_list.text_labels();
+        for label in &labels {
+            println!("TEST LABEL: {:?}", label);
+        }
+        
+        let has_keybind_label = labels.iter().any(|l| l.text == "(keybind)");
+        assert!(has_keybind_label, "Should have (keybind) label!");
     }
 }

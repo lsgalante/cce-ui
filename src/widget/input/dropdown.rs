@@ -62,29 +62,44 @@ impl Dropdown {
         changed
     }
 
+    pub fn popover_width(&self) -> f32 {
+        let mut w = self.base.w;
+        let font_setting = crate::layout::dropdown_font();
+        let (font_family, font_size_opt) = crate::layout::parse_font_string(&font_setting);
+        let font_size = font_size_opt.unwrap_or(12.0);
+        for opt in &self.options {
+            let opt_w = crate::widget::display::measure_text_width(opt, &font_family, font_size) + 32.0;
+            if opt_w > w {
+                w = opt_w;
+            }
+        }
+        w
+    }
+
     pub fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
         if !self.open { return; }
         
         let dy = self.base.y + self.base.h;
         let dh = self.options.len() as f32 * 24.0;
+        let pw = self.popover_width();
         
         // 1. Soft layered drop shadows
-        pc.rect([0.02, 0.02, 0.05, 0.15], self.base.x + 1.0, dy + 1.0, self.base.w, dh);
-        pc.rect([0.02, 0.02, 0.05, 0.08], self.base.x + 3.0, dy + 3.0, self.base.w, dh);
-        pc.rect([0.02, 0.02, 0.05, 0.04], self.base.x + 5.0, dy + 5.0, self.base.w, dh);
+        pc.rect([0.02, 0.02, 0.05, 0.15], self.base.x + 1.0, dy + 1.0, pw, dh);
+        pc.rect([0.02, 0.02, 0.05, 0.08], self.base.x + 3.0, dy + 3.0, pw, dh);
+        pc.rect([0.02, 0.02, 0.05, 0.04], self.base.x + 5.0, dy + 5.0, pw, dh);
 
         let theme = colors::active_theme();
 
         // 2. High-contrast premium outer border
-        pc.rect(theme.surface_border, self.base.x, dy, self.base.w, dh);
+        pc.rect(theme.surface_border, self.base.x, dy, pw, dh);
         
         // 3. Frosted glass background
-        pc.rect(theme.surface_bg, self.base.x + 1.0, dy + 1.0, self.base.w - 2.0, dh - 2.0); // bg
+        pc.rect(theme.surface_bg, self.base.x + 1.0, dy + 1.0, pw - 2.0, dh - 2.0); // bg
         
         if let Some(h_idx) = self.hovered_item {
             let iy = dy + h_idx as f32 * 24.0;
             // 4. Vibrantly colored translucent selection highlight
-            pc.rect(theme.primary_accent, self.base.x + 2.0, iy + 2.0, self.base.w - 4.0, 20.0);
+            pc.rect(theme.primary_accent, self.base.x + 2.0, iy + 2.0, pw - 4.0, 20.0);
         }
         
         for (idx, opt) in self.options.iter().enumerate() {
@@ -104,7 +119,7 @@ impl Dropdown {
                 1.0,
             ];
             
-            let bounds = Some([self.base.x, dy, self.base.x + self.base.w, dy + dh]);
+            let bounds = Some([self.base.x, dy, self.base.x + pw, dy + dh]);
             if let Some(ref font) = self.widget_font() {
                 pc.text_with_font_and_bounds(
                     opt,
@@ -209,8 +224,9 @@ impl Element for Dropdown {
         if self.open {
             let dy = y + h;
             let dh = self.options.len() as f32 * 24.0;
+            let pw = self.popover_width();
             let hit_trigger = px >= hx && px <= hx + hw && py >= y && py <= y + h;
-            let hit_popover = px >= x && px <= x + w && py >= dy && py <= dy + dh;
+            let hit_popover = px >= x && px <= x + pw && py >= dy && py <= dy + dh;
             hit_trigger || hit_popover
         } else {
             px >= hx && px <= hx + hw && py >= y && py <= y + h
@@ -225,10 +241,11 @@ impl Element for Dropdown {
         self.hovered_item = None;
 
         if self.open {
-            let (x, y, w, h) = self.rect();
+            let (x, y, _, h) = self.rect();
             let dy = y + h;
             let dh = self.options.len() as f32 * 24.0;
-            if px >= x && px <= x + w && py >= dy && py <= dy + dh {
+            let pw = self.popover_width();
+            if px >= x && px <= x + pw && py >= dy && py <= dy + dh {
                 let idx = ((py - dy) / 24.0) as usize;
                 if idx < self.options.len() {
                     self.hovered_item = Some(idx);
@@ -251,9 +268,10 @@ impl Element for Dropdown {
         let (x, y, w, h) = self.rect();
         let dy = y + h;
         let dh = self.options.len() as f32 * 24.0;
+        let pw = self.popover_width();
 
         let inside_trigger = px >= x && px <= x + w && py >= y && py <= y + h;
-        let inside_popover = self.open && px >= x && px <= x + w && py >= dy && py <= dy + dh;
+        let inside_popover = self.open && px >= x && px <= x + pw && py >= dy && py <= dy + dh;
 
         if inside_popover {
             let idx = ((py - dy) / 24.0) as usize;
@@ -398,7 +416,7 @@ impl Element for Dropdown {
     fn take_click(&mut self) -> bool { self.take_change() }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
         if self.open {
-            Some((self.base.x, self.base.y + self.base.h, self.base.w, self.options.len() as f32 * 24.0))
+            Some((self.base.x, self.base.y + self.base.h, self.popover_width(), self.options.len() as f32 * 24.0))
         } else {
             None
         }

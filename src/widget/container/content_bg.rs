@@ -256,4 +256,5 @@ impl GraphController for ContentBg {
     fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
     fn take_pending_connection(&mut self) -> Option<(String, String)> { None }
     fn cancel_connecting(&mut self) {}
+    fn is_node_rect(&self, _qx: f32, _qy: f32, _qw: f32, _qh: f32) -> bool { false }
 }

@@ -48,6 +48,10 @@ pub enum NamedKey {
     PageDown,
     PageUp,
     Delete,
+    Control,
+    Shift,
+    Alt,
+    Super,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -669,7 +673,7 @@ pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, Canvas, get_font_db, ActiveThumb, FontSelector,
     ButtonStrip, MultiControl, InstancedControl, InstancedWidget, MultiControlRow,
-    KeybindsControl, KeybindRow
+    KeybindsControl, KeybindRow, KeybindRecorder
 };
 pub use self::container::{
     Container, ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
@@ -734,6 +738,7 @@ pub trait GraphController {
     fn set_show_network_grid(&mut self, show: bool);
     fn take_pending_connection(&mut self) -> Option<(String, String)>;
     fn cancel_connecting(&mut self);
+    fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool;
 }
 
 pub trait SpreadsheetController {

@@ -140,6 +140,21 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.backplate.corner_radius" => "backplate_corner_radius",
                 "style.surface.page.opacity" => "page_opacity",
                 "style.surface.page.margin" => "page_margin",
+                "style.surface.graph.cell_color" => "graph_cell_color",
+                "style.surface.graph.gap_color" => "graph_gap_color",
+                "style.surface.graph.opacity" => "graph_opacity",
+                "style.surface.graph.spacing_x" => "graph_spacing_x",
+                "style.surface.graph.spacing_y" => "graph_spacing_y",
+                "style.surface.graph.grid_snap" => "graph_grid_snap",
+                "style.surface.graph.blur" => "graph_blur",
+                "style.surface.graph.node.color" => "graph_node_color",
+                "style.surface.graph.node.selected_color" => "graph_node_selected_color",
+                "style.surface.graph.node.drag_color" => "graph_node_drag_color",
+                "style.surface.graph.node.corner_radius" => "graph_node_corner_radius",
+                "style.surface.graph.node.wire_color" => "graph_wire_color",
+                "style.surface.graph.node.wire_highlight_color" => "graph_wire_highlight_color",
+                "style.surface.graph.node.wire_size" => "graph_wire_size",
+                "style.surface.graph.node.wire_activation_radius" => "graph_wire_activation_radius",
                 
                 other => {
                     if let Some(rest) = other.strip_prefix("layout.") {
@@ -2434,6 +2449,90 @@ pub fn set_tree_corner_radius(radius: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("tree_corner_radius", radius);
+    }
+}
+
+pub fn graph_spacing_x() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_spacing_x").unwrap_or(150.0)
+}
+
+pub fn set_graph_spacing_x(spacing: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_spacing_x", spacing);
+    }
+}
+
+pub fn graph_spacing_y() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_spacing_y").unwrap_or(75.0)
+}
+
+pub fn set_graph_spacing_y(spacing: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_spacing_y", spacing);
+    }
+}
+
+pub fn graph_grid_snap() -> bool {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_grid_snap").unwrap_or(0.0) != 0.0
+}
+
+pub fn set_graph_grid_snap(snap: bool) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_grid_snap", if snap { 1.0 } else { 0.0 });
+    }
+}
+
+pub fn graph_blur() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_blur").unwrap_or(0.0)
+}
+
+pub fn set_graph_blur(blur: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_blur", blur);
+    }
+}
+
+pub fn graph_node_corner_radius() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_node_corner_radius").unwrap_or(4.0)
+}
+
+pub fn set_graph_node_corner_radius(radius: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_node_corner_radius", radius);
+    }
+}
+
+pub fn graph_wire_size() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_wire_size").unwrap_or(6.0)
+}
+
+pub fn set_graph_wire_size(size: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_wire_size", size);
+    }
+}
+
+pub fn graph_wire_activation_radius() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_wire_activation_radius").unwrap_or(9.0)
+}
+
+pub fn set_graph_wire_activation_radius(radius: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_wire_activation_radius", radius);
     }
 }
 
@@ -4995,6 +5094,52 @@ mod tests {
         let padding = spinbox_button_padding();
         println!("Parsed spinbox button padding: {}", padding);
         assert!(padding >= 0.0);
+    }
+
+    #[test]
+    fn test_graph_style_configuration() {
+        // Trigger load_colors_once first so it doesn't overwrite values later
+        let _ = crate::color::page_low_color();
+
+        set_graph_spacing_x(200.0);
+        set_graph_spacing_y(100.0);
+        set_graph_grid_snap(true);
+        set_graph_blur(0.8);
+        set_graph_node_corner_radius(8.0);
+        set_graph_wire_size(10.0);
+        set_graph_wire_activation_radius(15.0);
+
+        assert_eq!(graph_spacing_x(), 200.0);
+        assert_eq!(graph_spacing_y(), 100.0);
+        assert_eq!(graph_grid_snap(), true);
+        assert_eq!(graph_blur(), 0.8);
+        assert_eq!(graph_node_corner_radius(), 8.0);
+        assert_eq!(graph_wire_size(), 10.0);
+        assert_eq!(graph_wire_activation_radius(), 15.0);
+
+        crate::color::set_graph_cell_color([0.1, 0.2, 0.3]);
+        crate::color::set_graph_gap_color([0.4, 0.5, 0.6]);
+        crate::color::set_graph_node_color([0.7, 0.8, 0.9, 1.0]);
+        crate::color::set_graph_node_selected_color([0.9, 0.8, 0.7, 1.0]);
+        crate::color::set_graph_node_drag_color([0.5, 0.5, 0.5, 1.0]);
+        crate::color::set_node_color([0.7, 0.8, 0.9, 1.0]);
+        crate::color::set_node_selected_color([0.9, 0.8, 0.7, 1.0]);
+        crate::color::set_node_drag_color([0.5, 0.5, 0.5, 1.0]);
+        crate::color::set_graph_wire_color([0.1, 0.1, 0.1, 1.0]);
+        crate::color::set_graph_wire_highlight_color([0.2, 0.2, 0.2, 1.0]);
+
+        let cell_color = crate::color::graph_cell_color();
+        assert_eq!(cell_color, [0.1, 0.2, 0.3]);
+        let gap_color = crate::color::graph_gap_color();
+        assert_eq!(gap_color, [0.4, 0.5, 0.6]);
+        assert_eq!(crate::color::graph_node_color(), [0.7, 0.8, 0.9, 1.0]);
+        assert_eq!(crate::color::graph_node_selected_color(), [0.9, 0.8, 0.7, 1.0]);
+        assert_eq!(crate::color::graph_node_drag_color(), [0.5, 0.5, 0.5, 1.0]);
+        assert_eq!(crate::color::node_color(), [0.7, 0.8, 0.9, 1.0]);
+        assert_eq!(crate::color::node_selected_color(), [0.9, 0.8, 0.7, 1.0]);
+        assert_eq!(crate::color::node_drag_color(), [0.5, 0.5, 0.5, 1.0]);
+        assert_eq!(crate::color::graph_wire_color(), [0.1, 0.1, 0.1, 1.0]);
+        assert_eq!(crate::color::graph_wire_highlight_color(), [0.2, 0.2, 0.2, 1.0]);
     }
 }
 

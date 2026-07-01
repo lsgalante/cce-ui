@@ -67,6 +67,10 @@ pub struct UiContext {
     pub last_scroll_time: Option<std::time::Instant>,
     pub scroll_initiate_widget_id: Option<WidgetId>,
     pub scroll_gesture_new: bool,
+    pub ctrl_pressed: bool,
+    pub shift_pressed: bool,
+    pub alt_pressed: bool,
+    pub logo_pressed: bool,
 }
 
 impl UiContext {
@@ -92,6 +96,10 @@ impl UiContext {
             last_scroll_time: None,
             scroll_initiate_widget_id: None,
             scroll_gesture_new: false,
+            ctrl_pressed: false,
+            shift_pressed: false,
+            alt_pressed: false,
+            logo_pressed: false,
         }
     }
 

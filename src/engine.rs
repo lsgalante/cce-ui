@@ -7,5 +7,5 @@ pub use crate::backend::window_runner::{
     push_plate_bevel_vertices, widget_vertices, push_widget_vertices,
     extra_quad_vertices, push_extra_quad_vertices, extra_quad_vertices_clipped,
     push_extra_quad_vertices_clipped, circle_vertices, circle_border_vertices,
-    arc_background_vertices, push_arc_background_vertices,
+    arc_background_vertices, push_arc_background_vertices, push_plate_solid_border_vertices,
 };
