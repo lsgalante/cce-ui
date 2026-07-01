@@ -131,6 +131,7 @@ pub struct TreeList {
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub last_scroll_y: f32,
     pub scrollbar_activity_timer: f32,
+    pub deleted_key_path: Option<String>,
 }
 
 impl TreeList {
@@ -150,6 +151,7 @@ impl TreeList {
             children: Vec::new(),
             last_scroll_y: 0.0,
             scrollbar_activity_timer: 0.0,
+            deleted_key_path: None,
         }
     }
 
@@ -186,6 +188,10 @@ impl TreeList {
 
     pub fn take_clicked_item(&mut self) -> Option<TreeElement> {
         self.clicked_item.take()
+    }
+
+    pub fn take_deleted_key_path(&mut self) -> Option<String> {
+        self.deleted_key_path.take()
     }
 
     pub fn check_scroll_activity(&mut self, ctx: &mut UiContext) {
@@ -338,6 +344,7 @@ impl Element for TreeList {
                                 path.clone(),
                                 "Copy Key".to_string(),
                                 "Copy Value".to_string(),
+                                "Delete".to_string(),
                             ];
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
                             ctx.show_context_menu(px, py - scroll_offset, options, 1, self.as_ptr_mut());
@@ -771,6 +778,15 @@ impl Element for TreeList {
                     other => serde_json::to_string(other).unwrap_or_default(),
                 };
                 clipboard::copy_to_clipboard(&val_str);
+            }
+        }
+    }
+
+    fn delete_key(&mut self) {
+        if let Some(idx) = self.selected_key_idx {
+            if idx < self.flat_keys.len() {
+                let key_path = self.flat_keys[idx].0.clone();
+                self.deleted_key_path = Some(key_path);
             }
         }
     }

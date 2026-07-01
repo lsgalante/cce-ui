@@ -552,6 +552,9 @@ pub mod context_menu {
                                         "Copy Value" => {
                                             target.copy_value();
                                         }
+                                        "Delete" => {
+                                            target.delete_key();
+                                        }
                                         "Expand" => {
                                             target.expand_node();
                                         }

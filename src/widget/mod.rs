@@ -299,6 +299,7 @@ pub trait Element {
     fn select_all(&mut self) {}
     fn copy_key(&self) {}
     fn copy_value(&self) {}
+    fn delete_key(&mut self) {}
     fn expand_node(&mut self) {}
     fn collapse_node(&mut self) {}
     fn expand_all_nodes(&mut self) {}
