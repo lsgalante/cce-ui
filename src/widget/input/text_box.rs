@@ -38,6 +38,7 @@ pub struct TextBox {
     pub font_family: String,
     pub placeholder: Option<String>,
     pub editor_state: TextEditorState,
+    pub scroll_y: f32,
 }
 
 impl TextBox {
@@ -68,6 +69,7 @@ impl TextBox {
             font_family: "monospace".to_string(),
             placeholder: None,
             editor_state,
+            scroll_y: 0.0,
         }
     }
 
@@ -318,6 +320,44 @@ impl TextBox {
         self.all_selected = state.all_selected;
         self.sync_editor_state();
     }
+
+    pub fn clamp_scroll(&mut self) {
+        if !self.multiline {
+            self.scroll_y = 0.0;
+            return;
+        }
+        let char_width = self.font_size * 0.6;
+        let line_height = self.font_size * 1.333;
+        let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+        let (lines, _) = self.wrap_text(max_chars);
+        let content_h = lines.len() as f32 * line_height;
+        let max_scroll = (content_h - (self.base.h - 16.0)).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+    }
+
+    pub fn scroll_to_cursor(&mut self) {
+        if !self.multiline { return; }
+        let char_width = self.font_size * 0.6;
+        let line_height = self.font_size * 1.333;
+        let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+        let (_, index_map) = self.wrap_text(max_chars);
+        if index_map.is_empty() { return; }
+        
+        let cursor_idx = self.cursor_idx.min(index_map.len() - 1);
+        let (line_idx, _) = index_map[cursor_idx];
+        
+        let top = self.base.label_offset();
+        let line_y = top + 8.0 + (line_idx as f32 * line_height);
+        
+        let viewport_h = self.base.h - top - 16.0;
+        
+        if line_y < self.scroll_y + 10.0 {
+            self.scroll_y = (line_y - 20.0).max(0.0);
+        } else if line_y + line_height > self.scroll_y + viewport_h - 10.0 {
+            self.scroll_y = (line_y + line_height - viewport_h + 20.0).max(0.0);
+        }
+        self.clamp_scroll();
+    }
 }
 
 impl Default for TextBox {
@@ -340,6 +380,7 @@ impl Element for TextBox {
             self.edit_buffer = val_str;
             self.just_changed = true;
             self.sync_editor_state();
+            self.clamp_scroll();
             true
         } else {
             false
@@ -406,6 +447,7 @@ impl Element for TextBox {
             b.w = final_w;
             b.h = h;
         }
+        self.clamp_scroll();
     }
     fn set_row_rect(&mut self, x: f32, w: f32) {
         let final_w = if let Some(explicit_w) = self.width {
@@ -439,7 +481,7 @@ impl Element for TextBox {
                 let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
                 let (lines, index_map) = self.wrap_text(max_chars);
                 let top = self.base.label_offset();
-                let click_line = (((py - (self.base.y + top + 8.0)) / line_height).floor() as isize).max(0) as usize;
+                let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
                 let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
                 self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
             } else {
@@ -482,7 +524,7 @@ impl Element for TextBox {
             let line_height = self.font_size * 1.333;
             let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
             let (lines, index_map) = self.wrap_text(max_chars);
-            let click_line = (((py - (self.base.y + top + 8.0)) / line_height).floor() as isize).max(0) as usize;
+            let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
             let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
             self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
         } else {
@@ -532,7 +574,7 @@ impl Element for TextBox {
                         let line_height = self.font_size * 1.333;
                         let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
                         let (lines, index_map) = self.wrap_text(max_chars);
-                        let click_line = (((py - (self.base.y + top + 8.0)) / line_height).floor() as isize).max(0) as usize;
+                        let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
                         let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
                         self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
                     } else {
@@ -732,6 +774,7 @@ impl Element for TextBox {
             self.select_anchor = state.select_anchor;
             self.all_selected = state.all_selected;
             self.sync_editor_state();
+            self.scroll_to_cursor();
         }
         
         handled
@@ -784,6 +827,9 @@ impl Element for TextBox {
                 let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
                 let (_lines, index_map) = self.wrap_text(max_chars);
 
+                let view_top = self.base.y + top;
+                let view_bottom = self.base.y + self.base.h;
+
                 if start != end {
                     let start_pos = index_map[start.min(index_map.len() - 1)];
                     let end_pos = index_map[end.min(index_map.len() - 1)];
@@ -807,14 +853,18 @@ impl Element for TextBox {
                         if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
                             let highlight_x = self.base.x + 8.0 + (sc as f32 * char_width);
                             let highlight_w = (ec - sc + 1) as f32 * char_width;
-                            let highlight_y = self.base.y + top + 8.0 + (line_idx as f32 * line_height);
-                            quads.push((
-                                highlight_x,
-                                highlight_y,
-                                highlight_w,
-                                line_height,
-                                highlight_color,
-                            ));
+                            let highlight_y = self.base.y + top + 8.0 + (line_idx as f32 * line_height) - self.scroll_y;
+                            let clipped_y = highlight_y.max(view_top);
+                            let clipped_bottom = (highlight_y + line_height).min(view_bottom);
+                            if clipped_y < clipped_bottom {
+                                quads.push((
+                                    highlight_x,
+                                    clipped_y,
+                                    highlight_w,
+                                    clipped_bottom - clipped_y,
+                                    highlight_color,
+                                ));
+                            }
                         }
                     }
                 }
@@ -823,10 +873,15 @@ impl Element for TextBox {
                     let caret_h = self.font_size * 1.15;
                     let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
                     let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width);
-                    let cursor_y = self.base.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0;
-                    quads.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+                    let cursor_y = self.base.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
+                    let clipped_y = cursor_y.max(view_top);
+                    let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
+                    if clipped_y < clipped_bottom {
+                        quads.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, cursor_color));
+                    }
                 }
-            } else {
+            }
+ else {
                 let caret_h = self.font_size * 1.15;
                 if start != end {
                     let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
@@ -923,7 +978,7 @@ impl Element for TextBox {
                 labels.push(TextLabel {
                     text: line_text.clone(),
                     x: self.base.x + 8.0,
-                    y: self.base.y + top + 8.0 + (line_idx as f32 * line_height) + (line_height - self.font_size) / 2.0,
+                    y: self.base.y + top + 8.0 + (line_idx as f32 * line_height) + (line_height - self.font_size) / 2.0 - self.scroll_y,
                     font_size: self.font_size,
                     color: label_color,
                 });
@@ -949,6 +1004,29 @@ impl Element for TextBox {
         let font = self.widget_font();
         let bounds = Some([self.base.x, self.base.y, self.base.x + self.base.w, self.base.y + self.base.h]);
         self.text_labels().into_iter().map(|l| (l, font.clone(), bounds)).collect()
+    }
+
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, _px: f32, _py: f32, ctx: &mut UiContext) -> bool {
+        if self.disabled || !self.multiline { return false; }
+        let char_width = self.font_size * 0.6;
+        let line_height = self.font_size * 1.333;
+        let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+        let (lines, _) = self.wrap_text(max_chars);
+        let content_h = lines.len() as f32 * line_height;
+        let max_scroll = (content_h - (self.base.h - 16.0)).max(0.0);
+        
+        let scroll_amt = match *delta {
+            MouseScrollDelta::LineDelta(_, dy) => -dy * line_height * 2.0,
+            MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+        };
+        let old_scroll = self.scroll_y;
+        self.scroll_y = (self.scroll_y + scroll_amt).clamp(0.0, max_scroll);
+        if old_scroll != self.scroll_y {
+            self.mark_dirty(ctx);
+            true
+        } else {
+            false
+        }
     }
 }
 
