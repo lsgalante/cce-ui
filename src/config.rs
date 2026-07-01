@@ -32,7 +32,42 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
             }
         }
 
-        let val = if let Some(children) = node.children() {
+        let val = if name == "key_bindings" {
+            if let Some(children) = node.children() {
+                let mut binds = Vec::new();
+                for child in children.nodes() {
+                    let mut child_map = serde_json::Map::new();
+                    for entry in child.entries() {
+                        if let Some(prop_name) = entry.name() {
+                            let j_val = match entry.value() {
+                                kdl::KdlValue::Bool(b) => serde_json::Value::Bool(*b),
+                                kdl::KdlValue::Base2(i) |
+                                kdl::KdlValue::Base8(i) |
+                                kdl::KdlValue::Base10(i) |
+                                kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
+                                kdl::KdlValue::Base10Float(f) => {
+                                    if let Some(num) = serde_json::Number::from_f64(*f) {
+                                        serde_json::Value::Number(num)
+                                    } else {
+                                        serde_json::Value::Null
+                                    }
+                                }
+                                kdl::KdlValue::String(s) |
+                                kdl::KdlValue::RawString(s) => serde_json::Value::String(s.clone()),
+                                kdl::KdlValue::Null => serde_json::Value::Null,
+                            };
+                            child_map.insert(prop_name.value().to_string(), j_val);
+                        }
+                    }
+                    binds.push(serde_json::Value::Object(child_map));
+                }
+                serde_json::Value::Array(binds)
+            } else if has_props {
+                serde_json::Value::Object(node_map)
+            } else {
+                serde_json::Value::Null
+            }
+        } else if let Some(children) = node.children() {
             kdl_to_json(children)
         } else if has_props {
             serde_json::Value::Object(node_map)
@@ -61,17 +96,40 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
         if let Some(existing) = map.remove(&name) {
             match existing {
                 serde_json::Value::Array(mut arr) => {
-                    arr.push(val);
+                    match val {
+                        serde_json::Value::Array(new_arr) => {
+                            arr.extend(new_arr);
+                        }
+                        _ => {
+                            arr.push(val);
+                        }
+                    }
                     map.insert(name, serde_json::Value::Array(arr));
                 }
                 other => {
-                    map.insert(name, serde_json::Value::Array(vec![other, val]));
+                    match val {
+                        serde_json::Value::Array(new_arr) => {
+                            let mut combined = vec![other];
+                            combined.extend(new_arr);
+                            map.insert(name, serde_json::Value::Array(combined));
+                        }
+                        _ => {
+                            map.insert(name, serde_json::Value::Array(vec![other, val]));
+                        }
+                    }
                 }
             }
         } else {
             let list_names = ["key_bindings", "pointer_bind", "gesture_bind", "mode_rule", "tag_layout", "startup", "device"];
             if list_names.contains(&name.as_str()) {
-                map.insert(name, serde_json::Value::Array(vec![val]));
+                match val {
+                    serde_json::Value::Array(_) => {
+                        map.insert(name, val);
+                    }
+                    _ => {
+                        map.insert(name, serde_json::Value::Array(vec![val]));
+                    }
+                }
             } else {
                 map.insert(name, val);
             }
@@ -336,7 +394,8 @@ pub fn write_keybindings_to_kdl(path: &str, keybinds: &[serde_json::Value]) -> b
     // Remove all existing key_bindings nodes
     doc.nodes_mut().retain(|n| n.name().value() != "key_bindings");
 
-    // Add new key_bindings nodes
+    // Construct nested key_bindings block
+    let mut block_str = "key_bindings {\n".to_string();
     for v in keybinds {
         if let Some(obj) = v.as_object() {
             let mods = obj.get("mods").and_then(|m| m.as_str()).unwrap_or("");
@@ -344,25 +403,26 @@ pub fn write_keybindings_to_kdl(path: &str, keybinds: &[serde_json::Value]) -> b
             let action = obj.get("action").and_then(|a| a.as_str()).unwrap_or("");
             let command = obj.get("command").and_then(|c| c.as_str()).unwrap_or("");
 
-            let mut node_str = "key_bindings".to_string();
+            block_str.push_str("    bind");
             if !action.is_empty() {
-                node_str.push_str(&format!(" action={:?}", action));
+                block_str.push_str(&format!(" action={:?}", action));
             }
             if !command.is_empty() {
-                node_str.push_str(&format!(" command={:?}", command));
+                block_str.push_str(&format!(" command={:?}", command));
             }
             if !key.is_empty() {
-                node_str.push_str(&format!(" key={:?}", key));
+                block_str.push_str(&format!(" key={:?}", key));
             }
             if !mods.is_empty() {
-                node_str.push_str(&format!(" mods={:?}", mods));
+                block_str.push_str(&format!(" mods={:?}", mods));
             }
-            node_str.push('\n');
-
-            if let Ok(node) = node_str.parse::<kdl::KdlNode>() {
-                doc.nodes_mut().push(node);
-            }
+            block_str.push('\n');
         }
+    }
+    block_str.push_str("}\n");
+
+    if let Ok(node) = block_str.parse::<kdl::KdlNode>() {
+        doc.nodes_mut().push(node);
     }
 
     let updated_str = doc.to_string();

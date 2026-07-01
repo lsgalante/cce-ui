@@ -92,7 +92,6 @@ impl TextBox {
         self.text_color = color;
         self
     }
-
     pub fn with_font_size(mut self, size: f32) -> Self {
         self.font_size = size;
         self
@@ -101,6 +100,14 @@ impl TextBox {
     pub fn with_font_family(mut self, family: String) -> Self {
         self.font_family = family;
         self
+    }
+
+    pub fn char_width(&self) -> f32 {
+        crate::widget::display::measure_text_width("M", &self.font_family, self.font_size)
+    }
+
+    pub fn line_height(&self) -> f32 {
+        self.font_size * 1.333
     }
 
     pub fn wrap_text(&self, max_chars_per_line: usize) -> (Vec<String>, Vec<(usize, usize)>) {
@@ -331,8 +338,8 @@ impl TextBox {
             self.scroll_y = 0.0;
             return;
         }
-        let char_width = self.font_size * 0.6;
-        let line_height = self.font_size * 1.333;
+        let char_width = self.char_width();
+        let line_height = self.line_height();
         let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
         let (lines, _) = self.wrap_text(max_chars);
         let content_h = lines.len() as f32 * line_height;
@@ -342,8 +349,8 @@ impl TextBox {
 
     pub fn scroll_to_cursor(&mut self) {
         if !self.multiline { return; }
-        let char_width = self.font_size * 0.6;
-        let line_height = self.font_size * 1.333;
+        let char_width = self.char_width();
+        let line_height = self.line_height();
         let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
         let (_, index_map) = self.wrap_text(max_chars);
         if index_map.is_empty() { return; }
@@ -493,9 +500,9 @@ impl Element for TextBox {
         }
         let mut changed = false;
         if self.dragging && self.editing {
-            let char_width = self.font_size * 0.6;
+            let char_width = self.char_width();
             let drag_idx = if self.multiline {
-                let line_height = self.font_size * 1.333;
+                let line_height = self.line_height();
                 let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
                 let (lines, index_map) = self.wrap_text(max_chars);
                 let top = self.base.label_offset();
@@ -536,10 +543,10 @@ impl Element for TextBox {
 
     fn drag_update(&mut self, px: f32, py: f32) -> bool {
         if self.disabled || !self.editing { return false; }
-        let char_width = self.font_size * 0.6;
+        let char_width = self.char_width();
         let top = self.base.label_offset();
         let drag_idx = if self.multiline {
-            let line_height = self.font_size * 1.333;
+            let line_height = self.line_height();
             let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
             let (lines, index_map) = self.wrap_text(max_chars);
             let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
@@ -586,10 +593,10 @@ impl Element for TextBox {
                 if !self.editing {
                     self.focus();
                 } else {
-                    let char_width = self.font_size * 0.6;
+                    let char_width = self.char_width();
                     let top = self.base.label_offset();
                     let idx = if self.multiline {
-                        let line_height = self.font_size * 1.333;
+                        let line_height = self.line_height();
                         let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
                         let (lines, index_map) = self.wrap_text(max_chars);
                         let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
@@ -681,7 +688,7 @@ impl Element for TextBox {
                     state.clear_selection();
                 }
                 if self.multiline {
-                    let char_width = self.font_size * 0.6;
+                    let char_width = self.char_width();
                     let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
                     let (lines, index_map) = self.wrap_text(max_chars);
                     let (cursor_l, cursor_c) = index_map[state.cursor_idx.min(index_map.len() - 1)];
@@ -706,7 +713,7 @@ impl Element for TextBox {
                     state.clear_selection();
                 }
                 if self.multiline {
-                    let char_width = self.font_size * 0.6;
+                    let char_width = self.char_width();
                     let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
                     let (lines, index_map) = self.wrap_text(max_chars);
                     let (cursor_l, cursor_c) = index_map[state.cursor_idx.min(index_map.len() - 1)];
@@ -834,8 +841,8 @@ impl Element for TextBox {
         }
 
         if self.editing || self.select_anchor.is_some() {
-            let char_width = self.font_size * 0.6;
-            let line_height = self.font_size * 1.333;
+            let char_width = self.char_width();
+            let line_height = self.line_height();
             
             let highlight_color = [0.20, 0.50, 0.85, 0.3];
             let cursor_color = if self.draw_bg_border {
@@ -967,8 +974,8 @@ impl Element for TextBox {
         }
 
         if self.editing || self.select_anchor.is_some() {
-            let char_width = self.font_size * 0.6;
-            let line_height = self.font_size * 1.333;
+            let char_width = self.char_width();
+            let line_height = self.line_height();
             
             let highlight_color = [0.20, 0.50, 0.85, 0.3];
             let cursor_color = if self.draw_bg_border {
@@ -1103,8 +1110,8 @@ impl Element for TextBox {
         };
 
         if self.multiline {
-            let char_width = self.font_size * 0.6;
-            let line_height = self.font_size * 1.333;
+            let char_width = self.char_width();
+            let line_height = self.line_height();
             let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
             let (lines, _) = self.wrap_text(max_chars);
             let lines_to_draw = if is_placeholder {
@@ -1164,8 +1171,8 @@ impl Element for TextBox {
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, _px: f32, _py: f32, ctx: &mut UiContext) -> bool {
         if self.disabled || !self.multiline { return false; }
-        let char_width = self.font_size * 0.6;
-        let line_height = self.font_size * 1.333;
+        let char_width = self.char_width();
+        let line_height = self.line_height();
         let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
         let (lines, _) = self.wrap_text(max_chars);
         let content_h = lines.len() as f32 * line_height;
@@ -1264,16 +1271,18 @@ mod tests {
         assert_eq!(tb.cursor_idx, 11);
         assert_eq!(tb.select_anchor, Some(0));
 
-        // 2. Click inside placed caret at index 5 (x = 10 + 8 + 5 * 7.2 = 54)
-        let pressed_inside = tb.mouse_input(MouseButton::Left, ElementState::Pressed, 54.0, 20.0, &mut dummy);
+        // 2. Click inside placed caret at index 5
+        let click_x5 = 10.0 + 8.0 + 5.0 * tb.char_width();
+        let pressed_inside = tb.mouse_input(MouseButton::Left, ElementState::Pressed, click_x5, 20.0, &mut dummy);
         assert!(pressed_inside);
         assert_eq!(tb.cursor_idx, 5);
         assert_eq!(tb.select_anchor, Some(5));
         assert!(!tb.all_selected);
 
-        // 3. Drag to index 11 (x = 10 + 8 + 11 * 7.2 = 97.2)
-        tb.drag_begin(54.0, 20.0);
-        let updated = tb.drag_update(97.2, 20.0);
+        // 3. Drag to index 11
+        let drag_x11 = 10.0 + 8.0 + 11.0 * tb.char_width();
+        tb.drag_begin(click_x5, 20.0);
+        let updated = tb.drag_update(drag_x11, 20.0);
         assert!(updated);
         assert_eq!(tb.cursor_idx, 11);
         assert_eq!(tb.select_anchor, Some(5));
