@@ -39,6 +39,7 @@ pub struct TextBox {
     pub placeholder: Option<String>,
     pub editor_state: TextEditorState,
     pub scroll_y: f32,
+    pub scroll_x: f32,
     default_font_size: f32,
     default_font_family: String,
 }
@@ -73,6 +74,7 @@ impl TextBox {
             placeholder: None,
             editor_state,
             scroll_y: 0.0,
+            scroll_x: 0.0,
             default_font_size: style_size,
             default_font_family: style_family,
         }
@@ -116,6 +118,25 @@ impl TextBox {
         let mut lines = Vec::new();
         let mut current_line = Vec::new();
         let mut index_map = vec![(0, 0); chars.len() + 1];
+        
+        if !crate::layout::textbox_line_wrap() {
+            let mut i = 0;
+            while i < chars.len() {
+                let ch = chars[i];
+                if ch == '\n' {
+                    index_map[i] = (lines.len(), current_line.len());
+                    lines.push(current_line.iter().collect::<String>());
+                    current_line.clear();
+                } else {
+                    current_line.push(ch);
+                    index_map[i] = (lines.len(), current_line.len() - 1);
+                }
+                i += 1;
+            }
+            index_map[chars.len()] = (lines.len(), current_line.len());
+            lines.push(current_line.iter().collect::<String>());
+            return (lines, index_map);
+        }
         
         let max_chars = max_chars_per_line.max(1);
         
@@ -334,39 +355,89 @@ impl TextBox {
     }
 
     pub fn clamp_scroll(&mut self) {
-        if !self.multiline {
-            self.scroll_y = 0.0;
-            return;
-        }
         let char_width = self.char_width();
         let line_height = self.line_height();
-        let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
-        let (lines, _) = self.wrap_text(max_chars);
-        let content_h = lines.len() as f32 * line_height;
-        let max_scroll = (content_h - (self.base.h - 16.0)).max(0.0);
-        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+        let max_chars = if self.multiline {
+            if crate::layout::textbox_line_wrap() {
+                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+            } else {
+                999999
+            }
+        } else {
+            999999
+        };
+        let (lines, _) = if self.multiline {
+            self.wrap_text(max_chars)
+        } else {
+            let buffer = if self.editing { &self.edit_buffer } else { &self.text };
+            (vec![buffer.clone()], vec![(0, 0); buffer.chars().count() + 1])
+        };
+
+        if self.multiline {
+            let content_h = lines.len() as f32 * line_height;
+            let max_scroll = (content_h - (self.base.h - 16.0)).max(0.0);
+            self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+        } else {
+            self.scroll_y = 0.0;
+        }
+
+        if !crate::layout::textbox_line_wrap() {
+            let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+            let content_w = max_line_len as f32 * char_width;
+            let max_scroll_x = (content_w - (self.base.w - 16.0)).max(0.0);
+            self.scroll_x = self.scroll_x.clamp(0.0, max_scroll_x);
+        } else {
+            self.scroll_x = 0.0;
+        }
     }
 
     pub fn scroll_to_cursor(&mut self) {
-        if !self.multiline { return; }
         let char_width = self.char_width();
         let line_height = self.line_height();
-        let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
-        let (_, index_map) = self.wrap_text(max_chars);
+        let max_chars = if self.multiline {
+            if crate::layout::textbox_line_wrap() {
+                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+            } else {
+                999999
+            }
+        } else {
+            999999
+        };
+        let (_lines, index_map) = if self.multiline {
+            self.wrap_text(max_chars)
+        } else {
+            let buffer = if self.editing { &self.edit_buffer } else { &self.text };
+            let mut m = Vec::new();
+            for i in 0..=buffer.chars().count() {
+                m.push((0, i));
+            }
+            (vec![buffer.clone()], m)
+        };
         if index_map.is_empty() { return; }
         
         let cursor_idx = self.cursor_idx.min(index_map.len() - 1);
-        let (line_idx, _) = index_map[cursor_idx];
+        let (line_idx, col_idx) = index_map[cursor_idx];
         
         let top = self.base.label_offset();
-        let line_y = top + 8.0 + (line_idx as f32 * line_height);
-        
+        let viewport_w = self.base.w - 16.0;
         let viewport_h = self.base.h - top - 16.0;
         
-        if line_y < self.scroll_y + 10.0 {
-            self.scroll_y = (line_y - 20.0).max(0.0);
-        } else if line_y + line_height > self.scroll_y + viewport_h - 10.0 {
-            self.scroll_y = (line_y + line_height - viewport_h + 20.0).max(0.0);
+        if self.multiline {
+            let line_y = top + 8.0 + (line_idx as f32 * line_height);
+            if line_y < self.scroll_y + 10.0 {
+                self.scroll_y = (line_y - 20.0).max(0.0);
+            } else if line_y + line_height > self.scroll_y + viewport_h - 10.0 {
+                self.scroll_y = (line_y + line_height - viewport_h + 20.0).max(0.0);
+            }
+        }
+        
+        if !crate::layout::textbox_line_wrap() {
+            let cursor_x = col_idx as f32 * char_width;
+            if cursor_x < self.scroll_x + 10.0 {
+                self.scroll_x = (cursor_x - 20.0).max(0.0);
+            } else if cursor_x + char_width > self.scroll_x + viewport_w - 10.0 {
+                self.scroll_x = (cursor_x + char_width - viewport_w + 20.0).max(0.0);
+            }
         }
         self.clamp_scroll();
     }
@@ -503,14 +574,18 @@ impl Element for TextBox {
             let char_width = self.char_width();
             let drag_idx = if self.multiline {
                 let line_height = self.line_height();
-                let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                let max_chars = if crate::layout::textbox_line_wrap() {
+                    (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+                } else {
+                    999999
+                };
                 let (lines, index_map) = self.wrap_text(max_chars);
                 let top = self.base.label_offset();
                 let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
-                let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
+                let click_col = (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
                 self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
             } else {
-                (((px - (self.base.x + 8.0)) / char_width).round() as isize)
+                (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize)
                     .max(0)
                     .min(self.edit_buffer.chars().count() as isize) as usize
             };
@@ -547,13 +622,17 @@ impl Element for TextBox {
         let top = self.base.label_offset();
         let drag_idx = if self.multiline {
             let line_height = self.line_height();
-            let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+            let max_chars = if crate::layout::textbox_line_wrap() {
+                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+            } else {
+                999999
+            };
             let (lines, index_map) = self.wrap_text(max_chars);
             let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
-            let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
+            let click_col = (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
             self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
         } else {
-            (((px - (self.base.x + 8.0)) / char_width).round() as isize)
+            (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize)
                 .max(0)
                 .min(self.edit_buffer.chars().count() as isize) as usize
         };
@@ -597,13 +676,17 @@ impl Element for TextBox {
                     let top = self.base.label_offset();
                     let idx = if self.multiline {
                         let line_height = self.line_height();
-                        let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                        let max_chars = if crate::layout::textbox_line_wrap() {
+                            (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+                        } else {
+                            999999
+                        };
                         let (lines, index_map) = self.wrap_text(max_chars);
                         let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
-                        let click_col = (((px - (self.base.x + 8.0)) / char_width).round() as isize).max(0) as usize;
+                        let click_col = (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
                         self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
                     } else {
-                        (((px - (self.base.x + 8.0)) / char_width).round() as isize)
+                        (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize)
                             .max(0)
                             .min(self.edit_buffer.chars().count() as isize) as usize
                     };
@@ -855,7 +938,11 @@ impl Element for TextBox {
             let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
 
             if self.multiline {
-                let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                let max_chars = if crate::layout::textbox_line_wrap() {
+                    (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+                } else {
+                    999999
+                };
                 let (_lines, index_map) = self.wrap_text(max_chars);
 
                 let view_top = self.base.y + top;
@@ -882,16 +969,18 @@ impl Element for TextBox {
                             }
                         }
                         if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
-                            let highlight_x = self.base.x + 8.0 + (sc as f32 * char_width);
+                            let highlight_x = self.base.x + 8.0 + (sc as f32 * char_width) - self.scroll_x;
                             let highlight_w = (ec - sc + 1) as f32 * char_width;
                             let highlight_y = self.base.y + top + 8.0 + (line_idx as f32 * line_height) - self.scroll_y;
                             let clipped_y = highlight_y.max(view_top);
                             let clipped_bottom = (highlight_y + line_height).min(view_bottom);
-                            if clipped_y < clipped_bottom {
+                            let h_left = highlight_x.max(self.base.x + 8.0);
+                            let h_right = (highlight_x + highlight_w).min(self.base.x + self.base.w - 8.0);
+                            if h_left < h_right && clipped_y < clipped_bottom {
                                 quads.push((
-                                    highlight_x,
+                                    h_left,
                                     clipped_y,
-                                    highlight_w,
+                                    h_right - h_left,
                                     clipped_bottom - clipped_y,
                                     highlight_color,
                                 ));
@@ -903,35 +992,39 @@ impl Element for TextBox {
                 if self.editing {
                     let caret_h = self.font_size * 1.15;
                     let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
-                    let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width);
+                    let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width) - self.scroll_x;
                     let cursor_y = self.base.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
                     let clipped_y = cursor_y.max(view_top);
                     let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
-                    if clipped_y < clipped_bottom {
-                        quads.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, cursor_color));
+                    if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
+                        if clipped_y < clipped_bottom {
+                            quads.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, cursor_color));
+                        }
                     }
                 }
             } else {
                 let caret_h = self.font_size * 1.15;
                 if start != end {
-                    let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
-                    let max_x = self.base.x + self.base.w - 6.0;
-                    let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
-                    quads.push((
-                        highlight_x,
-                        crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
-                        highlight_w,
-                        crate::layout::line_height(self.font_size),
-                        highlight_color,
-                    ));
+                    let highlight_x = self.base.x + 8.0 + (start as f32 * char_width) - self.scroll_x;
+                    let h_left = highlight_x.max(self.base.x + 8.0);
+                    let h_right = (highlight_x + ((end - start) as f32 * char_width)).min(self.base.x + self.base.w - 8.0);
+                    if h_left < h_right {
+                        quads.push((
+                            h_left,
+                            crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
+                            h_right - h_left,
+                            crate::layout::line_height(self.font_size),
+                            highlight_color,
+                        ));
+                    }
                 }
 
                 if self.editing {
-                    let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width);
-                    let max_cursor_x = self.base.x + self.base.w - 6.0;
-                    let final_cursor_x = cursor_x.min(max_cursor_x);
-                    let cursor_y = self.base.y + top + (visual_h - caret_h) / 2.0;
-                    quads.push((final_cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+                    let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width) - self.scroll_x;
+                    if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
+                        let cursor_y = self.base.y + top + (visual_h - caret_h) / 2.0;
+                        quads.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
+                    }
                 }
             }
         }
@@ -988,7 +1081,11 @@ impl Element for TextBox {
             let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
 
             if self.multiline {
-                let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+                let max_chars = if crate::layout::textbox_line_wrap() {
+                    (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+                } else {
+                    999999
+                };
                 let (_lines, index_map) = self.wrap_text(max_chars);
 
                 let view_top = self.base.y + top;
@@ -1015,13 +1112,15 @@ impl Element for TextBox {
                             }
                         }
                         if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
-                            let highlight_x = self.base.x + 8.0 + (sc as f32 * char_width);
+                            let highlight_x = self.base.x + 8.0 + (sc as f32 * char_width) - self.scroll_x;
                             let highlight_w = (ec - sc + 1) as f32 * char_width;
                             let highlight_y = self.base.y + top + 8.0 + (line_idx as f32 * line_height) - self.scroll_y;
                             let clipped_y = highlight_y.max(view_top);
                             let clipped_bottom = (highlight_y + line_height).min(view_bottom);
-                            if clipped_y < clipped_bottom {
-                                quads.push((highlight_x, clipped_y, highlight_w, clipped_bottom - clipped_y, 0.0, highlight_color, (false, false, false, false)));
+                            let h_left = highlight_x.max(self.base.x + 8.0);
+                            let h_right = (highlight_x + highlight_w).min(self.base.x + self.base.w - 8.0);
+                            if h_left < h_right && clipped_y < clipped_bottom {
+                                quads.push((h_left, clipped_y, h_right - h_left, clipped_bottom - clipped_y, 0.0, highlight_color, (false, false, false, false)));
                             }
                         }
                     }
@@ -1030,37 +1129,41 @@ impl Element for TextBox {
                 if self.editing {
                     let caret_h = self.font_size * 1.15;
                     let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
-                    let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width);
+                    let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width) - self.scroll_x;
                     let cursor_y = self.base.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
                     let clipped_y = cursor_y.max(view_top);
                     let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
-                    if clipped_y < clipped_bottom {
-                        quads.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, 0.0, cursor_color, (false, false, false, false)));
+                    if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
+                        if clipped_y < clipped_bottom {
+                            quads.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, 0.0, cursor_color, (false, false, false, false)));
+                        }
                     }
                 }
             } else {
                 let caret_h = self.font_size * 1.15;
                 if start != end {
-                    let highlight_x = self.base.x + 8.0 + (start as f32 * char_width);
-                    let max_x = self.base.x + self.base.w - 6.0;
-                    let highlight_w = ((end - start) as f32 * char_width).min(max_x - highlight_x).max(0.0);
-                    quads.push((
-                        highlight_x,
-                        crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
-                        highlight_w,
-                        crate::layout::line_height(self.font_size),
-                        0.0,
-                        highlight_color,
-                        (false, false, false, false),
-                    ));
+                    let highlight_x = self.base.x + 8.0 + (start as f32 * char_width) - self.scroll_x;
+                    let h_left = highlight_x.max(self.base.x + 8.0);
+                    let h_right = (highlight_x + ((end - start) as f32 * char_width)).min(self.base.x + self.base.w - 8.0);
+                    if h_left < h_right {
+                        quads.push((
+                            h_left,
+                            crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
+                            h_right - h_left,
+                            crate::layout::line_height(self.font_size),
+                            0.0,
+                            highlight_color,
+                            (false, false, false, false),
+                        ));
+                    }
                 }
 
                 if self.editing {
-                    let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width);
-                    let max_cursor_x = self.base.x + self.base.w - 6.0;
-                    let final_cursor_x = cursor_x.min(max_cursor_x);
-                    let cursor_y = self.base.y + top + (visual_h - caret_h) / 2.0;
-                    quads.push((final_cursor_x, cursor_y, 1.5, caret_h, 0.0, cursor_color, (false, false, false, false)));
+                    let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width) - self.scroll_x;
+                    if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
+                        let cursor_y = self.base.y + top + (visual_h - caret_h) / 2.0;
+                        quads.push((cursor_x, cursor_y, 1.5, caret_h, 0.0, cursor_color, (false, false, false, false)));
+                    }
                 }
             }
         }
@@ -1112,21 +1215,24 @@ impl Element for TextBox {
         if self.multiline {
             let char_width = self.char_width();
             let line_height = self.line_height();
-            let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
+            let max_chars = if crate::layout::textbox_line_wrap() {
+                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+            } else {
+                999999
+            };
             let (lines, _) = self.wrap_text(max_chars);
             let lines_to_draw = if is_placeholder {
                 let placeholder_src = self.placeholder.as_ref().unwrap();
                 let chars: Vec<char> = placeholder_src.chars().collect();
                 let mut p_lines = Vec::new();
                 let mut current_line = Vec::new();
-                let max_chars = max_chars.max(1);
                 for ch in chars {
                     if ch == '\n' {
                         p_lines.push(current_line.iter().collect::<String>());
                         current_line.clear();
                     } else {
                         current_line.push(ch);
-                        if current_line.len() > max_chars {
+                        if crate::layout::textbox_line_wrap() && current_line.len() > max_chars {
                             p_lines.push(current_line.iter().collect::<String>());
                             current_line.clear();
                         }
@@ -1140,7 +1246,7 @@ impl Element for TextBox {
             for (line_idx, line_text) in lines_to_draw.iter().enumerate() {
                 labels.push(TextLabel {
                     text: line_text.clone(),
-                    x: self.base.x + 8.0,
+                    x: self.base.x + 8.0 - self.scroll_x,
                     y: self.base.y + top + 8.0 + (line_idx as f32 * line_height) + (line_height - self.font_size) / 2.0 - self.scroll_y,
                     font_size: self.font_size,
                     color: label_color,
@@ -1149,7 +1255,7 @@ impl Element for TextBox {
         } else {
             labels.push(TextLabel {
                 text: display_text,
-                x: self.base.x + 8.0,
+                x: self.base.x + 8.0 - self.scroll_x,
                 y: crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
                 font_size: self.font_size,
                 color: label_color,
@@ -1170,21 +1276,73 @@ impl Element for TextBox {
     }
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, _px: f32, _py: f32, ctx: &mut UiContext) -> bool {
-        if self.disabled || !self.multiline { return false; }
+        if self.disabled { return false; }
         let char_width = self.char_width();
         let line_height = self.line_height();
-        let max_chars = (((self.base.w - 16.0) / char_width).floor() as usize).max(1);
-        let (lines, _) = self.wrap_text(max_chars);
-        let content_h = lines.len() as f32 * line_height;
-        let max_scroll = (content_h - (self.base.h - 16.0)).max(0.0);
         
-        let scroll_amt = match *delta {
-            MouseScrollDelta::LineDelta(_, dy) => -dy * line_height * 2.0,
-            MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+        let max_chars = if self.multiline {
+            if crate::layout::textbox_line_wrap() {
+                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+            } else {
+                999999
+            }
+        } else {
+            999999
         };
-        let old_scroll = self.scroll_y;
-        self.scroll_y = (self.scroll_y + scroll_amt).clamp(0.0, max_scroll);
-        if old_scroll != self.scroll_y {
+        
+        let (lines, _) = if self.multiline {
+            self.wrap_text(max_chars)
+        } else {
+            let buffer = if self.editing { &self.edit_buffer } else { &self.text };
+            (vec![buffer.clone()], vec![(0, 0); buffer.chars().count() + 1])
+        };
+
+        let mut changed = false;
+
+        if self.multiline {
+            let content_h = lines.len() as f32 * line_height;
+            let max_scroll = (content_h - (self.base.h - 16.0)).max(0.0);
+            let scroll_amt = match *delta {
+                MouseScrollDelta::LineDelta(_, dy) => -dy * line_height * 2.0,
+                MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+            };
+            let old_scroll = self.scroll_y;
+            self.scroll_y = (self.scroll_y + scroll_amt).clamp(0.0, max_scroll);
+            if old_scroll != self.scroll_y {
+                changed = true;
+            }
+        }
+
+        if !crate::layout::textbox_line_wrap() {
+            let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+            let content_w = max_line_len as f32 * char_width;
+            let max_scroll_x = (content_w - (self.base.w - 16.0)).max(0.0);
+            let scroll_amt_x = match *delta {
+                MouseScrollDelta::LineDelta(dx, dy) => {
+                    if !self.multiline {
+                        let scroll_val = if dy != 0.0 { -dy } else { dx };
+                        scroll_val * char_width * 3.0
+                    } else {
+                        dx * char_width * 3.0
+                    }
+                }
+                MouseScrollDelta::PixelDelta(pos) => {
+                    if !self.multiline {
+                        let scroll_val = if pos.y != 0.0 { -pos.y as f32 } else { pos.x as f32 };
+                        scroll_val
+                    } else {
+                        pos.x as f32
+                    }
+                }
+            };
+            let old_scroll_x = self.scroll_x;
+            self.scroll_x = (self.scroll_x + scroll_amt_x).clamp(0.0, max_scroll_x);
+            if old_scroll_x != self.scroll_x {
+                changed = true;
+            }
+        }
+
+        if changed {
             self.mark_dirty(ctx);
             true
         } else {
@@ -1382,6 +1540,25 @@ mod tests {
             extra.iter().any(|q| q.4 == [0.20, 0.50, 0.85, 0.3])
         };
         assert!(has_highlight, "Should have a highlight quad!");
+    }
+
+    #[test]
+    fn test_textbox_line_wrap_disabled_horizontal_scrolling() {
+        let _dummy = crate::context::UiContext::new();
+        crate::layout::set_textbox_line_wrap(false);
+        
+        let mut tb = TextBox::new("Very long text that should not wrap and instead scroll horizontally".to_string());
+        tb.set_rect(10.0, 10.0, 100.0, 30.0);
+        
+        assert_eq!(tb.scroll_x, 0.0);
+        
+        tb.focus();
+        tb.cursor_idx = tb.edit_buffer.chars().count();
+        tb.scroll_to_cursor();
+        
+        assert!(tb.scroll_x > 0.0, "scroll_x should be scrolled horizontally to keep the cursor visible");
+        
+        crate::layout::set_textbox_line_wrap(true);
     }
 }
 

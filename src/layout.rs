@@ -106,6 +106,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.spinbox.button_padding" => "spinbox_button_padding",
                 "style.control.spinbox.corner_radius" => "spinbox_corner_radius",
                 "style.textbox.height" | "style.data.textbox.height" => "textbox_height",
+                "style.textbox.line_wrap" | "style.data.textbox.line_wrap" => "textbox_line_wrap",
                 "style.control.toggle.font" => "toggle_font",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
@@ -273,6 +274,7 @@ static LIST_JUSTIFICATION: RwLock<u8> = RwLock::new(0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static LAYER_OPACITY: RwLock<f32> = RwLock::new(1.0);
+static TEXTBOX_LINE_WRAP: RwLock<bool> = RwLock::new(true);
 
 
 
@@ -455,6 +457,14 @@ pub fn reload_config() {
                     if let Ok(mut lock) = TEXTBOX_CORNER_RADIUS.write() {
                         *lock = val;
                     }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("textbox_line_wrap") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                let wrap = val_str == "true" || val_str == "1" || val_str == "1.0";
+                if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
+                    *lock = wrap;
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("breadcrumb_corner_radius") {
@@ -2413,6 +2423,18 @@ pub fn set_textbox_corner_radius(radius: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("textbox_corner_radius", radius);
+    }
+}
+
+pub fn textbox_line_wrap() -> bool {
+    lazy_init_style_registry();
+    *TEXTBOX_LINE_WRAP.read().unwrap()
+}
+
+pub fn set_textbox_line_wrap(wrap: bool) {
+    lazy_init_style_registry();
+    if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
+        *lock = wrap;
     }
 }
 
