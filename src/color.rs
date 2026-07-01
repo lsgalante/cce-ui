@@ -159,13 +159,13 @@ fn parse_and_set_colors(content: &str) {
         }
     }
 
-    if let Some(radius) = val.pointer("/style/surfaces/backplate/corner_radius").and_then(|v| v.as_f64()) {
+    if let Some(radius) = val.pointer("/style/surface/backplate/corner_radius").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
             *lock = radius as f32;
         }
-    }
+     }
 
-    if let Some(c) = get_color("/style/surfaces/backplate/color") {
+    if let Some(c) = get_color("/style/surface/backplate/color") {
         if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
         if let Ok(mut lock) = BACKPLATE_OPACITY.write() { *lock = Some(c[3]); }
     }
