@@ -600,12 +600,88 @@ impl Element for TreeList {
         let radius = self.corner_radius();
         let (x, y, w, h) = self.rect();
         
-        // Solid border if active
+        // 1. Draw container border and background
         if let Some((border_color, thickness)) = self.solid_border() {
             quads.push((x, y, w, h, radius, border_color, (r1, r2, r3, r4)));
             quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, crate::color::tree_background_color(), (r1, r2, r3, r4)));
         } else {
             quads.push((x, y, w, h, radius, crate::color::tree_background_color(), (r1, r2, r3, r4)));
+        }
+
+        // 2. Draw items (row backgrounds, separator lines, color previews)
+        let list_left = self.scroll_box.base.x;
+        let list_width = self.scroll_box.base.w;
+        let list_top = self.scroll_box.viewport_y;
+        let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
+
+        for (i, item) in self.items.iter().enumerate() {
+            let row_y = list_top + i as f32 * self.item_height - self.scroll_box.scroll_y;
+            if row_y + self.item_height < list_top || row_y > list_bottom {
+                continue;
+            }
+            
+            let draw_y = row_y.max(list_top);
+            let draw_bottom = (row_y + self.item_height).min(list_bottom);
+            let draw_h = draw_bottom - draw_y;
+            if draw_h <= 0.0 { continue; }
+            
+            let bg_color = match item {
+                TreeElement::Section { .. } => {
+                    if Some(i) == self.hovered_row_idx {
+                        crate::color::tree_section_bg_hover_color()
+                    } else {
+                        crate::color::tree_section_bg_color()
+                    }
+                }
+                TreeElement::Leaf { original_idx, .. } => {
+                    if Some(*original_idx) == self.selected_key_idx {
+                        crate::color::tree_leaf_bg_selected_color()
+                    } else if Some(i) == self.hovered_row_idx {
+                        crate::color::tree_leaf_bg_hover_color()
+                    } else if i % 2 == 0 {
+                        crate::color::tree_leaf_bg_even_color()
+                    } else {
+                        crate::color::tree_leaf_bg_odd_color()
+                    }
+                }
+            };
+            
+            quads.push((list_left + 1.0, draw_y, list_width - 9.0, draw_h, 0.0, bg_color, (false, false, false, false)));
+            
+            if let TreeElement::Leaf { ref val, original_idx, .. } = item {
+                let separator_color = crate::color::tree_separator_color();
+                quads.push((list_left + 180.0, draw_y, 1.0, draw_h, 0.0, separator_color, (false, false, false, false)));
+                quads.push((list_left + 235.0, draw_y, 1.0, draw_h, 0.0, separator_color, (false, false, false, false)));
+
+                if Some(*original_idx) != self.selected_key_idx {
+                    if let serde_json::Value::String(s) = val {
+                        if s.starts_with('#') {
+                            if let Some(rgba) = parse_hex_f32(s) {
+                                let preview_x = list_left + 245.0;
+                                let preview_y = row_y + 4.0;
+                                let preview_bottom = (row_y + 20.0).min(list_bottom);
+                                let preview_draw_y = preview_y.max(list_top);
+                                let preview_draw_h = preview_bottom - preview_draw_y;
+                                if preview_draw_h > 0.0 {
+                                    quads.push((preview_x, preview_draw_y, 16.0, preview_draw_h, 0.0, rgba, (false, false, false, false)));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if row_y + self.item_height <= list_bottom {
+                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 9.0, 1.0, 0.0, [0.13, 0.13, 0.17, 1.0], (false, false, false, false)));
+            }
+        }
+
+        // 3. Draw scrollbar track and thumb
+        let scroll_quads = self.scroll_box.extra_quads();
+        if scroll_quads.len() > 1 {
+            for q in &scroll_quads[1..] {
+                quads.push((q.0, q.1, q.2, q.3, 0.0, q.4, (false, false, false, false)));
+            }
         }
 
         for &child_ptr in &self.children(ctx) {
@@ -817,5 +893,33 @@ mod tests {
         // 3. Test click at logical x=100.0, y=200.0
         let is_movable = ctx.is_movable_backplate_at(100.0, 200.0);
         assert!(!is_movable, "Clicking TreeList under exact app layout should block backplate drag!");
+    }
+
+    #[test]
+    fn test_treelist_separators() {
+        let ctx = UiContext::new();
+        let mut tree_list = TreeList::new();
+        tree_list.set_rect(10.0, 52.0, 380.0, 500.0);
+        tree_list.set_flat_keys(vec![
+            ("style.data.tree.corner_radius".to_string(), serde_json::Value::Number(serde_json::Number::from(8)))
+        ]);
+        
+        println!("Flat keys size: {}", tree_list.flat_keys.len());
+        println!("Items count: {}", tree_list.items.len());
+        for (i, item) in tree_list.items.iter().enumerate() {
+            println!("Item {}: {:?}", i, item);
+        }
+        println!("scroll_box base.x: {}", tree_list.scroll_box.base.x);
+        println!("scroll_box viewport_y: {}", tree_list.scroll_box.viewport_y);
+        println!("scroll_box viewport_h: {}", tree_list.scroll_box.viewport_h);
+        println!("scroll_box scroll_y: {}", tree_list.scroll_box.scroll_y);
+        println!("item_height: {}", tree_list.item_height);
+        
+        let quads = tree_list.all_rounded_quads(&ctx);
+        println!("Rounded quads count: {}", quads.len());
+        for (i, q) in quads.iter().enumerate() {
+            println!("Quad {}: {:?}", i, q);
+        }
+        assert!(quads.len() > 1, "Should have more than 1 quad!");
     }
 }
