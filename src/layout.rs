@@ -16,20 +16,20 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
         }
         _ => {
             let flat_key = match prefix {
-                "style.list.font" => "list_font",
+                "style.list.font" | "style.data.list.font" => "list_font",
                 "style.control.breadcrumb.font" => "breadcrumb_font",
                 "style.control.breadcrumb.corner_radius" => "breadcrumb_corner_radius",
                 "style.control.button.font" => "button_font",
                 "style.control.button.padding" => "button_padding",
                 "style.control.button.corner_radius" => "button_corner_radius",
-                "style.list.corner_radius" => "list_corner_radius",
-                "style.textbox.corner_radius" => "textbox_corner_radius",
+                "style.list.corner_radius" | "style.data.list.corner_radius" => "list_corner_radius",
+                "style.textbox.corner_radius" | "style.data.textbox.corner_radius" => "textbox_corner_radius",
                 "style.control.dropdown.font" => "dropdown_font",
                 "style.control.font_selector.font" => "font_selector_font",
                 "style.control.slider.font" => "slider_font",
                 "style.control.spinbox.font" => "spinbox_font",
                 "style.section.font" => "section_label_font",
-                "style.textbox.font" => "textbox_font",
+                "style.textbox.font" | "style.data.textbox.font" => "textbox_font",
                 "style.control.button_strip.font" => "button_strip_font",
                 "style.control.button_strip.spacing" => "button_strip_spacing",
                 "style.control.dropdown.height" => "dropdown_height",
@@ -42,7 +42,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.spinbox.height" => "spinbox_height",
                 "style.control.spinbox.button_padding" => "spinbox_button_padding",
                 "style.control.spinbox.corner_radius" => "spinbox_corner_radius",
-                "style.textbox.height" => "textbox_height",
+                "style.textbox.height" | "style.data.textbox.height" => "textbox_height",
                 "style.control.toggle.font" => "toggle_font",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
@@ -60,7 +60,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.overlay.width" => "overlay_width",
                 "style.overlay.position" => "overlay_position",
                 "style.overlay.border_gap" => "overlay_border_gap",
-                "style.editor.last_page" => "last_page",
+                "style.editor.last_page" | "style.data.editor.last_page" => "last_page",
+                "style.data.tree.corner_radius" => "tree_corner_radius",
                 "style.surface.desktop.gap_color" => "desktop_gap_color",
                 "style.surface.desktop.cell_color" => "desktop_cell_color",
                 "style.surface.desktop.gap_width" => "desktop_gap_width",
@@ -162,6 +163,7 @@ static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static SLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static BREADCRUMB_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static LIST_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static TREE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
 static TOGGLE_FONT: RwLock<String> = RwLock::new(String::new());
 static TOGGLE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
@@ -348,6 +350,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("tree_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = TREE_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -2377,6 +2388,34 @@ pub fn list_corner_radius() -> f32 {
 
 pub fn set_list_corner_radius(radius: f32) {
     if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
+pub fn tree_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("tree_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = TREE_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *TREE_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_tree_corner_radius(radius: f32) {
+    if let Ok(mut lock) = TREE_CORNER_RADIUS.write() {
         *lock = radius;
     }
 }

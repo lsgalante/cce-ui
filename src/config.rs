@@ -193,7 +193,7 @@ pub fn parse_config_path(key: &str, default_section: &str) -> (String, String, O
 const PROP_NODES: &[&str] = &[
     "gestures", "key_bindings", "pointer_bind", "gesture_bind",
     "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
-    "status", "overlay", "backplate", "desktop", "list", "section", "textbox"
+    "status", "overlay", "backplate", "desktop", "list", "section", "textbox", "editor", "tree"
 ];
 
 fn get_or_create_node_mut<'a>(doc: &'a mut kdl::KdlDocument, path: &[&str]) -> Option<&'a mut kdl::KdlNode> {
