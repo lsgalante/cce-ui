@@ -12,6 +12,7 @@ pub struct Dropdown {
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub font_family: String,
+    pub custom_display_text: Option<String>,
 }
 
 impl Dropdown {
@@ -26,7 +27,13 @@ impl Dropdown {
             parent: None,
             children: Vec::new(),
             font_family: "sans-serif".to_string(),
+            custom_display_text: None,
         }
+    }
+
+    pub fn with_custom_display_text(mut self, text: &str) -> Self {
+        self.custom_display_text = Some(text.to_string());
+        self
     }
 
     pub fn with_font_family(mut self, font_family: &str) -> Self {
@@ -251,7 +258,7 @@ impl Element for Dropdown {
         if inside_popover {
             let idx = ((py - dy) / 24.0) as usize;
             if idx < self.options.len() {
-                if self.selected != idx {
+                if self.selected != idx || self.custom_display_text.is_some() {
                     self.selected = idx;
                     self.just_changed = true;
                 }
@@ -318,7 +325,7 @@ impl Element for Dropdown {
             }
             Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
                 if let Some(idx) = self.hovered_item {
-                    if self.selected != idx {
+                    if self.selected != idx || self.custom_display_text.is_some() {
                         self.selected = idx;
                         self.just_changed = true;
                     }
@@ -363,7 +370,11 @@ impl Element for Dropdown {
             labels.push(lbl);
         }
 
-        let selected_text = self.options.get(self.selected).cloned().unwrap_or_default();
+        let selected_text = if let Some(ref custom_text) = self.custom_display_text {
+            custom_text.clone()
+        } else {
+            self.options.get(self.selected).cloned().unwrap_or_default()
+        };
         labels.push(TextLabel {
             text: selected_text,
             x: self.base.x + 8.0,
