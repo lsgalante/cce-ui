@@ -1087,8 +1087,9 @@ mod tests {
     fn test_keybind_label() {
         let mut tree_list = TreeList::new();
         tree_list.set_rect(10.0, 52.0, 380.0, 500.0);
+        tree_list.annotations = vec![Some("menu:flat,adaptive".to_string())];
         tree_list.set_flat_keys(vec![
-            ("input.key_bindings[0].key".to_string(), serde_json::Value::String("super+q".to_string()))
+            ("input.accel_profile".to_string(), serde_json::Value::String("flat".to_string()))
         ]);
         
         let labels = tree_list.text_labels();
@@ -1096,8 +1097,8 @@ mod tests {
             println!("TEST LABEL: {:?}", label);
         }
         
-        let has_keybind_label = labels.iter().any(|l| l.text == "(keybind)");
-        assert!(has_keybind_label, "Should have (keybind) label!");
+        let has_menu_label = labels.iter().any(|l| l.text == "(menu)");
+        assert!(has_menu_label, "Should have (menu) label!");
     }
 
     #[test]
