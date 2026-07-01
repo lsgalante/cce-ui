@@ -69,7 +69,7 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
                 }
             }
         } else {
-            let list_names = ["keybind", "pointer_bind", "gesture_bind", "mode_rule", "tag_layout", "startup", "device"];
+            let list_names = ["key_bindings", "pointer_bind", "gesture_bind", "mode_rule", "tag_layout", "startup", "device"];
             if list_names.contains(&name.as_str()) {
                 map.insert(name, serde_json::Value::Array(vec![val]));
             } else {
@@ -144,31 +144,64 @@ pub fn parse_config_path(key: &str, default_section: &str) -> (String, String, O
     }
 }
 
-pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, default_section: &str) -> bool {
-    let (target_section, target_node, target_prop) = parse_config_path(key, default_section);
-    
-    let section_node = if let Some(node) = doc.nodes_mut().iter_mut().find(|n| n.name().value() == target_section) {
-        node
+const PROP_NODES: &[&str] = &[
+    "gestures", "key_bindings", "pointer_bind", "gesture_bind",
+    "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
+    "status", "overlay", "backplate", "desktop", "list", "section", "textbox"
+];
+
+fn get_or_create_node_mut<'a>(doc: &'a mut kdl::KdlDocument, path: &[&str]) -> Option<&'a mut kdl::KdlNode> {
+    if path.is_empty() {
+        return None;
+    }
+    let segment = path[0];
+    let idx = if let Some(i) = doc.nodes().iter().position(|n| n.name().value() == segment) {
+        i
     } else {
-        if let Ok(new_node) = format!("{}\n", target_section).parse::<kdl::KdlNode>() {
-            doc.nodes_mut().push(new_node);
-            doc.nodes_mut().last_mut().unwrap()
-        } else {
-            return false;
-        }
+        let new_node = format!("{}\n", segment).parse::<kdl::KdlNode>().ok()?;
+        doc.nodes_mut().push(new_node);
+        doc.nodes().len() - 1
+    };
+    if path.len() == 1 {
+        Some(&mut doc.nodes_mut()[idx])
+    } else {
+        let children = doc.nodes_mut()[idx].ensure_children();
+        get_or_create_node_mut(children, &path[1..])
+    }
+}
+
+fn get_node_ref<'a>(doc: &'a kdl::KdlDocument, path: &[&str]) -> Option<&'a kdl::KdlNode> {
+    if path.is_empty() {
+        return None;
+    }
+    let segment = path[0];
+    let node = doc.nodes().iter().find(|n| n.name().value() == segment)?;
+    if path.len() == 1 {
+        Some(node)
+    } else {
+        let children = node.children()?;
+        get_node_ref(children, &path[1..])
+    }
+}
+
+pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, _default_section: &str) -> bool {
+    let parts: Vec<&str> = key.split('.').collect();
+    if parts.is_empty() {
+        return false;
+    }
+
+    let is_property = parts.len() >= 2 && PROP_NODES.contains(&parts[parts.len() - 2]);
+
+    let (node_path, target_prop) = if is_property {
+        (&parts[0..parts.len() - 1], Some(parts[parts.len() - 1].to_string()))
+    } else {
+        (&parts[0..parts.len()], None)
     };
 
-    let children = section_node.ensure_children();
-
-    let child_node = if let Some(child) = children.nodes_mut().iter_mut().find(|n| n.name().value() == target_node) {
-        child
+    let child_node = if let Some(node) = get_or_create_node_mut(doc, node_path) {
+        node
     } else {
-        if let Ok(new_child) = format!("{}\n", target_node).parse::<kdl::KdlNode>() {
-            children.nodes_mut().push(new_child);
-            children.nodes_mut().last_mut().unwrap()
-        } else {
-            return false;
-        }
+        return false;
     };
 
     let existing_ty = if let Some(ref prop_name) = target_prop {
@@ -307,15 +340,21 @@ pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &
 
 pub fn get_kdl_type_annotation(kdl_content: &str, key_path: &str) -> Option<String> {
     let doc: kdl::KdlDocument = kdl_content.parse().ok()?;
-    let (target_section, target_node, target_prop) = parse_config_path(key_path, "");
-    
-    // Find the section node
-    let section_node = doc.nodes().iter().find(|n| n.name().value() == target_section)?;
-    
-    // Find the child node
-    let children = section_node.children()?;
-    let child_node = children.nodes().iter().find(|n| n.name().value() == target_node)?;
-    
+    let parts: Vec<&str> = key_path.split('.').collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    let is_property = parts.len() >= 2 && PROP_NODES.contains(&parts[parts.len() - 2]);
+
+    let (node_path, target_prop) = if is_property {
+        (&parts[0..parts.len() - 1], Some(parts[parts.len() - 1].to_string()))
+    } else {
+        (&parts[0..parts.len()], None)
+    };
+
+    let child_node = get_node_ref(&doc, node_path)?;
+
     if let Some(prop_name) = target_prop {
         let entry = child_node.entries().iter().find(|e| e.name().map(|n| n.value()) == Some(&prop_name))?;
         entry.ty().map(|t| t.value().to_string())
@@ -348,11 +387,11 @@ mod tests {
 
     #[test]
     fn test_get_kdl_type_annotation() {
-        let content = "input {\n    accel_profile (\"menu:flat,adaptive,none,custom\")\"flat\"\n    gestures pinch=(bool)true\n}\n";
+        let content = "input {\n    accel_profile (\"menu:flat,adaptive,none,custom\")\"flat\"\n    touchpad {\n        gestures pinch=(bool)true\n    }\n}\n";
         let ty1 = get_kdl_type_annotation(content, "input.accel_profile");
         assert_eq!(ty1, Some("menu:flat,adaptive,none,custom".to_string()));
         
-        let ty2 = get_kdl_type_annotation(content, "input.gestures.pinch");
+        let ty2 = get_kdl_type_annotation(content, "input.touchpad.gestures.pinch");
         assert_eq!(ty2, Some("bool".to_string()));
     }
 }

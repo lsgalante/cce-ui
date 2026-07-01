@@ -57,7 +57,7 @@ impl KeybindsControl {
         let content = std::fs::read_to_string(&path).unwrap_or_default();
         let val: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
         let mut loaded = Vec::new();
-        if let Some(arr) = val.get("keybind").and_then(|k| k.as_array()) {
+        if let Some(arr) = val.get("key_bindings").and_then(|k| k.as_array()) {
             for v in arr {
                 let mods = v.get("mods").and_then(|m| m.as_str()).unwrap_or("").to_string();
                 let key = v.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string();
@@ -123,7 +123,7 @@ impl KeybindsControl {
         }
         
         if let Some(obj) = val.as_object_mut() {
-            obj.insert("keybind".to_string(), serde_json::Value::Array(keybinds));
+            obj.insert("key_bindings".to_string(), serde_json::Value::Array(keybinds));
         }
         
         if let Ok(updated_str) = serde_json::to_string_pretty(&val) {

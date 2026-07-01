@@ -255,7 +255,7 @@ impl Element for Button {
                 }
             };
             let justify = if self.kind == ButtonKind::ListRow {
-                match crate::layout::scrollinglist_justification() {
+                match crate::layout::list_justification() {
                     0 => Justification::Left,
                     2 => Justification::Right,
                     _ => Justification::Center,
@@ -307,7 +307,7 @@ impl Element for Button {
 
     fn widget_font(&self) -> Option<String> {
         if self.kind == ButtonKind::ListRow {
-            Some(crate::layout::scrollinglist_font())
+            Some(crate::layout::list_font())
         } else {
             Some(crate::layout::button_font())
         }

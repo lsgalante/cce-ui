@@ -59,6 +59,10 @@ impl Element for ScrollingList {
     fn color(&self) -> [f32; 4] {
         self.scroll_box.color()
     }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::list_corner_radius()
+    }
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
     }

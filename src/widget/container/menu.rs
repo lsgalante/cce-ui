@@ -431,8 +431,40 @@ impl Element for MenuBar {
     }
 
     fn color(&self) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+        self.color.unwrap_or_else(|| colors::sidebar_bg_color())
     }
+
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        if let Some(p_ptr) = self.parent {
+            let is_bp = unsafe { (*p_ptr).is_backplate() };
+            if is_bp {
+                let (px, py, pw, ph) = unsafe { (*p_ptr).rect() };
+                let (x, y, w, h) = self.rect();
+                let is_at_top = (y - py).abs() < 0.1;
+                let is_at_bottom = (y + h - (py + ph)).abs() < 0.1;
+                
+                if is_at_top && is_at_bottom {
+                    let is_at_left = (x - px).abs() < 0.1;
+                    let is_at_right = (x + w - (px + pw)).abs() < 0.1;
+                    return (is_at_left, is_at_right, is_at_right, is_at_left);
+                } else if is_at_top {
+                    return (true, true, false, false);
+                } else if is_at_bottom {
+                    return (false, false, true, true);
+                }
+            }
+        }
+        (false, false, false, false)
+    }
+
+    fn corner_radius(&self) -> f32 {
+        if let Some(p_ptr) = self.parent {
+            unsafe { (*p_ptr).corner_radius() }
+        } else {
+            0.0
+        }
+    }
+
 
     fn set_hovered(&mut self, v: bool) {
         self.base.hovered = v;
@@ -906,7 +938,10 @@ impl Element for MenuBar {
         let mut quads = Vec::new();
 
         // Draw main background
-        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, colors::sidebar_bg_color()));
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if !r1 && !r2 && !r3 && !r4 {
+            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, self.color()));
+        }
 
         // 1. Highlight the title on hover or open
         if !self.context_options.is_empty() {

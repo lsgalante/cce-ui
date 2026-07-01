@@ -16,22 +16,38 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
         }
         _ => {
             let flat_key = match prefix {
-                "style.button.font" => "button_font",
-                "style.button.padding" => "button_padding",
-                "style.button_strip.font" => "button_strip_font",
-                "style.button_strip.spacing" => "button_strip_spacing",
-                "style.dropdown.height" => "dropdown_height",
-                "style.font_selector.height" => "font_selector_height",
+                "style.list.font" => "list_font",
+                "style.control.breadcrumb.font" => "breadcrumb_font",
+                "style.control.breadcrumb.corner_radius" => "breadcrumb_corner_radius",
+                "style.control.button.font" => "button_font",
+                "style.control.button.padding" => "button_padding",
+                "style.control.button.corner_radius" => "button_corner_radius",
+                "style.list.corner_radius" => "list_corner_radius",
+                "style.textbox.corner_radius" => "textbox_corner_radius",
+                "style.control.dropdown.font" => "dropdown_font",
+                "style.control.font_selector.font" => "font_selector_font",
+                "style.control.slider.font" => "slider_font",
+                "style.control.spinbox.font" => "spinbox_font",
+                "style.section.font" => "section_label_font",
+                "style.textbox.font" => "textbox_font",
+                "style.control.button_strip.font" => "button_strip_font",
+                "style.control.button_strip.spacing" => "button_strip_spacing",
+                "style.control.dropdown.height" => "dropdown_height",
+                "style.control.dropdown.corner_radius" => "dropdown_corner_radius",
+                "style.control.font_selector.height" => "font_selector_height",
+                "style.control.font_selector.corner_radius" => "font_selector_corner_radius",
                 "style.label.font" => "label_font",
-                "style.slider.height" => "slider_height",
-                "style.slider.corner_radius" => "slider_corner_radius",
-                "style.spinbox.height" => "spinbox_height",
-                "style.spinbox.button_padding" => "spinbox_button_padding",
+                "style.control.slider.height" => "slider_height",
+                "style.control.slider.corner_radius" => "slider_corner_radius",
+                "style.control.spinbox.height" => "spinbox_height",
+                "style.control.spinbox.button_padding" => "spinbox_button_padding",
+                "style.control.spinbox.corner_radius" => "spinbox_corner_radius",
                 "style.textbox.height" => "textbox_height",
-                "style.toggle.font" => "toggle_font",
-                "style.toggle.height" => "toggle_height",
-                "style.toggle.border_width" => "toggle_border_width",
-                "style.toggle.disabled_color" => "toggle_disabled_color",
+                "style.control.toggle.font" => "toggle_font",
+                "style.control.toggle.height" => "toggle_height",
+                "style.control.toggle.border_width" => "toggle_border_width",
+                "style.control.toggle.disabled_color" => "toggle_disabled_color",
+                "style.control.toggle.corner_radius" => "toggle_corner_radius",
                 "style.status.normal_color" => "status_normal_color",
                 "style.status.background_color" => "status_background_color",
                 "style.status.background_blur" => "status_background_blur",
@@ -45,9 +61,13 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.overlay.position" => "overlay_position",
                 "style.overlay.border_gap" => "overlay_border_gap",
                 "style.editor.last_page" => "last_page",
-                "style.surfaces.desktop.background_color" => "desktop_background_color",
-                "style.surfaces.desktop.grid_color" => "desktop_grid_color",
-                "style.surfaces.desktop.line_width" => "desktop_line_width",
+                "style.surfaces.desktop.gap_color" => "desktop_gap_color",
+                "style.surfaces.desktop.cell_color" => "desktop_cell_color",
+                "style.surfaces.desktop.gap_width" => "desktop_gap_width",
+                "style.surfaces.desktop.cell_corner_radius" => "desktop_cell_corner_radius",
+                "style.surfaces.desktop.cell_fade_inset" => "desktop_cell_fade_inset",
+                "style.surfaces.desktop.enable_solid_color" => "desktop_enable_solid_color",
+                "style.surfaces.desktop.solid_color" => "desktop_solid_color",
                 "style.surfaces.plate.padding" => "plate_padding",
                 "style.surfaces.backplate.color" => "backplate_color",
                 "style.surfaces.backplate.blur" => "backplate_blur",
@@ -140,6 +160,8 @@ static FONT_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static SLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static BREADCRUMB_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static LIST_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
 static TOGGLE_FONT: RwLock<String> = RwLock::new(String::new());
 static TOGGLE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
@@ -160,9 +182,9 @@ static SPINBOX_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static SLIDER_FONT: RwLock<String> = RwLock::new(String::new());
 static SLIDER_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
-static SCROLLINGLIST_FONT: RwLock<String> = RwLock::new(String::new());
-static SCROLLINGLIST_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static SCROLLINGLIST_JUSTIFICATION: RwLock<u8> = RwLock::new(0);
+static LIST_FONT: RwLock<String> = RwLock::new(String::new());
+static LIST_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static LIST_JUSTIFICATION: RwLock<u8> = RwLock::new(0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static LAYER_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -201,7 +223,7 @@ pub fn reload_config() {
         let mut textbox_font_changed = false;
         let mut spinbox_font_changed = false;
         let mut slider_font_changed = false;
-        let mut scrollinglist_font_changed = false;
+        let mut list_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("label_margin") {
@@ -308,6 +330,24 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TEXTBOX_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("breadcrumb_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = BREADCRUMB_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("list_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -713,26 +753,26 @@ pub fn reload_config() {
                     slider_font_changed = true;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("scrollinglist_font") {
+            if let Some(rest) = trimmed.strip_prefix("list_font") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
                 let rest = mod_rest(rest);
                 let font = rest.trim().to_string();
                 let mut changed = false;
-                if let Ok(mut lock) = SCROLLINGLIST_FONT.write() {
+                if let Ok(mut lock) = LIST_FONT.write() {
                     if *lock != font {
                         *lock = font;
                         changed = true;
                     }
                 }
                 if changed {
-                    scrollinglist_font_changed = true;
+                    list_font_changed = true;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("scrollinglist_justification") {
+            if let Some(rest) = trimmed.strip_prefix("list_justification") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<u8>() {
-                    if let Ok(mut lock) = SCROLLINGLIST_JUSTIFICATION.write() {
+                    if let Ok(mut lock) = LIST_JUSTIFICATION.write() {
                         *lock = val;
                     }
                 }
@@ -788,8 +828,8 @@ pub fn reload_config() {
                 *lock = None;
             }
         }
-        if scrollinglist_font_changed {
-            if let Ok(mut lock) = SCROLLINGLIST_FONT_CACHED.write() {
+        if list_font_changed {
+            if let Ok(mut lock) = LIST_FONT_CACHED.write() {
                 *lock = None;
             }
         }
@@ -1761,8 +1801,8 @@ pub fn set_dropdown_font(font: &str) {
     }
 }
 
-// ScrollingList Font
-pub fn scrollinglist_font() -> String {
+// List Font
+pub fn list_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
@@ -1770,18 +1810,18 @@ pub fn scrollinglist_font() -> String {
         if let Some(content) = read_config() {
             for line in content.lines() {
                 let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("scrollinglist_font") {
+                if let Some(rest) = trimmed.strip_prefix("list_font") {
                     let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
                     let rest = mod_rest(rest);
                     font = rest.trim().to_string();
                 }
             }
         }
-        if let Ok(mut lock) = SCROLLINGLIST_FONT.write() {
+        if let Ok(mut lock) = LIST_FONT.write() {
             *lock = font;
         }
     });
-    let lock = SCROLLINGLIST_FONT.read().unwrap();
+    let lock = LIST_FONT.read().unwrap();
     if lock.is_empty() {
         "Outfit".to_string()
     } else {
@@ -1789,44 +1829,44 @@ pub fn scrollinglist_font() -> String {
     }
 }
 
-pub fn scrollinglist_font_parsed() -> (String, f32) {
-    if let Ok(lock) = SCROLLINGLIST_FONT_CACHED.read() {
+pub fn list_font_parsed() -> (String, f32) {
+    if let Ok(lock) = LIST_FONT_CACHED.read() {
         if let Some(ref val) = *lock {
             return val.clone();
         }
     }
-    let font_str = scrollinglist_font();
+    let font_str = list_font();
     let parsed = parse_font_string(&font_str);
     let size = parsed.1.unwrap_or(12.0);
     let val = (parsed.0, size);
-    if let Ok(mut lock) = SCROLLINGLIST_FONT_CACHED.write() {
+    if let Ok(mut lock) = LIST_FONT_CACHED.write() {
         *lock = Some(val.clone());
     }
     val
 }
 
-pub fn set_scrollinglist_font(font: &str) {
-    if let Ok(mut lock) = SCROLLINGLIST_FONT.write() {
+pub fn set_list_font(font: &str) {
+    if let Ok(mut lock) = LIST_FONT.write() {
         *lock = font.to_string();
     }
-    if let Ok(mut lock) = SCROLLINGLIST_FONT_CACHED.write() {
+    if let Ok(mut lock) = LIST_FONT_CACHED.write() {
         *lock = None;
     }
 }
 
-// ScrollingList Justification
-pub fn scrollinglist_justification() -> u8 {
+// List Justification
+pub fn list_justification() -> u8 {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
         if let Some(content) = read_config() {
             for line in content.lines() {
                 let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("scrollinglist_justification") {
+                if let Some(rest) = trimmed.strip_prefix("list_justification") {
                     let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                     let val_str = rest.trim_end_matches('"').trim();
                     if let Ok(val) = val_str.parse::<u8>() {
-                        if let Ok(mut lock) = SCROLLINGLIST_JUSTIFICATION.write() {
+                        if let Ok(mut lock) = LIST_JUSTIFICATION.write() {
                             *lock = val;
                         }
                     }
@@ -1834,11 +1874,11 @@ pub fn scrollinglist_justification() -> u8 {
             }
         }
     });
-    *SCROLLINGLIST_JUSTIFICATION.read().unwrap()
+    *LIST_JUSTIFICATION.read().unwrap()
 }
 
-pub fn set_scrollinglist_justification(just: u8) {
-    if let Ok(mut lock) = SCROLLINGLIST_JUSTIFICATION.write() {
+pub fn set_list_justification(just: u8) {
+    if let Ok(mut lock) = LIST_JUSTIFICATION.write() {
         *lock = just;
     }
 }
@@ -2281,6 +2321,62 @@ pub fn textbox_corner_radius() -> f32 {
 
 pub fn set_textbox_corner_radius(radius: f32) {
     if let Ok(mut lock) = TEXTBOX_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
+pub fn breadcrumb_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("breadcrumb_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = BREADCRUMB_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *BREADCRUMB_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_breadcrumb_corner_radius(radius: f32) {
+    if let Ok(mut lock) = BREADCRUMB_CORNER_RADIUS.write() {
+        *lock = radius;
+    }
+}
+
+pub fn list_corner_radius() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("list_corner_radius") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *LIST_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn set_list_corner_radius(radius: f32) {
+    if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
         *lock = radius;
     }
 }

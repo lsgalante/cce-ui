@@ -1,8 +1,10 @@
 use crate::colors;
 use crate::widget::*;
 use crate::widget::display::{TextLabel, make_widget_text_buffer};
+use crate::context::UiContext;
 
 pub struct StatusBar {
+    pub base: Widget,
     x: f32, y: f32, w: f32, h: f32,
     hovered: bool,
     pub text: String,
@@ -10,11 +12,13 @@ pub struct StatusBar {
     pub text_offset_x: Option<f32>,
     pub text_color: Option<[f32; 4]>,
     pub bg_color: Option<[f32; 4]>,
+    pub parent: Option<*mut (dyn Element + 'static)>,
 }
 
 impl StatusBar {
     pub fn new() -> Self {
         Self {
+            base: Widget::new_rect(0.0, 0.0, 0.0, 0.0),
             x: 0.0,
             y: 0.0,
             w: 0.0,
@@ -25,6 +29,7 @@ impl StatusBar {
             text_offset_x: None,
             text_color: None,
             bg_color: None,
+            parent: None,
         }
     }
     pub fn with_text(mut self, text: &str) -> Self {
@@ -55,8 +60,13 @@ impl StatusBar {
 }
 
 impl Element for StatusBar {
+    fn base(&self) -> Option<&Widget> { Some(&self.base) }
+    fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base) }
     fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.x = x; self.y = y; self.w = w; self.h = h;
+        self.base.x = x; self.base.y = y; self.base.w = w; self.base.h = h;
+    }
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
     }
@@ -66,6 +76,54 @@ impl Element for StatusBar {
     fn color(&self) -> [f32; 4] { self.bg_color.unwrap_or(colors::STATUS_BG) }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
+
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
+        self.parent
+    }
+
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
+        self.parent = parent;
+    }
+
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        if let Some(p_ptr) = self.parent {
+            let is_bp = unsafe { (*p_ptr).is_backplate() };
+            if is_bp {
+                let (px, py, pw, ph) = unsafe { (*p_ptr).rect() };
+                let (x, y, w, h) = self.rect();
+                let is_at_top = (y - py).abs() < 0.1;
+                let is_at_bottom = (y + h - (py + ph)).abs() < 0.1;
+                
+                if is_at_top && is_at_bottom {
+                    let is_at_left = (x - px).abs() < 0.1;
+                    let is_at_right = (x + w - (px + pw)).abs() < 0.1;
+                    return (is_at_left, is_at_right, is_at_right, is_at_left);
+                } else if is_at_top {
+                    return (true, true, false, false);
+                } else if is_at_bottom {
+                    return (false, false, true, true);
+                }
+            }
+        }
+        (false, false, false, false)
+    }
+
+    fn corner_radius(&self) -> f32 {
+        if let Some(p_ptr) = self.parent {
+            unsafe { (*p_ptr).corner_radius() }
+        } else {
+            0.0
+        }
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if !r1 && !r2 && !r3 && !r4 {
+            vec![(self.x, self.y, self.w, self.h, self.color())]
+        } else {
+            Vec::new()
+        }
+    }
     fn set_text(&mut self, text: &str) {
         if self.text != text {
             self.text = text.to_string();

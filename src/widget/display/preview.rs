@@ -256,7 +256,7 @@ impl PreviewState {
         preview_sec.content_y = cy + half_h - pad - 12.0;
         preview_sec.finish();
 
-        let bg_color = color::scrollinglist_bg_color();
+        let bg_color = color::list_bg_color();
         canvas.rect(bg_color, cx + 12.0, rect_y, cw - 24.0, rect_h);
 
         if let Some(image_data) = &self.image_preview {

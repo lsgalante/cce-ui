@@ -1028,6 +1028,10 @@ pub trait Application: Sized + 'static {
     fn input_regions(&self) -> Option<Vec<(i32, i32, i32, i32)>> {
         None
     }
+
+    fn desired_size(&self) -> Option<(u32, u32)> {
+        None
+    }
     
     fn ui_context(&self) -> Option<&crate::context::UiContext> {
         None
@@ -1629,7 +1633,9 @@ impl<A: Application> CompositorHandler for EngineState<A> {
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
         _output: &wl_output::WlOutput,
-    ) {}
+    ) {
+        self.redraw = true;
+    }
     
     fn surface_leave(
         &mut self,
@@ -2374,6 +2380,13 @@ pub fn run<A: Application>() {
         engine_state.inner.tick(dt, &mut rebuild);
         if rebuild {
             engine_state.redraw = true;
+        }
+
+        if let Some((w, h)) = engine_state.inner.desired_size() {
+            if (engine_state.logical_width - w as f32).abs() > 0.001 || (engine_state.logical_height - h as f32).abs() > 0.001 {
+                engine_state.resize(w as f32, h as f32);
+                engine_state.redraw = true;
+            }
         }
 
         if let Some(ref mut pk) = engine_state.pressed_key {

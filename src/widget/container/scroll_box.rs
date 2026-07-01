@@ -63,7 +63,11 @@ impl Element for ScrollBox {
         self.viewport_y = y + self.viewport_offset_y;
         self.viewport_h = h + self.viewport_offset_h;
     }
-    fn color(&self) -> [f32; 4] { crate::color::scrollinglist_bg_color() }
+    fn color(&self) -> [f32; 4] { crate::color::list_bg_color() }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::list_corner_radius()
+    }
 
     fn focus(&mut self) {
         focus::set_focused(self);
@@ -106,7 +110,7 @@ impl Element for ScrollBox {
         let mut quads = Vec::new();
         
         // Background
-        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, crate::color::scrollinglist_bg_color()));
+        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, crate::color::list_bg_color()));
 
         // Border lines
         let box_border_color = if focus::is_focused(self) {

@@ -37,9 +37,9 @@ static BACKPLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
 static TOGGLE_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.22, 1.0]);
-static SCROLLINGLIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
-static SCROLLINGLIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
-static SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
+static LIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
+static LIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
+static LIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
 static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
@@ -181,7 +181,7 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/highlight/primary") {
         if let Ok(mut lock) = HIGHLIGHT_PRIMARY_COLOR.write() { *lock = [c[0], c[1], c[2], 0.12]; }
     }
-    if let Some(c) = get_color("/style/button/background").or_else(|| get_color("/layout/button_background_color")) {
+    if let Some(c) = get_color("/style/control/button/background").or_else(|| get_color("/layout/button_background_color")) {
         if let Ok(mut lock) = BUTTON_BACKGROUND_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
@@ -190,13 +190,13 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/layout/toggle_enabled_color") {
         if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/style/toggle/disabled_color") {
+    if let Some(c) = get_color("/style/control/toggle/disabled_color") {
         if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/toggle_bg_color") {
         if let Ok(mut lock) = TOGGLE_BG_COLOR.write() { *lock = c; }
     }
-    let parsed_scrollinglist_bg = get_color("/layout/scrollinglist_bg_color");
+    let parsed_list_bg = get_color("/layout/list_bg_color");
     let parsed_breadcrumb_bg = get_color("/layout/breadcrumb_bg_color");
     let parsed_popover_bg = get_color("/layout/popover_bg_color");
 
@@ -207,18 +207,18 @@ fn parse_and_set_colors(content: &str) {
         if let Ok(mut lock) = LAYER_COLOR.write() { *lock = c; }
     }
 
-    if let Some(c) = parsed_scrollinglist_bg {
-        if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
+    if let Some(c) = parsed_list_bg {
+        if let Ok(mut lock) = LIST_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 0.3];
         }
     }
-    if let Some(c) = get_color("/layout/scrollinglist_entry_bg_color") {
-        if let Ok(mut lock) = SCROLLINGLIST_ENTRY_BG_COLOR.write() {
+    if let Some(c) = get_color("/layout/list_entry_bg_color") {
+        if let Ok(mut lock) = LIST_ENTRY_BG_COLOR.write() {
             *lock = c;
         }
     }
-    if let Some(c) = get_color("/layout/scrollinglist_entry_highlight_color") {
-        if let Ok(mut lock) = SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR.write() {
+    if let Some(c) = get_color("/layout/list_entry_highlight_color") {
+        if let Ok(mut lock) = LIST_ENTRY_HIGHLIGHT_COLOR.write() {
             *lock = c;
         }
     }
@@ -226,7 +226,7 @@ fn parse_and_set_colors(content: &str) {
         if let Ok(mut lock) = BREADCRUMB_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 1.0];
         }
-    } else if let Some(c) = parsed_scrollinglist_bg {
+    } else if let Some(c) = parsed_list_bg {
         if let Ok(mut lock) = BREADCRUMB_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 1.0];
         }
@@ -235,7 +235,7 @@ fn parse_and_set_colors(content: &str) {
         if let Ok(mut lock) = POPOVER_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 1.0];
         }
-    } else if let Some(c) = parsed_scrollinglist_bg {
+    } else if let Some(c) = parsed_list_bg {
         if let Ok(mut lock) = POPOVER_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 1.0];
         }
@@ -452,35 +452,35 @@ pub fn set_toggle_bg_color(color: [f32; 4]) {
     }
 }
 
-pub fn scrollinglist_bg_color() -> [f32; 4] {
+pub fn list_bg_color() -> [f32; 4] {
     load_colors_once();
-    *SCROLLINGLIST_BG_COLOR.read().unwrap()
+    *LIST_BG_COLOR.read().unwrap()
 }
 
-pub fn set_scrollinglist_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = SCROLLINGLIST_BG_COLOR.write() {
+pub fn set_list_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = LIST_BG_COLOR.write() {
         *lock = [color[0], color[1], color[2], 0.3];
     }
 }
 
-pub fn scrollinglist_entry_bg_color() -> [f32; 4] {
+pub fn list_entry_bg_color() -> [f32; 4] {
     load_colors_once();
-    *SCROLLINGLIST_ENTRY_BG_COLOR.read().unwrap()
+    *LIST_ENTRY_BG_COLOR.read().unwrap()
 }
 
-pub fn set_scrollinglist_entry_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = SCROLLINGLIST_ENTRY_BG_COLOR.write() {
+pub fn set_list_entry_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = LIST_ENTRY_BG_COLOR.write() {
         *lock = color;
     }
 }
 
-pub fn scrollinglist_entry_highlight_color() -> [f32; 4] {
+pub fn list_entry_highlight_color() -> [f32; 4] {
     load_colors_once();
-    *SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR.read().unwrap()
+    *LIST_ENTRY_HIGHLIGHT_COLOR.read().unwrap()
 }
 
-pub fn set_scrollinglist_entry_highlight_color(color: [f32; 4]) {
-    if let Ok(mut lock) = SCROLLINGLIST_ENTRY_HIGHLIGHT_COLOR.write() {
+pub fn set_list_entry_highlight_color(color: [f32; 4]) {
+    if let Ok(mut lock) = LIST_ENTRY_HIGHLIGHT_COLOR.write() {
         *lock = color;
     }
 }
