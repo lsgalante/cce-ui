@@ -47,6 +47,27 @@ static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static BUTTON_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new(BUTTON_IDLE);
 
+static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
+static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
+static TREE_BORDER_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.25, 0.25, 0.35, 1.0]);
+static TREE_BORDER_FOCUS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.30, 0.50, 0.32, 1.0]);
+
+static TREE_SECTION_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.07, 0.07, 0.09, 1.0]);
+static TREE_SECTION_BG_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.10, 0.12, 0.18, 1.0]);
+
+static TREE_LEAF_BG_EVEN_COLOR: RwLock<[f32; 4]> = RwLock::new([0.09, 0.09, 0.11, 1.0]);
+static TREE_LEAF_BG_ODD_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.10, 1.0]);
+static TREE_LEAF_BG_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.12, 0.12, 0.16, 1.0]);
+static TREE_LEAF_BG_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.20, 0.30, 1.0]);
+
+static TREE_SECTION_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.38, 0.69, 0.94, 1.0]);
+static TREE_LEAF_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.80, 0.80, 0.83, 1.0]);
+static TREE_LEAF_TEXT_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new([0.49, 1.0, 1.0, 1.0]);
+
+static TREE_TYPE_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.78, 0.47, 0.87, 1.0]);
+static TREE_VALUE_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.51, 0.51, 0.54, 1.0]);
+static TREE_SEPARATOR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.19, 1.0]);
+
 pub fn button_background_color() -> [f32; 4] {
     *BUTTON_BACKGROUND_COLOR.read().unwrap()
 }
@@ -239,6 +260,55 @@ fn parse_and_set_colors(content: &str) {
         if let Ok(mut lock) = POPOVER_BG_COLOR.write() {
             *lock = [c[0], c[1], c[2], 1.0];
         }
+    }
+
+    if let Some(c) = get_color("/style/data/tree/background_color") {
+        if let Ok(mut lock) = TREE_BACKGROUND_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/border_color") {
+        if let Ok(mut lock) = TREE_BORDER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/border_hover_color") {
+        if let Ok(mut lock) = TREE_BORDER_HOVER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/border_focus_color") {
+        if let Ok(mut lock) = TREE_BORDER_FOCUS_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/section_bg_color") {
+        if let Ok(mut lock) = TREE_SECTION_BG_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/section_bg_hover_color") {
+        if let Ok(mut lock) = TREE_SECTION_BG_HOVER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/leaf_bg_even_color") {
+        if let Ok(mut lock) = TREE_LEAF_BG_EVEN_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/leaf_bg_odd_color") {
+        if let Ok(mut lock) = TREE_LEAF_BG_ODD_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/leaf_bg_hover_color") {
+        if let Ok(mut lock) = TREE_LEAF_BG_HOVER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/leaf_bg_selected_color") {
+        if let Ok(mut lock) = TREE_LEAF_BG_SELECTED_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/section_text_color") {
+        if let Ok(mut lock) = TREE_SECTION_TEXT_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/leaf_text_color") {
+        if let Ok(mut lock) = TREE_LEAF_TEXT_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/leaf_text_selected_color") {
+        if let Ok(mut lock) = TREE_LEAF_TEXT_SELECTED_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/type_text_color") {
+        if let Ok(mut lock) = TREE_TYPE_TEXT_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/value_text_color") {
+        if let Ok(mut lock) = TREE_VALUE_TEXT_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/data/tree/separator_color") {
+        if let Ok(mut lock) = TREE_SEPARATOR_COLOR.write() { *lock = c; }
     }
 }
 
@@ -584,4 +654,46 @@ pub fn active_window_mode() -> String {
 pub fn active_backplate_opacity() -> f32 {
     page_low_color()[3]
 }
+
+pub fn tree_background_color() -> [f32; 4] { *TREE_BACKGROUND_COLOR.read().unwrap() }
+pub fn tree_border_color() -> [f32; 4] { *TREE_BORDER_COLOR.read().unwrap() }
+pub fn tree_border_hover_color() -> [f32; 4] { *TREE_BORDER_HOVER_COLOR.read().unwrap() }
+pub fn tree_border_focus_color() -> [f32; 4] { *TREE_BORDER_FOCUS_COLOR.read().unwrap() }
+
+pub fn tree_section_bg_color() -> [f32; 4] { *TREE_SECTION_BG_COLOR.read().unwrap() }
+pub fn tree_section_bg_hover_color() -> [f32; 4] { *TREE_SECTION_BG_HOVER_COLOR.read().unwrap() }
+
+pub fn tree_leaf_bg_even_color() -> [f32; 4] { *TREE_LEAF_BG_EVEN_COLOR.read().unwrap() }
+pub fn tree_leaf_bg_odd_color() -> [f32; 4] { *TREE_LEAF_BG_ODD_COLOR.read().unwrap() }
+pub fn tree_leaf_bg_hover_color() -> [f32; 4] { *TREE_LEAF_BG_HOVER_COLOR.read().unwrap() }
+pub fn tree_leaf_bg_selected_color() -> [f32; 4] { *TREE_LEAF_BG_SELECTED_COLOR.read().unwrap() }
+
+pub fn tree_section_text_color() -> [f32; 4] { *TREE_SECTION_TEXT_COLOR.read().unwrap() }
+pub fn tree_leaf_text_color() -> [f32; 4] { *TREE_LEAF_TEXT_COLOR.read().unwrap() }
+pub fn tree_leaf_text_selected_color() -> [f32; 4] { *TREE_LEAF_TEXT_SELECTED_COLOR.read().unwrap() }
+
+pub fn tree_type_text_color() -> [f32; 4] { *TREE_TYPE_TEXT_COLOR.read().unwrap() }
+pub fn tree_value_text_color() -> [f32; 4] { *TREE_VALUE_TEXT_COLOR.read().unwrap() }
+pub fn tree_separator_color() -> [f32; 4] { *TREE_SEPARATOR_COLOR.read().unwrap() }
+
+pub fn set_tree_background_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_BACKGROUND_COLOR.write() { *lock = c; } }
+pub fn set_tree_border_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_BORDER_COLOR.write() { *lock = c; } }
+pub fn set_tree_border_hover_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_BORDER_HOVER_COLOR.write() { *lock = c; } }
+pub fn set_tree_border_focus_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_BORDER_FOCUS_COLOR.write() { *lock = c; } }
+
+pub fn set_tree_section_bg_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SECTION_BG_COLOR.write() { *lock = c; } }
+pub fn set_tree_section_bg_hover_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SECTION_BG_HOVER_COLOR.write() { *lock = c; } }
+
+pub fn set_tree_leaf_bg_even_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_BG_EVEN_COLOR.write() { *lock = c; } }
+pub fn set_tree_leaf_bg_odd_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_BG_ODD_COLOR.write() { *lock = c; } }
+pub fn set_tree_leaf_bg_hover_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_BG_HOVER_COLOR.write() { *lock = c; } }
+pub fn set_tree_leaf_bg_selected_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_BG_SELECTED_COLOR.write() { *lock = c; } }
+
+pub fn set_tree_section_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SECTION_TEXT_COLOR.write() { *lock = c; } }
+pub fn set_tree_leaf_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_TEXT_COLOR.write() { *lock = c; } }
+pub fn set_tree_leaf_text_selected_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_TEXT_SELECTED_COLOR.write() { *lock = c; } }
+
+pub fn set_tree_type_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_TYPE_TEXT_COLOR.write() { *lock = c; } }
+pub fn set_tree_value_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_VALUE_TEXT_COLOR.write() { *lock = c; } }
+pub fn set_tree_separator_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SEPARATOR_COLOR.write() { *lock = c; } }
 

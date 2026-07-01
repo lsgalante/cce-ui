@@ -220,11 +220,11 @@ impl Element for TreeList {
         let is_hovered = self.hovered() || self.hovered_row_idx.is_some() || self.scroll_box.base.hovered;
         if self.scroll_box.show_border {
             let box_border_color = if is_focused {
-                [0.30, 0.50, 0.32, 1.0]
+                crate::color::tree_border_focus_color()
             } else if is_hovered {
-                [0.25, 0.25, 0.35, 1.0]
+                crate::color::tree_border_hover_color()
             } else {
-                [0.18, 0.18, 0.24, 1.0]
+                crate::color::tree_border_color()
             };
             Some((box_border_color, 1.0))
         } else {
@@ -393,20 +393,20 @@ impl Element for TreeList {
             let bg_color = match item {
                 TreeElement::Section { .. } => {
                     if Some(i) == self.hovered_row_idx {
-                        [0.10, 0.12, 0.18, 1.0]
+                        crate::color::tree_section_bg_hover_color()
                     } else {
-                        [0.07, 0.07, 0.09, 1.0]
+                        crate::color::tree_section_bg_color()
                     }
                 }
                 TreeElement::Leaf { original_idx, .. } => {
                     if Some(*original_idx) == self.selected_key_idx {
-                        [0.15, 0.20, 0.30, 1.0]
+                        crate::color::tree_leaf_bg_selected_color()
                     } else if Some(i) == self.hovered_row_idx {
-                        [0.12, 0.12, 0.16, 1.0]
+                        crate::color::tree_leaf_bg_hover_color()
                     } else if i % 2 == 0 {
-                        [0.09, 0.09, 0.11, 1.0]
+                        crate::color::tree_leaf_bg_even_color()
                     } else {
-                        [0.08, 0.08, 0.10, 1.0]
+                        crate::color::tree_leaf_bg_odd_color()
                     }
                 }
             };
@@ -415,7 +415,7 @@ impl Element for TreeList {
             
             // Draw column separator lines and color preview for Leaf rows
             if let TreeElement::Leaf { ref val, original_idx, .. } = item {
-                let separator_color = [0.15, 0.15, 0.19, 1.0];
+                let separator_color = crate::color::tree_separator_color();
                 quads.push((list_left + 180.0, draw_y, 1.0, draw_h, separator_color));
                 quads.push((list_left + 235.0, draw_y, 1.0, draw_h, separator_color));
 
@@ -447,6 +447,10 @@ impl Element for TreeList {
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
+        let f32_to_rgb = |c: [f32; 4]| -> [u8; 3] {
+            [(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8]
+        };
+
         let mut labels = Vec::new();
         let list_left = self.scroll_box.base.x;
         let list_top = self.scroll_box.viewport_y;
@@ -466,7 +470,7 @@ impl Element for TreeList {
                         x: list_left + 8.0 + *indent as f32 * 12.0,
                         y: row_y + 6.0,
                         font_size: 12.0,
-                        color: [0x61, 0xaf, 0xef],
+                        color: f32_to_rgb(crate::color::tree_section_text_color()),
                     });
                 }
                 TreeElement::Leaf { name, indent, val, original_idx, .. } => {
@@ -478,9 +482,9 @@ impl Element for TreeList {
                     };
 
                     let color = if Some(*original_idx) == self.selected_key_idx {
-                        [0x7d, 0xff, 0xff]
+                        f32_to_rgb(crate::color::tree_leaf_text_selected_color())
                     } else {
-                        [0xcc, 0xcc, 0xd4]
+                        f32_to_rgb(crate::color::tree_leaf_text_color())
                     };
 
                     labels.push(TextLabel {
@@ -523,7 +527,7 @@ impl Element for TreeList {
                             x: list_left + 190.0,
                             y: row_y + 6.0,
                             font_size: 12.0,
-                            color: [0xc6, 0x78, 0xdd],
+                            color: f32_to_rgb(crate::color::tree_type_text_color()),
                         });
                     }
 
@@ -545,7 +549,7 @@ impl Element for TreeList {
                             x: label_x,
                             y: row_y + 6.0,
                             font_size: 12.0,
-                            color: [0x83, 0x83, 0x8a],
+                            color: f32_to_rgb(crate::color::tree_value_text_color()),
                         });
                     }
                 }
@@ -595,9 +599,9 @@ impl Element for TreeList {
         // Solid border if active
         if let Some((border_color, thickness)) = self.solid_border() {
             quads.push((x, y, w, h, radius, border_color, (r1, r2, r3, r4)));
-            quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, crate::color::list_bg_color(), (r1, r2, r3, r4)));
+            quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, crate::color::tree_background_color(), (r1, r2, r3, r4)));
         } else {
-            quads.push((x, y, w, h, radius, crate::color::list_bg_color(), (r1, r2, r3, r4)));
+            quads.push((x, y, w, h, radius, crate::color::tree_background_color(), (r1, r2, r3, r4)));
         }
 
         for &child_ptr in &self.children(ctx) {
