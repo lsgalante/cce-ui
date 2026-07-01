@@ -293,6 +293,8 @@ pub trait Element {
         }
     }
     fn select_all(&mut self) {}
+    fn copy_key(&self) {}
+    fn copy_value(&self) {}
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         if let Some(b) = self.base_mut() {

@@ -546,6 +546,12 @@ pub mod context_menu {
                                         "Select All" => {
                                             target.select_all();
                                         }
+                                        "Copy Key" => {
+                                            target.copy_key();
+                                        }
+                                        "Copy Value" => {
+                                            target.copy_value();
+                                        }
                                         _ => {}
                                     }
                                 }

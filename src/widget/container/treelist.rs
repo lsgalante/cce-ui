@@ -257,6 +257,36 @@ impl Element for TreeList {
                 }
             }
         }
+
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            if px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
+                self.focus();
+                let relative_y = py - list_top + self.scroll_box.scroll_y;
+                let row_idx = (relative_y / self.item_height) as usize;
+                if row_idx < self.items.len() {
+                    let item = self.items[row_idx].clone();
+                    if let TreeElement::Leaf { original_idx, ref path, ref name, indent, ref val } = item {
+                        self.selected_key_idx = Some(original_idx);
+                        self.clicked_item = Some(TreeElement::Leaf {
+                            path: path.clone(),
+                            name: name.clone(),
+                            indent,
+                            val: val.clone(),
+                            original_idx,
+                        });
+                        
+                        let options = vec![
+                            path.clone(),
+                            "Copy Key".to_string(),
+                            "Copy Value".to_string(),
+                        ];
+                        let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
+                        ctx.show_context_menu(px, py - scroll_offset, options, 1, self.as_ptr_mut());
+                        changed = true;
+                    }
+                }
+            }
+        }
         changed
     }
 
@@ -510,6 +540,30 @@ impl Element for TreeList {
 
     fn clear_children(&mut self, _ctx: &mut UiContext) {
         self.children.clear();
+    }
+
+    fn copy_key(&self) {
+        if let Some(idx) = self.selected_key_idx {
+            if idx < self.flat_keys.len() {
+                let key_path = &self.flat_keys[idx].0;
+                clipboard::copy_to_clipboard(key_path);
+            }
+        }
+    }
+
+    fn copy_value(&self) {
+        if let Some(idx) = self.selected_key_idx {
+            if idx < self.flat_keys.len() {
+                let val = &self.flat_keys[idx].1;
+                let val_str = match val {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    other => serde_json::to_string(other).unwrap_or_default(),
+                };
+                clipboard::copy_to_clipboard(&val_str);
+            }
+        }
     }
 }
 
