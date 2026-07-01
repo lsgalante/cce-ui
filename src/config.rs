@@ -541,36 +541,55 @@ mod tests {
 }
 
 pub fn value_to_kdl(key: &str, val: &serde_json::Value, indent: usize) -> String {
+    value_to_kdl_with_annotations(key, val, indent, "", &std::collections::HashMap::new())
+}
+
+pub fn value_to_kdl_with_annotations(
+    key: &str,
+    val: &serde_json::Value,
+    indent: usize,
+    parent_path: &str,
+    annotations: &std::collections::HashMap<String, String>,
+) -> String {
     let indent_str = "    ".repeat(indent);
+    let current_path = if parent_path.is_empty() {
+        key.to_string()
+    } else {
+        format!("{}.{}", parent_path, key)
+    };
+
     match val {
         serde_json::Value::Object(map) => {
             let has_objects = map.values().any(|v| v.is_object());
             if has_objects {
                 let mut out = format!("{}{} {{\n", indent_str, key);
                 for (k, v) in map {
-                    out.push_str(&value_to_kdl(k, v, indent + 1));
+                    out.push_str(&value_to_kdl_with_annotations(k, v, indent + 1, &current_path, annotations));
                 }
                 out.push_str(&format!("{}}}\n", indent_str));
                 out
             } else {
                 let mut prop_parts = Vec::new();
                 for (prop_name, prop_val) in map {
+                    let prop_path = format!("{}.{}", current_path, prop_name);
                     let (val_str, val_ty) = match prop_val {
-                        serde_json::Value::Bool(b) => (b.to_string(), Some("bool")),
+                        serde_json::Value::Bool(b) => (b.to_string(), Some("bool".to_string())),
                         serde_json::Value::Number(num) => {
                             if num.is_f64() {
-                                (num.to_string(), Some("f64"))
+                                (num.to_string(), Some("f64".to_string()))
                             } else {
-                                (num.to_string(), Some("i64"))
+                                (num.to_string(), Some("i64".to_string()))
                             }
                         }
                         serde_json::Value::String(s) => {
-                            if s.starts_with('#') {
+                            if let Some(anno) = annotations.get(&prop_path) {
+                                (format!("\"{}\"", s), Some(anno.clone()))
+                            } else if s.starts_with('#') {
                                 let s_clean = s.trim_start_matches('#');
                                 let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
-                                (format!("\"{}\"", s), Some(ty))
+                                (format!("\"{}\"", s), Some(ty.to_string()))
                             } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") {
-                                (format!("\"{}\"", s), Some("keybind"))
+                                (format!("\"{}\"", s), Some("keybind".to_string()))
                             } else {
                                 (format!("\"{}\"", s), None)
                             }
@@ -589,27 +608,29 @@ pub fn value_to_kdl(key: &str, val: &serde_json::Value, indent: usize) -> String
         serde_json::Value::Array(arr) => {
             let mut out = String::new();
             for item in arr {
-                out.push_str(&value_to_kdl(key, item, indent));
+                out.push_str(&value_to_kdl_with_annotations(key, item, indent, parent_path, annotations));
             }
             out
         }
         _ => {
             let (val_str, val_ty) = match val {
-                serde_json::Value::Bool(b) => (b.to_string(), Some("bool")),
+                serde_json::Value::Bool(b) => (b.to_string(), Some("bool".to_string())),
                 serde_json::Value::Number(num) => {
                     if num.is_f64() {
-                        (num.to_string(), Some("f64"))
+                        (num.to_string(), Some("f64".to_string()))
                     } else {
-                        (num.to_string(), Some("i64"))
+                        (num.to_string(), Some("i64".to_string()))
                     }
                 }
                 serde_json::Value::String(s) => {
-                    if s.starts_with('#') {
+                    if let Some(anno) = annotations.get(&current_path) {
+                        (format!("\"{}\"", s), Some(anno.clone()))
+                    } else if s.starts_with('#') {
                         let s_clean = s.trim_start_matches('#');
                         let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
-                        (format!("\"{}\"", s), Some(ty))
+                        (format!("\"{}\"", s), Some(ty.to_string()))
                     } else if key == "key" || key == "keybind" || key == "shortcut" || key.ends_with("_key") || key.ends_with(".key") || key.ends_with(".keybind") {
-                        (format!("\"{}\"", s), Some("keybind"))
+                        (format!("\"{}\"", s), Some("keybind".to_string()))
                     } else {
                         (format!("\"{}\"", s), None)
                     }
@@ -626,17 +647,24 @@ pub fn value_to_kdl(key: &str, val: &serde_json::Value, indent: usize) -> String
 }
 
 pub fn json_to_kdl_string(val: &serde_json::Value) -> String {
+    json_to_kdl_string_with_annotations(val, &std::collections::HashMap::new())
+}
+
+pub fn json_to_kdl_string_with_annotations(
+    val: &serde_json::Value,
+    annotations: &std::collections::HashMap<String, String>,
+) -> String {
     let mut out = String::new();
     if let serde_json::Value::Object(map) = val {
         for (sec_name, sec_val) in map {
             if let serde_json::Value::Object(sec_map) = sec_val {
                 out.push_str(&format!("{} {{\n", sec_name));
                 for (k, v) in sec_map {
-                    out.push_str(&value_to_kdl(k, v, 1));
+                    out.push_str(&value_to_kdl_with_annotations(k, v, 1, sec_name, annotations));
                 }
                 out.push_str("}\n");
             } else {
-                out.push_str(&value_to_kdl(sec_name, sec_val, 0));
+                out.push_str(&value_to_kdl_with_annotations(sec_name, sec_val, 0, "", annotations));
             }
         }
     }
