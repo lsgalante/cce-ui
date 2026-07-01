@@ -448,7 +448,11 @@ impl Element for TreeList {
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let f32_to_rgb = |c: [f32; 4]| -> [u8; 3] {
-            [(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8]
+            [
+                (crate::color::linear_to_srgb(c[0]) * 255.0).round() as u8,
+                (crate::color::linear_to_srgb(c[1]) * 255.0).round() as u8,
+                (crate::color::linear_to_srgb(c[2]) * 255.0).round() as u8,
+            ]
         };
 
         let mut labels = Vec::new();
