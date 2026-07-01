@@ -39,10 +39,13 @@ pub struct TextBox {
     pub placeholder: Option<String>,
     pub editor_state: TextEditorState,
     pub scroll_y: f32,
+    default_font_size: f32,
+    default_font_family: String,
 }
 
 impl TextBox {
     pub fn new(text: String) -> Self {
+        let (style_family, style_size) = crate::layout::textbox_font_parsed();
         let editor_state = TextEditorState::new(text.clone());
         Self {
             base: Widget::new(),
@@ -65,11 +68,13 @@ impl TextBox {
             multiline: false,
             draw_bg_border: true,
             text_color: None,
-            font_size: 12.0,
-            font_family: "monospace".to_string(),
+            font_size: style_size,
+            font_family: style_family.clone(),
             placeholder: None,
             editor_state,
             scroll_y: 0.0,
+            default_font_size: style_size,
+            default_font_family: style_family,
         }
     }
 
@@ -368,6 +373,19 @@ impl Default for TextBox {
 
 impl Element for TextBox {
     crate::impl_widget_base!(TextBox);
+
+    fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem) {
+        let (style_family, style_size) = crate::layout::textbox_font_parsed();
+        if self.font_size == self.default_font_size {
+            self.font_size = style_size;
+        }
+        self.default_font_size = style_size;
+
+        if self.font_family == self.default_font_family {
+            self.font_family = style_family.clone();
+        }
+        self.default_font_family = style_family;
+    }
 
     fn get_value_string(&self) -> Option<String> {
         Some(self.text.clone())
