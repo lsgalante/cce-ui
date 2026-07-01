@@ -57,7 +57,11 @@ impl KeybindsControl {
         let content = std::fs::read_to_string(&path).unwrap_or_default();
         let val = crate::config::parse_kdl_to_json(&content);
         let mut loaded = Vec::new();
-        if let Some(arr) = val.get("key_bindings").and_then(|k| k.as_array()) {
+        let mut keybind_val = val.get("key_bindings");
+        if keybind_val.is_none() {
+            keybind_val = val.get("input").and_then(|i| i.get("key_bindings"));
+        }
+        if let Some(arr) = keybind_val.and_then(|k| k.as_array()) {
             for v in arr {
                 let mods = v.get("mods").and_then(|m| m.as_str()).unwrap_or("").to_string();
                 let key = v.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string();

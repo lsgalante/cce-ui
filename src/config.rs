@@ -391,7 +391,7 @@ pub fn write_keybindings_to_kdl(path: &str, keybinds: &[serde_json::Value]) -> b
         Err(_) => kdl::KdlDocument::new(),
     };
 
-    // Remove all existing key_bindings nodes
+    // Remove all existing key_bindings nodes (root-level)
     doc.nodes_mut().retain(|n| n.name().value() != "key_bindings");
 
     // Construct nested key_bindings block
@@ -422,7 +422,14 @@ pub fn write_keybindings_to_kdl(path: &str, keybinds: &[serde_json::Value]) -> b
     block_str.push_str("}\n");
 
     if let Ok(node) = block_str.parse::<kdl::KdlNode>() {
-        doc.nodes_mut().push(node);
+        if let Some(input_idx) = doc.nodes().iter().position(|n| n.name().value() == "input") {
+            let input_node = &mut doc.nodes_mut()[input_idx];
+            let children = input_node.ensure_children();
+            children.nodes_mut().retain(|n| n.name().value() != "key_bindings");
+            children.nodes_mut().push(node);
+        } else {
+            doc.nodes_mut().push(node);
+        }
     }
 
     let updated_str = doc.to_string();
