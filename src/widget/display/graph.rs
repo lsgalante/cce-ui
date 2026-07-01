@@ -861,16 +861,16 @@ impl Element for Graph {
             }
         };
 
-        let w_size = crate::layout::graph_wire_size();
-        let mut w_color = colors::graph_wire_color();
-        let mut w_hl_color = colors::graph_wire_highlight_color();
-        w_color[3] *= self.network_opacity;
-        w_hl_color[3] *= self.network_opacity;
+        let conn_size = crate::layout::graph_connector_size();
+        let mut conn_color = colors::graph_connector_color();
+        let mut conn_hl_color = colors::graph_connector_highlight_color();
+        conn_color[3] *= self.network_opacity;
+        conn_hl_color[3] *= self.network_opacity;
 
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
-                let port_size = (w_size * scale_f).max(2.0);
+                let port_size = (conn_size * scale_f).max(2.0);
                 let base_r = port_size / 2.0;
 
                 let node = &self.nodes[i];
@@ -884,9 +884,9 @@ impl Element for Graph {
                     let is_connecting = self.connecting_from == Some((i, PortType::Input, k));
                     
                     let (r, color) = if is_hovered || is_connecting {
-                        (base_r * 1.4, w_hl_color)
+                        (base_r * 1.4, conn_hl_color)
                     } else {
-                        (base_r, w_color)
+                        (base_r, conn_color)
                     };
                     push_circle_clipped(cx, cy, r, color);
                 }
@@ -900,9 +900,9 @@ impl Element for Graph {
                     let is_connecting = self.connecting_from == Some((i, PortType::Output, k));
                     
                     let (r, color) = if is_hovered || is_connecting {
-                        (base_r * 1.4, w_hl_color)
+                        (base_r * 1.4, conn_hl_color)
                     } else {
-                        (base_r, w_color)
+                        (base_r, conn_color)
                     };
                     push_circle_clipped(cx, cy, r, color);
                 }

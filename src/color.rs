@@ -84,6 +84,9 @@ static GRAPH_NODE_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_DRAG);
 static GRAPH_WIRE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.1, 0.8, 0.4, 1.0]);
 static GRAPH_WIRE_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 1.0, 0.9, 1.0]);
 
+static GRAPH_CONNECTOR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.1, 0.8, 0.4, 1.0]);
+static GRAPH_CONNECTOR_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 1.0, 0.9, 1.0]);
+
 pub fn button_background_color() -> [f32; 4] {
     *BUTTON_BACKGROUND_COLOR.read().unwrap()
 }
@@ -311,6 +314,12 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/surface/graph/node/wire_highlight_color") {
         if let Ok(mut lock) = GRAPH_WIRE_HIGHLIGHT_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = get_color("/style/surface/graph/node/connector_color") {
+        if let Ok(mut lock) = GRAPH_CONNECTOR_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/surface/graph/node/connector_highlight_color") {
+        if let Ok(mut lock) = GRAPH_CONNECTOR_HIGHLIGHT_COLOR.write() { *lock = c; }
+    }
     if let Some(opacity) = val.pointer("/style/surface/graph/opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = GRAPH_OPACITY.write() { *lock = opacity as f32; }
     }
@@ -403,6 +412,28 @@ pub fn graph_wire_highlight_color() -> [f32; 4] {
 
 pub fn set_graph_wire_highlight_color(color: [f32; 4]) {
     if let Ok(mut lock) = GRAPH_WIRE_HIGHLIGHT_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_connector_color() -> [f32; 4] {
+    load_colors_once();
+    *GRAPH_CONNECTOR_COLOR.read().unwrap()
+}
+
+pub fn set_graph_connector_color(color: [f32; 4]) {
+    if let Ok(mut lock) = GRAPH_CONNECTOR_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn graph_connector_highlight_color() -> [f32; 4] {
+    load_colors_once();
+    *GRAPH_CONNECTOR_HIGHLIGHT_COLOR.read().unwrap()
+}
+
+pub fn set_graph_connector_highlight_color(color: [f32; 4]) {
+    if let Ok(mut lock) = GRAPH_CONNECTOR_HIGHLIGHT_COLOR.write() {
         *lock = color;
     }
 }

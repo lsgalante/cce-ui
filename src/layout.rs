@@ -156,6 +156,9 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.node.wire_highlight_color" => "graph_wire_highlight_color",
                 "style.surface.graph.node.wire_size" => "graph_wire_size",
                 "style.surface.graph.node.wire_activation_radius" => "graph_wire_activation_radius",
+                "style.surface.graph.node.connector_color" => "graph_connector_color",
+                "style.surface.graph.node.connector_highlight_color" => "graph_connector_highlight_color",
+                "style.surface.graph.node.connector_size" => "graph_connector_size",
                 
                 other => {
                     if let Some(rest) = other.strip_prefix("layout.") {
@@ -2555,6 +2558,18 @@ pub fn set_graph_wire_activation_radius(radius: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("graph_wire_activation_radius", radius);
+    }
+}
+
+pub fn graph_connector_size() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_connector_size").unwrap_or(6.0)
+}
+
+pub fn set_graph_connector_size(size: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_connector_size", size);
     }
 }
 
@@ -5130,6 +5145,7 @@ mod tests {
         set_graph_node_corner_radius(8.0);
         set_graph_wire_size(10.0);
         set_graph_wire_activation_radius(15.0);
+        set_graph_connector_size(12.0);
 
         assert_eq!(graph_spacing_x(), 200.0);
         assert_eq!(graph_spacing_y(), 100.0);
@@ -5138,6 +5154,7 @@ mod tests {
         assert_eq!(graph_node_corner_radius(), 8.0);
         assert_eq!(graph_wire_size(), 10.0);
         assert_eq!(graph_wire_activation_radius(), 15.0);
+        assert_eq!(graph_connector_size(), 12.0);
 
         crate::color::set_graph_cell_color([0.1, 0.2, 0.3]);
         crate::color::set_graph_gap_color([0.4, 0.5, 0.6]);
@@ -5149,6 +5166,8 @@ mod tests {
         crate::color::set_node_drag_color([0.5, 0.5, 0.5, 1.0]);
         crate::color::set_graph_wire_color([0.1, 0.1, 0.1, 1.0]);
         crate::color::set_graph_wire_highlight_color([0.2, 0.2, 0.2, 1.0]);
+        crate::color::set_graph_connector_color([0.3, 0.3, 0.3, 1.0]);
+        crate::color::set_graph_connector_highlight_color([0.4, 0.4, 0.4, 1.0]);
 
         let cell_color = crate::color::graph_cell_color();
         assert_eq!(cell_color, [0.1, 0.2, 0.3]);
@@ -5162,6 +5181,8 @@ mod tests {
         assert_eq!(crate::color::node_drag_color(), [0.5, 0.5, 0.5, 1.0]);
         assert_eq!(crate::color::graph_wire_color(), [0.1, 0.1, 0.1, 1.0]);
         assert_eq!(crate::color::graph_wire_highlight_color(), [0.2, 0.2, 0.2, 1.0]);
+        assert_eq!(crate::color::graph_connector_color(), [0.3, 0.3, 0.3, 1.0]);
+        assert_eq!(crate::color::graph_connector_highlight_color(), [0.4, 0.4, 0.4, 1.0]);
     }
 }
 
