@@ -337,22 +337,13 @@ impl Element for Spinbox {
         let mut quads = Vec::new();
         let (r1, r2, r3, r4) = self.rounded_corners();
         let has_rounded = r1 || r2 || r3 || r4;
+        if has_rounded {
+            return quads;
+        }
 
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         let display_w = self.base.w * 0.55;
-
-        if has_rounded {
-            if self.editing {
-                let char_width = 8.4;
-                let cursor_x = self.base.x + 4.0 + (self.cursor_idx as f32 * char_width);
-                let max_cursor_x = self.base.x + display_w - 4.0;
-                let final_cursor_x = cursor_x.min(max_cursor_x);
-                let cursor_y = self.base.y + top + (visual_h - 14.0) / 2.0;
-                quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
-            }
-            return quads;
-        }
 
         let p = crate::layout::spinbox_button_padding();
         let split_dec = self.base.x + display_w;
@@ -441,6 +432,16 @@ impl Element for Spinbox {
             quads.push((split_dec + p, btn_y, btn_w_padded, btn_h, 0.0, dec_col, (false, false, false, false)));
             // Increment button (right, rounded top-right and bottom-right)
             quads.push((split_dec + p + btn_w_padded, btn_y, btn_w_padded, btn_h, radius, inc_col, (false, r2, r3, false)));
+        }
+
+        // Draw cursor if editing and rounded
+        if self.editing {
+            let char_width = 8.4;
+            let cursor_x = self.base.x + 4.0 + (self.cursor_idx as f32 * char_width);
+            let max_cursor_x = self.base.x + display_w - 4.0;
+            let final_cursor_x = cursor_x.min(max_cursor_x);
+            let cursor_y = self.base.y + top + (visual_h - 14.0) / 2.0;
+            quads.push((final_cursor_x, cursor_y, 1.5, 14.0, 0.0, [0.80, 0.80, 0.85, 1.0], (false, false, false, false)));
         }
 
         quads
