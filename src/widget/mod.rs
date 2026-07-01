@@ -295,6 +295,10 @@ pub trait Element {
     fn select_all(&mut self) {}
     fn copy_key(&self) {}
     fn copy_value(&self) {}
+    fn expand_node(&mut self) {}
+    fn collapse_node(&mut self) {}
+    fn expand_all_nodes(&mut self) {}
+    fn collapse_all_nodes(&mut self) {}
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         if let Some(b) = self.base_mut() {

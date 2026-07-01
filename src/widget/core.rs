@@ -552,6 +552,18 @@ pub mod context_menu {
                                         "Copy Value" => {
                                             target.copy_value();
                                         }
+                                        "Expand" => {
+                                            target.expand_node();
+                                        }
+                                        "Collapse" => {
+                                            target.collapse_node();
+                                        }
+                                        "Expand All" => {
+                                            target.expand_all_nodes();
+                                        }
+                                        "Collapse All" => {
+                                            target.collapse_all_nodes();
+                                        }
                                         _ => {}
                                     }
                                 }

@@ -126,6 +126,7 @@ pub struct TreeList {
     pub hovered_row_idx: Option<usize>,
     pub item_height: f32,
     pub clicked_item: Option<TreeElement>,
+    pub right_clicked_section: Option<String>,
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
 }
@@ -142,6 +143,7 @@ impl TreeList {
             hovered_row_idx: None,
             item_height: 28.0,
             clicked_item: None,
+            right_clicked_section: None,
             parent: None,
             children: Vec::new(),
         }
@@ -265,24 +267,42 @@ impl Element for TreeList {
                 let row_idx = (relative_y / self.item_height) as usize;
                 if row_idx < self.items.len() {
                     let item = self.items[row_idx].clone();
-                    if let TreeElement::Leaf { original_idx, ref path, ref name, indent, ref val } = item {
-                        self.selected_key_idx = Some(original_idx);
-                        self.clicked_item = Some(TreeElement::Leaf {
-                            path: path.clone(),
-                            name: name.clone(),
-                            indent,
-                            val: val.clone(),
-                            original_idx,
-                        });
-                        
-                        let options = vec![
-                            path.clone(),
-                            "Copy Key".to_string(),
-                            "Copy Value".to_string(),
-                        ];
-                        let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
-                        ctx.show_context_menu(px, py - scroll_offset, options, 1, self.as_ptr_mut());
-                        changed = true;
+                    match item {
+                        TreeElement::Section { ref path, collapsed, .. } => {
+                            self.right_clicked_section = Some(path.clone());
+                            
+                            let mut options = vec![path.clone()];
+                            if collapsed {
+                                options.push("Expand".to_string());
+                            } else {
+                                options.push("Collapse".to_string());
+                            }
+                            options.push("Expand All".to_string());
+                            options.push("Collapse All".to_string());
+                            
+                            let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
+                            ctx.show_context_menu(px, py - scroll_offset, options, 1, self.as_ptr_mut());
+                            changed = true;
+                        }
+                        TreeElement::Leaf { original_idx, ref path, ref name, indent, ref val } => {
+                            self.selected_key_idx = Some(original_idx);
+                            self.clicked_item = Some(TreeElement::Leaf {
+                                path: path.clone(),
+                                name: name.clone(),
+                                indent,
+                                val: val.clone(),
+                                original_idx,
+                            });
+                            
+                            let options = vec![
+                                path.clone(),
+                                "Copy Key".to_string(),
+                                "Copy Value".to_string(),
+                            ];
+                            let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
+                            ctx.show_context_menu(px, py - scroll_offset, options, 1, self.as_ptr_mut());
+                            changed = true;
+                        }
                     }
                 }
             }
@@ -564,6 +584,104 @@ impl Element for TreeList {
                 clipboard::copy_to_clipboard(&val_str);
             }
         }
+    }
+
+    fn expand_node(&mut self) {
+        if let Some(path) = self.right_clicked_section.clone() {
+            self.collapsed_sections.remove(&path);
+            self.rebuild_tree();
+            self.clicked_item = Some(TreeElement::Section {
+                path,
+                name: String::new(),
+                indent: 0,
+                collapsed: false,
+            });
+        }
+        self.right_clicked_section = None;
+    }
+
+    fn collapse_node(&mut self) {
+        if let Some(path) = self.right_clicked_section.clone() {
+            self.collapsed_sections.insert(path.clone());
+            self.rebuild_tree();
+            self.clicked_item = Some(TreeElement::Section {
+                path,
+                name: String::new(),
+                indent: 0,
+                collapsed: true,
+            });
+        }
+        self.right_clicked_section = None;
+    }
+
+    fn expand_all_nodes(&mut self) {
+        self.collapsed_sections.clear();
+        self.rebuild_tree();
+        if let Some(path) = self.right_clicked_section.clone() {
+            self.clicked_item = Some(TreeElement::Section {
+                path,
+                name: String::new(),
+                indent: 0,
+                collapsed: false,
+            });
+        } else {
+            self.clicked_item = Some(TreeElement::Section {
+                path: String::new(),
+                name: String::new(),
+                indent: 0,
+                collapsed: false,
+            });
+        }
+        self.right_clicked_section = None;
+    }
+
+    fn collapse_all_nodes(&mut self) {
+        self.collapsed_sections = self.get_all_section_paths();
+        self.rebuild_tree();
+        if let Some(path) = self.right_clicked_section.clone() {
+            self.clicked_item = Some(TreeElement::Section {
+                path,
+                name: String::new(),
+                indent: 0,
+                collapsed: true,
+            });
+        } else {
+            self.clicked_item = Some(TreeElement::Section {
+                path: String::new(),
+                name: String::new(),
+                indent: 0,
+                collapsed: true,
+            });
+        }
+        self.right_clicked_section = None;
+    }
+}
+
+impl TreeList {
+    fn get_all_section_paths(&self) -> HashSet<String> {
+        let mut sections = HashSet::new();
+        for (key_path, _) in &self.flat_keys {
+            let tokens = parse_path(key_path);
+            let mut current_prefix = String::new();
+            for i in 0..(tokens.len().saturating_sub(1)) {
+                let token = &tokens[i];
+                match token {
+                    PathToken::Key(k) => {
+                        if current_prefix.is_empty() {
+                            current_prefix = k.clone();
+                        } else {
+                            current_prefix = format!("{}.{}", current_prefix, k);
+                        }
+                    }
+                    PathToken::Index(idx) => {
+                        let s = format!("[{}]", idx);
+                        current_prefix = format!("{}{}", current_prefix, s);
+                    }
+                };
+                sections.insert(current_prefix.clone());
+            }
+        }
+        sections
     }
 }
 
