@@ -82,21 +82,9 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
 
 pub fn parse_kdl_to_json(content: &str) -> serde_json::Value {
     if let Ok(doc) = content.parse::<kdl::KdlDocument>() {
-        let val = kdl_to_json(&doc);
-        if let Some(obj) = val.as_object() {
-            if obj.is_empty() && (content.trim().starts_with('{') || content.trim().starts_with('[')) {
-                if let Ok(j) = serde_json::from_str::<serde_json::Value>(content) {
-                    return j;
-                }
-            }
-        }
-        val
+        kdl_to_json(&doc)
     } else {
-        if let Ok(j) = serde_json::from_str::<serde_json::Value>(content) {
-            j
-        } else {
-            serde_json::json!({})
-        }
+        serde_json::json!({})
     }
 }
 
@@ -336,6 +324,49 @@ pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &
         return safe_write(path, &updated_str);
     }
     false
+}
+
+pub fn write_keybindings_to_kdl(path: &str, keybinds: &[serde_json::Value]) -> bool {
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let mut doc = match content.parse::<kdl::KdlDocument>() {
+        Ok(d) => d,
+        Err(_) => kdl::KdlDocument::new(),
+    };
+
+    // Remove all existing key_bindings nodes
+    doc.nodes_mut().retain(|n| n.name().value() != "key_bindings");
+
+    // Add new key_bindings nodes
+    for v in keybinds {
+        if let Some(obj) = v.as_object() {
+            let mods = obj.get("mods").and_then(|m| m.as_str()).unwrap_or("");
+            let key = obj.get("key").and_then(|k| k.as_str()).unwrap_or("");
+            let action = obj.get("action").and_then(|a| a.as_str()).unwrap_or("");
+            let command = obj.get("command").and_then(|c| c.as_str()).unwrap_or("");
+
+            let mut node_str = "key_bindings".to_string();
+            if !action.is_empty() {
+                node_str.push_str(&format!(" action={:?}", action));
+            }
+            if !command.is_empty() {
+                node_str.push_str(&format!(" command={:?}", command));
+            }
+            if !key.is_empty() {
+                node_str.push_str(&format!(" key={:?}", key));
+            }
+            if !mods.is_empty() {
+                node_str.push_str(&format!(" mods={:?}", mods));
+            }
+            node_str.push('\n');
+
+            if let Ok(node) = node_str.parse::<kdl::KdlNode>() {
+                doc.nodes_mut().push(node);
+            }
+        }
+    }
+
+    let updated_str = doc.to_string();
+    safe_write(path, &updated_str)
 }
 
 pub fn get_kdl_type_annotation(kdl_content: &str, key_path: &str) -> Option<String> {

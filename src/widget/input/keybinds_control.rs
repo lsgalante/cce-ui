@@ -55,7 +55,7 @@ impl KeybindsControl {
     pub fn load_from_config(&mut self) {
         let path = crate::config::get_config_path();
         let content = std::fs::read_to_string(&path).unwrap_or_default();
-        let val: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
+        let val = crate::config::parse_kdl_to_json(&content);
         let mut loaded = Vec::new();
         if let Some(arr) = val.get("key_bindings").and_then(|k| k.as_array()) {
             for v in arr {
@@ -87,8 +87,6 @@ impl KeybindsControl {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let content = std::fs::read_to_string(&path).unwrap_or_default();
-        let mut val: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
         
         let mut keybinds = Vec::new();
         for row in &self.rows {
@@ -122,13 +120,7 @@ impl KeybindsControl {
             keybinds.push(serde_json::Value::Object(obj));
         }
         
-        if let Some(obj) = val.as_object_mut() {
-            obj.insert("key_bindings".to_string(), serde_json::Value::Array(keybinds));
-        }
-        
-        if let Ok(updated_str) = serde_json::to_string_pretty(&val) {
-            let _ = std::fs::write(&path, updated_str);
-        }
+        crate::config::write_keybindings_to_kdl(path.to_str().unwrap(), &keybinds);
     }
 }
 
