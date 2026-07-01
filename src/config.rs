@@ -538,6 +538,41 @@ mod tests {
         assert_eq!(ty2, Some("bool".to_string()));
     }
 
+    #[test]
+    fn test_json_to_kdl_with_special_annotations() {
+        let mut annotations = std::collections::HashMap::new();
+        annotations.insert("style.surface.desktop.mode".to_string(), "menu:grid,solid".to_string());
+        
+        let mut desktop_map = serde_json::Map::new();
+        desktop_map.insert("mode".to_string(), serde_json::Value::String("grid".to_string()));
+        
+        let mut surface_map = serde_json::Map::new();
+        surface_map.insert("desktop".to_string(), serde_json::Value::Object(desktop_map));
+        
+        let mut style_map = serde_json::Map::new();
+        style_map.insert("surface".to_string(), serde_json::Value::Object(surface_map));
+        
+        let mut root_map = serde_json::Map::new();
+        root_map.insert("style".to_string(), serde_json::Value::Object(style_map));
+        
+        let root = serde_json::Value::Object(root_map);
+        let kdl_str = json_to_kdl_string_with_annotations(&root, &annotations);
+        println!("Generated KDL:\n{}", kdl_str);
+        
+        let doc_parsed = kdl_str.parse::<kdl::KdlDocument>();
+        assert!(doc_parsed.is_ok(), "Failed to parse KDL: {:?}", doc_parsed.err());
+    }
+}
+
+fn format_kdl_type(ty: &str) -> String {
+    let is_ident = !ty.is_empty()
+        && !ty.chars().next().unwrap().is_ascii_digit()
+        && ty.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+' | '?' | '!' | '@' | '*' | '~' | '|' | '.'));
+    if is_ident {
+        ty.to_string()
+    } else {
+        format!("\"{}\"", ty.replace('\\', "\\\\").replace('"', "\\\""))
+    }
 }
 
 pub fn value_to_kdl(key: &str, val: &serde_json::Value, indent: usize) -> String {
@@ -597,7 +632,7 @@ pub fn value_to_kdl_with_annotations(
                         _ => (prop_val.to_string(), None),
                     };
                     if let Some(ty) = val_ty {
-                        prop_parts.push(format!("{}=({}){}", prop_name, ty, val_str));
+                        prop_parts.push(format!("{}=({}){}", prop_name, format_kdl_type(&ty), val_str));
                     } else {
                         prop_parts.push(format!("{}={}", prop_name, val_str));
                     }
@@ -638,7 +673,7 @@ pub fn value_to_kdl_with_annotations(
                 _ => (val.to_string(), None),
             };
             if let Some(ty) = val_ty {
-                format!("{}{} ({}){}\n", indent_str, key, ty, val_str)
+                format!("{}{} ({}){}\n", indent_str, key, format_kdl_type(&ty), val_str)
             } else {
                 format!("{}{} {}\n", indent_str, key, val_str)
             }

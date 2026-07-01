@@ -135,6 +135,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.desktop.cell_fade_inset" => "desktop_cell_fade_inset",
                 "style.surface.desktop.mode" => "desktop_mode",
                 "style.surface.desktop.solid_color" => "desktop_solid_color",
+                "style.surface.desktop.grid_cell_size" => "desktop_grid_scale",
                 "style.surface.plate.padding" => "plate_padding",
                 "style.surface.backplate.color" => "backplate_color",
                 "style.surface.backplate.blur" => "backplate_blur",
