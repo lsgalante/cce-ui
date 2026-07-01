@@ -69,11 +69,28 @@ impl KeybindsControl {
                 } else {
                     format!("{}+{}", mods, key)
                 };
-                let cmd_val = if action == "spawn" {
-                    command
+                
+                let mut cmd_val = if action == "spawn" {
+                    command.clone()
+                } else if action == "toggle" {
+                    command.clone()
                 } else {
-                    action
+                    action.clone()
                 };
+
+                if cmd_val.starts_with("cce control ") {
+                    let sub = &cmd_val["cce control ".len()..];
+                    if sub.starts_with("view ") {
+                        let num = &sub["view ".len()..];
+                        cmd_val = format!("view-{}", num);
+                    } else if sub.starts_with("set-tag ") {
+                        let num = &sub["set-tag ".len()..];
+                        cmd_val = format!("set-tag-{}", num);
+                    } else {
+                        cmd_val = sub.to_string();
+                    }
+                }
+                
                 loaded.push((binding, cmd_val));
             }
         }
@@ -100,10 +117,10 @@ impl KeybindsControl {
             };
 
             let built_in_actions = [
-                "expose", "close", "focus-next", "focus-prev", "mode-next",
+                "expose", "close", "minimize", "focus-next", "focus-prev", "mode-next",
                 "mode-next-shared", "fullscreen", "exit", "reload",
-                "view-1", "view-2", "view-3", "view-4",
-                "set-tag-1", "set-tag-2", "set-tag-3", "set-tag-4"
+                "zoom-in", "zoom-out", "zoom-reset", "pan-left", "pan-right", "pan-up", "pan-down",
+                "overlay-left", "overlay-right"
             ];
             
             let mut obj = serde_json::Map::new();
@@ -111,7 +128,16 @@ impl KeybindsControl {
             obj.insert("key".to_string(), serde_json::Value::String(key));
             
             if built_in_actions.contains(&cmd_val.as_str()) {
-                obj.insert("action".to_string(), serde_json::Value::String(cmd_val));
+                obj.insert("action".to_string(), serde_json::Value::String("spawn".to_string()));
+                obj.insert("command".to_string(), serde_json::Value::String(format!("cce control {}", cmd_val)));
+            } else if cmd_val.starts_with("view-") {
+                let num = &cmd_val["view-".len()..];
+                obj.insert("action".to_string(), serde_json::Value::String("spawn".to_string()));
+                obj.insert("command".to_string(), serde_json::Value::String(format!("cce control view {}", num)));
+            } else if cmd_val.starts_with("set-tag-") {
+                let num = &cmd_val["set-tag-".len()..];
+                obj.insert("action".to_string(), serde_json::Value::String("spawn".to_string()));
+                obj.insert("command".to_string(), serde_json::Value::String(format!("cce control set-tag {}", num)));
             } else {
                 obj.insert("action".to_string(), serde_json::Value::String("spawn".to_string()));
                 obj.insert("command".to_string(), serde_json::Value::String(cmd_val));
