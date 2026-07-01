@@ -120,6 +120,7 @@ pub struct TreeList {
     pub base: Widget,
     pub scroll_box: ScrollBox,
     pub flat_keys: Vec<(String, serde_json::Value)>,
+    pub annotations: Vec<Option<String>>,
     pub collapsed_sections: HashSet<String>,
     pub items: Vec<TreeElement>,
     pub selected_key_idx: Option<usize>,
@@ -140,6 +141,7 @@ impl TreeList {
             base: Widget::new(),
             scroll_box: ScrollBox::new(),
             flat_keys: Vec::new(),
+            annotations: Vec::new(),
             collapsed_sections: HashSet::new(),
             items: Vec::new(),
             selected_key_idx: None,
@@ -602,7 +604,20 @@ impl Element for TreeList {
                         }
                         _ => None,
                     };
-                    if let Some(ty) = val_ty {
+                    let mut display_ty = val_ty.map(|s| s.to_string());
+                    if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
+                        if anno.starts_with("menu:") {
+                            display_ty = Some("menu".to_string());
+                        } else {
+                            display_ty = Some(anno.clone());
+                        }
+                    } else if display_ty.is_none() {
+                        if let serde_json::Value::String(_) = val {
+                            display_ty = Some("string".to_string());
+                        }
+                    }
+
+                    if let Some(ty) = display_ty {
                         let ty_text = format!("({})", ty);
                         labels.push(TextLabel {
                             text: ty_text,
