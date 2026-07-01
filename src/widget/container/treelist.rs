@@ -644,8 +644,8 @@ impl Element for TreeList {
         let (x, y, w, h) = self.rect();
         let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
         let header_bounds = Some([x, y, x + w, y + h]);
-        self.text_labels().into_iter().map(|l| {
-            let b = if l.y < self.scroll_box.viewport_y {
+        self.text_labels().into_iter().enumerate().map(|(idx, l)| {
+            let b = if idx < 3 {
                 header_bounds
             } else {
                 list_bounds
@@ -659,8 +659,8 @@ impl Element for TreeList {
         let (x, y, w, h) = self.rect();
         let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
         let header_bounds = Some([x, y, x + w, y + h]);
-        self.text_labels().into_iter().map(|l| {
-            let b = if l.y < self.scroll_box.viewport_y {
+        self.text_labels().into_iter().enumerate().map(|(idx, l)| {
+            let b = if idx < 3 {
                 header_bounds
             } else {
                 list_bounds
