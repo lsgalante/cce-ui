@@ -538,16 +538,6 @@ mod tests {
         assert_eq!(ty2, Some("bool".to_string()));
     }
 
-    #[test]
-    fn test_real_config_kdl() {
-        let path = "/home/lsgalante/.config/cce/config.kdl";
-        if std::path::Path::new(path).exists() {
-            let content = std::fs::read_to_string(path).unwrap();
-            let ty = get_kdl_type_annotation(&content, "input.accel_profile");
-            println!("REAL CONFIG ACCEL PROFILE ANNO: {:?}", ty);
-            assert_eq!(ty, Some("menu:flat,adaptive,none,custom".to_string()));
-        }
-    }
 }
 
 pub fn value_to_kdl(key: &str, val: &serde_json::Value, indent: usize) -> String {
