@@ -207,6 +207,31 @@ impl Element for TreeList {
         [0.0, 0.0, 0.0, 0.0]
     }
 
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        (true, true, true, true)
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::tree_corner_radius()
+    }
+
+    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+        let is_focused = focus::is_focused(self) || focus::is_focused(&self.scroll_box);
+        let is_hovered = self.hovered() || self.hovered_row_idx.is_some() || self.scroll_box.base.hovered;
+        if self.scroll_box.show_border {
+            let box_border_color = if is_focused {
+                [0.30, 0.50, 0.32, 1.0]
+            } else if is_hovered {
+                [0.25, 0.25, 0.35, 1.0]
+            } else {
+                [0.18, 0.18, 0.24, 1.0]
+            };
+            Some((box_border_color, 1.0))
+        } else {
+            None
+        }
+    }
+
     fn focus(&mut self) {
         focus::set_focused(self);
     }

@@ -112,18 +112,7 @@ impl Element for ScrollBox {
         // Background
         quads.push((self.base.x, self.base.y, self.base.w, self.base.h, crate::color::list_bg_color()));
 
-        // Border lines
-        let box_border_color = if focus::is_focused(self) {
-            [0.30, 0.50, 0.32, 1.0] // Focused green
-        } else if self.base.hovered {
-            [0.25, 0.25, 0.35, 1.0] // Hovered
-        } else {
-            [0.18, 0.18, 0.24, 1.0] // Default
-        };
-        quads.push((self.base.x, self.base.y, self.base.w, 1.0, box_border_color)); // Top
-        quads.push((self.base.x, self.base.y + self.base.h - 1.0, self.base.w, 1.0, box_border_color)); // Bottom
-        quads.push((self.base.x, self.base.y, 1.0, self.base.h, box_border_color)); // Left
-        quads.push((self.base.x + self.base.w - 1.0, self.base.y, 1.0, self.base.h, box_border_color)); // Right
+
 
         // Scrollbar
         if self.content_h > self.viewport_h {
