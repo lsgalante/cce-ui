@@ -1220,30 +1220,14 @@ pub fn set_toggle_height(height: f32) {
 }
 
 pub fn toggle_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("toggle_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = TOGGLE_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *TOGGLE_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("toggle_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_toggle_corner_radius(radius: f32) {
-    if let Ok(mut lock) = TOGGLE_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("toggle_corner_radius", radius);
     }
 }
 
@@ -1276,58 +1260,29 @@ pub fn set_toggle_border_width(width: f32) {
 }
 
 pub fn slider_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("slider_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = SLIDER_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *SLIDER_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("slider_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_slider_corner_radius(radius: f32) {
-    if let Ok(mut lock) = SLIDER_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("slider_corner_radius", radius);
     }
 }
 
 pub fn plate_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("plate_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = PLATE_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *PLATE_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    let r = get_style_registry().read().unwrap();
+    r.get_float("plate_corner_radius")
+        .or_else(|| r.get_float("backplate_corner_radius"))
+        .unwrap_or(12.0)
 }
 
 pub fn set_plate_corner_radius(radius: f32) {
-    if let Ok(mut lock) = PLATE_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("plate_corner_radius", radius);
     }
 }
 
@@ -2242,114 +2197,50 @@ pub fn set_breadcrumb_font(font: &str) {
 }
 
 pub fn color_selector_preview_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("color_selector_preview_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *COLOR_SELECTOR_PREVIEW_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("color_selector_preview_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_color_selector_preview_corner_radius(radius: f32) {
-    if let Ok(mut lock) = COLOR_SELECTOR_PREVIEW_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("color_selector_preview_corner_radius", radius);
     }
 }
 
 pub fn color_selector_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("color_selector_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = COLOR_SELECTOR_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *COLOR_SELECTOR_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("color_selector_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_color_selector_corner_radius(radius: f32) {
-    if let Ok(mut lock) = COLOR_SELECTOR_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("color_selector_corner_radius", radius);
     }
 }
 
 pub fn button_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("button_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = BUTTON_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *BUTTON_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("button_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_button_corner_radius(radius: f32) {
-    if let Ok(mut lock) = BUTTON_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("button_corner_radius", radius);
     }
 }
 
 pub fn spinbox_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("spinbox_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = SPINBOX_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *SPINBOX_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("spinbox_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_spinbox_corner_radius(radius: f32) {
-    if let Ok(mut lock) = SPINBOX_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("spinbox_corner_radius", radius);
     }
 }
 
@@ -2382,53 +2273,20 @@ pub fn set_spinbox_button_padding(padding: f32) {
 }
 
 pub fn textbox_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("textbox_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = TEXTBOX_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *TEXTBOX_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("textbox_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_textbox_corner_radius(radius: f32) {
-    if let Ok(mut lock) = TEXTBOX_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("textbox_corner_radius", radius);
     }
 }
 
 pub fn breadcrumb_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("breadcrumb_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = BREADCRUMB_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *BREADCRUMB_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("breadcrumb_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_breadcrumb_corner_radius(radius: f32) {
@@ -2463,58 +2321,26 @@ pub fn set_tree_corner_radius(radius: f32) {
 }
 
 pub fn font_selector_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("font_selector_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = FONT_SELECTOR_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *FONT_SELECTOR_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("font_selector_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_font_selector_corner_radius(radius: f32) {
-    if let Ok(mut lock) = FONT_SELECTOR_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("font_selector_corner_radius", radius);
     }
 }
 
 pub fn dropdown_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("dropdown_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = DROPDOWN_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *DROPDOWN_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("dropdown_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_dropdown_corner_radius(radius: f32) {
-    if let Ok(mut lock) = DROPDOWN_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("dropdown_corner_radius", radius);
     }
 }
 

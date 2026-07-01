@@ -366,13 +366,11 @@ impl Element for TreeList {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = self.scroll_box.extra_quads();
-        
-        if focus::is_focused(self) {
-            let focus_color = [0.30, 0.50, 0.32, 1.0];
-            for i in 1..=4 {
-                if i < quads.len() {
-                    quads[i].4 = focus_color;
-                }
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let has_rounded = r1 || r2 || r3 || r4;
+        if has_rounded {
+            if !quads.is_empty() {
+                quads.remove(0);
             }
         }
 
@@ -577,6 +575,36 @@ impl Element for TreeList {
 
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
         self.children.clone()
+    }
+
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let has_rounded = r1 || r2 || r3 || r4;
+        if !has_rounded {
+            for &child_ptr in &self.children(ctx) {
+                let widget = unsafe { &*child_ptr };
+                quads.extend(widget.all_rounded_quads(ctx));
+            }
+            return quads;
+        }
+
+        let radius = self.corner_radius();
+        let (x, y, w, h) = self.rect();
+        
+        // Solid border if active
+        if let Some((border_color, thickness)) = self.solid_border() {
+            quads.push((x, y, w, h, radius, border_color, (r1, r2, r3, r4)));
+            quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, crate::color::list_bg_color(), (r1, r2, r3, r4)));
+        } else {
+            quads.push((x, y, w, h, radius, crate::color::list_bg_color(), (r1, r2, r3, r4)));
+        }
+
+        for &child_ptr in &self.children(ctx) {
+            let widget = unsafe { &*child_ptr };
+            quads.extend(widget.all_rounded_quads(ctx));
+        }
+        quads
     }
 
     fn add_child(&mut self, child: *mut (dyn Element + 'static), _ctx: &mut UiContext) {

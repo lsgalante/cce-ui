@@ -124,7 +124,45 @@ impl Element for ScrollingList {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        self.scroll_box.extra_quads()
+        let mut quads = self.scroll_box.extra_quads();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let has_rounded = r1 || r2 || r3 || r4;
+        if has_rounded {
+            if !quads.is_empty() {
+                quads.remove(0);
+            }
+        }
+        quads
+    }
+
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let has_rounded = r1 || r2 || r3 || r4;
+        if !has_rounded {
+            for &child_ptr in &self.children(ctx) {
+                let widget = unsafe { &*child_ptr };
+                quads.extend(widget.all_rounded_quads(ctx));
+            }
+            return quads;
+        }
+
+        let radius = self.corner_radius();
+        let (x, y, w, h) = self.rect();
+        
+        // Solid border if active
+        if let Some((border_color, thickness)) = self.solid_border() {
+            quads.push((x, y, w, h, radius, border_color, (r1, r2, r3, r4)));
+            quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, crate::color::list_bg_color(), (r1, r2, r3, r4)));
+        } else {
+            quads.push((x, y, w, h, radius, crate::color::list_bg_color(), (r1, r2, r3, r4)));
+        }
+
+        for &child_ptr in &self.children(ctx) {
+            let widget = unsafe { &*child_ptr };
+            quads.extend(widget.all_rounded_quads(ctx));
+        }
+        quads
     }
 
     fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {

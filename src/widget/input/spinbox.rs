@@ -335,9 +335,25 @@ impl Element for Spinbox {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let has_rounded = r1 || r2 || r3 || r4;
+
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         let display_w = self.base.w * 0.55;
+
+        if has_rounded {
+            if self.editing {
+                let char_width = 8.4;
+                let cursor_x = self.base.x + 4.0 + (self.cursor_idx as f32 * char_width);
+                let max_cursor_x = self.base.x + display_w - 4.0;
+                let final_cursor_x = cursor_x.min(max_cursor_x);
+                let cursor_y = self.base.y + top + (visual_h - 14.0) / 2.0;
+                quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
+            }
+            return quads;
+        }
+
         let p = crate::layout::spinbox_button_padding();
         let split_dec = self.base.x + display_w;
         let inc_col = if self.hover_inc { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
@@ -376,6 +392,57 @@ impl Element for Spinbox {
             quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
         }
         
+        quads
+    }
+
+    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let has_rounded = r1 || r2 || r3 || r4;
+        if !has_rounded {
+            return quads;
+        }
+
+        let top = self.base.label_offset();
+        let visual_h = self.base.h - top;
+        let radius = self.corner_radius();
+        
+        let display_bg = if self.editing {
+            [0.06, 0.10, 0.18, 1.0]
+        } else {
+            colors::SPINBOX_DISPLAY
+        };
+
+        let display_w = self.base.w * 0.55;
+        let border_color = if self.editing {
+            [0.20, 0.50, 0.85, 1.0]
+        } else if self.base.hovered {
+            [0.25, 0.25, 0.35, 1.0]
+        } else {
+            [0.18, 0.18, 0.24, 1.0]
+        };
+
+        // Draw display border (outer) and background (inner)
+        quads.push((self.base.x, self.base.y + top, display_w, visual_h, radius, border_color, (r1, false, false, r4)));
+        quads.push((self.base.x + 1.0, self.base.y + top + 1.0, display_w - 1.0, visual_h - 2.0, radius - 1.0, display_bg, (r1, false, false, r4)));
+
+        // Increment/decrement buttons
+        let p = crate::layout::spinbox_button_padding();
+        let btn_y = self.base.y + top + p;
+        let btn_h = (visual_h - 2.0 * p).max(0.0);
+        let pair_w = (self.base.w * 0.45 - 2.0 * p).max(0.0);
+        let btn_w_padded = pair_w / 2.0;
+        let split_dec = self.base.x + display_w;
+        let inc_col = if self.hover_inc { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
+        let dec_col = if self.hover_dec { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
+
+        if btn_h > 0.0 && btn_w_padded > 0.0 {
+            // Decrement button (middle, no rounded corners)
+            quads.push((split_dec + p, btn_y, btn_w_padded, btn_h, 0.0, dec_col, (false, false, false, false)));
+            // Increment button (right, rounded top-right and bottom-right)
+            quads.push((split_dec + p + btn_w_padded, btn_y, btn_w_padded, btn_h, radius, inc_col, (false, r2, r3, false)));
+        }
+
         quads
     }
 
