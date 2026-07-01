@@ -400,12 +400,12 @@ impl Element for Graph {
         let was_hovered_port = self.hovered_port;
         self.hovered_port = None;
 
-        let wire_act_r = crate::layout::graph_wire_activation_radius();
+        let conn_act_r = crate::layout::graph_connector_activation_radius();
 
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
-                let hit_radius = (wire_act_r * scale_f).max(2.0);
+                let hit_radius = (conn_act_r * scale_f).max(2.0);
                 let node = &self.nodes[i];
                 
                 for k in 0..node.inputs {
@@ -449,11 +449,11 @@ impl Element for Graph {
         match state {
             ElementState::Pressed => {
                 log::debug!("Graph::mouse_input: Pressed px={}, py={}, connecting_from={:?}", px, py, self.connecting_from);
-                // First, check direct port clicks
                 for i in (0..self.nodes.len()).rev() {
                     if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                         let scale_f = nw / 80.0;
-                        let port_click_radius = (20.0 * scale_f).max(12.0);
+                        let conn_act_r = crate::layout::graph_connector_activation_radius();
+                        let port_click_radius = (conn_act_r * scale_f).max(2.0);
                         let port_click_radius_sq = port_click_radius * port_click_radius;
 
                         let node = &self.nodes[i];

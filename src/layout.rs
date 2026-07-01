@@ -159,6 +159,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.node.connector_color" => "graph_connector_color",
                 "style.surface.graph.node.connector_highlight_color" => "graph_connector_highlight_color",
                 "style.surface.graph.node.connector_size" => "graph_connector_size",
+                "style.surface.graph.node.connector_activation_radius" => "graph_connector_activation_radius",
                 
                 other => {
                     if let Some(rest) = other.strip_prefix("layout.") {
@@ -2570,6 +2571,18 @@ pub fn set_graph_connector_size(size: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("graph_connector_size", size);
+    }
+}
+
+pub fn graph_connector_activation_radius() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_connector_activation_radius").unwrap_or(9.0)
+}
+
+pub fn set_graph_connector_activation_radius(radius: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_connector_activation_radius", radius);
     }
 }
 
@@ -5146,6 +5159,7 @@ mod tests {
         set_graph_wire_size(10.0);
         set_graph_wire_activation_radius(15.0);
         set_graph_connector_size(12.0);
+        set_graph_connector_activation_radius(18.0);
 
         assert_eq!(graph_spacing_x(), 200.0);
         assert_eq!(graph_spacing_y(), 100.0);
@@ -5155,6 +5169,7 @@ mod tests {
         assert_eq!(graph_wire_size(), 10.0);
         assert_eq!(graph_wire_activation_radius(), 15.0);
         assert_eq!(graph_connector_size(), 12.0);
+        assert_eq!(graph_connector_activation_radius(), 18.0);
 
         crate::color::set_graph_cell_color([0.1, 0.2, 0.3]);
         crate::color::set_graph_gap_color([0.4, 0.5, 0.6]);
