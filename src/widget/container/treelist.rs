@@ -164,7 +164,8 @@ impl TreeList {
         self.items = build_tree(&self.flat_keys, &self.collapsed_sections);
         let content_h = self.items.len() as f32 * self.item_height;
         let (_, _, _, h) = self.rect();
-        self.scroll_box.update_bounds(content_h, self.scroll_box.viewport_y, h);
+        let header_h = 26.0;
+        self.scroll_box.update_bounds(content_h, self.scroll_box.viewport_y, h - header_h);
     }
 
     pub fn get_row_rect(&self, original_idx: usize) -> Option<(f32, f32, f32, f32)> {
@@ -216,10 +217,12 @@ impl Element for TreeList {
         self.base.y = y;
         self.base.w = w;
         self.base.h = h;
-        self.scroll_box.set_rect(x, y, w, h);
+        
+        let header_h = 26.0;
+        self.scroll_box.set_rect(x, y + header_h, w, h - header_h);
         
         let content_h = self.items.len() as f32 * self.item_height;
-        self.scroll_box.update_bounds(content_h, y, h);
+        self.scroll_box.update_bounds(content_h, y + header_h, h - header_h);
         self.last_scroll_y = self.scroll_box.scroll_y;
     }
 
@@ -411,6 +414,22 @@ impl Element for TreeList {
 
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
+
+        // Draw Header background and border
+        let header_h = 26.0;
+        let header_bg_color = [0.12, 0.12, 0.16, 1.0]; // Dark header color
+        let header_border_color = [0.18, 0.18, 0.22, 1.0];
+        
+        // Header background
+        quads.push((list_left, self.base.y, list_width, header_h, header_bg_color));
+        
+        // Separator line below header
+        quads.push((list_left, self.base.y + header_h - 1.0, list_width, 1.0, header_border_color));
+        
+        // Vertical separators inside header
+        quads.push((list_left + 180.0, self.base.y, 1.0, header_h, header_border_color));
+        quads.push((list_left + 235.0, self.base.y, 1.0, header_h, header_border_color));
+
         let list_top = self.scroll_box.viewport_y;
         let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
 
@@ -494,6 +513,28 @@ impl Element for TreeList {
         let list_left = self.scroll_box.base.x;
         let list_top = self.scroll_box.viewport_y;
         let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
+
+        labels.push(TextLabel {
+            text: "Key".to_string(),
+            x: list_left + 8.0,
+            y: self.base.y + 6.0,
+            font_size: 11.0,
+            color: [200, 200, 210],
+        });
+        labels.push(TextLabel {
+            text: "Type".to_string(),
+            x: list_left + 180.0 + 8.0,
+            y: self.base.y + 6.0,
+            font_size: 11.0,
+            color: [200, 200, 210],
+        });
+        labels.push(TextLabel {
+            text: "Value".to_string(),
+            x: list_left + 235.0 + 8.0,
+            y: self.base.y + 6.0,
+            font_size: 11.0,
+            color: [200, 200, 210],
+        });
 
         for (i, item) in self.items.iter().enumerate() {
             let row_y = list_top + i as f32 * self.item_height - self.scroll_box.scroll_y;
@@ -600,14 +641,32 @@ impl Element for TreeList {
     }
 
     fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        let bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
-        self.text_labels().into_iter().map(|l| (l, bounds)).collect()
+        let (x, y, w, h) = self.rect();
+        let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
+        let header_bounds = Some([x, y, x + w, y + h]);
+        self.text_labels().into_iter().map(|l| {
+            let b = if l.y < self.scroll_box.viewport_y {
+                header_bounds
+            } else {
+                list_bounds
+            };
+            (l, b)
+        }).collect()
     }
 
     fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let font = self.widget_font();
-        let bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
-        self.text_labels().into_iter().map(|l| (l, font.clone(), bounds)).collect()
+        let (x, y, w, h) = self.rect();
+        let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
+        let header_bounds = Some([x, y, x + w, y + h]);
+        self.text_labels().into_iter().map(|l| {
+            let b = if l.y < self.scroll_box.viewport_y {
+                header_bounds
+            } else {
+                list_bounds
+            };
+            (l, font.clone(), b)
+        }).collect()
     }
 
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
@@ -650,6 +709,24 @@ impl Element for TreeList {
         } else {
             quads.push((x, y, w, h, radius, apply_opacity(crate::color::tree_background_color()), (r1, r2, r3, r4)));
         }
+
+        // Draw Header background and border
+        let header_h = 26.0;
+        let header_bg_color = [0.12, 0.12, 0.16, 1.0]; // Dark header color
+        let header_border_color = [0.18, 0.18, 0.22, 1.0];
+        
+        let list_left = self.scroll_box.base.x;
+        let list_width = self.scroll_box.base.w;
+        
+        // Header background (top corners rounded if r1 and r2 are true)
+        quads.push((list_left + 1.0, y + 1.0, list_width - 2.0, header_h - 1.0, radius - 1.0, apply_opacity(header_bg_color), (r1, r2, false, false)));
+        
+        // Separator line below header
+        quads.push((list_left + 1.0, y + header_h - 1.0, list_width - 2.0, 1.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
+        
+        // Vertical separators inside header
+        quads.push((list_left + 180.0, y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
+        quads.push((list_left + 235.0, y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
 
         // Helper to collect scrollbar quads
         let get_scrollbar_quads = || {
@@ -1006,5 +1083,14 @@ mod tests {
         
         let has_keybind_label = labels.iter().any(|l| l.text == "(keybind)");
         assert!(has_keybind_label, "Should have (keybind) label!");
+    }
+
+    #[test]
+    fn test_treelist_headers() {
+        let tree_list = TreeList::new();
+        let labels = tree_list.text_labels();
+        assert!(labels.iter().any(|l| l.text == "Key"), "Should have Key header!");
+        assert!(labels.iter().any(|l| l.text == "Type"), "Should have Type header!");
+        assert!(labels.iter().any(|l| l.text == "Value"), "Should have Value header!");
     }
 }
