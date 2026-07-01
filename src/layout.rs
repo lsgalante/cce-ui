@@ -1,6 +1,68 @@
 use crate::widget::Element;
 use crate::context::UiContext;
 use std::sync::RwLock;
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+#[derive(Debug)]
+pub struct StyleRegistry {
+    pub floats: HashMap<String, f32>,
+    pub strings: HashMap<String, String>,
+}
+
+impl StyleRegistry {
+    pub fn new() -> Self {
+        Self {
+            floats: HashMap::new(),
+            strings: HashMap::new(),
+        }
+    }
+
+    pub fn get_float(&self, key: &str) -> Option<f32> {
+        self.floats.get(key).copied()
+    }
+
+    pub fn get_string(&self, key: &str) -> Option<String> {
+        self.strings.get(key).cloned()
+    }
+
+    pub fn set_float(&mut self, key: &str, val: f32) {
+        self.floats.insert(key.to_string(), val);
+    }
+
+    pub fn set_string(&mut self, key: &str, val: String) {
+        self.strings.insert(key.to_string(), val);
+    }
+}
+
+pub static STYLE_REGISTRY: OnceLock<RwLock<StyleRegistry>> = OnceLock::new();
+
+pub fn get_style_registry() -> &'static RwLock<StyleRegistry> {
+    STYLE_REGISTRY.get_or_init(|| RwLock::new(StyleRegistry::new()))
+}
+
+pub fn lazy_init_style_registry() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(eq_idx) = trimmed.find('=') {
+                    let key = trimmed[..eq_idx].trim().to_string();
+                    let val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
+                    if let Ok(mut registry) = get_style_registry().write() {
+                        if let Ok(f_val) = val_str.parse::<f32>() {
+                            registry.set_float(&key, f_val);
+                        } else {
+                            registry.set_string(&key, val_str.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
 
 fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props: &mut String) {
     match val {
@@ -228,6 +290,17 @@ pub fn reload_config() {
         let mut list_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
+            if let Some(eq_idx) = trimmed.find('=') {
+                let key = trimmed[..eq_idx].trim().to_string();
+                let val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
+                if let Ok(mut registry) = get_style_registry().write() {
+                    if let Ok(f_val) = val_str.parse::<f32>() {
+                        registry.set_float(&key, f_val);
+                    } else {
+                        registry.set_string(&key, val_str.to_string());
+                    }
+                }
+            }
             if let Some(rest) = trimmed.strip_prefix("label_margin") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
@@ -2359,64 +2432,33 @@ pub fn breadcrumb_corner_radius() -> f32 {
 }
 
 pub fn set_breadcrumb_corner_radius(radius: f32) {
-    if let Ok(mut lock) = BREADCRUMB_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("breadcrumb_corner_radius", radius);
     }
 }
 
 pub fn list_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("list_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *LIST_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("list_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_list_corner_radius(radius: f32) {
-    if let Ok(mut lock) = LIST_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("list_corner_radius", radius);
     }
 }
 
 pub fn tree_corner_radius() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("tree_corner_radius") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = TREE_CORNER_RADIUS.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *TREE_CORNER_RADIUS.read().unwrap()
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("tree_corner_radius").unwrap_or(4.0)
 }
 
 pub fn set_tree_corner_radius(radius: f32) {
-    if let Ok(mut lock) = TREE_CORNER_RADIUS.write() {
-        *lock = radius;
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("tree_corner_radius", radius);
     }
 }
 
@@ -3670,7 +3712,6 @@ impl Radial {
 }
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 thread_local! {
     pub static GRID_STATES: RefCell<HashMap<usize, Grid>> = RefCell::new(HashMap::new());

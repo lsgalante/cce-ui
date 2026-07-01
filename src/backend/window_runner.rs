@@ -327,21 +327,55 @@ pub fn rounded_rect_vertices_corners(
     clip_rect: Option<(f32, f32, f32, f32)>,
 ) -> Vec<Vertex> {
     let mut verts = Vec::new();
-    push_rounded_rect_vertices_corners(x, y, ww, h, r, sw, sh, color, clip_circle, corners, clip_rect, &mut verts);
+    let radii = crate::widget::CornerRadii::new(
+        if corners.0 { r } else { 0.0 },
+        if corners.1 { r } else { 0.0 },
+        if corners.2 { r } else { 0.0 },
+        if corners.3 { r } else { 0.0 },
+    );
+    push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, color, clip_circle, clip_rect, &mut verts);
     verts
 }
 
 pub fn push_rounded_rect_vertices_corners(
     x: f32, y: f32, ww: f32, h: f32,
-    r: f32,
+    radii: crate::widget::CornerRadii,
     sw: f32, sh: f32,
     color: [f32; 4],
     clip_circle: [f32; 3],
-    corners: (bool, bool, bool, bool),
     clip_rect: Option<(f32, f32, f32, f32)>,
     out: &mut Vec<Vertex>,
 ) {
-    let r = r.min(ww * 0.5).min(h * 0.5);
+    let mut r_tl = radii.top_left.max(0.0);
+    let mut r_tr = radii.top_right.max(0.0);
+    let mut r_br = radii.bottom_right.max(0.0);
+    let mut r_bl = radii.bottom_left.max(0.0);
+
+    // Simple scale clamping
+    let sum_top = r_tl + r_tr;
+    if sum_top > ww {
+        let f = ww / sum_top;
+        r_tl *= f;
+        r_tr *= f;
+    }
+    let sum_bottom = r_bl + r_br;
+    if sum_bottom > ww {
+        let f = ww / sum_bottom;
+        r_bl *= f;
+        r_br *= f;
+    }
+    let sum_left = r_tl + r_bl;
+    if sum_left > h {
+        let f = h / sum_left;
+        r_tl *= f;
+        r_bl *= f;
+    }
+    let sum_right = r_tr + r_br;
+    if sum_right > h {
+        let f = h / sum_right;
+        r_tr *= f;
+        r_br *= f;
+    }
 
     let clamp_x = |val: f32| -> f32 {
         if let Some((cx0, _, cx1, _)) = clip_rect {
@@ -381,60 +415,166 @@ pub fn push_rounded_rect_vertices_corners(
         verts.push(Vertex { position: [ndc_x0, ndc_y1], color, clip_circle });
     };
 
-    if r <= 0.1 || (!corners.0 && !corners.1 && !corners.2 && !corners.3) {
+    let has_corners = r_tl > 0.1 || r_tr > 0.1 || r_br > 0.1 || r_bl > 0.1;
+    if !has_corners {
         push_quad(out, x, y, ww, h);
         return;
     }
 
-    // 1. Center rectangle
-    push_quad(out, x + r, y, ww - 2.0 * r, h);
-    
-    // 2. Left rectangle
-    push_quad(out, x, y + r, r, h - 2.0 * r);
-    
-    // 3. Right rectangle
-    push_quad(out, x + ww - r, y + r, r, h - 2.0 * r);
+    // Body rectangles
+    let mid_x0 = r_tl.max(r_bl);
+    let mid_x1 = ww - r_tr.max(r_br);
+    if mid_x1 > mid_x0 {
+        push_quad(out, x + mid_x0, y, mid_x1 - mid_x0, h);
+    }
+    if h > r_tl + r_bl {
+        push_quad(out, x, y + r_tl, mid_x0, h - r_tl - r_bl);
+    }
+    if h > r_tr + r_br {
+        push_quad(out, x + mid_x1, y + r_tr, ww - mid_x1, h - r_tr - r_br);
+    }
 
-    // 4. Four corners
-    let corner_configs = [
-        // Top-left
-        (corners.0, x, y, x + r, y + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI),
-        // Top-right
-        (corners.1, x + ww - r, y, x + ww - r, y + r, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI),
-        // Bottom-right
-        (corners.2, x + ww - r, y + h - r, x + ww - r, y + h - r, 0.0, 0.5 * std::f32::consts::PI),
-        // Bottom-left
-        (corners.3, x, y + h - r, x + r, y + h - r, 0.5 * std::f32::consts::PI, std::f32::consts::PI),
-    ];
-
+    // Corner rendering
     let segments = 16;
-    for &(is_rounded, sqx, sqy, cx, cy, start, end) in &corner_configs {
-        if is_rounded {
-            for i in 0..segments {
-                let theta1 = start + (i as f32) * (end - start) / (segments as f32);
-                let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
-                
-                let x0 = clamp_x(cx);
-                let y0 = clamp_y(cy);
-                let x1 = clamp_x(cx + r * theta1.cos());
-                let y1 = clamp_y(cy + r * theta1.sin());
-                let x2 = clamp_x(cx + r * theta2.cos());
-                let y2 = clamp_y(cy + r * theta2.sin());
-                
-                let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
-                let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
-                let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
-                let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
-                let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
-                let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
-                
-                out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
-                out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
-                out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
-            }
-        } else {
-            push_quad(out, sqx, sqy, r, r);
+
+    // Top-Left
+    if r_tl > 0.1 {
+        let cx = x + r_tl;
+        let cy = y + r_tl;
+        let start = std::f32::consts::PI;
+        let end = 1.5 * std::f32::consts::PI;
+        for i in 0..segments {
+            let theta1 = start + (i as f32) * (end - start) / (segments as f32);
+            let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
+            
+            let x0 = clamp_x(cx);
+            let y0 = clamp_y(cy);
+            let x1 = clamp_x(cx + r_tl * theta1.cos());
+            let y1 = clamp_y(cy + r_tl * theta1.sin());
+            let x2 = clamp_x(cx + r_tl * theta2.cos());
+            let y2 = clamp_y(cy + r_tl * theta2.sin());
+            
+            let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+            let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+            let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+            let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+            let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
+            let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+            
+            out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+            out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+            out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
         }
+        if mid_x0 > r_tl {
+            push_quad(out, x + r_tl, y, mid_x0 - r_tl, r_tl);
+        }
+    } else {
+        push_quad(out, x, y, mid_x0, 0.0);
+    }
+
+    // Top-Right
+    if r_tr > 0.1 {
+        let cx = x + ww - r_tr;
+        let cy = y + r_tr;
+        let start = 1.5 * std::f32::consts::PI;
+        let end = 2.0 * std::f32::consts::PI;
+        for i in 0..segments {
+            let theta1 = start + (i as f32) * (end - start) / (segments as f32);
+            let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
+            
+            let x0 = clamp_x(cx);
+            let y0 = clamp_y(cy);
+            let x1 = clamp_x(cx + r_tr * theta1.cos());
+            let y1 = clamp_y(cy + r_tr * theta1.sin());
+            let x2 = clamp_x(cx + r_tr * theta2.cos());
+            let y2 = clamp_y(cy + r_tr * theta2.sin());
+            
+            let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+            let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+            let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+            let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+            let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
+            let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+            
+            out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+            out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+            out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+        }
+        if ww - mid_x1 > r_tr {
+            push_quad(out, x + mid_x1, y, ww - mid_x1 - r_tr, r_tr);
+        }
+    } else {
+        push_quad(out, x + mid_x1, y, ww - mid_x1, 0.0);
+    }
+
+    // Bottom-Right
+    if r_br > 0.1 {
+        let cx = x + ww - r_br;
+        let cy = y + h - r_br;
+        let start = 0.0;
+        let end = 0.5 * std::f32::consts::PI;
+        for i in 0..segments {
+            let theta1 = start + (i as f32) * (end - start) / (segments as f32);
+            let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
+            
+            let x0 = clamp_x(cx);
+            let y0 = clamp_y(cy);
+            let x1 = clamp_x(cx + r_br * theta1.cos());
+            let y1 = clamp_y(cy + r_br * theta1.sin());
+            let x2 = clamp_x(cx + r_br * theta2.cos());
+            let y2 = clamp_y(cy + r_br * theta2.sin());
+            
+            let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+            let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+            let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+            let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+            let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
+            let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+            
+            out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+            out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+            out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+        }
+        if ww - mid_x1 > r_br {
+            push_quad(out, x + mid_x1, y + h - r_br, ww - mid_x1 - r_br, r_br);
+        }
+    } else {
+        push_quad(out, x + mid_x1, y + h, ww - mid_x1, 0.0);
+    }
+
+    // Bottom-Left
+    if r_bl > 0.1 {
+        let cx = x + r_bl;
+        let cy = y + h - r_bl;
+        let start = 0.5 * std::f32::consts::PI;
+        let end = std::f32::consts::PI;
+        for i in 0..segments {
+            let theta1 = start + (i as f32) * (end - start) / (segments as f32);
+            let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
+            
+            let x0 = clamp_x(cx);
+            let y0 = clamp_y(cy);
+            let x1 = clamp_x(cx + r_bl * theta1.cos());
+            let y1 = clamp_y(cy + r_bl * theta1.sin());
+            let x2 = clamp_x(cx + r_bl * theta2.cos());
+            let y2 = clamp_y(cy + r_bl * theta2.sin());
+            
+            let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
+            let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
+            let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
+            let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
+            let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
+            let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
+            
+            out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
+            out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
+            out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+        }
+        if mid_x0 > r_bl {
+            push_quad(out, x + r_bl, y + h - r_bl, mid_x0 - r_bl, r_bl);
+        }
+    } else {
+        push_quad(out, x, y + h, mid_x0, 0.0);
     }
 }
 
@@ -445,7 +585,9 @@ pub fn rounded_rect_vertices(
     color: [f32; 4],
     clip_circle: [f32; 3],
 ) -> Vec<Vertex> {
-    rounded_rect_vertices_corners(x, y, ww, h, r, sw, sh, color, clip_circle, (true, true, true, true), None)
+    let mut verts = Vec::new();
+    push_rounded_rect_vertices_corners(x, y, ww, h, crate::widget::CornerRadii::uniform(r), sw, sh, color, clip_circle, None, &mut verts);
+    verts
 }
 
 pub fn push_rounded_rect_vertices(
@@ -456,7 +598,7 @@ pub fn push_rounded_rect_vertices(
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
-    push_rounded_rect_vertices_corners(x, y, ww, h, r, sw, sh, color, clip_circle, (true, true, true, true), None, out);
+    push_rounded_rect_vertices_corners(x, y, ww, h, crate::widget::CornerRadii::uniform(r), sw, sh, color, clip_circle, None, out);
 }
 
 pub fn plate_bevel_vertices(
@@ -533,6 +675,87 @@ pub fn push_plate_bevel_vertices(
 
 pub fn push_plate_solid_border_vertices(
     x: f32, y: f32, ww: f32, h: f32,
+    radii: crate::widget::CornerRadii,
+    t: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    clip_circle: [f32; 3],
+    out: &mut Vec<Vertex>,
+) {
+    let mut r_tl = radii.top_left.max(0.0);
+    let mut r_tr = radii.top_right.max(0.0);
+    let mut r_br = radii.bottom_right.max(0.0);
+    let mut r_bl = radii.bottom_left.max(0.0);
+
+    // Simple scale clamping
+    let sum_top = r_tl + r_tr;
+    if sum_top > ww {
+        let f = ww / sum_top;
+        r_tl *= f;
+        r_tr *= f;
+    }
+    let sum_bottom = r_bl + r_br;
+    if sum_bottom > ww {
+        let f = ww / sum_bottom;
+        r_bl *= f;
+        r_br *= f;
+    }
+    let sum_left = r_tl + r_bl;
+    if sum_left > h {
+        let f = h / sum_left;
+        r_tl *= f;
+        r_bl *= f;
+    }
+    let sum_right = r_tr + r_br;
+    if sum_right > h {
+        let f = h / sum_right;
+        r_tr *= f;
+        r_br *= f;
+    }
+
+    out.extend_from_slice(&quad_vertices_with_clip(x + r_tl, y, ww - r_tl - r_tr, t, sw, sh, color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x, y + r_tl, t, h - r_tl - r_bl, sw, sh, color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x + r_bl, y + h - t, ww - r_bl - r_br, t, sw, sh, color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + r_tr, t, h - r_tr - r_br, sw, sh, color, clip_circle));
+
+    let segments = 16;
+
+    if r_tl > 0.1 {
+        push_arc_background_vertices(
+            x + r_tl, y + r_tl, r_tl, t,
+            std::f32::consts::PI, 1.5 * std::f32::consts::PI,
+            sw, sh, color, segments, clip_circle,
+            out,
+        );
+    }
+    if r_tr > 0.1 {
+        push_arc_background_vertices(
+            x + ww - r_tr, y + r_tr, r_tr, t,
+            1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI,
+            sw, sh, color, segments, clip_circle,
+            out,
+        );
+    }
+    if r_br > 0.1 {
+        push_arc_background_vertices(
+            x + ww - r_br, y + h - r_br, r_br, t,
+            0.0, 0.5 * std::f32::consts::PI,
+            sw, sh, color, segments, clip_circle,
+            out,
+        );
+    }
+    if r_bl > 0.1 {
+        push_arc_background_vertices(
+            x + r_bl, y + h - r_bl, r_bl, t,
+            0.5 * std::f32::consts::PI, std::f32::consts::PI,
+            sw, sh, color, segments, clip_circle,
+            out,
+        );
+    }
+}
+
+pub fn push_plate_solid_border_vertices_legacy(
+    x: f32, y: f32, ww: f32, h: f32,
     r: f32,
     t: f32,
     sw: f32, sh: f32,
@@ -540,41 +763,8 @@ pub fn push_plate_solid_border_vertices(
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
-    let r = r.min(ww * 0.5).min(h * 0.5);
-    out.extend_from_slice(&quad_vertices_with_clip(x + r, y, ww - 2.0 * r, t, sw, sh, color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x, y + r, t, h - 2.0 * r, sw, sh, color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x + r, y + h - t, ww - 2.0 * r, t, sw, sh, color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + r, t, h - 2.0 * r, sw, sh, color, clip_circle));
-
-    let segments = 16;
-
-    push_arc_background_vertices(
-        x + r, y + r, r, t,
-        std::f32::consts::PI, 1.5 * std::f32::consts::PI,
-        sw, sh, color, segments, clip_circle,
-        out,
-    );
-
-    push_arc_background_vertices(
-        x + ww - r, y + r, r, t,
-        1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI,
-        sw, sh, color, segments, clip_circle,
-        out,
-    );
-
-    push_arc_background_vertices(
-        x + ww - r, y + h - r, r, t,
-        0.0, 0.5 * std::f32::consts::PI,
-        sw, sh, color, segments, clip_circle,
-        out,
-    );
-
-    push_arc_background_vertices(
-        x + r, y + h - r, r, t,
-        0.5 * std::f32::consts::PI, std::f32::consts::PI,
-        sw, sh, color, segments, clip_circle,
-        out,
-    );
+    let radii = crate::widget::CornerRadii::uniform(r);
+    push_plate_solid_border_vertices(x, y, ww, h, radii, t, sw, sh, color, clip_circle, out);
 }
 
 pub fn widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
@@ -585,15 +775,11 @@ pub fn widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_ci
 
 pub fn push_widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_circle: [f32; 3], out: &mut Vec<Vertex>) {
     let (x, y, ww, h) = w.rect();
-    let corners = w.rounded_corners();
-    if corners != (false, false, false, false) {
-        push_rounded_rect_vertices_corners(x, y, ww, h, w.corner_radius(), sw, sh, w.color(), clip_circle, corners, None, out);
-    } else {
-        out.extend_from_slice(&quad_vertices_with_clip(x, y, ww, h, sw, sh, w.color(), clip_circle));
-    }
+    let radii = w.corner_radii();
+    push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
 
     if let Some((color, thickness)) = w.solid_border() {
-        push_plate_solid_border_vertices(x, y, ww, h, w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+        push_plate_solid_border_vertices(x, y, ww, h, radii, thickness, sw, sh, color, clip_circle, out);
     }
 }
 
@@ -747,13 +933,13 @@ pub fn push_extra_quad_vertices(
     out: &mut Vec<Vertex>,
 ) {
     let target_w = get_child_widget_for_quad(w, qx, qy, qw, qh);
-    let corners = target_w.rounded_corners();
-    if corners == (false, false, false, false) {
+    let radii = target_w.corner_radii();
+    if radii.top_left <= 0.1 && radii.top_right <= 0.1 && radii.bottom_right <= 0.1 && radii.bottom_left <= 0.1 {
         out.extend_from_slice(&quad_vertices_with_clip(qx, qy, qw, qh, sw, sh, qc, clip_circle));
         if let Some((color, thickness)) = target_w.solid_border() {
             let (wx, wy, ww, wh) = target_w.rect();
             if (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - ww).abs() < 0.1 && (qh - wh).abs() < 0.1 {
-                push_plate_solid_border_vertices(qx, qy, qw, qh, target_w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+                push_plate_solid_border_vertices(qx, qy, qw, qh, radii, thickness, sw, sh, color, clip_circle, out);
             }
         }
         return;
@@ -763,14 +949,14 @@ pub fn push_extra_quad_vertices(
     let top_room = crate::widget::label_offset(target_w);
     wy += top_room;
     wh -= top_room;
-    let extra_corners = (
-        corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
-        corners.1 && qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5,
-        corners.2 && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5,
-        corners.3 && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5,
+    let extra_radii = crate::widget::CornerRadii::new(
+        if qx <= wx + 1.5 && qy <= wy + 1.5 { radii.top_left } else { 0.0 },
+        if qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5 { radii.top_right } else { 0.0 },
+        if qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5 { radii.bottom_right } else { 0.0 },
+        if qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5 { radii.bottom_left } else { 0.0 },
     );
 
-    push_rounded_rect_vertices_corners(qx, qy, qw, qh, target_w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, None, out);
+    push_rounded_rect_vertices_corners(qx, qy, qw, qh, extra_radii, sw, sh, qc, clip_circle, None, out);
 
     if let Some((color, thickness)) = target_w.solid_border() {
         let (rx, mut ry, rw, mut rh) = target_w.rect();
@@ -778,7 +964,7 @@ pub fn push_extra_quad_vertices(
         ry += top;
         rh -= top;
         if (qx - rx).abs() < 0.1 && (qy - ry).abs() < 0.1 && (qw - rw).abs() < 0.1 && (qh - rh).abs() < 0.1 {
-            push_plate_solid_border_vertices(qx, qy, qw, qh, target_w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+            push_plate_solid_border_vertices(qx, qy, qw, qh, radii, thickness, sw, sh, color, clip_circle, out);
         }
     }
 }
@@ -806,8 +992,8 @@ pub fn push_extra_quad_vertices_clipped(
     out: &mut Vec<Vertex>,
 ) {
     let target_w = get_child_widget_for_quad(w, qx, qy, qw, qh);
-    let corners = target_w.rounded_corners();
-    if corners == (false, false, false, false) {
+    let radii = target_w.corner_radii();
+    if radii.top_left <= 0.1 && radii.top_right <= 0.1 && radii.bottom_right <= 0.1 && radii.bottom_left <= 0.1 {
         let (cx0, cy0, cx1, cy1) = clip;
         let ix0 = qx.max(cx0);
         let iy0 = qy.max(cy0);
@@ -820,7 +1006,7 @@ pub fn push_extra_quad_vertices_clipped(
         if let Some((color, thickness)) = target_w.solid_border() {
             let (wx, wy, ww, wh) = target_w.rect();
             if (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - ww).abs() < 0.1 && (qh - wh).abs() < 0.1 {
-                push_plate_solid_border_vertices(qx, qy, qw, qh, target_w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+                push_plate_solid_border_vertices(qx, qy, qw, qh, radii, thickness, sw, sh, color, clip_circle, out);
             }
         }
         return;
@@ -830,14 +1016,14 @@ pub fn push_extra_quad_vertices_clipped(
     let top_room = crate::widget::label_offset(target_w);
     wy += top_room;
     wh -= top_room;
-    let extra_corners = (
-        corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
-        corners.1 && qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5,
-        corners.2 && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5,
-        corners.3 && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5,
+    let extra_radii = crate::widget::CornerRadii::new(
+        if qx <= wx + 1.5 && qy <= wy + 1.5 { radii.top_left } else { 0.0 },
+        if qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5 { radii.top_right } else { 0.0 },
+        if qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5 { radii.bottom_right } else { 0.0 },
+        if qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5 { radii.bottom_left } else { 0.0 },
     );
 
-    push_rounded_rect_vertices_corners(qx, qy, qw, qh, target_w.corner_radius(), sw, sh, qc, clip_circle, extra_corners, Some(clip), out);
+    push_rounded_rect_vertices_corners(qx, qy, qw, qh, extra_radii, sw, sh, qc, clip_circle, Some(clip), out);
 
     if let Some((color, thickness)) = target_w.solid_border() {
         let (rx, mut ry, rw, mut rh) = target_w.rect();
@@ -845,7 +1031,7 @@ pub fn push_extra_quad_vertices_clipped(
         ry += top;
         rh -= top;
         if (qx - rx).abs() < 0.1 && (qy - ry).abs() < 0.1 && (qw - rw).abs() < 0.1 && (qh - rh).abs() < 0.1 {
-            push_plate_solid_border_vertices(qx, qy, qw, qh, target_w.corner_radius(), thickness, sw, sh, color, clip_circle, out);
+            push_plate_solid_border_vertices(qx, qy, qw, qh, radii, thickness, sw, sh, color, clip_circle, out);
         }
     }
 }
@@ -1316,7 +1502,13 @@ impl<A: Application> EngineState<A> {
         }
         for &(qx, qy, qw, qh, qr, qc, qcorners) in &rounded_quads {
             if qr > 0.1 {
-                push_rounded_rect_vertices_corners(qx, qy, qw, qh, qr, logical_w, logical_h, qc, [0.0, 0.0, 0.0], qcorners, None, &mut verts);
+                let radii = crate::widget::CornerRadii::new(
+                    if qcorners.0 { qr } else { 0.0 },
+                    if qcorners.1 { qr } else { 0.0 },
+                    if qcorners.2 { qr } else { 0.0 },
+                    if qcorners.3 { qr } else { 0.0 },
+                );
+                push_rounded_rect_vertices_corners(qx, qy, qw, qh, radii, logical_w, logical_h, qc, [0.0, 0.0, 0.0], None, &mut verts);
             } else {
                 verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
             }

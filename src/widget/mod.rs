@@ -610,6 +610,17 @@ pub trait Element {
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
 
     fn corner_radius(&self) -> f32 { 12.0 }
+
+    fn corner_radii(&self) -> CornerRadii {
+        let r = self.corner_radius();
+        let (tl, tr, br, bl) = self.rounded_corners();
+        CornerRadii::new(
+            if tl { r } else { 0.0 },
+            if tr { r } else { 0.0 },
+            if br { r } else { 0.0 },
+            if bl { r } else { 0.0 },
+        )
+    }
     fn layout_ignore(&self) -> bool { false }
     fn color_u8(&self) -> Option<[u8; 4]> { None }
 }
@@ -756,4 +767,22 @@ pub fn label_offset(w: &dyn Element) -> f32 {
         return 0.0;
     }
     w.base().map_or(0.0, |b| b.label_offset())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CornerRadii {
+    pub top_left: f32,
+    pub top_right: f32,
+    pub bottom_right: f32,
+    pub bottom_left: f32,
+}
+
+impl CornerRadii {
+    pub fn new(tl: f32, tr: f32, br: f32, bl: f32) -> Self {
+        Self { top_left: tl, top_right: tr, bottom_right: br, bottom_left: bl }
+    }
+
+    pub fn uniform(radius: f32) -> Self {
+        Self::new(radius, radius, radius, radius)
+    }
 }
