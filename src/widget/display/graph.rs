@@ -73,6 +73,15 @@ impl Graph {
     pub fn set_network_opacity(&mut self, opacity: f32) {
         self.network_opacity = opacity;
     }
+    pub fn grid_sizes(&self) -> (f32, f32) {
+        (self.grid_size_x, self.grid_size_y)
+    }
+    pub fn skipped_sizes(&self) -> (f32, f32) {
+        (self.skipped_row_h, self.skipped_col_w)
+    }
+    pub fn grid_origin(&self) -> (f32, f32) {
+        (self.grid_origin_x, self.grid_origin_y)
+    }
     pub fn set_cell_color(&mut self, color: [f32; 3]) {
         self.cell_color = color;
     }
