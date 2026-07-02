@@ -36,6 +36,8 @@ pub struct MenuBar {
     pub layout_dirty: bool,
     pub on_context_change_cb: Option<Box<dyn Fn(usize) + Send + Sync>>,
     pub on_menu_click_cb: Option<Box<dyn Fn(usize, usize) + Send + Sync>>,
+    pub hovered_dropdown_item: Option<usize>,
+    pub clicked_dropdown_item: Option<(usize, usize)>,
 }
 
 impl MenuBar {
@@ -92,6 +94,8 @@ impl MenuBar {
             layout_dirty: true,
             on_context_change_cb: None,
             on_menu_click_cb: None,
+            hovered_dropdown_item: None,
+            clicked_dropdown_item: None,
         }
     }
 
@@ -268,6 +272,34 @@ impl MenuBar {
     pub fn with_z_index(mut self, z: i32) -> Self {
         self.z_level = z;
         self
+    }
+
+    pub fn menu_dropdown_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        let menu_idx = self.menus.selected?;
+        let items = self.menu_dropdowns.get(menu_idx)?;
+        if items.is_empty() {
+            return None;
+        }
+        let hr = self.menus.item_rect(menu_idx);
+        let dh = items.len() as f32 * DROPDOWN_ITEM_H;
+        let max_len = items.iter().map(|s| s.len()).max().unwrap_or(0);
+        let font_setting = crate::layout::menubar_font();
+        let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
+        let font_size = font_size_opt.unwrap_or(12.0);
+        let char_w = 7.5 * (font_size / 12.0);
+        let dw = (max_len as f32 * char_w + 40.0).max(120.0);
+        
+        let dx = if self.vertical {
+            hr.0 + hr.2
+        } else {
+            hr.0
+        };
+        let dy = if self.vertical {
+            hr.1
+        } else {
+            hr.1 + hr.3
+        };
+        Some((dx, dy, dw, dh))
     }
 }
 
@@ -486,6 +518,11 @@ impl Element for MenuBar {
                 return true;
             }
         }
+        if let Some((dx, dy, dw, dh)) = self.menu_dropdown_rect() {
+            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                return true;
+            }
+        }
         let (rx, ry, rw, rh) = self.rect();
         if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
             return true;
@@ -531,6 +568,24 @@ impl Element for MenuBar {
             changed = true;
         }
 
+        let old_hovered_dropdown = self.hovered_dropdown_item;
+        self.hovered_dropdown_item = None;
+        if let Some((dx, dy, dw, dh)) = self.menu_dropdown_rect() {
+            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
+                if let Some(menu_idx) = self.menus.selected {
+                    if let Some(items) = self.menu_dropdowns.get(menu_idx) {
+                        if di < items.len() {
+                            self.hovered_dropdown_item = Some(di);
+                        }
+                    }
+                }
+            }
+        }
+        if old_hovered_dropdown != self.hovered_dropdown_item {
+            changed = true;
+        }
+
         if self.menus.cursor_moved(px, py, ctx) {
             changed = true;
         }
@@ -549,6 +604,26 @@ impl Element for MenuBar {
         self.set_rect(rx, ry, rw, rh);
 
         let mut changed = false;
+
+        if let Some((dx, dy, dw, dh)) = self.menu_dropdown_rect() {
+            if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
+                if state == ElementState::Pressed {
+                    let di = ((py - dy) / DROPDOWN_ITEM_H) as usize;
+                    if let Some(menu_idx) = self.menus.selected {
+                        if let Some(items) = self.menu_dropdowns.get(menu_idx) {
+                            if di < items.len() {
+                                self.clicked_dropdown_item = Some((menu_idx, di));
+                                self.menus.set_selected(None);
+                                self.hovered_dropdown_item = None;
+                                self.unfocus();
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+        }
 
         if let Some((dx, dy, dw, dh)) = self.context_popover_rect() {
             if px >= dx && px < dx + dw && py >= dy && py < dy + dh {
@@ -591,14 +666,18 @@ impl Element for MenuBar {
             changed = true;
         }
 
+        let old_menu_selected = self.menus.selected;
         if self.menus.mouse_input(button, state, px, py, ctx) {
             changed = true;
+            if self.menus.selected.is_some() && old_menu_selected != self.menus.selected {
+                self.focus();
+            }
         }
         changed
     }
 
     fn focus(&mut self) {
-        if self.context_dropdown_open {
+        if self.context_dropdown_open || self.menus.selected.is_some() {
             self.focused = true;
             focus::set_focused(self);
         } else {
@@ -611,16 +690,85 @@ impl Element for MenuBar {
         self.focused = false;
         self.context_dropdown_open = false;
         self.context_hovered_item = None;
+        self.hovered_dropdown_item = None;
         focus::clear_if_matches(self);
-        self.menus.unfocus();
+        self.menus.set_selected(None);
     }
 
     fn focused(&self, _ctx: &UiContext) -> bool {
-        self.focused || self.context_dropdown_open
+        self.focused || self.context_dropdown_open || self.menus.selected.is_some()
     }
 
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
-        self.context_popover_rect()
+        self.context_popover_rect().or_else(|| self.menu_dropdown_rect())
+    }
+
+    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        if self.context_dropdown_open {
+            if let Some((dx, dy, dw, dh)) = self.context_popover_rect() {
+                let theme = colors::active_theme();
+                pc.rect(theme.surface_border, dx, dy, dw, dh);
+                pc.rect(theme.surface_bg, dx + 1.0, dy + 1.0, dw - 2.0, dh - 2.0);
+                if let Some(di) = self.context_hovered_item {
+                    let iy = dy + di as f32 * DROPDOWN_ITEM_H;
+                    pc.rect(colors::PANEL_MENU_HOVER, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0);
+                }
+                
+                let label_color = crate::colors::menubar_tab_label_color();
+                let srgb = crate::colors::to_srgb(label_color);
+                let color_f32 = [srgb[0], srgb[1], srgb[2], 1.0];
+                let bounds = Some([dx, dy, dx + dw, dy + dh]);
+                
+                let font = self.widget_font();
+                for (i, option) in self.context_options.iter().enumerate() {
+                    let is_selected = self.context_selected == i;
+                    let prefix = if is_selected { "✓ " } else { "  " };
+                    let text = format!("{}{}", prefix, option);
+                    let iy = crate::layout::align_text_y(dy + i as f32 * DROPDOWN_ITEM_H, DROPDOWN_ITEM_H, 12.0, 0.0);
+                    if let Some(ref f) = font {
+                        pc.text_with_font_and_bounds(&text, dx + 8.0, iy, 12.0, color_f32, f, bounds);
+                    } else {
+                        pc.text_with_bounds(&text, dx + 8.0, iy, 12.0, color_f32, bounds);
+                    }
+                }
+            }
+        } else if let Some((dx, dy, dw, dh)) = self.menu_dropdown_rect() {
+            let theme = colors::active_theme();
+            pc.rect(theme.surface_border, dx, dy, dw, dh);
+            pc.rect(theme.surface_bg, dx + 1.0, dy + 1.0, dw - 2.0, dh - 2.0);
+            if let Some(di) = self.hovered_dropdown_item {
+                let iy = dy + di as f32 * DROPDOWN_ITEM_H;
+                pc.rect(colors::PANEL_MENU_HOVER, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0);
+            }
+
+            let label_color = crate::colors::menubar_tab_label_color();
+            let srgb = crate::colors::to_srgb(label_color);
+            let color_f32 = [srgb[0], srgb[1], srgb[2], 1.0];
+            let bounds = Some([dx, dy, dx + dw, dy + dh]);
+
+            let font = self.widget_font();
+            if let Some(menu_idx) = self.menus.selected {
+                if let Some(items) = self.menu_dropdowns.get(menu_idx) {
+                    for (i, option) in items.iter().enumerate() {
+                        let checked = self.menu_dropdown_checked.get(menu_idx)
+                            .and_then(|menu| menu.get(i))
+                            .and_then(|&v| v);
+                        let prefix = match checked {
+                            Some(true) => "✓ ",
+                            Some(false) => "  ",
+                            None => "",
+                        };
+                        let text = format!("{}{}", prefix, option);
+                        let iy = crate::layout::align_text_y(dy + i as f32 * DROPDOWN_ITEM_H, DROPDOWN_ITEM_H, 12.0, 0.0);
+                        if let Some(ref f) = font {
+                            pc.text_with_font_and_bounds(&text, dx + 8.0, iy, 12.0, color_f32, f, bounds);
+                        } else {
+                            pc.text_with_bounds(&text, dx + 8.0, iy, 12.0, color_f32, bounds);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
@@ -888,22 +1036,6 @@ impl Element for MenuBar {
             }
         }
 
-        if self.context_dropdown_open {
-            if let Some((dx, dy, _, _)) = self.context_popover_rect() {
-                for (i, option) in self.context_options.iter().enumerate() {
-                    let is_selected = self.context_selected == i;
-                    let prefix = if is_selected { "✓ " } else { "  " };
-                    labels.push(TextLabel {
-                        text: format!("{}{}", prefix, option),
-                        x: dx + 8.0,
-                        y: dy + i as f32 * DROPDOWN_ITEM_H + 5.0,
-                        font_size: 12.0,
-                        color: text_color,
-                    });
-                }
-            }
-        }
-
         labels.extend(self.menus.text_labels());
         labels
     }
@@ -950,16 +1082,6 @@ impl Element for MenuBar {
                 quads.push((tr.0, tr.1, tr.2, tr.3, colors::highlight_primary_color()));
             } else if self.context_title_hovered {
                 quads.push((tr.0, tr.1, tr.2, tr.3, colors::HIGHLIGHT_SECONDARY));
-            }
-        }
-
-        // 2. Draw the context popover background and hovered item highlight
-        if self.context_dropdown_open {
-            if let Some((dx, dy, dw, dh)) = self.context_popover_rect() {
-                quads.push((dx, dy, dw, dh, colors::popover_bg_color()));
-                if let Some(di) = self.context_hovered_item {
-                    quads.push((dx, dy + di as f32 * DROPDOWN_ITEM_H, dw, DROPDOWN_ITEM_H, colors::PANEL_MENU_HOVER));
-                }
             }
         }
 
@@ -1426,16 +1548,20 @@ impl MenuController for Menu {
 
 impl MenuController for MenuBar {
     fn menu_click(&mut self) -> Option<(usize, usize)> {
-        if let Some(idx) = self.menus.take_click() {
+        let _ = self.menus.take_click();
+        
+        if let Some((menu_idx, item_idx)) = self.clicked_dropdown_item.take() {
             if let Some(ref cb) = self.on_menu_click_cb {
-                cb(idx, 0);
+                cb(menu_idx, item_idx);
             }
-            return Some((idx, 0));
+            return Some((menu_idx, item_idx));
         }
         None
     }
 
-    fn trigger_menu_click(&mut self, _menu_idx: usize, _item_idx: usize) {}
+    fn trigger_menu_click(&mut self, menu_idx: usize, item_idx: usize) {
+        self.clicked_dropdown_item = Some((menu_idx, item_idx));
+    }
 
     fn set_item_checked(&mut self, menu_idx: usize, item_idx: usize, checked: bool) {
         if let Some(menu) = self.menu_dropdown_checked.get_mut(menu_idx) {
@@ -1458,7 +1584,7 @@ impl MenuController for MenuBar {
     }
 
     fn is_menu_open(&self) -> bool {
-        self.context_dropdown_open
+        self.context_dropdown_open || self.menus.selected.is_some()
     }
 
     fn menu_items(&self) -> Vec<String> {
