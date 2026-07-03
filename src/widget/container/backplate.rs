@@ -406,4 +406,32 @@ mod tests {
         let is_movable = ctx.is_movable_backplate_at(10.0, 20.0);
         assert!(!is_movable, "Clicking the sidebar should block backplate drag!");
     }
+
+    #[test]
+    fn test_menubar_statusbar_do_not_block_backplate_drag() {
+        let mut ctx = UiContext::new();
+        let mut win = Backplate::new(0.0, 0.0, 800.0, 600.0).with_movable(true);
+        let mut menubar = MenuBar::new(0.0, 0.0, 800.0, 42.0);
+        let mut statusbar = StatusBar::new();
+        statusbar.set_rect(0.0, 570.0, 800.0, 30.0);
+
+        ctx.register_widget(win.base().unwrap().id(), win.as_ptr_mut());
+        win.add_child(menubar.as_ptr_mut(), &mut ctx);
+        win.add_child(statusbar.as_ptr_mut(), &mut ctx);
+
+        // Render to assign coordinates and register with layout hierarchy
+        crate::layout::render_widget(&mut TestRenderTarget, &mut menubar, 0.0, 0.0, 800.0, 42.0, &mut ctx);
+        crate::layout::render_widget(&mut TestRenderTarget, &mut statusbar, 0.0, 570.0, 800.0, 30.0, &mut ctx);
+
+        ctx.tick(0.016);
+        ctx.clear_dirty(); // Triggers rebuild_spatial_grid()
+
+        // Check if clicking menubar allows dragging
+        let drag_menubar = ctx.is_movable_backplate_at(100.0, 20.0);
+        assert!(drag_menubar, "Clicking the menubar should not block backplate drag!");
+
+        // Check if clicking statusbar allows dragging
+        let drag_statusbar = ctx.is_movable_backplate_at(100.0, 580.0);
+        assert!(drag_statusbar, "Clicking the statusbar should not block backplate drag!");
+    }
 }

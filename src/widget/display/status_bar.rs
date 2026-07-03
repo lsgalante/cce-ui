@@ -101,6 +101,7 @@ impl Element for StatusBar {
     }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
+    fn blocks_backplate_drag(&self) -> bool { false }
 
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         self.parent

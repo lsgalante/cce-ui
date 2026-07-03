@@ -332,6 +332,10 @@ impl Element for MenuBar {
         true
     }
 
+    fn blocks_backplate_drag(&self) -> bool {
+        false
+    }
+
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         self.parent
     }
