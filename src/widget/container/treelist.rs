@@ -54,11 +54,52 @@ fn parse_path(path: &str) -> Vec<PathToken> {
     tokens
 }
 
-fn build_tree(flat_keys: &[(String, serde_json::Value)], collapsed_sections: &HashSet<String>) -> Vec<TreeElement> {
+fn matches_query(key_path: &str, val: &serde_json::Value, annotation: Option<&str>, query: &str) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    let query_lower = query.to_lowercase();
+    if key_path.to_lowercase().contains(&query_lower) {
+        return true;
+    }
+    let val_str = match val {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => n.to_string(),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    };
+    if val_str.to_lowercase().contains(&query_lower) {
+        return true;
+    }
+    if let Some(anno) = annotation {
+        if anno.to_lowercase().contains(&query_lower) {
+            return true;
+        }
+    }
+    false
+}
+
+fn build_tree(
+    flat_keys: &[(String, serde_json::Value)],
+    annotations: &[Option<String>],
+    collapsed_sections: &HashSet<String>,
+    query: &str,
+) -> Vec<TreeElement> {
     let mut items = Vec::new();
     let mut seen_prefixes = HashSet::new();
 
+    let mut matching_indices = HashSet::new();
+    for (idx, (key_path, val)) in flat_keys.iter().enumerate() {
+        let annotation = annotations.get(idx).and_then(|opt| opt.as_deref());
+        if query.is_empty() || matches_query(key_path, val, annotation, query) {
+            matching_indices.insert(idx);
+        }
+    }
+
     for (original_idx, (key_path, val)) in flat_keys.iter().enumerate() {
+        if !matching_indices.contains(&original_idx) {
+            continue;
+        }
         let tokens = parse_path(key_path);
         let mut current_prefix = String::new();
         let mut is_hidden = false;
@@ -98,7 +139,11 @@ fn build_tree(flat_keys: &[(String, serde_json::Value)], collapsed_sections: &Ha
             } else {
                 if !seen_prefixes.contains(&current_prefix) {
                     seen_prefixes.insert(current_prefix.clone());
-                    let collapsed = collapsed_sections.contains(&current_prefix);
+                    let collapsed = if query.is_empty() {
+                        collapsed_sections.contains(&current_prefix)
+                    } else {
+                        false
+                    };
                     items.push(TreeElement::Section {
                         path: current_prefix.clone(),
                         name: part_name,
@@ -106,7 +151,7 @@ fn build_tree(flat_keys: &[(String, serde_json::Value)], collapsed_sections: &Ha
                         collapsed,
                     });
                 }
-                if collapsed_sections.contains(&current_prefix) {
+                if query.is_empty() && collapsed_sections.contains(&current_prefix) {
                     is_hidden = true;
                 }
             }
@@ -119,6 +164,7 @@ fn build_tree(flat_keys: &[(String, serde_json::Value)], collapsed_sections: &Ha
 pub struct TreeList {
     pub base: Widget,
     pub scroll_box: ScrollBox,
+    pub search_box: TextBox,
     pub flat_keys: Vec<(String, serde_json::Value)>,
     pub annotations: Vec<Option<String>>,
     pub collapsed_sections: HashSet<String>,
@@ -140,6 +186,7 @@ impl TreeList {
         Self {
             base: Widget::new(),
             scroll_box: ScrollBox::new(),
+            search_box: TextBox::new(String::new()).with_placeholder("Search..."),
             flat_keys: Vec::new(),
             annotations: Vec::new(),
             collapsed_sections: HashSet::new(),
@@ -163,11 +210,15 @@ impl TreeList {
     }
 
     pub fn rebuild_tree(&mut self) {
-        self.items = build_tree(&self.flat_keys, &self.collapsed_sections);
+        let query = self.search_box.text.clone();
+        self.items = build_tree(&self.flat_keys, &self.annotations, &self.collapsed_sections, &query);
         let content_h = self.items.len() as f32 * self.item_height;
         let (_, _, _, h) = self.rect();
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
         let header_h = 26.0;
-        self.scroll_box.update_bounds(content_h, self.scroll_box.viewport_y, h - header_h);
+        self.scroll_box.update_bounds(content_h, self.scroll_box.viewport_y, h - offset_y - header_h);
     }
 
     pub fn get_row_rect(&self, original_idx: usize) -> Option<(f32, f32, f32, f32)> {
@@ -220,11 +271,18 @@ impl Element for TreeList {
         self.base.w = w;
         self.base.h = h;
         
+        let search_margin_x = 8.0;
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+        
+        self.search_box.set_rect(x + search_margin_x, y + search_margin_y, w - 2.0 * search_margin_x, search_h);
+        
         let header_h = 26.0;
-        self.scroll_box.set_rect(x, y + header_h, w, h - header_h);
+        self.scroll_box.set_rect(x, y + offset_y + header_h, w, h - offset_y - header_h);
         
         let content_h = self.items.len() as f32 * self.item_height;
-        self.scroll_box.update_bounds(content_h, y + header_h, h - header_h);
+        self.scroll_box.update_bounds(content_h, y + offset_y + header_h, h - offset_y - header_h);
         self.last_scroll_y = self.scroll_box.scroll_y;
     }
 
@@ -265,6 +323,9 @@ impl Element for TreeList {
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = self.scroll_box.mouse_input(button, state, px, py, ctx);
+        if self.search_box.mouse_input(button, state, px, py, ctx) {
+            changed = true;
+        }
         self.check_scroll_activity(ctx);
 
         let list_left = self.scroll_box.base.x;
@@ -364,6 +425,9 @@ impl Element for TreeList {
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = self.scroll_box.on_cursor_moved(px, py, ctx);
+        if self.search_box.on_cursor_moved(px, py, ctx) {
+            changed = true;
+        }
 
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
@@ -393,16 +457,25 @@ impl Element for TreeList {
         changed
     }
 
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = false;
+        if self.search_box.tick(dt, ctx) {
+            changed = true;
+        }
+        if self.search_box.take_change() {
+            self.rebuild_tree();
+            self.mark_dirty(ctx);
+            changed = true;
+        }
         if self.scrollbar_activity_timer > 0.0 {
             self.scrollbar_activity_timer = (self.scrollbar_activity_timer - dt).max(0.0);
-            if self.scrollbar_activity_timer <= 0.0 {
-                ctx.unregister_tick_receiver(self.base.id());
-            }
-            true
-        } else {
-            false
+            changed = true;
         }
+        changed
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -417,20 +490,24 @@ impl Element for TreeList {
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
 
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+
         // Draw Header background and border
         let header_h = 26.0;
         let header_bg_color = [0.12, 0.12, 0.16, 1.0]; // Dark header color
         let header_border_color = [0.18, 0.18, 0.22, 1.0];
         
         // Header background
-        quads.push((list_left, self.base.y, list_width, header_h, header_bg_color));
+        quads.push((list_left, self.base.y + offset_y, list_width, header_h, header_bg_color));
         
         // Separator line below header
-        quads.push((list_left, self.base.y + header_h - 1.0, list_width, 1.0, header_border_color));
+        quads.push((list_left, self.base.y + offset_y + header_h - 1.0, list_width, 1.0, header_border_color));
         
         // Vertical separators inside header
-        quads.push((list_left + 180.0, self.base.y, 1.0, header_h, header_border_color));
-        quads.push((list_left + 235.0, self.base.y, 1.0, header_h, header_border_color));
+        quads.push((list_left + 180.0, self.base.y + offset_y, 1.0, header_h, header_border_color));
+        quads.push((list_left + 235.0, self.base.y + offset_y, 1.0, header_h, header_border_color));
 
         let list_top = self.scroll_box.viewport_y;
         let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
@@ -516,24 +593,28 @@ impl Element for TreeList {
         let list_top = self.scroll_box.viewport_y;
         let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
 
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+
         labels.push(TextLabel {
             text: "Key".to_string(),
             x: list_left + 8.0,
-            y: self.base.y + 6.0,
+            y: self.base.y + offset_y + 6.0,
             font_size: 11.0,
             color: [200, 200, 210],
         });
         labels.push(TextLabel {
             text: "Type".to_string(),
             x: list_left + 180.0 + 8.0,
-            y: self.base.y + 6.0,
+            y: self.base.y + offset_y + 6.0,
             font_size: 11.0,
             color: [200, 200, 210],
         });
         labels.push(TextLabel {
             text: "Value".to_string(),
             x: list_left + 235.0 + 8.0,
-            y: self.base.y + 6.0,
+            y: self.base.y + offset_y + 6.0,
             font_size: 11.0,
             color: [200, 200, 210],
         });
@@ -655,45 +736,81 @@ impl Element for TreeList {
         labels
     }
 
-    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        let (x, y, w, h) = self.rect();
+    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        let (x, y, w, _h) = self.rect();
+        
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+        let header_h = 26.0;
+
         let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
-        let header_bounds = Some([x, y, x + w, y + h]);
-        self.text_labels().into_iter().enumerate().map(|(idx, l)| {
+        let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
+        
+        let mut labels = self.text_labels().into_iter().enumerate().map(|(idx, l)| {
             let b = if idx < 3 {
                 header_bounds
             } else {
                 list_bounds
             };
             (l, b)
-        }).collect()
+        }).collect::<Vec<_>>();
+
+        labels.extend(self.search_box.text_labels_with_bounds(ctx));
+        labels
     }
 
-    fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let font = self.widget_font();
-        let (x, y, w, h) = self.rect();
+        let (x, y, w, _h) = self.rect();
+        
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+        let header_h = 26.0;
+
         let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
-        let header_bounds = Some([x, y, x + w, y + h]);
-        self.text_labels().into_iter().enumerate().map(|(idx, l)| {
+        let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
+        
+        let mut labels = self.text_labels().into_iter().enumerate().map(|(idx, l)| {
             let b = if idx < 3 {
                 header_bounds
             } else {
                 list_bounds
             };
             (l, font.clone(), b)
-        }).collect()
+        }).collect::<Vec<_>>();
+
+        labels.extend(self.search_box.text_labels_with_font_and_bounds(ctx));
+        labels
     }
 
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         self.parent
     }
 
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
         self.parent = parent;
+        if parent.is_some() {
+            let self_ptr = self as *mut Self;
+            let self_id = self.base.id();
+            unsafe {
+                let sb_ptr = &mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static);
+                let sb_id = (*self_ptr).search_box.base().unwrap().id();
+                ctx.register_widget(sb_id, sb_ptr);
+                ctx.link_ids(self_id, sb_id);
+                (*sb_ptr).set_parent(Some(self_ptr), ctx);
+            }
+        }
     }
 
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        self.children.clone()
+        let mut list = self.children.clone();
+        let self_ptr = self as *const Self as *mut Self;
+        unsafe {
+            list.push(&mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static));
+        }
+        list
     }
 
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
@@ -725,6 +842,10 @@ impl Element for TreeList {
             quads.push((x, y, w, h, radius, apply_opacity(crate::color::tree_background_color()), (r1, r2, r3, r4)));
         }
 
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+
         // Draw Header background and border
         let header_h = 26.0;
         let header_bg_color = [0.12, 0.12, 0.16, 1.0]; // Dark header color
@@ -733,15 +854,15 @@ impl Element for TreeList {
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
         
-        // Header background (top corners rounded if r1 and r2 are true)
-        quads.push((list_left + 1.0, y + 1.0, list_width - 2.0, header_h - 1.0, radius - 1.0, apply_opacity(header_bg_color), (r1, r2, false, false)));
+        // Header background (not rounded anymore, since it is in the middle of TreeList, below search box)
+        quads.push((list_left + 1.0, y + offset_y + 1.0, list_width - 2.0, header_h - 1.0, 0.0, apply_opacity(header_bg_color), (false, false, false, false)));
         
         // Separator line below header
-        quads.push((list_left + 1.0, y + header_h - 1.0, list_width - 2.0, 1.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
+        quads.push((list_left + 1.0, y + offset_y + header_h - 1.0, list_width - 2.0, 1.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
         
         // Vertical separators inside header
-        quads.push((list_left + 180.0, y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
-        quads.push((list_left + 235.0, y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
+        quads.push((list_left + 180.0, y + offset_y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
+        quads.push((list_left + 235.0, y + offset_y + 1.0, 1.0, header_h - 2.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
 
         // Helper to collect scrollbar quads
         let get_scrollbar_quads = || {
@@ -1108,5 +1229,45 @@ mod tests {
         assert!(labels.iter().any(|l| l.text == "Key"), "Should have Key header!");
         assert!(labels.iter().any(|l| l.text == "Type"), "Should have Type header!");
         assert!(labels.iter().any(|l| l.text == "Value"), "Should have Value header!");
+    }
+
+    #[test]
+    fn test_treelist_search_filtering() {
+        let mut tree_list = TreeList::new();
+        tree_list.set_rect(10.0, 52.0, 380.0, 500.0);
+        tree_list.set_flat_keys(vec![
+            ("style.data.tree.corner_radius".to_string(), serde_json::Value::Number(serde_json::Number::from(8))),
+            ("style.data.tree.border_color".to_string(), serde_json::Value::String("#ff0000".to_string())),
+            ("input.accel_profile".to_string(), serde_json::Value::String("flat".to_string())),
+        ]);
+        
+        // Match none
+        tree_list.search_box.text = "nonexistent".to_string();
+        tree_list.rebuild_tree();
+        assert!(tree_list.items.is_empty(), "Tree should be empty for nonexistent search query!");
+
+        // Match partially on key path
+        tree_list.search_box.text = "corner".to_string();
+        tree_list.rebuild_tree();
+        assert!(!tree_list.items.is_empty(), "Tree should have items matching 'corner'!");
+        let has_corner = tree_list.items.iter().any(|item| match item {
+            TreeElement::Leaf { name, .. } => name == "corner_radius",
+            _ => false,
+        });
+        assert!(has_corner, "Tree should contain 'corner_radius' item!");
+        let has_accel = tree_list.items.iter().any(|item| match item {
+            TreeElement::Leaf { name, .. } => name == "accel_profile",
+            _ => false,
+        });
+        assert!(!has_accel, "Tree should not contain 'accel_profile' item!");
+
+        // Match on value
+        tree_list.search_box.text = "flat".to_string();
+        tree_list.rebuild_tree();
+        let has_accel = tree_list.items.iter().any(|item| match item {
+            TreeElement::Leaf { name, .. } => name == "accel_profile",
+            _ => false,
+        });
+        assert!(has_accel, "Tree should contain 'accel_profile' when matching on value 'flat'!");
     }
 }
