@@ -178,9 +178,38 @@ impl Element for ScrollBox {
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = false;
+        if self.scrollbar_dragging {
+            let sb_track_h = self.viewport_h - 8.0;
+            let sb_track_y = self.viewport_y + 4.0;
+            let visible_ratio = self.viewport_h / self.content_h;
+            let thumb_h = if sb_track_h <= 20.0 {
+                sb_track_h
+            } else {
+                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+            };
+            let max_scroll = (self.content_h - self.viewport_h).max(0.0);
+            
+            let target_thumb_y = py - self.drag_offset_y;
+            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            
+            let old_scroll = self.scroll_y;
+            self.scroll_y = new_scroll_ratio * max_scroll;
+            if (self.scroll_y - old_scroll).abs() > 0.01 {
+                changed = true;
+            }
+        }
+
         let was = self.base.hovered;
         self.base.hovered = self.hit_test(px, py, ctx);
-        was != self.base.hovered
+        if was != self.base.hovered {
+            changed = true;
+        }
+        changed
     }
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
