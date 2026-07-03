@@ -104,8 +104,17 @@ impl StyledLabel {
 
     pub fn new_with_family(fs: &mut glyphon::FontSystem, text: &str, size: f32, color: [f32; 4], family: &str) -> Self {
         let scale = crate::scale::scale_factor();
-        let buffer = crate::backend::window_runner::get_text_buffer(fs, text, size, Some(family));
-        let w = buffer.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0) / scale;
+        let mut final_text = text.to_string();
+        let is_vert = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
+        if is_vert {
+            final_text = text.chars().map(|c| c.to_string()).collect::<Vec<_>>().join("\n");
+        }
+        let buffer = crate::backend::window_runner::get_text_buffer(fs, &final_text, size, Some(family));
+        let mut w = buffer.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0) / scale;
+        if is_vert {
+            let num_lines = buffer.layout_runs().count();
+            w = num_lines as f32 * size * 1.4;
+        }
         let g_color = glyphon::Color::rgb(
             (color[0] * 255.0) as u8,
             (color[1] * 255.0) as u8,

@@ -17,3 +17,5 @@ pub mod colors {
 
 pub const SHADER: &str = include_str!("shader.wgsl");
 
+pub static IS_VERTICAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
