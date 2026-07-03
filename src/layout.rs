@@ -64,6 +64,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
         _ => {
             let flat_key = match prefix {
                 "style.list.font" | "style.data.list.font" => "list_font",
+                "style.list.font_color" | "style.data.list.font_color" => "list_font_color",
                 "style.control.breadcrumb.font" => "breadcrumb_font",
                 "style.control.breadcrumb.corner_radius" => "breadcrumb_corner_radius",
                 "style.control.button.font" => "button_font",

@@ -136,12 +136,19 @@ impl Element for InteractiveListItem {
             crate::layout::align_text_y(y, h, 12.0, 0.0)
         };
 
+        let font_col = colors::list_font_color();
+        let title_col = [
+            (font_col[0] * 255.0) as u8,
+            (font_col[1] * 255.0) as u8,
+            (font_col[2] * 255.0) as u8,
+        ];
+
         labels.push(TextLabel {
             text: self.title.clone(),
             x: x + 8.0,
             y: title_y,
             font_size: 12.0,
-            color: [220, 220, 230],
+            color: title_col,
         });
 
         if let Some(ref sub) = self.subtitle {

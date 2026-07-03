@@ -42,6 +42,7 @@ static TOGGLE_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.22, 1.0]);
 static LIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static LIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
 static LIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
+static LIST_FONT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.80, 0.80, 0.85, 1.0]);
 static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
@@ -329,6 +330,11 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/layout/list_entry_highlight_color") {
         if let Ok(mut lock) = LIST_ENTRY_HIGHLIGHT_COLOR.write() {
+            *lock = c;
+        }
+    }
+    if let Some(c) = get_color("/style/data/list/font_color").or_else(|| get_color("/layout/list_font_color")) {
+        if let Ok(mut lock) = LIST_FONT_COLOR.write() {
             *lock = c;
         }
     }
@@ -871,6 +877,17 @@ pub fn list_entry_highlight_color() -> [f32; 4] {
 
 pub fn set_list_entry_highlight_color(color: [f32; 4]) {
     if let Ok(mut lock) = LIST_ENTRY_HIGHLIGHT_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn list_font_color() -> [f32; 4] {
+    load_colors_once();
+    *LIST_FONT_COLOR.read().unwrap()
+}
+
+pub fn set_list_font_color(color: [f32; 4]) {
+    if let Ok(mut lock) = LIST_FONT_COLOR.write() {
         *lock = color;
     }
 }
