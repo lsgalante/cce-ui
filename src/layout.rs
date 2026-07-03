@@ -144,7 +144,9 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.spacing_y" => "graph_spacing_y",
                 "style.surface.graph.grid_snap" => "graph_grid_snap",
                 "style.surface.graph.blur" => "graph_blur",
+                "style.surface.graph.font" => "graph_font",
                 "style.surface.graph.node.color" => "graph_node_color",
+                "style.surface.graph.node.font" => "graph_node_font",
                 "style.surface.graph.node.selected_color" => "graph_node_selected_color",
                 "style.surface.graph.node.drag_color" => "graph_node_drag_color",
                 "style.surface.graph.node.corner_radius" => "graph_node_corner_radius",
@@ -272,6 +274,10 @@ static LIST_FONT: RwLock<String> = RwLock::new(String::new());
 static LIST_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static TREE_FONT: RwLock<String> = RwLock::new(String::new());
 static TREE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static GRAPH_FONT: RwLock<String> = RwLock::new(String::new());
+static GRAPH_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static GRAPH_NODE_FONT: RwLock<String> = RwLock::new(String::new());
+static GRAPH_NODE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static LIST_JUSTIFICATION: RwLock<u8> = RwLock::new(0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -315,6 +321,8 @@ pub fn reload_config() {
         let mut slider_font_changed = false;
         let mut list_font_changed = false;
         let mut tree_font_changed = false;
+        let mut graph_font_changed = false;
+        let mut graph_node_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(eq_idx) = trimmed.find('=') {
@@ -938,6 +946,36 @@ pub fn reload_config() {
                     tree_font_changed = true;
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("graph_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = GRAPH_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    graph_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("graph_node_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    graph_node_font_changed = true;
+                }
+            }
             if let Some(rest) = trimmed.strip_prefix("list_justification") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
@@ -1005,6 +1043,16 @@ pub fn reload_config() {
         }
         if tree_font_changed {
             if let Ok(mut lock) = TREE_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if graph_font_changed {
+            if let Ok(mut lock) = GRAPH_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if graph_node_font_changed {
+            if let Ok(mut lock) = GRAPH_NODE_FONT_CACHED.write() {
                 *lock = None;
             }
         }
@@ -2033,6 +2081,112 @@ pub fn set_tree_font(font: &str) {
         *lock = font.to_string();
     }
     if let Ok(mut lock) = TREE_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Graph Font
+pub fn graph_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("graph_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = GRAPH_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = GRAPH_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn graph_font_parsed() -> (String, f32) {
+    if let Ok(lock) = GRAPH_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = graph_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = GRAPH_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_graph_font(font: &str) {
+    if let Ok(mut lock) = GRAPH_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = GRAPH_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Graph Node Font
+pub fn graph_node_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("graph_node_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = GRAPH_NODE_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn graph_node_font_parsed() -> (String, f32) {
+    if let Ok(lock) = GRAPH_NODE_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = graph_node_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = GRAPH_NODE_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_graph_node_font(font: &str) {
+    if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = GRAPH_NODE_FONT_CACHED.write() {
         *lock = None;
     }
 }

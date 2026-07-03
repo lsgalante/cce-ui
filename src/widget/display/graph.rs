@@ -256,6 +256,10 @@ impl Element for Graph {
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, true, true) }
 
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::graph_node_font())
+    }
+
 
 
     fn paint(&mut self, ctx: &mut UiContext) {
