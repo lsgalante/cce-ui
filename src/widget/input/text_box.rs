@@ -547,6 +547,7 @@ impl Element for TextBox {
 
         let cursor_pos = self.cursor_idx.min(self.glyph_positions.len() - 1);
         self.cursor_x_offset = self.glyph_positions.get(cursor_pos).copied().unwrap_or(0.0);
+
     }
 
     fn get_value_string(&self) -> Option<String> {
