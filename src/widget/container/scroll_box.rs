@@ -94,42 +94,48 @@ impl Element for ScrollBox {
     fn unfocus(&mut self) {}
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if button == MouseButton::Left && state == ElementState::Pressed {
-            if self.hit_test_scrollbar(px, py) {
-                self.focus();
-                self.scrollbar_dragging = true;
-                
-                let sb_track_h = self.viewport_h - 8.0;
-                let sb_track_y = self.viewport_y + 4.0;
-                let visible_ratio = self.viewport_h / self.content_h;
-                let thumb_h = if sb_track_h <= 20.0 {
-                    sb_track_h
-                } else {
-                    (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-                };
-                let max_scroll = (self.content_h - self.viewport_h).max(0.0);
-                let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
-                let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
-                
-                let click_offset = py - thumb_y;
-                if click_offset >= 0.0 && click_offset <= thumb_h {
-                    self.drag_offset_y = click_offset;
-                } else {
-                    // Clicked outside the thumb: jump thumb center to py
-                    self.drag_offset_y = thumb_h / 2.0;
-                    let target_thumb_y = py - self.drag_offset_y;
-                    let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                        ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+        if button == MouseButton::Left {
+            if state == ElementState::Pressed {
+                if self.hit_test_scrollbar(px, py) {
+                    self.focus();
+                    self.scrollbar_dragging = true;
+                    
+                    let sb_track_h = self.viewport_h - 8.0;
+                    let sb_track_y = self.viewport_y + 4.0;
+                    let visible_ratio = self.viewport_h / self.content_h;
+                    let thumb_h = if sb_track_h <= 20.0 {
+                        sb_track_h
                     } else {
-                        0.0
+                        (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
                     };
-                    self.scroll_y = new_scroll_ratio * max_scroll;
+                    let max_scroll = (self.content_h - self.viewport_h).max(0.0);
+                    let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+                    let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
+                    
+                    let click_offset = py - thumb_y;
+                    if click_offset >= 0.0 && click_offset <= thumb_h {
+                        self.drag_offset_y = click_offset;
+                    } else {
+                        // Clicked outside the thumb: jump thumb center to py
+                        self.drag_offset_y = thumb_h / 2.0;
+                        let target_thumb_y = py - self.drag_offset_y;
+                        let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                            ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        self.scroll_y = new_scroll_ratio * max_scroll;
+                    }
+                    return true;
+                } else {
+                    self.scrollbar_dragging = false;
                 }
-                return true;
-            }
-            if self.hit_test(px, py, ctx) {
-                self.focus();
-                return true;
+                if self.hit_test(px, py, ctx) {
+                    self.focus();
+                    return true;
+                }
+            } else if state == ElementState::Released {
+                self.scrollbar_dragging = false;
             }
         }
         false
