@@ -2114,7 +2114,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     };
 
                     // Client-Side Decorations (CSD) Drag & Resize Handling
-                    let is_status_bar = self.inner.settings().app_id == "cce-status";
+                    let is_status_bar = self.inner.settings().app_id.starts_with("cce-status");
                     if btn == MouseButton::Left && !is_status_bar {
                         let border = 8.0f32;
                         let mut edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None;
@@ -2548,7 +2548,7 @@ pub fn run<A: Application>() {
     let surface = engine_state.compositor_state.create_surface(&qh);
     surface.set_buffer_scale(scale as i32);
 
-    if settings.app_id == "cce-status" {
+    if settings.app_id.starts_with("cce-status") {
         let compositor = engine_state.compositor_state.wl_compositor();
         let region = compositor.create_region(&qh, ());
         region.add(0, 0, settings.width as i32, settings.height as i32);
