@@ -170,8 +170,8 @@ impl Element for Backplate {
         let mut quads = Vec::new();
         let bg_color = self.color();
         let (wx, wy, ww, wh) = self.rect();
-        
-        if bg_color[3] != 0.0 {
+        let has_rounded = self.rounded_corners() != (false, false, false, false);
+        if bg_color[3] != 0.0 && !has_rounded {
             quads.push((wx, wy, ww, wh, bg_color));
         }
         for &child_ptr in &self.children {

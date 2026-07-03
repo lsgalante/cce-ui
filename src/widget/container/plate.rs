@@ -365,7 +365,10 @@ impl Element for Plate {
         }
         let mut quads = Vec::new();
         let (px, py, pw, ph) = self.rect();
-        quads.push((px, py, pw, ph, self.color()));
+        let has_rounded = self.rounded_corners() != (false, false, false, false);
+        if !has_rounded {
+            quads.push((px, py, pw, ph, self.color()));
+        }
 
         for &child_ptr in &self.base.children {
             let widget = unsafe { &*child_ptr };
