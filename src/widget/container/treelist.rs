@@ -306,17 +306,8 @@ impl Element for TreeList {
     }
 
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
-        let is_focused = focus::is_focused(self) || focus::is_focused(&self.scroll_box);
-        let is_hovered = self.hovered() || self.hovered_row_idx.is_some() || self.scroll_box.base.hovered;
         if self.scroll_box.show_border {
-            let box_border_color = if is_focused {
-                crate::color::tree_border_focus_color()
-            } else if is_hovered {
-                crate::color::tree_border_hover_color()
-            } else {
-                crate::color::tree_border_color()
-            };
-            Some((box_border_color, 1.0))
+            Some((crate::color::tree_border_color(), 1.0))
         } else {
             None
         }
