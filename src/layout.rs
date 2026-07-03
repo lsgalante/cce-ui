@@ -72,6 +72,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.list.corner_radius" | "style.data.list.corner_radius" => "list_corner_radius",
                 "style.textbox.corner_radius" | "style.data.textbox.corner_radius" => "textbox_corner_radius",
                 "style.control.dropdown.font" => "dropdown_font",
+                "style.control.dropdown.color" => "dropdown_color",
                 "style.control.font_selector.font" => "font_selector_font",
                 "style.control.slider.font" => "slider_font",
                 "style.control.spinbox.font" => "spinbox_font",

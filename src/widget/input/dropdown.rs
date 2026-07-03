@@ -392,7 +392,7 @@ impl Element for Dropdown {
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
 
-        let bg_color = [0.08, 0.08, 0.12, 1.0];
+        let bg_color = colors::dropdown_background_color();
         let border_color = if self.open {
             [0.30, 0.50, 0.32, 1.0]
         } else if self.base.hovered {

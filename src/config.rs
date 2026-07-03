@@ -598,6 +598,9 @@ mod tests {
                         statusbar blur=(bool)false color=(rgba)"#12141cd0" text_color=(rgba)"#b5b9c8ff"
                     }
                 }
+                control {
+                    dropdown color=(rgba)"#08080cff"
+                }
             }
         "##;
         
@@ -606,6 +609,9 @@ mod tests {
 
         // Verify values are parsed correctly
         assert_eq!(crate::color::backplate_menubar_blur(), true);
+        
+        let dd_color = crate::color::dropdown_background_color();
+        assert!(dd_color[0] > 0.0);
         assert_eq!(crate::color::backplate_statusbar_blur(), false);
 
         // Colors are in sRGB converted to linear, let's verify text colors

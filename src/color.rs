@@ -48,6 +48,8 @@ static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 
+static DROPDOWN_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
+
 static BACKPLATE_MENUBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static BACKPLATE_MENUBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]);
 static BACKPLATE_MENUBAR_BLUR: RwLock<bool> = RwLock::new(false);
@@ -266,6 +268,9 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/control/button/background").or_else(|| get_color("/layout/button_background_color")) {
         if let Ok(mut lock) = BUTTON_BACKGROUND_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = get_color("/style/control/dropdown/color") {
+        if let Ok(mut lock) = DROPDOWN_BACKGROUND_COLOR.write() { *lock = c; }
+    }
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
         if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
     }
@@ -428,6 +433,17 @@ fn load_colors_once() {
 
 pub fn reload_colors(content: &str) {
     parse_and_set_colors(content);
+}
+
+pub fn dropdown_background_color() -> [f32; 4] {
+    load_colors_once();
+    *DROPDOWN_BACKGROUND_COLOR.read().unwrap()
+}
+
+pub fn set_dropdown_background_color(color: [f32; 4]) {
+    if let Ok(mut lock) = DROPDOWN_BACKGROUND_COLOR.write() {
+        *lock = color;
+    }
 }
 
 pub fn graph_wire_color() -> [f32; 4] {
