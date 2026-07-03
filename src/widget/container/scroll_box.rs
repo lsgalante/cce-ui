@@ -13,6 +13,8 @@ pub struct ScrollBox {
     pub show_background: bool,
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
+    pub scrollbar_dragging: bool,
+    pub drag_offset_y: f32,
 }
 
 impl ScrollBox {
@@ -29,6 +31,8 @@ impl ScrollBox {
             show_background: true,
             parent: None,
             children: Vec::new(),
+            scrollbar_dragging: false,
+            drag_offset_y: 0.0,
         }
     }
 
@@ -40,6 +44,19 @@ impl ScrollBox {
         self.viewport_offset_h = viewport_h - self.base.h;
         let max_scroll = (content_h - viewport_h).max(0.0);
         self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+    }
+
+    pub fn hit_test_scrollbar(&self, px: f32, py: f32) -> bool {
+        if self.content_h <= self.viewport_h {
+            return false;
+        }
+        let sb_w = crate::layout::scrollbar_width();
+        let sb_x = self.base.x + self.base.w - sb_w - 4.0;
+        let sb_track_h = self.viewport_h - 8.0;
+        let sb_track_y = self.viewport_y + 4.0;
+
+        px >= sb_x - 4.0 && px <= sb_x + sb_w + 4.0
+            && py >= sb_track_y && py <= sb_track_y + sb_track_h
     }
 
     pub fn get_item_draw_y(&self, virtual_y: f32, item_h: f32) -> Option<f32> {
@@ -78,12 +95,80 @@ impl Element for ScrollBox {
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if button == MouseButton::Left && state == ElementState::Pressed {
+            if self.hit_test_scrollbar(px, py) {
+                self.focus();
+                self.scrollbar_dragging = true;
+                
+                let sb_track_h = self.viewport_h - 8.0;
+                let sb_track_y = self.viewport_y + 4.0;
+                let visible_ratio = self.viewport_h / self.content_h;
+                let thumb_h = if sb_track_h <= 20.0 {
+                    sb_track_h
+                } else {
+                    (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+                };
+                let max_scroll = (self.content_h - self.viewport_h).max(0.0);
+                let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+                let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
+                
+                let click_offset = py - thumb_y;
+                if click_offset >= 0.0 && click_offset <= thumb_h {
+                    self.drag_offset_y = click_offset;
+                } else {
+                    // Clicked outside the thumb: jump thumb center to py
+                    self.drag_offset_y = thumb_h / 2.0;
+                    let target_thumb_y = py - self.drag_offset_y;
+                    let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                        ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    self.scroll_y = new_scroll_ratio * max_scroll;
+                }
+                return true;
+            }
             if self.hit_test(px, py, ctx) {
                 self.focus();
                 return true;
             }
         }
         false
+    }
+
+    fn draggable(&self) -> bool {
+        self.scrollbar_dragging
+    }
+
+    fn drag_begin(&mut self, _px: f32, _py: f32) {}
+
+    fn drag_update(&mut self, _px: f32, py: f32) -> bool {
+        if !self.scrollbar_dragging {
+            return false;
+        }
+        let sb_track_h = self.viewport_h - 8.0;
+        let sb_track_y = self.viewport_y + 4.0;
+        let visible_ratio = self.viewport_h / self.content_h;
+        let thumb_h = if sb_track_h <= 20.0 {
+            sb_track_h
+        } else {
+            (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+        };
+        let max_scroll = (self.content_h - self.viewport_h).max(0.0);
+        
+        let target_thumb_y = py - self.drag_offset_y;
+        let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+            ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        
+        let old_scroll = self.scroll_y;
+        self.scroll_y = new_scroll_ratio * max_scroll;
+        (self.scroll_y - old_scroll).abs() > 0.01
+    }
+
+    fn drag_end(&mut self) {
+        self.scrollbar_dragging = false;
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
