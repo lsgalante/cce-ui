@@ -464,6 +464,22 @@ impl Element for TreeList {
         changed
     }
 
+    fn draggable(&self) -> bool {
+        self.scroll_box.draggable()
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32) {
+        self.scroll_box.drag_begin(px, py);
+    }
+
+    fn drag_update(&mut self, px: f32, py: f32) -> bool {
+        self.scroll_box.drag_update(px, py)
+    }
+
+    fn drag_end(&mut self) {
+        self.scroll_box.drag_end();
+    }
+
     fn wants_tick(&self) -> bool {
         true
     }
