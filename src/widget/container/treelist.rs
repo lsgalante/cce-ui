@@ -139,11 +139,7 @@ fn build_tree(
             } else {
                 if !seen_prefixes.contains(&current_prefix) {
                     seen_prefixes.insert(current_prefix.clone());
-                    let collapsed = if query.is_empty() {
-                        collapsed_sections.contains(&current_prefix)
-                    } else {
-                        false
-                    };
+                    let collapsed = collapsed_sections.contains(&current_prefix);
                     items.push(TreeElement::Section {
                         path: current_prefix.clone(),
                         name: part_name,
@@ -151,7 +147,7 @@ fn build_tree(
                         collapsed,
                     });
                 }
-                if query.is_empty() && collapsed_sections.contains(&current_prefix) {
+                if collapsed_sections.contains(&current_prefix) {
                     is_hidden = true;
                 }
             }
