@@ -183,9 +183,11 @@ pub struct TreeList {
 
 impl TreeList {
     pub fn new() -> Self {
+        let mut scroll_box = ScrollBox::new();
+        scroll_box.show_background = false;
         Self {
             base: Widget::new(),
-            scroll_box: ScrollBox::new(),
+            scroll_box,
             search_box: TextBox::new(String::new()).with_placeholder("Search..."),
             flat_keys: Vec::new(),
             annotations: Vec::new(),

@@ -10,6 +10,7 @@ pub struct ScrollBox {
     viewport_offset_y: f32,
     viewport_offset_h: f32,
     pub show_border: bool,
+    pub show_background: bool,
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
 }
@@ -25,6 +26,7 @@ impl ScrollBox {
             viewport_offset_y: 0.0,
             viewport_offset_h: 0.0,
             show_border: true,
+            show_background: true,
             parent: None,
             children: Vec::new(),
         }
@@ -110,7 +112,9 @@ impl Element for ScrollBox {
         let mut quads = Vec::new();
         
         // Background
-        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, crate::color::list_bg_color()));
+        if self.show_background {
+            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, crate::color::list_bg_color()));
+        }
 
 
 
