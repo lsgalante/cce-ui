@@ -188,7 +188,7 @@ impl TreeList {
         Self {
             base: Widget::new(),
             scroll_box,
-            search_box: TextBox::new(String::new()).with_placeholder("Search..."),
+            search_box: TextBox::new(String::new()).with_placeholder("Search...").with_update_on_type(true),
             flat_keys: Vec::new(),
             annotations: Vec::new(),
             collapsed_sections: HashSet::new(),

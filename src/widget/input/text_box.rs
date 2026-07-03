@@ -45,6 +45,7 @@ pub struct TextBox {
     pub cursor_x_offset: f32,
     pub glyph_positions: Vec<f32>,
     pub total_text_width: f32,
+    pub update_on_type: bool,
 }
 
 impl TextBox {
@@ -83,7 +84,13 @@ impl TextBox {
             cursor_x_offset: 0.0,
             glyph_positions: Vec::new(),
             total_text_width: 0.0,
+            update_on_type: false,
         }
+    }
+
+    pub fn with_update_on_type(mut self, update: bool) -> Self {
+        self.update_on_type = update;
+        self
     }
 
     pub fn with_multiline(mut self, multiline: bool) -> Self {
@@ -273,6 +280,12 @@ impl TextBox {
     }
 
     pub fn take_change(&mut self) -> bool {
+        if self.update_on_type {
+            if self.text != self.edit_buffer {
+                self.text = self.edit_buffer.clone();
+                self.just_changed = true;
+            }
+        }
         let changed = self.just_changed;
         self.just_changed = false;
         changed
