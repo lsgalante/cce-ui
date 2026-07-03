@@ -171,10 +171,7 @@ impl Element for Backplate {
         let bg_color = self.color();
         let (wx, wy, ww, wh) = self.rect();
         
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        let has_rounded = r1 || r2 || r3 || r4;
-        
-        if bg_color[3] != 0.0 && !has_rounded {
+        if bg_color[3] != 0.0 {
             quads.push((wx, wy, ww, wh, bg_color));
         }
         for &child_ptr in &self.children {

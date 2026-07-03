@@ -5,13 +5,13 @@ pub use crate::widget::input::font_selector::FontSelector;
 
 // Generic text item layout wrapper
 #[derive(Debug, Clone)]
-pub struct ScrollingList {
+pub struct List {
     pub scroll_box: ScrollBox,
     pub item_height: f32,
     pub item_gap: f32,
 }
 
-impl ScrollingList {
+impl List {
     pub fn new(item_height: f32, item_gap: f32) -> Self {
         Self {
             scroll_box: ScrollBox::new(),
@@ -41,13 +41,13 @@ impl ScrollingList {
     }
 }
 
-impl Default for ScrollingList {
+impl Default for List {
     fn default() -> Self {
         Self::new(24.0, 4.0)
     }
 }
 
-impl Element for ScrollingList {
+impl Element for List {
     fn rect(&self) -> (f32, f32, f32, f32) {
         self.scroll_box.rect()
     }
@@ -179,7 +179,7 @@ impl Element for ScrollingList {
     fn as_scroll_controller_mut(&mut self) -> Option<&mut dyn ScrollController> { Some(self) }
 }
 
-impl ScrollController for ScrollingList {
+impl ScrollController for List {
     fn update_bounds(&mut self, count: usize, viewport_y: f32, viewport_h: f32) {
         self.update_bounds(count, viewport_y, viewport_h);
     }
@@ -189,5 +189,5 @@ impl ScrollController for ScrollingList {
     }
 }
 
-unsafe impl Send for ScrollingList {}
-unsafe impl Sync for ScrollingList {}
+unsafe impl Send for List {}
+unsafe impl Sync for List {}

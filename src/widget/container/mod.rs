@@ -30,7 +30,7 @@ pub use menu::{Menu, MenuBar};
 pub use breadcrumb::Breadcrumb;
 pub use spreadsheet::Spreadsheet;
 pub use scroll_box::ScrollBox;
-pub use scrolling_list::{ScrollingList, FontSelector};
+pub use scrolling_list::{List, FontSelector};
 pub use plate::Plate;
 pub use switcher::Switcher;
 pub use layer::Layer;

@@ -4,7 +4,7 @@ use crate::widget::display::TextLabel;
 
 #[derive(Debug, Clone)]
 pub struct Breadcrumb {
-    x: f32, y: f32, w: f32, h: f32,
+    pub base: Widget,
     hovered: bool,
     path: Vec<String>,
     hovered_seg: Option<usize>,
@@ -18,7 +18,7 @@ impl Breadcrumb {
     }
 
     pub fn new() -> Self {
-        Self { x: 0.0, y: 0.0, w: 0.0, h: 0.0, hovered: false,
+        Self { base: Widget::new(), hovered: false,
                path: Vec::new(), hovered_seg: None, clicked_seg: None, network_opacity: 1.0 }
     }
 
@@ -31,7 +31,7 @@ impl Breadcrumb {
     }
 
     fn seg_at(&self, px: f32) -> Option<usize> {
-        let mut cx = self.x + BREADCRUMB_PADDING;
+        let mut cx = self.base.x + BREADCRUMB_PADDING;
         let segs = self.virtual_segs();
         for (i, seg) in segs.iter().enumerate() {
             let w = seg.len() as f32 * 7.5;
@@ -45,19 +45,9 @@ impl Breadcrumb {
 }
 
 impl Element for Breadcrumb {
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
+    crate::impl_widget_base!(Breadcrumb);
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, false, false) }
-
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
 
     fn color(&self) -> [f32; 4] {
         let c = crate::color::breadcrumb_bg_color();
@@ -103,30 +93,32 @@ impl Element for Breadcrumb {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        quads.push((self.x, self.y, self.w, self.h, self.color()));
+        let (x, y, w, h) = self.rect();
+        quads.push((x, y, w, h, self.color()));
         if let Some(i) = self.hovered_seg {
-            let mut cx = self.x + BREADCRUMB_PADDING;
+            let mut cx = x + BREADCRUMB_PADDING;
             let segs = self.virtual_segs();
             for j in 0..i {
                 let w = segs[j].len() as f32 * 7.5;
                 cx += w + SEGMENT_GAP;
             }
             let w = segs[i].len() as f32 * 7.5;
-            quads.push((cx, self.y, w, self.h, [1.0, 1.0, 1.0, 0.06]));
+            quads.push((cx, y, w, h, [1.0, 1.0, 1.0, 0.06]));
         }
         quads
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
-        let mut cx = self.x + BREADCRUMB_PADDING;
+        let (x, y, _, _) = self.rect();
+        let mut cx = x + BREADCRUMB_PADDING;
         let segs = self.virtual_segs();
         let len = segs.len();
         for (i, seg) in segs.iter().enumerate() {
             labels.push(TextLabel {
                 text: seg.clone(),
                 x: cx,
-                y: self.y + 6.0,
+                y: y + 6.0,
                 font_size: 12.0,
                 color: if i == len - 1 { [0xcc, 0xcc, 0xd4] } else { [0x88, 0x88, 0x99] },
             });
@@ -144,3 +136,47 @@ impl PathController for Breadcrumb {
         self.clicked_seg.take()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::UiContext;
+    use crate::widget::Element;
+
+    #[test]
+    fn test_breadcrumb_clicks() {
+        let mut breadcrumb = Breadcrumb::new();
+        breadcrumb.set_path(&["home".to_string(), "lsgalante".to_string()]);
+        // Set coordinates: x=10.0, y=20.0, w=300.0, h=24.0
+        breadcrumb.set_rect(10.0, 20.0, 300.0, 24.0);
+
+        let ctx = UiContext::new();
+
+        // Let's test hit_test
+        assert!(breadcrumb.hit_test(15.0, 25.0, &ctx));
+
+        // Let's test seg_at:
+        // x + padding = 10.0 + 8.0 = 18.0
+        // Segment 0 ("/"): length 1. width = 1 * 7.5 = 7.5. range: [18.0, 25.5)
+        // GAP = 4.0. next = 25.5 + 4.0 = 29.5
+        // Segment 1 ("home/"): length 5. width = 5 * 7.5 = 37.5. range: [29.5, 67.0)
+        // GAP = 4.0. next = 67.0 + 4.0 = 71.0
+        // Segment 2 ("lsgalante/"): length 10. width = 10 * 7.5 = 75.0. range: [71.0, 146.0)
+
+        // Click in segment 0 (/)
+        let mut ui_ctx = UiContext::new();
+        assert!(breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, 20.0, 25.0, &mut ui_ctx));
+        assert_eq!(breadcrumb.path_click(), Some(0));
+
+        // Click in segment 1 (home/)
+        assert!(breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, 50.0, 25.0, &mut ui_ctx));
+        assert_eq!(breadcrumb.path_click(), Some(1));
+
+        // Click in segment 2 (lsgalante/)
+        // Wait, path.len() is 2. i = 2. 2 < 2 is false.
+        // So clicking the last segment should return false.
+        assert!(!breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, 100.0, 25.0, &mut ui_ctx));
+        assert_eq!(breadcrumb.path_click(), None);
+    }
+}
+
