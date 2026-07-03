@@ -1541,9 +1541,6 @@ impl<A: Application> EngineState<A> {
         
         // 1. Build and upload vertex buffer
         let mut verts = Vec::new();
-        for &(qx, qy, qw, qh, qc) in &quads {
-            verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
-        }
         for &(qx, qy, qw, qh, qr, qc, qcorners) in &rounded_quads {
             if qr > 0.1 {
                 let radii = crate::widget::CornerRadii::new(
@@ -1556,6 +1553,9 @@ impl<A: Application> EngineState<A> {
             } else {
                 verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
             }
+        }
+        for &(qx, qy, qw, qh, qc) in &quads {
+            verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
         }
         for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
             verts.extend(vector_vertices(vx1, vy1, vx2, vy2, vthickness, logical_w, logical_h, vcolor, vcap));
