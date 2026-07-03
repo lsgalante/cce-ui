@@ -56,6 +56,7 @@ struct BufferCacheKey {
     text: String,
     size_milli: u32,
     font: Option<String>,
+    is_vertical: bool,
 }
 
 std::thread_local! {
@@ -77,10 +78,12 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
 
     let physical_size = font_size * scale;
     let size_key = (physical_size * 1000.0).round() as u32;
+    let is_vertical = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
     let key = BufferCacheKey {
         text: text.to_string(),
         size_milli: size_key,
         font: family_name.clone(),
+        is_vertical,
     };
 
     let cached = BUFFER_CACHE.with(|cache| {
@@ -91,7 +94,12 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
         return buf;
     }
 
-    let metrics = Metrics::new(physical_size, physical_size * 1.4);
+    let line_height = if is_vertical {
+        physical_size * 1.05
+    } else {
+        physical_size * 1.4
+    };
+    let metrics = Metrics::new(physical_size, line_height);
     let mut buf = Buffer::new(fs, metrics);
     let mut attrs = Attrs::new();
     if let Some(ref font_family) = family_name {
@@ -1398,6 +1406,7 @@ pub struct EngineState<A: Application> {
     pub active_popup: Option<ActivePopup>,
     pub current_cursor_icon: Option<CursorIcon>,
     pub qh: QueueHandle<EngineState<A>>,
+    pub just_configured: bool,
 }
 
 impl<A: Application> EngineState<A> {
@@ -1935,6 +1944,7 @@ impl<A: Application> WindowHandler for EngineState<A> {
         self.redraw = true;
         self.frame_callback_pending = false;
         self.first_configure_received = true;
+        self.just_configured = true;
     }
     
     fn request_close(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _window: &XdgWindow) {
@@ -2538,6 +2548,7 @@ pub fn run<A: Application>() {
         active_popup: None,
         current_cursor_icon: None,
         qh: qh.clone(),
+        just_configured: false,
     };
 
     event_queue.roundtrip(&mut engine_state).unwrap();
@@ -2613,10 +2624,15 @@ pub fn run<A: Application>() {
             engine_state.redraw = true;
         }
 
-        if let Some((w, h)) = engine_state.inner.desired_size() {
-            if (engine_state.logical_width - w as f32).abs() > 0.001 || (engine_state.logical_height - h as f32).abs() > 0.001 {
-                engine_state.resize(w as f32, h as f32);
-                engine_state.redraw = true;
+        let just_configured = engine_state.just_configured;
+        engine_state.just_configured = false;
+
+        if !just_configured {
+            if let Some((w, h)) = engine_state.inner.desired_size() {
+                if (engine_state.logical_width - w as f32).abs() > 0.001 || (engine_state.logical_height - h as f32).abs() > 0.001 {
+                    engine_state.resize(w as f32, h as f32);
+                    engine_state.redraw = true;
+                }
             }
         }
 

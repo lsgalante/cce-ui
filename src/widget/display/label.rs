@@ -109,11 +109,19 @@ impl StyledLabel {
         if is_vert {
             final_text = text.chars().map(|c| c.to_string()).collect::<Vec<_>>().join("\n");
         }
-        let buffer = crate::backend::window_runner::get_text_buffer(fs, &final_text, size, Some(family));
+        let mut buffer = crate::backend::window_runner::get_text_buffer(fs, &final_text, size, Some(family));
+        if is_vert {
+            let bar_thickness = crate::BAR_THICKNESS.load(std::sync::atomic::Ordering::Relaxed) as f32;
+            buffer.set_size(fs, Some(bar_thickness * scale as f32), None);
+            for line in &mut buffer.lines {
+                line.set_align(Some(glyphon::cosmic_text::Align::Center));
+            }
+            buffer.shape_until_scroll(fs, true);
+        }
         let mut w = buffer.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0) / scale;
         if is_vert {
             let num_lines = buffer.layout_runs().count();
-            w = num_lines as f32 * size * 1.4;
+            w = num_lines as f32 * size * 1.05;
         }
         let g_color = glyphon::Color::rgb(
             (color[0] * 255.0) as u8,
@@ -142,10 +150,11 @@ impl StyledLabel {
 
     pub fn draw(self, text_items: &mut Vec<TextItem>, x: f32, y: f32) -> f32 {
         let w = self.w;
+        let is_vert = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
         text_items.push(TextItem {
             buffer: self.buffer,
             x,
-            y,
+            y: if is_vert { 0.0 } else { y },
             color: self.g_color,
             bounds: None,
         });

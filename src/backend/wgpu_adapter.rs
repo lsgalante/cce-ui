@@ -87,8 +87,7 @@ impl WgpuAdapter {
         surface.configure(&device, &config);
 
         // Initialize text rendering
-        let mut font_system = FontSystem::new();
-        font_system.db_mut().load_fonts_dir("/home/lsgalante/Dropbox/Fonts");
+        let font_system = crate::create_font_system();
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&device);
         let mut text_atlas = TextAtlas::new(&device, &queue, &cache, config.format);

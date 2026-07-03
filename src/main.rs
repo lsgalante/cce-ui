@@ -568,7 +568,7 @@ impl State {
             cache: None,
         });
 
-        let mut font_system = FontSystem::new();
+        let mut font_system = cce_ui::create_font_system();
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&device);
         let viewport = Viewport::new(&device, &cache);
