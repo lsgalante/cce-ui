@@ -329,6 +329,7 @@ impl Element for TreeList {
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = self.scroll_box.mouse_input(button, state, px, py, ctx);
         if self.search_box.mouse_input(button, state, px, py, ctx) {
+            ctx.set_focused(&mut self.search_box);
             changed = true;
         }
         self.check_scroll_activity(ctx);
@@ -340,6 +341,7 @@ impl Element for TreeList {
 
         if button == MouseButton::Left && state == ElementState::Pressed {
             if px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
+                ctx.set_focused(self);
                 self.focus();
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
                 let row_idx = (relative_y / self.item_height) as usize;
@@ -379,6 +381,7 @@ impl Element for TreeList {
 
         if button == MouseButton::Right && state == ElementState::Pressed {
             if px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
+                ctx.set_focused(self);
                 self.focus();
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
                 let row_idx = (relative_y / self.item_height) as usize;
