@@ -494,6 +494,12 @@ impl Element for TreeList {
             self.mark_dirty(ctx);
             changed = true;
         }
+        if (self.scroll_box.scroll_y - self.last_scroll_y).abs() > 0.01 {
+            self.last_scroll_y = self.scroll_box.scroll_y;
+            self.scrollbar_activity_timer = 1.0;
+            self.mark_dirty(ctx);
+            changed = true;
+        }
         if self.scrollbar_activity_timer > 0.0 {
             self.scrollbar_activity_timer = (self.scrollbar_activity_timer - dt).max(0.0);
             changed = true;
