@@ -297,6 +297,7 @@ pub trait Element {
         }
     }
     fn select_all(&mut self) {}
+    fn clear_text(&mut self) {}
     fn copy_key(&self) {}
     fn copy_value(&self) {}
     fn delete_key(&mut self) {}

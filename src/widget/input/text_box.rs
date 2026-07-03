@@ -605,6 +605,10 @@ impl Element for TextBox {
         self.select_all();
     }
 
+    fn clear_text(&mut self) {
+        self.set_value_string("");
+    }
+
     fn preferred_height(&self) -> Option<f32> {
         Some(crate::layout::textbox_height())
     }
@@ -1659,6 +1663,27 @@ mod tests {
         assert!(tb.scroll_x > 0.0, "scroll_x should be scrolled horizontally to keep the cursor visible");
         
         crate::layout::set_textbox_line_wrap(true);
+    }
+
+    #[test]
+    fn test_search_textbox_cear_option() {
+        let mut dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new("Some Search query".to_string()).with_placeholder("Search...");
+        tb.set_rect(10.0, 10.0, 200.0, 30.0);
+
+        // Right click on textbox
+        let clicked = tb.mouse_input(MouseButton::Right, ElementState::Pressed, 50.0, 20.0, &mut dummy);
+        assert!(clicked);
+        assert!(dummy.is_context_menu_visible());
+
+        // Verify "Cear" option is in options
+        let opts = crate::widget::context_menu::options();
+        assert!(opts.contains(&"Cear".to_string()));
+
+        // Simulate choosing the "Cear" option
+        tb.clear_text();
+        assert_eq!(tb.text, "");
+        assert_eq!(tb.edit_buffer, "");
     }
 }
 

@@ -803,6 +803,16 @@ impl UiContext {
 
         if name == "TextBox" {
             options.extend(vec!["Cut".to_string(), "Copy".to_string(), "Paste".to_string(), "Select All".to_string()]);
+            let is_search = unsafe {
+                if let Some(tb) = (*target).as_any().downcast_ref::<crate::widget::input::TextBox>() {
+                    tb.placeholder.as_deref() == Some("Search...")
+                } else {
+                    false
+                }
+            };
+            if is_search {
+                options.push("Cear".to_string());
+            }
         } else {
             options.extend(vec!["Copy".to_string(), "Paste".to_string()]);
         }

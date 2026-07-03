@@ -546,6 +546,9 @@ pub mod context_menu {
                                         "Select All" => {
                                             target.select_all();
                                         }
+                                        "Cear" => {
+                                            target.clear_text();
+                                        }
                                         "Copy Key" => {
                                             target.copy_key();
                                         }
