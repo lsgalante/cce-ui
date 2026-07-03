@@ -209,6 +209,16 @@ impl Graph {
             self.skipped_col_w /= 1.1;
         }
     }
+
+    pub fn zoom_by_factor(&mut self, factor: f32) {
+        let new_grid_x = self.grid_size_x * factor;
+        if new_grid_x >= 40.0 && new_grid_x <= 400.0 {
+            self.grid_size_x = new_grid_x;
+            self.grid_size_y *= factor;
+            self.skipped_row_h *= factor;
+            self.skipped_col_w *= factor;
+        }
+    }
 }
 
 fn read_zoom_bindings() -> (String, String) {
@@ -958,16 +968,34 @@ impl Element for Graph {
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if self.hit_test(px, py, ctx) {
-            match delta {
-                MouseScrollDelta::LineDelta(x, y) => {
-                    self.grid_origin_x += *x * 15.0;
-                    self.grid_origin_y += *y * 15.0;
-                    true
+            if ctx.ctrl_pressed {
+                match delta {
+                    MouseScrollDelta::LineDelta(_x, y) => {
+                        if *y > 0.0 {
+                            self.zoom_by_factor(1.1);
+                        } else if *y < 0.0 {
+                            self.zoom_by_factor(1.0 / 1.1);
+                        }
+                        true
+                    }
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        let factor = 1.0 + (pos.y as f32 * 0.015);
+                        self.zoom_by_factor(factor);
+                        true
+                    }
                 }
-                MouseScrollDelta::PixelDelta(pos) => {
-                    self.grid_origin_x += pos.x as f32;
-                    self.grid_origin_y += pos.y as f32;
-                    true
+            } else {
+                match delta {
+                    MouseScrollDelta::LineDelta(x, y) => {
+                        self.grid_origin_x += *x * 15.0;
+                        self.grid_origin_y += *y * 15.0;
+                        true
+                    }
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        self.grid_origin_x += pos.x as f32;
+                        self.grid_origin_y += pos.y as f32;
+                        true
+                    }
                 }
             }
         } else {
