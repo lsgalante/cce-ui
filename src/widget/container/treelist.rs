@@ -337,7 +337,8 @@ impl Element for TreeList {
         let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
 
         if button == MouseButton::Left && state == ElementState::Pressed {
-            if px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
+            let on_scrollbar = self.scroll_box.hit_test_scrollbar(px, py) || self.scroll_box.scrollbar_dragging;
+            if !on_scrollbar && px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
                 ctx.set_focused(self);
                 self.focus();
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
@@ -442,7 +443,8 @@ impl Element for TreeList {
         let old_hovered = self.hovered_row_idx;
         self.hovered_row_idx = None;
 
-        if px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
+        let on_scrollbar = self.scroll_box.hit_test_scrollbar(px, py) || self.scroll_box.scrollbar_dragging;
+        if !on_scrollbar && px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
             let relative_y = py - list_top + self.scroll_box.scroll_y;
             let row_idx = (relative_y / self.item_height) as usize;
             if row_idx < self.items.len() {
