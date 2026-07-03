@@ -92,6 +92,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.spinbox.corner_radius" => "spinbox_corner_radius",
                 "style.textbox.height" | "style.data.textbox.height" => "textbox_height",
                 "style.textbox.multiline.line_wrap" | "style.data.textbox.multiline.line_wrap" => "textbox_line_wrap",
+                "style.textbox.multiline.border_width" | "style.data.textbox.multiline.border_width" => "textbox_multiline_border_width",
                 "style.control.toggle.font" => "toggle_font",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
@@ -265,6 +266,7 @@ static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static LAYER_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static TEXTBOX_LINE_WRAP: RwLock<bool> = RwLock::new(true);
+static TEXTBOX_MULTILINE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
 
 
 
@@ -455,6 +457,15 @@ pub fn reload_config() {
                 let wrap = val_str == "true" || val_str == "1" || val_str == "1.0";
                 if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
                     *lock = wrap;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("textbox_multiline_border_width") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = TEXTBOX_MULTILINE_BORDER_WIDTH.write() {
+                        *lock = val;
+                    }
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("breadcrumb_corner_radius") {
@@ -2425,6 +2436,18 @@ pub fn set_textbox_line_wrap(wrap: bool) {
     lazy_init_style_registry();
     if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
         *lock = wrap;
+    }
+}
+
+pub fn textbox_multiline_border_width() -> f32 {
+    lazy_init_style_registry();
+    *TEXTBOX_MULTILINE_BORDER_WIDTH.read().unwrap()
+}
+
+pub fn set_textbox_multiline_border_width(width: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut lock) = TEXTBOX_MULTILINE_BORDER_WIDTH.write() {
+        *lock = width;
     }
 }
 

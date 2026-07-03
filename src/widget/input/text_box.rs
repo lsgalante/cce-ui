@@ -275,6 +275,14 @@ impl TextBox {
         self
     }
 
+    fn border_width(&self) -> f32 {
+        if self.multiline {
+            crate::layout::textbox_multiline_border_width()
+        } else {
+            1.0
+        }
+    }
+
     pub fn set_placeholder(&mut self, placeholder: &str) {
         self.placeholder = Some(placeholder.to_string());
     }
@@ -990,10 +998,11 @@ impl Element for TextBox {
         
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
+        let border_w = self.border_width();
         if self.disabled {
             if self.draw_bg_border {
                 quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, [0.12, 0.12, 0.16, 1.0]));
-                quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, [0.06, 0.06, 0.08, 1.0]));
+                quads.push((self.base.x + border_w, self.base.y + top + border_w, self.base.w - 2.0 * border_w, visual_h - 2.0 * border_w, [0.06, 0.06, 0.08, 1.0]));
             }
             return quads;
         }
@@ -1012,7 +1021,7 @@ impl Element for TextBox {
                 [0.18, 0.18, 0.24, 1.0]
             };
             quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, border_color));
-            quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, bg_color));
+            quads.push((self.base.x + border_w, self.base.y + top + border_w, self.base.w - 2.0 * border_w, visual_h - 2.0 * border_w, bg_color));
         }
 
         if self.editing || self.select_anchor.is_some() {
@@ -1162,8 +1171,9 @@ impl Element for TextBox {
         };
         
         if self.draw_bg_border {
+            let border_w = self.border_width();
             quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, border_color, (r1, r2, r3, r4)));
-            quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, radius - 1.0, bg_color, (r1, r2, r3, r4)));
+            quads.push((self.base.x + border_w, self.base.y + top + border_w, self.base.w - 2.0 * border_w, visual_h - 2.0 * border_w, (radius - border_w).max(0.0), bg_color, (r1, r2, r3, r4)));
         }
 
         if self.editing || self.select_anchor.is_some() {
@@ -1684,6 +1694,25 @@ mod tests {
         tb.clear_text();
         assert_eq!(tb.text, "");
         assert_eq!(tb.edit_buffer, "");
+    }
+
+    #[test]
+    fn test_multiline_textbox_border_width() {
+        let _dummy = crate::context::UiContext::new();
+        let tb_single = TextBox::new("Singleline".to_string()).with_multiline(false);
+        let tb_multi = TextBox::new("Multiline".to_string()).with_multiline(true);
+
+        // Default border width
+        assert_eq!(tb_single.border_width(), 1.0);
+        assert_eq!(tb_multi.border_width(), 1.0);
+
+        // Configure custom border width
+        crate::layout::set_textbox_multiline_border_width(4.5);
+        assert_eq!(tb_single.border_width(), 1.0);
+        assert_eq!(tb_multi.border_width(), 4.5);
+
+        // Reset to default
+        crate::layout::set_textbox_multiline_border_width(1.0);
     }
 }
 
