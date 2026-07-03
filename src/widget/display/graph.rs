@@ -270,8 +270,38 @@ impl Element for Graph {
         }
     }
 
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
+
+    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        if let Some(hq) = self.highlight_quad(ctx) {
+            if hq.4 != colors::HIGHLIGHT_SECONDARY {
+                quads.push(hq);
+            }
+        }
+        quads
+    }
+
+    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut rounded = Vec::new();
+        
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            let bg_color = self.color();
+            let (x, y, w, h) = self.rect();
+            let radius = self.corner_radius();
+            rounded.push((x, y, w, h, radius, bg_color, (r1, r2, r3, r4)));
+        }
+
+        let node_radius = crate::layout::graph_node_corner_radius();
+        for (qx, qy, qw, qh, qc) in self.extra_quads() {
+            let is_node = self.is_node_rect(qx, qy, qw, qh);
+            let r = if is_node { node_radius } else { 0.0 };
+            rounded.push((qx, qy, qw, qh, r, qc, (is_node, is_node, is_node, is_node)));
+        }
+
+        rounded
+    }
 
     fn color(&self) -> [f32; 4] {
         let mut c = if self.uniform_background {
