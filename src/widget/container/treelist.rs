@@ -549,7 +549,7 @@ impl Element for TreeList {
                 }
             };
             
-            quads.push((list_left + 1.0, draw_y, list_width - 9.0, draw_h, bg_color));
+            quads.push((list_left + 1.0, draw_y, list_width - 2.0, draw_h, bg_color));
             
             // Draw column separator lines and color preview for Leaf rows
             if let TreeElement::Leaf { ref val, original_idx, .. } = item {
@@ -577,7 +577,7 @@ impl Element for TreeList {
             }
 
             if row_y + self.item_height <= list_bottom {
-                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 9.0, 1.0, [0.13, 0.13, 0.17, 1.0]));
+                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 2.0, 1.0, [0.13, 0.13, 0.17, 1.0]));
             }
         }
 
@@ -926,7 +926,7 @@ impl Element for TreeList {
                 }
             };
             
-            quads.push((list_left + 1.0, draw_y, list_width - 9.0, draw_h, 0.0, apply_opacity(bg_color), (false, false, false, false)));
+            quads.push((list_left + 1.0, draw_y, list_width - 2.0, draw_h, 0.0, apply_opacity(bg_color), (false, false, false, false)));
             
             if let TreeElement::Leaf { ref val, original_idx, .. } = item {
                 let separator_color = crate::color::tree_separator_color();
@@ -952,7 +952,7 @@ impl Element for TreeList {
             }
 
             if row_y + self.item_height <= list_bottom {
-                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 9.0, 1.0, 0.0, apply_opacity([0.13, 0.13, 0.17, 1.0]), (false, false, false, false)));
+                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 2.0, 1.0, 0.0, apply_opacity([0.13, 0.13, 0.17, 1.0]), (false, false, false, false)));
             }
         }
 
