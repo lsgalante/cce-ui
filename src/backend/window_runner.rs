@@ -24,6 +24,11 @@ use wayland_client::{
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface, wl_registry, wl_region, wl_callback},
     Connection, QueueHandle, Proxy,
 };
+
+use wayland_protocols::wp::pointer_gestures::zv1::client::{
+    zwp_pointer_gesture_pinch_v1::{self, ZwpPointerGesturePinchV1},
+    zwp_pointer_gestures_v1::{self as zwp_pointer_gestures, ZwpPointerGesturesV1},
+};
 use smithay_client_toolkit::shell::xdg::popup::{Popup, PopupHandler, PopupConfigure};
 use smithay_client_toolkit::shell::xdg::{XdgPositioner, XdgSurface};
 use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{Anchor, Gravity, ConstraintAdjustment};
@@ -1409,6 +1414,10 @@ pub struct EngineState<A: Application> {
     pub current_cursor_icon: Option<CursorIcon>,
     pub qh: QueueHandle<EngineState<A>>,
     pub just_configured: bool,
+    pub pointer_gestures: Option<ZwpPointerGesturesV1>,
+    pub pinch_gesture: Option<ZwpPointerGesturePinchV1>,
+    pub last_pinch_scale: f32,
+    pub cursor_pos: (f32, f32),
 }
 
 impl<A: Application> EngineState<A> {
@@ -1972,7 +1981,7 @@ impl<A: Application> SeatHandler for EngineState<A> {
         capability: Capability,
     ) {
         if capability == Capability::Pointer && self.pointer.is_none() {
-            let surface = self.compositor_state.create_surface(qh);
+            let surface = self.compositor_state.create_surface::<Self>(qh);
             let themed_pointer = self.seat_state.get_pointer_with_theme(
                 qh,
                 &seat,
@@ -1980,6 +1989,9 @@ impl<A: Application> SeatHandler for EngineState<A> {
                 surface,
                 ThemeSpec::System,
             ).unwrap();
+            if let Some(ref pg) = self.pointer_gestures {
+                self.pinch_gesture = Some(pg.get_pinch_gesture(themed_pointer.pointer(), qh, ()));
+            }
             self.pointer = Some(themed_pointer);
         }
         if capability == Capability::Keyboard && self.keyboard.is_none() {
@@ -1996,6 +2008,7 @@ impl<A: Application> SeatHandler for EngineState<A> {
         capability: Capability,
     ) {
         if capability == Capability::Pointer {
+            self.pinch_gesture = None;
             self.pointer = None;
         }
         if capability == Capability::Keyboard {
@@ -2035,6 +2048,8 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     ly += popup.y;
                 }
             }
+            
+            self.cursor_pos = (lx, ly);
             
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
@@ -2512,6 +2527,68 @@ impl<A: Application> wayland_client::Dispatch<wl_callback::WlCallback, ()> for E
     }
 }
 
+impl<A: Application> wayland_client::Dispatch<ZwpPointerGesturesV1, ()> for EngineState<A> {
+    fn event(
+        _state: &mut Self,
+        _proxy: &ZwpPointerGesturesV1,
+        _event: zwp_pointer_gestures::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {}
+}
+
+impl<A: Application> wayland_client::Dispatch<ZwpPointerGesturePinchV1, ()> for EngineState<A> {
+    fn event(
+        state: &mut Self,
+        _proxy: &ZwpPointerGesturePinchV1,
+        event: zwp_pointer_gesture_pinch_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            zwp_pointer_gesture_pinch_v1::Event::Begin { .. } => {
+                state.last_pinch_scale = 1.0;
+            }
+            zwp_pointer_gesture_pinch_v1::Event::Update { scale, .. } => {
+                let scale_f32 = scale as f32;
+                let factor = scale_f32 / state.last_pinch_scale;
+                state.last_pinch_scale = scale_f32;
+
+                let (px, py) = state.cursor_pos;
+                let mut rebuild = false;
+
+                // Calculate the y_delta for PixelDelta mapping.
+                // Since cce-graph interprets factor = 1.0 + y_delta * 0.015, we reverse it:
+                let y_delta = (factor - 1.0) / 0.015;
+                let delta = MouseScrollDelta::PixelDelta(Position {
+                    x: 0.0,
+                    y: y_delta as f64,
+                });
+
+                if let Some(ctx) = state.inner.ui_context_mut() {
+                    ctx.ctrl_pressed = true; // Force ctrl_pressed = true for the pinch event
+                }
+
+                state.inner.handle_mouse_wheel(&delta, LogicalPosition::new(px, py), &mut rebuild);
+
+                if let Some(ctx) = state.inner.ui_context_mut() {
+                    ctx.ctrl_pressed = state.ctrl_pressed; // Restore original state
+                }
+
+                if rebuild {
+                    state.redraw = true;
+                }
+            }
+            zwp_pointer_gesture_pinch_v1::Event::End { .. } => {
+                state.last_pinch_scale = 1.0;
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn run<A: Application>() {
     let conn = Connection::connect_to_env().unwrap();
     let (globals, mut event_queue) = registry_queue_init(&conn).unwrap();
@@ -2528,6 +2605,8 @@ pub fn run<A: Application>() {
     let inner = A::new(&qh, sender.clone());
     let settings = inner.settings();
     crate::scale::set_app_id(settings.app_id.clone());
+
+    let pointer_gestures: Option<ZwpPointerGesturesV1> = globals.bind(&qh, 1..=3, ()).ok();
 
     let mut engine_state = EngineState {
         registry_state: RegistryState::new(&globals),
@@ -2565,6 +2644,10 @@ pub fn run<A: Application>() {
         current_cursor_icon: None,
         qh: qh.clone(),
         just_configured: false,
+        pointer_gestures,
+        pinch_gesture: None,
+        last_pinch_scale: 1.0,
+        cursor_pos: (0.0, 0.0),
     };
 
     event_queue.roundtrip(&mut engine_state).unwrap();
