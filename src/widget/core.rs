@@ -570,6 +570,9 @@ pub mod context_menu {
                                         "Collapse All" => {
                                             target.collapse_all_nodes();
                                         }
+                                        "Copy Path" => {
+                                            target.copy_path();
+                                        }
                                         _ => {}
                                     }
                                 }

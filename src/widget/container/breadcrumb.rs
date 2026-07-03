@@ -6,9 +6,10 @@ use crate::widget::display::TextLabel;
 pub struct Breadcrumb {
     pub base: Widget,
     hovered: bool,
-    path: Vec<String>,
+    pub path: Vec<String>,
     hovered_seg: Option<usize>,
     clicked_seg: Option<usize>,
+    pub right_clicked_seg: Option<usize>,
     pub network_opacity: f32,
 }
 
@@ -19,7 +20,21 @@ impl Breadcrumb {
 
     pub fn new() -> Self {
         Self { base: Widget::new(), hovered: false,
-               path: Vec::new(), hovered_seg: None, clicked_seg: None, network_opacity: 1.0 }
+               path: Vec::new(), hovered_seg: None, clicked_seg: None, right_clicked_seg: None, network_opacity: 1.0 }
+    }
+
+    pub fn path_to_seg(&self, idx: usize) -> String {
+        let mut path_str = "/".to_string();
+        for (i, s) in self.path.iter().enumerate() {
+            if i + 1 > idx {
+                break;
+            }
+            if path_str != "/" {
+                path_str.push('/');
+            }
+            path_str.push_str(s);
+        }
+        path_str
     }
 
     fn virtual_segs(&self) -> Vec<String> {
@@ -64,7 +79,12 @@ impl Element for Breadcrumb {
         was != self.hovered || old != self.hovered_seg
     }
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, _py: f32, _ctx: &mut UiContext) -> bool {
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if button == MouseButton::Right && state == ElementState::Pressed {
+            self.right_clicked_seg = self.seg_at(px);
+            ctx.handle_right_click(self.as_ptr_mut(), px, py);
+            return true;
+        }
         if button != MouseButton::Left || state != ElementState::Pressed { return false; }
         if let Some(i) = self.seg_at(px) {
             if i < self.path.len() {
@@ -73,6 +93,12 @@ impl Element for Breadcrumb {
             }
         }
         false
+    }
+
+    fn copy_path(&self) {
+        let idx = self.right_clicked_seg.unwrap_or(self.path.len());
+        let path_str = self.path_to_seg(idx);
+        crate::widget::clipboard::copy_to_clipboard(&path_str);
     }
 
     fn as_path_controller(&self) -> Option<&dyn PathController> { Some(self) }
@@ -177,6 +203,25 @@ mod tests {
         // So clicking the last segment should return false.
         assert!(!breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, 100.0, 25.0, &mut ui_ctx));
         assert_eq!(breadcrumb.path_click(), None);
+    }
+
+    #[test]
+    fn test_breadcrumb_right_clicks() {
+        let mut breadcrumb = Breadcrumb::new();
+        breadcrumb.set_path(&["home".to_string(), "lsgalante".to_string()]);
+        breadcrumb.set_rect(10.0, 20.0, 300.0, 24.0);
+
+        let mut ui_ctx = UiContext::new();
+
+        // Right click segment 1 (home/)
+        let handled = breadcrumb.mouse_input(crate::widget::MouseButton::Right, crate::widget::ElementState::Pressed, 50.0, 25.0, &mut ui_ctx);
+        assert!(handled);
+        assert_eq!(breadcrumb.right_clicked_seg, Some(1));
+
+        // Test path_to_seg
+        assert_eq!(breadcrumb.path_to_seg(0), "/");
+        assert_eq!(breadcrumb.path_to_seg(1), "/home");
+        assert_eq!(breadcrumb.path_to_seg(2), "/home/lsgalante");
     }
 }
 

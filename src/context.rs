@@ -777,7 +777,18 @@ impl UiContext {
             return;
         }
         let name = unsafe { (*target).type_name() };
-        let label = unsafe { (*target).label() };
+        let label = if name == "Breadcrumb" {
+            unsafe {
+                if let Some(bc) = (*target).as_any().downcast_ref::<crate::widget::container::Breadcrumb>() {
+                    let idx = bc.right_clicked_seg.unwrap_or(bc.path.len());
+                    Some(bc.path_to_seg(idx))
+                } else {
+                    None
+                }
+            }
+        } else {
+            unsafe { (*target).label() }
+        };
         let header = if let Some(lbl) = label {
             format!("[{}]: {}", name, lbl)
         } else {
@@ -813,6 +824,8 @@ impl UiContext {
             if is_search {
                 options.push("Cear".to_string());
             }
+        } else if name == "Breadcrumb" {
+            options.push("Copy Path".to_string());
         } else {
             options.extend(vec!["Copy".to_string(), "Paste".to_string()]);
         }
