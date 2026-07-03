@@ -2245,6 +2245,12 @@ impl<A: Application> PointerHandler for EngineState<A> {
                 MouseScrollDelta::LineDelta(-h_lines, -v_lines)
             };
             let mut rebuild = false;
+            if let Some(ctx) = self.inner.ui_context_mut() {
+                ctx.ctrl_pressed = self.ctrl_pressed;
+                ctx.shift_pressed = self.shift_pressed;
+                ctx.alt_pressed = self.alt_pressed;
+                ctx.logo_pressed = self.logo_pressed;
+            }
             self.inner.handle_mouse_wheel(&delta, LogicalPosition::new(last_lx, last_ly), &mut rebuild);
             if rebuild {
                 self.redraw = true;
@@ -2313,6 +2319,13 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         self.shift_pressed = modifiers.shift;
         self.alt_pressed = modifiers.alt;
         self.logo_pressed = modifiers.logo;
+
+        if let Some(ctx) = self.inner.ui_context_mut() {
+            ctx.ctrl_pressed = self.ctrl_pressed;
+            ctx.shift_pressed = self.shift_pressed;
+            ctx.alt_pressed = self.alt_pressed;
+            ctx.logo_pressed = self.logo_pressed;
+        }
     }
 
     fn update_repeat_info(
