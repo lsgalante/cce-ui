@@ -1191,14 +1191,14 @@ fn parse_hex_f32(s: &str) -> Option<[f32; 4]> {
     let s = s.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
     let s = s.trim_start_matches('#');
     if s.len() == 6 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()? as f32 / 255.0;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()? as f32 / 255.0;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()? as f32 / 255.0;
+        let r = crate::color::srgb_to_linear(u8::from_str_radix(&s[0..2], 16).ok()? as f32 / 255.0);
+        let g = crate::color::srgb_to_linear(u8::from_str_radix(&s[2..4], 16).ok()? as f32 / 255.0);
+        let b = crate::color::srgb_to_linear(u8::from_str_radix(&s[4..6], 16).ok()? as f32 / 255.0);
         Some([r, g, b, 1.0])
     } else if s.len() == 8 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()? as f32 / 255.0;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()? as f32 / 255.0;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()? as f32 / 255.0;
+        let r = crate::color::srgb_to_linear(u8::from_str_radix(&s[0..2], 16).ok()? as f32 / 255.0);
+        let g = crate::color::srgb_to_linear(u8::from_str_radix(&s[2..4], 16).ok()? as f32 / 255.0);
+        let b = crate::color::srgb_to_linear(u8::from_str_radix(&s[4..6], 16).ok()? as f32 / 255.0);
         let a = u8::from_str_radix(&s[6..8], 16).ok()? as f32 / 255.0;
         Some([r, g, b, a])
     } else {
