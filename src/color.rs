@@ -1085,3 +1085,22 @@ pub fn set_backplate_statusbar_blur(b: bool) {
     if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = b; }
 }
 
+#[cfg(test)]
+mod color_tests {
+    use super::*;
+
+    #[test]
+    fn test_print_active_config() {
+        let path = crate::config::get_config_path();
+        println!("ACTIVE CONFIG PATH: {:?}", path);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            println!("FILE READ OK! Length: {}", content.len());
+            let val = crate::config::parse_kdl_to_json(&content);
+            println!("PARSED JSON POINTER: {:?}", val.pointer("/style/control/dropdown/color"));
+        } else {
+            println!("FILE READ FAILED!");
+        }
+        println!("DROPDOWN COLOR GETTER: {:?}", dropdown_background_color());
+    }
+}
+

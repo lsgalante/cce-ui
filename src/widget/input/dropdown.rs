@@ -213,6 +213,36 @@ impl Element for Dropdown {
         crate::layout::dropdown_corner_radius()
     }
 
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            let top = self.base.label_offset();
+            let visual_h = self.base.h - top;
+            let radius = self.corner_radius();
+            
+            let bg_color = colors::dropdown_background_color();
+            let border_color = if self.open {
+                [0.30, 0.50, 0.32, 1.0]
+            } else if self.base.hovered {
+                [0.25, 0.25, 0.35, 1.0]
+            } else {
+                [0.18, 0.18, 0.24, 1.0]
+            };
+
+            // Draw border
+            quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, border_color, (r1, r2, r3, r4)));
+            // Draw background (slightly inset to show border)
+            let inner_radius = (radius - 1.0).max(0.0);
+            quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, inner_radius, bg_color, (r1, r2, r3, r4)));
+        }
+        for &child_ptr in &self.children(ctx) {
+            let widget = unsafe { &*child_ptr };
+            quads.extend(widget.all_rounded_quads(ctx));
+        }
+        quads
+    }
+
     fn widget_font(&self) -> Option<String> {
         Some(crate::layout::dropdown_font())
     }
@@ -388,6 +418,11 @@ impl Element for Dropdown {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            return Vec::new();
+        }
+
         let mut quads = Vec::new();
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;

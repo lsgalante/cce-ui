@@ -179,6 +179,10 @@ pub struct TreeList {
     pub last_scroll_y: f32,
     pub scrollbar_activity_timer: f32,
     pub deleted_key_path: Option<String>,
+    pub edit_box: TextBox,
+    pub editing_key_idx: Option<usize>,
+    pub double_click_timer: Option<(std::time::Instant, usize)>,
+    pub rename_request: Option<(String, String)>,
 }
 
 impl TreeList {
@@ -203,6 +207,10 @@ impl TreeList {
             last_scroll_y: 0.0,
             scrollbar_activity_timer: 0.0,
             deleted_key_path: None,
+            edit_box: TextBox::new(String::new()).with_multiline(false).with_draw_bg_border(true),
+            editing_key_idx: None,
+            double_click_timer: None,
+            rename_request: None,
         }
     }
 
@@ -253,6 +261,10 @@ impl TreeList {
 
     pub fn take_deleted_key_path(&mut self) -> Option<String> {
         self.deleted_key_path.take()
+    }
+
+    pub fn take_rename_request(&mut self) -> Option<(String, String)> {
+        self.rename_request.take()
     }
 
     pub fn check_scroll_activity(&mut self, ctx: &mut UiContext) {
@@ -376,9 +388,27 @@ impl Element for TreeList {
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         self.search_box.prepare_text(fs);
         self.scroll_box.prepare_text(fs);
+        if self.editing_key_idx.is_some() {
+            self.edit_box.prepare_text(fs);
+        }
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if self.editing_key_idx.is_some() {
+            if button == MouseButton::Left && state == ElementState::Pressed {
+                let (ex, ey, ew, eh) = self.edit_box.rect();
+                if px >= ex && px <= ex + ew && py >= ey && py <= ey + eh {
+                    if self.edit_box.mouse_input(button, state, px, py, ctx) {
+                        return true;
+                    }
+                } else {
+                    ctx.clear_focus();
+                    return true;
+                }
+            }
+            return false;
+        }
+
         let mut changed = self.scroll_box.mouse_input(button, state, px, py, ctx);
         if self.search_box.mouse_input(button, state, px, py, ctx) {
             ctx.set_focused(&mut self.search_box);
@@ -400,6 +430,49 @@ impl Element for TreeList {
                 let row_idx = (relative_y / self.item_height) as usize;
                 if row_idx < self.items.len() {
                     let item = self.items[row_idx].clone();
+                    
+                    let mut is_double = false;
+                    let now = std::time::Instant::now();
+                    if let Some((prev_time, prev_row)) = self.double_click_timer {
+                        if prev_row == row_idx && now.duration_since(prev_time).as_millis() < 300 {
+                            is_double = true;
+                        }
+                    }
+                    self.double_click_timer = Some((now, row_idx));
+
+                    if is_double {
+                        let (_path_to_edit, relative_name) = match &item {
+                            TreeElement::Section { path, name, .. } => {
+                                if self.collapsed_sections.contains(path) {
+                                    self.collapsed_sections.remove(path);
+                                } else {
+                                    self.collapsed_sections.insert(path.clone());
+                                }
+                                self.rebuild_tree();
+                                (path.clone(), name.clone())
+                            }
+                            TreeElement::Leaf { path, name, .. } => (path.clone(), name.clone()),
+                        };
+                        self.editing_key_idx = Some(row_idx);
+                        self.edit_box = TextBox::new(relative_name).with_multiline(false).with_draw_bg_border(true);
+                        self.edit_box.editing = true;
+                        self.edit_box.cursor_idx = self.edit_box.text.chars().count();
+                        self.edit_box.select_anchor = Some(0);
+                        
+                        let self_ptr = self as *mut Self;
+                        let self_id = self.base.id();
+                        unsafe {
+                            let eb_ptr = &mut (*self_ptr).edit_box as *mut TextBox as *mut (dyn Element + 'static);
+                            let eb_id = (*self_ptr).edit_box.base().unwrap().id();
+                            ctx.register_widget(eb_id, eb_ptr);
+                            ctx.link_ids(self_id, eb_id);
+                            (*eb_ptr).set_parent(Some(self_ptr), ctx);
+                        }
+                        
+                        ctx.set_focused(&mut self.edit_box);
+                        return true;
+                    }
+
                     match item {
                         TreeElement::Section { ref path, .. } => {
                             if self.collapsed_sections.contains(path) {
@@ -549,6 +622,45 @@ impl Element for TreeList {
             self.mark_dirty(ctx);
             changed = true;
         }
+        
+        if self.editing_key_idx.is_some() {
+            if self.edit_box.tick(dt, ctx) {
+                changed = true;
+            }
+            if let Some(row_idx) = self.editing_key_idx {
+                if row_idx < self.items.len() {
+                    let list_left = self.scroll_box.base.x;
+                    let list_top = self.scroll_box.viewport_y;
+                    let row_y = list_top + row_idx as f32 * self.item_height - self.scroll_box.scroll_y;
+                    let box_x = list_left + 5.0;
+                    let box_y = row_y + 2.0;
+                    self.edit_box.set_rect(box_x, box_y, 170.0, 24.0);
+                }
+            }
+            if !self.edit_box.editing {
+                let row_idx = self.editing_key_idx.unwrap();
+                if row_idx < self.items.len() {
+                    let (old_path, relative_name) = match &self.items[row_idx] {
+                        TreeElement::Section { path, name, .. } => (path.clone(), name.clone()),
+                        TreeElement::Leaf { path, name, .. } => (path.clone(), name.clone()),
+                    };
+                    let new_name = self.edit_box.text.trim().to_string();
+                    if !new_name.is_empty() && new_name != relative_name {
+                        let new_path = if let Some(pos) = old_path.rfind('.') {
+                            format!("{}.{}", &old_path[..pos], new_name)
+                        } else {
+                            new_name
+                        };
+                        self.rename_request = Some((old_path, new_path));
+                    }
+                }
+                self.editing_key_idx = None;
+                ctx.set_focused(self);
+                self.mark_dirty(ctx);
+                changed = true;
+            }
+        }
+
         if (self.scroll_box.scroll_y - self.last_scroll_y).abs() > 0.01 {
             self.last_scroll_y = self.scroll_box.scroll_y;
             self.scrollbar_activity_timer = 1.0;
@@ -560,6 +672,18 @@ impl Element for TreeList {
             changed = true;
         }
         changed
+    }
+
+    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        if self.editing_key_idx.is_some() {
+            if self.edit_box.keyboard_input(event, ctx) {
+                return true;
+            }
+        }
+        if self.search_box.keyboard_input(event, ctx) {
+            return true;
+        }
+        false
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -647,6 +771,24 @@ impl Element for TreeList {
                                 let preview_draw_y = preview_y.max(list_top);
                                 let preview_draw_h = preview_bottom - preview_draw_y;
                                 if preview_draw_h > 0.0 {
+                                    // Checkerboard pattern
+                                    let grid_size = 8.0;
+                                    quads.push((preview_x, preview_draw_y, 16.0, preview_draw_h, [1.0, 1.0, 1.0, 1.0]));
+                                    let cols = (16.0f32 / grid_size).ceil() as i32;
+                                    let rows = (preview_draw_h as f32 / grid_size).ceil() as i32;
+                                    for r in 0..rows {
+                                        for c in 0..cols {
+                                            if (r + c) % 2 == 1 {
+                                                let qx = preview_x + c as f32 * grid_size;
+                                                let qy = preview_draw_y + r as f32 * grid_size;
+                                                let qw = grid_size.min(preview_x + 16.0 - qx);
+                                                let qh = grid_size.min(preview_draw_y + preview_draw_h - qy);
+                                                if qw > 0.0 && qh > 0.0 {
+                                                    quads.push((qx, qy, qw, qh, [0.8, 0.8, 0.8, 1.0]));
+                                                }
+                                            }
+                                        }
+                                    }
                                     quads.push((preview_x, preview_draw_y, 16.0, preview_draw_h, rgba));
                                 }
                             }
@@ -711,14 +853,16 @@ impl Element for TreeList {
 
             match item {
                 TreeElement::Section { name, indent, collapsed, .. } => {
-                    let display_text = format!("{} {}", if *collapsed { "▶" } else { "▼" }, name);
-                    labels.push(TextLabel {
-                        text: display_text,
-                        x: list_left + 8.0 + *indent as f32 * 12.0,
-                        y: row_y + 6.0,
-                        font_size: 12.0,
-                        color: f32_to_rgb(crate::color::tree_section_text_color()),
-                    });
+                    if self.editing_key_idx != Some(i) {
+                        let display_text = format!("{} {}", if *collapsed { "▶" } else { "▼" }, name);
+                        labels.push(TextLabel {
+                            text: display_text,
+                            x: list_left + 8.0 + *indent as f32 * 12.0,
+                            y: row_y + 6.0,
+                            font_size: 12.0,
+                            color: f32_to_rgb(crate::color::tree_section_text_color()),
+                        });
+                    }
                 }
                 TreeElement::Leaf { name, indent, val, original_idx, .. } => {
                     let val_str = serde_json::to_string(val).unwrap_or_default();
@@ -734,13 +878,15 @@ impl Element for TreeList {
                         f32_to_rgb(crate::color::tree_leaf_text_color())
                     };
 
-                    labels.push(TextLabel {
-                        text: name.clone(),
-                        x: list_left + 8.0 + *indent as f32 * 12.0,
-                        y: row_y + 6.0,
-                        font_size: 12.0,
-                        color,
-                    });
+                    if self.editing_key_idx != Some(i) {
+                        labels.push(TextLabel {
+                            text: name.clone(),
+                            x: list_left + 8.0 + *indent as f32 * 12.0,
+                            y: row_y + 6.0,
+                            font_size: 12.0,
+                            color,
+                        });
+                    }
 
                     let val_ty = match val {
                         serde_json::Value::Bool(_) => Some("bool"),
@@ -893,6 +1039,9 @@ impl Element for TreeList {
         let self_ptr = self as *const Self as *mut Self;
         unsafe {
             list.push(&mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static));
+            if (*self_ptr).editing_key_idx.is_some() {
+                list.push(&mut (*self_ptr).edit_box as *mut TextBox as *mut (dyn Element + 'static));
+            }
         }
         list
     }
@@ -1022,6 +1171,24 @@ impl Element for TreeList {
                                 let preview_draw_y = preview_y.max(list_top);
                                 let preview_draw_h = preview_bottom - preview_draw_y;
                                 if preview_draw_h > 0.0 {
+                                    // Checkerboard pattern
+                                    let grid_size = 8.0;
+                                    quads.push((preview_x, preview_draw_y, 16.0, preview_draw_h, 0.0, [1.0, 1.0, 1.0, 1.0], (false, false, false, false)));
+                                    let cols = (16.0f32 / grid_size).ceil() as i32;
+                                    let rows = (preview_draw_h as f32 / grid_size).ceil() as i32;
+                                    for r in 0..rows {
+                                        for c in 0..cols {
+                                            if (r + c) % 2 == 1 {
+                                                let qx = preview_x + c as f32 * grid_size;
+                                                let qy = preview_draw_y + r as f32 * grid_size;
+                                                let qw = grid_size.min(preview_x + 16.0 - qx);
+                                                let qh = grid_size.min(preview_draw_y + preview_draw_h - qy);
+                                                if qw > 0.0 && qh > 0.0 {
+                                                    quads.push((qx, qy, qw, qh, 0.0, [0.8, 0.8, 0.8, 1.0], (false, false, false, false)));
+                                                }
+                                            }
+                                        }
+                                    }
                                     quads.push((preview_x, preview_draw_y, 16.0, preview_draw_h, 0.0, rgba, (false, false, false, false)));
                                 }
                             }
@@ -1353,5 +1520,51 @@ mod tests {
             _ => false,
         });
         assert!(has_accel, "Tree should contain 'accel_profile' when matching on value 'flat'!");
+    }
+
+    #[test]
+    fn test_treelist_double_click_rename() {
+        let mut ctx = UiContext::new();
+        let mut tree_list = TreeList::new();
+        tree_list.set_rect(0.0, 0.0, 380.0, 500.0);
+        tree_list.set_flat_keys(vec![
+            ("style.control.dropdown.color".to_string(), serde_json::Value::String("#ff00ff".to_string()))
+        ]);
+
+        // 1. Test renaming a section (row 0)
+        let list_top = tree_list.scroll_box.viewport_y;
+        let py0 = list_top + 10.0;
+        tree_list.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py0, &mut ctx);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        tree_list.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py0, &mut ctx);
+
+        assert!(tree_list.editing_key_idx.is_some());
+        assert_eq!(tree_list.edit_box.text, "style"); // Pre-populated with relative name!
+
+        tree_list.edit_box.text = "theme".to_string();
+        tree_list.edit_box.edit_buffer = "theme".to_string();
+        tree_list.edit_box.editing = false;
+        tree_list.tick(0.016, &mut ctx);
+
+        let req = tree_list.take_rename_request();
+        assert_eq!(req, Some(("style".to_string(), "theme".to_string())));
+
+        // 2. Test renaming a leaf (row 3)
+        tree_list.rebuild_tree();
+        let py3 = list_top + 3.0 * tree_list.item_height + 10.0; // Click row 3 (Leaf "color")
+        tree_list.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py3, &mut ctx);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        tree_list.mouse_input(MouseButton::Left, ElementState::Pressed, 10.0, py3, &mut ctx);
+
+        assert!(tree_list.editing_key_idx.is_some());
+        assert_eq!(tree_list.edit_box.text, "color"); // Pre-populated with relative name "color"!
+
+        tree_list.edit_box.text = "bg_color".to_string();
+        tree_list.edit_box.edit_buffer = "bg_color".to_string();
+        tree_list.edit_box.editing = false;
+        tree_list.tick(0.016, &mut ctx);
+
+        let req = tree_list.take_rename_request();
+        assert_eq!(req, Some(("style.control.dropdown.color".to_string(), "style.control.dropdown.bg_color".to_string())));
     }
 }

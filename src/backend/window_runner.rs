@@ -2025,7 +2025,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
             
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
-                    let is_status_bar = self.inner.settings().app_id == "cce-status";
+                    let is_status_bar = self.inner.settings().app_id.starts_with("cce-status");
                     let mut cursor_icon = CursorIcon::Default;
                     if !is_status_bar {
                         let border = 8.0f32;
@@ -2071,7 +2071,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         self.redraw = true;
                     }
 
-                    let is_status_bar = self.inner.settings().app_id == "cce-status";
+                    let is_status_bar = self.inner.settings().app_id.starts_with("cce-status");
                     let mut cursor_icon = CursorIcon::Default;
                     if !is_status_bar {
                         let border = 8.0f32;

@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(crate::color::backplate_menubar_blur(), true);
         
         let dd_color = crate::color::dropdown_background_color();
-        assert!(dd_color[0] > 0.0);
+        assert!((dd_color[0] - crate::color::srgb_to_linear(8.0 / 255.0)).abs() < 0.0001);
         
         let placeholder_color = crate::color::textbox_placeholder_text_color();
         assert_eq!(placeholder_color, [0x60, 0x60, 0x6a]);
