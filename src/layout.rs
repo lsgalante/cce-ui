@@ -3334,6 +3334,9 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
             pc.rect_with_radius_corners(qc, qx, qy, qw, qh, resolved_r, resolved_corners);
         }
     }
+    for (qx, qy, qw, qh, qr, qc, qcorners) in w.all_rounded_quads(ctx) {
+        pc.rect_with_radius_corners(qc, qx, qy, qw, qh, qr, qcorners);
+    }
     let font_opt = w.widget_font();
     for (label, font, bounds) in w.text_labels_with_font_and_bounds(ctx) {
         let color_f32 = [

@@ -679,6 +679,17 @@ fn format_kdl_type(ty: &str) -> String {
     }
 }
 
+fn format_kdl_identifier(name: &str) -> String {
+    let is_ident = !name.is_empty()
+        && !name.chars().next().unwrap().is_ascii_digit()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+' | '?' | '!' | '@' | '*' | '~' | '|' | '.'));
+    if is_ident {
+        name.to_string()
+    } else {
+        format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
 pub fn value_to_kdl(key: &str, val: &serde_json::Value, indent: usize) -> String {
     value_to_kdl_with_annotations(key, val, indent, "", &std::collections::HashMap::new())
 }
@@ -701,7 +712,7 @@ pub fn value_to_kdl_with_annotations(
         serde_json::Value::Object(map) => {
             let has_objects = map.values().any(|v| v.is_object());
             if has_objects {
-                let mut out = format!("{}{} {{\n", indent_str, key);
+                let mut out = format!("{}{} {{\n", indent_str, format_kdl_identifier(key));
                 for (k, v) in map {
                     out.push_str(&value_to_kdl_with_annotations(k, v, indent + 1, &current_path, annotations));
                 }
@@ -797,7 +808,7 @@ pub fn json_to_kdl_string_with_annotations(
     if let serde_json::Value::Object(map) = val {
         for (sec_name, sec_val) in map {
             if let serde_json::Value::Object(sec_map) = sec_val {
-                out.push_str(&format!("{} {{\n", sec_name));
+                out.push_str(&format!("{} {{\n", format_kdl_identifier(sec_name)));
                 for (k, v) in sec_map {
                     out.push_str(&value_to_kdl_with_annotations(k, v, 1, sec_name, annotations));
                 }
