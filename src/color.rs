@@ -53,6 +53,7 @@ static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 
 static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
 static TREE_BORDER_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.25, 0.25, 0.35, 1.0]);
 static TREE_BORDER_FOCUS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.30, 0.50, 0.32, 1.0]);
+static TREE_OPEN_SEARCH_KEY: RwLock<String> = RwLock::new(String::new());
 
 static TREE_SECTION_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.07, 0.07, 0.09, 1.0]);
 static TREE_SECTION_BG_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.10, 0.12, 0.18, 1.0]);
@@ -371,6 +372,9 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/data/tree/separator_color") {
         if let Ok(mut lock) = TREE_SEPARATOR_COLOR.write() { *lock = c; }
+    }
+    if let Some(k) = val.pointer("/style/data/tree/open_search").and_then(|v| v.as_str()) {
+        if let Ok(mut lock) = TREE_OPEN_SEARCH_KEY.write() { *lock = k.to_string(); }
     }
     if let Some(c) = get_color("/style/control/scrollbar/track_color") {
         if let Ok(mut lock) = SCROLLBAR_TRACK_COLOR.write() { *lock = c; }
@@ -935,4 +939,19 @@ pub fn scrollbar_track_color() -> [f32; 4] { *SCROLLBAR_TRACK_COLOR.read().unwra
 pub fn set_scrollbar_track_color(c: [f32; 4]) { if let Ok(mut lock) = SCROLLBAR_TRACK_COLOR.write() { *lock = c; } }
 pub fn scrollbar_thumb_color() -> [f32; 4] { *SCROLLBAR_THUMB_COLOR.read().unwrap() }
 pub fn set_scrollbar_thumb_color(c: [f32; 4]) { if let Ok(mut lock) = SCROLLBAR_THUMB_COLOR.write() { *lock = c; } }
+
+pub fn tree_open_search_key() -> String {
+    load_colors_once();
+    let val = TREE_OPEN_SEARCH_KEY.read().unwrap().clone();
+    if val.is_empty() {
+        "ctrl+f".to_string()
+    } else {
+        val
+    }
+}
+pub fn set_tree_open_search_key(k: String) {
+    if let Ok(mut lock) = TREE_OPEN_SEARCH_KEY.write() {
+        *lock = k;
+    }
+}
 

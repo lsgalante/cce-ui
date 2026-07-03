@@ -680,7 +680,7 @@ impl Element for TreeList {
                                 } else {
                                     Some("rgb")
                                 }
-                            } else if name == "key" || name == "keybind" || name == "shortcut" || name.ends_with("_key") || name.ends_with(".key") || name.ends_with(".keybind") || name.ends_with(".shortcut") {
+                            } else if name == "key" || name == "keybind" || name == "shortcut" || name == "open_search" || name.ends_with("_key") || name.ends_with(".key") || name.ends_with(".keybind") || name.ends_with(".shortcut") {
                                 Some("keybind")
                             } else if name == "font" || name.ends_with("_font") || name.ends_with(".font") {
                                 Some("font")
