@@ -263,6 +263,61 @@ impl TreeList {
             self.mark_dirty(ctx);
         }
     }
+
+    pub fn scroll_to_selected_key(&mut self) {
+        if let Some(selected_idx) = self.selected_key_idx {
+            let visible_row_idx = self.items.iter().position(|item| {
+                if let TreeElement::Leaf { original_idx, .. } = item {
+                    *original_idx == selected_idx
+                } else {
+                    false
+                }
+            });
+            if let Some(row_idx) = visible_row_idx {
+                let row_top = row_idx as f32 * self.item_height;
+                let row_bottom = row_top + self.item_height;
+                let viewport_h = self.scroll_box.viewport_h;
+                
+                if row_top < self.scroll_box.scroll_y {
+                    self.scroll_box.scroll_y = row_top;
+                } else if row_bottom > self.scroll_box.scroll_y + viewport_h {
+                    self.scroll_box.scroll_y = (row_bottom - viewport_h).max(0.0);
+                }
+                
+                let max_scroll = (self.scroll_box.content_h - viewport_h).max(0.0);
+                self.scroll_box.scroll_y = self.scroll_box.scroll_y.clamp(0.0, max_scroll);
+            }
+        }
+    }
+
+    pub fn select_and_show_key(&mut self, key_path: &str) -> bool {
+        let found_idx = self.flat_keys.iter().position(|(k, _)| k == key_path);
+        if let Some(idx) = found_idx {
+            self.selected_key_idx = Some(idx);
+            
+            let parts: Vec<&str> = key_path.split('.').collect();
+            let mut current = String::new();
+            let mut expanded_any = false;
+            for i in 0..parts.len() - 1 {
+                if !current.is_empty() {
+                    current.push('.');
+                }
+                current.push_str(parts[i]);
+                if self.collapsed_sections.contains(&current) {
+                    self.collapsed_sections.remove(&current);
+                    expanded_any = true;
+                }
+            }
+            if expanded_any {
+                self.rebuild_tree();
+            }
+            
+            self.scroll_to_selected_key();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl Element for TreeList {
