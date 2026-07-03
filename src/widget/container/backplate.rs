@@ -198,6 +198,40 @@ impl Element for Backplate {
         }
         quads
     }
+    
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut quads = Vec::new();
+        let (wx, wy, ww, wh) = self.rect();
+        let radius = self.corner_radius();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            let bg_color = self.color();
+            if bg_color[3] > 0.001 {
+                quads.push((wx, wy, ww, wh, radius, bg_color, (r1, r2, r3, r4)));
+            }
+        }
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            let mut child_quads = Vec::new();
+            for (qx, qy, qw, qh, qr, qc, (cr1, cr2, cr3, cr4)) in widget.all_rounded_quads(ctx) {
+                child_quads.push((qx, qy, qw, qh, qr, qc, (cr1, cr2, cr3, cr4)));
+            }
+
+            for (qx, qy, qw, qh, qr, qc, (cr1, cr2, cr3, cr4)) in child_quads {
+                let x0 = qx.max(wx);
+                let y0 = qy.max(wy);
+                let x1 = (qx + qw).min(wx + ww);
+                let y1 = (qy + qh).min(wy + wh);
+                if x1 > x0 && y1 > y0 {
+                    quads.push((x0, y0, x1 - x0, y1 - y0, qr, qc, (cr1, cr2, cr3, cr4)));
+                }
+            }
+        }
+        quads
+    }
 
     fn text_labels(&self) -> Vec<TextLabel> {
         if !self.visible {
