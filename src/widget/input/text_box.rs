@@ -1022,7 +1022,8 @@ impl Element for TextBox {
                 if self.editing {
                     let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width) - self.scroll_x;
                     if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
-                        let cursor_y = self.base.y + top + (visual_h - caret_h) / 2.0;
+                        let text_y = crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top);
+                        let cursor_y = text_y + (self.font_size - caret_h) / 2.0;
                         quads.push((cursor_x, cursor_y, 1.5, caret_h, cursor_color));
                     }
                 }
