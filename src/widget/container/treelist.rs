@@ -204,6 +204,11 @@ impl TreeList {
         }
     }
 
+    pub fn focus_search(&mut self, ctx: &mut UiContext) {
+        ctx.set_focused(&mut self.search_box);
+        self.search_box.focus();
+    }
+
     pub fn set_flat_keys(&mut self, flat_keys: Vec<(String, serde_json::Value)>) {
         self.flat_keys = flat_keys;
         self.rebuild_tree();
