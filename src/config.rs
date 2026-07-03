@@ -809,3 +809,49 @@ pub fn json_to_kdl_string_with_annotations(
     }
     out
 }
+
+pub fn get_app_recent_files_path() -> std::path::PathBuf {
+    let app_name = get_app_name().unwrap_or_else(|| "cce-app".to_string());
+    get_config_path().parent().unwrap().join(app_name).join("recent-files.kdl")
+}
+
+pub fn load_recent_files() -> Vec<String> {
+    let path = get_app_recent_files_path();
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(doc) = content.parse::<kdl::KdlDocument>() {
+                if let Some(recent_node) = doc.get("recent") {
+                    if let Some(children) = recent_node.children() {
+                        let mut files = Vec::new();
+                        for node in children.nodes() {
+                            if node.name().value() == "file" {
+                                if let Some(entry) = node.entries().first() {
+                                    if let kdl::KdlValue::String(s) = entry.value() {
+                                        if std::path::Path::new(s).exists() {
+                                            files.push(s.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        return files;
+                    }
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+pub fn save_recent_files(files: &[String]) {
+    let path = get_app_recent_files_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut kdl_str = "recent {\n".to_string();
+    for file in files {
+        kdl_str.push_str(&format!("    file \"{}\"\n", file));
+    }
+    kdl_str.push_str("}\n");
+    let _ = std::fs::write(path, kdl_str);
+}
