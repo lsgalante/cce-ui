@@ -104,6 +104,12 @@ impl Dropdown {
         
         for (idx, opt) in self.options.iter().enumerate() {
             let iy = crate::layout::align_text_y(dy + idx as f32 * 24.0, 24.0, 12.0, 0.0);
+            
+            if opt == "-" {
+                pc.rect(theme.surface_border, self.base.x + 8.0, dy + idx as f32 * 24.0 + 11.5, pw - 16.0, 1.0);
+                continue;
+            }
+
             let text_color = if self.hovered_item == Some(idx) {
                 [0xff, 0xff, 0xff]
             } else if self.selected == idx {
@@ -248,7 +254,9 @@ impl Element for Dropdown {
             if px >= x && px <= x + pw && py >= dy && py <= dy + dh {
                 let idx = ((py - dy) / 24.0) as usize;
                 if idx < self.options.len() {
-                    self.hovered_item = Some(idx);
+                    if self.options[idx] != "-" {
+                        self.hovered_item = Some(idx);
+                    }
                 }
             }
         }
@@ -276,6 +284,9 @@ impl Element for Dropdown {
         if inside_popover {
             let idx = ((py - dy) / 24.0) as usize;
             if idx < self.options.len() {
+                if self.options[idx] == "-" {
+                    return true;
+                }
                 if self.selected != idx || self.custom_display_text.is_some() {
                     self.selected = idx;
                     self.just_changed = true;
@@ -316,7 +327,16 @@ impl Element for Dropdown {
         if !self.open {
             if let Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) = event.logical_key {
                 self.open = true;
-                self.hovered_item = Some(self.selected);
+                let mut start_idx = self.selected;
+                if start_idx < self.options.len() && self.options[start_idx] == "-" {
+                    for i in 0..self.options.len() {
+                        if self.options[i] != "-" {
+                            start_idx = i;
+                            break;
+                        }
+                    }
+                }
+                self.hovered_item = Some(start_idx);
                 return true;
             }
             return false;
@@ -325,30 +345,38 @@ impl Element for Dropdown {
         match event.logical_key {
             Key::Named(NamedKey::ArrowDown) => {
                 let current = self.hovered_item.unwrap_or(self.selected);
-                if current + 1 < self.options.len() {
-                    self.hovered_item = Some(current + 1);
-                } else {
-                    self.hovered_item = Some(0);
+                let mut next = (current + 1) % self.options.len();
+                for _ in 0..self.options.len() {
+                    if self.options[next] != "-" {
+                        self.hovered_item = Some(next);
+                        break;
+                    }
+                    next = (next + 1) % self.options.len();
                 }
                 true
             }
             Key::Named(NamedKey::ArrowUp) => {
                 let current = self.hovered_item.unwrap_or(self.selected);
-                if current > 0 {
-                    self.hovered_item = Some(current - 1);
-                } else {
-                    self.hovered_item = Some(self.options.len() - 1);
+                let mut prev = if current == 0 { self.options.len() - 1 } else { current - 1 };
+                for _ in 0..self.options.len() {
+                    if self.options[prev] != "-" {
+                        self.hovered_item = Some(prev);
+                        break;
+                    }
+                    prev = if prev == 0 { self.options.len() - 1 } else { prev - 1 };
                 }
                 true
             }
             Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
                 if let Some(idx) = self.hovered_item {
-                    if self.selected != idx || self.custom_display_text.is_some() {
-                        self.selected = idx;
-                        self.just_changed = true;
+                    if idx < self.options.len() && self.options[idx] != "-" {
+                        if self.selected != idx || self.custom_display_text.is_some() {
+                            self.selected = idx;
+                            self.just_changed = true;
+                        }
+                        self.open = false;
                     }
                 }
-                self.open = false;
                 true
             }
             Key::Named(NamedKey::Escape) => {
@@ -502,6 +530,48 @@ mod tests {
 
         crate::widget::context_menu::hide();
         assert!(!crate::widget::context_menu::is_visible());
+    }
+
+    #[test]
+    fn test_dropdown_separators() {
+        let mut dummy = crate::context::UiContext::new();
+        let options = vec![
+            "Option A".to_string(),
+            "-".to_string(),
+            "Option B".to_string(),
+        ];
+        let mut dd = Dropdown::new(options, 0);
+        dd.set_rect(10.0, 10.0, 100.0, 24.0);
+
+        // Open dropdown
+        dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0, &mut dummy);
+        assert!(dd.open);
+
+        // Hover over separator at index 1 at y = 34 + 24 + 12 = 70.0
+        dd.on_cursor_moved(50.0, 70.0, &mut dummy);
+        assert_eq!(dd.hovered_item, None); // Separator should not be hovered
+
+        // Click separator at index 1
+        let clicked = dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 70.0, &mut dummy);
+        assert!(clicked);
+        assert!(dd.open); // Dropdown should remain open
+        assert_eq!(dd.selected, 0); // Selection should not change
+
+        // Hover over Option B at index 2 at y = 34 + 48 + 12 = 94.0
+        dd.on_cursor_moved(50.0, 94.0, &mut dummy);
+        assert_eq!(dd.hovered_item, Some(2));
+
+        // Keyboard arrow up from index 2 should skip separator (index 1) and go to index 0
+        let key_up = crate::widget::KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::ArrowUp),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        dd.keyboard_input(&key_up, &mut dummy);
+        assert_eq!(dd.hovered_item, Some(0));
     }
 }
 
