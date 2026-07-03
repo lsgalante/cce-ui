@@ -153,7 +153,7 @@ impl TextBox {
         let mut current_line = Vec::new();
         let mut index_map = vec![(0, 0); chars.len() + 1];
         
-        if !crate::layout::textbox_line_wrap() {
+        if !self.line_wrap_enabled() {
             let mut i = 0;
             while i < chars.len() {
                 let ch = chars[i];
@@ -291,6 +291,10 @@ impl TextBox {
         changed
     }
 
+    pub fn line_wrap_enabled(&self) -> bool {
+        self.multiline && crate::layout::textbox_line_wrap()
+    }
+
     pub fn with_max_width(mut self, max_w: Option<f32>) -> Self {
         self.max_width = max_w;
         self
@@ -397,12 +401,8 @@ impl TextBox {
     pub fn clamp_scroll(&mut self) {
         let char_width = self.char_width();
         let line_height = self.line_height();
-        let max_chars = if self.multiline {
-            if crate::layout::textbox_line_wrap() {
-                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
-            } else {
-                999999
-            }
+        let max_chars = if self.line_wrap_enabled() {
+            (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
         } else {
             999999
         };
@@ -421,7 +421,7 @@ impl TextBox {
             self.scroll_y = 0.0;
         }
 
-        if !crate::layout::textbox_line_wrap() {
+        if !self.line_wrap_enabled() {
             let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
             let content_w = max_line_len as f32 * char_width;
             let max_scroll_x = (content_w - (self.base.w - 16.0)).max(0.0);
@@ -434,12 +434,8 @@ impl TextBox {
     pub fn scroll_to_cursor(&mut self) {
         let char_width = self.char_width();
         let line_height = self.line_height();
-        let max_chars = if self.multiline {
-            if crate::layout::textbox_line_wrap() {
-                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
-            } else {
-                999999
-            }
+        let max_chars = if self.line_wrap_enabled() {
+            (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
         } else {
             999999
         };
@@ -471,7 +467,7 @@ impl TextBox {
             }
         }
         
-        if !crate::layout::textbox_line_wrap() {
+        if !self.line_wrap_enabled() {
             let cursor_x = col_idx as f32 * char_width;
             if cursor_x < self.scroll_x + 10.0 {
                 self.scroll_x = (cursor_x - 20.0).max(0.0);
@@ -672,7 +668,7 @@ impl Element for TextBox {
             let char_width = self.char_width();
             let drag_idx = if self.multiline {
                 let line_height = self.line_height();
-                let max_chars = if crate::layout::textbox_line_wrap() {
+                let max_chars = if self.line_wrap_enabled() {
                     (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
                 } else {
                     999999
@@ -718,7 +714,7 @@ impl Element for TextBox {
         let top = self.base.label_offset();
         let drag_idx = if self.multiline {
             let line_height = self.line_height();
-            let max_chars = if crate::layout::textbox_line_wrap() {
+            let max_chars = if self.line_wrap_enabled() {
                 (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
             } else {
                 999999
@@ -770,7 +766,7 @@ impl Element for TextBox {
                     let top = self.base.label_offset();
                     let idx = if self.multiline {
                         let line_height = self.line_height();
-                        let max_chars = if crate::layout::textbox_line_wrap() {
+                        let max_chars = if self.line_wrap_enabled() {
                             (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
                         } else {
                             999999
@@ -1030,7 +1026,7 @@ impl Element for TextBox {
             let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
 
             if self.multiline {
-                let max_chars = if crate::layout::textbox_line_wrap() {
+                let max_chars = if self.line_wrap_enabled() {
                     (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
                 } else {
                     999999
@@ -1181,7 +1177,7 @@ impl Element for TextBox {
             let end = self.select_anchor.unwrap_or(self.cursor_idx).max(self.cursor_idx);
 
             if self.multiline {
-                let max_chars = if crate::layout::textbox_line_wrap() {
+                let max_chars = if self.line_wrap_enabled() {
                     (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
                 } else {
                     999999
@@ -1323,7 +1319,7 @@ impl Element for TextBox {
         if self.multiline {
             let char_width = self.char_width();
             let line_height = self.line_height();
-            let max_chars = if crate::layout::textbox_line_wrap() {
+            let max_chars = if self.line_wrap_enabled() {
                 (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
             } else {
                 999999
@@ -1340,7 +1336,7 @@ impl Element for TextBox {
                         current_line.clear();
                     } else {
                         current_line.push(ch);
-                        if crate::layout::textbox_line_wrap() && current_line.len() > max_chars {
+                        if self.line_wrap_enabled() && current_line.len() > max_chars {
                             p_lines.push(current_line.iter().collect::<String>());
                             current_line.clear();
                         }
@@ -1388,12 +1384,8 @@ impl Element for TextBox {
         let char_width = self.char_width();
         let line_height = self.line_height();
         
-        let max_chars = if self.multiline {
-            if crate::layout::textbox_line_wrap() {
-                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
-            } else {
-                999999
-            }
+        let max_chars = if self.line_wrap_enabled() {
+            (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
         } else {
             999999
         };
@@ -1421,7 +1413,7 @@ impl Element for TextBox {
             }
         }
 
-        if !crate::layout::textbox_line_wrap() {
+        if !self.line_wrap_enabled() {
             let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
             let content_w = max_line_len as f32 * char_width;
             let max_scroll_x = (content_w - (self.base.w - 16.0)).max(0.0);

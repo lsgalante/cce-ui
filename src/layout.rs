@@ -106,7 +106,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.spinbox.button_padding" => "spinbox_button_padding",
                 "style.control.spinbox.corner_radius" => "spinbox_corner_radius",
                 "style.textbox.height" | "style.data.textbox.height" => "textbox_height",
-                "style.textbox.line_wrap" | "style.data.textbox.line_wrap" => "textbox_line_wrap",
+                "style.textbox.multiline.line_wrap" | "style.data.textbox.multiline.line_wrap" => "textbox_line_wrap",
                 "style.control.toggle.font" => "toggle_font",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",

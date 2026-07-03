@@ -95,44 +95,61 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
             } else {
                 serde_json::Value::Null
             }
-        } else if let Some(children) = node.children() {
-            kdl_to_json(children)
-        } else if has_props {
-            serde_json::Value::Object(node_map)
-        } else if let Some(entry) = node.entries().first() {
-            match entry.value() {
-                kdl::KdlValue::Bool(b) => serde_json::Value::Bool(*b),
-                kdl::KdlValue::Base2(i) |
-                kdl::KdlValue::Base8(i) |
-                kdl::KdlValue::Base10(i) |
-                kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
-                kdl::KdlValue::Base10Float(f) => {
-                    let mut val_f = *f;
-                    if let Some(ty) = entry.ty() {
-                        let ty_str = ty.value();
-                        if ty_str.starts_with("f64:") {
-                            let range_str = ty_str.trim_start_matches("f64:");
-                            if let Some(dash_idx) = range_str.find('-') {
-                                let min_str = &range_str[..dash_idx].trim();
-                                let max_str = &range_str[dash_idx + 1..].trim();
-                                if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
-                                    val_f = val_f.clamp(min_f, max_f);
+        } else {
+            let mut node_val = serde_json::Value::Null;
+            if has_props {
+                node_val = serde_json::Value::Object(node_map);
+            } else if let Some(entry) = node.entries().first() {
+                node_val = match entry.value() {
+                    kdl::KdlValue::Bool(b) => serde_json::Value::Bool(*b),
+                    kdl::KdlValue::Base2(i) |
+                    kdl::KdlValue::Base8(i) |
+                    kdl::KdlValue::Base10(i) |
+                    kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
+                    kdl::KdlValue::Base10Float(f) => {
+                        let mut val_f = *f;
+                        if let Some(ty) = entry.ty() {
+                            let ty_str = ty.value();
+                            if ty_str.starts_with("f64:") {
+                                let range_str = ty_str.trim_start_matches("f64:");
+                                if let Some(dash_idx) = range_str.find('-') {
+                                    let min_str = &range_str[..dash_idx].trim();
+                                    let max_str = &range_str[dash_idx + 1..].trim();
+                                    if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
+                                        val_f = val_f.clamp(min_f, max_f);
+                                    }
                                 }
                             }
                         }
+                        if let Some(num) = serde_json::Number::from_f64(val_f) {
+                            serde_json::Value::Number(num)
+                        } else {
+                            serde_json::Value::Null
+                        }
                     }
-                    if let Some(num) = serde_json::Number::from_f64(val_f) {
-                        serde_json::Value::Number(num)
-                    } else {
-                        serde_json::Value::Null
-                    }
-                }
-                kdl::KdlValue::String(s) |
-                kdl::KdlValue::RawString(s) => serde_json::Value::String(s.clone()),
-                kdl::KdlValue::Null => serde_json::Value::Null,
+                    kdl::KdlValue::String(s) |
+                    kdl::KdlValue::RawString(s) => serde_json::Value::String(s.clone()),
+                    kdl::KdlValue::Null => serde_json::Value::Null,
+                };
             }
-        } else {
-            serde_json::Value::Null
+
+            if let Some(children) = node.children() {
+                let children_val = kdl_to_json(children);
+                if let serde_json::Value::Object(children_map) = children_val {
+                    if let serde_json::Value::Object(mut nm) = node_val {
+                        for (k, v) in children_map {
+                            nm.insert(k, v);
+                        }
+                        serde_json::Value::Object(nm)
+                    } else {
+                        serde_json::Value::Object(children_map)
+                    }
+                } else {
+                    node_val
+                }
+            } else {
+                node_val
+            }
         };
 
         if let Some(existing) = map.remove(&name) {
@@ -235,7 +252,7 @@ pub fn parse_config_path(key: &str, default_section: &str) -> (String, String, O
 const PROP_NODES: &[&str] = &[
     "gestures", "key_bindings", "pointer_bind", "gesture_bind",
     "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
-    "status", "overlay", "backplate", "desktop", "list", "section", "textbox", "editor", "tree"
+    "status", "overlay", "backplate", "desktop", "list", "section", "textbox", "multiline", "editor", "tree"
 ];
 
 fn get_or_create_node_mut<'a>(doc: &'a mut kdl::KdlDocument, path: &[&str]) -> Option<&'a mut kdl::KdlNode> {
