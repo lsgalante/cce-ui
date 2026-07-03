@@ -316,8 +316,12 @@ impl Element for TreeList {
     fn focus(&mut self) {
         focus::set_focused(self);
     }
-
     fn unfocus(&mut self) {}
+
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+        self.search_box.prepare_text(fs);
+        self.scroll_box.prepare_text(fs);
+    }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = self.scroll_box.mouse_input(button, state, px, py, ctx);
