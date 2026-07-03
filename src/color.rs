@@ -50,6 +50,8 @@ static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 
 static DROPDOWN_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 
+static TEXTBOX_PLACEHOLDER_TEXT_COLOR: RwLock<[u8; 3]> = RwLock::new([0x60, 0x60, 0x6a]);
+
 static BACKPLATE_MENUBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static BACKPLATE_MENUBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]);
 static BACKPLATE_MENUBAR_BLUR: RwLock<bool> = RwLock::new(false);
@@ -213,6 +215,23 @@ fn parse_and_set_colors(content: &str) {
         val.pointer(pointer).and_then(|v| v.as_str()).and_then(parse_hex)
     };
 
+    let get_color_u8 = |pointer: &str| -> Option<[u8; 3]> {
+        val.pointer(pointer).and_then(|v| v.as_str()).and_then(|hex_str| {
+            let hex = hex_str.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
+            let hex = hex.trim_start_matches('#');
+            if hex.len() >= 6 {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&hex[0..2], 16),
+                    u8::from_str_radix(&hex[2..4], 16),
+                    u8::from_str_radix(&hex[4..6], 16),
+                ) {
+                    return Some([r, g, b]);
+                }
+            }
+            None
+        })
+    };
+
     if let Some(opacity) = val.pointer("/layout/menubar_opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = OPACITY.write() {
             *lock = Some(opacity as f32);
@@ -270,6 +289,10 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/dropdown/color") {
         if let Ok(mut lock) = DROPDOWN_BACKGROUND_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color_u8("/style/textbox/placeholder_text_color")
+        .or_else(|| get_color_u8("/style/data/textbox/placeholder_text_color")) {
+        if let Ok(mut lock) = TEXTBOX_PLACEHOLDER_TEXT_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
         if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
@@ -442,6 +465,17 @@ pub fn dropdown_background_color() -> [f32; 4] {
 
 pub fn set_dropdown_background_color(color: [f32; 4]) {
     if let Ok(mut lock) = DROPDOWN_BACKGROUND_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn textbox_placeholder_text_color() -> [u8; 3] {
+    load_colors_once();
+    *TEXTBOX_PLACEHOLDER_TEXT_COLOR.read().unwrap()
+}
+
+pub fn set_textbox_placeholder_text_color(color: [u8; 3]) {
+    if let Ok(mut lock) = TEXTBOX_PLACEHOLDER_TEXT_COLOR.write() {
         *lock = color;
     }
 }

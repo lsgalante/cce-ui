@@ -1317,7 +1317,7 @@ impl Element for TextBox {
         };
 
         let label_color = if is_placeholder {
-            [0x60, 0x60, 0x6a]
+            crate::colors::textbox_placeholder_text_color()
         } else if let Some(custom_color) = self.text_color {
             custom_color
         } else if self.disabled {

@@ -601,6 +601,9 @@ mod tests {
                 control {
                     dropdown color=(rgba)"#08080cff"
                 }
+                data {
+                    textbox placeholder_text_color=(rgba)"#60606aff"
+                }
             }
         "##;
         
@@ -612,6 +615,9 @@ mod tests {
         
         let dd_color = crate::color::dropdown_background_color();
         assert!(dd_color[0] > 0.0);
+        
+        let placeholder_color = crate::color::textbox_placeholder_text_color();
+        assert_eq!(placeholder_color, [0x60, 0x60, 0x6a]);
         assert_eq!(crate::color::backplate_statusbar_blur(), false);
 
         // Colors are in sRGB converted to linear, let's verify text colors
