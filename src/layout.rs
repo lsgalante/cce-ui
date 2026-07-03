@@ -116,6 +116,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.data.tree.corner_radius" => "tree_corner_radius",
                 "style.data.tree.opacity" => "tree_opacity",
                 "style.data.tree.blur" => "tree_blur",
+                "style.data.tree.font" => "tree_font",
                 "style.surface.desktop.gap_color" => "desktop_gap_color",
                 "style.surface.desktop.cell_color" => "desktop_cell_color",
                 "style.surface.desktop.gap_width" => "desktop_gap_width",
@@ -269,6 +270,8 @@ static SLIDER_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static LIST_FONT: RwLock<String> = RwLock::new(String::new());
 static LIST_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static TREE_FONT: RwLock<String> = RwLock::new(String::new());
+static TREE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static LIST_JUSTIFICATION: RwLock<u8> = RwLock::new(0);
 static PLATE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static PAGE_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -311,6 +314,7 @@ pub fn reload_config() {
         let mut spinbox_font_changed = false;
         let mut slider_font_changed = false;
         let mut list_font_changed = false;
+        let mut tree_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(eq_idx) = trimmed.find('=') {
@@ -919,6 +923,21 @@ pub fn reload_config() {
                     list_font_changed = true;
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("tree_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = TREE_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    tree_font_changed = true;
+                }
+            }
             if let Some(rest) = trimmed.strip_prefix("list_justification") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
@@ -981,6 +1000,11 @@ pub fn reload_config() {
         }
         if list_font_changed {
             if let Ok(mut lock) = LIST_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
+        if tree_font_changed {
+            if let Ok(mut lock) = TREE_FONT_CACHED.write() {
                 *lock = None;
             }
         }
@@ -1956,6 +1980,59 @@ pub fn set_list_font(font: &str) {
         *lock = font.to_string();
     }
     if let Ok(mut lock) = LIST_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+// Tree Font
+pub fn tree_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("tree_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    font = rest.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = TREE_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = TREE_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn tree_font_parsed() -> (String, f32) {
+    if let Ok(lock) = TREE_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = tree_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = TREE_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_tree_font(font: &str) {
+    if let Ok(mut lock) = TREE_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = TREE_FONT_CACHED.write() {
         *lock = None;
     }
 }

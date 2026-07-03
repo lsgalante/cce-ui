@@ -339,6 +339,10 @@ impl Element for TreeList {
         true
     }
 
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::tree_font())
+    }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.x = x;
         self.base.y = y;
@@ -814,6 +818,9 @@ impl Element for TreeList {
             ]
         };
 
+        let (_, tree_font_size) = crate::layout::tree_font_parsed();
+        let header_font_size = (tree_font_size - 1.0).max(8.0);
+
         let mut labels = Vec::new();
         let list_left = self.scroll_box.base.x;
         let list_top = self.scroll_box.viewport_y;
@@ -827,21 +834,21 @@ impl Element for TreeList {
             text: "Key".to_string(),
             x: list_left + 8.0,
             y: self.base.y + offset_y + 6.0,
-            font_size: 11.0,
+            font_size: header_font_size,
             color: [200, 200, 210],
         });
         labels.push(TextLabel {
             text: "Type".to_string(),
             x: list_left + 180.0 + 8.0,
             y: self.base.y + offset_y + 6.0,
-            font_size: 11.0,
+            font_size: header_font_size,
             color: [200, 200, 210],
         });
         labels.push(TextLabel {
             text: "Value".to_string(),
             x: list_left + 235.0 + 8.0,
             y: self.base.y + offset_y + 6.0,
-            font_size: 11.0,
+            font_size: header_font_size,
             color: [200, 200, 210],
         });
 
@@ -859,7 +866,7 @@ impl Element for TreeList {
                             text: display_text,
                             x: list_left + 8.0 + *indent as f32 * 12.0,
                             y: row_y + 6.0,
-                            font_size: 12.0,
+                            font_size: tree_font_size,
                             color: f32_to_rgb(crate::color::tree_section_text_color()),
                         });
                     }
@@ -883,7 +890,7 @@ impl Element for TreeList {
                             text: name.clone(),
                             x: list_left + 8.0 + *indent as f32 * 12.0,
                             y: row_y + 6.0,
-                            font_size: 12.0,
+                            font_size: tree_font_size,
                             color,
                         });
                     }
@@ -919,6 +926,8 @@ impl Element for TreeList {
                     if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
                         if anno.starts_with("menu:") {
                             display_ty = Some("menu".to_string());
+                        } else if anno == "button" || anno.starts_with("button:") {
+                            display_ty = Some("button".to_string());
                         } else {
                             display_ty = Some(anno.clone());
                         }
@@ -934,12 +943,19 @@ impl Element for TreeList {
                             text: ty_text,
                             x: list_left + 190.0,
                             y: row_y + 6.0,
-                            font_size: 12.0,
+                            font_size: tree_font_size,
                             color: f32_to_rgb(crate::color::tree_type_text_color()),
                         });
                     }
 
                     if Some(*original_idx) != self.selected_key_idx {
+                        let mut is_button = false;
+                        if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
+                            if anno == "button" || anno.starts_with("button:") {
+                                is_button = true;
+                            }
+                        }
+
                         let is_color = if let serde_json::Value::String(s) = val {
                             s.starts_with('#')
                         } else {
@@ -952,13 +968,23 @@ impl Element for TreeList {
                             list_left + 245.0
                         };
 
-                        labels.push(TextLabel {
-                            text: display_val,
-                            x: label_x,
-                            y: row_y + 6.0,
-                            font_size: 12.0,
-                            color: f32_to_rgb(crate::color::tree_value_text_color()),
-                        });
+                        if is_button {
+                            labels.push(TextLabel {
+                                text: display_val,
+                                x: list_left + 245.0 + 8.0,
+                                y: row_y + 6.0,
+                                font_size: tree_font_size,
+                                color: [240, 240, 245],
+                            });
+                        } else {
+                            labels.push(TextLabel {
+                                text: display_val,
+                                x: label_x,
+                                y: row_y + 6.0,
+                                font_size: tree_font_size,
+                                color: f32_to_rgb(crate::color::tree_value_text_color()),
+                            });
+                        }
                     }
                 }
             }
@@ -1161,8 +1187,25 @@ impl Element for TreeList {
                 quads.push((list_left + 180.0, draw_y, 1.0, draw_h, 0.0, apply_opacity(separator_color), (false, false, false, false)));
                 quads.push((list_left + 235.0, draw_y, 1.0, draw_h, 0.0, apply_opacity(separator_color), (false, false, false, false)));
 
+                let mut is_button = false;
+                if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
+                    if anno == "button" || anno.starts_with("button:") {
+                        is_button = true;
+                    }
+                }
+
                 if Some(*original_idx) != self.selected_key_idx {
-                    if let serde_json::Value::String(s) = val {
+                    if is_button {
+                        let btn_x = list_left + 245.0;
+                        let btn_y = row_y + 1.0;
+                        let btn_bottom = (row_y + 27.0).min(list_bottom);
+                        let btn_draw_y = btn_y.max(list_top);
+                        let btn_draw_h = btn_bottom - btn_draw_y;
+                        if btn_draw_h > 0.0 {
+                            let btn_bg = [0.10, 0.29, 0.33, 0.65]; // theme button color
+                            quads.push((btn_x, btn_draw_y, 125.0, btn_draw_h, 4.0, apply_opacity(btn_bg), (true, true, true, true)));
+                        }
+                    } else if let serde_json::Value::String(s) = val {
                         if s.starts_with('#') {
                             if let Some(rgba) = parse_hex_f32(s) {
                                 let preview_x = list_left + 245.0;

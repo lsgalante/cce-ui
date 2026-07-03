@@ -197,12 +197,52 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+pub fn get_app_name() -> Option<String> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str().map(|ss| ss.to_string()))
+        })
+}
+
+pub fn get_app_config_path(app_name: &str) -> std::path::PathBuf {
+    get_config_path().parent().unwrap().join(app_name).join("config.kdl")
+}
+
+fn merge_json(a: &mut serde_json::Value, b: &serde_json::Value) {
+    match (a, b) {
+        (serde_json::Value::Object(a_map), serde_json::Value::Object(b_map)) => {
+            for (k, v) in b_map {
+                if !v.is_null() {
+                    merge_json(a_map.entry(k.clone()).or_insert(serde_json::Value::Null), v);
+                }
+            }
+        }
+        (a_val, b_val) => {
+            *a_val = b_val.clone();
+        }
+    }
+}
+
 pub fn parse_kdl_to_json(content: &str) -> serde_json::Value {
-    if let Ok(doc) = content.parse::<kdl::KdlDocument>() {
+    let mut main_val = if let Ok(doc) = content.parse::<kdl::KdlDocument>() {
         kdl_to_json(&doc)
     } else {
         serde_json::json!({})
+    };
+
+    if let Some(app_name) = get_app_name() {
+        let app_path = get_app_config_path(&app_name);
+        if let Ok(override_content) = std::fs::read_to_string(&app_path) {
+            if let Ok(override_doc) = override_content.parse::<kdl::KdlDocument>() {
+                let override_val = kdl_to_json(&override_doc);
+                merge_json(&mut main_val, &override_val);
+            }
+        }
     }
+
+    main_val
 }
 
 pub fn update_json_in_memory(val_obj: &mut Value, key: &str, value: &str, default_section: &str) -> bool {
@@ -339,7 +379,7 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
     };
 
     if let Some(ref ext_ty) = existing_ty {
-        if ext_ty.starts_with("menu:") {
+        if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") {
             kdl_ty = Some(ext_ty.clone());
         }
     }
