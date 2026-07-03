@@ -45,22 +45,7 @@ pub fn lazy_init_style_registry() {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(eq_idx) = trimmed.find('=') {
-                    let key = trimmed[..eq_idx].trim().to_string();
-                    let val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
-                    if let Ok(mut registry) = get_style_registry().write() {
-                        if let Ok(f_val) = val_str.parse::<f32>() {
-                            registry.set_float(&key, f_val);
-                        } else {
-                            registry.set_string(&key, val_str.to_string());
-                        }
-                    }
-                }
-            }
-        }
+        reload_config();
     });
 }
 
