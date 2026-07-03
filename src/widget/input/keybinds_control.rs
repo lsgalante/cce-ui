@@ -53,7 +53,7 @@ impl KeybindsControl {
     }
 
     pub fn load_from_config(&mut self) {
-        let path = crate::config::get_keybinds_path();
+        let path = crate::config::get_input_path();
         let content = std::fs::read_to_string(&path).unwrap_or_default();
         let val = crate::config::parse_kdl_to_json(&content);
         let mut loaded = Vec::new();
@@ -104,7 +104,7 @@ impl KeybindsControl {
     }
 
     pub fn save_to_config(&self) {
-        let path = crate::config::get_keybinds_path();
+        let path = crate::config::get_input_path();
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
