@@ -42,6 +42,9 @@ pub struct TextBox {
     pub scroll_x: f32,
     default_font_size: f32,
     default_font_family: String,
+    pub cursor_x_offset: f32,
+    pub glyph_positions: Vec<f32>,
+    pub total_text_width: f32,
 }
 
 impl TextBox {
@@ -77,12 +80,36 @@ impl TextBox {
             scroll_x: 0.0,
             default_font_size: style_size,
             default_font_family: style_family,
+            cursor_x_offset: 0.0,
+            glyph_positions: Vec::new(),
+            total_text_width: 0.0,
         }
     }
 
     pub fn with_multiline(mut self, multiline: bool) -> Self {
         self.multiline = multiline;
         self
+    }
+
+    fn map_x_to_idx(&self, click_x: f32) -> usize {
+        let relative_x = click_x - (self.base.x + 8.0) + self.scroll_x;
+        if self.glyph_positions.is_empty() {
+            let char_width = self.char_width();
+            return ((relative_x / char_width).round() as isize)
+                .max(0)
+                .min(self.edit_buffer.chars().count() as isize) as usize;
+        }
+        
+        let mut closest_idx = 0;
+        let mut min_diff = f32::MAX;
+        for (i, &pos) in self.glyph_positions.iter().enumerate() {
+            let diff = (pos - relative_x).abs();
+            if diff < min_diff {
+                min_diff = diff;
+                closest_idx = i;
+            }
+        }
+        closest_idx
     }
 
     pub fn with_draw_bg_border(mut self, draw: bool) -> Self {
@@ -452,7 +479,7 @@ impl Default for TextBox {
 impl Element for TextBox {
     crate::impl_widget_base!(TextBox);
 
-    fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem) {
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         let (style_family, style_size) = crate::layout::textbox_font_parsed();
         if self.font_size == self.default_font_size {
             self.font_size = style_size;
@@ -463,6 +490,62 @@ impl Element for TextBox {
             self.font_family = style_family.clone();
         }
         self.default_font_family = style_family;
+
+        let text_src = if self.editing { &self.edit_buffer } else { &self.text };
+        let display_text = if text_src.is_empty() && self.placeholder.is_some() {
+            self.placeholder.as_ref().unwrap().as_str()
+        } else {
+            text_src.as_str()
+        };
+
+        let font_fam = if self.is_password {
+            "monospace"
+        } else {
+            self.font_family.as_str()
+        };
+
+        let render_text = if self.is_password {
+            "•".repeat(display_text.chars().count())
+        } else {
+            display_text.to_string()
+        };
+
+        let buffer = crate::widget::display::text_label::make_widget_text_buffer(fs, &render_text, self.font_size, font_fam);
+
+        let char_count = render_text.chars().count();
+        let mut x_offsets = vec![0.0; char_count + 1];
+        let mut total_w: f32 = 0.0;
+
+        for run in buffer.layout_runs() {
+            for glyph in run.glyphs {
+                let byte_offset = glyph.start;
+                let c_idx = render_text[..byte_offset.min(render_text.len())].chars().count();
+                if c_idx < x_offsets.len() {
+                    x_offsets[c_idx] = glyph.x;
+                }
+                total_w = total_w.max(glyph.x + glyph.w);
+            }
+        }
+
+        let mut current_x = 0.0;
+        for i in 0..x_offsets.len() {
+            if x_offsets[i] == 0.0 && i > 0 {
+                x_offsets[i] = current_x;
+            } else {
+                current_x = x_offsets[i];
+            }
+        }
+
+        if !x_offsets.is_empty() {
+            let last_idx = x_offsets.len() - 1;
+            x_offsets[last_idx] = total_w;
+        }
+
+        self.glyph_positions = x_offsets;
+        self.total_text_width = total_w;
+
+        let cursor_pos = self.cursor_idx.min(self.glyph_positions.len() - 1);
+        self.cursor_x_offset = self.glyph_positions.get(cursor_pos).copied().unwrap_or(0.0);
     }
 
     fn get_value_string(&self) -> Option<String> {
@@ -585,9 +668,7 @@ impl Element for TextBox {
                 let click_col = (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
                 self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
             } else {
-                (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize)
-                    .max(0)
-                    .min(self.edit_buffer.chars().count() as isize) as usize
+                self.map_x_to_idx(px)
             };
             if self.cursor_idx != drag_idx {
                 self.cursor_idx = drag_idx;
@@ -632,9 +713,7 @@ impl Element for TextBox {
             let click_col = (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
             self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
         } else {
-            (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize)
-                .max(0)
-                .min(self.edit_buffer.chars().count() as isize) as usize
+            self.map_x_to_idx(px)
         };
         if self.cursor_idx != drag_idx {
             self.cursor_idx = drag_idx;
@@ -686,9 +765,7 @@ impl Element for TextBox {
                         let click_col = (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
                         self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
                     } else {
-                        (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize)
-                            .max(0)
-                            .min(self.edit_buffer.chars().count() as isize) as usize
+                        self.map_x_to_idx(px)
                     };
                     self.cursor_idx = idx;
                     self.select_anchor = Some(idx);
@@ -1005,9 +1082,11 @@ impl Element for TextBox {
             } else {
                 let caret_h = self.font_size * 1.15;
                 if start != end {
-                    let highlight_x = self.base.x + 8.0 + (start as f32 * char_width) - self.scroll_x;
+                    let h_left_offset = self.glyph_positions.get(start).copied().unwrap_or_else(|| start as f32 * char_width);
+                    let h_right_offset = self.glyph_positions.get(end).copied().unwrap_or_else(|| end as f32 * char_width);
+                    let highlight_x = self.base.x + 8.0 + h_left_offset - self.scroll_x;
                     let h_left = highlight_x.max(self.base.x + 8.0);
-                    let h_right = (highlight_x + ((end - start) as f32 * char_width)).min(self.base.x + self.base.w - 8.0);
+                    let h_right = (self.base.x + 8.0 + h_right_offset - self.scroll_x).min(self.base.x + self.base.w - 8.0);
                     if h_left < h_right {
                         quads.push((
                             h_left,
@@ -1020,7 +1099,12 @@ impl Element for TextBox {
                 }
 
                 if self.editing {
-                    let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width) - self.scroll_x;
+                    let offset = if self.glyph_positions.is_empty() {
+                        self.cursor_idx as f32 * char_width
+                    } else {
+                        self.cursor_x_offset
+                    };
+                    let cursor_x = self.base.x + 8.0 + offset - self.scroll_x;
                     if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
                         let text_y = crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top);
                         let cursor_y = text_y + (self.font_size - caret_h) / 2.0;
@@ -1143,9 +1227,11 @@ impl Element for TextBox {
             } else {
                 let caret_h = self.font_size * 1.15;
                 if start != end {
-                    let highlight_x = self.base.x + 8.0 + (start as f32 * char_width) - self.scroll_x;
+                    let h_left_offset = self.glyph_positions.get(start).copied().unwrap_or_else(|| start as f32 * char_width);
+                    let h_right_offset = self.glyph_positions.get(end).copied().unwrap_or_else(|| end as f32 * char_width);
+                    let highlight_x = self.base.x + 8.0 + h_left_offset - self.scroll_x;
                     let h_left = highlight_x.max(self.base.x + 8.0);
-                    let h_right = (highlight_x + ((end - start) as f32 * char_width)).min(self.base.x + self.base.w - 8.0);
+                    let h_right = (self.base.x + 8.0 + h_right_offset - self.scroll_x).min(self.base.x + self.base.w - 8.0);
                     if h_left < h_right {
                         quads.push((
                             h_left,
@@ -1160,7 +1246,12 @@ impl Element for TextBox {
                 }
 
                 if self.editing {
-                    let cursor_x = self.base.x + 8.0 + (self.cursor_idx as f32 * char_width) - self.scroll_x;
+                    let offset = if self.glyph_positions.is_empty() {
+                        self.cursor_idx as f32 * char_width
+                    } else {
+                        self.cursor_x_offset
+                    };
+                    let cursor_x = self.base.x + 8.0 + offset - self.scroll_x;
                     if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
                         let text_y = crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top);
                         let cursor_y = text_y + (self.font_size - caret_h) / 2.0;
