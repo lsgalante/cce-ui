@@ -1699,6 +1699,7 @@ mod tests {
     #[test]
     fn test_multiline_textbox_border_width() {
         let _dummy = crate::context::UiContext::new();
+        crate::layout::set_textbox_multiline_border_width(1.0);
         let tb_single = TextBox::new("Singleline".to_string()).with_multiline(false);
         let tb_multi = TextBox::new("Multiline".to_string()).with_multiline(true);
 

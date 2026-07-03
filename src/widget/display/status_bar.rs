@@ -57,6 +57,24 @@ impl StatusBar {
     pub fn set_bg_color(&mut self, color: [f32; 4]) {
         self.bg_color = Some(color);
     }
+
+    pub fn get_actual_text_color(&self) -> [f32; 4] {
+        if let Some(p_ptr) = self.parent {
+            if unsafe { (*p_ptr).is_backplate() } {
+                return crate::colors::backplate_statusbar_text_color();
+            }
+        }
+        self.text_color.unwrap_or([0.6666, 0.6666, 0.7333, 1.0])
+    }
+
+    pub fn is_blur_enabled(&self) -> bool {
+        if let Some(p_ptr) = self.parent {
+            if unsafe { (*p_ptr).is_backplate() } {
+                return crate::colors::backplate_statusbar_blur();
+            }
+        }
+        false
+    }
 }
 
 impl Element for StatusBar {
@@ -73,7 +91,14 @@ impl Element for StatusBar {
     fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
         self as *mut Self as *mut (dyn Element + 'static)
     }
-    fn color(&self) -> [f32; 4] { self.bg_color.unwrap_or(colors::STATUS_BG) }
+    fn color(&self) -> [f32; 4] {
+        if let Some(p_ptr) = self.parent {
+            if unsafe { (*p_ptr).is_backplate() } {
+                return crate::colors::backplate_statusbar_color();
+            }
+        }
+        self.bg_color.unwrap_or(colors::STATUS_BG)
+    }
     fn set_hovered(&mut self, v: bool) { self.hovered = v; }
     fn hovered(&self) -> bool { self.hovered }
 
@@ -138,11 +163,12 @@ impl Element for StatusBar {
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
         if let Some(ref text_buf) = self.text_buf {
             let offset_x = self.text_offset_x.unwrap_or(12.0);
-            let color = self.text_color.map(|c| glyphon::Color::rgb(
+            let c = self.get_actual_text_color();
+            let color = glyphon::Color::rgb(
                 (c[0] * 255.0) as u8,
                 (c[1] * 255.0) as u8,
                 (c[2] * 255.0) as u8,
-            )).unwrap_or_else(|| glyphon::Color::rgb(0xaa, 0xaa, 0xbb));
+            );
             vec![(text_buf, self.x + offset_x, self.y + 4.0, color)]
         } else {
             Vec::new()
@@ -151,11 +177,12 @@ impl Element for StatusBar {
     fn text_labels(&self) -> Vec<TextLabel> {
         if !self.text.is_empty() {
             let offset_x = self.text_offset_x.unwrap_or(12.0);
-            let color = self.text_color.map(|c| [
+            let c = self.get_actual_text_color();
+            let color = [
                 (c[0] * 255.0) as u8,
                 (c[1] * 255.0) as u8,
                 (c[2] * 255.0) as u8,
-            ]).unwrap_or([0xaa, 0xaa, 0xbb]);
+            ];
             vec![TextLabel {
                 text: self.text.clone(),
                 x: self.x + offset_x,

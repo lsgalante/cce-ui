@@ -47,6 +47,14 @@ static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0])
 static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
+
+static BACKPLATE_MENUBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
+static BACKPLATE_MENUBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]);
+static BACKPLATE_MENUBAR_BLUR: RwLock<bool> = RwLock::new(false);
+
+static BACKPLATE_STATUSBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.06, 0.10, 1.0]);
+static BACKPLATE_STATUSBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.6666, 0.6666, 0.7333, 1.0]);
+static BACKPLATE_STATUSBAR_BLUR: RwLock<bool> = RwLock::new(false);
 static BUTTON_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new(BUTTON_IDLE);
 
 static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
@@ -218,6 +226,30 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/surface/backplate/color") {
         if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
         if let Ok(mut lock) = BACKPLATE_OPACITY.write() { *lock = Some(c[3]); }
+    }
+
+    if let Some(c) = get_color("/style/surface/backplate/menubar/color") {
+        if let Ok(mut lock) = BACKPLATE_MENUBAR_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/surface/backplate/menubar/text_color") {
+        if let Ok(mut lock) = BACKPLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
+    }
+    if let Some(blur) = val.pointer("/style/surface/backplate/menubar/blur").and_then(|v| v.as_bool()) {
+        if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = blur; }
+    } else if let Some(blur_val) = val.pointer("/style/surface/backplate/menubar/blur").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = blur_val > 0.001; }
+    }
+
+    if let Some(c) = get_color("/style/surface/backplate/statusbar/color") {
+        if let Ok(mut lock) = BACKPLATE_STATUSBAR_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/surface/backplate/statusbar/text_color") {
+        if let Ok(mut lock) = BACKPLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
+    }
+    if let Some(blur) = val.pointer("/style/surface/backplate/statusbar/blur").and_then(|v| v.as_bool()) {
+        if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = blur; }
+    } else if let Some(blur_val) = val.pointer("/style/surface/backplate/statusbar/blur").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = blur_val > 0.001; }
     }
     if let Some(c) = get_color("/layout/color_borders_color") {
         if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() { *lock = c; }
@@ -953,5 +985,53 @@ pub fn set_tree_open_search_key(k: String) {
     if let Ok(mut lock) = TREE_OPEN_SEARCH_KEY.write() {
         *lock = k;
     }
+}
+
+pub fn backplate_menubar_color() -> [f32; 4] {
+    load_colors_once();
+    *BACKPLATE_MENUBAR_COLOR.read().unwrap()
+}
+pub fn set_backplate_menubar_color(c: [f32; 4]) {
+    if let Ok(mut lock) = BACKPLATE_MENUBAR_COLOR.write() { *lock = c; }
+}
+
+pub fn backplate_menubar_text_color() -> [f32; 4] {
+    load_colors_once();
+    *BACKPLATE_MENUBAR_TEXT_COLOR.read().unwrap()
+}
+pub fn set_backplate_menubar_text_color(c: [f32; 4]) {
+    if let Ok(mut lock) = BACKPLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
+}
+
+pub fn backplate_menubar_blur() -> bool {
+    load_colors_once();
+    *BACKPLATE_MENUBAR_BLUR.read().unwrap()
+}
+pub fn set_backplate_menubar_blur(b: bool) {
+    if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = b; }
+}
+
+pub fn backplate_statusbar_color() -> [f32; 4] {
+    load_colors_once();
+    *BACKPLATE_STATUSBAR_COLOR.read().unwrap()
+}
+pub fn set_backplate_statusbar_color(c: [f32; 4]) {
+    if let Ok(mut lock) = BACKPLATE_STATUSBAR_COLOR.write() { *lock = c; }
+}
+
+pub fn backplate_statusbar_text_color() -> [f32; 4] {
+    load_colors_once();
+    *BACKPLATE_STATUSBAR_TEXT_COLOR.read().unwrap()
+}
+pub fn set_backplate_statusbar_text_color(c: [f32; 4]) {
+    if let Ok(mut lock) = BACKPLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
+}
+
+pub fn backplate_statusbar_blur() -> bool {
+    load_colors_once();
+    *BACKPLATE_STATUSBAR_BLUR.read().unwrap()
+}
+pub fn set_backplate_statusbar_blur(b: bool) {
+    if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = b; }
 }
 

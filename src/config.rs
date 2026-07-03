@@ -252,7 +252,8 @@ pub fn parse_config_path(key: &str, default_section: &str) -> (String, String, O
 const PROP_NODES: &[&str] = &[
     "gestures", "key_bindings", "pointer_bind", "gesture_bind",
     "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
-    "status", "overlay", "backplate", "desktop", "list", "section", "textbox", "multiline", "editor", "tree"
+    "status", "overlay", "backplate", "desktop", "list", "section", "textbox", "multiline", "editor", "tree",
+    "menubar", "statusbar"
 ];
 
 fn get_or_create_node_mut<'a>(doc: &'a mut kdl::KdlDocument, path: &[&str]) -> Option<&'a mut kdl::KdlNode> {
@@ -582,6 +583,36 @@ mod tests {
         
         let doc_parsed = kdl_str.parse::<kdl::KdlDocument>();
         assert!(doc_parsed.is_ok(), "Failed to parse KDL: {:?}", doc_parsed.err());
+    }
+
+    #[test]
+    fn test_backplate_menubar_statusbar_styling() {
+        // Trigger load_colors_once first to initialize the Once block from the real config file
+        let _ = crate::color::backplate_statusbar_blur();
+
+        let content = r##"
+            style {
+                surface {
+                    backplate blur=(f64)0.1 color=(rgba)"#5e657acf" corner_radius=(i64)12 {
+                        menubar blur=(bool)true color=(rgba)"#1a1d26d0" text_color=(rgba)"#e2e4f0ff"
+                        statusbar blur=(bool)false color=(rgba)"#12141cd0" text_color=(rgba)"#b5b9c8ff"
+                    }
+                }
+            }
+        "##;
+        
+        // Parse into json and set colors
+        crate::color::reload_colors(content);
+
+        // Verify values are parsed correctly
+        assert_eq!(crate::color::backplate_menubar_blur(), true);
+        assert_eq!(crate::color::backplate_statusbar_blur(), false);
+
+        // Colors are in sRGB converted to linear, let's verify text colors
+        let menubar_txt = crate::color::backplate_menubar_text_color();
+        assert!(menubar_txt[0] > 0.0);
+        let statusbar_txt = crate::color::backplate_statusbar_text_color();
+        assert!(statusbar_txt[0] > 0.0);
     }
 }
 

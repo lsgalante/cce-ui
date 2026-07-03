@@ -301,6 +301,24 @@ impl MenuBar {
         };
         Some((dx, dy, dw, dh))
     }
+
+    pub fn text_color(&self) -> [f32; 4] {
+        if let Some(p_ptr) = self.parent {
+            if unsafe { (*p_ptr).is_backplate() } {
+                return crate::colors::backplate_menubar_text_color();
+            }
+        }
+        crate::colors::menubar_tab_label_color()
+    }
+
+    pub fn is_blur_enabled(&self) -> bool {
+        if let Some(p_ptr) = self.parent {
+            if unsafe { (*p_ptr).is_backplate() } {
+                return crate::colors::backplate_menubar_blur();
+            }
+        }
+        self.blur
+    }
 }
 
 impl Element for MenuBar {
@@ -463,8 +481,15 @@ impl Element for MenuBar {
     }
 
     fn color(&self) -> [f32; 4] {
+        if let Some(p_ptr) = self.parent {
+            if unsafe { (*p_ptr).is_backplate() } {
+                return crate::colors::backplate_menubar_color();
+            }
+        }
         self.color.unwrap_or_else(|| colors::sidebar_bg_color())
     }
+
+
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {
         if let Some(p_ptr) = self.parent {
@@ -714,7 +739,7 @@ impl Element for MenuBar {
                     pc.rect(colors::PANEL_MENU_HOVER, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0);
                 }
                 
-                let label_color = crate::colors::menubar_tab_label_color();
+                let label_color = self.text_color();
                 let srgb = crate::colors::to_srgb(label_color);
                 let color_f32 = [srgb[0], srgb[1], srgb[2], 1.0];
                 let bounds = Some([dx, dy, dx + dw, dy + dh]);
@@ -741,7 +766,7 @@ impl Element for MenuBar {
                 pc.rect(colors::PANEL_MENU_HOVER, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0);
             }
 
-            let label_color = crate::colors::menubar_tab_label_color();
+            let label_color = self.text_color();
             let srgb = crate::colors::to_srgb(label_color);
             let color_f32 = [srgb[0], srgb[1], srgb[2], 1.0];
             let bounds = Some([dx, dy, dx + dw, dy + dh]);
@@ -917,7 +942,7 @@ impl Element for MenuBar {
         if !self.visible {
             return Vec::new();
         }
-        let label_color = crate::colors::menubar_tab_label_color();
+        let label_color = self.text_color();
         let srgb = crate::colors::to_srgb(label_color);
         let text_color = [
             (srgb[0] * 255.0) as u8,
@@ -1178,6 +1203,24 @@ impl Menu {
         };
         (dx, dy, dw, dh)
     }
+
+    pub fn text_color(&self) -> [f32; 4] {
+        if let Some(p_ptr) = self.parent {
+            let mut curr = p_ptr;
+            loop {
+                if unsafe { (*curr).is_backplate() } {
+                    return crate::colors::backplate_menubar_text_color();
+                }
+                let dummy = crate::context::UiContext::new();
+                if let Some(next_p) = unsafe { (*curr).parent(&dummy) } {
+                    curr = next_p;
+                } else {
+                    break;
+                }
+            }
+        }
+        crate::colors::menubar_tab_label_color()
+    }
 }
 impl Element for Menu {
     crate::impl_widget_base!(Menu);
@@ -1351,7 +1394,7 @@ impl Element for Menu {
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
-        let label_color = crate::colors::menubar_tab_label_color();
+        let label_color = self.text_color();
         let srgb = crate::colors::to_srgb(label_color);
         let text_color = [
             (srgb[0] * 255.0) as u8,
