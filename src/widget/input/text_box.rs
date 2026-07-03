@@ -515,15 +515,16 @@ impl Element for TextBox {
         let char_count = render_text.chars().count();
         let mut x_offsets = vec![0.0; char_count + 1];
         let mut total_w: f32 = 0.0;
+        let scale = crate::scale::scale_factor().max(1.0);
 
         for run in buffer.layout_runs() {
             for glyph in run.glyphs {
                 let byte_offset = glyph.start;
                 let c_idx = render_text[..byte_offset.min(render_text.len())].chars().count();
                 if c_idx < x_offsets.len() {
-                    x_offsets[c_idx] = glyph.x;
+                    x_offsets[c_idx] = glyph.x / scale;
                 }
-                total_w = total_w.max(glyph.x + glyph.w);
+                total_w = total_w.max((glyph.x + glyph.w) / scale);
             }
         }
 
