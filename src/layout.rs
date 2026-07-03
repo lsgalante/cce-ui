@@ -5078,6 +5078,23 @@ pub fn get_system_monospace_font() -> &'static str {
     })
 }
 
+pub fn get_system_sans_serif_font() -> &'static str {
+    static SANS_SERIF_FONT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SANS_SERIF_FONT.get_or_init(|| {
+        if let Ok(output) = std::process::Command::new("fc-match")
+            .args(["-f", "%{family}", "sans-serif"])
+            .output()
+        {
+            let name = String::from_utf8_lossy(&output.stdout);
+            let parsed = name.split(',').next().unwrap_or("sans-serif").trim();
+            if !parsed.is_empty() {
+                return parsed.to_string();
+            }
+        }
+        "sans-serif".to_string()
+    })
+}
+
 impl crate::widget::ContainerLayout for FlexLayout {
     fn box_clone_container(&self) -> Box<dyn crate::widget::ContainerLayout> {
         Box::new(self.clone())

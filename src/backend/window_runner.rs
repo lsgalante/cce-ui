@@ -102,15 +102,17 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
     let metrics = Metrics::new(physical_size, line_height);
     let mut buf = Buffer::new(fs, metrics);
     let mut attrs = Attrs::new();
-    if let Some(ref font_family) = family_name {
-        let family = match font_family.as_str() {
+    let family = if let Some(ref font_family) = family_name {
+        match font_family.as_str() {
             "monospace" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
-            "sans-serif" => glyphon::Family::SansSerif,
+            "sans-serif" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
             "serif" => glyphon::Family::Serif,
             name => glyphon::Family::Name(name),
-        };
-        attrs = attrs.family(family);
-    }
+        }
+    } else {
+        glyphon::Family::Name(crate::layout::get_system_monospace_font())
+    };
+    attrs = attrs.family(family);
     buf.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
     buf.shape_until_scroll(fs, true);
 
@@ -1600,6 +1602,7 @@ impl<A: Application> EngineState<A> {
         
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
         let areas = self.inner.text_areas(scale_f32, bounds);
+        eprintln!("DEBUG RENDER AREAS: len = {}", areas.len());
         
         adapter.text_renderer.prepare(&adapter.device, &adapter.queue, &mut adapter.font_system, &mut adapter.text_atlas, &adapter.text_viewport, areas, &mut adapter.swash_cache).unwrap();
         

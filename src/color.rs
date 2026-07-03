@@ -1118,6 +1118,7 @@ mod color_tests {
             println!("FILE READ FAILED!");
         }
         println!("DROPDOWN COLOR GETTER: {:?}", dropdown_background_color());
+        println!("LIST FONT COLOR GETTER: {:?}", list_font_color());
     }
 }
 
