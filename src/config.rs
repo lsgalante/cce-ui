@@ -392,7 +392,7 @@ pub fn get_config_path() -> std::path::PathBuf {
 }
 
 pub fn get_input_path() -> std::path::PathBuf {
-    get_config_path().parent().unwrap().to_path_buf().join("input.kdl")
+    get_config_path()
 }
 
 fn perform_rolling_backup(path: &str) {
