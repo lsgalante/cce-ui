@@ -13,6 +13,7 @@ pub struct Dropdown {
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub font_family: String,
     pub custom_display_text: Option<String>,
+    pub open_upward: Option<bool>,
 }
 
 impl Dropdown {
@@ -28,6 +29,7 @@ impl Dropdown {
             children: Vec::new(),
             font_family: "sans-serif".to_string(),
             custom_display_text: None,
+            open_upward: None,
         }
     }
 
@@ -43,6 +45,11 @@ impl Dropdown {
 
     pub fn with_label(mut self, label: &str) -> Self {
         self.base.label = Some(label.to_string());
+        self
+    }
+
+    pub fn with_open_upward(mut self, open_upward: bool) -> Self {
+        self.open_upward = Some(open_upward);
         self
     }
 
@@ -77,8 +84,8 @@ impl Dropdown {
     }
 
     pub fn get_dy_dh(&self) -> (f32, f32) {
-        let open_upward = self.base.y > 400.0;
         let dh = self.options.len() as f32 * 24.0;
+        let open_upward = self.open_upward.unwrap_or_else(|| self.base.y > 400.0);
         let dy = if open_upward {
             self.base.y - dh
         } else {
