@@ -232,8 +232,15 @@ impl Element for Button {
         }
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.label {
-            let font_size = 12.0;
-            let font_family = self.widget_font().unwrap_or_else(|| "sans-serif".to_string());
+            let mut font_size = 12.0;
+            let mut font_family = "sans-serif".to_string();
+            if let Some(font_str) = self.widget_font() {
+                let (parsed_fam, parsed_size) = crate::layout::parse_font_string(&font_str);
+                font_family = parsed_fam;
+                if let Some(ps) = parsed_size {
+                    font_size = ps;
+                }
+            }
             let est_w = if label == "📋" {
                 12.0
             } else {

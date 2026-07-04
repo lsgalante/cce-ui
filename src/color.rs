@@ -278,7 +278,7 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/layout/color_borders_color") {
         if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/layout/slider_track_color") {
+    if let Some(c) = get_color("/style/control/slider/color").or_else(|| get_color("/layout/slider_track_color")) {
         if let Ok(mut lock) = SLIDER_TRACK_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/layout/paginator_sidebar_color") {
@@ -308,7 +308,7 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
         if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/layout/toggle_enabled_color") {
+    if let Some(c) = get_color("/style/control/toggle/enabled_color").or_else(|| get_color("/layout/toggle_enabled_color")) {
         if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/style/control/toggle/disabled_color") {

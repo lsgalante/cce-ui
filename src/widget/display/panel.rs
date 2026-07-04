@@ -38,6 +38,11 @@ impl Element for Panel {
 
     fn color(&self) -> [f32; 4] { if self.dragging { colors::PANEL_DRAG } else { colors::PANEL_IDLE } }
 
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let (x, y, w, h) = self.rect();
+        vec![(x, y, w, h, self.color())]
+    }
+
     fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
         self.bounds = Some((bx, by, bw, bh));
     }

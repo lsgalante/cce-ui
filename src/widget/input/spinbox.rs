@@ -78,6 +78,13 @@ impl Spinbox {
 impl Element for Spinbox {
     crate::impl_widget_base!(Spinbox);
 
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h + self.base.label_offset();
+    }
+
     fn get_value_string(&self) -> Option<String> {
         if self.decimals > 0 {
             let divisor = 10.0f32.powi(self.decimals as i32);

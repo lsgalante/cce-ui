@@ -135,9 +135,11 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.backplate.menubar.color" => "backplate_menubar_color",
                 "style.surface.backplate.menubar.text_color" => "backplate_menubar_text_color",
                 "style.surface.backplate.menubar.blur" => "backplate_menubar_blur",
+                "style.surface.backplate.menubar.font" => "menubar_font",
                 "style.surface.backplate.statusbar.color" => "backplate_statusbar_color",
                 "style.surface.backplate.statusbar.text_color" => "backplate_statusbar_text_color",
                 "style.surface.backplate.statusbar.blur" => "backplate_statusbar_blur",
+                "style.surface.backplate.statusbar.font" => "statusbar_font",
                 "style.surface.page.opacity" => "page_opacity",
                 "style.surface.page.margin" => "page_margin",
                 "style.surface.graph.cell_color" => "graph_cell_color",
@@ -232,6 +234,8 @@ static COLOR_SELECTOR_PREVIEW_MARGIN: RwLock<f32> = RwLock::new(0.0);
 static COLOR_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static MENUBAR_FONT: RwLock<String> = RwLock::new(String::new());
 static MENUBAR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static STATUSBAR_FONT: RwLock<String> = RwLock::new(String::new());
+static STATUSBAR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
 static NESTED_SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
 static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
@@ -318,6 +322,7 @@ pub fn align_text_y(y: f32, height: f32, font_size: f32, top_offset: f32) -> f32
 pub fn reload_config() {
     if let Some(content) = read_config() {
         let mut menubar_font_changed = false;
+        let mut statusbar_font_changed = false;
         let mut toggle_font_changed = false;
         let mut font_selector_font_changed = false;
         let mut button_strip_font_changed = false;
@@ -647,6 +652,26 @@ pub fn reload_config() {
                 }
                 if changed {
                     menubar_font_changed = true;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("statusbar_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = rest.trim();
+                let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
+                    &rest[1..rest.len() - 1]
+                } else {
+                    rest
+                };
+                let font = val_str.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = STATUSBAR_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    statusbar_font_changed = true;
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("section_label_font") {
@@ -999,6 +1024,11 @@ pub fn reload_config() {
                 *lock = None;
             }
         }
+        if statusbar_font_changed {
+            if let Ok(mut lock) = STATUSBAR_FONT_CACHED.write() {
+                *lock = None;
+            }
+        }
         if toggle_font_changed {
             if let Ok(mut lock) = TOGGLE_FONT_CACHED.write() {
                 *lock = None;
@@ -1064,7 +1094,9 @@ pub fn reload_config() {
                 *lock = None;
             }
         }
-        crate::color::reload_colors(&content);
+        if let Ok(raw_kdl) = std::fs::read_to_string(crate::config::get_config_path()) {
+            crate::color::reload_colors(&raw_kdl);
+        }
     }
 }
 
@@ -1667,6 +1699,63 @@ pub fn set_menubar_font(font: &str) {
         *lock = font.to_string();
     }
     if let Ok(mut lock) = MENUBAR_FONT_CACHED.write() {
+        *lock = None;
+    }
+}
+
+pub fn statusbar_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("statusbar_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = rest.trim();
+                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
+                        &rest[1..rest.len() - 1]
+                    } else {
+                        rest
+                    };
+                    font = val_str.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = STATUSBAR_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = STATUSBAR_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn statusbar_font_parsed() -> (String, f32) {
+    if let Ok(lock) = STATUSBAR_FONT_CACHED.read() {
+        if let Some(ref val) = *lock {
+            return val.clone();
+        }
+    }
+    let font_str = statusbar_font();
+    let parsed = parse_font_string(&font_str);
+    let size = parsed.1.unwrap_or(12.0);
+    let val = (parsed.0, size);
+    if let Ok(mut lock) = STATUSBAR_FONT_CACHED.write() {
+        *lock = Some(val.clone());
+    }
+    val
+}
+
+pub fn set_statusbar_font(font: &str) {
+    if let Ok(mut lock) = STATUSBAR_FONT.write() {
+        *lock = font.to_string();
+    }
+    if let Ok(mut lock) = STATUSBAR_FONT_CACHED.write() {
         *lock = None;
     }
 }

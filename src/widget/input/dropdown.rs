@@ -76,11 +76,21 @@ impl Dropdown {
         w
     }
 
+    pub fn get_dy_dh(&self) -> (f32, f32) {
+        let open_upward = self.base.y > 400.0;
+        let dh = self.options.len() as f32 * 24.0;
+        let dy = if open_upward {
+            self.base.y - dh
+        } else {
+            self.base.y + self.base.h
+        };
+        (dy, dh)
+    }
+
     pub fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
         if !self.open { return; }
         
-        let dy = self.base.y + self.base.h;
-        let dh = self.options.len() as f32 * 24.0;
+        let (dy, dh) = self.get_dy_dh();
         let pw = self.popover_width();
         
         // 1. Soft layered drop shadows
@@ -258,8 +268,7 @@ impl Element for Dropdown {
         let hx = if self.base.row_w > 0.0 { self.base.row_x } else { x };
         let hw = if self.base.row_w > 0.0 { self.base.row_w } else { w };
         if self.open {
-            let dy = y + h;
-            let dh = self.options.len() as f32 * 24.0;
+            let (dy, dh) = self.get_dy_dh();
             let pw = self.popover_width();
             let hit_trigger = px >= hx && px <= hx + hw && py >= y && py <= y + h;
             let hit_popover = px >= x && px <= x + pw && py >= dy && py <= dy + dh;
@@ -277,9 +286,8 @@ impl Element for Dropdown {
         self.hovered_item = None;
 
         if self.open {
-            let (x, y, _, h) = self.rect();
-            let dy = y + h;
-            let dh = self.options.len() as f32 * 24.0;
+            let (x, _, _, _) = self.rect();
+            let (dy, dh) = self.get_dy_dh();
             let pw = self.popover_width();
             if px >= x && px <= x + pw && py >= dy && py <= dy + dh {
                 let idx = ((py - dy) / 24.0) as usize;
@@ -304,8 +312,7 @@ impl Element for Dropdown {
         if button != MouseButton::Left || state != ElementState::Pressed { return false; }
 
         let (x, y, w, h) = self.rect();
-        let dy = y + h;
-        let dh = self.options.len() as f32 * 24.0;
+        let (dy, dh) = self.get_dy_dh();
         let pw = self.popover_width();
 
         let inside_trigger = px >= x && px <= x + w && py >= y && py <= y + h;
@@ -479,7 +486,8 @@ impl Element for Dropdown {
     fn take_click(&mut self) -> bool { self.take_change() }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
         if self.open {
-            Some((self.base.x, self.base.y + self.base.h, self.popover_width(), self.options.len() as f32 * 24.0))
+            let (dy, dh) = self.get_dy_dh();
+            Some((self.base.x, dy, self.popover_width(), dh))
         } else {
             None
         }
