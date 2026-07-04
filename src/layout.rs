@@ -69,6 +69,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.breadcrumb.corner_radius" => "breadcrumb_corner_radius",
                 "style.control.button.font" => "button_font",
                 "style.control.button.padding" => "button_padding",
+                "style.control.button.height" => "button_height",
                 "style.control.button.corner_radius" => "button_corner_radius",
                 "style.list.corner_radius" | "style.data.list.corner_radius" => "list_corner_radius",
                 "style.textbox.corner_radius" | "style.data.textbox.corner_radius" => "textbox_corner_radius",
@@ -242,6 +243,7 @@ static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
 
 static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
 static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
+static BUTTON_HEIGHT: RwLock<f32> = RwLock::new(40.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
 static TREE_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -747,6 +749,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = BUTTON_PADDING.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("button_height") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = BUTTON_HEIGHT.write() {
                         *lock = val;
                     }
                 }
@@ -3066,6 +3077,34 @@ pub fn button_padding() -> f32 {
 pub fn set_button_padding(padding: f32) {
     if let Ok(mut lock) = BUTTON_PADDING.write() {
         *lock = padding;
+    }
+}
+
+pub fn button_height() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("button_height") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = BUTTON_HEIGHT.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *BUTTON_HEIGHT.read().unwrap()
+}
+
+pub fn set_button_height(height: f32) {
+    if let Ok(mut lock) = BUTTON_HEIGHT.write() {
+        *lock = height;
     }
 }
 
