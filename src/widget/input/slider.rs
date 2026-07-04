@@ -113,6 +113,13 @@ impl Slider {
 impl Element for Slider {
     crate::impl_widget_base!(Slider);
 
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h + self.base.label_offset();
+    }
+
     fn widget_font(&self) -> Option<String> {
         Some(crate::layout::slider_font())
     }
