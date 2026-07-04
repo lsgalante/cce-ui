@@ -104,6 +104,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.toggle.border_width" => "toggle_border_width",
                 "style.control.toggle.disabled_color" => "toggle_disabled_color",
                 "style.control.toggle.corner_radius" => "toggle_corner_radius",
+                "style.control.ramp.height" => "ramp_height",
                 "style.status.normal_color" => "status_normal_color",
                 "style.status.background_color" => "status_background_color",
                 "style.status.background_blur" => "status_background_blur",
@@ -244,6 +245,7 @@ static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
 static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
 static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
 static BUTTON_HEIGHT: RwLock<f32> = RwLock::new(40.0);
+static RAMP_HEIGHT: RwLock<f32> = RwLock::new(32.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
 static TREE_OPACITY: RwLock<f32> = RwLock::new(1.0);
@@ -3100,6 +3102,34 @@ pub fn button_height() -> f32 {
         }
     });
     *BUTTON_HEIGHT.read().unwrap()
+}
+
+pub fn ramp_height() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("ramp_height") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = RAMP_HEIGHT.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *RAMP_HEIGHT.read().unwrap()
+}
+
+pub fn set_ramp_height(height: f32) {
+    if let Ok(mut lock) = RAMP_HEIGHT.write() {
+        *lock = height;
+    }
 }
 
 pub fn set_button_height(height: f32) {

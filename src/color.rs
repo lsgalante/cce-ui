@@ -63,6 +63,8 @@ static BACKPLATE_STATUSBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.06, 0.
 static BACKPLATE_STATUSBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.6666, 0.6666, 0.7333, 1.0]);
 static BACKPLATE_STATUSBAR_BLUR: RwLock<bool> = RwLock::new(false);
 static BUTTON_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new(BUTTON_IDLE);
+static RAMP_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
+static RAMP_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
 
 static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
@@ -316,6 +318,12 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/layout/toggle_bg_color") {
         if let Ok(mut lock) = TOGGLE_BG_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/ramp/background") {
+        if let Ok(mut lock) = RAMP_BACKGROUND_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/ramp/border_color") {
+        if let Ok(mut lock) = RAMP_BORDER_COLOR.write() { *lock = c; }
     }
     let parsed_list_bg = get_color("/layout/list_bg_color");
     let parsed_breadcrumb_bg = get_color("/layout/breadcrumb_bg_color");
@@ -963,6 +971,16 @@ pub fn set_popover_bg_color(color: [f32; 4]) {
 pub fn backplate_corner_radius() -> f32 {
     load_colors_once();
     *BACKPLATE_CORNER_RADIUS.read().unwrap()
+}
+
+pub fn ramp_background_color() -> [f32; 4] {
+    load_colors_once();
+    *RAMP_BACKGROUND_COLOR.read().unwrap()
+}
+
+pub fn ramp_border_color() -> [f32; 4] {
+    load_colors_once();
+    *RAMP_BORDER_COLOR.read().unwrap()
 }
 
 pub fn set_backplate_corner_radius(radius: f32) {

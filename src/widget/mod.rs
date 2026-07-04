@@ -679,7 +679,7 @@ pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, Canvas, get_font_db, ActiveThumb, FontSelector,
     ButtonStrip, MultiControl, InstancedControl, InstancedWidget, MultiControlRow,
-    KeybindsControl, KeybindRow, KeybindRecorder
+    KeybindsControl, KeybindRow, KeybindRecorder, Ramp, RampKey
 };
 pub use self::container::{
     Container, ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
