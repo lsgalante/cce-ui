@@ -577,6 +577,14 @@ impl Element for TextBox {
             self.text = val_str.clone();
             self.edit_buffer = val_str;
             self.just_changed = true;
+            let len = self.edit_buffer.chars().count();
+            self.cursor_idx = self.cursor_idx.min(len);
+            if let Some(anchor) = self.select_anchor {
+                self.select_anchor = Some(anchor.min(len));
+            }
+            if self.cursor_idx == 0 && self.select_anchor == Some(0) {
+                self.all_selected = false;
+            }
             self.sync_editor_state();
             self.clamp_scroll();
             true
@@ -1009,9 +1017,9 @@ impl Element for TextBox {
         
         if self.draw_bg_border {
             let bg_color = if self.editing {
-                [0.06, 0.10, 0.18, 1.0]
+                crate::colors::textbox_background_edit_color()
             } else {
-                [0.08, 0.08, 0.12, 1.0]
+                crate::colors::textbox_background_color()
             };
             let border_color = if self.editing {
                 [0.20, 0.50, 0.85, 1.0]
@@ -1158,9 +1166,9 @@ impl Element for TextBox {
         let radius = self.corner_radius();
         
         let bg_color = if self.editing {
-            [0.06, 0.10, 0.18, 1.0]
+            crate::colors::textbox_background_edit_color()
         } else {
-            [0.08, 0.08, 0.12, 1.0]
+            crate::colors::textbox_background_color()
         };
         let border_color = if self.editing {
             [0.20, 0.50, 0.85, 1.0]

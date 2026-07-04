@@ -52,6 +52,8 @@ static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static DROPDOWN_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 
 static TEXTBOX_PLACEHOLDER_TEXT_COLOR: RwLock<[u8; 3]> = RwLock::new([0x60, 0x60, 0x6a]);
+static TEXTBOX_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
+static TEXTBOX_BACKGROUND_EDIT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.10, 0.18, 1.0]);
 
 static BACKPLATE_MENUBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static BACKPLATE_MENUBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]);
@@ -295,6 +297,14 @@ fn parse_and_set_colors(content: &str) {
         .or_else(|| get_color_u8("/style/data/textbox/placeholder_text_color")) {
         if let Ok(mut lock) = TEXTBOX_PLACEHOLDER_TEXT_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = get_color("/style/textbox/background_color")
+        .or_else(|| get_color("/style/data/textbox/background_color")) {
+        if let Ok(mut lock) = TEXTBOX_BACKGROUND_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/textbox/background_edit_color")
+        .or_else(|| get_color("/style/data/textbox/background_edit_color")) {
+        if let Ok(mut lock) = TEXTBOX_BACKGROUND_EDIT_COLOR.write() { *lock = c; }
+    }
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
         if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
     }
@@ -482,6 +492,28 @@ pub fn textbox_placeholder_text_color() -> [u8; 3] {
 
 pub fn set_textbox_placeholder_text_color(color: [u8; 3]) {
     if let Ok(mut lock) = TEXTBOX_PLACEHOLDER_TEXT_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn textbox_background_color() -> [f32; 4] {
+    load_colors_once();
+    *TEXTBOX_BACKGROUND_COLOR.read().unwrap()
+}
+
+pub fn set_textbox_background_color(color: [f32; 4]) {
+    if let Ok(mut lock) = TEXTBOX_BACKGROUND_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn textbox_background_edit_color() -> [f32; 4] {
+    load_colors_once();
+    *TEXTBOX_BACKGROUND_EDIT_COLOR.read().unwrap()
+}
+
+pub fn set_textbox_background_edit_color(color: [f32; 4]) {
+    if let Ok(mut lock) = TEXTBOX_BACKGROUND_EDIT_COLOR.write() {
         *lock = color;
     }
 }

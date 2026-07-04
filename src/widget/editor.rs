@@ -29,12 +29,22 @@ impl TextEditorState {
         self.all_selected = false;
     }
 
+    pub fn clamp_bounds(&mut self) {
+        let len = self.buffer.chars().count();
+        self.cursor_idx = self.cursor_idx.min(len);
+        if let Some(anchor) = self.select_anchor {
+            self.select_anchor = Some(anchor.min(len));
+        }
+    }
+
     pub fn selected_range(&self) -> Option<(usize, usize)> {
-        let anchor = self.select_anchor?;
-        if anchor == self.cursor_idx {
+        let len = self.buffer.chars().count();
+        let anchor = self.select_anchor?.min(len);
+        let cursor = self.cursor_idx.min(len);
+        if anchor == cursor {
             None
         } else {
-            Some((anchor.min(self.cursor_idx), anchor.max(self.cursor_idx)))
+            Some((anchor.min(cursor), anchor.max(cursor)))
         }
     }
 
@@ -45,6 +55,7 @@ impl TextEditorState {
     }
 
     pub fn insert_text(&mut self, text: &str) {
+        self.clamp_bounds();
         if self.all_selected {
             self.buffer.clear();
             self.cursor_idx = 0;
@@ -69,6 +80,7 @@ impl TextEditorState {
     }
 
     pub fn delete_backwards(&mut self) -> bool {
+        self.clamp_bounds();
         if self.all_selected {
             self.buffer.clear();
             self.cursor_idx = 0;
@@ -103,6 +115,7 @@ impl TextEditorState {
     }
 
     pub fn delete_forwards(&mut self) -> bool {
+        self.clamp_bounds();
         if self.all_selected {
             self.buffer.clear();
             self.cursor_idx = 0;
@@ -137,6 +150,7 @@ impl TextEditorState {
     }
 
     pub fn move_cursor_left(&mut self, select: bool) -> bool {
+        self.clamp_bounds();
         if select {
             if self.select_anchor.is_none() {
                 self.select_anchor = Some(self.cursor_idx);
@@ -162,6 +176,7 @@ impl TextEditorState {
     }
 
     pub fn move_cursor_right(&mut self, select: bool) -> bool {
+        self.clamp_bounds();
         let char_count = self.buffer.chars().count();
         if select {
             if self.select_anchor.is_none() {
@@ -188,6 +203,7 @@ impl TextEditorState {
     }
 
     pub fn move_cursor_to_start(&mut self, select: bool) -> bool {
+        self.clamp_bounds();
         if select {
             if self.select_anchor.is_none() {
                 self.select_anchor = Some(self.cursor_idx);
@@ -201,6 +217,7 @@ impl TextEditorState {
     }
 
     pub fn move_cursor_to_end(&mut self, select: bool) -> bool {
+        self.clamp_bounds();
         let char_count = self.buffer.chars().count();
         if select {
             if self.select_anchor.is_none() {

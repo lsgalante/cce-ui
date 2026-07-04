@@ -94,6 +94,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.spinbox.corner_radius" => "spinbox_corner_radius",
                 "style.textbox.height" | "style.data.textbox.height" => "textbox_height",
                 "style.textbox.placeholder_text_color" | "style.data.textbox.placeholder_text_color" => "textbox_placeholder_text_color",
+                "style.textbox.background_color" | "style.data.textbox.background_color" => "textbox_background_color",
+                "style.textbox.background_edit_color" | "style.data.textbox.background_edit_color" => "textbox_background_edit_color",
                 "style.textbox.multiline.line_wrap" | "style.data.textbox.multiline.line_wrap" => "textbox_line_wrap",
                 "style.textbox.multiline.border_width" | "style.data.textbox.multiline.border_width" => "textbox_multiline_border_width",
                 "style.control.toggle.font" => "toggle_font",
