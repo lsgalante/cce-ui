@@ -1559,6 +1559,22 @@ mod tests {
             _ => false,
         });
         assert!(has_accel, "Tree should contain 'accel_profile' when matching on value 'flat'!");
+
+        // Collapse matching section when filtered
+        tree_list.search_box.text = "corner".to_string();
+        tree_list.collapsed_sections.insert("style.data.tree".to_string());
+        tree_list.rebuild_tree();
+        let has_corner = tree_list.items.iter().any(|item| match item {
+            TreeElement::Leaf { name, .. } => name == "corner_radius",
+            _ => false,
+        });
+        assert!(!has_corner, "Tree should NOT contain 'corner_radius' item when its parent section 'style.data.tree' is collapsed!");
+        
+        let has_collapsed_section = tree_list.items.iter().any(|item| match item {
+            TreeElement::Section { path, collapsed, .. } => path == "style.data.tree" && *collapsed,
+            _ => false,
+        });
+        assert!(has_collapsed_section, "Tree should contain 'style.data.tree' collapsed section!");
     }
 
     #[test]
