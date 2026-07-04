@@ -148,6 +148,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.font" => "graph_font",
                 "style.surface.graph.node.color" => "graph_node_color",
                 "style.surface.graph.node.font" => "graph_node_font",
+                "style.surface.graph.node.delete" => "graph_node_delete",
                 "style.surface.graph.node.selected_color" => "graph_node_selected_color",
                 "style.surface.graph.node.drag_color" => "graph_node_drag_color",
                 "style.surface.graph.node.corner_radius" => "graph_node_corner_radius",
@@ -2784,6 +2785,18 @@ pub fn set_graph_node_corner_radius(radius: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("graph_node_corner_radius", radius);
+    }
+}
+
+pub fn graph_node_delete() -> String {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_string("graph_node_delete").unwrap_or_else(|| "delete".to_string())
+}
+
+pub fn set_graph_node_delete(key: String) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_string("graph_node_delete", key);
     }
 }
 
