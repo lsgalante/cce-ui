@@ -82,6 +82,9 @@ impl Graph {
     pub fn grid_origin(&self) -> (f32, f32) {
         (self.grid_origin_x, self.grid_origin_y)
     }
+    pub fn grid_snap_enabled(&self) -> bool {
+        self.grid_snap_enabled
+    }
     pub fn set_cell_color(&mut self, color: [f32; 3]) {
         self.cell_color = color;
     }
