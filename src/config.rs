@@ -626,6 +626,39 @@ mod tests {
     }
 
     #[test]
+    fn test_brightness_annotations() {
+        let mut edp_map = serde_json::Map::new();
+        edp_map.insert("scale".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(2.0).unwrap()));
+        edp_map.insert("brightness_up".to_string(), serde_json::Value::String("XF86MonBrightnessUp".to_string()));
+        edp_map.insert("brightness_down".to_string(), serde_json::Value::String("XF86MonBrightnessDown".to_string()));
+        edp_map.insert("brightness_interval".to_string(), serde_json::Value::Number(serde_json::Number::from(10)));
+
+        let mut output_map = serde_json::Map::new();
+        output_map.insert("eDP-1".to_string(), serde_json::Value::Object(edp_map));
+
+        let mut root_map = serde_json::Map::new();
+        root_map.insert("output".to_string(), serde_json::Value::Object(output_map));
+
+        let root = serde_json::Value::Object(root_map);
+        let kdl_str = json_to_kdl_string(&root);
+        println!("Generated KDL for brightness:\n{}", kdl_str);
+
+        let doc_parsed = kdl_str.parse::<kdl::KdlDocument>().unwrap();
+        
+        let output_node = doc_parsed.nodes().iter().find(|n| n.name().value() == "output").unwrap();
+        let edp_node = output_node.children().unwrap().nodes().iter().find(|n| n.name().value() == "eDP-1").unwrap();
+        
+        let up_entry = edp_node.entries().iter().find(|e| e.name().map(|n| n.value()) == Some("brightness_up")).unwrap();
+        assert_eq!(up_entry.ty().unwrap().value(), "keybind");
+
+        let down_entry = edp_node.entries().iter().find(|e| e.name().map(|n| n.value()) == Some("brightness_down")).unwrap();
+        assert_eq!(down_entry.ty().unwrap().value(), "keybind");
+
+        let interval_entry = edp_node.entries().iter().find(|e| e.name().map(|n| n.value()) == Some("brightness_interval")).unwrap();
+        assert_eq!(interval_entry.ty().unwrap().value(), "i64");
+    }
+
+    #[test]
     fn test_backplate_menubar_statusbar_styling() {
         // Trigger load_colors_once first to initialize the Once block from the real config file
         let _ = crate::color::backplate_statusbar_blur();
@@ -738,7 +771,7 @@ pub fn value_to_kdl_with_annotations(
                                 let s_clean = s.trim_start_matches('#');
                                 let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
                                 (format!("\"{}\"", s), Some(ty.to_string()))
-                            } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name == "open_search" || prop_name == "delete" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") {
+                            } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name == "open_search" || prop_name == "delete" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") || prop_name == "brightness_up" || prop_name == "brightness_down" || prop_name.ends_with(".brightness_up") || prop_name.ends_with(".brightness_down") {
                                 (format!("\"{}\"", s), Some("keybind".to_string()))
                             } else {
                                 (format!("\"{}\"", s), None)
@@ -779,7 +812,7 @@ pub fn value_to_kdl_with_annotations(
                         let s_clean = s.trim_start_matches('#');
                         let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
                         (format!("\"{}\"", s), Some(ty.to_string()))
-                    } else if key == "key" || key == "keybind" || key == "shortcut" || key == "open_search" || key == "delete" || key.ends_with("_key") || key.ends_with(".key") || key.ends_with(".keybind") {
+                    } else if key == "key" || key == "keybind" || key == "shortcut" || key == "open_search" || key == "delete" || key.ends_with("_key") || key.ends_with(".key") || key.ends_with(".keybind") || key == "brightness_up" || key == "brightness_down" || key.ends_with(".brightness_up") || key.ends_with(".brightness_down") {
                         (format!("\"{}\"", s), Some("keybind".to_string()))
                     } else {
                         (format!("\"{}\"", s), None)
