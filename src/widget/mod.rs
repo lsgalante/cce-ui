@@ -443,6 +443,9 @@ pub trait Element {
     }
 
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible() {
+            return Vec::new();
+        }
         let mut quads = Vec::new();
         let (r1, r2, r3, r4) = self.rounded_corners();
         if r1 || r2 || r3 || r4 {
