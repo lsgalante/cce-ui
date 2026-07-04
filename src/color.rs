@@ -458,6 +458,15 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/control/scrollbar/thumb_color") {
         if let Ok(mut lock) = SCROLLBAR_THUMB_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = get_color("/style/surface/plate/color") {
+        if let Ok(mut lock) = PLATE_COLOR.write() { *lock = Some(c); }
+    }
+    if let Some(c) = get_color("/style/surface/plate/border_color") {
+        if let Ok(mut lock) = PLATE_BORDER_COLOR.write() { *lock = Some(c); }
+    }
+    if let Some(t) = val.pointer("/style/surface/plate/border_thickness").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = PLATE_BORDER_THICKNESS.write() { *lock = t as f32; }
+    }
 }
 
 fn load_colors_once() {
@@ -1132,6 +1141,52 @@ pub fn backplate_statusbar_blur() -> bool {
 }
 pub fn set_backplate_statusbar_blur(b: bool) {
     if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = b; }
+}
+
+static PLATE_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.15, 0.15, 0.2, 0.95]));
+static PLATE_BORDER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.3, 0.3, 0.4, 1.0]));
+static PLATE_BORDER_THICKNESS: RwLock<f32> = RwLock::new(1.0);
+
+pub fn plate_color() -> Option<[f32; 4]> {
+    load_colors_once();
+    if let Ok(lock) = PLATE_COLOR.read() {
+        return *lock;
+    }
+    None
+}
+
+pub fn set_plate_color(c: Option<[f32; 4]>) {
+    if let Ok(mut lock) = PLATE_COLOR.write() {
+        *lock = c;
+    }
+}
+
+pub fn plate_border_color() -> Option<[f32; 4]> {
+    load_colors_once();
+    if let Ok(lock) = PLATE_BORDER_COLOR.read() {
+        return *lock;
+    }
+    None
+}
+
+pub fn set_plate_border_color(c: Option<[f32; 4]>) {
+    if let Ok(mut lock) = PLATE_BORDER_COLOR.write() {
+        *lock = c;
+    }
+}
+
+pub fn plate_border_thickness() -> f32 {
+    load_colors_once();
+    if let Ok(lock) = PLATE_BORDER_THICKNESS.read() {
+        return *lock;
+    }
+    1.0
+}
+
+pub fn set_plate_border_thickness(t: f32) {
+    if let Ok(mut lock) = PLATE_BORDER_THICKNESS.write() {
+        *lock = t;
+    }
 }
 
 #[cfg(test)]

@@ -117,8 +117,12 @@ impl Element for Plate {
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         if self.selected {
             Some((colors::active_theme().primary_accent, 1.5))
+        } else if let Some(border) = self.solid_border {
+            Some(border)
+        } else if let Some(bc) = colors::plate_border_color() {
+            Some((bc, colors::plate_border_thickness()))
         } else {
-            self.solid_border
+            None
         }
     }
 
@@ -145,6 +149,8 @@ impl Element for Plate {
 
     fn color(&self) -> [f32; 4] {
         let mut c = if let Some(c) = self.color {
+            c
+        } else if let Some(c) = colors::plate_color() {
             c
         } else if self.dragging {
             let base = colors::page_low_color();
