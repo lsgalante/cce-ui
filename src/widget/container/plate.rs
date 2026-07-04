@@ -166,7 +166,8 @@ impl Element for Plate {
         c[3] *= crate::layout::plate_opacity();
         c[3] *= self.network_opacity;
 
-        if self.blur {
+        let use_blur = self.blur && colors::plate_blur();
+        if use_blur {
             c[3] = -c[3].abs();
         }
         c

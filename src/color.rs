@@ -467,6 +467,11 @@ fn parse_and_set_colors(content: &str) {
     if let Some(t) = val.pointer("/style/surface/plate/border_thickness").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = PLATE_BORDER_THICKNESS.write() { *lock = t as f32; }
     }
+    if let Some(blur) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_bool()) {
+        if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur; }
+    } else if let Some(blur_val) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur_val > 0.001; }
+    }
 }
 
 fn load_colors_once() {
@@ -1189,6 +1194,22 @@ pub fn set_plate_border_thickness(t: f32) {
     }
 }
 
+static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
+
+pub fn plate_blur() -> bool {
+    load_colors_once();
+    if let Ok(lock) = PLATE_BLUR.read() {
+        return *lock;
+    }
+    false
+}
+
+pub fn set_plate_blur(b: bool) {
+    if let Ok(mut lock) = PLATE_BLUR.write() {
+        *lock = b;
+    }
+}
+
 #[cfg(test)]
 mod color_tests {
     use super::*;
@@ -1206,6 +1227,10 @@ mod color_tests {
         }
         println!("DROPDOWN COLOR GETTER: {:?}", dropdown_background_color());
         println!("LIST FONT COLOR GETTER: {:?}", list_font_color());
+        println!("PLATE COLOR: {:?}", plate_color());
+        println!("PLATE BORDER COLOR: {:?}", plate_border_color());
+        println!("PLATE BORDER THICKNESS: {:?}", plate_border_thickness());
+        println!("PLATE BLUR: {:?}", plate_blur());
     }
 }
 

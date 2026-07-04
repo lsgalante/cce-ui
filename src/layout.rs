@@ -165,6 +165,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.plate.color" => "plate_color",
                 "style.surface.plate.border_color" => "plate_border_color",
                 "style.surface.plate.border_thickness" => "plate_border_thickness",
+                "style.surface.plate.blur" => "plate_blur",
                 
                 other => {
                     if let Some(rest) = other.strip_prefix("layout.") {
