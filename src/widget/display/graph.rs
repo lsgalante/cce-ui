@@ -308,10 +308,23 @@ impl Element for Graph {
         }
 
         let node_radius = crate::layout::graph_node_corner_radius();
+        let widget_radius = self.corner_radius();
+        let (w_tl, w_tr, w_br, w_bl) = self.rounded_corners();
+        let (wx, wy, ww, wh) = self.rect();
+
         for (qx, qy, qw, qh, qc) in self.extra_quads() {
             let is_node = self.is_node_rect(qx, qy, qw, qh);
-            let r = if is_node { node_radius } else { 0.0 };
-            rounded.push((qx, qy, qw, qh, r, qc, (is_node, is_node, is_node, is_node)));
+            if is_node {
+                rounded.push((qx, qy, qw, qh, node_radius, qc, (true, true, true, true)));
+            } else {
+                let tl = w_tl && qx <= wx + 1.5 && qy <= wy + 1.5;
+                let tr = w_tr && qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5;
+                let br = w_br && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5;
+                let bl = w_bl && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5;
+
+                let r = if tl || tr || br || bl { widget_radius } else { 0.0 };
+                rounded.push((qx, qy, qw, qh, r, qc, (tl, tr, br, bl)));
+            }
         }
 
         rounded
