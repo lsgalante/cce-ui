@@ -630,6 +630,10 @@ impl Element for Ramp {
         colors::ramp_background_color()
     }
     
+    fn preferred_height(&self) -> Option<f32> {
+        Some(150.0)
+    }
+    
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.x = x;
         self.base.y = y;
