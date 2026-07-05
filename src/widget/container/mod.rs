@@ -24,7 +24,7 @@ pub mod hbox;
 
 pub use container::Container;
 pub use control_panel::ControlPanel;
-pub use container_layout::{ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout, ColumnsLayout, MosaicLayout, ReverseMosaicLayout};
+pub use container_layout::{ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout, ColumnsLayout, MosaicLayout, ReverseMosaicLayout};
 pub use section_container::SectionContainer;
 pub use header::Header;
 pub use content_bg::ContentBg;

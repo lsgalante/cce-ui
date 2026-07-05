@@ -258,7 +258,7 @@ impl Element for Button {
                         if self.selected { [230, 230, 242] }
                         else { [178, 178, 191] }
                     }
-                    _ => [0xcc, 0xcc, 0xd4]
+                    _ => colors::control_label_color_u8()
                 }
             };
             let justify = if self.kind == ButtonKind::ListRow {
@@ -289,10 +289,37 @@ impl Element for Button {
         self.selected = selected;
     }
 
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            let radius = self.corner_radius();
+            let c = self.color();
+            if let Some(bc) = colors::button_border_color() {
+                quads.push((self.base.x, self.base.y, self.base.w, self.base.h, radius, bc, (r1, r2, r3, r4)));
+                quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, (radius - 1.0).max(0.0), c, (r1, r2, r3, r4)));
+            } else {
+                if c[3].abs() > 0.001 {
+                    quads.push((self.base.x, self.base.y, self.base.w, self.base.h, radius, c, (r1, r2, r3, r4)));
+                }
+            }
+        }
+        for &child_ptr in &self.children(ctx) {
+            let widget = unsafe { &*child_ptr };
+            quads.extend(widget.all_rounded_quads(ctx));
+        }
+        quads
+    }
+
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
         if self.corner_radius() <= 0.0 {
-            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, self.color()));
+            if let Some(bc) = colors::button_border_color() {
+                quads.push((self.base.x, self.base.y, self.base.w, self.base.h, bc));
+                quads.push((self.base.x + 1.0, self.base.y + 1.0, self.base.w - 2.0, self.base.h - 2.0, self.color()));
+            } else {
+                quads.push((self.base.x, self.base.y, self.base.w, self.base.h, self.color()));
+            }
         }
         if let Some(ref svg) = self.svg {
             let svg_x = self.base.x + (self.base.w - svg.w) / 2.0;
@@ -319,7 +346,7 @@ impl Element for Button {
         if self.kind == ButtonKind::ListRow {
             Some(crate::layout::list_font())
         } else {
-            Some(crate::layout::button_font())
+            Some(crate::layout::control_label_font())
         }
     }
 

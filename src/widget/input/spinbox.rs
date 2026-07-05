@@ -144,7 +144,7 @@ impl Element for Spinbox {
 
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
     fn value(&self) -> i32 { self.value }
-    fn widget_font(&self) -> Option<String> { Some(crate::layout::spinbox_font()) }
+    fn widget_font(&self) -> Option<String> { Some(crate::layout::control_label_font_detached()) }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let was = self.base.hovered;
@@ -160,11 +160,14 @@ impl Element for Spinbox {
         let p = crate::layout::spinbox_button_padding();
         let btn_y = self.base.y + top + p;
         let btn_h = (visual_h - 2.0 * p).max(0.0);
-        let split_dec = self.base.x + self.base.w * 0.55;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+        let split_dec = x + w * 0.55;
         
         let in_y = py >= btn_y && py < btn_y + btn_h;
-        let hd = in_y && px >= split_dec + p && px < self.base.x + self.base.w * 0.775;
-        let hi = in_y && px >= self.base.x + self.base.w * 0.775 && px < self.base.x + self.base.w - p;
+        let hd = in_y && px >= split_dec + p && px < x + w * 0.775;
+        let hi = in_y && px >= x + w * 0.775 && px < x + w - p;
         let changed = hd != self.hover_dec || hi != self.hover_inc;
         self.hover_dec = hd;
         self.hover_inc = hi;
@@ -187,17 +190,20 @@ impl Element for Spinbox {
                 let p = crate::layout::spinbox_button_padding();
                 let btn_y = self.base.y + top + p;
                 let btn_h = (visual_h - 2.0 * p).max(0.0);
-                let split_dec = self.base.x + self.base.w * 0.55;
+                let label_x = self.label_x_offset();
+                let x = self.base.x + label_x;
+                let w = self.base.w - label_x;
+                let split_dec = x + w * 0.55;
                 
                 let in_y = py >= btn_y && py < btn_y + btn_h;
-                if in_y && px >= split_dec + p && px < self.base.x + self.base.w * 0.775 {
+                if in_y && px >= split_dec + p && px < x + w * 0.775 {
                     let old_val = self.value;
                     self.value = (self.value - self.step).max(self.min);
                     if self.value != old_val {
                         self.just_changed = true;
                     }
                     true
-                } else if in_y && px >= self.base.x + self.base.w * 0.775 && px < self.base.x + self.base.w - p {
+                } else if in_y && px >= x + w * 0.775 && px < x + w - p {
                     let old_val = self.value;
                     self.value = (self.value + self.step).min(self.max);
                     if self.value != old_val {
@@ -213,7 +219,7 @@ impl Element for Spinbox {
                         self.edit_buffer = self.value.to_string();
                     }
                     let char_width = 8.4;
-                    let click_idx = (((px - (self.base.x + 4.0)) / char_width).round() as isize)
+                    let click_idx = (((px - (x + 4.0)) / char_width).round() as isize)
                         .max(0)
                         .min(self.edit_buffer.chars().count() as isize) as usize;
                     self.cursor_idx = click_idx;
@@ -350,10 +356,13 @@ impl Element for Spinbox {
 
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
-        let display_w = self.base.w * 0.55;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+        let display_w = w * 0.55;
 
         let p = crate::layout::spinbox_button_padding();
-        let split_dec = self.base.x + display_w;
+        let split_dec = x + display_w;
         let inc_col = if self.hover_inc { colors::spinbox_button_hover() } else { colors::spinbox_button() };
         let dec_col = if self.hover_dec { colors::spinbox_button_hover() } else { colors::spinbox_button() };
         
@@ -363,11 +372,11 @@ impl Element for Spinbox {
             colors::spinbox_display()
         };
         
-        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, display_bg));
+        quads.push((x, self.base.y + top, w, visual_h, display_bg));
         
         let btn_y = self.base.y + top + p;
         let btn_h = (visual_h - 2.0 * p).max(0.0);
-        let pair_w = (self.base.w * 0.45 - 2.0 * p).max(0.0);
+        let pair_w = (w * 0.45 - 2.0 * p).max(0.0);
         let btn_w_padded = pair_w / 2.0;
         
         if btn_h > 0.0 && btn_w_padded > 0.0 {
@@ -377,14 +386,14 @@ impl Element for Spinbox {
         
         if self.editing {
             let border_color = [0.20, 0.50, 0.85, 1.0];
-            quads.push((self.base.x, self.base.y + top, self.base.w, 1.0, border_color));
-            quads.push((self.base.x, self.base.y + top + visual_h - 1.0, self.base.w, 1.0, border_color));
-            quads.push((self.base.x, self.base.y + top, 1.0, visual_h, border_color));
-            quads.push((self.base.x + self.base.w - 1.0, self.base.y + top, 1.0, visual_h, border_color));
+            quads.push((x, self.base.y + top, w, 1.0, border_color));
+            quads.push((x, self.base.y + top + visual_h - 1.0, w, 1.0, border_color));
+            quads.push((x, self.base.y + top, 1.0, visual_h, border_color));
+            quads.push((x + w - 1.0, self.base.y + top, 1.0, visual_h, border_color));
 
             let char_width = 8.4;
-            let cursor_x = self.base.x + 4.0 + (self.cursor_idx as f32 * char_width);
-            let max_cursor_x = self.base.x + display_w - 4.0;
+            let cursor_x = x + 4.0 + (self.cursor_idx as f32 * char_width);
+            let max_cursor_x = x + display_w - 4.0;
             let final_cursor_x = cursor_x.min(max_cursor_x);
             let cursor_y = self.base.y + top + (visual_h - 14.0) / 2.0;
             quads.push((final_cursor_x, cursor_y, 1.5, 14.0, [0.80, 0.80, 0.85, 1.0]));
@@ -411,7 +420,7 @@ impl Element for Spinbox {
             colors::spinbox_display()
         };
 
-        let display_w = self.base.w * 0.55;
+
         let border_color = if self.editing {
             [0.20, 0.50, 0.85, 1.0]
         } else if self.base.hovered {
@@ -420,17 +429,22 @@ impl Element for Spinbox {
             [0.18, 0.18, 0.24, 1.0]
         };
 
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+        let display_w = w * 0.55;
+
         // Draw display border (outer) and background (inner)
-        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, border_color, (r1, r2, r3, r4)));
-        quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, radius - 1.0, display_bg, (r1, r2, r3, r4)));
+        quads.push((x, self.base.y + top, w, visual_h, radius, border_color, (r1, r2, r3, r4)));
+        quads.push((x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0, radius - 1.0, display_bg, (r1, r2, r3, r4)));
 
         // Increment/decrement buttons
         let p = crate::layout::spinbox_button_padding();
         let btn_y = self.base.y + top + p;
         let btn_h = (visual_h - 2.0 * p).max(0.0);
-        let pair_w = (self.base.w * 0.45 - 2.0 * p).max(0.0);
+        let pair_w = (w * 0.45 - 2.0 * p).max(0.0);
         let btn_w_padded = pair_w / 2.0;
-        let split_dec = self.base.x + display_w;
+        let split_dec = x + display_w;
         let inc_col = if self.hover_inc { colors::spinbox_button_hover() } else { colors::spinbox_button() };
         let dec_col = if self.hover_dec { colors::spinbox_button_hover() } else { colors::spinbox_button() };
 
@@ -444,8 +458,8 @@ impl Element for Spinbox {
         // Draw cursor if editing and rounded
         if self.editing {
             let char_width = 8.4;
-            let cursor_x = self.base.x + 4.0 + (self.cursor_idx as f32 * char_width);
-            let max_cursor_x = self.base.x + display_w - 4.0;
+            let cursor_x = x + 4.0 + (self.cursor_idx as f32 * char_width);
+            let max_cursor_x = x + display_w - 4.0;
             let final_cursor_x = cursor_x.min(max_cursor_x);
             let cursor_y = self.base.y + top + (visual_h - 14.0) / 2.0;
             quads.push((final_cursor_x, cursor_y, 1.5, 14.0, 0.0, [0.80, 0.80, 0.85, 1.0], (false, false, false, false)));
@@ -469,14 +483,16 @@ impl Element for Spinbox {
         };
         
         let top = self.base.label_offset();
-        let _visual_h = self.base.h - top;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         
         let tc = colors::spinbox_text_color();
         let text_color_u8 = [(tc[0]*255.0) as u8, (tc[1]*255.0) as u8, (tc[2]*255.0) as u8];
 
         labels.push(TextLabel {
             text: value_text,
-            x: self.base.x + 4.0,
+            x: x + 4.0,
             y: crate::layout::align_text_y(self.base.y, self.base.h, 14.0, top),
             font_size: 14.0,
             color: text_color_u8,
@@ -484,7 +500,7 @@ impl Element for Spinbox {
         if let Some(ref unit) = self.unit {
             labels.push(TextLabel {
                 text: unit.clone(),
-                x: self.base.x + 4.0 + 36.0,
+                x: x + 4.0 + 36.0,
                 y: crate::layout::align_text_y(self.base.y, self.base.h, 11.0, top),
                 font_size: 11.0,
                 color: [0x73, 0x73, 0x7a],
@@ -492,8 +508,8 @@ impl Element for Spinbox {
         }
 
         let p = crate::layout::spinbox_button_padding();
-        let split_dec = self.base.x + self.base.w * 0.55;
-        let pair_w = (self.base.w * 0.45 - 2.0 * p).max(0.0);
+        let split_dec = x + w * 0.55;
+        let pair_w = (w * 0.45 - 2.0 * p).max(0.0);
         let btn_w_padded = pair_w / 2.0;
 
         if btn_w_padded > 0.0 {

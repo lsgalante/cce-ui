@@ -15,6 +15,7 @@ pub struct ButtonStrip {
     pub tab_quads_cache: std::collections::HashMap<String, Vec<(f32, f32, f32, f32, [f32; 4])>>,
     pub last_padding: Option<f32>,
     pub last_font: Option<String>,
+    pub last_scale: Option<f32>,
 }
 
 impl ButtonStrip {
@@ -31,6 +32,7 @@ impl ButtonStrip {
             tab_quads_cache: std::collections::HashMap::new(),
             last_padding: None,
             last_font: None,
+            last_scale: None,
         }
     }
 
@@ -94,6 +96,7 @@ impl ButtonStrip {
 
         let (font_fam, font_size) = crate::layout::button_strip_font_parsed();
         let scale = crate::scale::scale_factor().max(1.0);
+        self.last_scale = Some(scale);
 
         for (i, page_name) in self.buttons.iter().enumerate() {
             let color = if self.selected == Some(i) {
@@ -262,7 +265,11 @@ impl Element for ButtonStrip {
         let mut changed = false;
         let current_padding = crate::layout::button_padding();
         let current_font = crate::layout::button_strip_font();
-        if self.last_padding != Some(current_padding) || self.last_font.as_ref() != Some(&current_font) {
+        let current_scale = crate::scale::scale_factor().max(1.0);
+        if self.last_padding != Some(current_padding)
+            || self.last_font.as_ref() != Some(&current_font)
+            || self.last_scale != Some(current_scale)
+        {
             self.generate_rotated_labels();
             changed = true;
         }

@@ -121,7 +121,7 @@ impl Element for Slider {
     }
 
     fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::slider_font())
+        Some(crate::layout::control_label_font_detached())
     }
 
     fn get_value_string(&self) -> Option<String> {
@@ -183,13 +183,16 @@ impl Element for Slider {
     fn drag_update(&mut self, px: f32, _py: f32) -> bool {
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         let (track_x, track_w) = if self.show_readout {
             let readout_w = 60.0;
             let gap = 8.0;
-            let tw = (self.base.w - readout_w - gap).max(10.0);
-            (self.base.x, tw)
+            let tw = (w - readout_w - gap).max(10.0);
+            (x, tw)
         } else {
-            (self.base.x, self.base.w)
+            (x, w)
         };
         let thumb_size = visual_h * 0.9;
         let range = track_w - thumb_size;
@@ -213,13 +216,16 @@ impl Element for Slider {
         self.dragging = true;
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         let (track_x, track_w) = if self.show_readout {
             let readout_w = 60.0;
             let gap = 8.0;
-            let tw = (self.base.w - readout_w - gap).max(10.0);
-            (self.base.x, tw)
+            let tw = (w - readout_w - gap).max(10.0);
+            (x, tw)
         } else {
-            (self.base.x, self.base.w)
+            (x, w)
         };
         let thumb_size = visual_h * 0.9;
         let thumb_x = track_x + self.value * (track_w - thumb_size);
@@ -273,10 +279,13 @@ impl Element for Slider {
         
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         
         if self.show_readout {
             let readout_w = 60.0;
-            let rx = self.base.x + self.base.w - readout_w;
+            let rx = x + w - readout_w;
             
             if px >= rx && px <= rx + readout_w && py >= self.base.y + top && py <= self.base.y + top + visual_h {
                 if state == ElementState::Pressed {
@@ -296,10 +305,10 @@ impl Element for Slider {
                 let (track_x, track_w) = if self.show_readout {
                     let readout_w = 60.0;
                     let gap = 8.0;
-                    let tw = (self.base.w - readout_w - gap).max(10.0);
-                    (self.base.x, tw)
+                    let tw = (w - readout_w - gap).max(10.0);
+                    (x, tw)
                 } else {
-                    (self.base.x, self.base.w)
+                    (x, w)
                 };
                 let thumb_size = visual_h * 0.9;
                 let thumb_x = track_x + self.value * (track_w - thumb_size);
@@ -390,15 +399,18 @@ impl Element for Slider {
         let mut quads = Vec::new();
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         
         let (track_x, track_w) = if self.show_readout {
             let readout_w = 60.0;
             let gap = 8.0;
-            let tw = (self.base.w - readout_w - gap).max(10.0);
+            let tw = (w - readout_w - gap).max(10.0);
             
-            quads.push((self.base.x, self.base.y + top, tw, visual_h, colors::slider_track()));
+            quads.push((x, self.base.y + top, tw, visual_h, colors::slider_track()));
             
-            let rx = self.base.x + self.base.w - readout_w;
+            let rx = x + w - readout_w;
             let bg_color = if self.editing {
                 [0.06, 0.10, 0.18, 1.0]
             } else {
@@ -415,19 +427,25 @@ impl Element for Slider {
                 quads.push((rx + readout_w - border_t, self.base.y + top, border_t, visual_h, border_color));
             }
 
-            (self.base.x, tw)
+            (x, tw)
         } else {
-            quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, colors::slider_track()));
-            (self.base.x, self.base.w)
+            quads.push((x, self.base.y + top, w, visual_h, colors::slider_track()));
+            (x, w)
         };
 
         let thumb_size = visual_h * 0.9;
         let thumb_x = track_x + self.value * (track_w - thumb_size);
+
+        if let Some(fill_color) = colors::slider_fill() {
+            let fill_w = (thumb_x + thumb_size / 2.0 - track_x).max(0.0).min(track_w);
+            quads.push((track_x, self.base.y + top, fill_w, visual_h, fill_color));
+        }
+
         let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
         let thumb_color = if self.dragging {
-            colors::SLIDER_THUMB_DRAG
+            colors::slider_thumb_drag()
         } else {
-            colors::SLIDER_THUMB
+            colors::slider_thumb()
         };
         quads.push((thumb_x, thumb_y, thumb_size, thumb_size, thumb_color));
         
@@ -444,15 +462,18 @@ impl Element for Slider {
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         let radius = self.corner_radius();
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         
         let (track_x, track_w) = if self.show_readout {
             let readout_w = 60.0;
             let gap = 8.0;
-            let tw = (self.base.w - readout_w - gap).max(10.0);
+            let tw = (w - readout_w - gap).max(10.0);
             
-            quads.push((self.base.x, self.base.y + top, tw, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
+            quads.push((x, self.base.y + top, tw, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
             
-            let rx = self.base.x + self.base.w - readout_w;
+            let rx = x + w - readout_w;
             let bg_color = if self.editing {
                 [0.06, 0.10, 0.18, 1.0]
             } else {
@@ -468,19 +489,25 @@ impl Element for Slider {
                 quads.push((rx, self.base.y + top, readout_w, visual_h, radius, bg_color, (r1, r2, r3, r4)));
             }
 
-            (self.base.x, tw)
+            (x, tw)
         } else {
-            quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
-            (self.base.x, self.base.w)
+            quads.push((x, self.base.y + top, w, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
+            (x, w)
         };
 
         let thumb_size = visual_h * 0.9;
         let thumb_x = track_x + self.value * (track_w - thumb_size);
+
+        if let Some(fill_color) = colors::slider_fill() {
+            let fill_w = (thumb_x + thumb_size / 2.0 - track_x).max(0.0).min(track_w);
+            quads.push((track_x, self.base.y + top, fill_w, visual_h, radius.min(visual_h / 2.0), fill_color, (true, true, true, true)));
+        }
+
         let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
         let thumb_color = if self.dragging {
-            colors::SLIDER_THUMB_DRAG
+            colors::slider_thumb_drag()
         } else {
-            colors::SLIDER_THUMB
+            colors::slider_thumb()
         };
         quads.push((thumb_x, thumb_y, thumb_size, thumb_size, thumb_size / 2.0, thumb_color, (true, true, true, true)));
         
@@ -491,6 +518,9 @@ impl Element for Slider {
         let mut labels = Vec::new();
         let top = self.base.label_offset();
         let _visual_h = self.base.h - top;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         
         if let Some(lbl) = self.control_label() {
             labels.push(lbl);
@@ -498,7 +528,7 @@ impl Element for Slider {
         
         if self.show_readout {
             let readout_w = 60.0;
-            let rx = self.base.x + self.base.w - readout_w;
+            let rx = x + w - readout_w;
             let ry = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
             
             let text = if self.editing {
@@ -597,7 +627,7 @@ impl Element for RangeSlider {
     }
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        let r = crate::layout::slider_corner_radius();
+        let r = crate::layout::rangeslider_corner_radius();
         if r > 0.0 {
             (true, true, true, true)
         } else {
@@ -606,7 +636,7 @@ impl Element for RangeSlider {
     }
 
     fn corner_radius(&self) -> f32 {
-        crate::layout::slider_corner_radius()
+        crate::layout::rangeslider_corner_radius()
     }
 
     fn draggable(&self) -> bool { true }
@@ -616,11 +646,14 @@ impl Element for RangeSlider {
         let Some(active) = self.active_thumb else { return false; };
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         let thumb_size = visual_h * 0.9;
-        let range = self.base.w - thumb_size;
+        let range = w - thumb_size;
         if range <= 0.0 { return false; }
         
-        let new_val = ((px - self.drag_offset - self.base.x) / range).clamp(0.0, 1.0);
+        let new_val = ((px - self.drag_offset - x) / range).clamp(0.0, 1.0);
         match active {
             ActiveThumb::Low => {
                 let constrained = new_val.min(self.value_high);
@@ -643,10 +676,13 @@ impl Element for RangeSlider {
     fn drag_begin(&mut self, px: f32, _py: f32) {
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
         let thumb_size = visual_h * 0.9;
-        let range = self.base.w - thumb_size;
-        let thumb_low_x = self.base.x + self.value_low * range;
-        let thumb_high_x = self.base.x + self.value_high * range;
+        let range = w - thumb_size;
+        let thumb_low_x = x + self.value_low * range;
+        let thumb_high_x = x + self.value_high * range;
         let center_low = thumb_low_x + thumb_size / 2.0;
         let center_high = thumb_high_x + thumb_size / 2.0;
 
@@ -744,9 +780,12 @@ impl Element for RangeSlider {
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         let thumb_size = visual_h * 0.9;
-        let range = self.base.w - thumb_size;
-        let thumb_low_x = self.base.x + self.value_low * range;
-        let thumb_high_x = self.base.x + self.value_high * range;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+        let range = w - thumb_size;
+        let thumb_low_x = x + self.value_low * range;
+        let thumb_high_x = x + self.value_high * range;
         
         let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
         
@@ -757,19 +796,19 @@ impl Element for RangeSlider {
         let highlight_h = visual_h * 0.3;
         
         let low_color = if self.active_thumb == Some(ActiveThumb::Low) {
-            colors::SLIDER_THUMB_DRAG
+            colors::rangeslider_thumb_drag()
         } else {
-            colors::SLIDER_THUMB
+            colors::rangeslider_thumb()
         };
 
         let high_color = if self.active_thumb == Some(ActiveThumb::High) {
-            colors::SLIDER_THUMB_DRAG
+            colors::rangeslider_thumb_drag()
         } else {
-            colors::SLIDER_THUMB
+            colors::rangeslider_thumb()
         };
 
         vec![
-            (self.base.x, self.base.y + top, self.base.w, visual_h, colors::rangeslider_track()),
+            (x, self.base.y + top, w, visual_h, colors::rangeslider_track()),
             (highlight_x, highlight_y, highlight_w, highlight_h, colors::rangeslider_fill()),
             (thumb_low_x, thumb_y, thumb_size, thumb_size, low_color),
             (thumb_high_x, thumb_y, thumb_size, thumb_size, high_color),
@@ -788,9 +827,12 @@ impl Element for RangeSlider {
         let radius = self.corner_radius();
         
         let thumb_size = visual_h * 0.9;
-        let range = self.base.w - thumb_size;
-        let thumb_low_x = self.base.x + self.value_low * range;
-        let thumb_high_x = self.base.x + self.value_high * range;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+        let range = w - thumb_size;
+        let thumb_low_x = x + self.value_low * range;
+        let thumb_high_x = x + self.value_high * range;
         
         let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
         
@@ -801,19 +843,19 @@ impl Element for RangeSlider {
         let highlight_h = visual_h * 0.3;
         
         let low_color = if self.active_thumb == Some(ActiveThumb::Low) {
-            colors::SLIDER_THUMB_DRAG
+            colors::rangeslider_thumb_drag()
         } else {
-            colors::SLIDER_THUMB
+            colors::rangeslider_thumb()
         };
 
         let high_color = if self.active_thumb == Some(ActiveThumb::High) {
-            colors::SLIDER_THUMB_DRAG
+            colors::rangeslider_thumb_drag()
         } else {
-            colors::SLIDER_THUMB
+            colors::rangeslider_thumb()
         };
         
         // Track background
-        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, colors::rangeslider_track(), (r1, r2, r3, r4)));
+        quads.push((x, self.base.y + top, w, visual_h, radius, colors::rangeslider_track(), (r1, r2, r3, r4)));
         // Progress fill (highlight track)
         quads.push((highlight_x, highlight_y, highlight_w, highlight_h, radius.min(highlight_h / 2.0), colors::rangeslider_fill(), (true, true, true, true)));
         // Low thumb

@@ -71,7 +71,7 @@ impl Dropdown {
 
     pub fn popover_width(&self) -> f32 {
         let mut w = self.base.w;
-        let font_setting = crate::layout::dropdown_font();
+        let font_setting = crate::layout::control_label_font_detached();
         let (font_family, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
         for opt in &self.options {
@@ -88,8 +88,9 @@ impl Dropdown {
         let rh = self.options.len() as f32 * 24.0;
         
         let open_upward = self.open_upward.unwrap_or_else(|| self.base.y > 400.0);
+        let label_x = self.label_x_offset();
         
-        let mut rx = self.base.x;
+        let mut rx = self.base.x + label_x;
         let mut ry = if open_upward {
             let label_offset = self.base.label_offset();
             self.base.y + label_offset - rh
@@ -297,16 +298,21 @@ impl Element for Dropdown {
             let border_color = if self.open {
                 [0.30, 0.50, 0.32, 1.0]
             } else if self.base.hovered {
-                [0.25, 0.25, 0.35, 1.0]
+                let bc = colors::dropdown_border_color();
+                [(bc[0] + 0.15).min(1.0), (bc[1] + 0.15).min(1.0), (bc[2] + 0.15).min(1.0), bc[3]]
             } else {
-                [0.18, 0.18, 0.24, 1.0]
+                colors::dropdown_border_color()
             };
 
+            let label_x = self.label_x_offset();
+            let x = self.base.x + label_x;
+            let w = self.base.w - label_x;
+
             // Draw border
-            quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, border_color, (r1, r2, r3, r4)));
+            quads.push((x, self.base.y + top, w, visual_h, radius, border_color, (r1, r2, r3, r4)));
             // Draw background (slightly inset to show border)
             let inner_radius = (radius - 1.0).max(0.0);
-            quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, inner_radius, bg_color, (r1, r2, r3, r4)));
+            quads.push((x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0, inner_radius, bg_color, (r1, r2, r3, r4)));
         }
         for &child_ptr in &self.children(ctx) {
             let widget = unsafe { &*child_ptr };
@@ -316,7 +322,7 @@ impl Element for Dropdown {
     }
 
     fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::dropdown_font())
+        Some(crate::layout::control_label_font_detached())
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
@@ -497,13 +503,18 @@ impl Element for Dropdown {
         let border_color = if self.open {
             [0.30, 0.50, 0.32, 1.0]
         } else if self.base.hovered {
-            [0.25, 0.25, 0.35, 1.0]
+            let bc = colors::dropdown_border_color();
+            [(bc[0] + 0.15).min(1.0), (bc[1] + 0.15).min(1.0), (bc[2] + 0.15).min(1.0), bc[3]]
         } else {
-            [0.18, 0.18, 0.24, 1.0]
+            colors::dropdown_border_color()
         };
 
-        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, border_color));
-        quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, bg_color));
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+
+        quads.push((x, self.base.y + top, w, visual_h, border_color));
+        quads.push((x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0, bg_color));
 
         quads
     }
@@ -523,12 +534,20 @@ impl Element for Dropdown {
             self.options.get(self.selected).cloned().unwrap_or_default()
         };
 
-        let font_family = crate::layout::dropdown_font_parsed().0;
-        let start_x = self.base.x + 8.0;
-        let right_limit = self.base.x + self.base.w - 28.0; // 10px margin before the arrow
+        let font_family = crate::layout::control_label_font_detached_parsed().0;
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+        let start_x = x + 8.0;
+        let right_limit = x + w - 28.0; // 10px margin before the arrow
         let fade_start_x = (right_limit - 24.0).max(start_x); // Fade out over the last 24px
         let text_y = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
-        let default_color = [0xdd, 0xdd, 0xe2];
+        let tc = colors::dropdown_text_color();
+        let default_color = [
+            (colors::linear_to_srgb(tc[0]) * 255.0).round() as u8,
+            (colors::linear_to_srgb(tc[1]) * 255.0).round() as u8,
+            (colors::linear_to_srgb(tc[2]) * 255.0).round() as u8,
+        ];
         let bg_color = colors::dropdown_background_color();
         let mut parent_color = colors::page_color();
         if let Some(parent_ptr) = self.parent {
@@ -643,9 +662,13 @@ impl Element for Dropdown {
             }
         }
 
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+
         labels.push(TextLabel {
             text: "▼".to_string(),
-            x: self.base.x + self.base.w - 18.0,
+            x: x + w - 18.0,
             y: crate::layout::align_text_y(self.base.y, self.base.h, 10.0, top),
             font_size: 10.0,
             color: [0x83, 0x83, 0x8a],
@@ -835,8 +858,14 @@ mod tests {
         let first_char = &labels[0];
         let last_char = &labels[last_char_idx];
         
-        assert_eq!(first_char.color, [0xdd, 0xdd, 0xe2]);
-        assert_ne!(last_char.color, [0xdd, 0xdd, 0xe2]); // color has shifted towards background
+        let tc = colors::dropdown_text_color();
+        let expected_color = [
+            (colors::linear_to_srgb(tc[0]) * 255.0).round() as u8,
+            (colors::linear_to_srgb(tc[1]) * 255.0).round() as u8,
+            (colors::linear_to_srgb(tc[2]) * 255.0).round() as u8,
+        ];
+        assert_eq!(first_char.color, expected_color);
+        assert_ne!(last_char.color, expected_color); // color has shifted towards background
     }
 }
 

@@ -756,8 +756,12 @@ impl Widget {
     }
 
     pub fn label_offset(&self) -> f32 {
+        if crate::layout::control_label_layout() == "side" {
+            return 0.0;
+        }
         if self.label.is_some() {
-            12.0 + crate::layout::label_margin()
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            font_size + crate::layout::control_label_margin()
         } else {
             0.0
         }

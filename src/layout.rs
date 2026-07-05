@@ -67,30 +67,29 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.list.font_color" | "style.data.list.font_color" => "list_font_color",
                 "style.control.breadcrumb.font" => "breadcrumb_font",
                 "style.control.breadcrumb.corner_radius" => "breadcrumb_corner_radius",
-                "style.control.button.font" => "button_font",
                 "style.control.button.padding" => "button_padding",
                 "style.control.button.height" => "button_height",
                 "style.control.button.corner_radius" => "button_corner_radius",
                 "style.list.corner_radius" | "style.data.list.corner_radius" => "list_corner_radius",
                 "style.control.textbox.corner_radius" | "style.textbox.corner_radius" | "style.data.textbox.corner_radius" => "textbox_corner_radius",
-                "style.control.dropdown.font" => "dropdown_font",
                 "style.control.dropdown.color" => "dropdown_color",
                 "style.control.font_selector.font" => "font_selector_font",
-                "style.control.slider.font" => "slider_font",
-                "style.control.spinbox.font" => "spinbox_font",
                 "style.section.font" => "section_label_font",
-                "style.control.textbox.font" | "style.textbox.font" | "style.data.textbox.font" => "textbox_font",
                 "style.control.button_strip.font" => "button_strip_font",
                 "style.control.button_strip.spacing" => "button_strip_spacing",
                 "style.control.dropdown.height" => "dropdown_height",
                 "style.control.dropdown.corner_radius" => "dropdown_corner_radius",
                 "style.control.font_selector.height" => "font_selector_height",
                 "style.control.font_selector.corner_radius" => "font_selector_corner_radius",
-                "style.label.font" => "label_font",
+                "style.control.label.font" => "control_label_font",
+                "style.control.label.font_detached" => "control_label_font_detached",
+                "style.control.label.margin" => "control_label_margin",
+                "style.control.label.layout" => "control_label_layout",
                 "style.control.slider.height" => "slider_height",
                 "style.control.slider.corner_radius" => "slider_corner_radius",
                 "style.control.progressbar.height" => "progressbar_height",
                 "style.control.rangeslider.height" => "rangeslider_height",
+                "style.control.rangeslider.corner_radius" | "style.rangeslider.corner_radius" => "rangeslider_corner_radius",
                 "style.control.scrollbar.width" => "scrollbar_width",
                 "style.control.spinbox.height" => "spinbox_height",
                 "style.control.spinbox.button_padding" => "spinbox_button_padding",
@@ -101,7 +100,6 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.textbox.background_edit_color" | "style.textbox.background_edit_color" | "style.data.textbox.background_edit_color" => "textbox_background_edit_color",
                 "style.control.textbox.multiline.line_wrap" | "style.textbox.multiline.line_wrap" | "style.data.textbox.multiline.line_wrap" => "textbox_line_wrap",
                 "style.control.textbox.multiline.border_width" | "style.textbox.multiline.border_width" | "style.data.textbox.multiline.border_width" => "textbox_multiline_border_width",
-                "style.control.toggle.font" => "toggle_font",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
                 "style.control.toggle.disabled_color" => "toggle_disabled_color",
@@ -268,7 +266,7 @@ static PLATE_PADDING: RwLock<f32> = RwLock::new(20.0);
 static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(44.0);
 static NESTED_SECTION_LABEL_ALIGNMENT: RwLock<u8> = RwLock::new(0);
 
-static LABEL_MARGIN: RwLock<f32> = RwLock::new(6.0);
+
 static BUTTON_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static SPINBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TEXTBOX_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
@@ -276,28 +274,21 @@ static FONT_SELECTOR_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static SLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
+static RANGESLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static BREADCRUMB_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static LIST_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TREE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
-static TOGGLE_FONT: RwLock<String> = RwLock::new(String::new());
-static TOGGLE_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static FONT_SELECTOR_FONT: RwLock<String> = RwLock::new(String::new());
 static FONT_SELECTOR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static BUTTON_STRIP_FONT: RwLock<String> = RwLock::new(String::new());
 static BUTTON_STRIP_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static BUTTON_FONT: RwLock<String> = RwLock::new(String::new());
-static BUTTON_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static LABEL_FONT: RwLock<String> = RwLock::new(String::new());
-static LABEL_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static DROPDOWN_FONT: RwLock<String> = RwLock::new(String::new());
-static DROPDOWN_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static TEXTBOX_FONT: RwLock<String> = RwLock::new(String::new());
-static TEXTBOX_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static SPINBOX_FONT: RwLock<String> = RwLock::new(String::new());
-static SPINBOX_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
-static SLIDER_FONT: RwLock<String> = RwLock::new(String::new());
-static SLIDER_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static CONTROL_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
+static CONTROL_LABEL_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static CONTROL_LABEL_FONT_DETACHED: RwLock<String> = RwLock::new(String::new());
+static CONTROL_LABEL_FONT_DETACHED_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
+static CONTROL_LABEL_MARGIN: RwLock<f32> = RwLock::new(6.0);
+static CONTROL_LABEL_LAYOUT: RwLock<String> = RwLock::new(String::new());
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static LIST_FONT: RwLock<String> = RwLock::new(String::new());
 static LIST_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
@@ -340,15 +331,10 @@ pub fn reload_config() {
     if let Some(content) = read_config() {
         let mut menubar_font_changed = false;
         let mut statusbar_font_changed = false;
-        let mut toggle_font_changed = false;
         let mut font_selector_font_changed = false;
         let mut button_strip_font_changed = false;
-        let mut button_font_changed = false;
         let mut label_font_changed = false;
-        let mut dropdown_font_changed = false;
-        let mut textbox_font_changed = false;
-        let mut spinbox_font_changed = false;
-        let mut slider_font_changed = false;
+        let mut label_font_detached_changed = false;
         let mut list_font_changed = false;
         let mut tree_font_changed = false;
         let mut graph_font_changed = false;
@@ -366,13 +352,20 @@ pub fn reload_config() {
                     }
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("label_margin") {
+            if let Some(rest) = trimmed.strip_prefix("control_label_margin") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = LABEL_MARGIN.write() {
+                    if let Ok(mut lock) = CONTROL_LABEL_MARGIN.write() {
                         *lock = val;
                     }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("control_label_layout") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim().to_string();
+                if let Ok(mut lock) = CONTROL_LABEL_LAYOUT.write() {
+                    *lock = val_str;
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("nested_section_label_alignment") {
@@ -867,6 +860,15 @@ pub fn reload_config() {
                     }
                 }
             }
+            if let Some(rest) = trimmed.strip_prefix("rangeslider_corner_radius") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = RANGESLIDER_CORNER_RADIUS.write() {
+                        *lock = val;
+                    }
+                }
+            }
             if let Some(rest) = trimmed.strip_prefix("toggle_border_width") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
                 let val_str = rest.trim_end_matches('"').trim();
@@ -876,19 +878,33 @@ pub fn reload_config() {
                     }
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("toggle_font") {
+            if let Some(rest) = trimmed.strip_prefix("control_label_font_detached") {
                 let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
                 let rest = mod_rest(rest);
                 let font = rest.trim().to_string();
                 let mut changed = false;
-                if let Ok(mut lock) = TOGGLE_FONT.write() {
+                if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
                     if *lock != font {
                         *lock = font;
                         changed = true;
                     }
                 }
                 if changed {
-                    toggle_font_changed = true;
+                    label_font_detached_changed = true;
+                }
+            } else if let Some(rest) = trimmed.strip_prefix("control_label_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
+                    }
+                }
+                if changed {
+                    label_font_changed = true;
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("font_selector_font") {
@@ -919,96 +935,6 @@ pub fn reload_config() {
                 }
                 if changed {
                     button_strip_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("button_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = BUTTON_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    button_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("label_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = LABEL_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    label_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("dropdown_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = DROPDOWN_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    dropdown_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("textbox_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = TEXTBOX_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    textbox_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("spinbox_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = SPINBOX_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    spinbox_font_changed = true;
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("slider_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = SLIDER_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    slider_font_changed = true;
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("list_font") {
@@ -1091,8 +1017,8 @@ pub fn reload_config() {
                 *lock = None;
             }
         }
-        if toggle_font_changed {
-            if let Ok(mut lock) = TOGGLE_FONT_CACHED.write() {
+        if label_font_detached_changed {
+            if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.write() {
                 *lock = None;
             }
         }
@@ -1106,36 +1032,12 @@ pub fn reload_config() {
                 *lock = None;
             }
         }
-        if button_font_changed {
-            if let Ok(mut lock) = BUTTON_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
         if label_font_changed {
-            if let Ok(mut lock) = LABEL_FONT_CACHED.write() {
+            if let Ok(mut lock) = CONTROL_LABEL_FONT_CACHED.write() {
                 *lock = None;
             }
         }
-        if dropdown_font_changed {
-            if let Ok(mut lock) = DROPDOWN_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if textbox_font_changed {
-            if let Ok(mut lock) = TEXTBOX_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if spinbox_font_changed {
-            if let Ok(mut lock) = SPINBOX_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
-        if slider_font_changed {
-            if let Ok(mut lock) = SLIDER_FONT_CACHED.write() {
-                *lock = None;
-            }
-        }
+
         if list_font_changed {
             if let Ok(mut lock) = LIST_FONT_CACHED.write() {
                 *lock = None;
@@ -1171,32 +1073,31 @@ fn mod_rest(rest: &str) -> &str {
     }
 }
 
+pub fn control_label_margin() -> f32 {
+    *CONTROL_LABEL_MARGIN.read().unwrap()
+}
+
+pub fn control_label_layout() -> String {
+    let lock = CONTROL_LABEL_LAYOUT.read().unwrap();
+    if lock.is_empty() {
+        "top".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
 pub fn label_margin() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("label_margin") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = LABEL_MARGIN.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *LABEL_MARGIN.read().unwrap()
+    control_label_margin()
+}
+
+pub fn set_control_label_margin(margin: f32) {
+    if let Ok(mut lock) = CONTROL_LABEL_MARGIN.write() {
+        *lock = margin;
+    }
 }
 
 pub fn set_label_margin(margin: f32) {
-    if let Ok(mut lock) = LABEL_MARGIN.write() {
-        *lock = margin;
-    }
+    set_control_label_margin(margin);
 }
 
 pub fn nested_section_label_alignment() -> u8 {
@@ -1604,6 +1505,18 @@ pub fn set_slider_corner_radius(radius: f32) {
     }
 }
 
+pub fn rangeslider_corner_radius() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("rangeslider_corner_radius").unwrap_or(4.0)
+}
+
+pub fn set_rangeslider_corner_radius(radius: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("rangeslider_corner_radius", radius);
+    }
+}
+
 pub fn plate_corner_radius() -> f32 {
     lazy_init_style_registry();
     let r = get_style_registry().read().unwrap();
@@ -1914,57 +1827,7 @@ pub fn set_statusbar_font(font: &str) {
     }
 }
 
-pub fn toggle_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("toggle_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = TOGGLE_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = TOGGLE_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Outfit".to_string()
-    } else {
-        lock.clone()
-    }
-}
 
-pub fn toggle_font_parsed() -> (String, f32) {
-    if let Ok(lock) = TOGGLE_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = toggle_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = TOGGLE_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
-}
-
-pub fn set_toggle_font(font: &str) {
-    if let Ok(mut lock) = TOGGLE_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = TOGGLE_FONT_CACHED.write() {
-        *lock = None;
-    }
-}
 
 pub fn font_selector_font() -> String {
     use std::sync::Once;
@@ -2071,8 +1934,10 @@ pub fn set_button_strip_font(font: &str) {
     }
 }
 
-// Button Font
-pub fn button_font() -> String {
+
+
+// Control Label Font
+pub fn control_label_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
@@ -2080,18 +1945,18 @@ pub fn button_font() -> String {
         if let Some(content) = read_config() {
             for line in content.lines() {
                 let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("button_font") {
+                if let Some(rest) = trimmed.strip_prefix("control_label_font") {
                     let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
                     let rest = mod_rest(rest);
                     font = rest.trim().to_string();
                 }
             }
         }
-        if let Ok(mut lock) = BUTTON_FONT.write() {
+        if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
             *lock = font;
         }
     });
-    let lock = BUTTON_FONT.read().unwrap();
+    let lock = CONTROL_LABEL_FONT.read().unwrap();
     if lock.is_empty() {
         "Outfit".to_string()
     } else {
@@ -2099,33 +1964,33 @@ pub fn button_font() -> String {
     }
 }
 
-pub fn button_font_parsed() -> (String, f32) {
-    if let Ok(lock) = BUTTON_FONT_CACHED.read() {
+pub fn control_label_font_parsed() -> (String, f32) {
+    if let Ok(lock) = CONTROL_LABEL_FONT_CACHED.read() {
         if let Some(ref val) = *lock {
             return val.clone();
         }
     }
-    let font_str = button_font();
+    let font_str = control_label_font();
     let parsed = parse_font_string(&font_str);
     let size = parsed.1.unwrap_or(12.0);
     let val = (parsed.0, size);
-    if let Ok(mut lock) = BUTTON_FONT_CACHED.write() {
+    if let Ok(mut lock) = CONTROL_LABEL_FONT_CACHED.write() {
         *lock = Some(val.clone());
     }
     val
 }
 
-pub fn set_button_font(font: &str) {
-    if let Ok(mut lock) = BUTTON_FONT.write() {
+pub fn set_control_label_font(font: &str) {
+    if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
         *lock = font.to_string();
     }
-    if let Ok(mut lock) = BUTTON_FONT_CACHED.write() {
+    if let Ok(mut lock) = CONTROL_LABEL_FONT_CACHED.write() {
         *lock = None;
     }
 }
 
-// Label Font
-pub fn label_font() -> String {
+// Control Label Font Detached
+pub fn control_label_font_detached() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
@@ -2133,18 +1998,18 @@ pub fn label_font() -> String {
         if let Some(content) = read_config() {
             for line in content.lines() {
                 let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("label_font") {
+                if let Some(rest) = trimmed.strip_prefix("control_label_font_detached") {
                     let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
                     let rest = mod_rest(rest);
                     font = rest.trim().to_string();
                 }
             }
         }
-        if let Ok(mut lock) = LABEL_FONT.write() {
+        if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
             *lock = font;
         }
     });
-    let lock = LABEL_FONT.read().unwrap();
+    let lock = CONTROL_LABEL_FONT_DETACHED.read().unwrap();
     if lock.is_empty() {
         "Outfit".to_string()
     } else {
@@ -2152,83 +2017,32 @@ pub fn label_font() -> String {
     }
 }
 
-pub fn label_font_parsed() -> (String, f32) {
-    if let Ok(lock) = LABEL_FONT_CACHED.read() {
+pub fn control_label_font_detached_parsed() -> (String, f32) {
+    if let Ok(lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.read() {
         if let Some(ref val) = *lock {
             return val.clone();
         }
     }
-    let font_str = label_font();
+    let font_str = control_label_font_detached();
     let parsed = parse_font_string(&font_str);
     let size = parsed.1.unwrap_or(12.0);
     let val = (parsed.0, size);
-    if let Ok(mut lock) = LABEL_FONT_CACHED.write() {
+    if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.write() {
         *lock = Some(val.clone());
     }
     val
 }
 
-pub fn set_label_font(font: &str) {
-    if let Ok(mut lock) = LABEL_FONT.write() {
+pub fn set_control_label_font_detached(font: &str) {
+    if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
         *lock = font.to_string();
     }
-    if let Ok(mut lock) = LABEL_FONT_CACHED.write() {
+    if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.write() {
         *lock = None;
     }
 }
 
-// Dropdown Font
-pub fn dropdown_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("dropdown_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = DROPDOWN_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = DROPDOWN_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Outfit".to_string()
-    } else {
-        lock.clone()
-    }
-}
 
-pub fn dropdown_font_parsed() -> (String, f32) {
-    if let Ok(lock) = DROPDOWN_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = dropdown_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = DROPDOWN_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
-}
-
-pub fn set_dropdown_font(font: &str) {
-    if let Ok(mut lock) = DROPDOWN_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = DROPDOWN_FONT_CACHED.write() {
-        *lock = None;
-    }
-}
 
 // List Font
 pub fn list_font() -> String {
@@ -2471,164 +2285,7 @@ pub fn set_list_justification(just: u8) {
     }
 }
 
-// Textbox Font
-pub fn textbox_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("textbox_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = TEXTBOX_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = TEXTBOX_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Outfit".to_string()
-    } else {
-        lock.clone()
-    }
-}
 
-pub fn textbox_font_parsed() -> (String, f32) {
-    if let Ok(lock) = TEXTBOX_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = textbox_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = TEXTBOX_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
-}
-
-pub fn set_textbox_font(font: &str) {
-    if let Ok(mut lock) = TEXTBOX_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = TEXTBOX_FONT_CACHED.write() {
-        *lock = None;
-    }
-}
-
-// Spinbox Font
-pub fn spinbox_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "monospace".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("spinbox_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = SPINBOX_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = SPINBOX_FONT.read().unwrap();
-    if lock.is_empty() {
-        "monospace".to_string()
-    } else {
-        lock.clone()
-    }
-}
-
-pub fn spinbox_font_parsed() -> (String, f32) {
-    if let Ok(lock) = SPINBOX_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = spinbox_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = SPINBOX_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
-}
-
-pub fn set_spinbox_font(font: &str) {
-    if let Ok(mut lock) = SPINBOX_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = SPINBOX_FONT_CACHED.write() {
-        *lock = None;
-    }
-}
-
-// Slider Font
-pub fn slider_font() -> String {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("slider_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
-        if let Ok(mut lock) = SLIDER_FONT.write() {
-            *lock = font;
-        }
-    });
-    let lock = SLIDER_FONT.read().unwrap();
-    if lock.is_empty() {
-        "Outfit".to_string()
-    } else {
-        lock.clone()
-    }
-}
-
-pub fn slider_font_parsed() -> (String, f32) {
-    if let Ok(lock) = SLIDER_FONT_CACHED.read() {
-        if let Some(ref val) = *lock {
-            return val.clone();
-        }
-    }
-    let font_str = slider_font();
-    let parsed = parse_font_string(&font_str);
-    let size = parsed.1.unwrap_or(12.0);
-    let val = (parsed.0, size);
-    if let Ok(mut lock) = SLIDER_FONT_CACHED.write() {
-        *lock = Some(val.clone());
-    }
-    val
-}
-
-pub fn set_slider_font(font: &str) {
-    if let Ok(mut lock) = SLIDER_FONT.write() {
-        *lock = font.to_string();
-    }
-    if let Ok(mut lock) = SLIDER_FONT_CACHED.write() {
-        *lock = None;
-    }
-}
 
 
 pub fn section_label_font() -> String {
@@ -5541,6 +5198,10 @@ mod tests {
     fn test_vstack_flow() {
         let orig_margin = label_margin();
         set_label_margin(6.0);
+        let orig_font = control_label_font();
+        set_control_label_font("Outfit 12");
+        let orig_font_detached = control_label_font_detached();
+        set_control_label_font_detached("Outfit 12");
         let _ = section_padding();
         set_section_padding(8.0);
         let mut mock_pc = MockRenderTarget { rects: Vec::new() };
@@ -5568,9 +5229,13 @@ mod tests {
         let mut w3 = MockWidgetWithLabel { base };
         stack.add_widget(&mut w3, 70.0, 50.0, &mut dummy);
 
-        // Third widget has label, so its y should be shifted by 18.0
-        assert_eq!(w3.base.y, start_y + 30.0 + 10.0 + 40.0 + 10.0 + 18.0);
+        let offset = w3.base.label_offset();
+        
+        // Third widget has label, so its y should be shifted by offset
+        assert_eq!(w3.base.y, start_y + 30.0 + 10.0 + 40.0 + 10.0 + offset);
         set_label_margin(orig_margin);
+        set_control_label_font(&orig_font);
+        set_control_label_font_detached(&orig_font_detached);
     }
 
     #[test]

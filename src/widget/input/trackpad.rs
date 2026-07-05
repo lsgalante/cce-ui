@@ -31,8 +31,12 @@ impl Trackpad {
     }
 
     pub fn label_offset(&self) -> f32 {
+        if crate::layout::control_label_layout() == "side" {
+            return 0.0;
+        }
         if self.base.label.is_some() {
-            12.0 + crate::layout::label_margin()
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            font_size + crate::layout::control_label_margin()
         } else {
             0.0
         }
@@ -42,30 +46,42 @@ impl Trackpad {
 impl Element for Trackpad {
     crate::impl_widget_base!(Trackpad);
 
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h + self.label_offset();
+    }
+
     fn color(&self) -> [f32; 4] {
         [0.11, 0.11, 0.16, 0.85]
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (x, y, w, h) = self.rect();
+        let (rx_rect, y, rw_rect, h) = self.rect();
+        let label_x = self.label_x_offset();
+        let x = rx_rect + label_x;
+        let w = rw_rect - label_x;
+        let top = self.label_offset();
+        let visual_h = h - top;
         let mut quads = Vec::new();
 
         // 1. Background
-        quads.push((x, y, w, h, [0.11, 0.11, 0.16, 0.85]));
+        quads.push((x, y + top, w, visual_h, [0.11, 0.11, 0.16, 0.85]));
 
         // 2. Borders
         let border_color = [0.28, 0.28, 0.38, 1.0];
-        quads.push((x, y, w, 1.0, border_color));             // Top
-        quads.push((x, y + h - 1.0, w, 1.0, border_color));     // Bottom
-        quads.push((x, y, 1.0, h, border_color));             // Left
-        quads.push((x + w - 1.0, y, 1.0, h, border_color));     // Right
+        quads.push((x, y + top, w, 1.0, border_color));             // Top
+        quads.push((x, y + top + visual_h - 1.0, w, 1.0, border_color));     // Bottom
+        quads.push((x, y + top, 1.0, visual_h, border_color));             // Left
+        quads.push((x + w - 1.0, y + top, 1.0, visual_h, border_color));     // Right
 
         // 3. Fingers
         for finger in &self.fingers {
             let rx = finger.x.clamp(0.0, 1.0);
             let ry = finger.y.clamp(0.0, 1.0);
             let fx = x + rx * w;
-            let fy = y + ry * h;
+            let fy = y + top + ry * visual_h;
             let dot_size = 12.0;
 
             // Render glow (outer light blue rectangle)
@@ -90,26 +106,32 @@ impl Element for Trackpad {
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
-        let (x, y, _w, h) = self.rect();
+        let (rx_rect, y, rw_rect, h) = self.rect();
+        let label_x = self.label_x_offset();
+        let x = rx_rect + label_x;
+        let _w = rw_rect - label_x;
+        let top = self.label_offset();
+        let visual_h = h - top;
         let mut labels = Vec::new();
 
         // Render "Touchpad Area" label
         labels.push(TextLabel {
             text: "Touchpad Area".to_string(),
             x: x + 12.0,
-            y: y + h - 22.0,
+            y: y + top + visual_h - 22.0,
             font_size: 11.0,
             color: [0x73, 0x73, 0x8c],
         });
 
         // Optional widget-base label on top
         if let Some(ref label) = self.base.label {
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
             labels.push(TextLabel {
                 text: label.clone(),
-                x,
-                y: y - (12.0 + crate::layout::label_margin()),
-                font_size: 12.0,
-                color: [0x83, 0x83, 0x8a],
+                x: rx_rect,
+                y,
+                font_size,
+                color: colors::control_label_color_detached_for_state(self.base.hovered, self.base.focused),
             });
         }
 
@@ -120,19 +142,29 @@ impl Element for Trackpad {
     fn is_dragging(&self) -> bool { !self.fingers.is_empty() }
 
     fn drag_begin(&mut self, px: f32, py: f32) {
-        let (x, y, w, h) = self.rect();
-        if w > 0.0 && h > 0.0 {
+        let (rx_rect, y, rw_rect, h) = self.rect();
+        let label_x = self.label_x_offset();
+        let x = rx_rect + label_x;
+        let w = rw_rect - label_x;
+        let top = self.label_offset();
+        let visual_h = h - top;
+        if w > 0.0 && visual_h > 0.0 {
             let rx = ((px - x) / w).clamp(0.0, 1.0);
-            let ry = ((py - y) / h).clamp(0.0, 1.0);
+            let ry = ((py - (y + top)) / visual_h).clamp(0.0, 1.0);
             self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
         }
     }
 
     fn drag_update(&mut self, px: f32, py: f32) -> bool {
-        let (x, y, w, h) = self.rect();
-        if w > 0.0 && h > 0.0 {
+        let (rx_rect, y, rw_rect, h) = self.rect();
+        let label_x = self.label_x_offset();
+        let x = rx_rect + label_x;
+        let w = rw_rect - label_x;
+        let top = self.label_offset();
+        let visual_h = h - top;
+        if w > 0.0 && visual_h > 0.0 {
             let rx = ((px - x) / w).clamp(0.0, 1.0);
-            let ry = ((py - y) / h).clamp(0.0, 1.0);
+            let ry = ((py - (y + top)) / visual_h).clamp(0.0, 1.0);
             self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
             true
         } else {
@@ -146,11 +178,16 @@ impl Element for Trackpad {
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
         if button == MouseButton::Left {
-            let (x, y, w, h) = self.rect();
-            if px >= x && px <= x + w && py >= y && py <= y + h {
+            let (rx_rect, y, rw_rect, h) = self.rect();
+            let label_x = self.label_x_offset();
+            let x = rx_rect + label_x;
+            let w = rw_rect - label_x;
+            let top = self.label_offset();
+            let visual_h = h - top;
+            if px >= x && px <= x + w && py >= y + top && py <= y + top + visual_h {
                 if state == ElementState::Pressed {
                     let rx = ((px - x) / w).clamp(0.0, 1.0);
-                    let ry = ((py - y) / h).clamp(0.0, 1.0);
+                    let ry = ((py - (y + top)) / visual_h).clamp(0.0, 1.0);
                     self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
                     return true;
                 } else {

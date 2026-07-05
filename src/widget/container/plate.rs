@@ -224,6 +224,7 @@ impl Element for Plate {
     }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let label_off = self.base.base.label_offset();
         let (clamped_x, clamped_y, clamped_w, clamped_h) = if let Some(parent_ptr) = self.base.parent {
             let (px, py, pw, ph) = unsafe { (*parent_ptr).rect() };
             let cx = x.clamp(px, px + pw.max(0.0));
@@ -238,7 +239,7 @@ impl Element for Plate {
         self.base.base.x = clamped_x;
         self.base.base.y = clamped_y;
         self.base.base.w = clamped_w;
-        self.base.base.h = clamped_h;
+        self.base.base.h = clamped_h + label_off;
 
         if !self.base.visible {
             return;
@@ -249,7 +250,7 @@ impl Element for Plate {
         let padding_y = pad;
         let left_x = clamped_x + padding_x;
         let available_w = (clamped_w - 2.0 * padding_x).max(1.0);
-        let start_y = clamped_y + padding_y;
+        let start_y = clamped_y + label_off + padding_y;
         let available_h = (clamped_h - 2.0 * padding_y).max(1.0);
 
         let center_x = left_x + available_w / 2.0;
@@ -287,7 +288,7 @@ impl Element for Plate {
                 let cx = (center_x - use_w / 2.0).clamp(left_x, (left_x + available_w - use_w).max(left_x));
                 let cy = (center_y - use_h / 2.0).clamp(start_y, (start_y + available_h - use_h).max(start_y));
                 let cw = use_w.min(clamped_x + clamped_w - padding_x - cx);
-                let ch = use_h.min(clamped_y + clamped_h - padding_y - cy);
+                let ch = use_h.min(clamped_y + label_off + clamped_h - padding_y - cy);
                 w.set_rect(cx, cy, cw, ch);
             } else {
                 let mut ring = 1;
@@ -309,7 +310,7 @@ impl Element for Plate {
                         let cx = raw_x.clamp(left_x, (left_x + available_w - use_w).max(left_x));
                         let cy = raw_y.clamp(start_y, (start_y + available_h - use_h).max(start_y));
                         let cw = use_w.min(clamped_x + clamped_w - padding_x - cx);
-                        let ch = use_h.min(clamped_y + clamped_h - padding_y - cy);
+                        let ch = use_h.min(clamped_y + label_off + clamped_h - padding_y - cy);
 
                         w.set_rect(cx, cy, cw, ch);
                         placed = true;
@@ -366,6 +367,28 @@ impl Element for Plate {
         ctx.clear_children_ids(id);
     }
 
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            let (x, y, w, h) = self.rect();
+            let label_off = self.base.base.label_offset();
+            let radius = self.corner_radius();
+            let c = self.color();
+            if c[3].abs() > 0.001 {
+                quads.push((x, y + label_off, w, h - label_off, radius, c, (r1, r2, r3, r4)));
+            }
+        }
+        for &child_ptr in &self.base.children {
+            let widget = unsafe { &*child_ptr };
+            quads.extend(widget.all_rounded_quads(ctx));
+        }
+        quads
+    }
+
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.visible {
             return Vec::new();
@@ -374,7 +397,8 @@ impl Element for Plate {
         let (px, py, pw, ph) = self.rect();
         let has_rounded = self.rounded_corners() != (false, false, false, false);
         if !has_rounded {
-            quads.push((px, py, pw, ph, self.color()));
+            let label_off = self.base.base.label_offset();
+            quads.push((px, py + label_off, pw, ph - label_off, self.color()));
         }
 
         for &child_ptr in &self.base.children {
@@ -397,12 +421,13 @@ impl Element for Plate {
         }
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.base.label {
+            let (_, font_size) = crate::layout::control_label_font_parsed();
             labels.push(TextLabel {
                 text: label.clone(),
                 x: self.base.base.x,
-                y: self.base.base.y - (12.0 + crate::layout::label_margin()),
-                font_size: 12.0,
-                color: [0x83, 0x83, 0x8a],
+                y: self.base.base.y,
+                font_size,
+                color: colors::control_label_color_u8(),
             });
         }
         for &child_ptr in &self.base.children {
@@ -418,13 +443,14 @@ impl Element for Plate {
         }
         let mut result = Vec::new();
         if let Some(ref label) = self.base.base.label {
+            let (_, font_size) = crate::layout::control_label_font_parsed();
             result.push((
                 TextLabel {
                     text: label.clone(),
                     x: self.base.base.x,
-                    y: self.base.base.y - (12.0 + crate::layout::label_margin()),
-                    font_size: 12.0,
-                    color: [0x83, 0x83, 0x8a],
+                    y: self.base.base.y,
+                    font_size,
+                    color: colors::control_label_color_u8(),
                 },
                 None,
             ));
@@ -442,13 +468,14 @@ impl Element for Plate {
         }
         let mut result = Vec::new();
         if let Some(ref label) = self.base.base.label {
+            let (_, font_size) = crate::layout::control_label_font_parsed();
             result.push((
                 TextLabel {
                     text: label.clone(),
                     x: self.base.base.x,
-                    y: self.base.base.y - (12.0 + crate::layout::label_margin()),
-                    font_size: 12.0,
-                    color: [0x83, 0x83, 0x8a],
+                    y: self.base.base.y,
+                    font_size,
+                    color: colors::control_label_color_u8(),
                 },
                 None,
                 None,

@@ -12,10 +12,11 @@ impl Label {
     pub fn new(text: &str) -> Self {
         let mut base = Widget::new();
         base.label = Some(text.to_string());
+        let (_, font_size) = crate::layout::control_label_font_parsed();
         Self {
             base,
-            font_size: 12.0,
-            color: [0x83, 0x83, 0x8a],
+            font_size,
+            color: colors::control_label_color_u8(),
         }
     }
 

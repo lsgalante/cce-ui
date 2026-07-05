@@ -1294,10 +1294,10 @@ pub trait Application: Sized + 'static {
         self.text_items().iter().map(|ti| {
             let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
                 TextBounds {
-                    left: (l * scale_f32).round() as i32,
-                    top: (t * scale_f32).round() as i32,
-                    right: (r * scale_f32).round() as i32,
-                    bottom: (b * scale_f32).round() as i32,
+                    left: ((l * scale_f32).round() as i32).clamp(0, bounds.right),
+                    top: ((t * scale_f32).round() as i32).clamp(0, bounds.bottom),
+                    right: ((r * scale_f32).round() as i32).clamp(0, bounds.right),
+                    bottom: ((b * scale_f32).round() as i32).clamp(0, bounds.bottom),
                 }
             } else {
                 bounds
@@ -1641,7 +1641,16 @@ impl<A: Application> EngineState<A> {
         
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
         let areas = self.inner.as_ref().unwrap().text_areas(scale_f32, bounds);
-        eprintln!("DEBUG RENDER AREAS: len = {}", areas.len());
+        eprintln!("AREAS_LEN: {}", areas.len());
+        for (idx, area) in areas.iter().enumerate() {
+            let mut text_snippet = String::new();
+            for run in area.buffer.layout_runs() {
+                text_snippet.push_str(run.text);
+            }
+            eprintln!("TEXT_AREA idx={}: text='{}', left={}, top={}, bounds=[{}, {}, {}, {}]",
+                idx, text_snippet, area.left, area.top,
+                area.bounds.left, area.bounds.top, area.bounds.right, area.bounds.bottom);
+        }
         
         adapter.text_renderer.prepare(&adapter.device, &adapter.queue, &mut adapter.font_system, &mut adapter.text_atlas, &adapter.text_viewport, areas, &mut adapter.swash_cache).unwrap();
         
@@ -1973,6 +1982,7 @@ impl<A: Application> WindowHandler for EngineState<A> {
         crate::scale::set_maximized(is_max);
 
         let (w, h) = configure.new_size;
+        eprintln!("CONFIGURE_NEW_SIZE: w={:?}, h={:?}, scale={}", w, h, self.scale_factor);
         if let (Some(w), Some(h)) = (w, h) {
             let width = w.get();
             let height = h.get();
@@ -2929,4 +2939,5 @@ pub fn run<A: Application>() {
             }
         }
     }
+    crate::process::cleanup_spawned_processes();
 }

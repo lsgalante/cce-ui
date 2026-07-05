@@ -808,18 +808,14 @@ impl Element for Ramp {
         }
         let mut quads = Vec::new();
         
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        let ch = self.base.h - 20.0;
-        
         let border_color = colors::ramp_border_color();
         let bg_color = [0.15, 0.15, 0.18, 1.0];
         let radius = 6.0f32;
         
-        // Draw container border (rounded quad)
-        quads.push((track_x - 1.0, self.base.y + 10.0 - 1.0, track_w + 2.0, ch + 2.0, radius, border_color, (true, true, true, true)));
-        // Draw container background (rounded quad)
-        quads.push((track_x, self.base.y + 10.0, track_w, ch, (radius - 1.0).max(0.0), bg_color, (true, true, true, true)));
+        // Draw container border (rounded quad) using full widget bounds
+        quads.push((self.base.x - 1.0, self.base.y - 1.0, self.base.w + 2.0, self.base.h + 2.0, radius, border_color, (true, true, true, true)));
+        // Draw container background (rounded quad) using full widget bounds
+        quads.push((self.base.x, self.base.y, self.base.w, self.base.h, (radius - 1.0).max(0.0), bg_color, (true, true, true, true)));
         
         // Extend children's rounded quads
         for &child_ptr in &self.children(ctx) {
@@ -1013,13 +1009,16 @@ impl Element for Ramp {
             (track_w - gap) / 2.0
         };
         
+        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+        let label_color = colors::control_label_color_detached_u8();
+
         labels.push((
             TextLabel {
                 text: "Preset".to_string(),
                 x: track_x + 4.0,
                 y: sy - 2.0,
-                font_size: 12.0,
-                color: [0x83, 0x83, 0x8a],
+                font_size,
+                color: label_color,
             },
             self.preset_dropdown.widget_font(),
             None,
@@ -1030,8 +1029,8 @@ impl Element for Ramp {
                 text: "Line Type".to_string(),
                 x: track_x + col_w + gap + 4.0,
                 y: sy - 2.0,
-                font_size: 12.0,
-                color: [0x83, 0x83, 0x8a],
+                font_size,
+                color: label_color,
             },
             self.line_type_dropdown.widget_font(),
             None,
@@ -1043,8 +1042,8 @@ impl Element for Ramp {
                     text: "Value".to_string(),
                     x: track_x + 2.0 * (col_w + gap) + 4.0,
                     y: sy - 2.0,
-                    font_size: 12.0,
-                    color: [0x83, 0x83, 0x8a],
+                    font_size,
+                    color: label_color,
                 },
                 self.val_slider.widget_font(),
                 None,

@@ -332,7 +332,7 @@ pub trait Element {
         if w <= 0.0 || h <= 0.0 {
             return false;
         }
-        let (hx, hw) = if let Some(b) = self.base() {
+        let (mut hx, mut hw) = if let Some(b) = self.base() {
             if b.row_w > 0.0 {
                 (b.row_x, b.row_w)
             } else {
@@ -341,6 +341,9 @@ pub trait Element {
         } else {
             (x, w)
         };
+        let label_x = self.label_x_offset();
+        hx += label_x;
+        hw -= label_x;
         px >= hx && px <= hx + hw && py >= y && py <= y + h
     }
 
@@ -409,13 +412,14 @@ pub trait Element {
 
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         let hc = self.highlight_color(ctx)?;
+        let label_x = self.label_x_offset();
         if let Some(b) = self.base() {
-            let hx = if b.row_w > 0.0 { b.row_x } else { b.x };
-            let hw = if b.row_w > 0.0 { b.row_w } else { b.w };
+            let hx = if b.row_w > 0.0 { b.row_x } else { b.x } + label_x;
+            let hw = if b.row_w > 0.0 { b.row_w } else { b.w } - label_x;
             Some((hx, b.y, hw, b.h, hc))
         } else {
             let (x, y, w, h) = self.rect();
-            Some((x, y, w, h, hc))
+            Some((x + label_x, y, w - label_x, h, hc))
         }
     }
 
@@ -429,6 +433,18 @@ pub trait Element {
     fn drag_end(&mut self) {}
     fn take_click(&mut self) -> bool { false }
     fn draggable(&self) -> bool { false }
+
+    fn label_x_offset(&self) -> f32 {
+        let name = self.type_name();
+        if name == "Label" || name == "Button" || name == "Checkbox" || name == "Toggle" || name == "Plate" || name == "Ramp" {
+            return 0.0;
+        }
+        if crate::layout::control_label_layout() == "side" && self.base().map_or(false, |b| b.label.is_some()) {
+            90.0
+        } else {
+            0.0
+        }
+    }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { Vec::new() }
     fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> { Vec::new() }
@@ -476,12 +492,27 @@ pub trait Element {
     fn text_labels(&self) -> Vec<TextLabel> {
         if let Some(b) = self.base() {
             if let Some(ref label) = b.label {
+                let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+                let color = colors::control_label_color_detached_for_state(b.hovered, b.focused);
+                if crate::layout::control_label_layout() == "side" {
+                    let label_x = self.label_x_offset();
+                    if label_x > 0.0 {
+                        let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
+                        return vec![TextLabel {
+                            text: label.clone(),
+                            x: b.x + 4.0,
+                            y: y_pos,
+                            font_size,
+                            color,
+                        }];
+                    }
+                }
                 return vec![TextLabel {
                     text: label.clone(),
                     x: b.x,
                     y: b.y,
-                    font_size: 12.0,
-                    color: [0x83, 0x83, 0x8a],
+                    font_size,
+                    color,
                 }];
             }
         }
@@ -649,19 +680,31 @@ pub trait Control: Element {
         let label = b.label.as_ref()?;
         let name = self.type_name();
         
-        let x_offset = if name == "Slider" || name == "RangeSlider" {
-            0.0
+        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+        let color = colors::control_label_color_detached_for_state(b.hovered, b.focused);
+        if crate::layout::control_label_layout() == "side" {
+            let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
+            Some(TextLabel {
+                text: label.clone(),
+                x: b.x + 4.0,
+                y: y_pos,
+                font_size,
+                color,
+            })
         } else {
-            4.0
-        };
-        
-        Some(TextLabel {
-            text: label.clone(),
-            x: b.x + x_offset,
-            y: b.y,
-            font_size: 12.0,
-            color: [0x83, 0x83, 0x8a],
-        })
+            let x_offset = if name == "Slider" || name == "RangeSlider" {
+                0.0
+            } else {
+                4.0
+            };
+            Some(TextLabel {
+                text: label.clone(),
+                x: b.x + x_offset,
+                y: b.y,
+                font_size,
+                color,
+            })
+        }
     }
 }
 
@@ -684,7 +727,7 @@ pub use self::input::{
     KeybindsControl, KeybindRow, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey
 };
 pub use self::container::{
-    Container, ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
+    Container, ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     SectionContainer, Header, ContentBg, ViewportBg, ParametersBg, List,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,

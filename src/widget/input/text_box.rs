@@ -50,7 +50,7 @@ pub struct TextBox {
 
 impl TextBox {
     pub fn new(text: String) -> Self {
-        let (style_family, style_size) = crate::layout::textbox_font_parsed();
+        let (style_family, style_size) = crate::layout::control_label_font_detached_parsed();
         let editor_state = TextEditorState::new(text.clone());
         Self {
             base: Widget::new(),
@@ -99,7 +99,8 @@ impl TextBox {
     }
 
     fn map_x_to_idx(&self, click_x: f32) -> usize {
-        let relative_x = click_x - (self.base.x + 8.0) + self.scroll_x;
+        let label_x = self.label_x_offset();
+        let relative_x = click_x - (self.base.x + label_x + 8.0) + self.scroll_x;
         if self.glyph_positions.is_empty() {
             let char_width = self.char_width();
             return ((relative_x / char_width).round() as isize)
@@ -497,7 +498,7 @@ impl Element for TextBox {
     crate::impl_widget_base!(TextBox);
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
-        let (style_family, style_size) = crate::layout::textbox_font_parsed();
+        let (style_family, style_size) = crate::layout::control_label_font_detached_parsed();
         if self.font_size == self.default_font_size {
             self.font_size = style_size;
         }
@@ -721,7 +722,7 @@ impl Element for TextBox {
 
     fn draggable(&self) -> bool { !self.disabled }
     fn is_dragging(&self) -> bool { self.dragging }
-    fn widget_font(&self) -> Option<String> { Some(crate::layout::textbox_font()) }
+    fn widget_font(&self) -> Option<String> { Some(crate::layout::control_label_font_detached()) }
 
     fn drag_begin(&mut self, _px: f32, _py: f32) {
         if self.disabled || !self.editing { return; }
@@ -784,16 +785,17 @@ impl Element for TextBox {
                 } else {
                     let char_width = self.char_width();
                     let top = self.base.label_offset();
+                    let label_x = self.label_x_offset();
                     let idx = if self.multiline {
                         let line_height = self.line_height();
                         let max_chars = if self.line_wrap_enabled() {
-                            (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+                            ((((self.base.w - label_x) - 16.0) / char_width).floor() as usize).max(1)
                         } else {
                             999999
                         };
                         let (lines, index_map) = self.wrap_text(max_chars);
                         let click_line = (((py - (self.base.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
-                        let click_col = (((px - (self.base.x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
+                        let click_col = (((px - (self.base.x + label_x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
                         self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
                     } else {
                         self.map_x_to_idx(px)
@@ -1178,10 +1180,14 @@ impl Element for TextBox {
             [0.18, 0.18, 0.24, 1.0]
         };
         
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+
         if self.draw_bg_border {
             let border_w = self.border_width();
-            quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, border_color, (r1, r2, r3, r4)));
-            quads.push((self.base.x + border_w, self.base.y + top + border_w, self.base.w - 2.0 * border_w, visual_h - 2.0 * border_w, (radius - border_w).max(0.0), bg_color, (r1, r2, r3, r4)));
+            quads.push((x, self.base.y + top, w, visual_h, radius, border_color, (r1, r2, r3, r4)));
+            quads.push((x + border_w, self.base.y + top + border_w, w - 2.0 * border_w, visual_h - 2.0 * border_w, (radius - border_w).max(0.0), bg_color, (r1, r2, r3, r4)));
         }
 
         if self.editing || self.select_anchor.is_some() {
@@ -1200,7 +1206,7 @@ impl Element for TextBox {
 
             if self.multiline {
                 let max_chars = if self.line_wrap_enabled() {
-                    (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+                    (((w - 16.0) / char_width).floor() as usize).max(1)
                 } else {
                     999999
                 };
@@ -1230,13 +1236,13 @@ impl Element for TextBox {
                             }
                         }
                         if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
-                            let highlight_x = self.base.x + 8.0 + (sc as f32 * char_width) - self.scroll_x;
+                            let highlight_x = x + 8.0 + (sc as f32 * char_width) - self.scroll_x;
                             let highlight_w = (ec - sc + 1) as f32 * char_width;
                             let highlight_y = self.base.y + top + 8.0 + (line_idx as f32 * line_height) - self.scroll_y;
                             let clipped_y = highlight_y.max(view_top);
                             let clipped_bottom = (highlight_y + line_height).min(view_bottom);
-                            let h_left = highlight_x.max(self.base.x + 8.0);
-                            let h_right = (highlight_x + highlight_w).min(self.base.x + self.base.w - 8.0);
+                            let h_left = highlight_x.max(x + 8.0);
+                            let h_right = (highlight_x + highlight_w).min(x + w - 8.0);
                             if h_left < h_right && clipped_y < clipped_bottom {
                                 quads.push((h_left, clipped_y, h_right - h_left, clipped_bottom - clipped_y, 0.0, highlight_color, (false, false, false, false)));
                             }
@@ -1247,11 +1253,11 @@ impl Element for TextBox {
                 if self.editing {
                     let caret_h = self.font_size * 1.15;
                     let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
-                    let cursor_x = self.base.x + 8.0 + (cursor_c as f32 * char_width) - self.scroll_x;
+                    let cursor_x = x + 8.0 + (cursor_c as f32 * char_width) - self.scroll_x;
                     let cursor_y = self.base.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
                     let clipped_y = cursor_y.max(view_top);
                     let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
-                    if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
+                    if cursor_x >= x + 8.0 && cursor_x <= x + w - 8.0 {
                         if clipped_y < clipped_bottom {
                             quads.push((cursor_x, clipped_y, 1.5, clipped_bottom - clipped_y, 0.0, cursor_color, (false, false, false, false)));
                         }
@@ -1262,9 +1268,9 @@ impl Element for TextBox {
                 if start != end {
                     let h_left_offset = self.glyph_positions.get(start).copied().unwrap_or_else(|| start as f32 * char_width);
                     let h_right_offset = self.glyph_positions.get(end).copied().unwrap_or_else(|| end as f32 * char_width);
-                    let highlight_x = self.base.x + 8.0 + h_left_offset - self.scroll_x;
-                    let h_left = highlight_x.max(self.base.x + 8.0);
-                    let h_right = (self.base.x + 8.0 + h_right_offset - self.scroll_x).min(self.base.x + self.base.w - 8.0);
+                    let highlight_x = x + 8.0 + h_left_offset - self.scroll_x;
+                    let h_left = highlight_x.max(x + 8.0);
+                    let h_right = (x + 8.0 + h_right_offset - self.scroll_x).min(x + w - 8.0);
                     if h_left < h_right {
                         quads.push((
                             h_left,
@@ -1284,8 +1290,8 @@ impl Element for TextBox {
                     } else {
                         self.cursor_x_offset
                     };
-                    let cursor_x = self.base.x + 8.0 + offset - self.scroll_x;
-                    if cursor_x >= self.base.x + 8.0 && cursor_x <= self.base.x + self.base.w - 8.0 {
+                    let cursor_x = x + 8.0 + offset - self.scroll_x;
+                    if cursor_x >= x + 8.0 && cursor_x <= x + w - 8.0 {
                         let text_y = crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top);
                         let cursor_y = text_y + (self.font_size - caret_h) / 2.0;
                         quads.push((cursor_x, cursor_y, 1.5, caret_h, 0.0, cursor_color, (false, false, false, false)));
@@ -1338,11 +1344,15 @@ impl Element for TextBox {
             [0xcc, 0xcc, 0xd4]
         };
 
+        let label_x = self.label_x_offset();
+        let x = self.base.x + label_x;
+        let w = self.base.w - label_x;
+
         if self.multiline {
             let char_width = self.char_width();
             let line_height = self.line_height();
             let max_chars = if self.line_wrap_enabled() {
-                (((self.base.w - 16.0) / char_width).floor() as usize).max(1)
+                (((w - 16.0) / char_width).floor() as usize).max(1)
             } else {
                 999999
             };
@@ -1372,7 +1382,7 @@ impl Element for TextBox {
             for (line_idx, line_text) in lines_to_draw.iter().enumerate() {
                 labels.push(TextLabel {
                     text: line_text.clone(),
-                    x: self.base.x + 8.0 - self.scroll_x,
+                    x: x + 8.0 - self.scroll_x,
                     y: self.base.y + top + 8.0 + (line_idx as f32 * line_height) + (line_height - self.font_size) / 2.0 - self.scroll_y,
                     font_size: self.font_size,
                     color: label_color,
@@ -1381,7 +1391,7 @@ impl Element for TextBox {
         } else {
             labels.push(TextLabel {
                 text: display_text,
-                x: self.base.x + 8.0 - self.scroll_x,
+                x: x + 8.0 - self.scroll_x,
                 y: crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, top),
                 font_size: self.font_size,
                 color: label_color,
@@ -1391,13 +1401,15 @@ impl Element for TextBox {
     }
 
     fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        let bounds = Some([self.base.x, self.base.y, self.base.x + self.base.w, self.base.y + self.base.h]);
+        let label_x = self.label_x_offset();
+        let bounds = Some([self.base.x + label_x, self.base.y, self.base.x + self.base.w, self.base.y + self.base.h]);
         self.text_labels().into_iter().map(|l| (l, bounds)).collect()
     }
 
     fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let font = self.widget_font();
-        let bounds = Some([self.base.x, self.base.y, self.base.x + self.base.w, self.base.y + self.base.h]);
+        let label_x = self.label_x_offset();
+        let bounds = Some([self.base.x + label_x, self.base.y, self.base.x + self.base.w, self.base.y + self.base.h]);
         self.text_labels().into_iter().map(|l| (l, font.clone(), bounds)).collect()
     }
 

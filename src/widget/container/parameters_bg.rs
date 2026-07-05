@@ -285,7 +285,7 @@ impl Element for ParametersBg {
     crate::impl_widget_base!(ParametersBg);
 
     fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::label_font())
+        Some(crate::layout::control_label_font())
     }
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }

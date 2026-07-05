@@ -34,6 +34,10 @@ static NODE_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_DRAG);
 static SIDEBAR_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(SIDEBAR_BG);
 static HIGHLIGHT_PRIMARY_COLOR: RwLock<[f32; 4]> = RwLock::new(HIGHLIGHT_PRIMARY);
 static MENUBAR_TAB_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]); // sRGB [230, 230, 242] linear
+static CONTROL_LABEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.61206, 0.61206, 0.68666, 1.0]); // sRGB [204, 204, 212]
+static CONTROL_LABEL_COLOR_DETACHED: RwLock<[f32; 4]> = RwLock::new([0.22416, 0.22416, 0.2526, 1.0]); // sRGB [131, 131, 138]
+static CONTROL_LABEL_HOVER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
+static CONTROL_LABEL_FOCUS_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static BACKPLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
@@ -79,6 +83,20 @@ static SPINBOX_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.8, 0.8, 0.83, 1.0])
 static CHECKBOX_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_BG);
 static CHECKBOX_CHECKED_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_CHECKED);
 static CHECKBOX_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_HOVER);
+static CHECKBOX_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.25, 0.25, 0.30, 1.0]);
+
+static BUTTON_BORDER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
+static BUTTON_HOVER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
+
+static DROPDOWN_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
+static DROPDOWN_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.72305, 0.72305, 0.76008, 1.0]);
+
+static SLIDER_FILL_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
+static SLIDER_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB);
+static SLIDER_THUMB_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB_DRAG);
+
+static RANGE_SLIDER_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB);
+static RANGE_SLIDER_THUMB_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB_DRAG);
 
 static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
@@ -327,6 +345,18 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
         if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = get_color("/style/control/label/color") {
+        if let Ok(mut lock) = CONTROL_LABEL_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/label/color_detached") {
+        if let Ok(mut lock) = CONTROL_LABEL_COLOR_DETACHED.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/label/hover_color") {
+        if let Ok(mut lock) = CONTROL_LABEL_HOVER_COLOR.write() { *lock = Some(c); }
+    }
+    if let Some(c) = get_color("/style/control/label/focus_color") {
+        if let Ok(mut lock) = CONTROL_LABEL_FOCUS_COLOR.write() { *lock = Some(c); }
+    }
     let toggle_border_color = get_color("/style/control/toggle/border_color")
         .or_else(|| get_color("/layout/toggle_border_color"));
 
@@ -384,6 +414,46 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/checkbox/hover_color").or_else(|| get_color("/style/checkbox/hover_color")) {
         if let Ok(mut lock) = CHECKBOX_HOVER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/checkbox/border_color").or_else(|| get_color("/style/checkbox/border_color")) {
+        if let Ok(mut lock) = CHECKBOX_BORDER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/button/border_color").or_else(|| get_color("/style/button/border_color")) {
+        if let Ok(mut lock) = BUTTON_BORDER_COLOR.write() { *lock = Some(c); }
+    }
+    if let Some(c) = get_color("/style/control/button/hover_color").or_else(|| get_color("/style/button/hover_color")) {
+        if let Ok(mut lock) = BUTTON_HOVER_COLOR.write() { *lock = Some(c); }
+    }
+    if let Some(c) = get_color("/style/control/dropdown/border_color").or_else(|| get_color("/style/dropdown/border_color")) {
+        if let Ok(mut lock) = DROPDOWN_BORDER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/dropdown/text_color").or_else(|| get_color("/style/dropdown/text_color")) {
+        if let Ok(mut lock) = DROPDOWN_TEXT_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/slider/fill_color").or_else(|| get_color("/style/slider/fill_color")) {
+        if let Ok(mut lock) = SLIDER_FILL_COLOR.write() { *lock = Some(c); }
+    }
+    if let Some(c) = get_color("/style/control/slider/thumb_color").or_else(|| get_color("/style/slider/thumb_color")) {
+        if let Ok(mut lock) = SLIDER_THUMB_COLOR.write() { *lock = c; }
+        if let Ok(mut lock_drag) = SLIDER_THUMB_DRAG_COLOR.write() {
+            *lock_drag = [
+                (c[0] + 0.15).min(1.0),
+                (c[1] + 0.15).min(1.0),
+                (c[2] + 0.15).min(1.0),
+                c[3]
+            ];
+        }
+    }
+    if let Some(c) = get_color("/style/control/rangeslider/thumb_color").or_else(|| get_color("/style/rangeslider/thumb_color")) {
+        if let Ok(mut lock) = RANGE_SLIDER_THUMB_COLOR.write() { *lock = c; }
+        if let Ok(mut lock_drag) = RANGE_SLIDER_THUMB_DRAG_COLOR.write() {
+            *lock_drag = [
+                (c[0] + 0.15).min(1.0),
+                (c[1] + 0.15).min(1.0),
+                (c[2] + 0.15).min(1.0),
+                c[3]
+            ];
+        }
     }
     if let Some(c) = get_color("/style/control/progressbar/background") {
         if let Ok(mut lock) = PROGRESS_BG_COLOR.write() { *lock = c; }
@@ -1121,6 +1191,105 @@ pub fn set_rangeslider_fill(color: [f32; 4]) {
     }
 }
 
+pub fn checkbox_border() -> [f32; 4] {
+    load_colors_once();
+    *CHECKBOX_BORDER_COLOR.read().unwrap()
+}
+
+pub fn set_checkbox_border(color: [f32; 4]) {
+    if let Ok(mut lock) = CHECKBOX_BORDER_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn button_border_color() -> Option<[f32; 4]> {
+    load_colors_once();
+    *BUTTON_BORDER_COLOR.read().unwrap()
+}
+
+pub fn set_button_border_color(color: [f32; 4]) {
+    if let Ok(mut lock) = BUTTON_BORDER_COLOR.write() {
+        *lock = Some(color);
+    }
+}
+
+pub fn dropdown_border_color() -> [f32; 4] {
+    load_colors_once();
+    *DROPDOWN_BORDER_COLOR.read().unwrap()
+}
+
+pub fn set_dropdown_border_color(color: [f32; 4]) {
+    if let Ok(mut lock) = DROPDOWN_BORDER_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn dropdown_text_color() -> [f32; 4] {
+    load_colors_once();
+    *DROPDOWN_TEXT_COLOR.read().unwrap()
+}
+
+pub fn set_dropdown_text_color(color: [f32; 4]) {
+    if let Ok(mut lock) = DROPDOWN_TEXT_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn slider_fill() -> Option<[f32; 4]> {
+    load_colors_once();
+    *SLIDER_FILL_COLOR.read().unwrap()
+}
+
+pub fn set_slider_fill(color: [f32; 4]) {
+    if let Ok(mut lock) = SLIDER_FILL_COLOR.write() {
+        *lock = Some(color);
+    }
+}
+
+pub fn slider_thumb() -> [f32; 4] {
+    load_colors_once();
+    *SLIDER_THUMB_COLOR.read().unwrap()
+}
+
+pub fn set_slider_thumb(color: [f32; 4]) {
+    if let Ok(mut lock) = SLIDER_THUMB_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn slider_thumb_drag() -> [f32; 4] {
+    load_colors_once();
+    *SLIDER_THUMB_DRAG_COLOR.read().unwrap()
+}
+
+pub fn set_slider_thumb_drag(color: [f32; 4]) {
+    if let Ok(mut lock) = SLIDER_THUMB_DRAG_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn rangeslider_thumb() -> [f32; 4] {
+    load_colors_once();
+    *RANGE_SLIDER_THUMB_COLOR.read().unwrap()
+}
+
+pub fn set_rangeslider_thumb(color: [f32; 4]) {
+    if let Ok(mut lock) = RANGE_SLIDER_THUMB_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn rangeslider_thumb_drag() -> [f32; 4] {
+    load_colors_once();
+    *RANGE_SLIDER_THUMB_DRAG_COLOR.read().unwrap()
+}
+
+pub fn set_rangeslider_thumb_drag(color: [f32; 4]) {
+    if let Ok(mut lock) = RANGE_SLIDER_THUMB_DRAG_COLOR.write() {
+        *lock = color;
+    }
+}
+
 pub fn spinbox_display() -> [f32; 4] {
     load_colors_once();
     *SPINBOX_DISPLAY_COLOR.read().unwrap()
@@ -1441,6 +1610,82 @@ pub fn set_plate_blur(b: bool) {
     if let Ok(mut lock) = PLATE_BLUR.write() {
         *lock = b;
     }
+}
+
+pub fn control_label_color() -> [f32; 4] {
+    *CONTROL_LABEL_COLOR.read().unwrap()
+}
+
+pub fn control_label_color_u8() -> [u8; 3] {
+    let c = control_label_color();
+    [
+        (linear_to_srgb(c[0]) * 255.0).round() as u8,
+        (linear_to_srgb(c[1]) * 255.0).round() as u8,
+        (linear_to_srgb(c[2]) * 255.0).round() as u8,
+    ]
+}
+
+pub fn set_control_label_color(color: [f32; 4]) {
+    if let Ok(mut lock) = CONTROL_LABEL_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn control_label_hover_color() -> Option<[f32; 4]> {
+    *CONTROL_LABEL_HOVER_COLOR.read().unwrap()
+}
+
+pub fn control_label_focus_color() -> Option<[f32; 4]> {
+    *CONTROL_LABEL_FOCUS_COLOR.read().unwrap()
+}
+
+pub fn control_label_color_for_state(hovered: bool, focused: bool) -> [u8; 3] {
+    let c = if focused {
+        control_label_focus_color().unwrap_or_else(|| control_label_color())
+    } else if hovered {
+        control_label_hover_color().unwrap_or_else(|| control_label_color())
+    } else {
+        control_label_color()
+    };
+    [
+        (linear_to_srgb(c[0]) * 255.0).round() as u8,
+        (linear_to_srgb(c[1]) * 255.0).round() as u8,
+        (linear_to_srgb(c[2]) * 255.0).round() as u8,
+    ]
+}
+
+pub fn control_label_color_detached() -> [f32; 4] {
+    *CONTROL_LABEL_COLOR_DETACHED.read().unwrap()
+}
+
+pub fn control_label_color_detached_u8() -> [u8; 3] {
+    let c = control_label_color_detached();
+    [
+        (linear_to_srgb(c[0]) * 255.0).round() as u8,
+        (linear_to_srgb(c[1]) * 255.0).round() as u8,
+        (linear_to_srgb(c[2]) * 255.0).round() as u8,
+    ]
+}
+
+pub fn set_control_label_color_detached(color: [f32; 4]) {
+    if let Ok(mut lock) = CONTROL_LABEL_COLOR_DETACHED.write() {
+        *lock = color;
+    }
+}
+
+pub fn control_label_color_detached_for_state(hovered: bool, focused: bool) -> [u8; 3] {
+    let c = if focused {
+        control_label_focus_color().unwrap_or_else(|| control_label_color_detached())
+    } else if hovered {
+        control_label_hover_color().unwrap_or_else(|| control_label_color_detached())
+    } else {
+        control_label_color_detached()
+    };
+    [
+        (linear_to_srgb(c[0]) * 255.0).round() as u8,
+        (linear_to_srgb(c[1]) * 255.0).round() as u8,
+        (linear_to_srgb(c[2]) * 255.0).round() as u8,
+    ]
 }
 
 #[cfg(test)]

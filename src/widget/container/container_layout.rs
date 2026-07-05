@@ -67,6 +67,49 @@ impl ContainerLayout for OverlayLayout {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ManualLayout {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
+impl crate::layout::LayoutStrategy for ManualLayout {
+    fn init(&mut self, left: f32, top: f32, width: f32, height: f32) {
+        self.left = left;
+        self.top = top;
+        self.width = width;
+        self.height = height;
+    }
+
+    fn allocate(&mut self, _ww: f32, _wh: f32) -> (f32, f32, f32, f32) {
+        (self.left, self.top, self.width, self.height)
+    }
+
+    fn layout(&self, _x: f32, _y: f32, _w: f32, _h: f32, _children: &[*mut (dyn Element + 'static)], _ctx: &mut UiContext) -> f32 {
+        self.height
+    }
+
+    fn measure(&self, constraints: LayoutConstraints, _children: &[*mut (dyn Element + 'static)], _ctx: &UiContext) -> Size {
+        Size {
+            width: self.width.clamp(constraints.min_width, constraints.max_width),
+            height: self.height.clamp(constraints.min_height, constraints.max_height),
+        }
+    }
+
+    fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
+        Box::new(*self)
+    }
+}
+
+impl ContainerLayout for ManualLayout {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
+        Box::new(*self)
+    }
+}
+
+
 #[derive(Debug, Clone, Copy)]
 pub struct VerticalLayout {
     pub padding_x: f32,

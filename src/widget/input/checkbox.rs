@@ -156,14 +156,14 @@ impl Element for Checkbox {
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.label {
-            let font_size = 12.0;
+            let (_, font_size) = crate::layout::control_label_font_parsed();
             let y = crate::layout::align_text_y(self.base.y, self.base.h, font_size, 0.0);
             labels.push(TextLabel {
                 text: label.clone(),
                 x: self.base.x + 8.0,
                 y,
                 font_size,
-                color: [0xcc, 0xcc, 0xd4],
+                color: colors::control_label_color_for_state(self.base.hovered, self.base.focused),
             });
         }
         labels
@@ -274,7 +274,7 @@ impl Element for Toggle {
     }
 
     fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::toggle_font())
+        Some(crate::layout::control_label_font())
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
@@ -394,15 +394,14 @@ impl Element for Toggle {
     fn text_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         if let Some(ref label) = self.base.label {
-            let font_size = 12.0;
-            let font_fam = crate::layout::toggle_font_parsed().0;
+            let (font_fam, font_size) = crate::layout::control_label_font_parsed();
             let est_w = crate::widget::display::measure_text_width(label, &font_fam, font_size);
             labels.push(TextLabel {
                 text: label.clone(),
                 x: self.base.x + (self.base.w - est_w) / 2.0,
                 y: crate::layout::align_text_y(self.base.y, self.base.h, font_size, 0.0),
                 font_size,
-                color: [0xcc, 0xcc, 0xd4],
+                color: colors::control_label_color_for_state(self.base.hovered, self.base.focused),
             });
         }
         labels

@@ -94,7 +94,10 @@ impl Element for StatusBar {
     fn color(&self) -> [f32; 4] {
         if let Some(p_ptr) = self.parent {
             if unsafe { (*p_ptr).is_backplate() } {
-                return crate::colors::backplate_statusbar_color();
+                let theme_color = crate::colors::backplate_statusbar_color();
+                if theme_color[3] > 0.001 {
+                    return theme_color;
+                }
             }
         }
         self.bg_color.unwrap_or(colors::STATUS_BG)
