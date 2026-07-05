@@ -103,6 +103,7 @@ impl Element for ControlPanel {
             let mut create_btn: Option<*mut dyn Element> = None;
             let mut tile_btn: Option<*mut dyn Element> = None;
             let mut opacity_toggle: Option<*mut dyn Element> = None;
+            let mut enable_toggle: Option<*mut dyn Element> = None;
             let mut slider: Option<*mut dyn Element> = None;
             let mut slider_label: Option<*mut dyn Element> = None;
             let mut type_dd: Option<*mut dyn Element> = None;
@@ -114,6 +115,7 @@ impl Element for ControlPanel {
             let mut menubar_toggle: Option<*mut dyn Element> = None;
             let mut statusbar_toggle: Option<*mut dyn Element> = None;
             let mut border_sec: Option<*mut dyn Element> = None;
+            let mut bevel_toggle: Option<*mut dyn Element> = None;
             let mut border_width_spin: Option<*mut dyn Element> = None;
             let mut bevel_depth_spin: Option<*mut dyn Element> = None;
             let mut win_sec: Option<*mut dyn Element> = None;
@@ -127,6 +129,7 @@ impl Element for ControlPanel {
                     "Create Window" => create_btn = Some(child_ptr),
                     "Tile Windows" => tile_btn = Some(child_ptr),
                     "Opacity" => opacity_toggle = Some(child_ptr),
+                    "Enable" => enable_toggle = Some(child_ptr),
                     "Transparency Level" => slider_label = Some(child_ptr),
                     "Border" => border_sec = Some(child_ptr),
                     "Window Elements" => win_sec = Some(child_ptr),
@@ -138,6 +141,7 @@ impl Element for ControlPanel {
                     "Backplate" => backplate_toggle = Some(child_ptr),
                     "MenuBar" => menubar_toggle = Some(child_ptr),
                     "StatusBar" => statusbar_toggle = Some(child_ptr),
+                    "Bevel" => bevel_toggle = Some(child_ptr),
                     "Border Width" => border_width_spin = Some(child_ptr),
                     "Bevel Depth" => bevel_depth_spin = Some(child_ptr),
                     "Bevel Shape..." => bevel_shape_btn = Some(child_ptr),
@@ -161,24 +165,27 @@ impl Element for ControlPanel {
             }
 
             if let (Some(w_sp), Some(h_sp)) = (width_spin, height_spin) {
-                col.add_row(&[w_sp, h_sp], 20.0, 12.0);
+                col.add_row(&[w_sp, h_sp], 42.0, 12.0);
             } else {
                 if let Some(w_sp) = width_spin {
-                    col.add_widget(&mut *w_sp, 20.0);
+                    col.add_widget(&mut *w_sp, 42.0);
                 }
                 if let Some(h_sp) = height_spin {
-                    col.add_widget(&mut *h_sp, 20.0);
+                    col.add_widget(&mut *h_sp, 42.0);
                 }
             }
 
             if let Some(t_dd) = type_dd {
-                col.add_widget(&mut *t_dd, 20.0);
+                col.add_widget(&mut *t_dd, 44.0);
             }
             if let Some(s_dd) = shape_dd {
-                col.add_widget(&mut *s_dd, 20.0);
+                col.add_widget(&mut *s_dd, 44.0);
             }
             if let Some(op_t) = opacity_toggle {
-                col.add_widget(&mut *op_t, 20.0);
+                col.add_widget(&mut *op_t, 28.0);
+            }
+            if let Some(en_t) = enable_toggle {
+                col.add_widget(&mut *en_t, 28.0);
             }
             if let Some(sl_lbl) = slider_label {
                 col.add_widget(&mut *sl_lbl, 12.0);
@@ -193,24 +200,27 @@ impl Element for ControlPanel {
             let toggles = [backplate_toggle, menubar_toggle, statusbar_toggle];
             let active_toggles: Vec<*mut dyn Element> = toggles.iter().filter_map(|&t| t).collect();
             if !active_toggles.is_empty() {
-                col.add_row(&active_toggles, 20.0, 10.0);
+                col.add_row(&active_toggles, 28.0, 10.0);
             }
 
             if let Some(b_s) = border_sec {
                 col.add_widget(&mut *b_s, 20.0);
             }
             if let Some(bs_dd) = border_style_dd {
-                col.add_widget(&mut *bs_dd, 20.0);
+                col.add_widget(&mut *bs_dd, 44.0);
+            }
+            if let Some(bev_t) = bevel_toggle {
+                col.add_widget(&mut *bev_t, 28.0);
             }
 
             if let (Some(bw_sp), Some(bd_sp)) = (border_width_spin, bevel_depth_spin) {
-                col.add_row(&[bw_sp, bd_sp], 20.0, 12.0);
+                col.add_row(&[bw_sp, bd_sp], 42.0, 12.0);
             } else {
                 if let Some(bw_sp) = border_width_spin {
-                    col.add_widget(&mut *bw_sp, 20.0);
+                    col.add_widget(&mut *bw_sp, 42.0);
                 }
                 if let Some(bd_sp) = bevel_depth_spin {
-                    col.add_widget(&mut *bd_sp, 20.0);
+                    col.add_widget(&mut *bd_sp, 42.0);
                 }
             }
             if let Some(bs_btn) = bevel_shape_btn {
