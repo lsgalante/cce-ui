@@ -541,7 +541,7 @@ impl Element for Dropdown {
         let start_x = x + 8.0;
         let right_limit = x + w - 28.0; // 10px margin before the arrow
         let fade_start_x = (right_limit - 24.0).max(start_x); // Fade out over the last 24px
-        let text_y = self.base.y + top + (self.base.h - top - 12.0) / 2.0 - 1.0;
+        let text_y = crate::layout::center_text_y(self.base.y + top, self.base.h - top, 12.0);
         let tc = colors::dropdown_text_color();
         let default_color = [
             (colors::linear_to_srgb(tc[0]) * 255.0).round() as u8,
@@ -669,7 +669,7 @@ impl Element for Dropdown {
         labels.push(TextLabel {
             text: "▼".to_string(),
             x: x + w - 18.0,
-            y: self.base.y + top + (self.base.h - top - 10.0) / 2.0 - 1.0,
+            y: crate::layout::center_text_y(self.base.y + top, self.base.h - top, 10.0),
             font_size: 10.0,
             color: [0x83, 0x83, 0x8a],
         });
