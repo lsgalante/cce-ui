@@ -796,12 +796,21 @@ pub fn widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_ci
 pub fn push_widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_circle: [f32; 3], out: &mut Vec<Vertex>) {
     let (x, y, ww, h) = w.rect();
     let radii = w.corner_radii();
-    push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
-
     if let Some(thickness) = w.plate_bevel() {
-        push_plate_bevel_vertices(x, y, ww, h, radii.top_left, thickness, sw, sh, w.color(), clip_circle, out);
-    } else if let Some((color, thickness)) = w.solid_border() {
-        push_plate_solid_border_vertices(x, y, ww, h, radii, thickness, sw, sh, color, clip_circle, out);
+        let t = thickness;
+        let inner_radii = crate::widget::CornerRadii {
+            top_left: (radii.top_left - t).max(0.0),
+            top_right: (radii.top_right - t).max(0.0),
+            bottom_right: (radii.bottom_right - t).max(0.0),
+            bottom_left: (radii.bottom_left - t).max(0.0),
+        };
+        push_rounded_rect_vertices_corners(x + t, y + t, ww - 2.0 * t, h - 2.0 * t, inner_radii, sw, sh, w.color(), clip_circle, None, out);
+        push_plate_bevel_vertices(x, y, ww, h, radii.top_left, t, sw, sh, w.color(), clip_circle, out);
+    } else {
+        push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
+        if let Some((color, thickness)) = w.solid_border() {
+            push_plate_solid_border_vertices(x, y, ww, h, radii, thickness, sw, sh, color, clip_circle, out);
+        }
     }
 
     for (cx, cy, r, t, start, end, qc) in w.extra_arcs() {
