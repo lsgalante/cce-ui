@@ -355,7 +355,15 @@ impl Element for ControlPanel {
 
         unsafe {
             for child_ptr in &self.children {
-                for (qx, qy, qw, qh, qc) in (**child_ptr).all_quads(&ctx_dummy) {
+                let child = &**child_ptr;
+                let (cx, cy, cw, ch) = child.rect();
+                let has_rounded = child.rounded_corners() != (false, false, false, false);
+                let has_bg = child.color()[3].abs() > 0.001;
+
+                for (qx, qy, qw, qh, qc) in child.all_quads(&ctx_dummy) {
+                    if has_rounded && has_bg && (qx - cx).abs() < 0.1 && (qy - cy).abs() < 0.1 && (qw - cw).abs() < 0.1 && (qh - ch).abs() < 0.1 {
+                        continue;
+                    }
                     let qy_shifted = qy - scroll_y;
                     let qy_top = qy_shifted;
                     let qy_bottom = qy_shifted + qh;
