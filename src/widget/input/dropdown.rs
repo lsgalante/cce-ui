@@ -83,47 +83,94 @@ impl Dropdown {
         w
     }
 
-    pub fn get_dy_dh(&self) -> (f32, f32) {
-        let dh = self.options.len() as f32 * 24.0;
+    pub fn get_popover_geom(&self) -> (f32, f32, f32, f32) {
+        let rw = self.popover_width();
+        let rh = self.options.len() as f32 * 24.0;
+        
         let open_upward = self.open_upward.unwrap_or_else(|| self.base.y > 400.0);
-        let dy = if open_upward {
-            self.base.y - dh
+        
+        let mut rx = self.base.x;
+        let mut ry = if open_upward {
+            let label_offset = self.base.label_offset();
+            self.base.y + label_offset - rh
         } else {
             self.base.y + self.base.h
         };
-        (dy, dh)
+        
+        let mut is_ramp = false;
+        if let Some(parent_ptr) = self.parent {
+            is_ramp = unsafe {
+                (*parent_ptr).as_any().is::<crate::widget::Ramp>()
+            };
+        }
+        
+        if is_ramp {
+            if let Some(parent_ptr) = self.parent {
+                let (px, py, pw_parent, ph_parent) = unsafe { (*parent_ptr).rect() };
+                if pw_parent > 0.0 && ph_parent > 0.0 {
+                    let label_offset = self.base.label_offset();
+                    let dy_down = self.base.y + self.base.h;
+                    let dy_up = self.base.y + label_offset - rh;
+                    
+                    if self.open_upward.is_none() {
+                        if dy_down + rh > py + ph_parent && dy_up >= py {
+                            ry = dy_up;
+                        } else if dy_up < py && dy_down + rh <= py + ph_parent {
+                            ry = dy_down;
+                        }
+                    }
+                    
+                    // Clamp X to parent borders
+                    if rx < px {
+                        rx = px;
+                    }
+                    if rx + rw > px + pw_parent {
+                        rx = px + pw_parent - rw;
+                    }
+                    
+                    // Clamp Y to parent borders
+                    if ry < py {
+                        ry = py;
+                    }
+                    if ry + rh > py + ph_parent {
+                        ry = py + ph_parent - rh;
+                    }
+                }
+            }
+        }
+        
+        (rx, ry, rw, rh)
     }
 
     pub fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
         if !self.open { return; }
         
-        let (dy, dh) = self.get_dy_dh();
-        let pw = self.popover_width();
+        let (rx, ry, rw, rh) = self.get_popover_geom();
         
         // 1. Soft layered drop shadows
-        pc.rect([0.02, 0.02, 0.05, 0.15], self.base.x + 1.0, dy + 1.0, pw, dh);
-        pc.rect([0.02, 0.02, 0.05, 0.08], self.base.x + 3.0, dy + 3.0, pw, dh);
-        pc.rect([0.02, 0.02, 0.05, 0.04], self.base.x + 5.0, dy + 5.0, pw, dh);
+        pc.rect([0.02, 0.02, 0.05, 0.15], rx + 1.0, ry + 1.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.08], rx + 3.0, ry + 3.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.04], rx + 5.0, ry + 5.0, rw, rh);
 
         let theme = colors::active_theme();
 
         // 2. High-contrast premium outer border
-        pc.rect(theme.surface_border, self.base.x, dy, pw, dh);
+        pc.rect(theme.surface_border, rx, ry, rw, rh);
         
         // 3. Frosted glass background
-        pc.rect(theme.surface_bg, self.base.x + 1.0, dy + 1.0, pw - 2.0, dh - 2.0); // bg
+        pc.rect(theme.surface_bg, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0); // bg
         
         if let Some(h_idx) = self.hovered_item {
-            let iy = dy + h_idx as f32 * 24.0;
+            let iy = ry + h_idx as f32 * 24.0;
             // 4. Vibrantly colored translucent selection highlight
-            pc.rect(theme.primary_accent, self.base.x + 2.0, iy + 2.0, pw - 4.0, 20.0);
+            pc.rect(theme.primary_accent, rx + 2.0, iy + 2.0, rw - 4.0, 20.0);
         }
         
         for (idx, opt) in self.options.iter().enumerate() {
-            let iy = crate::layout::align_text_y(dy + idx as f32 * 24.0, 24.0, 12.0, 0.0);
+            let iy = crate::layout::align_text_y(ry + idx as f32 * 24.0, 24.0, 12.0, 0.0);
             
             if opt == "-" {
-                pc.rect(theme.surface_border, self.base.x + 8.0, dy + idx as f32 * 24.0 + 11.5, pw - 16.0, 1.0);
+                pc.rect(theme.surface_border, rx + 8.0, ry + idx as f32 * 24.0 + 11.5, rw - 16.0, 1.0);
                 continue;
             }
 
@@ -142,11 +189,11 @@ impl Dropdown {
                 1.0,
             ];
             
-            let bounds = Some([self.base.x, dy, self.base.x + pw, dy + dh]);
+            let bounds = Some([rx, ry, rx + rw, ry + rh]);
             if let Some(ref font) = self.widget_font() {
                 pc.text_with_font_and_bounds(
                     opt,
-                    self.base.x + 8.0,
+                    rx + 8.0,
                     iy,
                     12.0,
                     color_f32,
@@ -156,7 +203,7 @@ impl Dropdown {
             } else {
                 pc.text_with_bounds(
                     opt,
-                    self.base.x + 8.0,
+                    rx + 8.0,
                     iy,
                     12.0,
                     color_f32,
@@ -282,10 +329,9 @@ impl Element for Dropdown {
         let hx = if self.base.row_w > 0.0 { self.base.row_x } else { x };
         let hw = if self.base.row_w > 0.0 { self.base.row_w } else { w };
         if self.open {
-            let (dy, dh) = self.get_dy_dh();
-            let pw = self.popover_width();
+            let (rx, ry, rw, rh) = self.get_popover_geom();
             let hit_trigger = px >= hx && px <= hx + hw && py >= y && py <= y + h;
-            let hit_popover = px >= x && px <= x + pw && py >= dy && py <= dy + dh;
+            let hit_popover = px >= rx && px <= rx + rw && py >= ry && py <= ry + rh;
             hit_trigger || hit_popover
         } else {
             px >= hx && px <= hx + hw && py >= y && py <= y + h
@@ -300,11 +346,9 @@ impl Element for Dropdown {
         self.hovered_item = None;
 
         if self.open {
-            let (x, _, _, _) = self.rect();
-            let (dy, dh) = self.get_dy_dh();
-            let pw = self.popover_width();
-            if px >= x && px <= x + pw && py >= dy && py <= dy + dh {
-                let idx = ((py - dy) / 24.0) as usize;
+            let (rx, ry, rw, rh) = self.get_popover_geom();
+            if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
+                let idx = ((py - ry) / 24.0) as usize;
                 if idx < self.options.len() {
                     if self.options[idx] != "-" {
                         self.hovered_item = Some(idx);
@@ -326,14 +370,13 @@ impl Element for Dropdown {
         if button != MouseButton::Left || state != ElementState::Pressed { return false; }
 
         let (x, y, w, h) = self.rect();
-        let (dy, dh) = self.get_dy_dh();
-        let pw = self.popover_width();
+        let (rx, ry, rw, rh) = self.get_popover_geom();
 
         let inside_trigger = px >= x && px <= x + w && py >= y && py <= y + h;
-        let inside_popover = self.open && px >= x && px <= x + pw && py >= dy && py <= dy + dh;
+        let inside_popover = self.open && px >= rx && px <= rx + rw && py >= ry && py <= ry + rh;
 
         if inside_popover {
-            let idx = ((py - dy) / 24.0) as usize;
+            let idx = ((py - ry) / 24.0) as usize;
             if idx < self.options.len() {
                 if self.options[idx] == "-" {
                     return true;
@@ -500,8 +543,7 @@ impl Element for Dropdown {
     fn take_click(&mut self) -> bool { self.take_change() }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
         if self.open {
-            let (dy, dh) = self.get_dy_dh();
-            Some((self.base.x, dy, self.popover_width(), dh))
+            Some(self.get_popover_geom())
         } else {
             None
         }
@@ -629,6 +671,36 @@ mod tests {
         };
         dd.keyboard_input(&key_up, &mut dummy);
         assert_eq!(dd.hovered_item, Some(0));
+    }
+
+    #[test]
+    fn test_dropdown_ramp_parent_constraints() {
+        let mut ramp = crate::widget::Ramp::new();
+        // Set the rect of parent Ramp
+        ramp.set_rect(20.0, 20.0, 410.0, 260.0);
+        
+        let options = vec![
+            "Option 1".to_string(),
+            "Option 2".to_string(),
+            "Option 3".to_string(),
+            "Option 4".to_string(),
+            "Option 5".to_string(),
+            "Option 6".to_string(),
+        ];
+        let mut dd = Dropdown::new(options, 0).with_label("Preset");
+        dd.set_rect(30.0, 125.0, 110.0, 20.0);
+        
+        // Link the dropdown parent pointer to the Ramp
+        dd.parent = Some(&mut ramp as *mut crate::widget::Ramp as *mut (dyn crate::widget::Element + 'static));
+        
+        // Compute geometry
+        let (rx, ry, rw, rh) = dd.get_popover_geom();
+        
+        // Validate coordinates stay inside the parent Ramp bounds: x in [20, 430], y in [20, 280]
+        assert!(rx >= 20.0, "rx {} should be >= 20.0", rx);
+        assert!(rx + rw <= 430.0, "rx + rw {} should be <= 430.0", rx + rw);
+        assert!(ry >= 20.0, "ry {} should be >= 20.0", ry);
+        assert!(ry + rh <= 280.0, "ry + rh {} should be <= 280.0", ry + rh);
     }
 }
 
