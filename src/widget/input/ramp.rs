@@ -449,7 +449,7 @@ impl Ramp {
             RampKey { pos: 1.0, value: 0.5 },
         ];
         
-        let val_slider = Slider::new().with_label("Value");
+        let val_slider = Slider::new();
         let del_button = Button::new(0.0, 0.0, 70.0, 28.0).with_label("Delete Key");
         let preset_dropdown = Dropdown::new(
             vec![
@@ -461,16 +461,14 @@ impl Ramp {
                 "Valley".to_string(),
             ],
             2,
-        ).with_label("Preset")
-         .with_open_upward(true);
+        ).with_open_upward(true);
         let line_type_dropdown = Dropdown::new(
             vec![
                 "Linear".to_string(),
                 "Bezier".to_string(),
             ],
             0,
-        ).with_label("Line Type")
-         .with_open_upward(true);
+        ).with_open_upward(true);
         
         Self {
             base: Widget::new(),
@@ -745,15 +743,15 @@ impl Element for Ramp {
             let available_for_inputs = track_w - del_w - 3.0 * gap;
             let col_w = (available_for_inputs / 3.0).max(40.0);
             
-            self.preset_dropdown.set_rect(track_x, sy, col_w, 40.0);
-            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy, col_w, 40.0);
-            self.val_slider.set_rect(track_x + 2.0 * (col_w + gap), sy, col_w, 40.0);
+            self.preset_dropdown.set_rect(track_x, sy + 20.0, col_w, 20.0);
+            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy + 20.0, col_w, 20.0);
+            self.val_slider.set_rect(track_x + 2.0 * (col_w + gap), sy + 20.0, col_w, 20.0);
             self.del_button.set_rect(track_x + track_w - del_w, sy + 12.0, del_w, 28.0);
         } else {
             let gap = 10.0;
             let col_w = (track_w - gap) / 2.0;
-            self.preset_dropdown.set_rect(track_x, sy, col_w, 40.0);
-            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy, col_w, 40.0);
+            self.preset_dropdown.set_rect(track_x, sy + 20.0, col_w, 20.0);
+            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy + 20.0, col_w, 20.0);
             self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
         }
@@ -999,6 +997,60 @@ impl Element for Ramp {
     
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
+        
+        let track_x = self.base.x + 10.0;
+        let track_w = self.base.w - 20.0;
+        let h = self.base.h;
+        let gh = (h - 70.0).max(30.0);
+        let sy = self.base.y + gh + 15.0;
+        
+        let gap = 10.0;
+        let col_w = if self.selected_key_idx.is_some() {
+            let del_w = 70.0;
+            let available_for_inputs = track_w - del_w - 3.0 * gap;
+            (available_for_inputs / 3.0).max(40.0)
+        } else {
+            (track_w - gap) / 2.0
+        };
+        
+        labels.push((
+            TextLabel {
+                text: "Preset".to_string(),
+                x: track_x + 4.0,
+                y: sy - 2.0,
+                font_size: 12.0,
+                color: [0x83, 0x83, 0x8a],
+            },
+            self.preset_dropdown.widget_font(),
+            None,
+        ));
+        
+        labels.push((
+            TextLabel {
+                text: "Line Type".to_string(),
+                x: track_x + col_w + gap + 4.0,
+                y: sy - 2.0,
+                font_size: 12.0,
+                color: [0x83, 0x83, 0x8a],
+            },
+            self.line_type_dropdown.widget_font(),
+            None,
+        ));
+        
+        if self.selected_key_idx.is_some() {
+            labels.push((
+                TextLabel {
+                    text: "Value".to_string(),
+                    x: track_x + 2.0 * (col_w + gap) + 4.0,
+                    y: sy - 2.0,
+                    font_size: 12.0,
+                    color: [0x83, 0x83, 0x8a],
+                },
+                self.val_slider.widget_font(),
+                None,
+            ));
+        }
+        
         labels.extend(self.preset_dropdown.text_labels_with_font_and_bounds(ctx));
         labels.extend(self.line_type_dropdown.text_labels_with_font_and_bounds(ctx));
         if self.selected_key_idx.is_some() {
