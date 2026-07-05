@@ -105,7 +105,7 @@ impl crate::layout::LayoutStrategy for VerticalLayout {
         self.spacing
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], _ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
         let left_x = x + self.padding_x;
         let available_w = (w - 2.0 * self.padding_x).max(1.0);
         let mut current_y = y + self.padding_y;
@@ -115,7 +115,11 @@ impl crate::layout::LayoutStrategy for VerticalLayout {
                 let child = &mut *child_ptr;
                 let ch = child.preferred_height().unwrap_or(child.rect().3);
                 let use_h = if ch > 0.0 { ch } else { 44.0 };
-                child.set_rect(left_x, current_y, available_w, use_h);
+                child.layout(
+                    Point { x: left_x, y: current_y },
+                    LayoutConstraints::new(available_w, available_w, use_h, use_h),
+                    ctx,
+                );
                 current_y += use_h + self.spacing;
             }
         }
@@ -199,7 +203,7 @@ impl crate::layout::LayoutStrategy for GridLayout {
         self.gap
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], _ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
         let count = children.len();
         if count == 0 {
             return 0.0;
@@ -228,7 +232,11 @@ impl crate::layout::LayoutStrategy for GridLayout {
                 
                 let cx = x + self.padding_x + min_col as f32 * (col_w + self.gap);
                 let cy = col_heights[min_col];
-                child.set_rect(cx, cy, col_w, use_h);
+                child.layout(
+                    Point { x: cx, y: cy },
+                    LayoutConstraints::new(col_w, col_w, use_h, use_h),
+                    ctx,
+                );
                 col_heights[min_col] += use_h + self.gap;
             }
         }
@@ -357,5 +365,83 @@ impl crate::layout::LayoutStrategy for AdaptiveGridLayout {
 impl ContainerLayout for AdaptiveGridLayout {
     fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
         Box::new(self.clone())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ColumnsLayout {
+    pub padding_x: f32,
+    pub padding_y: f32,
+    pub spacing: f32,
+}
+
+impl Default for ColumnsLayout {
+    fn default() -> Self {
+        Self {
+            padding_x: 8.0,
+            padding_y: 10.0,
+            spacing: 12.0,
+        }
+    }
+}
+
+impl crate::layout::LayoutStrategy for ColumnsLayout {
+    fn init(&mut self, _left: f32, _top: f32, _width: f32, _height: f32) {}
+    fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) { (0.0, 0.0, ww, wh) }
+    fn get_gap(&self) -> f32 { self.spacing }
+
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+        let count = children.len();
+        if count == 0 {
+            return 0.0;
+        }
+        let total_spacing = self.spacing * (count - 1) as f32;
+        let total_padding = self.padding_x * 2.0;
+        let available_w = (w - total_padding - total_spacing).max(1.0);
+        let col_w = available_w / count as f32;
+        let use_h = (h - 2.0 * self.padding_y).max(1.0);
+        let start_y = y + self.padding_y;
+
+        let mut current_x = x + self.padding_x;
+        for &child_ptr in children {
+            unsafe {
+                let child = &mut *child_ptr;
+                child.layout(
+                    Point { x: current_x, y: start_y },
+                    LayoutConstraints::new(col_w, col_w, use_h, use_h),
+                    ctx,
+                );
+                current_x += col_w + self.spacing;
+            }
+        }
+        use_h + 2.0 * self.padding_y
+    }
+
+    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size {
+        let count = children.len();
+        if count == 0 {
+            return Size { width: constraints.min_width, height: constraints.min_height };
+        }
+        let mut max_h = 0.0f32;
+        for &child_ptr in children {
+            unsafe {
+                let size = (*child_ptr).measure(constraints, ctx);
+                max_h = max_h.max(size.height);
+            }
+        }
+        Size {
+            width: constraints.max_width,
+            height: (max_h + 2.0 * self.padding_y).clamp(constraints.min_height, constraints.max_height),
+        }
+    }
+
+    fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
+        Box::new(*self)
+    }
+}
+
+impl ContainerLayout for ColumnsLayout {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
+        Box::new(*self)
     }
 }
