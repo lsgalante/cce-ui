@@ -650,14 +650,24 @@ impl Element for Ramp {
         let gh = 80.0;
         let sy = y + gh + 25.0;
         
-        // Dropdowns are always visible at the bottom row
-        self.preset_dropdown.set_rect(x + 10.0, sy, 110.0, 20.0);
-        self.line_type_dropdown.set_rect(x + 130.0, sy, 110.0, 20.0);
+        let track_x = x + 10.0;
+        let track_w = w - 20.0;
         
         if self.selected_key_idx.is_some() {
-            self.val_slider.set_rect(x + 250.0, sy, 110.0, 20.0);
-            self.del_button.set_rect(x + w - 80.0, sy - 4.0, 70.0, 28.0);
+            let gap = 10.0;
+            let del_w = 70.0;
+            let available_for_inputs = track_w - del_w - 3.0 * gap;
+            let col_w = (available_for_inputs / 3.0).max(40.0);
+            
+            self.preset_dropdown.set_rect(track_x, sy, col_w, 20.0);
+            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy, col_w, 20.0);
+            self.val_slider.set_rect(track_x + 2.0 * (col_w + gap), sy, col_w, 20.0);
+            self.del_button.set_rect(track_x + track_w - del_w, sy - 4.0, del_w, 28.0);
         } else {
+            let gap = 10.0;
+            let col_w = (track_w - gap) / 2.0;
+            self.preset_dropdown.set_rect(track_x, sy, col_w, 20.0);
+            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy, col_w, 20.0);
             self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
         }
@@ -669,21 +679,13 @@ impl Element for Ramp {
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
-        // Draw outer container border
-        let bx = self.base.x;
-        let by = self.base.y;
-        let bw = self.base.w;
-        let bh = self.base.h;
         let border_color = colors::ramp_border_color();
-        quads.push((bx, by, bw, 1.0, border_color));                 // Top
-        quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));         // Bottom
-        quads.push((bx, by, 1.0, bh, border_color));                 // Left
-        quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));         // Right
         
-        // Draw graph background
-        quads.push((track_x, self.base.y + 10.0, track_w, gh, [0.15, 0.15, 0.18, 1.0]));
-        // Border
-        quads.push((track_x - 1.0, self.base.y + 10.0 - 1.0, track_w + 2.0, gh + 2.0, border_color));
+        // Draw container background (enclosing graph and dropdowns)
+        let ch = self.base.h - 20.0;
+        quads.push((track_x, self.base.y + 10.0, track_w, ch, [0.15, 0.15, 0.18, 1.0]));
+        // Draw container border
+        quads.push((track_x - 1.0, self.base.y + 10.0 - 1.0, track_w + 2.0, ch + 2.0, border_color));
         
         // Draw grid lines
         for ratio in [0.25, 0.5, 0.75] {
