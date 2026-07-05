@@ -99,6 +99,21 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
             let mut node_val = serde_json::Value::Null;
             if has_props {
                 node_val = serde_json::Value::Object(node_map);
+            } else if node.entries().len() > 1 {
+                let parts: Vec<String> = node.entries().iter().map(|entry| {
+                    match entry.value() {
+                        kdl::KdlValue::Bool(b) => b.to_string(),
+                        kdl::KdlValue::Base2(i) |
+                        kdl::KdlValue::Base8(i) |
+                        kdl::KdlValue::Base10(i) |
+                        kdl::KdlValue::Base16(i) => i.to_string(),
+                        kdl::KdlValue::Base10Float(f) => f.to_string(),
+                        kdl::KdlValue::String(s) |
+                        kdl::KdlValue::RawString(s) => s.clone(),
+                        kdl::KdlValue::Null => "null".to_string(),
+                    }
+                }).collect();
+                node_val = serde_json::Value::String(parts.join(" "));
             } else if let Some(entry) = node.entries().first() {
                 node_val = match entry.value() {
                     kdl::KdlValue::Bool(b) => serde_json::Value::Bool(*b),
@@ -379,7 +394,7 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
     };
 
     if let Some(ref ext_ty) = existing_ty {
-        if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") {
+        if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") || ext_ty == "vec2i" {
             kdl_ty = Some(ext_ty.clone());
         }
     }
@@ -407,11 +422,24 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
         }
     } else {
         child_node.entries_mut().clear();
-        let mut entry = kdl::KdlEntry::new(kdl_val);
-        if let Some(ref ty) = kdl_ty {
-            entry.set_ty(ty.as_str());
+        if kdl_ty.as_deref() == Some("vec2i") {
+            let parts: Vec<&str> = value.split_whitespace().collect();
+            for (idx, part) in parts.iter().enumerate() {
+                if let Ok(i) = part.parse::<i64>() {
+                    let mut entry = kdl::KdlEntry::new(kdl::KdlValue::Base10(i));
+                    if idx == 0 {
+                        entry.set_ty("vec2i");
+                    }
+                    child_node.entries_mut().push(entry);
+                }
+            }
+        } else {
+            let mut entry = kdl::KdlEntry::new(kdl_val);
+            if let Some(ref ty) = kdl_ty {
+                entry.set_ty(ty.as_str());
+            }
+            child_node.entries_mut().push(entry);
         }
-        child_node.entries_mut().push(entry);
     }
 
     true
@@ -699,6 +727,36 @@ mod tests {
         let statusbar_txt = crate::color::backplate_statusbar_text_color();
         assert!(statusbar_txt[0] > 0.0);
     }
+
+    #[test]
+    fn test_vec2i_lossless_roundtrip() {
+        let content = "style {\n    surface {\n        cloud {\n            position_default (vec2i)100 200\n        }\n    }\n}\n";
+        let val = parse_kdl_to_json(content);
+        println!("Parsed KDL to JSON: {:?}", val);
+        
+        let position_default_val = val.get("style").unwrap()
+            .get("surface").unwrap()
+            .get("cloud").unwrap()
+            .get("position_default").unwrap();
+        assert_eq!(position_default_val.as_str().unwrap(), "100 200");
+
+        let mut annotations = std::collections::HashMap::new();
+        annotations.insert("style.surface.cloud.position_default".to_string(), "vec2i".to_string());
+        
+        let kdl_str = json_to_kdl_string_with_annotations(&val, &annotations);
+        println!("Generated KDL:\n{}", kdl_str);
+        
+        // Assert that (vec2i)100 200 is preserved without quotes
+        assert!(kdl_str.contains("position_default (vec2i)100 200"));
+        
+        // Test update_kdl_in_memory preserves and updates the KDL Document correctly
+        let mut doc = kdl_str.parse::<kdl::KdlDocument>().unwrap();
+        let updated = update_kdl_in_memory(&mut doc, "style.surface.cloud.position_default", "150 250", "layout");
+        assert!(updated);
+        let updated_kdl = doc.to_string();
+        println!("Updated KDL:\n{}", updated_kdl);
+        assert!(updated_kdl.contains("position_default (vec2i)150 250"));
+    }
 }
 
 fn format_kdl_type(ty: &str) -> String {
@@ -753,39 +811,63 @@ pub fn value_to_kdl_with_annotations(
                 out
             } else {
                 let mut prop_parts = Vec::new();
+                let mut child_parts = Vec::new();
                 for (prop_name, prop_val) in map {
                     let prop_path = format!("{}.{}", current_path, prop_name);
-                    let (val_str, val_ty) = match prop_val {
-                        serde_json::Value::Bool(b) => (b.to_string(), Some("bool".to_string())),
-                        serde_json::Value::Number(num) => {
-                            if num.is_f64() {
-                                (num.to_string(), Some("f64".to_string()))
-                            } else {
-                                (num.to_string(), Some("i64".to_string()))
-                            }
+                    let is_vec2i = annotations.get(&prop_path).map_or(false, |a| a == "vec2i");
+                    if is_vec2i {
+                        if let serde_json::Value::String(ref s) = prop_val {
+                            child_parts.push(format!("{}{} (vec2i){}\n", "    ".repeat(indent + 1), prop_name, s));
                         }
-                        serde_json::Value::String(s) => {
-                            if let Some(anno) = annotations.get(&prop_path) {
-                                (format!("\"{}\"", s), Some(anno.clone()))
-                            } else if s.starts_with('#') {
-                                let s_clean = s.trim_start_matches('#');
-                                let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
-                                (format!("\"{}\"", s), Some(ty.to_string()))
-                            } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name == "open_search" || prop_name == "delete" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") || prop_name == "brightness_up" || prop_name == "brightness_down" || prop_name.ends_with(".brightness_up") || prop_name.ends_with(".brightness_down") {
-                                (format!("\"{}\"", s), Some("keybind".to_string()))
-                            } else {
-                                (format!("\"{}\"", s), None)
-                            }
-                        }
-                        _ => (prop_val.to_string(), None),
-                    };
-                    if let Some(ty) = val_ty {
-                        prop_parts.push(format!("{}=({}){}", prop_name, format_kdl_type(&ty), val_str));
                     } else {
-                        prop_parts.push(format!("{}={}", prop_name, val_str));
+                        let (val_str, val_ty) = match prop_val {
+                            serde_json::Value::Bool(b) => (b.to_string(), Some("bool".to_string())),
+                            serde_json::Value::Number(num) => {
+                                if num.is_f64() {
+                                    (num.to_string(), Some("f64".to_string()))
+                                } else {
+                                    (num.to_string(), Some("i64".to_string()))
+                                }
+                            }
+                            serde_json::Value::String(s) => {
+                                if let Some(anno) = annotations.get(&prop_path) {
+                                    if anno == "vec2i" {
+                                        (s.clone(), Some(anno.clone()))
+                                    } else {
+                                        (format!("\"{}\"", s), Some(anno.clone()))
+                                    }
+                                } else if s.starts_with('#') {
+                                    let s_clean = s.trim_start_matches('#');
+                                    let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
+                                    (format!("\"{}\"", s), Some(ty.to_string()))
+                                } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name == "open_search" || prop_name == "delete" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") || prop_name == "brightness_up" || prop_name == "brightness_down" || prop_name.ends_with(".brightness_up") || prop_name.ends_with(".brightness_down") {
+                                    (format!("\"{}\"", s), Some("keybind".to_string()))
+                                } else {
+                                    (format!("\"{}\"", s), None)
+                                }
+                            }
+                            _ => (prop_val.to_string(), None),
+                        };
+                        if let Some(ty) = val_ty {
+                            prop_parts.push(format!("{}=({}){}", prop_name, format_kdl_type(&ty), val_str));
+                        } else {
+                            prop_parts.push(format!("{}={}", prop_name, val_str));
+                        }
                     }
                 }
-                format!("{}{} {}\n", indent_str, key, prop_parts.join(" "))
+                if !child_parts.is_empty() {
+                    let mut out = format!("{}{} {{\n", indent_str, format_kdl_identifier(key));
+                    if !prop_parts.is_empty() {
+                        out.push_str(&format!("{}{}\n", "    ".repeat(indent + 1), prop_parts.join(" ")));
+                    }
+                    for child in child_parts {
+                        out.push_str(&child);
+                    }
+                    out.push_str(&format!("{}}}\n", indent_str));
+                    out
+                } else {
+                    format!("{}{} {}\n", indent_str, key, prop_parts.join(" "))
+                }
             }
         }
         serde_json::Value::Array(arr) => {
@@ -807,7 +889,11 @@ pub fn value_to_kdl_with_annotations(
                 }
                 serde_json::Value::String(s) => {
                     if let Some(anno) = annotations.get(&current_path) {
-                        (format!("\"{}\"", s), Some(anno.clone()))
+                        if anno == "vec2i" {
+                            (s.clone(), Some(anno.clone()))
+                        } else {
+                            (format!("\"{}\"", s), Some(anno.clone()))
+                        }
                     } else if s.starts_with('#') {
                         let s_clean = s.trim_start_matches('#');
                         let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
