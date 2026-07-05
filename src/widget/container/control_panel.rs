@@ -80,7 +80,7 @@ impl Element for ControlPanel {
     }
 
     fn color(&self) -> [f32; 4] {
-        colors::list_bg_color()
+        colors::ramp_background_color()
     }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
