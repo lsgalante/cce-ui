@@ -528,10 +528,12 @@ impl Element for Dropdown {
         let text_y = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
         let default_color = [0xdd, 0xdd, 0xe2];
         let bg_color = colors::dropdown_background_color();
+        let parent_color = colors::control_panel_color();
+        let alpha = bg_color[3];
         let bg_rgb = [
-            (bg_color[0] * 255.0).round().clamp(0.0, 255.0) as u8,
-            (bg_color[1] * 255.0).round().clamp(0.0, 255.0) as u8,
-            (bg_color[2] * 255.0).round().clamp(0.0, 255.0) as u8,
+            ((parent_color[0] * (1.0 - alpha) + bg_color[0] * alpha) * 255.0).round().clamp(0.0, 255.0) as u8,
+            ((parent_color[1] * (1.0 - alpha) + bg_color[1] * alpha) * 255.0).round().clamp(0.0, 255.0) as u8,
+            ((parent_color[2] * (1.0 - alpha) + bg_color[2] * alpha) * 255.0).round().clamp(0.0, 255.0) as u8,
         ];
 
         let w_dummy = crate::widget::display::measure_text_width("M", &font_family, 12.0);
