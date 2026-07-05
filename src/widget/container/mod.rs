@@ -18,8 +18,10 @@ pub mod backplate;
 pub mod paginator;
 pub mod scroll_bar;
 pub mod treelist;
+pub mod control_panel;
 
 pub use container::Container;
+pub use control_panel::ControlPanel;
 pub use container_layout::{ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout};
 pub use section_container::SectionContainer;
 pub use header::Header;
