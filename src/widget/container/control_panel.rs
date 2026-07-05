@@ -116,6 +116,7 @@ impl Element for ControlPanel {
             let mut border_sec: Option<*mut dyn Element> = None;
             let mut bevel_toggle: Option<*mut dyn Element> = None;
             let mut border_width_spin: Option<*mut dyn Element> = None;
+            let mut bevel_depth_spin: Option<*mut dyn Element> = None;
             let mut win_sec: Option<*mut dyn Element> = None;
             let mut bevel_shape_btn: Option<*mut dyn Element> = None;
 
@@ -140,6 +141,7 @@ impl Element for ControlPanel {
                     "StatusBar" => statusbar_toggle = Some(child_ptr),
                     "Bevel" => bevel_toggle = Some(child_ptr),
                     "Border Width" => border_width_spin = Some(child_ptr),
+                    "Bevel Depth" => bevel_depth_spin = Some(child_ptr),
                     "Bevel Shape..." => bevel_shape_btn = Some(child_ptr),
                     _ => {
                         if child.base().is_some() && child.base().unwrap().label.is_none() {
@@ -221,9 +223,20 @@ impl Element for ControlPanel {
                 (*bev_tg).set_rect(x + padding + tg_w + 12.0, y + curr_y, tg_w, 20.0);
                 curr_y += 20.0 + 16.0;
             }
-            if let Some(bw_sp) = border_width_spin {
-                (*bw_sp).set_rect(x + padding, y + curr_y, content_w, 20.0);
+            if let (Some(bw_sp), Some(bd_sp)) = (border_width_spin, bevel_depth_spin) {
+                let spin_w = (content_w - 12.0) / 2.0;
+                (*bw_sp).set_rect(x + padding, y + curr_y, spin_w, 20.0);
+                (*bd_sp).set_rect(x + padding + spin_w + 12.0, y + curr_y, spin_w, 20.0);
                 curr_y += 20.0 + 16.0;
+            } else {
+                if let Some(bw_sp) = border_width_spin {
+                    (*bw_sp).set_rect(x + padding, y + curr_y, content_w, 20.0);
+                    curr_y += 20.0 + 16.0;
+                }
+                if let Some(bd_sp) = bevel_depth_spin {
+                    (*bd_sp).set_rect(x + padding, y + curr_y, content_w, 20.0);
+                    curr_y += 20.0 + 16.0;
+                }
             }
             if let Some(bs_btn) = bevel_shape_btn {
                 (*bs_btn).set_rect(x + padding, y + curr_y, content_w, 28.0);
