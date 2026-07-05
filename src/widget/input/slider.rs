@@ -762,8 +762,8 @@ impl Element for RangeSlider {
         };
 
         vec![
-            (self.base.x, self.base.y + top, self.base.w, visual_h, colors::slider_track()),
-            (highlight_x, highlight_y, highlight_w, highlight_h, colors::PROGRESS_FILL),
+            (self.base.x, self.base.y + top, self.base.w, visual_h, colors::rangeslider_track()),
+            (highlight_x, highlight_y, highlight_w, highlight_h, colors::rangeslider_fill()),
             (thumb_low_x, thumb_y, thumb_size, thumb_size, low_color),
             (thumb_high_x, thumb_y, thumb_size, thumb_size, high_color),
         ]
@@ -806,9 +806,9 @@ impl Element for RangeSlider {
         };
         
         // Track background
-        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
+        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, colors::rangeslider_track(), (r1, r2, r3, r4)));
         // Progress fill (highlight track)
-        quads.push((highlight_x, highlight_y, highlight_w, highlight_h, radius.min(highlight_h / 2.0), colors::PROGRESS_FILL, (true, true, true, true)));
+        quads.push((highlight_x, highlight_y, highlight_w, highlight_h, radius.min(highlight_h / 2.0), colors::rangeslider_fill(), (true, true, true, true)));
         // Low thumb
         quads.push((thumb_low_x, thumb_y, thumb_size, thumb_size, thumb_size / 2.0, low_color, (true, true, true, true)));
         // High thumb

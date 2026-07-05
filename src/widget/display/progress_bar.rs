@@ -32,5 +32,12 @@ impl Element for ProgressBar {
 
     fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
 
-    fn color(&self) -> [f32; 4] { colors::PROGRESS_BG }
+    fn color(&self) -> [f32; 4] { colors::progress_bg() }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let top = self.base.label_offset();
+        let visual_h = self.base.h - top;
+        let fill_w = self.base.w * self._value.clamp(0.0, 1.0);
+        vec![(self.base.x, self.base.y + top, fill_w, visual_h, colors::progress_fill())]
+    }
 }

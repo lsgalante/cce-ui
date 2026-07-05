@@ -68,6 +68,11 @@ static RAMP_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]
 static CONTROL_PANEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.075, 0.082, 0.11, 1.0]); // default #13151cff
 static CONTROL_PANEL_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.161, 0.173, 0.216, 1.0]); // default #292c37ff
 
+static PROGRESS_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_BG);
+static PROGRESS_FILL_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_FILL);
+static RANGE_SLIDER_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_TRACK);
+static RANGE_SLIDER_FILL_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_FILL);
+
 static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
 static TREE_BORDER_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.25, 0.25, 0.35, 1.0]);
@@ -340,6 +345,18 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/control_panel/border_color") {
         if let Ok(mut lock) = CONTROL_PANEL_BORDER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/progressbar/background") {
+        if let Ok(mut lock) = PROGRESS_BG_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/progressbar/fill") {
+        if let Ok(mut lock) = PROGRESS_FILL_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/rangeslider/track") {
+        if let Ok(mut lock) = RANGE_SLIDER_TRACK_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/rangeslider/fill") {
+        if let Ok(mut lock) = RANGE_SLIDER_FILL_COLOR.write() { *lock = c; }
     }
     let parsed_list_bg = get_color("/layout/list_bg_color");
     let parsed_breadcrumb_bg = get_color("/layout/breadcrumb_bg_color");
@@ -1017,6 +1034,50 @@ pub fn control_panel_border_color() -> [f32; 4] {
 
 pub fn set_control_panel_border_color(color: [f32; 4]) {
     if let Ok(mut lock) = CONTROL_PANEL_BORDER_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn progress_bg() -> [f32; 4] {
+    load_colors_once();
+    *PROGRESS_BG_COLOR.read().unwrap()
+}
+
+pub fn set_progress_bg(color: [f32; 4]) {
+    if let Ok(mut lock) = PROGRESS_BG_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn progress_fill() -> [f32; 4] {
+    load_colors_once();
+    *PROGRESS_FILL_COLOR.read().unwrap()
+}
+
+pub fn set_progress_fill(color: [f32; 4]) {
+    if let Ok(mut lock) = PROGRESS_FILL_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn rangeslider_track() -> [f32; 4] {
+    load_colors_once();
+    *RANGE_SLIDER_TRACK_COLOR.read().unwrap()
+}
+
+pub fn set_rangeslider_track(color: [f32; 4]) {
+    if let Ok(mut lock) = RANGE_SLIDER_TRACK_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn rangeslider_fill() -> [f32; 4] {
+    load_colors_once();
+    *RANGE_SLIDER_FILL_COLOR.read().unwrap()
+}
+
+pub fn set_rangeslider_fill(color: [f32; 4]) {
+    if let Ok(mut lock) = RANGE_SLIDER_FILL_COLOR.write() {
         *lock = color;
     }
 }
