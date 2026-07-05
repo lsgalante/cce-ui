@@ -445,3 +445,155 @@ impl ContainerLayout for ColumnsLayout {
         Box::new(*self)
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct MosaicLayout {
+    pub gap: f32,
+    pub padding_x: f32,
+    pub padding_y: f32,
+}
+
+impl Default for MosaicLayout {
+    fn default() -> Self {
+        Self {
+            gap: 8.0,
+            padding_x: 8.0,
+            padding_y: 10.0,
+        }
+    }
+}
+
+struct Packer {
+    free_rects: Vec<(f32, f32, f32, f32)>, // (x, y, w, h)
+    max_w: f32,
+    max_h: f32,
+    gap: f32,
+}
+
+impl Packer {
+    fn new(start_x: f32, start_y: f32, max_width: f32, gap: f32) -> Self {
+        Self {
+            free_rects: vec![(start_x, start_y, max_width, 100000.0)],
+            max_w: max_width,
+            max_h: 0.0,
+            gap,
+        }
+    }
+
+    fn pack(&mut self, cw: f32, ch: f32) -> (f32, f32) {
+        let cw_clamped = cw.min(self.max_w);
+        
+        let mut best_idx = None;
+        let mut best_y = f32::MAX;
+        let mut best_x = f32::MAX;
+
+        for (idx, &(rx, ry, rw, rh)) in self.free_rects.iter().enumerate() {
+            if rw >= cw_clamped && rh >= ch {
+                if ry < best_y || (ry == best_y && rx < best_x) {
+                    best_y = ry;
+                    best_x = rx;
+                    best_idx = Some(idx);
+                }
+            }
+        }
+
+        let chosen_idx = match best_idx {
+            Some(idx) => idx,
+            None => {
+                let new_y = self.max_h + self.gap;
+                let new_rect = (self.free_rects[0].0, new_y, self.max_w, 100000.0);
+                self.free_rects.push(new_rect);
+                self.free_rects.len() - 1
+            }
+        };
+
+        let (fx, fy, fw, fh) = self.free_rects.remove(chosen_idx);
+        let px = fx;
+        let py = fy;
+
+        let rx = fx + cw_clamped + self.gap;
+        let rw = fw - cw_clamped - self.gap;
+        if rw > 0.0 && ch > 0.0 {
+            self.free_rects.push((rx, py, rw, ch));
+        }
+
+        let by = py + ch + self.gap;
+        let bh = fh - ch - self.gap;
+        if bh > 0.0 && fw > 0.0 {
+            self.free_rects.push((fx, by, fw, bh));
+        }
+
+        self.max_h = self.max_h.max(py + ch);
+
+        (px, py)
+    }
+}
+
+impl crate::layout::LayoutStrategy for MosaicLayout {
+    fn init(&mut self, _left: f32, _top: f32, _width: f32, _height: f32) {}
+    fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) { (0.0, 0.0, ww, wh) }
+    fn get_gap(&self) -> f32 { self.gap }
+
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+        let count = children.len();
+        if count == 0 {
+            return 0.0;
+        }
+        let total_padding_x = self.padding_x * 2.0;
+        let available_w = (w - total_padding_x).max(1.0);
+
+        let mut packer = Packer::new(x + self.padding_x, y + self.padding_y, available_w, self.gap);
+
+        for &child_ptr in children {
+            unsafe {
+                let child = &mut *child_ptr;
+                let child_rect = child.rect();
+                let child_w = child_rect.2;
+                let child_h = child.preferred_height().unwrap_or(child_rect.3);
+                let use_h = if child_h > 0.0 { child_h } else { 44.0 };
+                
+                let (px, py) = packer.pack(child_w, use_h);
+                child.layout(
+                    Point { x: px, y: py },
+                    LayoutConstraints::new(child_w.min(available_w), child_w.min(available_w), use_h, use_h),
+                    ctx,
+                );
+            }
+        }
+
+        (packer.max_h - y).max(0.0)
+    }
+
+    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size {
+        let count = children.len();
+        if count == 0 {
+            return Size { width: constraints.min_width, height: constraints.min_height };
+        }
+        let total_padding_x = self.padding_x * 2.0;
+        let available_w = (constraints.max_width - total_padding_x).max(1.0);
+
+        let mut packer = Packer::new(self.padding_x, self.padding_y, available_w, self.gap);
+
+        for &child_ptr in children {
+            unsafe {
+                let size = (*child_ptr).measure(constraints, ctx);
+                packer.pack(size.width, size.height);
+            }
+        }
+
+        Size {
+            width: constraints.max_width,
+            height: (packer.max_h + self.padding_y).clamp(constraints.min_height, constraints.max_height),
+        }
+    }
+
+    fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
+        Box::new(*self)
+    }
+}
+
+impl ContainerLayout for MosaicLayout {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
+        Box::new(*self)
+    }
+}

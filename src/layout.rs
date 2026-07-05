@@ -5684,5 +5684,37 @@ mod tests {
         assert_eq!(crate::color::graph_connector_color(), [0.3, 0.3, 0.3, 1.0]);
         assert_eq!(crate::color::graph_connector_highlight_color(), [0.4, 0.4, 0.4, 1.0]);
     }
+
+    #[test]
+    fn test_mosaic_layout() {
+        use crate::widget::MosaicLayout;
+        use crate::layout::LayoutStrategy;
+        
+        let layout = MosaicLayout {
+            gap: 10.0,
+            padding_x: 5.0,
+            padding_y: 5.0,
+        };
+
+        let mut dummy = crate::context::UiContext::new();
+        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
+        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 100.0, h: 80.0 };
+        let mut w3 = MockWidget { x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
+        
+        let children = vec![
+            &mut w1 as *mut MockWidget as *mut (dyn Element + 'static),
+            &mut w2 as *mut MockWidget as *mut (dyn Element + 'static),
+            &mut w3 as *mut MockWidget as *mut (dyn Element + 'static),
+        ];
+
+        let _ = layout.layout(10.0, 20.0, 250.0, 500.0, &children, &mut dummy);
+
+        assert_eq!(w1.x, 15.0);
+        assert_eq!(w1.y, 25.0);
+        assert_eq!(w2.x, 15.0);
+        assert_eq!(w2.y, 85.0);
+        assert_eq!(w3.x, 125.0);
+        assert_eq!(w3.y, 25.0);
+    }
 }
 
