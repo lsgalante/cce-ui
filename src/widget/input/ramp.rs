@@ -145,6 +145,22 @@ impl Element for ColorRamp {
         }
     }
     
+    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        if ctx.is_focused(&self.r_slider) {
+            return self.r_slider.keyboard_input(event, ctx);
+        }
+        if ctx.is_focused(&self.g_slider) {
+            return self.g_slider.keyboard_input(event, ctx);
+        }
+        if ctx.is_focused(&self.b_slider) {
+            return self.b_slider.keyboard_input(event, ctx);
+        }
+        if ctx.is_focused(&self.del_button) {
+            return self.del_button.keyboard_input(event, ctx);
+        }
+        false
+    }
+    
     fn color(&self) -> [f32; 4] {
         colors::ramp_background_color()
     }
@@ -446,7 +462,7 @@ impl Ramp {
             ],
             2,
         ).with_label("Preset")
-         .with_open_upward(false);
+         .with_open_upward(true);
         let line_type_dropdown = Dropdown::new(
             vec![
                 "Linear".to_string(),
@@ -454,7 +470,7 @@ impl Ramp {
             ],
             0,
         ).with_label("Line Type")
-         .with_open_upward(false);
+         .with_open_upward(true);
         
         Self {
             base: Widget::new(),
@@ -625,6 +641,76 @@ impl Element for Ramp {
             list
         }
     }
+    fn focus(&mut self) {
+        self.base.focused = true;
+        crate::widget::focus::set_focused(&mut self.preset_dropdown);
+    }
+    
+    fn unfocus(&mut self) {
+        self.base.focused = false;
+        self.preset_dropdown.unfocus();
+        self.line_type_dropdown.unfocus();
+        self.val_slider.unfocus();
+        self.del_button.unfocus();
+    }
+    
+    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        if event.state != ElementState::Pressed { return false; }
+        
+        if event.logical_key == Key::Named(NamedKey::Tab) {
+            let is_shift = event.shift;
+            let self_ptr = self as *mut Self;
+            let mut children = unsafe {
+                let mut list = vec![
+                    &mut (*self_ptr).preset_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
+                    &mut (*self_ptr).line_type_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
+                ];
+                if (*self_ptr).selected_key_idx.is_some() {
+                    list.push(&mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static));
+                    list.push(&mut (*self_ptr).del_button as *mut Button as *mut (dyn Element + 'static));
+                }
+                list
+            };
+            
+            let mut focused_idx = None;
+            for (idx, child) in children.iter().enumerate() {
+                if unsafe { ctx.is_focused(&**child) } {
+                    focused_idx = Some(idx);
+                    break;
+                }
+            }
+            
+            if let Some(curr) = focused_idx {
+                let next_idx = if is_shift {
+                    if curr == 0 { children.len() - 1 } else { curr - 1 }
+                } else {
+                    (curr + 1) % children.len()
+                };
+                unsafe {
+                    ctx.set_focused(&mut *children[next_idx]);
+                }
+            } else {
+                unsafe {
+                    ctx.set_focused(&mut *children[0]);
+                }
+            }
+            return true;
+        }
+        
+        if ctx.is_focused(&self.preset_dropdown) {
+            return self.preset_dropdown.keyboard_input(event, ctx);
+        }
+        if ctx.is_focused(&self.line_type_dropdown) {
+            return self.line_type_dropdown.keyboard_input(event, ctx);
+        }
+        if ctx.is_focused(&self.val_slider) {
+            return self.val_slider.keyboard_input(event, ctx);
+        }
+        if ctx.is_focused(&self.del_button) {
+            return self.del_button.keyboard_input(event, ctx);
+        }
+        false
+    }
     
     fn color(&self) -> [f32; 4] {
         colors::ramp_background_color()
@@ -647,8 +733,8 @@ impl Element for Ramp {
         self.preset_dropdown.set_parent(Some(self_ptr), &mut dummy);
         self.line_type_dropdown.set_parent(Some(self_ptr), &mut dummy);
         
-        let gh = (h - 65.0).max(30.0);
-        let sy = y + gh + 25.0;
+        let gh = (h - 70.0).max(30.0);
+        let sy = y + gh + 15.0;
         
         let track_x = x + 10.0;
         let track_w = w - 20.0;
@@ -659,15 +745,15 @@ impl Element for Ramp {
             let available_for_inputs = track_w - del_w - 3.0 * gap;
             let col_w = (available_for_inputs / 3.0).max(40.0);
             
-            self.preset_dropdown.set_rect(track_x, sy, col_w, 20.0);
-            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy, col_w, 20.0);
-            self.val_slider.set_rect(track_x + 2.0 * (col_w + gap), sy, col_w, 20.0);
-            self.del_button.set_rect(track_x + track_w - del_w, sy - 4.0, del_w, 28.0);
+            self.preset_dropdown.set_rect(track_x, sy, col_w, 40.0);
+            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy, col_w, 40.0);
+            self.val_slider.set_rect(track_x + 2.0 * (col_w + gap), sy, col_w, 40.0);
+            self.del_button.set_rect(track_x + track_w - del_w, sy + 12.0, del_w, 28.0);
         } else {
             let gap = 10.0;
             let col_w = (track_w - gap) / 2.0;
-            self.preset_dropdown.set_rect(track_x, sy, col_w, 20.0);
-            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy, col_w, 20.0);
+            self.preset_dropdown.set_rect(track_x, sy, col_w, 40.0);
+            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy, col_w, 40.0);
             self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
         }
@@ -675,7 +761,7 @@ impl Element for Ramp {
     
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        let gh = (self.base.h - 65.0).max(30.0);
+        let gh = (self.base.h - 70.0).max(30.0);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -728,7 +814,7 @@ impl Element for Ramp {
     
     fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
         let mut circles = Vec::new();
-        let gh = (self.base.h - 65.0).max(30.0);
+        let gh = (self.base.h - 70.0).max(30.0);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -761,7 +847,7 @@ impl Element for Ramp {
             return true;
         }
         
-        let gh = (self.base.h - 65.0).max(30.0);
+        let gh = (self.base.h - 70.0).max(30.0);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -846,7 +932,7 @@ impl Element for Ramp {
         }
         
         let mut changed = false;
-        let gh = (self.base.h - 65.0).max(30.0);
+        let gh = (self.base.h - 70.0).max(30.0);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
