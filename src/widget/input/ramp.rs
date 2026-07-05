@@ -765,14 +765,6 @@ impl Element for Ramp {
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
-        let border_color = colors::ramp_border_color();
-        
-        // Draw container background (enclosing graph and dropdowns)
-        let ch = self.base.h - 20.0;
-        quads.push((track_x, self.base.y + 10.0, track_w, ch, [0.15, 0.15, 0.18, 1.0]));
-        // Draw container border
-        quads.push((track_x - 1.0, self.base.y + 10.0 - 1.0, track_w + 2.0, ch + 2.0, border_color));
-        
         // Draw grid lines
         for ratio in [0.25, 0.5, 0.75] {
             let gy = self.base.y + 10.0 + gh * (1.0 - ratio);
@@ -807,6 +799,34 @@ impl Element for Ramp {
         if self.selected_key_idx.is_some() {
             quads.extend(self.val_slider.all_quads(&ctx_dummy));
             quads.extend(self.del_button.all_quads(&ctx_dummy));
+        }
+        
+        quads
+    }
+
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        let mut quads = Vec::new();
+        
+        let track_x = self.base.x + 10.0;
+        let track_w = self.base.w - 20.0;
+        let ch = self.base.h - 20.0;
+        
+        let border_color = colors::ramp_border_color();
+        let bg_color = [0.15, 0.15, 0.18, 1.0];
+        let radius = 6.0f32;
+        
+        // Draw container border (rounded quad)
+        quads.push((track_x - 1.0, self.base.y + 10.0 - 1.0, track_w + 2.0, ch + 2.0, radius, border_color, (true, true, true, true)));
+        // Draw container background (rounded quad)
+        quads.push((track_x, self.base.y + 10.0, track_w, ch, (radius - 1.0).max(0.0), bg_color, (true, true, true, true)));
+        
+        // Extend children's rounded quads
+        for &child_ptr in &self.children(ctx) {
+            let widget = unsafe { &*child_ptr };
+            quads.extend(widget.all_rounded_quads(ctx));
         }
         
         quads
