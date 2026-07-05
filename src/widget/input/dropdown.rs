@@ -584,10 +584,13 @@ impl Element for Dropdown {
         }
 
         // Draw the remaining faded characters individually
+        let mut prev_char_end = prefix_w;
         for i in split_idx..n {
             let mut offset = char_offsets[i];
             if i == split_idx && split_idx > 0 {
                 offset = offset.max(prefix_w + 1.0);
+            } else if i > split_idx {
+                offset = offset.max(prev_char_end + 1.0);
             }
             let next_offset = if i < n - 1 { char_offsets[i + 1] } else { total_advance };
             let c_w = next_offset - offset;
@@ -623,6 +626,8 @@ impl Element for Dropdown {
                     font_size: 12.0,
                     color,
                 });
+                let c_w_ink = crate::widget::display::measure_text_width(&chars[i].to_string(), &font_family, 12.0);
+                prev_char_end = offset + c_w_ink;
             }
         }
 
