@@ -72,6 +72,8 @@ pub struct VerticalLayout {
     pub padding_x: f32,
     pub padding_y: f32,
     pub spacing: f32,
+    left: f32,
+    current_y: f32,
 }
 
 impl Default for VerticalLayout {
@@ -80,23 +82,22 @@ impl Default for VerticalLayout {
             padding_x: 0.0,
             padding_y: 0.0,
             spacing: 8.0,
+            left: 0.0,
+            current_y: 0.0,
         }
     }
 }
 
 impl crate::layout::LayoutStrategy for VerticalLayout {
     fn init(&mut self, left: f32, top: f32, _width: f32, _height: f32) {
-        let ptr = self as *const Self as usize;
-        crate::layout::VERTICAL_STATES.with(|m| m.borrow_mut().insert(ptr, (left, top + self.padding_y)));
+        self.left = left;
+        self.current_y = top + self.padding_y;
     }
 
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
-        let ptr = self as *const Self as usize;
-        let (left, mut current_y) = crate::layout::VERTICAL_STATES.with(|m| m.borrow().get(&ptr).copied().unwrap_or((0.0, 0.0)));
-        let x = left + self.padding_x;
-        let y = current_y;
-        current_y += wh + self.spacing;
-        crate::layout::VERTICAL_STATES.with(|m| m.borrow_mut().insert(ptr, (left, current_y)));
+        let x = self.left + self.padding_x;
+        let y = self.current_y;
+        self.current_y += wh + self.spacing;
         (x, y, ww, wh)
     }
 
@@ -154,12 +155,13 @@ impl ContainerLayout for VerticalLayout {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GridLayout {
     pub columns: usize,
     pub gap: f32,
     pub padding_x: f32,
     pub padding_y: f32,
+    pub grid: Option<crate::layout::Grid>,
 }
 
 impl crate::layout::LayoutStrategy for GridLayout {
@@ -174,26 +176,23 @@ impl crate::layout::LayoutStrategy for GridLayout {
             self.gap,
             count,
         );
-        let ptr = self as *const Self as usize;
-        crate::layout::save_grid_state(ptr, grid);
+        self.grid = Some(grid);
     }
 
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
-        let ptr = self as *const Self as usize;
-        crate::layout::mutate_grid_state(ptr, |grid| {
+        if let Some(ref mut grid) = self.grid {
             let col = grid.next_column();
             let x = grid.col_lefts[col];
             let y = grid.col_heights[col];
             grid.col_heights[col] += wh + grid.gap;
             (x, y, grid.col_width, wh)
-        }).unwrap_or((0.0, 0.0, ww, wh))
+        } else {
+            (0.0, 0.0, ww, wh)
+        }
     }
 
     fn get_column_width(&self) -> Option<f32> {
-        let ptr = self as *const Self as usize;
-        crate::layout::GRID_STATES.with(|m| {
-            m.borrow().get(&ptr).map(|g| g.col_width)
-        })
+        self.grid.as_ref().map(|g| g.col_width)
     }
 
     fn get_gap(&self) -> f32 {
@@ -270,22 +269,23 @@ impl crate::layout::LayoutStrategy for GridLayout {
     }
 
     fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
-        Box::new(*self)
+        Box::new(self.clone())
     }
 }
 
 impl ContainerLayout for GridLayout {
     fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
-        Box::new(*self)
+        Box::new(self.clone())
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct AdaptiveGridLayout {
     pub min_col_width: f32,
     pub gap: f32,
     pub padding_x: f32,
     pub padding_y: f32,
+    pub grid: Option<crate::layout::Grid>,
 }
 
 impl crate::layout::LayoutStrategy for AdaptiveGridLayout {
@@ -300,26 +300,23 @@ impl crate::layout::LayoutStrategy for AdaptiveGridLayout {
             self.gap,
             cols,
         );
-        let ptr = self as *const Self as usize;
-        crate::layout::save_grid_state(ptr, grid);
+        self.grid = Some(grid);
     }
 
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) {
-        let ptr = self as *const Self as usize;
-        crate::layout::mutate_grid_state(ptr, |grid| {
+        if let Some(ref mut grid) = self.grid {
             let col = grid.next_column();
             let x = grid.col_lefts[col];
             let y = grid.col_heights[col];
             grid.col_heights[col] += wh + grid.gap;
             (x, y, grid.col_width, wh)
-        }).unwrap_or((0.0, 0.0, ww, wh))
+        } else {
+            (0.0, 0.0, ww, wh)
+        }
     }
 
     fn get_column_width(&self) -> Option<f32> {
-        let ptr = self as *const Self as usize;
-        crate::layout::GRID_STATES.with(|m| {
-            m.borrow().get(&ptr).map(|g| g.col_width)
-        })
+        self.grid.as_ref().map(|g| g.col_width)
     }
 
     fn get_gap(&self) -> f32 {
@@ -334,6 +331,7 @@ impl crate::layout::LayoutStrategy for AdaptiveGridLayout {
             gap: self.gap,
             padding_x: self.padding_x,
             padding_y: self.padding_y,
+            grid: None,
         };
         grid.layout(x, y, w, h, children, ctx)
     }
@@ -346,17 +344,18 @@ impl crate::layout::LayoutStrategy for AdaptiveGridLayout {
             gap: self.gap,
             padding_x: self.padding_x,
             padding_y: self.padding_y,
+            grid: None,
         };
         grid.measure(constraints, children, ctx)
     }
 
     fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
-        Box::new(*self)
+        Box::new(self.clone())
     }
 }
 
 impl ContainerLayout for AdaptiveGridLayout {
     fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
-        Box::new(*self)
+        Box::new(self.clone())
     }
 }

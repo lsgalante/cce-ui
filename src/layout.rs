@@ -4282,27 +4282,7 @@ impl Radial {
     }
 }
 
-use std::cell::RefCell;
 
-thread_local! {
-    pub static GRID_STATES: RefCell<HashMap<usize, Grid>> = RefCell::new(HashMap::new());
-    pub static OVERLAY_STATES: RefCell<HashMap<usize, (f32, f32, f32, f32)>> = RefCell::new(HashMap::new());
-    pub static VERTICAL_STATES: RefCell<HashMap<usize, (f32, f32)>> = RefCell::new(HashMap::new());
-}
-
-pub fn save_grid_state(ptr: usize, grid: Grid) {
-    GRID_STATES.with(|m| m.borrow_mut().insert(ptr, grid));
-}
-
-pub fn mutate_grid_state<F, R>(ptr: usize, mut f: F) -> Option<R>
-where
-    F: FnMut(&mut Grid) -> R,
-{
-    GRID_STATES.with(|m| {
-        let mut map = m.borrow_mut();
-        map.get_mut(&ptr).map(|grid| f(grid))
-    })
-}
 
 pub trait LayoutStrategy: std::fmt::Debug {
     fn init(&mut self, left: f32, top: f32, width: f32, height: f32);
