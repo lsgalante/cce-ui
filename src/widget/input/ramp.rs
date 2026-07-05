@@ -17,6 +17,7 @@ pub struct ColorRamp {
     pub keys: Vec<ColorRampKey>,
     pub selected_key_idx: Option<usize>,
     pub is_dragging_key: bool,
+    pub just_changed: bool,
     
     // Child controls for color editing & deletion
     pub r_slider: Slider,
@@ -44,6 +45,7 @@ impl ColorRamp {
             keys,
             selected_key_idx: None,
             is_dragging_key: false,
+            just_changed: false,
             r_slider,
             g_slider,
             b_slider,
@@ -95,6 +97,36 @@ impl ColorRamp {
 
 impl Element for ColorRamp {
     crate::impl_widget_base!(ColorRamp);
+    
+    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = self.just_changed;
+        self.just_changed = false;
+        
+        if self.selected_key_idx.is_some() {
+            if self.r_slider.tick(dt, ctx) {
+                if let Some(idx) = self.selected_key_idx {
+                    self.keys[idx].color[0] = self.r_slider.value();
+                }
+                changed = true;
+            }
+            if self.g_slider.tick(dt, ctx) {
+                if let Some(idx) = self.selected_key_idx {
+                    self.keys[idx].color[1] = self.g_slider.value();
+                }
+                changed = true;
+            }
+            if self.b_slider.tick(dt, ctx) {
+                if let Some(idx) = self.selected_key_idx {
+                    self.keys[idx].color[2] = self.b_slider.value();
+                }
+                changed = true;
+            }
+            if self.del_button.tick(dt, ctx) {
+                changed = true;
+            }
+        }
+        changed
+    }
     
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
@@ -239,6 +271,7 @@ impl Element for ColorRamp {
                 let new_key = ColorRampKey { pos: t, color: col };
                 self.keys.push(new_key);
                 self.sort_keys();
+                self.just_changed = true;
                 
                 if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - t).abs() < 0.0001) {
                     self.selected_key_idx = Some(new_idx);
@@ -260,6 +293,7 @@ impl Element for ColorRamp {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
                                 self.selected_key_idx = None;
+                                self.just_changed = true;
                                 self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
                             }
                         }
@@ -279,6 +313,7 @@ impl Element for ColorRamp {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
                                 self.selected_key_idx = None;
+                                self.just_changed = true;
                                 self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
                             }
                         }
@@ -326,6 +361,9 @@ impl Element for ColorRamp {
             if self.del_button.cursor_moved(px, py_event, ctx) {
                 changed = true;
             }
+        }
+        if changed {
+            self.just_changed = true;
         }
         changed
     }
@@ -375,6 +413,7 @@ pub struct Ramp {
     pub keys: Vec<RampKey>,
     pub selected_key_idx: Option<usize>,
     pub is_dragging_key: bool,
+    pub just_changed: bool,
     
     // Child controls for value editing & deletion
     pub val_slider: Slider,
@@ -398,6 +437,7 @@ impl Ramp {
             keys,
             selected_key_idx: None,
             is_dragging_key: false,
+            just_changed: false,
             val_slider,
             del_button,
             parent: None,
@@ -443,6 +483,24 @@ impl Ramp {
 
 impl Element for Ramp {
     crate::impl_widget_base!(Ramp);
+    
+    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = self.just_changed;
+        self.just_changed = false;
+        
+        if self.selected_key_idx.is_some() {
+            if self.val_slider.tick(dt, ctx) {
+                if let Some(idx) = self.selected_key_idx {
+                    self.keys[idx].value = self.val_slider.value();
+                }
+                changed = true;
+            }
+            if self.del_button.tick(dt, ctx) {
+                changed = true;
+            }
+        }
+        changed
+    }
     
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
@@ -593,6 +651,7 @@ impl Element for Ramp {
                 let new_key = RampKey { pos: t, value: val };
                 self.keys.push(new_key);
                 self.sort_keys();
+                self.just_changed = true;
                 
                 if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - t).abs() < 0.0001) {
                     self.selected_key_idx = Some(new_idx);
@@ -610,6 +669,7 @@ impl Element for Ramp {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
                                 self.selected_key_idx = None;
+                                self.just_changed = true;
                                 self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
                             }
                         }
@@ -627,6 +687,7 @@ impl Element for Ramp {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
                                 self.selected_key_idx = None;
+                                self.just_changed = true;
                                 self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
                             }
                         }
@@ -666,6 +727,9 @@ impl Element for Ramp {
             if self.del_button.cursor_moved(px, py_event, ctx) {
                 changed = true;
             }
+        }
+        if changed {
+            self.just_changed = true;
         }
         changed
     }
