@@ -528,7 +528,12 @@ impl Element for Dropdown {
         let text_y = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
         let default_color = [0xdd, 0xdd, 0xe2];
         let bg_color = colors::dropdown_background_color();
-        let parent_color = colors::control_panel_color();
+        let mut parent_color = colors::page_color();
+        if let Some(parent_ptr) = self.parent {
+            unsafe {
+                parent_color = (*parent_ptr).color();
+            }
+        }
         let alpha = bg_color[3];
         let bg_rgb = [
             ((parent_color[0] * (1.0 - alpha) + bg_color[0] * alpha) * 255.0).round().clamp(0.0, 255.0) as u8,
