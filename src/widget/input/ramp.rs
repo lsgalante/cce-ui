@@ -131,7 +131,7 @@ impl Element for ColorRamp {
         self.del_button.set_parent(Some(self_ptr), &mut dummy);
         
         let th = crate::layout::ramp_height();
-        let sy = y + th + 45.0;
+        let sy = y + th + 55.0;
         let slider_w = w - 100.0;
         
         if self.selected_key_idx.is_some() {
@@ -153,9 +153,19 @@ impl Element for ColorRamp {
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
-        // Draw track border
+        // Draw outer container border
+        let bx = self.base.x;
+        let by = self.base.y;
+        let bw = self.base.w;
+        let bh = self.base.h;
         let border_color = colors::ramp_border_color();
-        quads.push((track_x - 1.0, self.base.y - 1.0, track_w + 2.0, th + 2.0, border_color));
+        quads.push((bx, by, bw, 1.0, border_color));                 // Top
+        quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));         // Bottom
+        quads.push((bx, by, 1.0, bh, border_color));                 // Left
+        quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));         // Right
+        
+        // Draw track border
+        quads.push((track_x - 1.0, self.base.y + 10.0 - 1.0, track_w + 2.0, th + 2.0, border_color));
         
         // Draw interpolated track slices (e.g. 100 slices)
         let slices = 100;
@@ -166,7 +176,7 @@ impl Element for ColorRamp {
             let center_t = (t1 + t2) / 2.0;
             let col = self.get_interpolated_color(center_t);
             let sx = track_x + t1 * track_w;
-            quads.push((sx, self.base.y, slice_w, th, [col[0], col[1], col[2], 1.0]));
+            quads.push((sx, self.base.y + 10.0, slice_w, th, [col[0], col[1], col[2], 1.0]));
         }
         
         if self.selected_key_idx.is_some() {
@@ -185,7 +195,7 @@ impl Element for ColorRamp {
         let th = crate::layout::ramp_height();
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
-        let py = self.base.y + th + 15.0;
+        let py = self.base.y + 10.0 + th + 15.0;
         
         for (idx, key) in self.keys.iter().enumerate() {
             let cx = track_x + key.pos * track_w;
@@ -205,7 +215,7 @@ impl Element for ColorRamp {
         let th = crate::layout::ramp_height();
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
-        let py_peg = self.base.y + th + 15.0;
+        let py_peg = self.base.y + 10.0 + th + 15.0;
         
         if state == ElementState::Pressed {
             for (idx, key) in self.keys.iter().enumerate() {
@@ -223,7 +233,7 @@ impl Element for ColorRamp {
                 }
             }
             
-            if px >= track_x && px <= track_x + track_w && py_event >= self.base.y && py_event <= self.base.y + th {
+            if px >= track_x && px <= track_x + track_w && py_event >= self.base.y + 10.0 && py_event <= self.base.y + 10.0 + th {
                 let t = (px - track_x) / track_w;
                 let col = self.get_interpolated_color(t);
                 let new_key = ColorRampKey { pos: t, color: col };
@@ -465,7 +475,7 @@ impl Element for Ramp {
         self.del_button.set_parent(Some(self_ptr), &mut dummy);
         
         let gh = 80.0;
-        let sy = y + gh + 15.0;
+        let sy = y + gh + 25.0;
         let slider_w = w - 100.0;
         
         if self.selected_key_idx.is_some() {
@@ -483,19 +493,30 @@ impl Element for Ramp {
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
+        // Draw outer container border
+        let bx = self.base.x;
+        let by = self.base.y;
+        let bw = self.base.w;
+        let bh = self.base.h;
+        let border_color = colors::ramp_border_color();
+        quads.push((bx, by, bw, 1.0, border_color));                 // Top
+        quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));         // Bottom
+        quads.push((bx, by, 1.0, bh, border_color));                 // Left
+        quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));         // Right
+        
         // Draw graph background
-        quads.push((track_x, self.base.y, track_w, gh, [0.15, 0.15, 0.18, 1.0]));
+        quads.push((track_x, self.base.y + 10.0, track_w, gh, [0.15, 0.15, 0.18, 1.0]));
         // Border
-        quads.push((track_x - 1.0, self.base.y - 1.0, track_w + 2.0, gh + 2.0, colors::ramp_border_color()));
+        quads.push((track_x - 1.0, self.base.y + 10.0 - 1.0, track_w + 2.0, gh + 2.0, border_color));
         
         // Draw grid lines
         for ratio in [0.25, 0.5, 0.75] {
-            let gy = self.base.y + gh * (1.0 - ratio);
+            let gy = self.base.y + 10.0 + gh * (1.0 - ratio);
             quads.push((track_x, gy, track_w, 1.0, [0.25, 0.25, 0.28, 0.5]));
         }
         for ratio in [0.25, 0.5, 0.75] {
             let gx = track_x + track_w * ratio;
-            quads.push((gx, self.base.y, 1.0, gh, [0.25, 0.25, 0.28, 0.5]));
+            quads.push((gx, self.base.y + 10.0, 1.0, gh, [0.25, 0.25, 0.28, 0.5]));
         }
         
         // Curve area fill and outline
@@ -507,11 +528,11 @@ impl Element for Ramp {
             let sx1 = track_x + t1 * track_w;
             
             let slice_h = v1 * gh;
-            let sy = self.base.y + gh - slice_h;
+            let sy = self.base.y + 10.0 + gh - slice_h;
             quads.push((sx1, sy, slice_w, slice_h, [0.3, 0.45, 0.6, 0.25]));
             
             let outline_h = 2.0;
-            let outline_y = self.base.y + gh - v1 * gh - 1.0;
+            let outline_y = self.base.y + 10.0 + gh - v1 * gh - 1.0;
             quads.push((sx1, outline_y, slice_w, outline_h, [0.5, 0.75, 1.0, 1.0]));
         }
         
@@ -532,7 +553,7 @@ impl Element for Ramp {
         
         for (idx, key) in self.keys.iter().enumerate() {
             let cx = track_x + key.pos * track_w;
-            let cy = self.base.y + gh - key.value * gh;
+            let cy = self.base.y + 10.0 + gh - key.value * gh;
             
             circles.push((cx, cy, 7.0, [0.0, 0.0, 0.0, 0.8]));
             circles.push((cx, cy, 5.0, [0.5, 0.75, 1.0, 1.0]));
@@ -554,7 +575,7 @@ impl Element for Ramp {
         if state == ElementState::Pressed {
             for (idx, key) in self.keys.iter().enumerate() {
                 let cx = track_x + key.pos * track_w;
-                let cy = self.base.y + gh - key.value * gh;
+                let cy = self.base.y + 10.0 + gh - key.value * gh;
                 let dx = px - cx;
                 let dy = py_event - cy;
                 if (dx*dx + dy*dy) <= 64.0 {
@@ -566,9 +587,9 @@ impl Element for Ramp {
                 }
             }
             
-            if px >= track_x && px <= track_x + track_w && py_event >= self.base.y && py_event <= self.base.y + gh {
+            if px >= track_x && px <= track_x + track_w && py_event >= self.base.y + 10.0 && py_event <= self.base.y + 10.0 + gh {
                 let t = (px - track_x) / track_w;
-                let val = 1.0 - (py_event - self.base.y) / gh;
+                let val = 1.0 - (py_event - (self.base.y + 10.0)) / gh;
                 let new_key = RampKey { pos: t, value: val };
                 self.keys.push(new_key);
                 self.sort_keys();
@@ -626,7 +647,7 @@ impl Element for Ramp {
         if self.is_dragging_key {
             if let Some(idx) = self.selected_key_idx {
                 let t = ((px - track_x) / track_w).clamp(0.0, 1.0);
-                let val = (1.0 - (py_event - self.base.y) / gh).clamp(0.0, 1.0);
+                let val = (1.0 - (py_event - (self.base.y + 10.0)) / gh).clamp(0.0, 1.0);
                 self.keys[idx].pos = t;
                 self.keys[idx].value = val;
                 self.val_slider.set_value(val);
