@@ -534,10 +534,36 @@ impl Element for Dropdown {
             (bg_color[2] * 255.0).round().clamp(0.0, 255.0) as u8,
         ];
 
-        let mut cur_x = start_x;
-        for c in selected_text.chars() {
-            let c_str = c.to_string();
-            let c_w = crate::widget::display::measure_text_width(&c_str, &font_family, 12.0);
+        let w_dummy = crate::widget::display::measure_text_width("M", &font_family, 12.0);
+        let chars: Vec<char> = selected_text.chars().collect();
+        let n = chars.len();
+
+        let mut char_offsets = Vec::with_capacity(n);
+        if n > 0 {
+            char_offsets.push(0.0f32);
+        }
+
+        let mut prefix = String::new();
+        for i in 1..n {
+            prefix.push(chars[i - 1]);
+            let measure_str = format!("{}M", prefix);
+            let w_prefix_dummy = crate::widget::display::measure_text_width(&measure_str, &font_family, 12.0);
+            let offset = (w_prefix_dummy - w_dummy).max(0.0);
+            char_offsets.push(offset);
+        }
+
+        let total_advance = if n > 0 {
+            let measure_str = format!("{}M", selected_text);
+            (crate::widget::display::measure_text_width(&measure_str, &font_family, 12.0) - w_dummy).max(0.0)
+        } else {
+            0.0
+        };
+
+        for i in 0..n {
+            let offset = char_offsets[i];
+            let next_offset = if i < n - 1 { char_offsets[i + 1] } else { total_advance };
+            let c_w = next_offset - offset;
+            let cur_x = start_x + offset;
 
             if cur_x >= right_limit {
                 break;
@@ -556,14 +582,12 @@ impl Element for Dropdown {
             };
 
             labels.push(TextLabel {
-                text: c_str,
+                text: chars[i].to_string(),
                 x: cur_x,
                 y: text_y,
                 font_size: 12.0,
                 color,
             });
-
-            cur_x += c_w;
         }
 
         labels.push(TextLabel {
