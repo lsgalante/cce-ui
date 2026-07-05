@@ -235,6 +235,10 @@ impl Element for ControlPanel {
         }
     }
 
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        (true, true, true, true)
+    }
+
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         let mut quads = Vec::new();
         let (x, y, w, h) = self.rect();
@@ -256,10 +260,57 @@ impl Element for ControlPanel {
 
         unsafe {
             for child_ptr in &self.children {
-                for (qx, qy, qw, qh, qr, qc, qcorners) in (**child_ptr).all_rounded_quads(ctx) {
-                    let qy_shifted = qy - scroll_y;
+                let child = &**child_ptr;
+                let solid_border_opt = child.solid_border();
+                let (cx, cy, cw, ch) = child.rect();
+
+                if let Some((b_color, _thickness)) = solid_border_opt {
+                    let cy_shifted = cy - scroll_y;
+                    let cy_top = cy_shifted;
+                    let cy_bottom = cy_shifted + ch;
+                    if cy_bottom > y_start && cy_top < y_end {
+                        let visible_top = cy_top.max(y_start);
+                        let visible_bottom = cy_bottom.min(y_end);
+                        let visible_h = visible_bottom - visible_top;
+                        if visible_h > 0.0 {
+                            let radii_adjusted = if visible_top > cy_top || visible_bottom < cy_bottom {
+                                0.0
+                            } else {
+                                child.corner_radius()
+                            };
+                            quads.push((
+                                cx,
+                                visible_top,
+                                cw,
+                                visible_h,
+                                radii_adjusted,
+                                b_color,
+                                child.rounded_corners(),
+                            ));
+                        }
+                    }
+                }
+
+                for (qx, qy, qw, qh, qr, qc, qcorners) in child.all_rounded_quads(ctx) {
+                    let mut rx = qx;
+                    let mut ry = qy;
+                    let mut rw = qw;
+                    let mut rh = qh;
+                    let mut rqr = qr;
+
+                    if let Some((_, thickness)) = solid_border_opt {
+                        if (qx - cx).abs() < 0.1 && (qy - cy).abs() < 0.1 && (qw - cw).abs() < 0.1 && (qh - ch).abs() < 0.1 {
+                            rx += thickness;
+                            ry += thickness;
+                            rw -= 2.0 * thickness;
+                            rh -= 2.0 * thickness;
+                            rqr = (qr - thickness).max(0.0);
+                        }
+                    }
+
+                    let qy_shifted = ry - scroll_y;
                     let qy_top = qy_shifted;
-                    let qy_bottom = qy_shifted + qh;
+                    let qy_bottom = qy_shifted + rh;
                     if qy_bottom > y_start && qy_top < y_end {
                         let visible_top = qy_top.max(y_start);
                         let visible_bottom = qy_bottom.min(y_end);
@@ -268,9 +319,9 @@ impl Element for ControlPanel {
                             let radii_adjusted = if visible_top > qy_top || visible_bottom < qy_bottom {
                                 0.0
                             } else {
-                                qr
+                                rqr
                             };
-                            quads.push((qx, visible_top, qw, visible_h, radii_adjusted, qc, qcorners));
+                            quads.push((rx, visible_top, rw, visible_h, radii_adjusted, qc, qcorners));
                         }
                     }
                 }
