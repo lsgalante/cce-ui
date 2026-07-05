@@ -583,6 +583,13 @@ impl RangeSlider {
 impl Element for RangeSlider {
     crate::impl_widget_base!(RangeSlider);
 
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h + self.base.label_offset();
+    }
+
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
 
     fn preferred_height(&self) -> Option<f32> {
