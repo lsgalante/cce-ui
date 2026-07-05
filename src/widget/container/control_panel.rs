@@ -325,16 +325,7 @@ impl Element for ControlPanel {
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        let (x, y, w, h) = self.rect();
-
-        quads.push((x, y, w, h, self.color()));
-
-        let border_color = colors::ramp_border_color();
-        quads.push((x, y, w, 1.0, border_color));
-        quads.push((x, y + h - 1.0, w, 1.0, border_color));
-        quads.push((x, y, 1.0, h, border_color));
-        quads.push((x + w - 1.0, y, 1.0, h, border_color));
-
+        let (_x, y, _w, h) = self.rect();
         let scroll_y = self.scroll_box.scroll_y;
         let y_start = y;
         let y_end = y + h;
