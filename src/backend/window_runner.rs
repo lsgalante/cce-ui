@@ -637,55 +637,55 @@ pub fn push_plate_bevel_vertices(
     out: &mut Vec<Vertex>,
 ) {
     let r = r.min(ww * 0.5).min(h * 0.5);
-    let highlight_color = [1.0, 1.0, 1.0, 0.15];
-    let shadow_color = [0.0, 0.0, 0.0, 0.25];
 
-    out.extend_from_slice(&quad_vertices_with_clip(x + r, y, ww - 2.0 * r, t, sw, sh, highlight_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x, y + r, t, h - 2.0 * r, sw, sh, highlight_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x + r, y + h - t, ww - 2.0 * r, t, sw, sh, shadow_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + r, t, h - 2.0 * r, sw, sh, shadow_color, clip_circle));
+    let light_angle = crate::layout::light_source_position();
+    let rad = light_angle.to_radians();
+    let lx = rad.cos();
+    let ly = -rad.sin();
+
+    let edge_color = |factor: f32| -> [f32; 4] {
+        if factor >= 0.0 {
+            [1.0, 1.0, 1.0, 0.15 * factor]
+        } else {
+            [0.0, 0.0, 0.0, 0.25 * (-factor)]
+        }
+    };
+
+    let top_color = edge_color(-ly);
+    let left_color = edge_color(-lx);
+    let bottom_color = edge_color(ly);
+    let right_color = edge_color(lx);
+
+    out.extend_from_slice(&quad_vertices_with_clip(x + r, y, ww - 2.0 * r, t, sw, sh, top_color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x, y + r, t, h - 2.0 * r, sw, sh, left_color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x + r, y + h - t, ww - 2.0 * r, t, sw, sh, bottom_color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + r, t, h - 2.0 * r, sw, sh, right_color, clip_circle));
 
     let segments = 16;
+    let corners = [
+        (x + r, y + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI), // Top-Left
+        (x + ww - r, y + r, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI), // Top-Right
+        (x + ww - r, y + h - r, 0.0, 0.5 * std::f32::consts::PI), // Bottom-Right
+        (x + r, y + h - r, 0.5 * std::f32::consts::PI, std::f32::consts::PI), // Bottom-Left
+    ];
 
-    push_arc_background_vertices(
-        x + r, y + r, r, t,
-        std::f32::consts::PI, 1.5 * std::f32::consts::PI,
-        sw, sh, highlight_color, segments, clip_circle,
-        out,
-    );
+    for &(cx, cy, start_angle, end_angle) in &corners {
+        for j in 0..segments {
+            let theta1 = start_angle + (j as f32) * (end_angle - start_angle) / (segments as f32);
+            let theta2 = start_angle + ((j + 1) as f32) * (end_angle - start_angle) / (segments as f32);
+            let theta_mid = 0.5 * (theta1 + theta2);
 
-    push_arc_background_vertices(
-        x + ww - r, y + r, r, t,
-        1.5 * std::f32::consts::PI, 1.75 * std::f32::consts::PI,
-        sw, sh, highlight_color, segments / 2, clip_circle,
-        out,
-    );
-    push_arc_background_vertices(
-        x + ww - r, y + r, r, t,
-        1.75 * std::f32::consts::PI, 2.0 * std::f32::consts::PI,
-        sw, sh, shadow_color, segments / 2, clip_circle,
-        out,
-    );
+            let factor = (theta_mid.cos() * lx + theta_mid.sin() * ly).clamp(-1.0, 1.0);
+            let segment_color = edge_color(factor);
 
-    push_arc_background_vertices(
-        x + ww - r, y + h - r, r, t,
-        0.0, 0.5 * std::f32::consts::PI,
-        sw, sh, shadow_color, segments, clip_circle,
-        out,
-    );
-
-    push_arc_background_vertices(
-        x + r, y + h - r, r, t,
-        0.5 * std::f32::consts::PI, 0.75 * std::f32::consts::PI,
-        sw, sh, shadow_color, segments / 2, clip_circle,
-        out,
-    );
-    push_arc_background_vertices(
-        x + r, y + h - r, r, t,
-        0.75 * std::f32::consts::PI, std::f32::consts::PI,
-        sw, sh, highlight_color, segments / 2, clip_circle,
-        out,
-    );
+            push_arc_background_vertices(
+                cx, cy, r, t,
+                theta1, theta2,
+                sw, sh, segment_color, 1, clip_circle,
+                out,
+            );
+        }
+    }
 }
 
 pub fn push_plate_solid_border_vertices(

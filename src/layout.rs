@@ -105,6 +105,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.toggle.disabled_color" => "toggle_disabled_color",
                 "style.control.toggle.border_color" => "toggle_border_color",
                 "style.control.toggle.corner_radius" => "toggle_corner_radius",
+                "window_manager.light_source_position" => "light_source_position",
                 "style.control.ramp.height" => "ramp_height",
                 "style.status.normal_color" => "status_normal_color",
                 "style.status.background_color" => "status_background_color",
@@ -1410,6 +1411,10 @@ pub fn set_toggle_height(height: f32) {
     if let Ok(mut lock) = TOGGLE_HEIGHT.write() {
         *lock = height;
     }
+}
+
+pub fn light_source_position() -> f32 {
+    get_style_registry().read().unwrap().get_float("light_source_position").unwrap_or(135.0)
 }
 
 pub fn toggle_corner_radius() -> f32 {
