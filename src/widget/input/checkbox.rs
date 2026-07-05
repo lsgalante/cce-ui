@@ -446,14 +446,34 @@ impl Element for Toggle {
                 colors::toggle_off_color()
             };
             
-            if border_w > 0.0 {
-                // Outer border rect
-                quads.push((x, y, w, h, radius, border_color, (r1, r2, r3, r4)));
-                // Inner background rect
-                let inner_radius = (radius - border_w).max(0.0);
-                quads.push((x + border_w, y + border_w, w - 2.0 * border_w, h - 2.0 * border_w, inner_radius, bg_color, (r1, r2, r3, r4)));
+            if self.toggled {
+                // Bottom half background
+                quads.push((x, y + h / 2.0, w, h / 2.0, radius, bg_color, (false, false, true, true)));
+                
+                if border_w > 0.0 {
+                    // Top half border
+                    quads.push((x, y, w, h / 2.0, radius, border_color, (true, true, false, false)));
+                    // Top half inset background
+                    let inner_radius = (radius - border_w).max(0.0);
+                    quads.push((x + border_w, y + border_w, w - 2.0 * border_w, h / 2.0 - border_w, inner_radius, bg_color, (true, true, false, false)));
+                } else {
+                    // Top half background (no border)
+                    quads.push((x, y, w, h / 2.0, radius, bg_color, (true, true, false, false)));
+                }
             } else {
-                quads.push((x, y, w, h, radius, bg_color, (r1, r2, r3, r4)));
+                // Top half background
+                quads.push((x, y, w, h / 2.0, radius, bg_color, (true, true, false, false)));
+                
+                if border_w > 0.0 {
+                    // Bottom half border
+                    quads.push((x, y + h / 2.0, w, h / 2.0, radius, border_color, (false, false, true, true)));
+                    // Bottom half inset background
+                    let inner_radius = (radius - border_w).max(0.0);
+                    quads.push((x + border_w, y + h / 2.0, w - 2.0 * border_w, h / 2.0 - border_w, inner_radius, bg_color, (false, false, true, true)));
+                } else {
+                    // Bottom half background (no border)
+                    quads.push((x, y + h / 2.0, w, h / 2.0, radius, bg_color, (false, false, true, true)));
+                }
             }
         }
         quads
