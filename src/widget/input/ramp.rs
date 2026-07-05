@@ -419,6 +419,7 @@ pub struct Ramp {
     pub val_slider: Slider,
     pub del_button: Button,
     pub preset_dropdown: Dropdown,
+    pub line_type_dropdown: Dropdown,
     
     pub parent: Option<*mut (dyn Element + 'static)>,
 }
@@ -446,6 +447,14 @@ impl Ramp {
             2,
         ).with_label("Preset")
          .with_open_upward(false);
+        let line_type_dropdown = Dropdown::new(
+            vec![
+                "Linear".to_string(),
+                "Bezier".to_string(),
+            ],
+            0,
+        ).with_label("Line Type")
+         .with_open_upward(false);
         
         Self {
             base: Widget::new(),
@@ -456,6 +465,7 @@ impl Ramp {
             val_slider,
             del_button,
             preset_dropdown,
+            line_type_dropdown,
             parent: None,
         }
     }
@@ -524,7 +534,12 @@ impl Ramp {
                     return k1.value;
                 }
                 let w = (t - k1.pos) / range;
-                return k1.value * (1.0 - w) + k2.value * w;
+                if self.line_type_dropdown.selected == 1 {
+                    let w_smooth = w * w * (3.0 - 2.0 * w);
+                    return k1.value * (1.0 - w_smooth) + k2.value * w_smooth;
+                } else {
+                    return k1.value * (1.0 - w) + k2.value * w;
+                }
             }
         }
         self.keys[0].value
@@ -571,6 +586,10 @@ impl Element for Ramp {
             changed = true;
         }
         
+        if self.line_type_dropdown.tick(dt, ctx) {
+            changed = true;
+        }
+        
         if self.selected_key_idx.is_some() {
             if self.val_slider.tick(dt, ctx) {
                 if let Some(idx) = self.selected_key_idx {
@@ -597,6 +616,7 @@ impl Element for Ramp {
         unsafe {
             let mut list = vec![
                 &mut (*self_ptr).preset_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
+                &mut (*self_ptr).line_type_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
             ];
             if self.selected_key_idx.is_some() {
                 list.push(&mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static));
@@ -621,15 +641,17 @@ impl Element for Ramp {
         self.val_slider.set_parent(Some(self_ptr), &mut dummy);
         self.del_button.set_parent(Some(self_ptr), &mut dummy);
         self.preset_dropdown.set_parent(Some(self_ptr), &mut dummy);
+        self.line_type_dropdown.set_parent(Some(self_ptr), &mut dummy);
         
         let gh = 80.0;
         let sy = y + gh + 25.0;
         
-        // Preset dropdown is always visible at the bottom row
-        self.preset_dropdown.set_rect(x + 10.0, sy, 140.0, 20.0);
+        // Dropdowns are always visible at the bottom row
+        self.preset_dropdown.set_rect(x + 10.0, sy, 110.0, 20.0);
+        self.line_type_dropdown.set_rect(x + 130.0, sy, 110.0, 20.0);
         
         if self.selected_key_idx.is_some() {
-            self.val_slider.set_rect(x + 165.0, sy, 140.0, 20.0);
+            self.val_slider.set_rect(x + 250.0, sy, 110.0, 20.0);
             self.del_button.set_rect(x + w - 80.0, sy - 4.0, 70.0, 28.0);
         } else {
             self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
@@ -688,6 +710,7 @@ impl Element for Ramp {
         
         let ctx_dummy = crate::context::UiContext::new();
         quads.extend(self.preset_dropdown.all_quads(&ctx_dummy));
+        quads.extend(self.line_type_dropdown.all_quads(&ctx_dummy));
         
         if self.selected_key_idx.is_some() {
             quads.extend(self.val_slider.all_quads(&ctx_dummy));
@@ -725,6 +748,10 @@ impl Element for Ramp {
                 let idx = self.preset_dropdown.selected;
                 self.apply_preset(idx);
             }
+            return true;
+        }
+        
+        if self.line_type_dropdown.mouse_input(button, state, px, py_event, ctx) {
             return true;
         }
         
@@ -808,6 +835,9 @@ impl Element for Ramp {
         if self.preset_dropdown.cursor_moved(px, py_event, ctx) {
             return true;
         }
+        if self.line_type_dropdown.cursor_moved(px, py_event, ctx) {
+            return true;
+        }
         
         let mut changed = false;
         let gh = 80.0;
@@ -847,15 +877,18 @@ impl Element for Ramp {
     
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
         self.preset_dropdown.popover_rect()
+            .or_else(|| self.line_type_dropdown.popover_rect())
     }
     
     fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
         self.preset_dropdown.render_popover(pc);
+        self.line_type_dropdown.render_popover(pc);
     }
     
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
         labels.extend(self.preset_dropdown.text_labels_with_font_and_bounds(ctx));
+        labels.extend(self.line_type_dropdown.text_labels_with_font_and_bounds(ctx));
         if self.selected_key_idx.is_some() {
             labels.extend(self.val_slider.text_labels_with_font_and_bounds(ctx));
             labels.extend(self.del_button.text_labels_with_font_and_bounds(ctx));
@@ -866,6 +899,7 @@ impl Element for Ramp {
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
         let mut items = Vec::new();
         items.extend(self.preset_dropdown.get_text_items());
+        items.extend(self.line_type_dropdown.get_text_items());
         if self.selected_key_idx.is_some() {
             items.extend(self.val_slider.get_text_items());
             items.extend(self.del_button.get_text_items());
