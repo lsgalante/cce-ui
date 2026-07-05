@@ -424,6 +424,40 @@ impl Element for Toggle {
     fn corner_radius(&self) -> f32 {
         crate::layout::toggle_corner_radius()
     }
+
+    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        let x = self.base.x;
+        let y = self.base.y;
+        let w = self.base.w;
+        let h = self.base.h;
+        let radius = self.corner_radius();
+        let bg_color = self.color();
+        
+        if r1 || r2 || r3 || r4 {
+            let border_w = crate::layout::toggle_border_width();
+            let border_color = if self.toggled {
+                colors::toggle_on_color()
+            } else {
+                colors::toggle_off_color()
+            };
+            
+            if border_w > 0.0 {
+                // Outer border rect
+                quads.push((x, y, w, h, radius, border_color, (r1, r2, r3, r4)));
+                // Inner background rect
+                let inner_radius = (radius - border_w).max(0.0);
+                quads.push((x + border_w, y + border_w, w - 2.0 * border_w, h - 2.0 * border_w, inner_radius, bg_color, (r1, r2, r3, r4)));
+            } else {
+                quads.push((x, y, w, h, radius, bg_color, (r1, r2, r3, r4)));
+            }
+        }
+        quads
+    }
 }
 
 

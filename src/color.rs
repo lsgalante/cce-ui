@@ -331,7 +331,7 @@ fn parse_and_set_colors(content: &str) {
             if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
         }
     }
-    if let Some(c) = get_color("/layout/toggle_bg_color") {
+    if let Some(c) = get_color("/style/control/toggle/background_color").or_else(|| get_color("/layout/toggle_bg_color")) {
         if let Ok(mut lock) = TOGGLE_BG_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/style/control/ramp/background") {
