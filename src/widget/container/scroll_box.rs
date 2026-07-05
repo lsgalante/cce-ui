@@ -132,7 +132,6 @@ impl Element for ScrollBox {
                 }
                 if self.hit_test(px, py, ctx) {
                     self.focus();
-                    return true;
                 }
             } else if state == ElementState::Released {
                 self.scrollbar_dragging = false;
