@@ -670,7 +670,7 @@ impl Element for Ramp {
         }
         
         // Curve area fill and outline
-        let slices = 80;
+        let slices = 600;
         let slice_w = track_w / slices as f32;
         for i in 0..slices {
             let t1 = i as f32 / slices as f32;
