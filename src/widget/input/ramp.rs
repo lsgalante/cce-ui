@@ -2,15 +2,19 @@ use crate::colors;
 use crate::widget::*;
 use crate::widget::input::{Slider, Button};
 
+// ==========================================
+// 1. Color Ramp (renamed from Ramp)
+// ==========================================
+
 #[derive(Debug, Clone)]
-pub struct RampKey {
+pub struct ColorRampKey {
     pub pos: f32,
     pub color: [f32; 3],
 }
 
-pub struct Ramp {
+pub struct ColorRamp {
     pub base: Widget,
-    pub keys: Vec<RampKey>,
+    pub keys: Vec<ColorRampKey>,
     pub selected_key_idx: Option<usize>,
     pub is_dragging_key: bool,
     
@@ -23,11 +27,11 @@ pub struct Ramp {
     pub parent: Option<*mut (dyn Element + 'static)>,
 }
 
-impl Ramp {
+impl ColorRamp {
     pub fn new() -> Self {
         let keys = vec![
-            RampKey { pos: 0.0, color: [0.0, 0.0, 0.0] },
-            RampKey { pos: 1.0, color: [1.0, 1.0, 1.0] },
+            ColorRampKey { pos: 0.0, color: [0.0, 0.0, 0.0] },
+            ColorRampKey { pos: 1.0, color: [1.0, 1.0, 1.0] },
         ];
         
         let r_slider = Slider::new().with_label("Red");
@@ -48,7 +52,6 @@ impl Ramp {
         }
     }
     
-    // Linear color interpolation helper
     pub fn get_interpolated_color(&self, t: f32) -> [f32; 3] {
         if self.keys.is_empty() {
             return [0.0, 0.0, 0.0];
@@ -90,8 +93,8 @@ impl Ramp {
     }
 }
 
-impl Element for Ramp {
-    crate::impl_widget_base!(Ramp);
+impl Element for ColorRamp {
+    crate::impl_widget_base!(ColorRamp);
     
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
@@ -166,7 +169,6 @@ impl Element for Ramp {
             quads.push((sx, self.base.y, slice_w, th, [col[0], col[1], col[2], 1.0]));
         }
         
-        // Return child quads if selected
         if self.selected_key_idx.is_some() {
             let ctx_dummy = crate::context::UiContext::new();
             quads.extend(self.r_slider.all_quads(&ctx_dummy));
@@ -187,14 +189,8 @@ impl Element for Ramp {
         
         for (idx, key) in self.keys.iter().enumerate() {
             let cx = track_x + key.pos * track_w;
-            
-            // Draw peg outline / shadow
             circles.push((cx, py, 7.0, [0.0, 0.0, 0.0, 0.8]));
-            
-            // Draw peg color preview
             circles.push((cx, py, 6.0, [key.color[0], key.color[1], key.color[2], 1.0]));
-            
-            // Highlight selected peg
             if Some(idx) == self.selected_key_idx {
                 circles.push((cx, py, 8.0, [0.49, 1.0, 1.0, 0.5]));
             }
@@ -212,52 +208,43 @@ impl Element for Ramp {
         let py_peg = self.base.y + th + 15.0;
         
         if state == ElementState::Pressed {
-            // 1. Check peg click selection/dragging
             for (idx, key) in self.keys.iter().enumerate() {
                 let cx = track_x + key.pos * track_w;
                 let dx = px - cx;
                 let dy = py_event - py_peg;
-                if (dx*dx + dy*dy) <= 64.0 { // hit circle radius 8.0
+                if (dx*dx + dy*dy) <= 64.0 {
                     self.selected_key_idx = Some(idx);
                     self.is_dragging_key = true;
-                    
-                    // Update slider values to match key color
                     self.r_slider.set_value(key.color[0]);
                     self.g_slider.set_value(key.color[1]);
                     self.b_slider.set_value(key.color[2]);
-                    
                     self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
                     return true;
                 }
             }
             
-            // 2. Check track click to add key
             if px >= track_x && px <= track_x + track_w && py_event >= self.base.y && py_event <= self.base.y + th {
                 let t = (px - track_x) / track_w;
                 let col = self.get_interpolated_color(t);
-                let new_key = RampKey { pos: t, color: col };
+                let new_key = ColorRampKey { pos: t, color: col };
                 self.keys.push(new_key);
                 self.sort_keys();
                 
-                // Select newly added key
                 if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - t).abs() < 0.0001) {
                     self.selected_key_idx = Some(new_idx);
                     self.r_slider.set_value(col[0]);
                     self.g_slider.set_value(col[1]);
                     self.b_slider.set_value(col[2]);
                 }
-                
                 self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
                 return true;
             }
             
-            // 3. Delegate to slider / button click
             if self.selected_key_idx.is_some() {
                 if self.r_slider.mouse_input(button, state, px, py_event, ctx) { return true; }
                 if self.g_slider.mouse_input(button, state, px, py_event, ctx) { return true; }
                 if self.b_slider.mouse_input(button, state, px, py_event, ctx) { return true; }
                 if self.del_button.mouse_input(button, state, px, py_event, ctx) {
-                    // Check if clicked
                     if self.del_button.take_click() {
                         if let Some(idx) = self.selected_key_idx {
                             if self.keys.len() > 2 {
@@ -271,9 +258,7 @@ impl Element for Ramp {
                 }
             }
         } else {
-            // Mouse released
             self.is_dragging_key = false;
-            
             if self.selected_key_idx.is_some() {
                 self.r_slider.mouse_input(button, state, px, py_event, ctx);
                 self.g_slider.mouse_input(button, state, px, py_event, ctx);
@@ -292,18 +277,14 @@ impl Element for Ramp {
                 return true;
             }
         }
-        
         false
     }
     
     fn cursor_moved(&mut self, px: f32, py_event: f32, ctx: &mut UiContext) -> bool {
         let mut changed = false;
-        
-        let _th = crate::layout::ramp_height();
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
-        // 1. Update key dragging
         if self.is_dragging_key {
             if let Some(idx) = self.selected_key_idx {
                 let t = ((px - track_x) / track_w).clamp(0.0, 1.0);
@@ -313,7 +294,6 @@ impl Element for Ramp {
             }
         }
         
-        // 2. Delegate to sliders / buttons
         if self.selected_key_idx.is_some() {
             if self.r_slider.cursor_moved(px, py_event, ctx) {
                 if let Some(idx) = self.selected_key_idx {
@@ -337,7 +317,6 @@ impl Element for Ramp {
                 changed = true;
             }
         }
-        
         changed
     }
     
@@ -358,6 +337,331 @@ impl Element for Ramp {
             items.extend(self.r_slider.get_text_items());
             items.extend(self.g_slider.get_text_items());
             items.extend(self.b_slider.get_text_items());
+            items.extend(self.del_button.get_text_items());
+        }
+        items
+    }
+}
+
+impl Drop for ColorRamp {
+    fn drop(&mut self) {
+        clear_widget_references(self);
+    }
+}
+
+
+// ==========================================
+// 2. Houdini-Style Float Ramp
+// ==========================================
+
+#[derive(Debug, Clone)]
+pub struct RampKey {
+    pub pos: f32,
+    pub value: f32,
+}
+
+pub struct Ramp {
+    pub base: Widget,
+    pub keys: Vec<RampKey>,
+    pub selected_key_idx: Option<usize>,
+    pub is_dragging_key: bool,
+    
+    // Child controls for value editing & deletion
+    pub val_slider: Slider,
+    pub del_button: Button,
+    
+    pub parent: Option<*mut (dyn Element + 'static)>,
+}
+
+impl Ramp {
+    pub fn new() -> Self {
+        let keys = vec![
+            RampKey { pos: 0.0, value: 0.0 },
+            RampKey { pos: 1.0, value: 1.0 },
+        ];
+        
+        let val_slider = Slider::new().with_label("Value");
+        let del_button = Button::new(0.0, 0.0, 70.0, 28.0).with_label("Delete Key");
+        
+        Self {
+            base: Widget::new(),
+            keys,
+            selected_key_idx: None,
+            is_dragging_key: false,
+            val_slider,
+            del_button,
+            parent: None,
+        }
+    }
+    
+    pub fn get_interpolated_value(&self, t: f32) -> f32 {
+        if self.keys.is_empty() {
+            return 0.0;
+        }
+        if t <= self.keys[0].pos {
+            return self.keys[0].value;
+        }
+        if t >= self.keys[self.keys.len() - 1].pos {
+            return self.keys[self.keys.len() - 1].value;
+        }
+        
+        for i in 0..self.keys.len() - 1 {
+            let k1 = &self.keys[i];
+            let k2 = &self.keys[i+1];
+            if t >= k1.pos && t <= k2.pos {
+                let range = k2.pos - k1.pos;
+                if range.abs() < 0.0001 {
+                    return k1.value;
+                }
+                let w = (t - k1.pos) / range;
+                return k1.value * (1.0 - w) + k2.value * w;
+            }
+        }
+        self.keys[0].value
+    }
+    
+    fn sort_keys(&mut self) {
+        let prev_selected_id = self.selected_key_idx.map(|idx| self.keys[idx].pos);
+        self.keys.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap());
+        if let Some(pos) = prev_selected_id {
+            if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - pos).abs() < 0.0001) {
+                self.selected_key_idx = Some(new_idx);
+            }
+        }
+    }
+}
+
+impl Element for Ramp {
+    crate::impl_widget_base!(Ramp);
+    
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
+        self.parent = parent;
+    }
+    
+    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+        let self_ptr = self as *const Self as *mut Self;
+        unsafe {
+            vec![
+                &mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static),
+                &mut (*self_ptr).del_button as *mut Button as *mut (dyn Element + 'static),
+            ]
+        }
+    }
+    
+    fn color(&self) -> [f32; 4] {
+        colors::ramp_background_color()
+    }
+    
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h;
+        
+        let self_ptr = self.as_ptr_mut();
+        let mut dummy = crate::context::UiContext::new();
+        self.val_slider.set_parent(Some(self_ptr), &mut dummy);
+        self.del_button.set_parent(Some(self_ptr), &mut dummy);
+        
+        let gh = 80.0;
+        let sy = y + gh + 15.0;
+        let slider_w = w - 100.0;
+        
+        if self.selected_key_idx.is_some() {
+            self.val_slider.set_rect(x + 10.0, sy, slider_w, 20.0);
+            self.del_button.set_rect(x + w - 80.0, sy - 4.0, 70.0, 28.0);
+        } else {
+            self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+        }
+    }
+    
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let mut quads = Vec::new();
+        let gh = 80.0;
+        let track_x = self.base.x + 10.0;
+        let track_w = self.base.w - 20.0;
+        
+        // Draw graph background
+        quads.push((track_x, self.base.y, track_w, gh, [0.15, 0.15, 0.18, 1.0]));
+        // Border
+        quads.push((track_x - 1.0, self.base.y - 1.0, track_w + 2.0, gh + 2.0, colors::ramp_border_color()));
+        
+        // Draw grid lines
+        for ratio in [0.25, 0.5, 0.75] {
+            let gy = self.base.y + gh * (1.0 - ratio);
+            quads.push((track_x, gy, track_w, 1.0, [0.25, 0.25, 0.28, 0.5]));
+        }
+        for ratio in [0.25, 0.5, 0.75] {
+            let gx = track_x + track_w * ratio;
+            quads.push((gx, self.base.y, 1.0, gh, [0.25, 0.25, 0.28, 0.5]));
+        }
+        
+        // Curve area fill and outline
+        let slices = 80;
+        let slice_w = track_w / slices as f32;
+        for i in 0..slices {
+            let t1 = i as f32 / slices as f32;
+            let v1 = self.get_interpolated_value(t1);
+            let sx1 = track_x + t1 * track_w;
+            
+            let slice_h = v1 * gh;
+            let sy = self.base.y + gh - slice_h;
+            quads.push((sx1, sy, slice_w, slice_h, [0.3, 0.45, 0.6, 0.25]));
+            
+            let outline_h = 2.0;
+            let outline_y = self.base.y + gh - v1 * gh - 1.0;
+            quads.push((sx1, outline_y, slice_w, outline_h, [0.5, 0.75, 1.0, 1.0]));
+        }
+        
+        if self.selected_key_idx.is_some() {
+            let ctx_dummy = crate::context::UiContext::new();
+            quads.extend(self.val_slider.all_quads(&ctx_dummy));
+            quads.extend(self.del_button.all_quads(&ctx_dummy));
+        }
+        
+        quads
+    }
+    
+    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
+        let mut circles = Vec::new();
+        let gh = 80.0;
+        let track_x = self.base.x + 10.0;
+        let track_w = self.base.w - 20.0;
+        
+        for (idx, key) in self.keys.iter().enumerate() {
+            let cx = track_x + key.pos * track_w;
+            let cy = self.base.y + gh - key.value * gh;
+            
+            circles.push((cx, cy, 7.0, [0.0, 0.0, 0.0, 0.8]));
+            circles.push((cx, cy, 5.0, [0.5, 0.75, 1.0, 1.0]));
+            if Some(idx) == self.selected_key_idx {
+                circles.push((cx, cy, 9.0, [0.49, 1.0, 1.0, 0.5]));
+            }
+        }
+        
+        circles
+    }
+    
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py_event: f32, ctx: &mut UiContext) -> bool {
+        if button != MouseButton::Left { return false; }
+        
+        let gh = 80.0;
+        let track_x = self.base.x + 10.0;
+        let track_w = self.base.w - 20.0;
+        
+        if state == ElementState::Pressed {
+            for (idx, key) in self.keys.iter().enumerate() {
+                let cx = track_x + key.pos * track_w;
+                let cy = self.base.y + gh - key.value * gh;
+                let dx = px - cx;
+                let dy = py_event - cy;
+                if (dx*dx + dy*dy) <= 64.0 {
+                    self.selected_key_idx = Some(idx);
+                    self.is_dragging_key = true;
+                    self.val_slider.set_value(key.value);
+                    self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
+                    return true;
+                }
+            }
+            
+            if px >= track_x && px <= track_x + track_w && py_event >= self.base.y && py_event <= self.base.y + gh {
+                let t = (px - track_x) / track_w;
+                let val = 1.0 - (py_event - self.base.y) / gh;
+                let new_key = RampKey { pos: t, value: val };
+                self.keys.push(new_key);
+                self.sort_keys();
+                
+                if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - t).abs() < 0.0001) {
+                    self.selected_key_idx = Some(new_idx);
+                    self.val_slider.set_value(val);
+                }
+                self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
+                return true;
+            }
+            
+            if self.selected_key_idx.is_some() {
+                if self.val_slider.mouse_input(button, state, px, py_event, ctx) { return true; }
+                if self.del_button.mouse_input(button, state, px, py_event, ctx) {
+                    if self.del_button.take_click() {
+                        if let Some(idx) = self.selected_key_idx {
+                            if self.keys.len() > 2 {
+                                self.keys.remove(idx);
+                                self.selected_key_idx = None;
+                                self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
+                            }
+                        }
+                    }
+                    return true;
+                }
+            }
+        } else {
+            self.is_dragging_key = false;
+            if self.selected_key_idx.is_some() {
+                self.val_slider.mouse_input(button, state, px, py_event, ctx);
+                if self.del_button.mouse_input(button, state, px, py_event, ctx) {
+                    if self.del_button.take_click() {
+                        if let Some(idx) = self.selected_key_idx {
+                            if self.keys.len() > 2 {
+                                self.keys.remove(idx);
+                                self.selected_key_idx = None;
+                                self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
+                            }
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+        false
+    }
+    
+    fn cursor_moved(&mut self, px: f32, py_event: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = false;
+        let gh = 80.0;
+        let track_x = self.base.x + 10.0;
+        let track_w = self.base.w - 20.0;
+        
+        if self.is_dragging_key {
+            if let Some(idx) = self.selected_key_idx {
+                let t = ((px - track_x) / track_w).clamp(0.0, 1.0);
+                let val = (1.0 - (py_event - self.base.y) / gh).clamp(0.0, 1.0);
+                self.keys[idx].pos = t;
+                self.keys[idx].value = val;
+                self.val_slider.set_value(val);
+                self.sort_keys();
+                changed = true;
+            }
+        }
+        
+        if self.selected_key_idx.is_some() {
+            if self.val_slider.cursor_moved(px, py_event, ctx) {
+                if let Some(idx) = self.selected_key_idx {
+                    self.keys[idx].value = self.val_slider.value();
+                    changed = true;
+                }
+            }
+            if self.del_button.cursor_moved(px, py_event, ctx) {
+                changed = true;
+            }
+        }
+        changed
+    }
+    
+    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let mut labels = Vec::new();
+        if self.selected_key_idx.is_some() {
+            labels.extend(self.val_slider.text_labels_with_font_and_bounds(ctx));
+            labels.extend(self.del_button.text_labels_with_font_and_bounds(ctx));
+        }
+        labels
+    }
+    
+    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
+        let mut items = Vec::new();
+        if self.selected_key_idx.is_some() {
+            items.extend(self.val_slider.get_text_items());
             items.extend(self.del_button.get_text_items());
         }
         items

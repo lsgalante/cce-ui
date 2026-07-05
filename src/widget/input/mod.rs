@@ -28,7 +28,7 @@ pub use button_strip::ButtonStrip;
 pub use multi_control::{MultiControl, InstancedControl, InstancedWidget, MultiControlRow};
 pub use keybinds_control::{KeybindsControl, KeybindRow};
 pub use keybind_recorder::KeybindRecorder;
-pub use ramp::{Ramp, RampKey};
+pub use ramp::{Ramp, RampKey, ColorRamp, ColorRampKey};
 
 pub const BREADCRUMB_PADDING: f32 = 8.0;
 pub const SEGMENT_GAP: f32 = 4.0;
