@@ -646,7 +646,7 @@ pub fn push_plate_bevel_vertices(
     let ly = -rad.sin();
 
     let edge_color = |factor: f32| -> [f32; 4] {
-        let max_offset = 0.15;
+        let max_offset = crate::layout::bevel_depth();
         let offset = factor * max_offset;
         [
             (base_color[0] + offset).clamp(0.0, 1.0),
