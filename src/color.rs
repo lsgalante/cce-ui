@@ -306,15 +306,18 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/control/dropdown/color") {
         if let Ok(mut lock) = DROPDOWN_BACKGROUND_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color_u8("/style/textbox/placeholder_text_color")
+    if let Some(c) = get_color_u8("/style/control/textbox/placeholder_text_color")
+        .or_else(|| get_color_u8("/style/textbox/placeholder_text_color"))
         .or_else(|| get_color_u8("/style/data/textbox/placeholder_text_color")) {
         if let Ok(mut lock) = TEXTBOX_PLACEHOLDER_TEXT_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/style/textbox/background_color")
+    if let Some(c) = get_color("/style/control/textbox/background_color")
+        .or_else(|| get_color("/style/textbox/background_color"))
         .or_else(|| get_color("/style/data/textbox/background_color")) {
         if let Ok(mut lock) = TEXTBOX_BACKGROUND_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/style/textbox/background_edit_color")
+    if let Some(c) = get_color("/style/control/textbox/background_edit_color")
+        .or_else(|| get_color("/style/textbox/background_edit_color"))
         .or_else(|| get_color("/style/data/textbox/background_edit_color")) {
         if let Ok(mut lock) = TEXTBOX_BACKGROUND_EDIT_COLOR.write() { *lock = c; }
     }
