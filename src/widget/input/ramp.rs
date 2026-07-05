@@ -544,6 +544,23 @@ impl Ramp {
 impl Element for Ramp {
     crate::impl_widget_base!(Ramp);
     
+    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
+        if let Some(pop_rect) = self.popover_rect() {
+            if px >= pop_rect.0 && px <= pop_rect.0 + pop_rect.2 && py >= pop_rect.1 && py <= pop_rect.1 + pop_rect.3 {
+                return true;
+            }
+        }
+        
+        let (x, y, w, h) = self.rect();
+        if w <= 0.0 || h <= 0.0 {
+            return false;
+        }
+        px >= x && px <= x + w && py >= y && py <= y + h
+    }
+    
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
         let mut changed = self.just_changed;
         self.just_changed = false;
