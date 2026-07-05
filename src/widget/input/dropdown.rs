@@ -524,7 +524,7 @@ impl Element for Dropdown {
         let font_family = crate::layout::dropdown_font();
         let start_x = self.base.x + 8.0;
         let right_limit = self.base.x + self.base.w - 28.0; // 10px margin before the arrow
-        let fade_start_x = (right_limit - 40.0).max(start_x); // Fade out over the last 40px
+        let fade_start_x = (right_limit - 12.0).max(start_x); // Fade out over the last 12px
         let text_y = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
         let default_color = [0xdd, 0xdd, 0xe2];
         let bg_color = colors::dropdown_background_color();
@@ -559,7 +559,30 @@ impl Element for Dropdown {
             0.0
         };
 
+        // Find the split point where fading begins
+        let mut split_idx = n;
         for i in 0..n {
+            let cur_x = start_x + char_offsets[i];
+            if cur_x >= fade_start_x {
+                split_idx = i;
+                break;
+            }
+        }
+
+        // Draw the non-faded prefix as a single string (retains perfect spacing/kerning)
+        if split_idx > 0 {
+            let prefix_str: String = chars[0..split_idx].iter().collect();
+            labels.push(TextLabel {
+                text: prefix_str,
+                x: start_x,
+                y: text_y,
+                font_size: 12.0,
+                color: default_color,
+            });
+        }
+
+        // Draw the remaining faded characters individually
+        for i in split_idx..n {
             let offset = char_offsets[i];
             let next_offset = if i < n - 1 { char_offsets[i + 1] } else { total_advance };
             let c_w = next_offset - offset;
