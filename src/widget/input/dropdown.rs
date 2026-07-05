@@ -292,7 +292,8 @@ impl Element for Dropdown {
             let visual_h = self.base.h - top;
             let radius = self.corner_radius();
             
-            let bg_color = colors::dropdown_background_color();
+            let mut bg_color = colors::dropdown_background_color();
+            bg_color[3] = 1.0; // Force opaque background to prevent subpixel blending artifacts
             let border_color = if self.open {
                 [0.30, 0.50, 0.32, 1.0]
             } else if self.base.hovered {
@@ -491,7 +492,8 @@ impl Element for Dropdown {
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
 
-        let bg_color = colors::dropdown_background_color();
+        let mut bg_color = colors::dropdown_background_color();
+        bg_color[3] = 1.0; // Force opaque background to prevent subpixel blending artifacts
         let border_color = if self.open {
             [0.30, 0.50, 0.32, 1.0]
         } else if self.base.hovered {
