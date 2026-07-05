@@ -711,7 +711,7 @@ impl Element for Ramp {
     }
     
     fn color(&self) -> [f32; 4] {
-        colors::ramp_background_color()
+        [0.15, 0.15, 0.18, 1.0]
     }
     
     fn preferred_height(&self) -> Option<f32> {
