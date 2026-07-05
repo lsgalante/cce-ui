@@ -100,3 +100,5 @@ fn perform_svg_measurement(text: &str, font_family: &str, font_size: f32, scale:
 
     TextLabel::estimate_width(text, font_size)
 }
+
+
