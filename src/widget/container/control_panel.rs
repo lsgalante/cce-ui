@@ -7,6 +7,7 @@ pub struct ControlPanel {
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub scroll_box: ScrollBox,
+    pub active_drag_widget: Option<*mut (dyn Element + 'static)>,
 }
 
 impl ControlPanel {
@@ -19,6 +20,7 @@ impl ControlPanel {
             children: Vec::new(),
             parent: None,
             scroll_box: sb,
+            active_drag_widget: None,
         }
     }
 
@@ -362,7 +364,55 @@ impl Element for ControlPanel {
         }
     }
 
+    fn draggable(&self) -> bool {
+        self.scroll_box.draggable() || self.active_drag_widget.is_some()
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32) {
+        if self.scroll_box.hit_test_scrollbar(px, py) {
+            self.scroll_box.drag_begin(px, py);
+            return;
+        }
+
+        let scroll_y = self.scroll_box.scroll_y;
+        let py_translated = py + scroll_y;
+        if let Some(child_ptr) = self.active_drag_widget {
+            unsafe {
+                (*child_ptr).drag_begin(px, py_translated);
+            }
+        }
+    }
+
+    fn drag_update(&mut self, px: f32, py: f32) -> bool {
+        if self.scroll_box.draggable() {
+            return self.scroll_box.drag_update(px, py);
+        }
+
+        let scroll_y = self.scroll_box.scroll_y;
+        let py_translated = py + scroll_y;
+        if let Some(child_ptr) = self.active_drag_widget {
+            unsafe {
+                return (*child_ptr).drag_update(px, py_translated);
+            }
+        }
+        false
+    }
+
+    fn drag_end(&mut self) {
+        self.scroll_box.drag_end();
+        if let Some(child_ptr) = self.active_drag_widget {
+            unsafe {
+                (*child_ptr).drag_end();
+            }
+            self.active_drag_widget = None;
+        }
+    }
+
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if state == ElementState::Pressed {
+            self.active_drag_widget = None;
+        }
+
         if self.scroll_box.mouse_input(button, state, px, py, ctx) {
             return true;
         }
@@ -373,9 +423,13 @@ impl Element for ControlPanel {
 
         unsafe {
             for child_ptr in &self.children {
-                // Only dispatch if the click is physically inside the ControlPanel viewport
-                if py >= y && py <= y + h {
+                let has_popover = (**child_ptr).popover_rect().is_some();
+                // Only dispatch if the click Y is inside the viewport or the child has an active popover
+                if has_popover || (py >= y && py <= y + h) {
                     if (**child_ptr).mouse_input(button, state, px, py_translated, ctx) {
+                        if state == ElementState::Pressed && (**child_ptr).draggable() {
+                            self.active_drag_widget = Some(*child_ptr);
+                        }
                         return true;
                     }
                 }
