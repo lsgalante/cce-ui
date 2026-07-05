@@ -52,3 +52,23 @@ pub fn scale_pointer_pos(pos: (f64, f64), scale: f64) -> (f32, f32) {
     ((pos.0 * scale) as f32, (pos.1 * scale) as f32)
 }
 
+#[macro_export]
+macro_rules! delegate_wl_callback {
+    ($name:ty) => {
+        impl wayland_client::Dispatch<wayland_client::protocol::wl_callback::WlCallback, ()> for $name {
+            fn event(
+                state: &mut Self,
+                _proxy: &wayland_client::protocol::wl_callback::WlCallback,
+                event: wayland_client::protocol::wl_callback::Event,
+                _data: &(),
+                _conn: &wayland_client::Connection,
+                _qh: &wayland_client::QueueHandle<Self>,
+            ) {
+                if let wayland_client::protocol::wl_callback::Event::Done { .. } = event {
+                    state.frame_callback_pending = false;
+                }
+            }
+        }
+    };
+}
+
