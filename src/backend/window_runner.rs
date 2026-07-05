@@ -1415,7 +1415,7 @@ pub struct EngineState<A: Application> {
     pub window: Option<XdgWindow>,
     pub surface: Option<wl_surface::WlSurface>,
     
-    pub inner: A,
+    pub inner: Option<A>,
     
     pub wgpu_adapter: Option<WgpuAdapter>,
     pub render_pipeline: Option<wgpu::RenderPipeline>,
@@ -1529,7 +1529,7 @@ impl<A: Application> EngineState<A> {
     }
     
     pub fn resize(&mut self, w: f32, h: f32) {
-        let (w, h) = self.inner.adjust_size(w, h);
+        let (w, h) = self.inner.as_ref().unwrap().adjust_size(w, h);
         if w > 0.0 && h > 0.0 {
             self.logical_width = w;
             self.logical_height = h;
@@ -1545,10 +1545,10 @@ impl<A: Application> EngineState<A> {
         let scale_factor = self.scale_factor;
         
         let mut quads = Vec::new();
-        self.inner.view(&mut quads, LogicalSize::new(logical_w, logical_h), scale_factor);
+        self.inner.as_mut().unwrap().view(&mut quads, LogicalSize::new(logical_w, logical_h), scale_factor);
 
         if let Some(ref surface) = self.surface {
-            if let Some(regions) = self.inner.input_regions() {
+            if let Some(regions) = self.inner.as_ref().unwrap().input_regions() {
                 let compositor = self.compositor_state.wl_compositor();
                 let wl_region = compositor.create_region(&self.qh, ());
                 for &(rx, ry, rw, rh) in &regions {
@@ -1560,10 +1560,10 @@ impl<A: Application> EngineState<A> {
         }
         
         let mut rounded_quads = Vec::new();
-        self.inner.view_rounded_quads(&mut rounded_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
+        self.inner.as_mut().unwrap().view_rounded_quads(&mut rounded_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
         
         let mut vectors = Vec::new();
-        self.inner.view_vectors(&mut vectors, LogicalSize::new(logical_w, logical_h), scale_factor);
+        self.inner.as_mut().unwrap().view_vectors(&mut vectors, LogicalSize::new(logical_w, logical_h), scale_factor);
         
         let adapter = self.wgpu_adapter.as_mut().unwrap();
         let render_pipeline = self.render_pipeline.as_ref().unwrap();
@@ -1589,7 +1589,7 @@ impl<A: Application> EngineState<A> {
         for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
             verts.extend(vector_vertices(vx1, vy1, vx2, vy2, vthickness, logical_w, logical_h, vcolor, vcap));
         }
-        self.inner.custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
+        self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
         self.vertex_count = verts.len() as u32;
         if self.vertex_count > 0 {
             let data = bytemuck::cast_slice(&verts);
@@ -1610,7 +1610,7 @@ impl<A: Application> EngineState<A> {
 
         // 1b. Build and upload overlay vertex buffer
         let mut overlay_quads = Vec::new();
-        self.inner.overlay_quads(&mut overlay_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
+        self.inner.as_mut().unwrap().overlay_quads(&mut overlay_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
         let mut overlay_verts = Vec::new();
         for &(qx, qy, qw, qh, qc) in &overlay_quads {
             overlay_verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
@@ -1640,7 +1640,7 @@ impl<A: Application> EngineState<A> {
         adapter.text_viewport.update(&adapter.queue, Resolution { width: pw, height: ph });
         
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
-        let areas = self.inner.text_areas(scale_f32, bounds);
+        let areas = self.inner.as_ref().unwrap().text_areas(scale_f32, bounds);
         eprintln!("DEBUG RENDER AREAS: len = {}", areas.len());
         
         adapter.text_renderer.prepare(&adapter.device, &adapter.queue, &mut adapter.font_system, &mut adapter.text_atlas, &adapter.text_viewport, areas, &mut adapter.swash_cache).unwrap();
@@ -1670,7 +1670,7 @@ impl<A: Application> EngineState<A> {
         });
         
         {
-            let cc = self.inner.clear_color();
+            let cc = self.inner.as_ref().unwrap().clear_color();
             let r_clear = (cc[0] as f64).powf(2.2);
             let g_clear = (cc[1] as f64).powf(2.2);
             let b_clear = (cc[2] as f64).powf(2.2);
@@ -1722,7 +1722,7 @@ impl<A: Application> EngineState<A> {
         if let Some(ref mut popup) = self.active_popup {
             if popup.configured {
                 let mut collector = crate::layout::PopoverCollector::new();
-                self.inner.render_popovers(&mut collector);
+                self.inner.as_mut().unwrap().render_popovers(&mut collector);
  
                 let mut verts = Vec::new();
                 for &(color, qx, qy, qw, qh) in &collector.rects {
@@ -1978,7 +1978,7 @@ impl<A: Application> WindowHandler for EngineState<A> {
             let height = h.get();
             self.resize(width as f32, height as f32);
         } else {
-            let settings = self.inner.settings();
+            let settings = self.inner.as_ref().unwrap().settings();
             let w = settings.width as f32;
             let h = settings.height as f32;
             self.resize(w, h);
@@ -2083,7 +2083,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
             
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
-                    let is_status_bar = self.inner.settings().app_id.starts_with("cce-status");
+                    let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
                     let mut cursor_icon = CursorIcon::Default;
                     if !is_status_bar {
                         let border = 8.0f32;
@@ -2117,19 +2117,19 @@ impl<A: Application> PointerHandler for EngineState<A> {
                 PointerEventKind::Leave { .. } => {
                     self.current_cursor_icon = None;
                     let mut rebuild = false;
-                    self.inner.handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
+                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
                     if rebuild {
                         self.redraw = true;
                     }
                 }
                 PointerEventKind::Motion { .. } => {
                     let mut rebuild = false;
-                    self.inner.handle_pointer_move(LogicalPosition::new(lx, ly), &mut rebuild);
+                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(lx, ly), &mut rebuild);
                     if rebuild {
                         self.redraw = true;
                     }
 
-                    let is_status_bar = self.inner.settings().app_id.starts_with("cce-status");
+                    let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
                     let mut cursor_icon = CursorIcon::Default;
                     if !is_status_bar {
                         let border = 8.0f32;
@@ -2172,7 +2172,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     };
 
                     // Client-Side Decorations (CSD) Drag & Resize Handling
-                    let is_status_bar = self.inner.settings().app_id.starts_with("cce-status");
+                    let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
                     if btn == MouseButton::Left && !is_status_bar {
                         let border = 8.0f32;
                         let mut edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None;
@@ -2211,14 +2211,14 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         // Titlebar drag check: y is in [8.0, 32.0], and x is not in the top-right button area
                         let mut should_move = false;
                         let mut is_widget = false;
-                        if let Some(ctx) = self.inner.ui_context() {
+                        if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
                             if ctx.is_widget_at(lx, ly) {
                                 is_widget = true;
                             }
                         }
                         if !is_widget && ly >= border && ly < 32.0 && lx < self.logical_width - 70.0 {
                             should_move = true;
-                        } else if self.inner.is_movable_backplate_at(lx, ly) {
+                        } else if self.inner.as_ref().unwrap().is_movable_backplate_at(lx, ly) {
                             should_move = true;
                         }
 
@@ -2234,9 +2234,9 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     }
 
                     let mut rebuild = false;
-                    if let Some(msg) = self.inner.handle_mouse_input(btn, ElementState::Pressed, LogicalPosition::new(lx, ly), &mut rebuild) {
+                    if let Some(msg) = self.inner.as_mut().unwrap().handle_mouse_input(btn, ElementState::Pressed, LogicalPosition::new(lx, ly), &mut rebuild) {
                         let mut update_rebuild = false;
-                        self.inner.update(msg, &mut update_rebuild, &mut self.exit);
+                        self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
                         if update_rebuild {
                             rebuild = true;
                         }
@@ -2253,9 +2253,9 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         _ => continue,
                     };
                     let mut rebuild = false;
-                    if let Some(msg) = self.inner.handle_mouse_input(btn, ElementState::Released, LogicalPosition::new(lx, ly), &mut rebuild) {
+                    if let Some(msg) = self.inner.as_mut().unwrap().handle_mouse_input(btn, ElementState::Released, LogicalPosition::new(lx, ly), &mut rebuild) {
                         let mut update_rebuild = false;
-                        self.inner.update(msg, &mut update_rebuild, &mut self.exit);
+                        self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
                         if update_rebuild {
                             rebuild = true;
                         }
@@ -2290,13 +2290,13 @@ impl<A: Application> PointerHandler for EngineState<A> {
                 MouseScrollDelta::LineDelta(-h_lines, -v_lines)
             };
             let mut rebuild = false;
-            if let Some(ctx) = self.inner.ui_context_mut() {
+            if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
                 ctx.ctrl_pressed = self.ctrl_pressed;
                 ctx.shift_pressed = self.shift_pressed;
                 ctx.alt_pressed = self.alt_pressed;
                 ctx.logo_pressed = self.logo_pressed;
             }
-            self.inner.handle_mouse_wheel(&delta, LogicalPosition::new(last_lx, last_ly), &mut rebuild);
+            self.inner.as_mut().unwrap().handle_mouse_wheel(&delta, LogicalPosition::new(last_lx, last_ly), &mut rebuild);
             if rebuild {
                 self.redraw = true;
             }
@@ -2365,7 +2365,7 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         self.alt_pressed = modifiers.alt;
         self.logo_pressed = modifiers.logo;
 
-        if let Some(ctx) = self.inner.ui_context_mut() {
+        if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
             ctx.ctrl_pressed = self.ctrl_pressed;
             ctx.shift_pressed = self.shift_pressed;
             ctx.alt_pressed = self.alt_pressed;
@@ -2451,7 +2451,7 @@ impl<A: Application> EngineState<A> {
             }
         }
 
-        if let Some(ctx) = self.inner.ui_context_mut() {
+        if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
             ctx.ctrl_pressed = self.ctrl_pressed;
             ctx.shift_pressed = self.shift_pressed;
             ctx.alt_pressed = self.alt_pressed;
@@ -2459,9 +2459,9 @@ impl<A: Application> EngineState<A> {
         }
 
         let mut rebuild = false;
-        if let Some(msg) = self.inner.handle_key_input(&custom_event, &mut rebuild) {
+        if let Some(msg) = self.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut rebuild) {
             let mut update_rebuild = false;
-            self.inner.update(msg, &mut update_rebuild, &mut self.exit);
+            self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
             if update_rebuild {
                 rebuild = true;
             }
@@ -2598,13 +2598,13 @@ impl<A: Application> wayland_client::Dispatch<ZwpPointerGesturePinchV1, ()> for 
                     y: y_delta as f64,
                 });
 
-                if let Some(ctx) = state.inner.ui_context_mut() {
+                if let Some(ctx) = state.inner.as_mut().unwrap().ui_context_mut() {
                     ctx.ctrl_pressed = true; // Force ctrl_pressed = true for the pinch event
                 }
 
-                state.inner.handle_mouse_wheel(&delta, LogicalPosition::new(px, py), &mut rebuild);
+                state.inner.as_mut().unwrap().handle_mouse_wheel(&delta, LogicalPosition::new(px, py), &mut rebuild);
 
-                if let Some(ctx) = state.inner.ui_context_mut() {
+                if let Some(ctx) = state.inner.as_mut().unwrap().ui_context_mut() {
                     ctx.ctrl_pressed = state.ctrl_pressed; // Restore original state
                 }
 
@@ -2632,11 +2632,6 @@ pub fn run<A: Application>() {
     let output_state = OutputState::new(&globals, &qh);
 
     let (sender, channel) = calloop::channel::channel::<A::Message>();
-
-    let inner = A::new(&qh, sender.clone());
-    let settings = inner.settings();
-    crate::scale::set_app_id(settings.app_id.clone());
-
     let pointer_gestures: Option<ZwpPointerGesturesV1> = globals.bind(&qh, 1..=3, ()).ok();
 
     let mut engine_state = EngineState {
@@ -2651,7 +2646,7 @@ pub fn run<A: Application>() {
         keyboard: None,
         window: None,
         surface: None,
-        inner,
+        inner: None,
         wgpu_adapter: None,
         render_pipeline: None,
         vertex_buffer: None,
@@ -2659,8 +2654,8 @@ pub fn run<A: Application>() {
         overlay_vertex_buffer: None,
         overlay_vertex_count: 0,
         scale_factor: 1.0,
-        logical_width: settings.width as f32,
-        logical_height: settings.height as f32,
+        logical_width: 0.0,
+        logical_height: 0.0,
         exit: false,
         redraw: false,
         frame_callback_pending: false,
@@ -2685,6 +2680,14 @@ pub fn run<A: Application>() {
 
     let scale = detect_scale_factor(&engine_state.output_state);
     engine_state.scale_factor = scale;
+    crate::scale::set_scale_factor(scale as f32);
+
+    let inner = A::new(&qh, engine_state.sender.clone());
+    let settings = inner.settings();
+    crate::scale::set_app_id(settings.app_id.clone());
+    engine_state.logical_width = settings.width as f32;
+    engine_state.logical_height = settings.height as f32;
+    engine_state.inner = Some(inner);
 
     let surface = engine_state.compositor_state.create_surface(&qh);
     surface.set_buffer_scale(scale as i32);
@@ -2720,14 +2723,14 @@ pub fn run<A: Application>() {
     loop_handle.insert_source(channel, |event, _metadata, app_state: &mut EngineState<A>| {
         if let calloop::channel::Event::Msg(msg) = event {
             let mut rebuild = false;
-            app_state.inner.update(msg, &mut rebuild, &mut app_state.exit);
+            app_state.inner.as_mut().unwrap().update(msg, &mut rebuild, &mut app_state.exit);
             if rebuild {
                 app_state.redraw = true;
             }
         }
     }).unwrap();
 
-    engine_state.inner.register_sources(&loop_handle);
+    engine_state.inner.as_mut().unwrap().register_sources(&loop_handle);
 
     const KEY_REPEAT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
     const KEY_REPEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
@@ -2751,7 +2754,7 @@ pub fn run<A: Application>() {
         }
 
         let mut rebuild = false;
-        engine_state.inner.tick(dt, &mut rebuild);
+        engine_state.inner.as_mut().unwrap().tick(dt, &mut rebuild);
         if rebuild {
             engine_state.redraw = true;
         }
@@ -2760,7 +2763,7 @@ pub fn run<A: Application>() {
         engine_state.just_configured = false;
 
         if !just_configured {
-            if let Some((w, h)) = engine_state.inner.desired_size() {
+            if let Some((w, h)) = engine_state.inner.as_ref().unwrap().desired_size() {
                 if (engine_state.logical_width - w as f32).abs() > 0.001 || (engine_state.logical_height - h as f32).abs() > 0.001 {
                     engine_state.resize(w as f32, h as f32);
                     engine_state.redraw = true;
@@ -2782,7 +2785,7 @@ pub fn run<A: Application>() {
                         shift: engine_state.shift_pressed,
                     };
 
-                    if let Some(ctx) = engine_state.inner.ui_context_mut() {
+                    if let Some(ctx) = engine_state.inner.as_mut().unwrap().ui_context_mut() {
                         ctx.ctrl_pressed = engine_state.ctrl_pressed;
                         ctx.shift_pressed = engine_state.shift_pressed;
                         ctx.alt_pressed = engine_state.alt_pressed;
@@ -2790,9 +2793,9 @@ pub fn run<A: Application>() {
                     }
 
                     let mut key_rebuild = false;
-                    if let Some(msg) = engine_state.inner.handle_key_input(&custom_event, &mut key_rebuild) {
+                    if let Some(msg) = engine_state.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut key_rebuild) {
                         let mut update_rebuild = false;
-                        engine_state.inner.update(msg, &mut update_rebuild, &mut engine_state.exit);
+                        engine_state.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut engine_state.exit);
                         if update_rebuild {
                             key_rebuild = true;
                         }
@@ -2803,7 +2806,7 @@ pub fn run<A: Application>() {
                 }
             }
         }
-        let current_title = engine_state.inner.settings().title;
+        let current_title = engine_state.inner.as_ref().unwrap().settings().title;
         if current_title != last_title {
             if let Some(ref window) = engine_state.window {
                 window.set_title(&current_title);
