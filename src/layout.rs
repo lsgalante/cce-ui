@@ -108,6 +108,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "window_manager.light_source_position" => "light_source_position",
                 "window_manager.bevel_depth" => "bevel_depth",
                 "style.control.ramp.height" => "ramp_height",
+                "style.layout.column.gap" => "column_gap",
                 "style.status.normal_color" => "status_normal_color",
                 "style.status.background_color" => "status_background_color",
                 "style.status.background_blur" => "status_background_blur",
@@ -251,6 +252,7 @@ static BUTTON_HEIGHT: RwLock<f32> = RwLock::new(40.0);
 static RAMP_HEIGHT: RwLock<f32> = RwLock::new(32.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
+static COLUMN_GAP: RwLock<f32> = RwLock::new(16.0);
 static TREE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static TREE_BLUR: RwLock<f32> = RwLock::new(0.0);
 
@@ -415,6 +417,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = GRID_GAP.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("column_gap") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = COLUMN_GAP.write() {
                         *lock = val;
                     }
                 }
@@ -1326,6 +1337,34 @@ pub fn grid_gap() -> f32 {
 
 pub fn set_grid_gap(gap: f32) {
     if let Ok(mut lock) = GRID_GAP.write() {
+        *lock = gap;
+    }
+}
+
+pub fn column_gap() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("column_gap") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = COLUMN_GAP.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *COLUMN_GAP.read().unwrap()
+}
+
+pub fn set_column_gap(gap: f32) {
+    if let Ok(mut lock) = COLUMN_GAP.write() {
         *lock = gap;
     }
 }
@@ -5502,6 +5541,15 @@ mod tests {
         assert_eq!(dropdown_height(), 48.0);
         set_dropdown_height(44.0);
         assert_eq!(dropdown_height(), 44.0);
+    }
+
+    #[test]
+    fn test_column_gap() {
+        let _ = column_gap();
+        set_column_gap(24.0);
+        assert_eq!(column_gap(), 24.0);
+        set_column_gap(16.0);
+        assert_eq!(column_gap(), 16.0);
     }
 
     #[test]

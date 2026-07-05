@@ -96,7 +96,7 @@ impl Element for ControlPanel {
         let self_ptr_option = Some(self_ptr);
 
         let padding = 16.0;
-        let gap = 16.0;
+        let gap = crate::layout::column_gap();
         let mut col = ColumnLayout::new(x, y, w - 12.0, gap, padding); // 12px reserved for scrollbar track
 
         unsafe {
