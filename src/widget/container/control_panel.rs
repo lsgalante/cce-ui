@@ -149,18 +149,28 @@ impl Element for ControlPanel {
                 }
             }
 
-            if let Some(c) = create_btn {
-                col.add_widget(&mut *c, 28.0);
+            if let (Some(c), Some(t)) = (create_btn, tile_btn) {
+                col.add_row(&[c, t], 28.0, 12.0);
+            } else {
+                if let Some(c) = create_btn {
+                    col.add_widget(&mut *c, 28.0);
+                }
+                if let Some(t) = tile_btn {
+                    col.add_widget(&mut *t, 28.0);
+                }
             }
-            if let Some(t) = tile_btn {
-                col.add_widget(&mut *t, 28.0);
+
+            if let (Some(w_sp), Some(h_sp)) = (width_spin, height_spin) {
+                col.add_row(&[w_sp, h_sp], 20.0, 12.0);
+            } else {
+                if let Some(w_sp) = width_spin {
+                    col.add_widget(&mut *w_sp, 20.0);
+                }
+                if let Some(h_sp) = height_spin {
+                    col.add_widget(&mut *h_sp, 20.0);
+                }
             }
-            if let Some(w_sp) = width_spin {
-                col.add_widget(&mut *w_sp, 20.0);
-            }
-            if let Some(h_sp) = height_spin {
-                col.add_widget(&mut *h_sp, 20.0);
-            }
+
             if let Some(t_dd) = type_dd {
                 col.add_widget(&mut *t_dd, 20.0);
             }
@@ -176,29 +186,32 @@ impl Element for ControlPanel {
             if let Some(sl) = slider {
                 col.add_widget(&mut *sl, 20.0);
             }
+
             if let Some(w_s) = win_sec {
                 col.add_widget(&mut *w_s, 20.0);
             }
-            if let Some(bp_t) = backplate_toggle {
-                col.add_widget(&mut *bp_t, 20.0);
+            let toggles = [backplate_toggle, menubar_toggle, statusbar_toggle];
+            let active_toggles: Vec<*mut dyn Element> = toggles.iter().filter_map(|&t| t).collect();
+            if !active_toggles.is_empty() {
+                col.add_row(&active_toggles, 20.0, 10.0);
             }
-            if let Some(mb_t) = menubar_toggle {
-                col.add_widget(&mut *mb_t, 20.0);
-            }
-            if let Some(sb_t) = statusbar_toggle {
-                col.add_widget(&mut *sb_t, 20.0);
-            }
+
             if let Some(b_s) = border_sec {
                 col.add_widget(&mut *b_s, 20.0);
             }
             if let Some(bs_dd) = border_style_dd {
                 col.add_widget(&mut *bs_dd, 20.0);
             }
-            if let Some(bw_sp) = border_width_spin {
-                col.add_widget(&mut *bw_sp, 20.0);
-            }
-            if let Some(bd_sp) = bevel_depth_spin {
-                col.add_widget(&mut *bd_sp, 20.0);
+
+            if let (Some(bw_sp), Some(bd_sp)) = (border_width_spin, bevel_depth_spin) {
+                col.add_row(&[bw_sp, bd_sp], 20.0, 12.0);
+            } else {
+                if let Some(bw_sp) = border_width_spin {
+                    col.add_widget(&mut *bw_sp, 20.0);
+                }
+                if let Some(bd_sp) = bevel_depth_spin {
+                    col.add_widget(&mut *bd_sp, 20.0);
+                }
             }
             if let Some(bs_btn) = bevel_shape_btn {
                 col.add_widget(&mut *bs_btn, 28.0);

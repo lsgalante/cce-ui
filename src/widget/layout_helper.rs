@@ -26,6 +26,23 @@ impl ColumnLayout {
         self.current_y += height + self.gap;
     }
 
+    pub fn add_row(&mut self, widgets: &[*mut dyn Element], height: f32, gap: f32) {
+        let count = widgets.len();
+        if count == 0 {
+            return;
+        }
+        let total_width = self.width - 2.0 * self.margin;
+        let widget_w = (total_width - (count as f32 - 1.0) * gap) / count as f32;
+        let mut curr_x = self.x + self.margin;
+        for &widget_ptr in widgets {
+            unsafe {
+                (*widget_ptr).set_rect(curr_x, self.current_y, widget_w, height);
+            }
+            curr_x += widget_w + gap;
+        }
+        self.current_y += height + self.gap;
+    }
+
     pub fn current_y(&self) -> f32 {
         self.current_y - self.gap + self.margin
     }
