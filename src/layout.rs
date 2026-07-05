@@ -103,6 +103,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
                 "style.control.toggle.disabled_color" => "toggle_disabled_color",
+                "style.control.toggle.border_color" => "toggle_border_color",
                 "style.control.toggle.corner_radius" => "toggle_corner_radius",
                 "style.control.ramp.height" => "ramp_height",
                 "style.status.normal_color" => "status_normal_color",

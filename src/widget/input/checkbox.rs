@@ -293,7 +293,99 @@ impl Element for Toggle {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())]
+        let mut quads = vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())];
+        
+        let border_w = crate::layout::toggle_border_width();
+        if border_w > 0.0 {
+            let x = self.base.x;
+            let y = self.base.y;
+            let w = self.base.w;
+            let h = self.base.h;
+            let r = crate::layout::toggle_corner_radius();
+            let t = border_w;
+            
+            let border_color = if self.toggled {
+                colors::toggle_on_color()
+            } else {
+                colors::toggle_off_color()
+            };
+            
+            let edge_h = ((h / 2.0) - r).max(0.0);
+            
+            if self.toggled {
+                // Top edge
+                quads.push((x + r, y, w - 2.0 * r, t, border_color));
+                // Top half of left edge
+                if edge_h > 0.0 {
+                    quads.push((x, y + r, t, edge_h, border_color));
+                }
+                // Top half of right edge
+                if edge_h > 0.0 {
+                    quads.push((x + w - t, y + r, t, edge_h, border_color));
+                }
+            } else {
+                // Bottom edge
+                quads.push((x + r, y + h - t, w - 2.0 * r, t, border_color));
+                // Bottom half of left edge
+                if edge_h > 0.0 {
+                    quads.push((x, y + h / 2.0, t, edge_h, border_color));
+                }
+                // Bottom half of right edge
+                if edge_h > 0.0 {
+                    quads.push((x + w - t, y + h / 2.0, t, edge_h, border_color));
+                }
+            }
+        }
+        quads
+    }
+
+    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
+        let mut arcs = Vec::new();
+        let border_w = crate::layout::toggle_border_width();
+        let r = crate::layout::toggle_corner_radius();
+        
+        if border_w > 0.0 && r > 0.1 {
+            let x = self.base.x;
+            let y = self.base.y;
+            let w = self.base.w;
+            let h = self.base.h;
+            let t = border_w;
+            
+            let border_color = if self.toggled {
+                colors::toggle_on_color()
+            } else {
+                colors::toggle_off_color()
+            };
+            
+            if self.toggled {
+                // Top-Left corner arc
+                arcs.push((
+                    x + r, y + r, r, t,
+                    std::f32::consts::PI, 1.5 * std::f32::consts::PI,
+                    border_color
+                ));
+                // Top-Right corner arc
+                arcs.push((
+                    x + w - r, y + r, r, t,
+                    1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI,
+                    border_color
+                ));
+            } else {
+                // Bottom-Left corner arc
+                arcs.push((
+                    x + r, y + h - r, r, t,
+                    0.5 * std::f32::consts::PI, std::f32::consts::PI,
+                    border_color
+                ));
+                // Bottom-Right corner arc
+                arcs.push((
+                    x + w - r, y + h - r, r, t,
+                    0.0, 0.5 * std::f32::consts::PI,
+                    border_color
+                ));
+            }
+        }
+        arcs
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {

@@ -310,11 +310,19 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/layout/menubar_tab_label_color").or_else(|| get_color("/layout/paginator_tab_label_color")) {
         if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/style/control/toggle/enabled_color").or_else(|| get_color("/layout/toggle_enabled_color")) {
+    let toggle_border_color = get_color("/style/control/toggle/border_color")
+        .or_else(|| get_color("/layout/toggle_border_color"));
+
+    if let Some(c) = toggle_border_color {
         if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/toggle/disabled_color") {
         if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
+    } else {
+        if let Some(c) = get_color("/style/control/toggle/enabled_color").or_else(|| get_color("/layout/toggle_enabled_color")) {
+            if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
+        }
+        if let Some(c) = get_color("/style/control/toggle/disabled_color") {
+            if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
+        }
     }
     if let Some(c) = get_color("/layout/toggle_bg_color") {
         if let Ok(mut lock) = TOGGLE_BG_COLOR.write() { *lock = c; }

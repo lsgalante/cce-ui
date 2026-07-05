@@ -261,7 +261,7 @@ impl Element for ControlPanel {
         unsafe {
             for child_ptr in &self.children {
                 let child = &**child_ptr;
-                let solid_border_opt = child.solid_border();
+                let solid_border_opt = if child.type_name() == "Toggle" { None } else { child.solid_border() };
                 let (cx, cy, cw, ch) = child.rect();
 
                 if let Some((b_color, _thickness)) = solid_border_opt {
@@ -381,6 +381,26 @@ impl Element for ControlPanel {
 
         quads.extend(self.scroll_box.extra_quads());
         quads
+    }
+
+    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
+        let mut arcs = Vec::new();
+        let scroll_y = self.scroll_box.scroll_y;
+        let y_start = self.base.y;
+        let y_end = self.base.y + self.base.h;
+
+        unsafe {
+            for child_ptr in &self.children {
+                let child = &**child_ptr;
+                for (cx, cy, r, t, start, end, color) in child.extra_arcs() {
+                    let cy_shifted = cy - scroll_y;
+                    if cy_shifted + r > y_start && cy_shifted - r < y_end {
+                        arcs.push((cx, cy_shifted, r, t, start, end, color));
+                    }
+                }
+            }
+        }
+        arcs
     }
 
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
