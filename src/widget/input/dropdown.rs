@@ -520,13 +520,51 @@ impl Element for Dropdown {
         } else {
             self.options.get(self.selected).cloned().unwrap_or_default()
         };
-        labels.push(TextLabel {
-            text: selected_text,
-            x: self.base.x + 8.0,
-            y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
-            font_size: 12.0,
-            color: [0xdd, 0xdd, 0xe2],
-        });
+
+        let font_family = crate::layout::dropdown_font();
+        let start_x = self.base.x + 8.0;
+        let right_limit = self.base.x + self.base.w - 28.0; // 10px margin before the arrow
+        let fade_start_x = (right_limit - 40.0).max(start_x); // Fade out over the last 40px
+        let text_y = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
+        let default_color = [0xdd, 0xdd, 0xe2];
+        let bg_color = colors::dropdown_background_color();
+        let bg_rgb = [
+            (bg_color[0] * 255.0).round().clamp(0.0, 255.0) as u8,
+            (bg_color[1] * 255.0).round().clamp(0.0, 255.0) as u8,
+            (bg_color[2] * 255.0).round().clamp(0.0, 255.0) as u8,
+        ];
+
+        let mut cur_x = start_x;
+        for c in selected_text.chars() {
+            let c_str = c.to_string();
+            let c_w = crate::widget::display::measure_text_width(&c_str, &font_family, 12.0);
+
+            if cur_x >= right_limit {
+                break;
+            }
+
+            let char_mid_x = cur_x + c_w / 2.0;
+            let color = if char_mid_x > fade_start_x {
+                let factor = ((char_mid_x - fade_start_x) / (right_limit - fade_start_x)).clamp(0.0, 1.0);
+                [
+                    (default_color[0] as f32 + (bg_rgb[0] as f32 - default_color[0] as f32) * factor).round() as u8,
+                    (default_color[1] as f32 + (bg_rgb[1] as f32 - default_color[1] as f32) * factor).round() as u8,
+                    (default_color[2] as f32 + (bg_rgb[2] as f32 - default_color[2] as f32) * factor).round() as u8,
+                ]
+            } else {
+                default_color
+            };
+
+            labels.push(TextLabel {
+                text: c_str,
+                x: cur_x,
+                y: text_y,
+                font_size: 12.0,
+                color,
+            });
+
+            cur_x += c_w;
+        }
 
         labels.push(TextLabel {
             text: "▼".to_string(),
@@ -701,6 +739,27 @@ mod tests {
         assert!(rx + rw <= 430.0, "rx + rw {} should be <= 430.0", rx + rw);
         assert!(ry >= 20.0, "ry {} should be >= 20.0", ry);
         assert!(ry + rh <= 280.0, "ry + rh {} should be <= 280.0", ry + rh);
+    }
+
+    #[test]
+    fn test_dropdown_label_fade_out() {
+        let options = vec!["This is a very long option name that will exceed the dropdown width".to_string()];
+        let mut dd = Dropdown::new(options, 0);
+        dd.set_rect(10.0, 10.0, 100.0, 24.0); // very narrow dropdown
+
+        let labels = dd.text_labels();
+        // Option 0: control_label (none)
+        // Option 1: ▼ (arrow) at the end of labels
+        // Remaining labels are individual characters of selected_text
+        assert!(labels.len() > 2);
+        
+        // The last character label (excluding the arrow) should be faded (i.e. not the default color)
+        let last_char_idx = labels.len() - 2;
+        let first_char = &labels[0];
+        let last_char = &labels[last_char_idx];
+        
+        assert_eq!(first_char.color, [0xdd, 0xdd, 0xe2]);
+        assert_ne!(last_char.color, [0xdd, 0xdd, 0xe2]); // color has shifted towards background
     }
 }
 
