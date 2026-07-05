@@ -363,7 +363,7 @@ impl Element for Spinbox {
             colors::SPINBOX_DISPLAY
         };
         
-        quads.push((self.base.x, self.base.y + top, display_w, visual_h, display_bg));
+        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, display_bg));
         
         let btn_y = self.base.y + top + p;
         let btn_h = (visual_h - 2.0 * p).max(0.0);
@@ -377,10 +377,10 @@ impl Element for Spinbox {
         
         if self.editing {
             let border_color = [0.20, 0.50, 0.85, 1.0];
-            quads.push((self.base.x, self.base.y + top, display_w, 1.0, border_color));
-            quads.push((self.base.x, self.base.y + top + visual_h - 1.0, display_w, 1.0, border_color));
+            quads.push((self.base.x, self.base.y + top, self.base.w, 1.0, border_color));
+            quads.push((self.base.x, self.base.y + top + visual_h - 1.0, self.base.w, 1.0, border_color));
             quads.push((self.base.x, self.base.y + top, 1.0, visual_h, border_color));
-            quads.push((self.base.x + display_w - 1.0, self.base.y + top, 1.0, visual_h, border_color));
+            quads.push((self.base.x + self.base.w - 1.0, self.base.y + top, 1.0, visual_h, border_color));
 
             let char_width = 8.4;
             let cursor_x = self.base.x + 4.0 + (self.cursor_idx as f32 * char_width);
@@ -421,8 +421,8 @@ impl Element for Spinbox {
         };
 
         // Draw display border (outer) and background (inner)
-        quads.push((self.base.x, self.base.y + top, display_w, visual_h, radius, border_color, (r1, false, false, r4)));
-        quads.push((self.base.x + 1.0, self.base.y + top + 1.0, display_w - 1.0, visual_h - 2.0, radius - 1.0, display_bg, (r1, false, false, r4)));
+        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, border_color, (r1, r2, r3, r4)));
+        quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, radius - 1.0, display_bg, (r1, r2, r3, r4)));
 
         // Increment/decrement buttons
         let p = crate::layout::spinbox_button_padding();
