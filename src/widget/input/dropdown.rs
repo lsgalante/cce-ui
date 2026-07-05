@@ -570,8 +570,10 @@ impl Element for Dropdown {
         }
 
         // Draw the non-faded prefix as a single string (retains perfect spacing/kerning)
+        let mut prefix_w = 0.0;
         if split_idx > 0 {
             let prefix_str: String = chars[0..split_idx].iter().collect();
+            prefix_w = crate::widget::display::measure_text_width(&prefix_str, &font_family, 12.0);
             labels.push(TextLabel {
                 text: prefix_str,
                 x: start_x,
@@ -583,7 +585,10 @@ impl Element for Dropdown {
 
         // Draw the remaining faded characters individually
         for i in split_idx..n {
-            let offset = char_offsets[i];
+            let mut offset = char_offsets[i];
+            if i == split_idx && split_idx > 0 {
+                offset = offset.max(prefix_w + 1.0);
+            }
             let next_offset = if i < n - 1 { char_offsets[i + 1] } else { total_advance };
             let c_w = next_offset - offset;
             let cur_x = start_x + offset;
