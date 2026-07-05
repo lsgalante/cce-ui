@@ -76,11 +76,11 @@ impl Element for Checkbox {
         } else {
             // Standalone mode -> colored widget background
             if self.checked {
-                colors::CHECKBOX_CHECKED
+                colors::checkbox_checked()
             } else if self.base.hovered {
-                colors::CHECKBOX_HOVER
+                colors::checkbox_hover()
             } else {
-                colors::CHECKBOX_BG
+                colors::checkbox_bg()
             }
         }
     }
@@ -118,11 +118,11 @@ impl Element for Checkbox {
 
             // Box background
             let bg_color = if self.checked {
-                colors::CHECKBOX_CHECKED
+                colors::checkbox_checked()
             } else if self.base.hovered {
-                colors::CHECKBOX_HOVER
+                colors::checkbox_hover()
             } else {
-                colors::CHECKBOX_BG
+                colors::checkbox_bg()
             };
             quads.push((box_x, box_y, box_size, box_size, bg_color));
 

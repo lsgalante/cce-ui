@@ -76,6 +76,9 @@ static SPINBOX_DISPLAY_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_DISPLAY);
 static SPINBOX_BUTTON_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON);
 static SPINBOX_BUTTON_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON_HOVER);
 static SPINBOX_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.8, 0.8, 0.83, 1.0]);
+static CHECKBOX_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_BG);
+static CHECKBOX_CHECKED_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_CHECKED);
+static CHECKBOX_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_HOVER);
 
 static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
@@ -372,6 +375,15 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/spinbox/text_color") {
         if let Ok(mut lock) = SPINBOX_TEXT_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/checkbox/background_color").or_else(|| get_color("/style/checkbox/background_color")) {
+        if let Ok(mut lock) = CHECKBOX_BG_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/checkbox/checked_color").or_else(|| get_color("/style/checkbox/checked_color")) {
+        if let Ok(mut lock) = CHECKBOX_CHECKED_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/checkbox/hover_color").or_else(|| get_color("/style/checkbox/hover_color")) {
+        if let Ok(mut lock) = CHECKBOX_HOVER_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/style/control/progressbar/background") {
         if let Ok(mut lock) = PROGRESS_BG_COLOR.write() { *lock = c; }
@@ -1149,6 +1161,39 @@ pub fn spinbox_text_color() -> [f32; 4] {
 
 pub fn set_spinbox_text_color(color: [f32; 4]) {
     if let Ok(mut lock) = SPINBOX_TEXT_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn checkbox_bg() -> [f32; 4] {
+    load_colors_once();
+    *CHECKBOX_BG_COLOR.read().unwrap()
+}
+
+pub fn set_checkbox_bg(color: [f32; 4]) {
+    if let Ok(mut lock) = CHECKBOX_BG_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn checkbox_checked() -> [f32; 4] {
+    load_colors_once();
+    *CHECKBOX_CHECKED_COLOR.read().unwrap()
+}
+
+pub fn set_checkbox_checked(color: [f32; 4]) {
+    if let Ok(mut lock) = CHECKBOX_CHECKED_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn checkbox_hover() -> [f32; 4] {
+    load_colors_once();
+    *CHECKBOX_HOVER_COLOR.read().unwrap()
+}
+
+pub fn set_checkbox_hover(color: [f32; 4]) {
+    if let Ok(mut lock) = CHECKBOX_HOVER_COLOR.write() {
         *lock = color;
     }
 }
