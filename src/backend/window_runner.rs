@@ -621,10 +621,11 @@ pub fn plate_bevel_vertices(
     r: f32,
     t: f32,
     sw: f32, sh: f32,
+    base_color: [f32; 4],
     clip_circle: [f32; 3],
 ) -> Vec<Vertex> {
     let mut verts = Vec::new();
-    push_plate_bevel_vertices(x, y, ww, h, r, t, sw, sh, clip_circle, &mut verts);
+    push_plate_bevel_vertices(x, y, ww, h, r, t, sw, sh, base_color, clip_circle, &mut verts);
     verts
 }
 
@@ -633,6 +634,7 @@ pub fn push_plate_bevel_vertices(
     r: f32,
     t: f32,
     sw: f32, sh: f32,
+    base_color: [f32; 4],
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
@@ -644,11 +646,14 @@ pub fn push_plate_bevel_vertices(
     let ly = -rad.sin();
 
     let edge_color = |factor: f32| -> [f32; 4] {
-        if factor >= 0.0 {
-            [1.0, 1.0, 1.0, 0.15 * factor]
-        } else {
-            [0.0, 0.0, 0.0, 0.25 * (-factor)]
-        }
+        let max_offset = 0.15;
+        let offset = factor * max_offset;
+        [
+            (base_color[0] + offset).clamp(0.0, 1.0),
+            (base_color[1] + offset).clamp(0.0, 1.0),
+            (base_color[2] + offset).clamp(0.0, 1.0),
+            base_color[3],
+        ]
     };
 
     let top_color = edge_color(-ly);
@@ -798,7 +803,7 @@ pub fn push_widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, cl
     }
 
     if let Some(thickness) = w.plate_bevel() {
-        push_plate_bevel_vertices(x, y, ww, h, radii.top_left, thickness, sw, sh, clip_circle, out);
+        push_plate_bevel_vertices(x, y, ww, h, radii.top_left, thickness, sw, sh, w.color(), clip_circle, out);
     }
 
     for (cx, cy, r, t, start, end, qc) in w.extra_arcs() {
