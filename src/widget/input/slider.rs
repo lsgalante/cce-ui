@@ -586,7 +586,7 @@ impl Element for RangeSlider {
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
 
     fn preferred_height(&self) -> Option<f32> {
-        Some(crate::layout::slider_height())
+        Some(crate::layout::rangeslider_height())
     }
 
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {

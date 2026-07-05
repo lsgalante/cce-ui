@@ -90,6 +90,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.slider.height" => "slider_height",
                 "style.control.slider.corner_radius" => "slider_corner_radius",
                 "style.control.progressbar.height" => "progressbar_height",
+                "style.control.rangeslider.height" => "rangeslider_height",
                 "style.control.scrollbar.width" => "scrollbar_width",
                 "style.control.spinbox.height" => "spinbox_height",
                 "style.control.spinbox.button_padding" => "spinbox_button_padding",
@@ -237,6 +238,7 @@ static TEXTBOX_HEIGHT: RwLock<f32> = RwLock::new(44.0);
 static FONT_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(44.0);
 static SLIDER_HEIGHT: RwLock<f32> = RwLock::new(28.0);
 static PROGRESSBAR_HEIGHT: RwLock<f32> = RwLock::new(24.0);
+static RANGESLIDER_HEIGHT: RwLock<f32> = RwLock::new(28.0);
 static TOGGLE_HEIGHT: RwLock<f32> = RwLock::new(44.0);
 static COLOR_SELECTOR_FONT: RwLock<String> = RwLock::new(String::new());
 static COLOR_SELECTOR_PREVIEW_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
@@ -3412,6 +3414,34 @@ pub fn progressbar_height() -> f32 {
 
 pub fn set_progressbar_height(height: f32) {
     if let Ok(mut lock) = PROGRESSBAR_HEIGHT.write() {
+        *lock = height;
+    }
+}
+
+pub fn rangeslider_height() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("rangeslider_height") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = RANGESLIDER_HEIGHT.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *RANGESLIDER_HEIGHT.read().unwrap()
+}
+
+pub fn set_rangeslider_height(height: f32) {
+    if let Ok(mut lock) = RANGESLIDER_HEIGHT.write() {
         *lock = height;
     }
 }
