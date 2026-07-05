@@ -593,24 +593,32 @@ impl Element for Dropdown {
             }
 
             let char_mid_x = cur_x + c_w / 2.0;
+            let mut skip_char = false;
             let color = if char_mid_x > fade_start_x {
                 let factor = ((char_mid_x - fade_start_x) / (right_limit - fade_start_x)).clamp(0.0, 1.0);
-                [
-                    (default_color[0] as f32 + (bg_rgb[0] as f32 - default_color[0] as f32) * factor).round() as u8,
-                    (default_color[1] as f32 + (bg_rgb[1] as f32 - default_color[1] as f32) * factor).round() as u8,
-                    (default_color[2] as f32 + (bg_rgb[2] as f32 - default_color[2] as f32) * factor).round() as u8,
-                ]
+                if factor >= 0.9 {
+                    skip_char = true;
+                    default_color
+                } else {
+                    [
+                        (default_color[0] as f32 + (bg_rgb[0] as f32 - default_color[0] as f32) * factor).round() as u8,
+                        (default_color[1] as f32 + (bg_rgb[1] as f32 - default_color[1] as f32) * factor).round() as u8,
+                        (default_color[2] as f32 + (bg_rgb[2] as f32 - default_color[2] as f32) * factor).round() as u8,
+                    ]
+                }
             } else {
                 default_color
             };
 
-            labels.push(TextLabel {
-                text: chars[i].to_string(),
-                x: cur_x,
-                y: text_y,
-                font_size: 12.0,
-                color,
-            });
+            if !skip_char {
+                labels.push(TextLabel {
+                    text: chars[i].to_string(),
+                    x: cur_x,
+                    y: text_y,
+                    font_size: 12.0,
+                    color,
+                });
+            }
         }
 
         labels.push(TextLabel {
