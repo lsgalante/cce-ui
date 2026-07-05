@@ -1,4 +1,4 @@
-use crate::widget::{Element};
+use crate::widget::Element;
 
 pub struct ColumnLayout {
     pub x: f32,
@@ -22,8 +22,10 @@ impl ColumnLayout {
     }
 
     pub fn add_widget(&mut self, widget: &mut dyn Element, height: f32) {
+        let label_off = widget.base().map_or(0.0, |b| b.label_offset());
+        let total_h = height + label_off;
         widget.set_rect(self.x + self.margin, self.current_y, self.width - 2.0 * self.margin, height);
-        self.current_y += height + self.gap;
+        self.current_y += total_h + self.gap;
     }
 
     pub fn add_row(&mut self, widgets: &[*mut dyn Element], height: f32, gap: f32) {
@@ -31,6 +33,16 @@ impl ColumnLayout {
         if count == 0 {
             return;
         }
+        let mut max_label_off = 0.0;
+        for &widget_ptr in widgets {
+            unsafe {
+                let off = (*widget_ptr).base().map_or(0.0, |b| b.label_offset());
+                if off > max_label_off {
+                    max_label_off = off;
+                }
+            }
+        }
+        let total_h = height + max_label_off;
         let total_width = self.width - 2.0 * self.margin;
         let widget_w = (total_width - (count as f32 - 1.0) * gap) / count as f32;
         let mut curr_x = self.x + self.margin;
@@ -40,7 +52,7 @@ impl ColumnLayout {
             }
             curr_x += widget_w + gap;
         }
-        self.current_y += height + self.gap;
+        self.current_y += total_h + self.gap;
     }
 
     pub fn current_y(&self) -> f32 {
