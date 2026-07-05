@@ -545,23 +545,46 @@ impl Element for Dropdown {
         let chars: Vec<char> = selected_text.chars().collect();
         let n = chars.len();
 
-        let mut char_offsets = Vec::with_capacity(n);
-        if n > 0 {
-            char_offsets.push(0.0f32);
-        }
+        let is_monospace = {
+            let w_i10 = crate::widget::display::measure_text_width("iiiiiiiiii", &font_family, 12.0);
+            let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", &font_family, 12.0);
+            (w_i10 - w_m10).abs() < 5.0
+        };
 
-        let mut prefix = String::new();
-        for i in 1..n {
-            prefix.push(chars[i - 1]);
-            let measure_str = format!("{}M", prefix);
-            let w_prefix_dummy = crate::widget::display::measure_text_width(&measure_str, &font_family, 12.0);
-            let offset = (w_prefix_dummy - w_dummy).max(0.0);
-            char_offsets.push(offset);
+        let cell_width = if is_monospace {
+            let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", &font_family, 12.0);
+            let w_m20 = crate::widget::display::measure_text_width("mmmmmmmmmmmmmmmmmmmm", &font_family, 12.0);
+            ((w_m20 - w_m10) / 10.0).max(1.0)
+        } else {
+            0.0
+        };
+
+        let mut char_offsets = Vec::with_capacity(n);
+        if is_monospace {
+            for i in 0..n {
+                char_offsets.push(i as f32 * cell_width);
+            }
+        } else {
+            if n > 0 {
+                char_offsets.push(0.0f32);
+            }
+            let mut prefix = String::new();
+            for i in 1..n {
+                prefix.push(chars[i - 1]);
+                let measure_str = format!("{}M", prefix);
+                let w_prefix_dummy = crate::widget::display::measure_text_width(&measure_str, &font_family, 12.0);
+                let offset = (w_prefix_dummy - w_dummy).max(0.0);
+                char_offsets.push(offset);
+            }
         }
 
         let total_advance = if n > 0 {
-            let measure_str = format!("{}M", selected_text);
-            (crate::widget::display::measure_text_width(&measure_str, &font_family, 12.0) - w_dummy).max(0.0)
+            if is_monospace {
+                n as f32 * cell_width
+            } else {
+                let measure_str = format!("{}M", selected_text);
+                (crate::widget::display::measure_text_width(&measure_str, &font_family, 12.0) - w_dummy).max(0.0)
+            }
         } else {
             0.0
         };
@@ -580,7 +603,11 @@ impl Element for Dropdown {
         let mut prefix_w = 0.0;
         if split_idx > 0 {
             let prefix_str: String = chars[0..split_idx].iter().collect();
-            prefix_w = crate::widget::display::measure_text_width(&prefix_str, &font_family, 12.0);
+            prefix_w = if is_monospace {
+                split_idx as f32 * cell_width
+            } else {
+                crate::widget::display::measure_text_width(&prefix_str, &font_family, 12.0)
+            };
             labels.push(TextLabel {
                 text: prefix_str,
                 x: start_x,
@@ -594,13 +621,15 @@ impl Element for Dropdown {
         let mut prev_char_end = prefix_w;
         for i in split_idx..n {
             let mut offset = char_offsets[i];
-            if i == split_idx && split_idx > 0 {
-                offset = offset.max(prefix_w + 1.0);
-            } else if i > split_idx {
-                offset = offset.max(prev_char_end + 1.0);
+            if !is_monospace {
+                if i == split_idx && split_idx > 0 {
+                    offset = offset.max(prefix_w + 1.0);
+                } else if i > split_idx {
+                    offset = offset.max(prev_char_end + 1.0);
+                }
             }
             let next_offset = if i < n - 1 { char_offsets[i + 1] } else { total_advance };
-            let c_w = next_offset - offset;
+            let c_w = if is_monospace { cell_width } else { next_offset - offset };
             let cur_x = start_x + offset;
 
             if cur_x >= right_limit {
@@ -633,7 +662,11 @@ impl Element for Dropdown {
                     font_size: 12.0,
                     color,
                 });
-                let c_w_ink = crate::widget::display::measure_text_width(&chars[i].to_string(), &font_family, 12.0);
+                let c_w_ink = if is_monospace {
+                    cell_width
+                } else {
+                    crate::widget::display::measure_text_width(&chars[i].to_string(), &font_family, 12.0)
+                };
                 prev_char_end = offset + c_w_ink;
             }
         }
