@@ -445,7 +445,7 @@ impl Ramp {
             ],
             2,
         ).with_label("Preset")
-         .with_open_upward(true);
+         .with_open_upward(false);
         
         Self {
             base: Widget::new(),
