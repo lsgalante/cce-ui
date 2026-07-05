@@ -418,6 +418,7 @@ pub struct Ramp {
     // Child controls for value editing & deletion
     pub val_slider: Slider,
     pub del_button: Button,
+    pub preset_dropdown: Dropdown,
     
     pub parent: Option<*mut (dyn Element + 'static)>,
 }
@@ -425,12 +426,25 @@ pub struct Ramp {
 impl Ramp {
     pub fn new() -> Self {
         let keys = vec![
-            RampKey { pos: 0.0, value: 0.0 },
-            RampKey { pos: 1.0, value: 1.0 },
+            RampKey { pos: 0.0, value: 0.5 },
+            RampKey { pos: 0.2, value: 1.0 },
+            RampKey { pos: 0.8, value: 1.0 },
+            RampKey { pos: 1.0, value: 0.5 },
         ];
         
         let val_slider = Slider::new().with_label("Value");
         let del_button = Button::new(0.0, 0.0, 70.0, 28.0).with_label("Delete Key");
+        let preset_dropdown = Dropdown::new(
+            vec![
+                "Custom".to_string(),
+                "Linear".to_string(),
+                "Bevel (Raised)".to_string(),
+                "Bevel (Sunken)".to_string(),
+                "Peak".to_string(),
+                "Valley".to_string(),
+            ],
+            2,
+        ).with_label("Preset");
         
         Self {
             base: Widget::new(),
@@ -440,8 +454,53 @@ impl Ramp {
             just_changed: false,
             val_slider,
             del_button,
+            preset_dropdown,
             parent: None,
         }
+    }
+    
+    pub fn apply_preset(&mut self, idx: usize) {
+        match idx {
+            1 => { // Linear
+                self.keys = vec![
+                    RampKey { pos: 0.0, value: 0.0 },
+                    RampKey { pos: 1.0, value: 1.0 },
+                ];
+            }
+            2 => { // Bevel (Raised)
+                self.keys = vec![
+                    RampKey { pos: 0.0, value: 0.5 },
+                    RampKey { pos: 0.2, value: 1.0 },
+                    RampKey { pos: 0.8, value: 1.0 },
+                    RampKey { pos: 1.0, value: 0.5 },
+                ];
+            }
+            3 => { // Bevel (Sunken)
+                self.keys = vec![
+                    RampKey { pos: 0.0, value: 0.5 },
+                    RampKey { pos: 0.2, value: 0.0 },
+                    RampKey { pos: 0.8, value: 0.0 },
+                    RampKey { pos: 1.0, value: 0.5 },
+                ];
+            }
+            4 => { // Peak
+                self.keys = vec![
+                    RampKey { pos: 0.0, value: 0.0 },
+                    RampKey { pos: 0.5, value: 1.0 },
+                    RampKey { pos: 1.0, value: 0.0 },
+                ];
+            }
+            5 => { // Valley
+                self.keys = vec![
+                    RampKey { pos: 0.0, value: 1.0 },
+                    RampKey { pos: 0.5, value: 0.0 },
+                    RampKey { pos: 1.0, value: 1.0 },
+                ];
+            }
+            _ => {}
+        }
+        self.selected_key_idx = None;
+        self.just_changed = true;
     }
     
     pub fn get_interpolated_value(&self, t: f32) -> f32 {
@@ -488,14 +547,22 @@ impl Element for Ramp {
         let mut changed = self.just_changed;
         self.just_changed = false;
         
+        if self.preset_dropdown.tick(dt, ctx) {
+            let idx = self.preset_dropdown.selected;
+            self.apply_preset(idx);
+            changed = true;
+        }
+        
         if self.selected_key_idx.is_some() {
             if self.val_slider.tick(dt, ctx) {
                 if let Some(idx) = self.selected_key_idx {
                     self.keys[idx].value = self.val_slider.value();
+                    self.preset_dropdown.selected = 0; // Custom
                 }
                 changed = true;
             }
             if self.del_button.tick(dt, ctx) {
+                self.preset_dropdown.selected = 0; // Custom
                 changed = true;
             }
         }
@@ -510,10 +577,14 @@ impl Element for Ramp {
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
         let self_ptr = self as *const Self as *mut Self;
         unsafe {
-            vec![
-                &mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static),
-                &mut (*self_ptr).del_button as *mut Button as *mut (dyn Element + 'static),
-            ]
+            let mut list = vec![
+                &mut (*self_ptr).preset_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
+            ];
+            if self.selected_key_idx.is_some() {
+                list.push(&mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static));
+                list.push(&mut (*self_ptr).del_button as *mut Button as *mut (dyn Element + 'static));
+            }
+            list
         }
     }
     
@@ -531,13 +602,16 @@ impl Element for Ramp {
         let mut dummy = crate::context::UiContext::new();
         self.val_slider.set_parent(Some(self_ptr), &mut dummy);
         self.del_button.set_parent(Some(self_ptr), &mut dummy);
+        self.preset_dropdown.set_parent(Some(self_ptr), &mut dummy);
         
         let gh = 80.0;
         let sy = y + gh + 25.0;
-        let slider_w = w - 100.0;
+        
+        // Preset dropdown is always visible at the bottom row
+        self.preset_dropdown.set_rect(x + 10.0, sy, 140.0, 20.0);
         
         if self.selected_key_idx.is_some() {
-            self.val_slider.set_rect(x + 10.0, sy, slider_w, 20.0);
+            self.val_slider.set_rect(x + 165.0, sy, 140.0, 20.0);
             self.del_button.set_rect(x + w - 80.0, sy - 4.0, 70.0, 28.0);
         } else {
             self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
@@ -594,8 +668,10 @@ impl Element for Ramp {
             quads.push((sx1, outline_y, slice_w, outline_h, [0.5, 0.75, 1.0, 1.0]));
         }
         
+        let ctx_dummy = crate::context::UiContext::new();
+        quads.extend(self.preset_dropdown.all_quads(&ctx_dummy));
+        
         if self.selected_key_idx.is_some() {
-            let ctx_dummy = crate::context::UiContext::new();
             quads.extend(self.val_slider.all_quads(&ctx_dummy));
             quads.extend(self.del_button.all_quads(&ctx_dummy));
         }
@@ -626,6 +702,14 @@ impl Element for Ramp {
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py_event: f32, ctx: &mut UiContext) -> bool {
         if button != MouseButton::Left { return false; }
         
+        if self.preset_dropdown.mouse_input(button, state, px, py_event, ctx) {
+            if self.preset_dropdown.take_change() {
+                let idx = self.preset_dropdown.selected;
+                self.apply_preset(idx);
+            }
+            return true;
+        }
+        
         let gh = 80.0;
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
@@ -651,6 +735,7 @@ impl Element for Ramp {
                 let new_key = RampKey { pos: t, value: val };
                 self.keys.push(new_key);
                 self.sort_keys();
+                self.preset_dropdown.selected = 0; // Custom
                 self.just_changed = true;
                 
                 if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - t).abs() < 0.0001) {
@@ -669,6 +754,7 @@ impl Element for Ramp {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
                                 self.selected_key_idx = None;
+                                self.preset_dropdown.selected = 0; // Custom
                                 self.just_changed = true;
                                 self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
                             }
@@ -687,6 +773,7 @@ impl Element for Ramp {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
                                 self.selected_key_idx = None;
+                                self.preset_dropdown.selected = 0; // Custom
                                 self.just_changed = true;
                                 self.set_rect(self.base.x, self.base.y, self.base.w, self.base.h);
                             }
@@ -700,6 +787,10 @@ impl Element for Ramp {
     }
     
     fn cursor_moved(&mut self, px: f32, py_event: f32, ctx: &mut UiContext) -> bool {
+        if self.preset_dropdown.cursor_moved(px, py_event, ctx) {
+            return true;
+        }
+        
         let mut changed = false;
         let gh = 80.0;
         let track_x = self.base.x + 10.0;
@@ -713,6 +804,7 @@ impl Element for Ramp {
                 self.keys[idx].value = val;
                 self.val_slider.set_value(val);
                 self.sort_keys();
+                self.preset_dropdown.selected = 0; // Custom
                 changed = true;
             }
         }
@@ -721,6 +813,7 @@ impl Element for Ramp {
             if self.val_slider.cursor_moved(px, py_event, ctx) {
                 if let Some(idx) = self.selected_key_idx {
                     self.keys[idx].value = self.val_slider.value();
+                    self.preset_dropdown.selected = 0; // Custom
                     changed = true;
                 }
             }
@@ -734,8 +827,17 @@ impl Element for Ramp {
         changed
     }
     
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        self.preset_dropdown.popover_rect()
+    }
+    
+    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        self.preset_dropdown.render_popover(pc);
+    }
+    
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let mut labels = Vec::new();
+        labels.extend(self.preset_dropdown.text_labels_with_font_and_bounds(ctx));
         if self.selected_key_idx.is_some() {
             labels.extend(self.val_slider.text_labels_with_font_and_bounds(ctx));
             labels.extend(self.del_button.text_labels_with_font_and_bounds(ctx));
@@ -745,6 +847,7 @@ impl Element for Ramp {
     
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
         let mut items = Vec::new();
+        items.extend(self.preset_dropdown.get_text_items());
         if self.selected_key_idx.is_some() {
             items.extend(self.val_slider.get_text_items());
             items.extend(self.del_button.get_text_items());
