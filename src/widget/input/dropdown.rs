@@ -536,7 +536,7 @@ impl Element for Dropdown {
                 parent_color = (*parent_ptr).color();
             }
         }
-        let alpha = bg_color[3];
+        let alpha = 1.0; // The dropdown background is drawn fully opaque
         let bg_rgb = [
             ((parent_color[0] * (1.0 - alpha) + bg_color[0] * alpha) * 255.0).round().clamp(0.0, 255.0) as u8,
             ((parent_color[1] * (1.0 - alpha) + bg_color[1] * alpha) * 255.0).round().clamp(0.0, 255.0) as u8,
