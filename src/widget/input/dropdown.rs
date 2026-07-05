@@ -521,10 +521,10 @@ impl Element for Dropdown {
             self.options.get(self.selected).cloned().unwrap_or_default()
         };
 
-        let font_family = crate::layout::dropdown_font();
+        let font_family = crate::layout::dropdown_font_parsed().0;
         let start_x = self.base.x + 8.0;
         let right_limit = self.base.x + self.base.w - 28.0; // 10px margin before the arrow
-        let fade_start_x = (right_limit - 12.0).max(start_x); // Fade out over the last 12px
+        let fade_start_x = (right_limit - 24.0).max(start_x); // Fade out over the last 24px
         let text_y = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
         let default_color = [0xdd, 0xdd, 0xe2];
         let bg_color = colors::dropdown_background_color();
