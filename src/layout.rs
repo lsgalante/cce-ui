@@ -109,6 +109,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "window_manager.bevel_depth" => "bevel_depth",
                 "style.control.ramp.height" => "ramp_height",
                 "style.layout.column.gap" => "column_gap",
+                "style.control.control_panel.padding" => "control_panel_padding",
+                "style.control.control_panel.gap" => "control_panel_gap",
                 "style.status.normal_color" => "status_normal_color",
                 "style.status.background_color" => "status_background_color",
                 "style.status.background_blur" => "status_background_blur",
@@ -253,6 +255,8 @@ static RAMP_HEIGHT: RwLock<f32> = RwLock::new(32.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
 static COLUMN_GAP: RwLock<f32> = RwLock::new(16.0);
+static CONTROL_PANEL_PADDING: RwLock<f32> = RwLock::new(16.0);
+static CONTROL_PANEL_GAP: RwLock<f32> = RwLock::new(12.0);
 static TREE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static TREE_BLUR: RwLock<f32> = RwLock::new(0.0);
 
@@ -426,6 +430,24 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLUMN_GAP.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("control_panel_padding") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("control_panel_gap") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
                         *lock = val;
                     }
                 }
@@ -1365,6 +1387,62 @@ pub fn column_gap() -> f32 {
 
 pub fn set_column_gap(gap: f32) {
     if let Ok(mut lock) = COLUMN_GAP.write() {
+        *lock = gap;
+    }
+}
+
+pub fn control_panel_padding() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("control_panel_padding") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *CONTROL_PANEL_PADDING.read().unwrap()
+}
+
+pub fn set_control_panel_padding(padding: f32) {
+    if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
+        *lock = padding;
+    }
+}
+
+pub fn control_panel_gap() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("control_panel_gap") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *CONTROL_PANEL_GAP.read().unwrap()
+}
+
+pub fn set_control_panel_gap(gap: f32) {
+    if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
         *lock = gap;
     }
 }

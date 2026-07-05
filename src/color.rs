@@ -65,6 +65,8 @@ static BACKPLATE_STATUSBAR_BLUR: RwLock<bool> = RwLock::new(false);
 static BUTTON_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new(BUTTON_IDLE);
 static RAMP_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static RAMP_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
+static CONTROL_PANEL_COLOR: RwLock<[f32; 4]> = RwLock::new([0.075, 0.082, 0.11, 1.0]); // default #13151cff
+static CONTROL_PANEL_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.161, 0.173, 0.216, 1.0]); // default #292c37ff
 
 static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
@@ -332,6 +334,12 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/ramp/border_color") {
         if let Ok(mut lock) = RAMP_BORDER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/control_panel/color") {
+        if let Ok(mut lock) = CONTROL_PANEL_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/control_panel/border_color") {
+        if let Ok(mut lock) = CONTROL_PANEL_BORDER_COLOR.write() { *lock = c; }
     }
     let parsed_list_bg = get_color("/layout/list_bg_color");
     let parsed_breadcrumb_bg = get_color("/layout/breadcrumb_bg_color");
@@ -989,6 +997,28 @@ pub fn ramp_background_color() -> [f32; 4] {
 pub fn ramp_border_color() -> [f32; 4] {
     load_colors_once();
     *RAMP_BORDER_COLOR.read().unwrap()
+}
+
+pub fn control_panel_color() -> [f32; 4] {
+    load_colors_once();
+    *CONTROL_PANEL_COLOR.read().unwrap()
+}
+
+pub fn set_control_panel_color(color: [f32; 4]) {
+    if let Ok(mut lock) = CONTROL_PANEL_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn control_panel_border_color() -> [f32; 4] {
+    load_colors_once();
+    *CONTROL_PANEL_BORDER_COLOR.read().unwrap()
+}
+
+pub fn set_control_panel_border_color(color: [f32; 4]) {
+    if let Ok(mut lock) = CONTROL_PANEL_BORDER_COLOR.write() {
+        *lock = color;
+    }
 }
 
 pub fn set_backplate_corner_radius(radius: f32) {

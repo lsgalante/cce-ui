@@ -80,7 +80,7 @@ impl Element for ControlPanel {
     }
 
     fn color(&self) -> [f32; 4] {
-        colors::ramp_background_color()
+        colors::control_panel_color()
     }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
@@ -95,8 +95,8 @@ impl Element for ControlPanel {
         let mut dummy = crate::context::UiContext::new();
         let self_ptr_option = Some(self_ptr);
 
-        let padding = 16.0;
-        let gap = crate::layout::column_gap();
+        let padding = crate::layout::control_panel_padding();
+        let gap = crate::layout::control_panel_gap();
         let mut col = ColumnLayout::new(x, y, w - 12.0, gap, padding); // 12px reserved for scrollbar track
 
         unsafe {
@@ -244,7 +244,7 @@ impl Element for ControlPanel {
         quads.push((x, y, w, h, 0.0, self.color(), (false, false, false, false)));
 
         // 2. Borders
-        let border_color = colors::ramp_border_color();
+        let border_color = colors::control_panel_border_color();
         quads.push((x, y, w, 1.0, 0.0, border_color, (false, false, false, false)));
         quads.push((x, y + h - 1.0, w, 1.0, 0.0, border_color, (false, false, false, false)));
         quads.push((x, y, 1.0, h, 0.0, border_color, (false, false, false, false)));
