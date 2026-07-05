@@ -19,6 +19,8 @@ pub mod paginator;
 pub mod scroll_bar;
 pub mod treelist;
 pub mod control_panel;
+pub mod vbox;
+pub mod hbox;
 
 pub use container::Container;
 pub use control_panel::ControlPanel;
@@ -41,3 +43,5 @@ pub use backplate::Backplate;
 pub use paginator::Paginator;
 pub use scroll_bar::ScrollBar;
 pub use treelist::{TreeList, TreeElement};
+pub use vbox::VBox;
+pub use hbox::HBox;

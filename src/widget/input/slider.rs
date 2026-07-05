@@ -382,6 +382,11 @@ impl Element for Slider {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            return Vec::new();
+        }
+
         let mut quads = Vec::new();
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
@@ -425,6 +430,59 @@ impl Element for Slider {
             colors::SLIDER_THUMB
         };
         quads.push((thumb_x, thumb_y, thumb_size, thumb_size, thumb_color));
+        
+        quads
+    }
+
+    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if !(r1 || r2 || r3 || r4) {
+            return quads;
+        }
+        
+        let top = self.base.label_offset();
+        let visual_h = self.base.h - top;
+        let radius = self.corner_radius();
+        
+        let (track_x, track_w) = if self.show_readout {
+            let readout_w = 60.0;
+            let gap = 8.0;
+            let tw = (self.base.w - readout_w - gap).max(10.0);
+            
+            quads.push((self.base.x, self.base.y + top, tw, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
+            
+            let rx = self.base.x + self.base.w - readout_w;
+            let bg_color = if self.editing {
+                [0.06, 0.10, 0.18, 1.0]
+            } else {
+                [0.10, 0.10, 0.13, 1.0]
+            };
+            
+            if self.base.focused || self.editing {
+                let border_color = [0.20, 0.50, 0.85, 1.0];
+                quads.push((rx, self.base.y + top, readout_w, visual_h, radius, border_color, (r1, r2, r3, r4)));
+                let inner_radius = (radius - 1.0).max(0.0);
+                quads.push((rx + 1.0, self.base.y + top + 1.0, readout_w - 2.0, visual_h - 2.0, inner_radius, bg_color, (r1, r2, r3, r4)));
+            } else {
+                quads.push((rx, self.base.y + top, readout_w, visual_h, radius, bg_color, (r1, r2, r3, r4)));
+            }
+
+            (self.base.x, tw)
+        } else {
+            quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
+            (self.base.x, self.base.w)
+        };
+
+        let thumb_size = visual_h * 0.9;
+        let thumb_x = track_x + self.value * (track_w - thumb_size);
+        let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
+        let thumb_color = if self.dragging {
+            colors::SLIDER_THUMB_DRAG
+        } else {
+            colors::SLIDER_THUMB
+        };
+        quads.push((thumb_x, thumb_y, thumb_size, thumb_size, thumb_size / 2.0, thumb_color, (true, true, true, true)));
         
         quads
     }
@@ -671,6 +729,11 @@ impl Element for RangeSlider {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            return Vec::new();
+        }
+
         let top = self.base.label_offset();
         let visual_h = self.base.h - top;
         let thumb_size = visual_h * 0.9;
@@ -704,6 +767,54 @@ impl Element for RangeSlider {
             (thumb_low_x, thumb_y, thumb_size, thumb_size, low_color),
             (thumb_high_x, thumb_y, thumb_size, thumb_size, high_color),
         ]
+    }
+
+    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut quads = Vec::new();
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if !(r1 || r2 || r3 || r4) {
+            return quads;
+        }
+        
+        let top = self.base.label_offset();
+        let visual_h = self.base.h - top;
+        let radius = self.corner_radius();
+        
+        let thumb_size = visual_h * 0.9;
+        let range = self.base.w - thumb_size;
+        let thumb_low_x = self.base.x + self.value_low * range;
+        let thumb_high_x = self.base.x + self.value_high * range;
+        
+        let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
+        
+        // Highlighted track segment
+        let highlight_x = thumb_low_x + thumb_size / 2.0;
+        let highlight_w = thumb_high_x - thumb_low_x;
+        let highlight_y = self.base.y + top + visual_h * 0.35;
+        let highlight_h = visual_h * 0.3;
+        
+        let low_color = if self.active_thumb == Some(ActiveThumb::Low) {
+            colors::SLIDER_THUMB_DRAG
+        } else {
+            colors::SLIDER_THUMB
+        };
+
+        let high_color = if self.active_thumb == Some(ActiveThumb::High) {
+            colors::SLIDER_THUMB_DRAG
+        } else {
+            colors::SLIDER_THUMB
+        };
+        
+        // Track background
+        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
+        // Progress fill (highlight track)
+        quads.push((highlight_x, highlight_y, highlight_w, highlight_h, radius.min(highlight_h / 2.0), colors::PROGRESS_FILL, (true, true, true, true)));
+        // Low thumb
+        quads.push((thumb_low_x, thumb_y, thumb_size, thumb_size, thumb_size / 2.0, low_color, (true, true, true, true)));
+        // High thumb
+        quads.push((thumb_high_x, thumb_y, thumb_size, thumb_size, thumb_size / 2.0, high_color, (true, true, true, true)));
+        
+        quads
     }
 
     fn value(&self) -> i32 {

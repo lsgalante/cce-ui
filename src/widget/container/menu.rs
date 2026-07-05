@@ -31,6 +31,7 @@ pub struct MenuBar {
     pub context_hovered_item: Option<usize>,
     pub context_title_hovered: bool,
     pub context_item_bufs: Vec<glyphon::Buffer>,
+    pub right_align_title: bool,
     pub parent: Option<*mut (dyn Element + 'static)>,
     pub page_hidden: bool,
     pub layout_dirty: bool,
@@ -96,7 +97,13 @@ impl MenuBar {
             on_menu_click_cb: None,
             hovered_dropdown_item: None,
             clicked_dropdown_item: None,
+            right_align_title: false,
         }
+    }
+
+    pub fn with_right_aligned_title(mut self, right: bool) -> Self {
+        self.right_align_title = right;
+        self
     }
 
     pub fn on_context_change<F: Fn(usize) + Send + Sync + 'static>(mut self, cb: F) -> Self {
@@ -192,7 +199,12 @@ impl MenuBar {
                 }
             }
             let title_w = display_title.len() as f32 * char_w + 24.0;
-            (self.base.x + start_x, self.base.y, title_w, self.base.h)
+            let tx = if self.right_align_title {
+                self.base.x + self.base.w - title_w - 20.0
+            } else {
+                self.base.x + start_x
+            };
+            (tx, self.base.y, title_w, self.base.h)
         }
     }
 
@@ -440,7 +452,7 @@ impl Element for MenuBar {
             let mut cx = 8.0;
             if self.center_items {
                 let mut total_width = 8.0;
-                if !self.title.is_empty() {
+                if !self.title.is_empty() && !self.right_align_title {
                     let mut display_title = self.title.clone();
                     if !self.context_options.is_empty() {
                         display_title.push_str(" ▼");
@@ -460,7 +472,7 @@ impl Element for MenuBar {
                     cx = (self.base.w - total_width) / 2.0;
                 }
             }
-            if !self.title.is_empty() {
+            if !self.title.is_empty() && !self.right_align_title {
                 let mut display_title = self.title.clone();
                 if !self.context_options.is_empty() {
                     display_title.push_str(" ▼");
@@ -978,7 +990,7 @@ impl Element for MenuBar {
         }
 
         let font_setting = crate::layout::menubar_font();
-        let (_, font_size_opt) = crate::layout::parse_font_string(&font_setting);
+        let (font_fam, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
         let char_w = 7.5 * (font_size / 12.0);
 
@@ -1043,7 +1055,7 @@ impl Element for MenuBar {
             let mut start_x = 8.0;
             if self.center_items {
                 let mut total_width = 8.0;
-                if !self.title.is_empty() {
+                if !self.title.is_empty() && !self.right_align_title {
                     total_width += display_title.len() as f32 * char_w + 24.0;
                 }
                 for btn_label in &self.menus.buttons {
@@ -1055,9 +1067,15 @@ impl Element for MenuBar {
             }
             if !self.title.is_empty() {
                 let text_y = crate::layout::align_text_y(self.base.y, self.base.h, font_size, 0.0);
+                let x_pos = if self.right_align_title {
+                    let title_w = crate::widget::display::measure_text_width(&display_title, &font_fam, font_size) + 24.0;
+                    self.base.x + self.base.w - title_w - 20.0
+                } else {
+                    self.base.x + start_x
+                };
                 labels.push(TextLabel {
                     text: display_title,
-                    x: self.base.x + start_x,
+                    x: x_pos,
                     y: text_y,
                     font_size,
                     color: text_color,

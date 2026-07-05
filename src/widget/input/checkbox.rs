@@ -293,46 +293,49 @@ impl Element for Toggle {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())];
-        
-        let border_w = crate::layout::toggle_border_width();
-        if border_w > 0.0 {
-            let x = self.base.x;
-            let y = self.base.y;
-            let w = self.base.w;
-            let h = self.base.h;
-            let r = crate::layout::toggle_corner_radius();
-            let t = border_w;
+        let mut quads = Vec::new();
+        if self.corner_radius() <= 0.0 {
+            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, self.color()));
             
-            let border_color = if self.toggled {
-                colors::toggle_on_color()
-            } else {
-                colors::toggle_off_color()
-            };
-            
-            let edge_h = ((h / 2.0) - r).max(0.0);
-            
-            if self.toggled {
-                // Top edge
-                quads.push((x + r, y, w - 2.0 * r, t, border_color));
-                // Top half of left edge
-                if edge_h > 0.0 {
-                    quads.push((x, y + r, t, edge_h, border_color));
-                }
-                // Top half of right edge
-                if edge_h > 0.0 {
-                    quads.push((x + w - t, y + r, t, edge_h, border_color));
-                }
-            } else {
-                // Bottom edge
-                quads.push((x + r, y + h - t, w - 2.0 * r, t, border_color));
-                // Bottom half of left edge
-                if edge_h > 0.0 {
-                    quads.push((x, y + h / 2.0, t, edge_h, border_color));
-                }
-                // Bottom half of right edge
-                if edge_h > 0.0 {
-                    quads.push((x + w - t, y + h / 2.0, t, edge_h, border_color));
+            let border_w = crate::layout::toggle_border_width();
+            if border_w > 0.0 {
+                let x = self.base.x;
+                let y = self.base.y;
+                let w = self.base.w;
+                let h = self.base.h;
+                let r = crate::layout::toggle_corner_radius();
+                let t = border_w;
+                
+                let border_color = if self.toggled {
+                    colors::toggle_on_color()
+                } else {
+                    colors::toggle_off_color()
+                };
+                
+                let edge_h = ((h / 2.0) - r).max(0.0);
+                
+                if self.toggled {
+                    // Top edge
+                    quads.push((x + r, y, w - 2.0 * r, t, border_color));
+                    // Top half of left edge
+                    if edge_h > 0.0 {
+                        quads.push((x, y + r, t, edge_h, border_color));
+                    }
+                    // Top half of right edge
+                    if edge_h > 0.0 {
+                        quads.push((x + w - t, y + r, t, edge_h, border_color));
+                    }
+                } else {
+                    // Bottom edge
+                    quads.push((x + r, y + h - t, w - 2.0 * r, t, border_color));
+                    // Bottom half of left edge
+                    if edge_h > 0.0 {
+                        quads.push((x, y + h / 2.0, t, edge_h, border_color));
+                    }
+                    // Bottom half of right edge
+                    if edge_h > 0.0 {
+                        quads.push((x + w - t, y + h / 2.0, t, edge_h, border_color));
+                    }
                 }
             }
         }

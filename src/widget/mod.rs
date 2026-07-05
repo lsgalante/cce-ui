@@ -52,6 +52,7 @@ pub enum NamedKey {
     Shift,
     Alt,
     Super,
+    F5,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

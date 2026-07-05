@@ -1364,11 +1364,19 @@ pub trait Application: Sized + 'static {
     fn clear_color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
     }
+
+    fn register_sources(&mut self, _handle: &calloop::LoopHandle<'_, EngineState<Self>>) {}
+
+    fn adjust_size(&self, width: f32, height: f32) -> (f32, f32) {
+        (width, height)
+    }
     
     fn handle_pointer_move(&mut self, pos: LogicalPosition, needs_rebuild: &mut bool);
     fn handle_mouse_input(&mut self, button: MouseButton, state: ElementState, pos: LogicalPosition, needs_rebuild: &mut bool) -> Option<Self::Message>;
     fn handle_mouse_wheel(&mut self, delta: &MouseScrollDelta, pos: LogicalPosition, needs_rebuild: &mut bool);
     fn handle_key_input(&mut self, event: &KeyEvent, needs_rebuild: &mut bool) -> Option<Self::Message>;
+
+    fn custom_vertices(&mut self, _verts: &mut Vec<Vertex>, _size: LogicalSize, _scale: f64) {}
 }
 
 pub struct PressedKey {
@@ -1521,6 +1529,7 @@ impl<A: Application> EngineState<A> {
     }
     
     pub fn resize(&mut self, w: f32, h: f32) {
+        let (w, h) = self.inner.adjust_size(w, h);
         if w > 0.0 && h > 0.0 {
             self.logical_width = w;
             self.logical_height = h;
@@ -1580,6 +1589,7 @@ impl<A: Application> EngineState<A> {
         for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
             verts.extend(vector_vertices(vx1, vy1, vx2, vy2, vthickness, logical_w, logical_h, vcolor, vcap));
         }
+        self.inner.custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
         self.vertex_count = verts.len() as u32;
         if self.vertex_count > 0 {
             let data = bytemuck::cast_slice(&verts);
@@ -2401,6 +2411,7 @@ impl<A: Application> EngineState<A> {
             xkeysym::Keysym::Alt_L | xkeysym::Keysym::Alt_R => Key::Named(NamedKey::Alt),
             xkeysym::Keysym::Control_L | xkeysym::Keysym::Control_R => Key::Named(NamedKey::Control),
             xkeysym::Keysym::Shift_L | xkeysym::Keysym::Shift_R => Key::Named(NamedKey::Shift),
+            xkeysym::Keysym::F5 => Key::Named(NamedKey::F5),
             _ => {
                 if let Some(ref text) = event.utf8 {
                     Key::Character(text.clone())
@@ -2715,6 +2726,8 @@ pub fn run<A: Application>() {
             }
         }
     }).unwrap();
+
+    engine_state.inner.register_sources(&loop_handle);
 
     const KEY_REPEAT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
     const KEY_REPEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);

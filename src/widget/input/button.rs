@@ -290,7 +290,10 @@ impl Element for Button {
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = vec![(self.base.x, self.base.y, self.base.w, self.base.h, self.color())];
+        let mut quads = Vec::new();
+        if self.corner_radius() <= 0.0 {
+            quads.push((self.base.x, self.base.y, self.base.w, self.base.h, self.color()));
+        }
         if let Some(ref svg) = self.svg {
             let svg_x = self.base.x + (self.base.w - svg.w) / 2.0;
             let svg_y = self.base.y + (self.base.h - svg.h) / 2.0;
