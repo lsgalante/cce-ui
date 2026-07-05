@@ -647,7 +647,7 @@ impl Element for Ramp {
         self.preset_dropdown.set_parent(Some(self_ptr), &mut dummy);
         self.line_type_dropdown.set_parent(Some(self_ptr), &mut dummy);
         
-        let gh = 80.0;
+        let gh = (h - 65.0).max(30.0);
         let sy = y + gh + 25.0;
         
         let track_x = x + 10.0;
@@ -675,7 +675,7 @@ impl Element for Ramp {
     
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        let gh = 80.0;
+        let gh = (self.base.h - 65.0).max(30.0);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -728,7 +728,7 @@ impl Element for Ramp {
     
     fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
         let mut circles = Vec::new();
-        let gh = 80.0;
+        let gh = (self.base.h - 65.0).max(30.0);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -761,7 +761,7 @@ impl Element for Ramp {
             return true;
         }
         
-        let gh = 80.0;
+        let gh = (self.base.h - 65.0).max(30.0);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -846,7 +846,7 @@ impl Element for Ramp {
         }
         
         let mut changed = false;
-        let gh = 80.0;
+        let gh = (self.base.h - 65.0).max(30.0);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
