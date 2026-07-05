@@ -591,42 +591,12 @@ impl Element for Dropdown {
             0.0
         };
 
-        // Find the split point where fading begins
-        let mut split_idx = n;
+        // Draw and fade every character individually
+        let mut prev_char_end = 0.0;
         for i in 0..n {
-            let cur_x = start_x + char_offsets[i];
-            if cur_x >= fade_start_x {
-                split_idx = i;
-                break;
-            }
-        }
-
-        // Draw the non-faded prefix as a single string (retains perfect spacing/kerning)
-        let mut prefix_w = 0.0;
-        if split_idx > 0 {
-            let prefix_str: String = chars[0..split_idx].iter().collect();
-            prefix_w = if is_monospace {
-                split_idx as f32 * cell_width
-            } else {
-                crate::widget::display::measure_text_width(&prefix_str, &font_family, 12.0)
-            };
-            labels.push(TextLabel {
-                text: prefix_str,
-                x: start_x,
-                y: text_y,
-                font_size: 12.0,
-                color: default_color,
-            });
-        }
-
-        // Draw the remaining faded characters individually
-        let mut prev_char_end = prefix_w;
-        for i in split_idx..n {
             let mut offset = char_offsets[i];
             if !is_monospace {
-                if i == split_idx && split_idx > 0 {
-                    offset = offset.max(prefix_w + 1.0);
-                } else if i > split_idx {
+                if i > 0 {
                     offset = offset.max(prev_char_end + 1.0);
                 }
             }
