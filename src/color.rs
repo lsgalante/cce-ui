@@ -72,6 +72,10 @@ static PROGRESS_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_BG);
 static PROGRESS_FILL_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_FILL);
 static RANGE_SLIDER_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_TRACK);
 static RANGE_SLIDER_FILL_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_FILL);
+static SPINBOX_DISPLAY_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_DISPLAY);
+static SPINBOX_BUTTON_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON);
+static SPINBOX_BUTTON_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON_HOVER);
+static SPINBOX_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.8, 0.8, 0.83, 1.0]);
 
 static TREE_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
@@ -345,6 +349,26 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/control_panel/border_color") {
         if let Ok(mut lock) = CONTROL_PANEL_BORDER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/spinbox/background_color") {
+        if let Ok(mut lock) = SPINBOX_DISPLAY_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/spinbox/button_color") {
+        if let Ok(mut lock) = SPINBOX_BUTTON_COLOR.write() { *lock = c; }
+        if let Ok(mut lock_hover) = SPINBOX_BUTTON_HOVER_COLOR.write() {
+            *lock_hover = [
+                (c[0] + 0.1).min(1.0),
+                (c[1] + 0.1).min(1.0),
+                (c[2] + 0.1).min(1.0),
+                c[3]
+            ];
+        }
+    }
+    if let Some(c) = get_color("/style/control/spinbox/button_hover_color") {
+        if let Ok(mut lock) = SPINBOX_BUTTON_HOVER_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/spinbox/text_color") {
+        if let Ok(mut lock) = SPINBOX_TEXT_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/style/control/progressbar/background") {
         if let Ok(mut lock) = PROGRESS_BG_COLOR.write() { *lock = c; }
@@ -1078,6 +1102,50 @@ pub fn rangeslider_fill() -> [f32; 4] {
 
 pub fn set_rangeslider_fill(color: [f32; 4]) {
     if let Ok(mut lock) = RANGE_SLIDER_FILL_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn spinbox_display() -> [f32; 4] {
+    load_colors_once();
+    *SPINBOX_DISPLAY_COLOR.read().unwrap()
+}
+
+pub fn set_spinbox_display(color: [f32; 4]) {
+    if let Ok(mut lock) = SPINBOX_DISPLAY_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn spinbox_button() -> [f32; 4] {
+    load_colors_once();
+    *SPINBOX_BUTTON_COLOR.read().unwrap()
+}
+
+pub fn set_spinbox_button(color: [f32; 4]) {
+    if let Ok(mut lock) = SPINBOX_BUTTON_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn spinbox_button_hover() -> [f32; 4] {
+    load_colors_once();
+    *SPINBOX_BUTTON_HOVER_COLOR.read().unwrap()
+}
+
+pub fn set_spinbox_button_hover(color: [f32; 4]) {
+    if let Ok(mut lock) = SPINBOX_BUTTON_HOVER_COLOR.write() {
+        *lock = color;
+    }
+}
+
+pub fn spinbox_text_color() -> [f32; 4] {
+    load_colors_once();
+    *SPINBOX_TEXT_COLOR.read().unwrap()
+}
+
+pub fn set_spinbox_text_color(color: [f32; 4]) {
+    if let Ok(mut lock) = SPINBOX_TEXT_COLOR.write() {
         *lock = color;
     }
 }

@@ -354,13 +354,13 @@ impl Element for Spinbox {
 
         let p = crate::layout::spinbox_button_padding();
         let split_dec = self.base.x + display_w;
-        let inc_col = if self.hover_inc { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
-        let dec_col = if self.hover_dec { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
+        let inc_col = if self.hover_inc { colors::spinbox_button_hover() } else { colors::spinbox_button() };
+        let dec_col = if self.hover_dec { colors::spinbox_button_hover() } else { colors::spinbox_button() };
         
         let display_bg = if self.editing {
             [0.06, 0.10, 0.18, 1.0]
         } else {
-            colors::SPINBOX_DISPLAY
+            colors::spinbox_display()
         };
         
         quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, display_bg));
@@ -408,7 +408,7 @@ impl Element for Spinbox {
         let display_bg = if self.editing {
             [0.06, 0.10, 0.18, 1.0]
         } else {
-            colors::SPINBOX_DISPLAY
+            colors::spinbox_display()
         };
 
         let display_w = self.base.w * 0.55;
@@ -431,8 +431,8 @@ impl Element for Spinbox {
         let pair_w = (self.base.w * 0.45 - 2.0 * p).max(0.0);
         let btn_w_padded = pair_w / 2.0;
         let split_dec = self.base.x + display_w;
-        let inc_col = if self.hover_inc { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
-        let dec_col = if self.hover_dec { colors::SPINBOX_BUTTON_HOVER } else { colors::SPINBOX_BUTTON };
+        let inc_col = if self.hover_inc { colors::spinbox_button_hover() } else { colors::spinbox_button() };
+        let dec_col = if self.hover_dec { colors::spinbox_button_hover() } else { colors::spinbox_button() };
 
         if btn_h > 0.0 && btn_w_padded > 0.0 {
             // Decrement button (middle, no rounded corners)
@@ -471,12 +471,15 @@ impl Element for Spinbox {
         let top = self.base.label_offset();
         let _visual_h = self.base.h - top;
         
+        let tc = colors::spinbox_text_color();
+        let text_color_u8 = [(tc[0]*255.0) as u8, (tc[1]*255.0) as u8, (tc[2]*255.0) as u8];
+
         labels.push(TextLabel {
             text: value_text,
             x: self.base.x + 4.0,
             y: crate::layout::align_text_y(self.base.y, self.base.h, 14.0, top),
             font_size: 14.0,
-            color: [0xcc, 0xcc, 0xd4],
+            color: text_color_u8,
         });
         if let Some(ref unit) = self.unit {
             labels.push(TextLabel {
@@ -502,14 +505,14 @@ impl Element for Spinbox {
                 x: dec_center_x - 4.0,
                 y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
                 font_size: 12.0,
-                color: [0xcc, 0xcc, 0xd4],
+                color: text_color_u8,
             });
             labels.push(TextLabel {
                 text: "+".to_string(),
                 x: inc_center_x - 4.0,
                 y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
                 font_size: 12.0,
-                color: [0xcc, 0xcc, 0xd4],
+                color: text_color_u8,
             });
         }
         labels
