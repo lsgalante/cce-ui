@@ -158,7 +158,10 @@ impl Element for StatusBar {
     }
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         if !self.text.is_empty() && self.text_buf.is_none() {
-            self.text_buf = Some(make_widget_text_buffer(fs, &self.text, 12.0, "Outfit"));
+            let (font_fam, font_size) = crate::layout::statusbar_font_parsed();
+            let size = if font_size > 0.0 { font_size } else { 12.0 };
+            let fam = if font_fam.is_empty() { "Outfit".to_string() } else { font_fam };
+            self.text_buf = Some(make_widget_text_buffer(fs, &self.text, size, &fam));
         }
     }
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
@@ -170,7 +173,10 @@ impl Element for StatusBar {
                 (c[1] * 255.0) as u8,
                 (c[2] * 255.0) as u8,
             );
-            vec![(text_buf, self.x + offset_x, self.y + 4.0, color)]
+            let (_, font_size) = crate::layout::statusbar_font_parsed();
+            let size = if font_size > 0.0 { font_size } else { 12.0 };
+            let text_y = crate::layout::align_text_y(self.y, self.h, size, 0.0);
+            vec![(text_buf, self.x + offset_x, text_y, color)]
         } else {
             Vec::new()
         }
@@ -184,11 +190,14 @@ impl Element for StatusBar {
                 (c[1] * 255.0) as u8,
                 (c[2] * 255.0) as u8,
             ];
+            let (_, font_size) = crate::layout::statusbar_font_parsed();
+            let size = if font_size > 0.0 { font_size } else { 12.0 };
+            let text_y = crate::layout::align_text_y(self.y, self.h, size, 0.0);
             vec![TextLabel {
                 text: self.text.clone(),
                 x: self.x + offset_x,
-                y: self.y + 4.0,
-                font_size: 12.0,
+                y: text_y,
+                font_size: size,
                 color,
             }]
         } else {

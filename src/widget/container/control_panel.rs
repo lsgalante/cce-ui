@@ -96,8 +96,8 @@ impl Element for ControlPanel {
         let self_ptr_option = Some(self_ptr);
 
         let padding = 16.0;
-        let mut curr_y = padding;
-        let content_w = w - 2.0 * padding - 12.0; // 12px reserved for scrollbar track
+        let gap = 16.0;
+        let mut col = ColumnLayout::new(x, y, w - 12.0, gap, padding); // 12px reserved for scrollbar track
 
         unsafe {
             let mut create_btn: Option<*mut dyn Element> = None;
@@ -107,14 +107,13 @@ impl Element for ControlPanel {
             let mut slider_label: Option<*mut dyn Element> = None;
             let mut type_dd: Option<*mut dyn Element> = None;
             let mut shape_dd: Option<*mut dyn Element> = None;
-            let mut border_toggle: Option<*mut dyn Element> = None;
+            let mut border_style_dd: Option<*mut dyn Element> = None;
             let mut width_spin: Option<*mut dyn Element> = None;
             let mut height_spin: Option<*mut dyn Element> = None;
             let mut backplate_toggle: Option<*mut dyn Element> = None;
             let mut menubar_toggle: Option<*mut dyn Element> = None;
             let mut statusbar_toggle: Option<*mut dyn Element> = None;
             let mut border_sec: Option<*mut dyn Element> = None;
-            let mut bevel_toggle: Option<*mut dyn Element> = None;
             let mut border_width_spin: Option<*mut dyn Element> = None;
             let mut bevel_depth_spin: Option<*mut dyn Element> = None;
             let mut win_sec: Option<*mut dyn Element> = None;
@@ -133,13 +132,12 @@ impl Element for ControlPanel {
                     "Window Elements" => win_sec = Some(child_ptr),
                     "Window Type" => type_dd = Some(child_ptr),
                     "Window Shape" => shape_dd = Some(child_ptr),
-                    "Enable" => border_toggle = Some(child_ptr),
+                    "Border Style" => border_style_dd = Some(child_ptr),
                     "Width" => width_spin = Some(child_ptr),
                     "Height" => height_spin = Some(child_ptr),
                     "Backplate" => backplate_toggle = Some(child_ptr),
                     "MenuBar" => menubar_toggle = Some(child_ptr),
                     "StatusBar" => statusbar_toggle = Some(child_ptr),
-                    "Bevel" => bevel_toggle = Some(child_ptr),
                     "Border Width" => border_width_spin = Some(child_ptr),
                     "Bevel Depth" => bevel_depth_spin = Some(child_ptr),
                     "Bevel Shape..." => bevel_shape_btn = Some(child_ptr),
@@ -151,100 +149,63 @@ impl Element for ControlPanel {
                 }
             }
 
-            // --- SECTION 1: Window Actions ---
-            if let (Some(c), Some(t)) = (create_btn, tile_btn) {
-                let btn_w = (content_w - 12.0) / 2.0;
-                (*c).set_rect(x + padding, y + curr_y, btn_w, 28.0);
-                (*t).set_rect(x + padding + btn_w + 12.0, y + curr_y, btn_w, 28.0);
-                curr_y += 28.0 + 24.0;
+            if let Some(c) = create_btn {
+                col.add_widget(&mut *c, 28.0);
             }
-
-            // --- SECTION 2: Dimensions ---
-            if let (Some(w_sp), Some(h_sp)) = (width_spin, height_spin) {
-                let spin_w = (content_w - 12.0) / 2.0;
-                (*w_sp).set_rect(x + padding, y + curr_y, spin_w, 20.0);
-                (*h_sp).set_rect(x + padding + spin_w + 12.0, y + curr_y, spin_w, 20.0);
-                curr_y += 20.0 + 24.0;
+            if let Some(t) = tile_btn {
+                col.add_widget(&mut *t, 28.0);
             }
-
-            // --- SECTION 3: Window Type & Shape ---
-            let mut has_dd = false;
+            if let Some(w_sp) = width_spin {
+                col.add_widget(&mut *w_sp, 20.0);
+            }
+            if let Some(h_sp) = height_spin {
+                col.add_widget(&mut *h_sp, 20.0);
+            }
             if let Some(t_dd) = type_dd {
-                (*t_dd).set_rect(x + padding, y + curr_y, content_w, 20.0);
-                curr_y += 20.0 + 16.0;
-                has_dd = true;
+                col.add_widget(&mut *t_dd, 20.0);
             }
             if let Some(s_dd) = shape_dd {
-                (*s_dd).set_rect(x + padding, y + curr_y, content_w, 20.0);
-                curr_y += 20.0 + 24.0;
-                has_dd = true;
+                col.add_widget(&mut *s_dd, 20.0);
             }
-            if !has_dd {
-                // Keep spacing consistent
-            }
-
-            // --- SECTION 4: Opacity & Transparency ---
             if let Some(op_t) = opacity_toggle {
-                (*op_t).set_rect(x + padding, y + curr_y, content_w, 20.0);
-                curr_y += 20.0 + 16.0;
+                col.add_widget(&mut *op_t, 20.0);
             }
             if let Some(sl_lbl) = slider_label {
-                (*sl_lbl).set_rect(x + padding, y + curr_y, content_w, 12.0);
-                curr_y += 12.0 + 4.0;
+                col.add_widget(&mut *sl_lbl, 12.0);
             }
             if let Some(sl) = slider {
-                (*sl).set_rect(x + padding, y + curr_y, content_w, 20.0);
-                curr_y += 20.0 + 24.0;
+                col.add_widget(&mut *sl, 20.0);
             }
-
-            // --- SECTION 5: Window Elements ---
             if let Some(w_s) = win_sec {
-                (*w_s).set_rect(x + padding, y + curr_y, content_w, 20.0);
-                curr_y += 20.0 + 16.0;
+                col.add_widget(&mut *w_s, 20.0);
             }
-            let toggles = [backplate_toggle, menubar_toggle, statusbar_toggle];
-            let active_toggles: Vec<*mut dyn Element> = toggles.iter().filter_map(|&t| t).collect();
-            if !active_toggles.is_empty() {
-                let t_w = (content_w - (active_toggles.len() as f32 - 1.0) * 10.0) / active_toggles.len() as f32;
-                for (idx, &t) in active_toggles.iter().enumerate() {
-                    (*t).set_rect(x + padding + idx as f32 * (t_w + 10.0), y + curr_y, t_w, 20.0);
-                }
-                curr_y += 20.0 + 24.0;
+            if let Some(bp_t) = backplate_toggle {
+                col.add_widget(&mut *bp_t, 20.0);
             }
-
-            // --- SECTION 6: Border & Bevel ---
+            if let Some(mb_t) = menubar_toggle {
+                col.add_widget(&mut *mb_t, 20.0);
+            }
+            if let Some(sb_t) = statusbar_toggle {
+                col.add_widget(&mut *sb_t, 20.0);
+            }
             if let Some(b_s) = border_sec {
-                (*b_s).set_rect(x + padding, y + curr_y, content_w, 20.0);
-                curr_y += 20.0 + 16.0;
+                col.add_widget(&mut *b_s, 20.0);
             }
-            if let (Some(b_tg), Some(bev_tg)) = (border_toggle, bevel_toggle) {
-                let tg_w = (content_w - 12.0) / 2.0;
-                (*b_tg).set_rect(x + padding, y + curr_y, tg_w, 20.0);
-                (*bev_tg).set_rect(x + padding + tg_w + 12.0, y + curr_y, tg_w, 20.0);
-                curr_y += 20.0 + 16.0;
+            if let Some(bs_dd) = border_style_dd {
+                col.add_widget(&mut *bs_dd, 20.0);
             }
-            if let (Some(bw_sp), Some(bd_sp)) = (border_width_spin, bevel_depth_spin) {
-                let spin_w = (content_w - 12.0) / 2.0;
-                (*bw_sp).set_rect(x + padding, y + curr_y, spin_w, 20.0);
-                (*bd_sp).set_rect(x + padding + spin_w + 12.0, y + curr_y, spin_w, 20.0);
-                curr_y += 20.0 + 16.0;
-            } else {
-                if let Some(bw_sp) = border_width_spin {
-                    (*bw_sp).set_rect(x + padding, y + curr_y, content_w, 20.0);
-                    curr_y += 20.0 + 16.0;
-                }
-                if let Some(bd_sp) = bevel_depth_spin {
-                    (*bd_sp).set_rect(x + padding, y + curr_y, content_w, 20.0);
-                    curr_y += 20.0 + 16.0;
-                }
+            if let Some(bw_sp) = border_width_spin {
+                col.add_widget(&mut *bw_sp, 20.0);
+            }
+            if let Some(bd_sp) = bevel_depth_spin {
+                col.add_widget(&mut *bd_sp, 20.0);
             }
             if let Some(bs_btn) = bevel_shape_btn {
-                (*bs_btn).set_rect(x + padding, y + curr_y, content_w, 28.0);
-                curr_y += 28.0;
+                col.add_widget(&mut *bs_btn, 28.0);
             }
 
-            curr_y += padding;
-            self.scroll_box.update_bounds(curr_y, y, h);
+            let total_h = col.current_y();
+            self.scroll_box.update_bounds(total_h, y, h);
         }
     }
 
