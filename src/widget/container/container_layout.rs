@@ -597,3 +597,109 @@ impl ContainerLayout for MosaicLayout {
         Box::new(*self)
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct ReverseMosaicLayout {
+    pub gap: f32,
+    pub padding_x: f32,
+    pub padding_y: f32,
+}
+
+impl Default for ReverseMosaicLayout {
+    fn default() -> Self {
+        Self {
+            gap: 8.0,
+            padding_x: 8.0,
+            padding_y: 10.0,
+        }
+    }
+}
+
+impl crate::layout::LayoutStrategy for ReverseMosaicLayout {
+    fn init(&mut self, _left: f32, _top: f32, _width: f32, _height: f32) {}
+    fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) { (0.0, 0.0, ww, wh) }
+    fn get_gap(&self) -> f32 { self.gap }
+
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+        let count = children.len();
+        if count == 0 {
+            return 0.0;
+        }
+        let total_padding_x = self.padding_x * 2.0;
+        let available_w = (w - total_padding_x).max(1.0);
+
+        let mut packer = Packer::new(self.padding_x, self.padding_y, available_w, self.gap);
+        let mut temp_positions = Vec::with_capacity(count);
+
+        for &child_ptr in children {
+            unsafe {
+                let child = &mut *child_ptr;
+                let child_rect = child.rect();
+                let child_w = child_rect.2;
+                let child_h = child.preferred_height().unwrap_or(child_rect.3);
+                let use_h = if child_h > 0.0 { child_h } else { 44.0 };
+                
+                let (px, py) = packer.pack(child_w, use_h);
+                temp_positions.push((px, py, child_w, use_h));
+            }
+        }
+
+        let mut x_min = f32::MAX;
+        let mut x_max = f32::MIN;
+        let mut y_min = f32::MAX;
+        let mut y_max = f32::MIN;
+
+        for &(px, py, pw, ph) in &temp_positions {
+            x_min = x_min.min(px);
+            x_max = x_max.max(px + pw);
+            y_min = y_min.min(py);
+            y_max = y_max.max(py + ph);
+        }
+
+        let src_w = (x_max - x_min).max(1.0);
+        let src_h = (y_max - y_min).max(1.0);
+
+        let dst_w = available_w;
+        let dst_h = (h - 2.0 * self.padding_y).max(1.0);
+
+        let scale_x = dst_w / src_w;
+        let scale_y = dst_h / src_h;
+
+        for (i, &child_ptr) in children.iter().enumerate() {
+            unsafe {
+                let child = &mut *child_ptr;
+                let (px, py, pw, ph) = temp_positions[i];
+
+                let new_x = x + self.padding_x + (px - x_min) * scale_x;
+                let new_y = y + self.padding_y + (py - y_min) * scale_y;
+                let new_w = pw * scale_x;
+                let new_h = ph * scale_y;
+
+                child.layout(
+                    Point { x: new_x, y: new_y },
+                    LayoutConstraints::new(new_w, new_w, new_h, new_h),
+                    ctx,
+                );
+            }
+        }
+
+        h
+    }
+
+    fn measure(&self, constraints: LayoutConstraints, _children: &[*mut (dyn Element + 'static)], _ctx: &UiContext) -> Size {
+        Size {
+            width: constraints.max_width,
+            height: constraints.max_height,
+        }
+    }
+
+    fn box_clone(&self) -> Box<dyn crate::layout::LayoutStrategy> {
+        Box::new(*self)
+    }
+}
+
+impl ContainerLayout for ReverseMosaicLayout {
+    fn box_clone_container(&self) -> Box<dyn ContainerLayout> {
+        Box::new(*self)
+    }
+}

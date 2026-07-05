@@ -5716,5 +5716,40 @@ mod tests {
         assert_eq!(w3.x, 125.0);
         assert_eq!(w3.y, 25.0);
     }
+
+    #[test]
+    fn test_reverse_mosaic_layout() {
+        use crate::widget::ReverseMosaicLayout;
+        use crate::layout::LayoutStrategy;
+        
+        let layout = ReverseMosaicLayout {
+            gap: 10.0,
+            padding_x: 5.0,
+            padding_y: 5.0,
+        };
+
+        let mut dummy = crate::context::UiContext::new();
+        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
+        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 100.0, h: 80.0 };
+        let mut w3 = MockWidget { x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
+        
+        let children = vec![
+            &mut w1 as *mut MockWidget as *mut (dyn Element + 'static),
+            &mut w2 as *mut MockWidget as *mut (dyn Element + 'static),
+            &mut w3 as *mut MockWidget as *mut (dyn Element + 'static),
+        ];
+
+        let _ = layout.layout(10.0, 20.0, 250.0, 300.0, &children, &mut dummy);
+
+        assert_eq!(w1.x, 15.0);
+        assert_eq!(w1.y, 25.0);
+        assert!((w1.w - 126.315).abs() < 0.01);
+        assert!((w1.h - 103.57).abs() < 0.01);
+
+        assert!((w3.x - 153.947).abs() < 0.01);
+        assert_eq!(w3.y, 25.0);
+        assert!((w3.w - 101.05).abs() < 0.01);
+        assert!((w3.h - 82.857).abs() < 0.01);
+    }
 }
 

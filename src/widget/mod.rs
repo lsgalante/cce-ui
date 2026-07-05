@@ -685,7 +685,7 @@ pub use self::input::{
 };
 pub use self::container::{
     Container, ContainerLayout, OverlayLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
-    ColumnsLayout, MosaicLayout,
+    ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     SectionContainer, Header, ContentBg, ViewportBg, ParametersBg, List,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
     Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel
