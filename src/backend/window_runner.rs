@@ -797,6 +797,10 @@ pub fn push_widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, cl
         push_plate_solid_border_vertices(x, y, ww, h, radii, thickness, sw, sh, color, clip_circle, out);
     }
 
+    if let Some(thickness) = w.plate_bevel() {
+        push_plate_bevel_vertices(x, y, ww, h, radii.top_left, thickness, sw, sh, clip_circle, out);
+    }
+
     for (cx, cy, r, t, start, end, qc) in w.extra_arcs() {
         push_arc_background_vertices(cx, cy, r, t, start, end, sw, sh, qc, 16, clip_circle, out);
     }

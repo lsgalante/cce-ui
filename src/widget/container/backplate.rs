@@ -13,6 +13,8 @@ pub struct Backplate {
     pub background_color: Option<[f32; 4]>,
     pub visible: bool,
     pub movable: bool,
+    pub bevel: bool,
+    pub bevel_thickness: f32,
 }
 
 impl Backplate {
@@ -27,6 +29,8 @@ impl Backplate {
             background_color: None,
             visible: true,
             movable: true,
+            bevel: false,
+            bevel_thickness: 1.5,
         }
     }
 
@@ -48,6 +52,12 @@ impl Backplate {
 
     pub fn with_radius(mut self, radius: f32) -> Self {
         self.radius = radius;
+        self
+    }
+
+    pub fn with_bevel(mut self, bevel: bool, thickness: f32) -> Self {
+        self.bevel = bevel;
+        self.bevel_thickness = thickness;
         self
     }
 }
@@ -145,6 +155,14 @@ impl Element for Backplate {
 
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         self.border_color.map(|c| (c, self.border_thickness))
+    }
+
+    fn plate_bevel(&self) -> Option<f32> {
+        if self.bevel {
+            Some(self.bevel_thickness)
+        } else {
+            None
+        }
     }
 
     fn corner_radius(&self) -> f32 {

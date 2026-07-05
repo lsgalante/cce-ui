@@ -420,6 +420,7 @@ pub trait Element {
 
     fn color(&self) -> [f32; 4];
     fn solid_border(&self) -> Option<([f32; 4], f32)> { None }
+    fn plate_bevel(&self) -> Option<f32> { None }
 
     fn is_dragging(&self) -> bool { false }
     fn drag_update(&mut self, _px: f32, _py: f32) -> bool { false }
