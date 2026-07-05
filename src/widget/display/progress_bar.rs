@@ -30,6 +30,10 @@ impl Element for ProgressBar {
         self.base.h = h + self.base.label_offset();
     }
 
+    fn preferred_height(&self) -> Option<f32> {
+        Some(crate::layout::progressbar_height())
+    }
+
     fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
 
     fn color(&self) -> [f32; 4] { colors::progress_bg() }
