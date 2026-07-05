@@ -444,7 +444,8 @@ impl Ramp {
                 "Valley".to_string(),
             ],
             2,
-        ).with_label("Preset");
+        ).with_label("Preset")
+         .with_open_upward(true);
         
         Self {
             base: Widget::new(),
