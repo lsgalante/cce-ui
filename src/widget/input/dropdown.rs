@@ -534,14 +534,14 @@ impl Element for Dropdown {
             self.options.get(self.selected).cloned().unwrap_or_default()
         };
 
-        let font_family = crate::layout::control_label_font_detached_parsed().0;
+        let (font_family, font_size) = crate::layout::control_label_font_detached_parsed();
         let label_x = self.label_x_offset();
         let x = self.base.x + label_x;
         let w = self.base.w - label_x;
         let start_x = x + 8.0;
         let right_limit = x + w - 28.0; // 10px margin before the arrow
         let fade_start_x = (right_limit - 24.0).max(start_x); // Fade out over the last 24px
-        let text_y = crate::layout::center_text_y(self.base.y + top, self.base.h - top, 12.0);
+        let text_y = crate::layout::center_text_y(self.base.y + top, self.base.h - top, font_size);
         let tc = colors::dropdown_text_color();
         let default_color = [
             (colors::linear_to_srgb(tc[0]) * 255.0).round() as u8,
@@ -562,19 +562,19 @@ impl Element for Dropdown {
             ((parent_color[2] * (1.0 - alpha) + bg_color[2] * alpha) * 255.0).round().clamp(0.0, 255.0) as u8,
         ];
 
-        let w_dummy = crate::widget::display::measure_text_width("M", &font_family, 12.0);
+        let w_dummy = crate::widget::display::measure_text_width("M", &font_family, font_size);
         let chars: Vec<char> = selected_text.chars().collect();
         let n = chars.len();
 
         let is_monospace = {
-            let w_i10 = crate::widget::display::measure_text_width("iiiiiiiiii", &font_family, 12.0);
-            let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", &font_family, 12.0);
+            let w_i10 = crate::widget::display::measure_text_width("iiiiiiiiii", &font_family, font_size);
+            let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", &font_family, font_size);
             (w_i10 - w_m10).abs() < 5.0
         };
 
         let cell_width = if is_monospace {
-            let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", &font_family, 12.0);
-            let w_m20 = crate::widget::display::measure_text_width("mmmmmmmmmmmmmmmmmmmm", &font_family, 12.0);
+            let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", &font_family, font_size);
+            let w_m20 = crate::widget::display::measure_text_width("mmmmmmmmmmmmmmmmmmmm", &font_family, font_size);
             ((w_m20 - w_m10) / 10.0).max(1.0)
         } else {
             0.0
@@ -593,7 +593,7 @@ impl Element for Dropdown {
             for i in 1..n {
                 prefix.push(chars[i - 1]);
                 let measure_str = format!("{}M", prefix);
-                let w_prefix_dummy = crate::widget::display::measure_text_width(&measure_str, &font_family, 12.0);
+                let w_prefix_dummy = crate::widget::display::measure_text_width(&measure_str, &font_family, font_size);
                 let offset = (w_prefix_dummy - w_dummy).max(0.0);
                 char_offsets.push(offset);
             }
@@ -604,7 +604,7 @@ impl Element for Dropdown {
                 n as f32 * cell_width
             } else {
                 let measure_str = format!("{}M", selected_text);
-                (crate::widget::display::measure_text_width(&measure_str, &font_family, 12.0) - w_dummy).max(0.0)
+                (crate::widget::display::measure_text_width(&measure_str, &font_family, font_size) - w_dummy).max(0.0)
             }
         } else {
             0.0
@@ -650,13 +650,13 @@ impl Element for Dropdown {
                     text: chars[i].to_string(),
                     x: cur_x,
                     y: text_y,
-                    font_size: 12.0,
+                    font_size,
                     color,
                 });
                 let c_w_ink = if is_monospace {
                     cell_width
                 } else {
-                    crate::widget::display::measure_text_width(&chars[i].to_string(), &font_family, 12.0)
+                    crate::widget::display::measure_text_width(&chars[i].to_string(), &font_family, font_size)
                 };
                 prev_char_end = offset + c_w_ink;
             }
