@@ -523,9 +523,50 @@ pub trait Element {
         self.text_labels().into_iter().map(|l| (l, None)).collect()
     }
     
-    fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let font = self.widget_font();
-        self.text_labels().into_iter().map(|l| (l, font.clone(), None)).collect()
+        let mut labels = self.text_labels().into_iter().map(|l| (l, font.clone(), None::<[f32; 4]>)).collect::<Vec<_>>();
+
+        let mut curr = self.parent(ctx);
+        let mut scroll_box_bounds = None;
+        while let Some(parent_ptr) = curr {
+            let parent = unsafe { &*parent_ptr };
+            if let Some(scroll_box) = parent.as_any().downcast_ref::<crate::widget::ScrollBox>() {
+                let (sb_x, _, sb_w, _) = scroll_box.rect();
+                let view_min = scroll_box.viewport_y + 4.0;
+                let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
+                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
+                break;
+            } else if let Some(list) = parent.as_any().downcast_ref::<crate::widget::List>() {
+                let (sb_x, _, sb_w, _) = list.rect();
+                let view_min = list.scroll_box.viewport_y + 4.0;
+                let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
+                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
+                break;
+            } else if let Some(col_list) = parent.as_any().downcast_ref::<crate::widget::ColumnarList>() {
+                let (sb_x, _, sb_w, _) = col_list.rect();
+                let view_min = col_list.scroll_box.viewport_y + 4.0;
+                let view_max = col_list.scroll_box.viewport_y + col_list.scroll_box.viewport_h - 4.0;
+                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
+                break;
+            }
+            curr = parent.parent(ctx);
+        }
+
+        if let Some(sb_bounds) = scroll_box_bounds {
+            for item in &mut labels {
+                if let Some(ref mut b) = item.2 {
+                    b[0] = b[0].max(sb_bounds[0]);
+                    b[1] = b[1].max(sb_bounds[1]);
+                    b[2] = b[2].min(sb_bounds[2]);
+                    b[3] = b[3].min(sb_bounds[3]);
+                } else {
+                    item.2 = Some(sb_bounds);
+                }
+            }
+        }
+
+        labels
     }
 
     fn widget_font(&self) -> Option<String> { None }
@@ -729,7 +770,7 @@ pub use self::input::{
 pub use self::container::{
     Container, ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
-    SectionContainer, Header, ContentBg, ParametersBg, List,
+    SectionContainer, Header, ContentBg, ParametersBg, List, ColumnarList, ListColumn, ListRow, ColumnWidth,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
     Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel
 };
