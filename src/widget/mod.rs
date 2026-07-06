@@ -543,12 +543,6 @@ pub trait Element {
                 let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
                 scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
                 break;
-            } else if let Some(col_list) = parent.as_any().downcast_ref::<crate::widget::ColumnarList>() {
-                let (sb_x, _, sb_w, _) = col_list.rect();
-                let view_min = col_list.scroll_box.viewport_y + 4.0;
-                let view_max = col_list.scroll_box.viewport_y + col_list.scroll_box.viewport_h - 4.0;
-                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
-                break;
             }
             curr = parent.parent(ctx);
         }
@@ -770,7 +764,7 @@ pub use self::input::{
 pub use self::container::{
     Container, ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
-    SectionContainer, Header, ContentBg, ParametersBg, List, ColumnarList, ListColumn, ListRow, ColumnWidth,
+    SectionContainer, Header, ContentBg, ParametersBg, List, ListColumn, ListRow, ColumnWidth,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
     Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel
 };
