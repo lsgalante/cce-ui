@@ -149,7 +149,10 @@ impl Element for Viewport3D {
         px >= x && px <= x + w && py >= y && py <= y + h
     }
 
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, _px: f32, _py: f32, _ctx: &mut UiContext) -> bool {
+    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if !self.hit_test(px, py, ctx) {
+            return false;
+        }
         let scale = crate::scale::scale_factor();
         if self.ctrl_pressed {
             match delta {
