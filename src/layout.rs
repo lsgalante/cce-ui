@@ -5111,8 +5111,8 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
 
 
 pub struct VStack<'b, 'a, P> {
-    context: &'b mut SectionContext<'a, P>,
-    spacing: f32,
+    pub context: &'b mut SectionContext<'a, P>,
+    pub spacing: f32,
 }
 
 impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
@@ -5121,11 +5121,27 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
         self.context.spacing(self.spacing);
     }
 
-    pub fn add_row<F>(&mut self, count: usize, gap: f32, h: f32, f: F)
+    pub fn add_row<F>(&mut self, count: usize, gap: f32, h: f32, mut f: F)
     where
-        F: FnMut(usize, f32, f32),
+        F: FnMut(&mut SectionContext<'a, P>, usize, f32, f32),
     {
-        self.context.row(count, gap, h, f);
+        let max_h = self.context.grid.max_height().max(self.context.content_y);
+        for col_h in &mut self.context.grid.col_heights {
+            *col_h = max_h;
+        }
+        self.context.content_y = max_h;
+
+        let cols = self.context.row_layout(count, gap);
+        for (i, &(x, w)) in cols.iter().enumerate() {
+            self.context.content_y = max_h;
+            f(self.context, i, x, w);
+        }
+
+        let new_bottom = max_h + h;
+        self.context.content_y = new_bottom;
+        for col_h in &mut self.context.grid.col_heights {
+            *col_h = new_bottom;
+        }
         self.context.spacing(self.spacing);
     }
 }
