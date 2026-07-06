@@ -1451,21 +1451,23 @@ impl Element for TextBox {
             let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
             let content_w = max_line_len as f32 * char_width;
             let max_scroll_x = (content_w - (self.base.w - 16.0)).max(0.0);
+            let natural = crate::layout::touchpad_natural_scroll();
             let scroll_amt_x = match *delta {
                 MouseScrollDelta::LineDelta(dx, dy) => {
                     if !self.multiline {
-                        let scroll_val = if dy != 0.0 { -dy } else { dx };
+                        let scroll_val = if dy != 0.0 { -dy } else { if natural { -dx } else { dx } };
                         scroll_val * char_width * 3.0
                     } else {
-                        dx * char_width * 3.0
+                        let scroll_val = if natural { -dx } else { dx };
+                        scroll_val * char_width * 3.0
                     }
                 }
                 MouseScrollDelta::PixelDelta(pos) => {
                     if !self.multiline {
-                        let scroll_val = if pos.y != 0.0 { -pos.y as f32 } else { pos.x as f32 };
+                        let scroll_val = if pos.y != 0.0 { -pos.y as f32 } else { if natural { -pos.x as f32 } else { pos.x as f32 } };
                         scroll_val
                     } else {
-                        pos.x as f32
+                        if natural { -pos.x as f32 } else { pos.x as f32 }
                     }
                 }
             };

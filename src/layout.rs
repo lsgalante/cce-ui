@@ -177,6 +177,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.plate.border_color" => "plate_border_color",
                 "style.surface.plate.border_thickness" => "plate_border_thickness",
                 "style.surface.plate.blur" => "plate_blur",
+                "input.touchpad.natural_scroll" => "touchpad_natural_scroll",
                 
                 other => {
                     if let Some(rest) = other.strip_prefix("layout.") {
@@ -267,6 +268,7 @@ static TREE_BLUR: RwLock<f32> = RwLock::new(0.0);
 static PLATE_PADDING: RwLock<f32> = RwLock::new(20.0);
 static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(44.0);
 static NESTED_SECTION_LABEL_ALIGNMENT: RwLock<u8> = RwLock::new(0);
+static TOUCHPAD_NATURAL_SCROLL: RwLock<bool> = RwLock::new(false);
 
 
 static BUTTON_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
@@ -529,6 +531,14 @@ pub fn reload_config() {
                 let wrap = val_str == "true" || val_str == "1" || val_str == "1.0";
                 if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
                     *lock = wrap;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("touchpad_natural_scroll") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                let enabled = val_str == "true" || val_str == "1" || val_str == "1.0";
+                if let Ok(mut lock) = TOUCHPAD_NATURAL_SCROLL.write() {
+                    *lock = enabled;
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("textbox_multiline_border_width") {
@@ -2636,6 +2646,18 @@ pub fn set_textbox_line_wrap(wrap: bool) {
     lazy_init_style_registry();
     if let Ok(mut lock) = TEXTBOX_LINE_WRAP.write() {
         *lock = wrap;
+    }
+}
+
+pub fn touchpad_natural_scroll() -> bool {
+    lazy_init_style_registry();
+    *TOUCHPAD_NATURAL_SCROLL.read().unwrap()
+}
+
+pub fn set_touchpad_natural_scroll(enabled: bool) {
+    lazy_init_style_registry();
+    if let Ok(mut lock) = TOUCHPAD_NATURAL_SCROLL.write() {
+        *lock = enabled;
     }
 }
 
