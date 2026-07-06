@@ -1446,7 +1446,12 @@ pub fn set_toggle_height(height: f32) {
 }
 
 pub fn light_source_position() -> f32 {
-    get_style_registry().read().unwrap().get_float("light_source_position").unwrap_or(135.0)
+    let val = get_style_registry().read().unwrap().get_float("light_source_position").unwrap_or(2.3561945);
+    if val > 2.0 * std::f32::consts::PI {
+        val.to_radians()
+    } else {
+        val
+    }
 }
 
 pub fn bevel_depth() -> f32 {
@@ -5116,8 +5121,30 @@ pub struct VStack<'b, 'a, P> {
 }
 
 impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
-    pub fn add_widget<T: Element + 'static>(&mut self, w: &mut T, ww: f32, wh: f32, ctx: &mut UiContext) {
-        self.context.widget(w, SectionContext::<P>::DEFAULT_MARGIN_X, ww, wh, ctx);
+    pub fn add_widget<T: Element + 'static>(&mut self, w: &mut T, _ww: f32, wh: f32, ctx: &mut UiContext) {
+        let pad = self.context.padding();
+        let margin_x = 2.0 * pad + 12.0;
+        let x = self.context.left + margin_x;
+        let clamped_w = (self.context.cw - 2.0 * margin_x).max(0.0);
+
+        let mut max_h = self.context.grid.max_height().max(self.context.content_y);
+        if max_h > self.context.content_start_y {
+            max_h += self.context.row_gap;
+        }
+        let y = max_h;
+
+        let pref_h = w.preferred_height().unwrap_or(wh);
+        let top_room = crate::widget::label_offset(w);
+        let total_h = pref_h + top_room;
+
+        w.set_row_rect(self.context.left + pad, self.context.cw - 2.0 * pad);
+        render_widget(self.context.pc, w, x, y, clamped_w, total_h, ctx);
+
+        let new_bottom = y + total_h;
+        self.context.content_y = new_bottom;
+        for h in &mut self.context.grid.col_heights {
+            *h = new_bottom;
+        }
         self.context.spacing(self.spacing);
     }
 

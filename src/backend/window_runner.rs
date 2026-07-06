@@ -141,12 +141,6 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
         _ => None,
     });
 
-    let resolved_mono = if !mono_fallback.is_empty() {
-        find_cased_family(fs, &mono_fallback)
-    } else {
-        None
-    };
-
     let resolved_sans = if !sans_fallback.is_empty() {
         find_cased_family(fs, &sans_fallback)
     } else {
@@ -160,7 +154,7 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
                     if let Some(ref cased) = resolved_storage {
                         glyphon::Family::Name(cased)
                     } else {
-                        glyphon::Family::Name(&mono_fallback)
+                        glyphon::Family::Name(crate::layout::get_system_monospace_font())
                     }
                 } else {
                     glyphon::Family::Name(crate::layout::get_system_monospace_font())
@@ -171,15 +165,7 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
                     if let Some(ref cased) = resolved_storage {
                         glyphon::Family::Name(cased)
                     } else {
-                        if !mono_fallback.is_empty() {
-                            if let Some(ref cased_mono) = resolved_mono {
-                                glyphon::Family::Name(cased_mono)
-                            } else {
-                                glyphon::Family::Name(&mono_fallback)
-                            }
-                        } else {
-                            glyphon::Family::Name(crate::layout::get_system_monospace_font())
-                        }
+                        glyphon::Family::SansSerif
                     }
                 } else {
                     glyphon::Family::SansSerif
@@ -190,15 +176,7 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
                     if let Some(ref cased) = resolved_storage {
                         glyphon::Family::Name(cased)
                     } else {
-                        if !mono_fallback.is_empty() {
-                            if let Some(ref cased_mono) = resolved_mono {
-                                glyphon::Family::Name(cased_mono)
-                            } else {
-                                glyphon::Family::Name(&mono_fallback)
-                            }
-                        } else {
-                            glyphon::Family::Name(crate::layout::get_system_monospace_font())
-                        }
+                        glyphon::Family::Serif
                     }
                 } else {
                     glyphon::Family::Serif
@@ -210,17 +188,11 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
         if !sans_fallback.is_empty() {
             if let Some(ref cased) = resolved_sans {
                 glyphon::Family::Name(cased)
-            } else if !mono_fallback.is_empty() {
-                if let Some(ref cased_mono) = resolved_mono {
-                    glyphon::Family::Name(cased_mono)
-                } else {
-                    glyphon::Family::Name(&mono_fallback)
-                }
             } else {
-                glyphon::Family::Name(crate::layout::get_system_monospace_font())
+                glyphon::Family::SansSerif
             }
         } else {
-            glyphon::Family::Name(crate::layout::get_system_monospace_font())
+            glyphon::Family::SansSerif
         }
     };
     attrs = attrs.family(family);
@@ -756,8 +728,7 @@ pub fn push_plate_bevel_vertices(
 ) {
     let r = r.min(ww * 0.5).min(h * 0.5);
 
-    let light_angle = crate::layout::light_source_position();
-    let rad = light_angle.to_radians();
+    let rad = crate::layout::light_source_position();
     let lx = rad.cos();
     let ly = -rad.sin();
 

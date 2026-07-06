@@ -3,7 +3,6 @@ pub mod container_layout;
 pub mod section_container;
 pub mod header;
 pub mod content_bg;
-pub mod viewport_bg;
 pub mod parameters_bg;
 pub mod menu;
 pub mod breadcrumb;
@@ -28,7 +27,6 @@ pub use container_layout::{ContainerLayout, OverlayLayout, ManualLayout, Vertica
 pub use section_container::SectionContainer;
 pub use header::Header;
 pub use content_bg::ContentBg;
-pub use viewport_bg::ViewportBg;
 pub use parameters_bg::ParametersBg;
 pub use menu::{Menu, MenuBar};
 pub use breadcrumb::Breadcrumb;

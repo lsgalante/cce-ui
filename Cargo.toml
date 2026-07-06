@@ -10,6 +10,7 @@ path = "src/lib.rs"
 [dependencies]
 raw-window-handle = "0.6"
 wgpu = "24"
+glam = "0.29"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 glyphon = "0.8"

@@ -729,7 +729,7 @@ pub use self::input::{
 pub use self::container::{
     Container, ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
-    SectionContainer, Header, ContentBg, ViewportBg, ParametersBg, List,
+    SectionContainer, Header, ContentBg, ParametersBg, List,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
     Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel
 };
@@ -737,7 +737,8 @@ pub use self::display::{
     TextLabel, Label, SectionHeader, StyledLabel, TextItem, Svg, UsageBar,
     LayoutPreview, FontPreview, InfoBox, StatusDot, InteractiveListItem,
     GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
-    DotStatus, PreviewLayoutMode, Sidebar, Panel, PreviewState, ImagePreviewData, serialize_widgets
+    DotStatus, PreviewLayoutMode, Sidebar, Panel, PreviewState, ImagePreviewData, serialize_widgets,
+    Viewport3D
 };
 
 pub trait PageSelector {

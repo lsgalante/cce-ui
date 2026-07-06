@@ -239,7 +239,7 @@ impl Element for Dropdown {
         self.base.x = x;
         self.base.y = y;
         self.base.w = w;
-        self.base.h = h + self.base.label_offset();
+        self.base.h = h;
     }
 
     fn get_value_string(&self) -> Option<String> {

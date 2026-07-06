@@ -394,7 +394,7 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
     };
 
     if let Some(ref ext_ty) = existing_ty {
-        if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") || ext_ty == "vec2i" {
+        if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") || ext_ty == "vec2i" || ext_ty == "radian" {
             kdl_ty = Some(ext_ty.clone());
         }
     }
@@ -823,7 +823,9 @@ pub fn value_to_kdl_with_annotations(
                         let (val_str, val_ty) = match prop_val {
                             serde_json::Value::Bool(b) => (b.to_string(), Some("bool".to_string())),
                             serde_json::Value::Number(num) => {
-                                if num.is_f64() {
+                                if prop_name == "light_source_position" {
+                                    (num.to_string(), Some("radian".to_string()))
+                                } else if num.is_f64() {
                                     (num.to_string(), Some("f64".to_string()))
                                 } else {
                                     (num.to_string(), Some("i64".to_string()))
@@ -881,7 +883,9 @@ pub fn value_to_kdl_with_annotations(
             let (val_str, val_ty) = match val {
                 serde_json::Value::Bool(b) => (b.to_string(), Some("bool".to_string())),
                 serde_json::Value::Number(num) => {
-                    if num.is_f64() {
+                    if key == "light_source_position" {
+                        (num.to_string(), Some("radian".to_string()))
+                    } else if num.is_f64() {
                         (num.to_string(), Some("f64".to_string()))
                     } else {
                         (num.to_string(), Some("i64".to_string()))

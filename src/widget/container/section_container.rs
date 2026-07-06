@@ -10,6 +10,7 @@ pub struct SectionContainer {
     pub container: Container,
     pub base: Widget,
     pub parent: Option<*mut (dyn Element + 'static)>,
+    pub draw_children: bool,
 }
 
 impl SectionContainer {
@@ -19,6 +20,7 @@ impl SectionContainer {
             container: Container::new(),
             base: Widget::new(),
             parent: None,
+            draw_children: true,
         }
     }
 
@@ -26,6 +28,15 @@ impl SectionContainer {
         let container = std::mem::replace(&mut self.container, Container::new());
         self.container = container.with_layout(layout);
         self
+    }
+
+    pub fn with_draw_children(mut self, draw: bool) -> Self {
+        self.draw_children = draw;
+        self
+    }
+
+    pub fn set_draw_children(&mut self, draw: bool) {
+        self.draw_children = draw;
     }
 }
 
@@ -114,33 +125,60 @@ impl Element for SectionContainer {
     }
 
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.draw_children {
+            return Vec::new();
+        }
         let mut quads = self.header.all_quads(ctx);
         quads.extend(self.container.all_quads(ctx));
         quads
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
+        if !self.draw_children {
+            return Vec::new();
+        }
         let mut labels = self.header.text_labels();
         labels.extend(self.container.text_labels());
         labels
     }
 
     fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        if !self.draw_children {
+            return Vec::new();
+        }
         let mut labels = self.header.text_labels_with_bounds(ctx);
         labels.extend(self.container.text_labels_with_bounds(ctx));
         labels
     }
 
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        if !self.draw_children {
+            return Vec::new();
+        }
         let mut labels = self.header.text_labels_with_font_and_bounds(ctx);
         labels.extend(self.container.text_labels_with_font_and_bounds(ctx));
         labels
     }
 
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
+        if !self.draw_children {
+            return Vec::new();
+        }
         let mut items = self.header.get_text_items();
         items.extend(self.container.get_text_items());
         items
+    }
+
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        if !self.draw_children {
+            return self.header.all_rounded_quads(ctx);
+        }
+        let mut quads = self.header.all_rounded_quads(ctx);
+        quads.extend(self.container.all_rounded_quads(ctx));
+        quads
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {

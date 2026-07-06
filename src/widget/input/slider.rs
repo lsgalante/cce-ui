@@ -117,7 +117,7 @@ impl Element for Slider {
         self.base.x = x;
         self.base.y = y;
         self.base.w = w;
-        self.base.h = h + self.base.label_offset();
+        self.base.h = h;
     }
 
     fn widget_font(&self) -> Option<String> {
@@ -617,7 +617,7 @@ impl Element for RangeSlider {
         self.base.x = x;
         self.base.y = y;
         self.base.w = w;
-        self.base.h = h + self.base.label_offset();
+        self.base.h = h;
     }
 
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }

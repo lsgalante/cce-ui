@@ -239,7 +239,7 @@ impl Element for Plate {
         self.base.base.x = clamped_x;
         self.base.base.y = clamped_y;
         self.base.base.w = clamped_w;
-        self.base.base.h = clamped_h + label_off;
+        self.base.base.h = clamped_h;
 
         if !self.base.visible {
             return;

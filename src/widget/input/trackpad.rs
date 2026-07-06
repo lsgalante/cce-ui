@@ -50,7 +50,7 @@ impl Element for Trackpad {
         self.base.x = x;
         self.base.y = y;
         self.base.w = w;
-        self.base.h = h + self.label_offset();
+        self.base.h = h;
     }
 
     fn color(&self) -> [f32; 4] {
