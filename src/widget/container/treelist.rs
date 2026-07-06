@@ -1304,7 +1304,18 @@ impl Element for TreeList {
                 }
             };
             
-            quads.push((list_left + 1.0, draw_y, list_width - 2.0, draw_h, 0.0, apply_opacity(bg_color), (false, false, false, false)));
+            let row_r1 = false;
+            let row_r2 = false;
+            let mut row_r3 = false;
+            let mut row_r4 = false;
+            let row_radius = radius - 1.0;
+
+            if draw_bottom >= list_bottom - radius {
+                row_r3 = r3;
+                row_r4 = r4;
+            }
+
+            quads.push((list_left + 1.0, draw_y, list_width - 2.0, draw_h, row_radius, apply_opacity(bg_color), (row_r1, row_r2, row_r3, row_r4)));
             
             if let TreeElement::Leaf { ref val, original_idx, .. } = item {
                 let separator_color = crate::color::tree_separator_color();
@@ -1365,7 +1376,13 @@ impl Element for TreeList {
             }
 
             if row_y + self.item_height <= list_bottom {
-                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 2.0, 1.0, 0.0, apply_opacity([0.13, 0.13, 0.17, 1.0]), (false, false, false, false)));
+                let mut sep_r3 = false;
+                let mut sep_r4 = false;
+                if row_y + self.item_height >= list_bottom - radius {
+                    sep_r3 = r3;
+                    sep_r4 = r4;
+                }
+                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 2.0, 1.0, row_radius, apply_opacity([0.13, 0.13, 0.17, 1.0]), (false, false, sep_r3, sep_r4)));
             }
         }
 
