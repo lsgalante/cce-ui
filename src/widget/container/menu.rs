@@ -69,7 +69,7 @@ impl MenuBar {
             blur: false,
             color: None,
             title: String::new(),
-            menus: ButtonStrip::new(x, y, w, h),
+            menus: ButtonStrip::new(x, y, w, h).with_inherit_menubar_font(true),
             menu_items: Vec::new(),
             vertical_items: Vec::new(),
             menu_dropdowns: Vec::new(),
