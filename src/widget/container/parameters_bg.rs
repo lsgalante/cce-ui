@@ -21,6 +21,10 @@ pub struct ParametersBg {
     visible: bool,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub parent: Option<*mut (dyn Element + 'static)>,
+    pub scroll_y: f32,
+    pub content_h: f32,
+    scrollbar_dragging: bool,
+    drag_offset_y: f32,
 }
 
 impl ParametersBg {
@@ -43,12 +47,52 @@ impl ParametersBg {
             visible: true,
             children: Vec::new(),
             parent: None,
+            scroll_y: 0.0,
+            content_h: 0.0,
+            scrollbar_dragging: false,
+            drag_offset_y: 0.0,
         }
+    }
+
+    pub fn get_total_content_height(&self) -> f32 {
+        let mut cur_y = 30.0;
+        for (i, p) in self.display_params.iter().enumerate() {
+            let h = if p.2 == "code" {
+                let val_text = if self.focused_param == Some(i) {
+                    if let Some(ref editor) = self.code_editor {
+                        &editor.buffer
+                    } else {
+                        &p.1
+                    }
+                } else {
+                    &p.1
+                };
+                let line_count = val_text.split('\n').count();
+                let content_h = 22.0 + (line_count as f32 * 16.0) + 12.0;
+                content_h.max(200.0)
+            } else if p.2 == "section" {
+                24.0
+            } else if p.2.starts_with("float3") {
+                108.0
+            } else if p.2.starts_with("slider") {
+                38.0
+            } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
+                42.0
+            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+                40.0
+            } else if p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
+                24.0
+            } else {
+                20.0
+            };
+            cur_y += h + 8.0;
+        }
+        cur_y + 10.0 // Add padding at the bottom
     }
 
     pub fn get_param_rects(&self) -> Vec<(f32, f32, f32, f32)> {
         let mut rects = Vec::new();
-        let mut cur_y = self.base.y + 30.0;
+        let mut cur_y = self.base.y + 30.0 - self.scroll_y;
         for (i, p) in self.display_params.iter().enumerate() {
             let h = if p.2 == "code" {
                 let val_text = if self.focused_param == Some(i) {
@@ -82,6 +126,19 @@ impl ParametersBg {
             cur_y += h + 8.0;
         }
         rects
+    }
+
+    pub fn hit_test_scrollbar(&self, px: f32, py: f32) -> bool {
+        if self.content_h <= self.base.h {
+            return false;
+        }
+        let sb_w = crate::layout::scrollbar_width();
+        let sb_x = self.base.x + self.base.w - sb_w - 4.0;
+        let sb_track_h = self.base.h - 8.0;
+        let sb_track_y = self.base.y + 4.0;
+
+        px >= sb_x - 4.0 && px <= sb_x + sb_w + 4.0
+            && py >= sb_track_y && py <= sb_track_y + sb_track_h
     }
 
     fn update_slider_rects(&mut self) {
@@ -283,6 +340,8 @@ fn parse_float3_value(val_str: &str, min: f32, max: f32) -> [f32; 3] {
 
 impl Element for ParametersBg {
     crate::impl_widget_base!(ParametersBg);
+    fn is_scrollable(&self) -> bool { true }
+    fn blocks_backplate_drag(&self) -> bool { true }
 
     fn widget_font(&self) -> Option<String> {
         Some(crate::layout::control_label_font())
@@ -297,6 +356,9 @@ impl Element for ParametersBg {
             b.w = w;
             b.h = h;
         }
+        self.content_h = self.get_total_content_height();
+        let max_scroll = (self.content_h - h).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
         self.update_slider_rects();
 
         // Layout child widgets vertically
@@ -418,15 +480,19 @@ impl Element for ParametersBg {
     }
 
     fn draggable(&self) -> bool {
-        self.dragging_param.is_some() 
+        self.scrollbar_dragging
+            || self.dragging_param.is_some() 
             || self.display_params.iter().any(|p| p.2.starts_with("slider") || p.2.starts_with("float3"))
     }
 
     fn is_dragging(&self) -> bool {
-        self.dragging_param.is_some()
+        self.scrollbar_dragging || self.dragging_param.is_some()
     }
 
     fn drag_begin(&mut self, px: f32, py: f32) {
+        if self.scrollbar_dragging {
+            return;
+        }
         let rects = self.get_param_rects();
         for (i, p) in self.display_params.iter().enumerate() {
             if p.2.starts_with("slider") {
@@ -455,6 +521,33 @@ impl Element for ParametersBg {
     }
 
     fn drag_update(&mut self, px: f32, py: f32) -> bool {
+        if self.scrollbar_dragging {
+            let sb_track_h = self.base.h - 8.0;
+            let sb_track_y = self.base.y + 4.0;
+            let visible_ratio = self.base.h / self.content_h;
+            let thumb_h = if sb_track_h <= 20.0 {
+                sb_track_h
+            } else {
+                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+            };
+            let max_scroll = (self.content_h - self.base.h).max(0.0);
+            
+            let target_thumb_y = py - self.drag_offset_y;
+            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            
+            let old_scroll = self.scroll_y;
+            self.scroll_y = new_scroll_ratio * max_scroll;
+            if (self.scroll_y - old_scroll).abs() > 0.01 {
+                self.update_slider_rects();
+                return true;
+            }
+            return false;
+        }
+
         if let Some(i) = self.dragging_param {
             if let Some(s) = &mut self.sliders[i] {
                 if s.drag_update(px, py) {
@@ -486,6 +579,10 @@ impl Element for ParametersBg {
     }
 
     fn drag_end(&mut self) {
+        if self.scrollbar_dragging {
+            self.scrollbar_dragging = false;
+            return;
+        }
         if let Some(i) = self.dragging_param.take() {
             if let Some(s) = &mut self.sliders[i] {
                 s.drag_end();
@@ -542,6 +639,32 @@ impl Element for ParametersBg {
         let is_hit = self.hit_test(px, py, ctx);
         self.base.hovered = is_hit;
         let mut changed = was != is_hit;
+
+        if self.scrollbar_dragging {
+            let sb_track_h = self.base.h - 8.0;
+            let sb_track_y = self.base.y + 4.0;
+            let visible_ratio = self.base.h / self.content_h;
+            let thumb_h = if sb_track_h <= 20.0 {
+                sb_track_h
+            } else {
+                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+            };
+            let max_scroll = (self.content_h - self.base.h).max(0.0);
+            
+            let target_thumb_y = py - self.drag_offset_y;
+            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            
+            let old_scroll = self.scroll_y;
+            self.scroll_y = new_scroll_ratio * max_scroll;
+            if (self.scroll_y - old_scroll).abs() > 0.01 {
+                self.update_slider_rects();
+                changed = true;
+            }
+        }
 
         for sb_opt in &mut self.spinboxes {
             if let Some(sb) = sb_opt {
@@ -609,6 +732,49 @@ impl Element for ParametersBg {
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if !self.visible {
             return false;
+        }
+
+        if button == MouseButton::Left {
+            if state == ElementState::Pressed {
+                if self.hit_test_scrollbar(px, py) {
+                    self.focus();
+                    self.scrollbar_dragging = true;
+                    
+                    let sb_track_h = self.base.h - 8.0;
+                    let sb_track_y = self.base.y + 4.0;
+                    let visible_ratio = self.base.h / self.content_h;
+                    let thumb_h = if sb_track_h <= 20.0 {
+                        sb_track_h
+                    } else {
+                        (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+                    };
+                    let max_scroll = (self.content_h - self.base.h).max(0.0);
+                    let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+                    let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
+                    
+                    let click_offset = py - thumb_y;
+                    if click_offset >= 0.0 && click_offset <= thumb_h {
+                        self.drag_offset_y = click_offset;
+                    } else {
+                        // Clicked outside the thumb: jump thumb center to py
+                        self.drag_offset_y = thumb_h / 2.0;
+                        let target_thumb_y = py - self.drag_offset_y;
+                        let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                            ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        self.scroll_y = new_scroll_ratio * max_scroll;
+                        self.update_slider_rects();
+                    }
+                    return true;
+                }
+            } else if state == ElementState::Released {
+                if self.scrollbar_dragging {
+                    self.scrollbar_dragging = false;
+                    return true;
+                }
+            }
         }
 
         // 1. Check open dropdown popovers first (since they are drawn on top)
@@ -1097,6 +1263,22 @@ impl Element for ParametersBg {
                 }
             }
         }
+
+        if !changed && self.hit_test(px, py, ctx) {
+            let scroll_speed = 24.0;
+            let dy = match delta {
+                MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
+                MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+            };
+            let old_scroll = self.scroll_y;
+            let max_scroll = (self.content_h - self.base.h).max(0.0);
+            self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
+            if (self.scroll_y - old_scroll).abs() > 0.01 {
+                self.update_slider_rects();
+                changed = true;
+            }
+        }
+
         changed
     }
 
@@ -1106,6 +1288,21 @@ impl Element for ParametersBg {
         }
         let mut quads = Vec::new();
         let rects = self.get_param_rects();
+        let view_min = self.base.y + 4.0;
+        let view_max = self.base.y + self.base.h - 4.0;
+
+        let clip_quad = |q: (f32, f32, f32, f32, [f32; 4])| -> Option<(f32, f32, f32, f32, [f32; 4])> {
+            let (qx, qy, qw, qh, qc) = q;
+            let y1 = qy.max(view_min);
+            let y2 = (qy + qh).min(view_max);
+            if y1 < y2 {
+                Some((qx, y1, qw, y2 - y1, qc))
+            } else {
+                None
+            }
+        };
+
+        let mut param_quads = Vec::new();
 
         // Find sections and their ranges
         let mut sections = Vec::new();
@@ -1146,13 +1343,13 @@ impl Element for ParametersBg {
                 let border_t = 1.0;
                 
                 // Top border
-                quads.push((bx, by, bw, border_t, border_color));
+                param_quads.push((bx, by, bw, border_t, border_color));
                 // Bottom border
-                quads.push((bx, by + bh - border_t, bw, border_t, border_color));
+                param_quads.push((bx, by + bh - border_t, bw, border_t, border_color));
                 // Left border
-                quads.push((bx, by, border_t, bh, border_color));
+                param_quads.push((bx, by, border_t, bh, border_color));
                 // Right border
-                quads.push((bx + bw - border_t, by, border_t, bh, border_color));
+                param_quads.push((bx + bw - border_t, by, border_t, bh, border_color));
             }
         }
 
@@ -1161,61 +1358,61 @@ impl Element for ParametersBg {
             if p.2.starts_with("slider") {
                 if let Some(s) = &self.sliders[i] {
                     let (sx, sy, sw, sh) = s.rect();
-                    quads.push((sx, sy, sw, sh, s.color()));
-                    quads.extend(s.extra_quads());
+                    param_quads.push((sx, sy, sw, sh, s.color()));
+                    param_quads.extend(s.extra_quads());
                 }
             } else if p.2 == "section" {
                 // Section header line is handled by the border box top border now
             } else if p.2.starts_with("float3") {
                 if let Some(f) = &self.float3s[i] {
-                    quads.extend(f.extra_quads());
+                    param_quads.extend(f.extra_quads());
                 }
             } else if p.2 == "code" {
-                quads.push((r.0, r.1 + 18.0, r.2, r.3 - 18.0, [0.08, 0.08, 0.10, 1.0]));
+                param_quads.push((r.0, r.1 + 18.0, r.2, r.3 - 18.0, [0.08, 0.08, 0.10, 1.0]));
                 let border_color = if self.focused_param == Some(i) {
                     [0.25, 0.45, 0.85, 1.0]
                 } else {
                     [0.20, 0.20, 0.25, 1.0]
                 };
                 let (bx, by, bw, bh) = (r.0, r.1 + 18.0, r.2, r.3 - 18.0);
-                quads.push((bx, by, bw, 1.0, border_color));
-                quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));
-                quads.push((bx, by, 1.0, bh, border_color));
-                quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));
+                param_quads.push((bx, by, bw, 1.0, border_color));
+                param_quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));
+                param_quads.push((bx, by, 1.0, bh, border_color));
+                param_quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));
                 if self.focused_param == Some(i) {
                     if let Some(ref editor) = self.code_editor {
                         let (cursor_l, cursor_c) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
                         let cursor_x = r.0 + 12.0 + (cursor_c as f32 * 7.2);
                         let cursor_y = r.1 + 22.0 + (cursor_l as f32 * 16.0) + (16.0 - 13.0) / 2.0;
                         if cursor_y >= r.1 + 18.0 && cursor_y + 13.0 <= r.1 + r.3 {
-                            quads.push((cursor_x, cursor_y, 1.5, 13.0, [0.80, 0.80, 0.85, 1.0]));
+                            param_quads.push((cursor_x, cursor_y, 1.5, 13.0, [0.80, 0.80, 0.85, 1.0]));
                         }
                     }
                 }
             } else if p.2 == "text" {
                 if let Some(tb) = &self.texts[i] {
-                    quads.extend(tb.extra_quads());
+                    param_quads.extend(tb.extra_quads());
                 }
             } else if p.2.starts_with("choice") {
                 if let Some(d) = &self.choices[i] {
-                    quads.extend(d.extra_quads());
+                    param_quads.extend(d.extra_quads());
                 }
             } else if p.2 == "button" {
                 if let Some(b) = &self.buttons[i] {
-                    quads.extend(b.extra_quads());
+                    param_quads.extend(b.extra_quads());
                 }
             } else if p.2.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
-                    quads.push((sb.base.x, sb.base.y, sb.base.w, sb.base.h, sb.color()));
-                    quads.extend(sb.extra_quads());
+                    param_quads.push((sb.base.x, sb.base.y, sb.base.w, sb.base.h, sb.color()));
+                    param_quads.extend(sb.extra_quads());
                 }
             } else if p.2 == "toggle" || p.2 == "checkbox" {
                 if let Some(cb) = &self.checkboxes[i] {
-                    quads.extend(cb.extra_quads());
+                    param_quads.extend(cb.extra_quads());
                 }
             } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                 if let Some(c) = &self.colors[i] {
-                    quads.extend(c.extra_quads());
+                    param_quads.extend(c.extra_quads());
                 }
             }
         }
@@ -1223,8 +1420,38 @@ impl Element for ParametersBg {
         for &child_ptr in &self.children {
             let child = unsafe { &*child_ptr };
             if child.visible() {
-                quads.extend(collect_child_quads(child));
+                param_quads.extend(collect_child_quads(child));
             }
+        }
+
+        // Clip all parameter quads vertically
+        for q in param_quads {
+            if let Some(clipped) = clip_quad(q) {
+                quads.push(clipped);
+            }
+        }
+
+        // Draw Scrollbar (unclipped) if content_h > base.h
+        if self.content_h > self.base.h {
+            let sb_w = crate::layout::scrollbar_width();
+            let sb_x = self.base.x + self.base.w - sb_w - 4.0;
+            let sb_track_h = self.base.h - 8.0;
+            let sb_track_y = self.base.y + 4.0;
+
+            // Track
+            quads.push((sb_x, sb_track_y, sb_w, sb_track_h, crate::color::scrollbar_track_color()));
+
+            // Thumb
+            let visible_ratio = self.base.h / self.content_h;
+            let thumb_h = if sb_track_h <= 20.0 {
+                sb_track_h
+            } else {
+                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+            };
+            let max_scroll = self.content_h - self.base.h;
+            let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+            let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
+            quads.push((sb_x, thumb_y, sb_w, thumb_h, crate::color::scrollbar_thumb_color()));
         }
 
         quads
@@ -1247,7 +1474,14 @@ impl Element for ParametersBg {
         if !self.visible {
             return Vec::new();
         }
-        let mut labels = self.own_text_labels();
+        let view_min = self.base.y + 4.0;
+        let view_max = self.base.y + self.base.h - 4.0;
+        let mut labels = Vec::new();
+        for l in self.own_text_labels() {
+            if l.y >= view_min - 20.0 && l.y <= view_max + 20.0 {
+                labels.push(l);
+            }
+        }
         for &child_ptr in &self.children {
             let widget = unsafe { &*child_ptr };
             labels.extend(widget.text_labels());
@@ -1259,17 +1493,28 @@ impl Element for ParametersBg {
         if !self.visible {
             return Vec::new();
         }
+        let view_min = self.base.y + 4.0;
+        let view_max = self.base.y + self.base.h - 4.0;
         let mut result = Vec::new();
         let font = self.widget_font();
         let rects = self.get_param_rects();
         for l in self.own_text_labels() {
-            let mut bounds = None;
+            if l.y < view_min - 20.0 || l.y > view_max + 20.0 {
+                continue;
+            }
+            let mut bounds = Some([self.base.x + 4.0, view_min, self.base.x + self.base.w - 4.0, view_max]);
             let mut label_font = font.clone();
             for (i, p) in self.display_params.iter().enumerate() {
                 if p.2 == "code" {
                     let r = rects[i];
                     if l.y >= r.1 + 18.0 && l.y <= r.1 + r.3 {
-                        bounds = Some([r.0 + 1.0, r.1 + 19.0, r.0 + r.2 - 1.0, r.1 + r.3 - 1.0]);
+                        let code_min = (r.1 + 19.0).max(view_min);
+                        let code_max = (r.1 + r.3 - 1.0).min(view_max);
+                        if code_min < code_max {
+                            bounds = Some([r.0 + 1.0, code_min, r.0 + r.2 - 1.0, code_max]);
+                        } else {
+                            bounds = Some([0.0, 0.0, 0.0, 0.0]); // hidden
+                        }
                         label_font = Some("monospace".to_string());
                         break;
                     }
@@ -1381,6 +1626,7 @@ impl ParamController for ParametersBg {
         }
 
         if layout_changed {
+            self.scroll_y = 0.0;
             self.display_params = params.to_vec();
             self.focused_param = None;
             self.sliders = self.display_params.iter().map(|p| {
@@ -1507,6 +1753,9 @@ impl ParamController for ParametersBg {
                 }
             }
         }
+        self.content_h = self.get_total_content_height();
+        let max_scroll = (self.content_h - self.base.h).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
         self.update_slider_rects();
     }
 }
