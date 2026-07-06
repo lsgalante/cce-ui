@@ -346,7 +346,7 @@ impl Element for Button {
         if self.kind == ButtonKind::ListRow {
             Some(crate::layout::list_font())
         } else {
-            Some(crate::layout::control_label_font())
+            Some(crate::layout::button_font())
         }
     }
 

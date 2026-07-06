@@ -70,6 +70,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.button.padding" => "button_padding",
                 "style.control.button.height" => "button_height",
                 "style.control.button.corner_radius" => "button_corner_radius",
+                "style.control.button.font" => "button_font",
                 "style.list.corner_radius" | "style.data.list.corner_radius" => "list_corner_radius",
                 "style.control.textbox.corner_radius" | "style.textbox.corner_radius" | "style.data.textbox.corner_radius" => "textbox_corner_radius",
                 "style.control.dropdown.color" => "dropdown_color",
@@ -249,6 +250,7 @@ static STATUSBAR_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
 static NESTED_SECTION_LABEL_FONT: RwLock<String> = RwLock::new(String::new());
 static BREADCRUMB_FONT: RwLock<String> = RwLock::new(String::new());
+static BUTTON_FONT: RwLock<String> = RwLock::new(String::new());
 
 static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
 static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
@@ -732,6 +734,14 @@ pub fn reload_config() {
                 let rest = mod_rest(rest);
                 let font = rest.trim().to_string();
                 if let Ok(mut lock) = BREADCRUMB_FONT.write() {
+                    *lock = font;
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("button_font") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                let rest = mod_rest(rest);
+                let font = rest.trim().to_string();
+                if let Ok(mut lock) = BUTTON_FONT.write() {
                     *lock = font;
                 }
             }
@@ -2403,6 +2413,44 @@ pub fn breadcrumb_font() -> String {
 
 pub fn set_breadcrumb_font(font: &str) {
     if let Ok(mut lock) = BREADCRUMB_FONT.write() {
+        *lock = font.to_string();
+    }
+}
+
+pub fn button_font() -> String {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let mut font = "Outfit".to_string();
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("button_font") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = rest.trim();
+                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
+                        &rest[1..rest.len() - 1]
+                    } else {
+                        rest
+                    };
+                    font = val_str.trim().to_string();
+                }
+            }
+        }
+        if let Ok(mut lock) = BUTTON_FONT.write() {
+            *lock = font;
+        }
+    });
+    let lock = BUTTON_FONT.read().unwrap();
+    if lock.is_empty() {
+        "Outfit".to_string()
+    } else {
+        lock.clone()
+    }
+}
+
+pub fn set_button_font(font: &str) {
+    if let Ok(mut lock) = BUTTON_FONT.write() {
         *lock = font.to_string();
     }
 }
