@@ -597,6 +597,39 @@ pub fn get_kdl_type_annotation(kdl_content: &str, key_path: &str) -> Option<Stri
     }
 }
 
+pub fn get_kdl_type_annotations(kdl_content: &str, key_paths: &[String]) -> Vec<Option<String>> {
+    let doc = match kdl_content.parse::<kdl::KdlDocument>() {
+        Ok(d) => Some(d),
+        Err(_) => None,
+    };
+    key_paths.iter().map(|key_path| {
+        let doc = doc.as_ref()?;
+        let parts: Vec<&str> = key_path.split('.').collect();
+        if parts.is_empty() {
+            return None;
+        }
+
+        let is_property = parts.len() >= 2 && PROP_NODES.contains(&parts[parts.len() - 2]);
+
+        let (node_path, target_prop) = if is_property {
+            (&parts[0..parts.len() - 1], Some(parts[parts.len() - 1].to_string()))
+        } else {
+            (&parts[0..parts.len()], None)
+        };
+
+        let child_node = get_node_ref(doc, node_path)?;
+
+        if let Some(prop_name) = target_prop {
+            let entry = child_node.entries().iter().find(|e| e.name().map(|n| n.value()) == Some(&prop_name))?;
+            entry.ty().map(|t| t.value().to_string())
+        } else {
+            let entry = child_node.entries().first()?;
+            entry.ty().map(|t| t.value().to_string())
+        }
+    }).collect()
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,6 +659,17 @@ mod tests {
         
         let ty2 = get_kdl_type_annotation(content, "input.touchpad.gestures.pinch");
         assert_eq!(ty2, Some("bool".to_string()));
+
+        let keys = vec![
+            "input.accel_profile".to_string(),
+            "input.touchpad.gestures.pinch".to_string(),
+            "input.invalid_key".to_string(),
+        ];
+        let tys = get_kdl_type_annotations(content, &keys);
+        assert_eq!(tys.len(), 3);
+        assert_eq!(tys[0], Some("menu:flat,adaptive,none,custom".to_string()));
+        assert_eq!(tys[1], Some("bool".to_string()));
+        assert_eq!(tys[2], None);
     }
 
     #[test]
