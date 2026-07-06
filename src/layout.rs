@@ -3398,6 +3398,64 @@ pub fn render_popovers(pc: &mut dyn RenderTarget, ctx: &UiContext) {
     }
 }
 
+pub fn partition_concentric_corners(
+    x: f32, y: f32, w: f32, h: f32,
+    _r_std: f32,
+    r_adjust: [f32; 4],
+    color: [f32; 4],
+) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+    let mut quads = Vec::new();
+
+    let r0 = r_adjust[0];
+    let r1 = r_adjust[1];
+    let r2 = r_adjust[2];
+    let r3 = r_adjust[3];
+
+    let max_left = r0.max(r3);
+    let max_right = r1.max(r2);
+
+    let mut push_valid_quad = |qx: f32, qy: f32, qw: f32, qh: f32, qr: f32, qcorners: (bool, bool, bool, bool)| {
+        if qw > 0.001 && qh > 0.001 {
+            quads.push((qx, qy, qw, qh, qr, color, qcorners));
+        }
+    };
+
+    // 1. Center vertical block
+    push_valid_quad(x + max_left, y, w - max_left - max_right, h, 0.0, (false, false, false, false));
+
+    // 2. Left block
+    push_valid_quad(x, y + r0, max_left, h - r0 - r3, 0.0, (false, false, false, false));
+
+    // 3. Top-left transition
+    push_valid_quad(x + r0, y, max_left - r0, r0, 0.0, (false, false, false, false));
+
+    // 4. Bottom-left transition
+    push_valid_quad(x + r3, y + h - r3, max_left - r3, r3, 0.0, (false, false, false, false));
+
+    // 5. Right block
+    push_valid_quad(x + w - max_right, y + r1, max_right, h - r1 - r2, 0.0, (false, false, false, false));
+
+    // 6. Top-right transition
+    push_valid_quad(x + w - max_right, y, max_right - r1, r1, 0.0, (false, false, false, false));
+
+    // 7. Bottom-right transition
+    push_valid_quad(x + w - max_right, y + h - r2, max_right - r2, r2, 0.0, (false, false, false, false));
+
+    // 8. Corner 0 (top-left)
+    push_valid_quad(x, y, r0, r0, r0, (true, false, false, false));
+
+    // 9. Corner 1 (top-right)
+    push_valid_quad(x + w - r1, y, r1, r1, r1, (false, true, false, false));
+
+    // 10. Corner 2 (bottom-right)
+    push_valid_quad(x + w - r2, y + h - r2, r2, r2, r2, (false, false, true, false));
+
+    // 11. Corner 3 (bottom-left)
+    push_valid_quad(x, y + h - r3, r3, r3, r3, (false, false, false, true));
+
+    quads
+}
+
 pub struct UiFrame;
 
 impl UiFrame {
@@ -5104,6 +5162,48 @@ pub fn get_system_sans_serif_font() -> &'static str {
         }
         "sans-serif".to_string()
     })
+}
+
+pub fn parse_font_for_alias(content: &str, alias: &str) -> Option<String> {
+    let lines: Vec<&str> = content.lines().collect();
+    for i in 0..lines.len() {
+        let line = lines[i].trim();
+        if line.contains("<test") && line.contains("name=\"family\"") && line.contains(&format!("<string>{}</string>", alias)) {
+            for j in (i + 1)..(i + 6).min(lines.len()) {
+                let next_line = lines[j].trim();
+                if next_line.contains("<edit") {
+                    for k in (j + 1)..(j + 6).min(lines.len()) {
+                        let str_line = lines[k].trim();
+                        if str_line.contains("<string>") && str_line.contains("</string>") {
+                            if let Some(start) = str_line.find("<string>") {
+                                if let Some(end) = str_line.find("</string>") {
+                                    let font = &str_line[start + 8..end];
+                                    return Some(font.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn read_preferred_fonts() -> (String, String, String, String, String, String, String) {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
+    let path = std::path::Path::new(&home).join(".config/fontconfig/fonts.conf");
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    
+    let sans = parse_font_for_alias(&content, "sans-serif").unwrap_or_else(|| "Noto Sans".to_string());
+    let serif = parse_font_for_alias(&content, "serif").unwrap_or_else(|| "Noto Serif".to_string());
+    let mono = parse_font_for_alias(&content, "monospace").unwrap_or_else(|| "Noto Sans Mono".to_string());
+    let borders = parse_font_for_alias(&content, "window-borders").unwrap_or_else(|| "Noto Sans".to_string());
+    let status = parse_font_for_alias(&content, "status-interface").unwrap_or_else(|| "Noto Sans".to_string());
+    let fuzzel_font = parse_font_for_alias(&content, "fuzzel").unwrap_or_else(|| "Noto Sans".to_string());
+    let term = parse_font_for_alias(&content, "terminal").unwrap_or_else(|| "Noto Sans Mono".to_string());
+    
+    (sans, serif, mono, borders, status, fuzzel_font, term)
 }
 
 impl crate::widget::ContainerLayout for FlexLayout {

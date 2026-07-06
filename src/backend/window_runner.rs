@@ -64,8 +64,26 @@ struct BufferCacheKey {
     is_vertical: bool,
 }
 
+#[derive(Clone)]
+struct CachedBuffer {
+    buffer: Buffer,
+    last_accessed: std::time::Instant,
+}
+
 std::thread_local! {
-    static BUFFER_CACHE: std::cell::RefCell<std::collections::HashMap<BufferCacheKey, Buffer>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    static BUFFER_CACHE: std::cell::RefCell<std::collections::HashMap<BufferCacheKey, CachedBuffer>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+fn find_cased_family(fs: &FontSystem, name: &str) -> Option<String> {
+    let lower_name = name.to_lowercase();
+    for face in fs.db().faces() {
+        for (family, _) in &face.families {
+            if family.to_lowercase() == lower_name {
+                return Some(family.clone());
+            }
+        }
+    }
+    None
 }
 
 pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
@@ -92,7 +110,13 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
     };
 
     let cached = BUFFER_CACHE.with(|cache| {
-        cache.borrow().get(&key).cloned()
+        let mut cache = cache.borrow_mut();
+        if let Some(cached_item) = cache.get_mut(&key) {
+            cached_item.last_accessed = std::time::Instant::now();
+            Some(cached_item.buffer.clone())
+        } else {
+            None
+        }
     });
 
     if let Some(buf) = cached {
@@ -107,15 +131,97 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
     let metrics = Metrics::new(physical_size, line_height);
     let mut buf = Buffer::new(fs, metrics);
     let mut attrs = Attrs::new();
+
+    let (sans_fallback, serif_fallback, mono_fallback, _, _, _, _) = crate::layout::read_preferred_fonts();
+
+    let resolved_storage = family_name.as_deref().and_then(|font_name| match font_name {
+        "monospace" if !mono_fallback.is_empty() => find_cased_family(fs, &mono_fallback),
+        "sans-serif" if !sans_fallback.is_empty() => find_cased_family(fs, &sans_fallback),
+        "serif" if !serif_fallback.is_empty() => find_cased_family(fs, &serif_fallback),
+        _ => None,
+    });
+
+    let resolved_mono = if !mono_fallback.is_empty() {
+        find_cased_family(fs, &mono_fallback)
+    } else {
+        None
+    };
+
+    let resolved_sans = if !sans_fallback.is_empty() {
+        find_cased_family(fs, &sans_fallback)
+    } else {
+        None
+    };
+
     let family = if let Some(ref font_family) = family_name {
         match font_family.as_str() {
-            "monospace" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
-            "sans-serif" => glyphon::Family::Name(crate::layout::get_system_monospace_font()),
-            "serif" => glyphon::Family::Serif,
+            "monospace" => {
+                if !mono_fallback.is_empty() {
+                    if let Some(ref cased) = resolved_storage {
+                        glyphon::Family::Name(cased)
+                    } else {
+                        glyphon::Family::Name(&mono_fallback)
+                    }
+                } else {
+                    glyphon::Family::Name(crate::layout::get_system_monospace_font())
+                }
+            }
+            "sans-serif" => {
+                if !sans_fallback.is_empty() {
+                    if let Some(ref cased) = resolved_storage {
+                        glyphon::Family::Name(cased)
+                    } else {
+                        if !mono_fallback.is_empty() {
+                            if let Some(ref cased_mono) = resolved_mono {
+                                glyphon::Family::Name(cased_mono)
+                            } else {
+                                glyphon::Family::Name(&mono_fallback)
+                            }
+                        } else {
+                            glyphon::Family::Name(crate::layout::get_system_monospace_font())
+                        }
+                    }
+                } else {
+                    glyphon::Family::SansSerif
+                }
+            }
+            "serif" => {
+                if !serif_fallback.is_empty() {
+                    if let Some(ref cased) = resolved_storage {
+                        glyphon::Family::Name(cased)
+                    } else {
+                        if !mono_fallback.is_empty() {
+                            if let Some(ref cased_mono) = resolved_mono {
+                                glyphon::Family::Name(cased_mono)
+                            } else {
+                                glyphon::Family::Name(&mono_fallback)
+                            }
+                        } else {
+                            glyphon::Family::Name(crate::layout::get_system_monospace_font())
+                        }
+                    }
+                } else {
+                    glyphon::Family::Serif
+                }
+            }
             name => glyphon::Family::Name(name),
         }
     } else {
-        glyphon::Family::Name(crate::layout::get_system_monospace_font())
+        if !sans_fallback.is_empty() {
+            if let Some(ref cased) = resolved_sans {
+                glyphon::Family::Name(cased)
+            } else if !mono_fallback.is_empty() {
+                if let Some(ref cased_mono) = resolved_mono {
+                    glyphon::Family::Name(cased_mono)
+                } else {
+                    glyphon::Family::Name(&mono_fallback)
+                }
+            } else {
+                glyphon::Family::Name(crate::layout::get_system_monospace_font())
+            }
+        } else {
+            glyphon::Family::Name(crate::layout::get_system_monospace_font())
+        }
     };
     attrs = attrs.family(family);
     buf.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
@@ -123,10 +229,20 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
 
     BUFFER_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if cache.len() > 2000 {
-            cache.clear();
+        if cache.len() >= 2000 {
+            let mut items: Vec<(BufferCacheKey, std::time::Instant)> = cache
+                .iter()
+                .map(|(k, v)| (k.clone(), v.last_accessed))
+                .collect();
+            items.sort_by_key(|&(_, time)| time);
+            for (k, _) in items.iter().take(100) {
+                cache.remove(k);
+            }
         }
-        cache.insert(key, buf.clone());
+        cache.insert(key, CachedBuffer {
+            buffer: buf.clone(),
+            last_accessed: std::time::Instant::now(),
+        });
     });
 
     buf

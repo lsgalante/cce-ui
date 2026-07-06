@@ -14,6 +14,7 @@ pub struct Dropdown {
     pub font_family: String,
     pub custom_display_text: Option<String>,
     pub open_upward: Option<bool>,
+    pub auto_width: bool,
 }
 
 impl Dropdown {
@@ -30,6 +31,7 @@ impl Dropdown {
             font_family: "sans-serif".to_string(),
             custom_display_text: None,
             open_upward: None,
+            auto_width: false,
         }
     }
 
@@ -69,18 +71,27 @@ impl Dropdown {
         changed
     }
 
-    pub fn popover_width(&self) -> f32 {
-        let mut w = self.base.w;
+    pub fn with_auto_width(mut self, auto_width: bool) -> Self {
+        self.auto_width = auto_width;
+        self
+    }
+
+    pub fn content_width(&self) -> f32 {
         let font_setting = crate::layout::control_label_font_detached();
         let (font_family, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
+        let mut max_w = 0.0f32;
         for opt in &self.options {
             let opt_w = crate::widget::display::measure_text_width(opt, &font_family, font_size) + 32.0;
-            if opt_w > w {
-                w = opt_w;
+            if opt_w > max_w {
+                max_w = opt_w;
             }
         }
-        w
+        max_w
+    }
+
+    pub fn popover_width(&self) -> f32 {
+        self.base.w.max(self.content_width())
     }
 
     pub fn get_popover_geom(&self) -> (f32, f32, f32, f32) {
@@ -268,6 +279,21 @@ impl Element for Dropdown {
         [0.0, 0.0, 0.0, 0.0]
     }
 
+    fn measure(&self, constraints: LayoutConstraints, _ctx: &UiContext) -> Size {
+        let (_, _, w, h) = self.rect();
+        let pref_w = if self.auto_width {
+            self.content_width()
+        } else {
+            w
+        };
+        let pref_h = self.preferred_height().unwrap_or(h);
+        
+        let width = pref_w.clamp(constraints.min_width, constraints.max_width);
+        let height = pref_h.clamp(constraints.min_height, constraints.max_height);
+        
+        Size { width, height }
+    }
+
     fn preferred_height(&self) -> Option<f32> {
         Some(crate::layout::dropdown_height())
     }
@@ -308,11 +334,70 @@ impl Element for Dropdown {
             let x = self.base.x + label_x;
             let w = self.base.w - label_x;
 
-            // Draw border
-            quads.push((x, self.base.y + top, w, visual_h, radius, border_color, (r1, r2, r3, r4)));
-            // Draw background (slightly inset to show border)
+            // Draw border and background (with potential parent-concentric corner adjustment)
             let inner_radius = (radius - 1.0).max(0.0);
-            quads.push((x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0, inner_radius, bg_color, (r1, r2, r3, r4)));
+            let mut adjusted = false;
+            let mut outer_radii = [radius; 4];
+            let mut inner_radii = [inner_radius; 4];
+
+            let mut curr = self.parent(ctx);
+            let mut backplate_ptr = None;
+            while let Some(ptr) = curr {
+                if unsafe { (*ptr).is_backplate() } {
+                    backplate_ptr = Some(ptr);
+                    break;
+                }
+                curr = unsafe { (*ptr).parent(ctx) };
+            }
+
+            if let Some(bp) = backplate_ptr {
+                let (px, py, pw, ph) = unsafe { (*bp).rect() };
+                let pr = unsafe { (*bp).corner_radius() };
+                let (pr1, pr2, pr3, pr4) = unsafe { (*bp).rounded_corners() };
+
+                let g_left = x - px;
+                let g_top = (self.base.y + top) - py;
+                let g_right = (px + pw) - (x + w);
+                let g_bottom = (py + ph) - ((self.base.y + top) + visual_h);
+
+                if pr1 && (g_left - g_top).abs() < 1.0 && g_left >= 0.0 {
+                    outer_radii[0] = (pr - g_left).max(0.0);
+                    inner_radii[0] = (outer_radii[0] - 1.0).max(0.0);
+                    adjusted = true;
+                }
+                if pr2 && (g_right - g_top).abs() < 1.0 && g_right >= 0.0 {
+                    outer_radii[1] = (pr - g_right).max(0.0);
+                    inner_radii[1] = (outer_radii[1] - 1.0).max(0.0);
+                    adjusted = true;
+                }
+                if pr3 && (g_right - g_bottom).abs() < 1.0 && g_right >= 0.0 {
+                    outer_radii[2] = (pr - g_right).max(0.0);
+                    inner_radii[2] = (outer_radii[2] - 1.0).max(0.0);
+                    adjusted = true;
+                }
+                if pr4 && (g_left - g_bottom).abs() < 1.0 && g_left >= 0.0 {
+                    outer_radii[3] = (pr - g_left).max(0.0);
+                    inner_radii[3] = (outer_radii[3] - 1.0).max(0.0);
+                    adjusted = true;
+                }
+            }
+
+            if adjusted {
+                let border_quads = crate::layout::partition_concentric_corners(
+                    x, self.base.y + top, w, visual_h,
+                    radius, outer_radii, border_color
+                );
+                quads.extend(border_quads);
+
+                let bg_quads = crate::layout::partition_concentric_corners(
+                    x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0,
+                    inner_radius, inner_radii, bg_color
+                );
+                quads.extend(bg_quads);
+            } else {
+                quads.push((x, self.base.y + top, w, visual_h, radius, border_color, (r1, r2, r3, r4)));
+                quads.push((x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0, inner_radius, bg_color, (r1, r2, r3, r4)));
+            }
         }
         for &child_ptr in &self.children(ctx) {
             let widget = unsafe { &*child_ptr };
@@ -866,6 +951,21 @@ mod tests {
         ];
         assert_eq!(first_char.color, expected_color);
         assert_ne!(last_char.color, expected_color); // color has shifted towards background
+    }
+
+    #[test]
+    fn test_dropdown_auto_width() {
+        let dummy = crate::context::UiContext::new();
+        let options = vec!["Short".to_string(), "A much longer option name".to_string()];
+        let mut dd = Dropdown::new(options, 0).with_auto_width(true);
+        dd.set_rect(10.0, 10.0, 50.0, 24.0);
+
+        let size = dd.measure(LayoutConstraints::new(0.0, 500.0, 24.0, 24.0), &dummy);
+        assert!(size.width > 50.0, "Measured auto-width {} should be greater than original width 50.0", size.width);
+        
+        let dd_no_auto = Dropdown::new(vec!["Short".to_string(), "A much longer option name".to_string()], 0);
+        let size_no_auto = dd_no_auto.measure(LayoutConstraints::new(0.0, 500.0, 24.0, 24.0), &dummy);
+        assert_eq!(size_no_auto.width, 0.0);
     }
 }
 
