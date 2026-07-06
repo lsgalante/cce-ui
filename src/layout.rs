@@ -309,7 +309,7 @@ static TEXTBOX_MULTILINE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
 
 
 /// Standard line height multiplier for text layout in cce-ui.
-pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
+pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.0;
 
 /// Standard line height based on font size.
 pub fn line_height(font_size: f32) -> f32 {

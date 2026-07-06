@@ -102,7 +102,7 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
     let line_height = if is_vertical {
         physical_size * 1.05
     } else {
-        physical_size * 1.4
+        physical_size * 1.0
     };
     let metrics = Metrics::new(physical_size, line_height);
     let mut buf = Buffer::new(fs, metrics);

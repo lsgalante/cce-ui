@@ -401,7 +401,7 @@ fn make_text_buffer_with_font(font_system: &mut FontSystem, text: &str, size: f3
         return buf;
     }
 
-    let metrics = Metrics::new(physical_size, physical_size * 1.4);
+    let metrics = Metrics::new(physical_size, physical_size * 1.0);
     let mut buffer = Buffer::new(font_system, metrics);
     let mut attrs = Attrs::new();
     if let Some(font_name) = family_name.as_deref() {
