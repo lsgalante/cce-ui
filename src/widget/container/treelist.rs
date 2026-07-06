@@ -161,6 +161,10 @@ pub struct TreeList {
     pub base: Widget,
     pub scroll_box: ScrollBox,
     pub search_box: TextBox,
+    pub add_key_btn: Button,
+    pub add_key_popover_open: bool,
+    pub add_key_popover_box: TextBox,
+    pub new_key_path_request: Option<String>,
     pub flat_keys: Vec<(String, serde_json::Value)>,
     pub annotations: Vec<Option<String>>,
     pub collapsed_sections: HashSet<String>,
@@ -189,6 +193,10 @@ impl TreeList {
             base: Widget::new(),
             scroll_box,
             search_box: TextBox::new(String::new()).with_placeholder("Search...").with_update_on_type(true),
+            add_key_btn: Button::new(0.0, 0.0, 80.0, 26.0).with_label("+ Add Key"),
+            add_key_popover_open: false,
+            add_key_popover_box: TextBox::new(String::new()).with_placeholder("new.key.path").with_multiline(false),
+            new_key_path_request: None,
             flat_keys: Vec::new(),
             annotations: Vec::new(),
             collapsed_sections: HashSet::new(),
@@ -208,6 +216,19 @@ impl TreeList {
             double_click_timer: None,
             rename_request: None,
         }
+    }
+
+    pub fn take_new_key_path_request(&mut self) -> Option<String> {
+        self.new_key_path_request.take()
+    }
+
+    pub fn popover_rect_geom(&self) -> (f32, f32, f32, f32) {
+        let (bx, by, bw, bh) = self.add_key_btn.rect();
+        let popover_w = 220.0;
+        let popover_h = 36.0;
+        let popover_x = bx + bw - popover_w;
+        let popover_y = by + bh + 4.0;
+        (popover_x, popover_y, popover_w, popover_h)
     }
 
     pub fn focus_search(&mut self, ctx: &mut UiContext) {
@@ -350,7 +371,15 @@ impl Element for TreeList {
         let search_h = 26.0;
         let offset_y = search_h + 2.0 * search_margin_y;
         
-        self.search_box.set_rect(x + search_margin_x, y + search_margin_y, w - 2.0 * search_margin_x, search_h);
+        let button_width = 80.0;
+        let button_height = search_h;
+        let button_x = x + w - search_margin_x - button_width;
+        
+        self.search_box.set_rect(x + search_margin_x, y + search_margin_y, w - 2.0 * search_margin_x - button_width - 6.0, search_h);
+        self.add_key_btn.set_rect(button_x, y + search_margin_y, button_width, button_height);
+        
+        let (px, py, pw, ph) = self.popover_rect_geom();
+        self.add_key_popover_box.set_rect(px + 8.0, py + 5.0, pw - 16.0, ph - 10.0);
         
         let header_h = 26.0;
         self.scroll_box.set_rect(x, y + offset_y + header_h, w, h - offset_y - header_h);
@@ -383,10 +412,17 @@ impl Element for TreeList {
     fn focus(&mut self) {
         focus::set_focused(self);
     }
-    fn unfocus(&mut self) {}
+    fn unfocus(&mut self) {
+        self.add_key_popover_open = false;
+        self.add_key_popover_box.unfocus();
+    }
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         self.search_box.prepare_text(fs);
+        self.add_key_btn.prepare_text(fs);
+        if self.add_key_popover_open {
+            self.add_key_popover_box.prepare_text(fs);
+        }
         self.scroll_box.prepare_text(fs);
         if self.editing_key_idx.is_some() {
             self.edit_box.prepare_text(fs);
@@ -409,9 +445,51 @@ impl Element for TreeList {
             return false;
         }
 
-        let mut changed = self.scroll_box.mouse_input(button, state, px, py, ctx);
+        let mut changed = false;
+
+        if self.add_key_popover_open {
+            let (px_rect, py_rect, pw, ph) = self.popover_rect_geom();
+            if button == MouseButton::Left && state == ElementState::Pressed {
+                if px < px_rect || px > px_rect + pw || py < py_rect || py > py_rect + ph {
+                    self.add_key_popover_open = false;
+                    ctx.clear_focus();
+                    changed = true;
+                } else {
+                    if self.add_key_popover_box.mouse_input(button, state, px, py, ctx) {
+                        ctx.set_focused(&mut self.add_key_popover_box);
+                        changed = true;
+                    }
+                }
+            }
+            let (px_rect, py_rect, pw, ph) = self.popover_rect_geom();
+            if px >= px_rect && px <= px_rect + pw && py >= py_rect && py <= py_rect + ph {
+                return true;
+            }
+        }
+
+        if self.scroll_box.mouse_input(button, state, px, py, ctx) {
+            changed = true;
+        }
         if self.search_box.mouse_input(button, state, px, py, ctx) {
             ctx.set_focused(&mut self.search_box);
+            changed = true;
+        }
+        if self.add_key_btn.mouse_input(button, state, px, py, ctx) {
+            if self.add_key_btn.take_click() {
+                self.add_key_popover_open = !self.add_key_popover_open;
+                if self.add_key_popover_open {
+                    self.add_key_popover_box.text.clear();
+                    self.add_key_popover_box.edit_buffer.clear();
+                    self.add_key_popover_box.cursor_idx = 0;
+                    self.add_key_popover_box.select_anchor = None;
+                    self.add_key_popover_box.all_selected = false;
+                    self.add_key_popover_box.editing = true;
+                    ctx.set_focused(&mut self.add_key_popover_box);
+                    self.add_key_popover_box.focus();
+                } else {
+                    ctx.clear_focus();
+                }
+            }
             changed = true;
         }
         self.check_scroll_activity(ctx);
@@ -562,6 +640,14 @@ impl Element for TreeList {
         if self.search_box.on_cursor_moved(px, py, ctx) {
             changed = true;
         }
+        if self.add_key_btn.on_cursor_moved(px, py, ctx) {
+            changed = true;
+        }
+        if self.add_key_popover_open {
+            if self.add_key_popover_box.on_cursor_moved(px, py, ctx) {
+                changed = true;
+            }
+        }
 
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
@@ -616,6 +702,23 @@ impl Element for TreeList {
         let mut changed = false;
         if self.search_box.tick(dt, ctx) {
             changed = true;
+        }
+        if self.add_key_btn.tick(dt, ctx) {
+            changed = true;
+        }
+        if self.add_key_popover_open {
+            if self.add_key_popover_box.tick(dt, ctx) {
+                changed = true;
+            }
+            if !self.add_key_popover_box.editing {
+                let path = self.add_key_popover_box.text.trim().to_string();
+                if !path.is_empty() {
+                    self.new_key_path_request = Some(path);
+                }
+                self.add_key_popover_open = false;
+                ctx.clear_focus();
+                changed = true;
+            }
         }
         if self.search_box.take_change() {
             self.rebuild_tree();
@@ -677,6 +780,11 @@ impl Element for TreeList {
     fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
         if self.editing_key_idx.is_some() {
             if self.edit_box.keyboard_input(event, ctx) {
+                return true;
+            }
+        }
+        if self.add_key_popover_open {
+            if self.add_key_popover_box.keyboard_input(event, ctx) {
                 return true;
             }
         }
@@ -1034,6 +1142,10 @@ impl Element for TreeList {
         }).collect::<Vec<_>>();
 
         labels.extend(self.search_box.text_labels_with_font_and_bounds(ctx));
+        labels.extend(self.add_key_btn.text_labels_with_font_and_bounds(ctx));
+        if self.add_key_popover_open {
+            labels.extend(self.add_key_popover_box.text_labels_with_font_and_bounds(ctx));
+        }
         labels
     }
 
@@ -1052,6 +1164,18 @@ impl Element for TreeList {
                 ctx.register_widget(sb_id, sb_ptr);
                 ctx.link_ids(self_id, sb_id);
                 (*sb_ptr).set_parent(Some(self_ptr), ctx);
+
+                let btn_ptr = &mut (*self_ptr).add_key_btn as *mut Button as *mut (dyn Element + 'static);
+                let btn_id = (*self_ptr).add_key_btn.base().unwrap().id();
+                ctx.register_widget(btn_id, btn_ptr);
+                ctx.link_ids(self_id, btn_id);
+                (*btn_ptr).set_parent(Some(self_ptr), ctx);
+
+                let pop_ptr = &mut (*self_ptr).add_key_popover_box as *mut TextBox as *mut (dyn Element + 'static);
+                let pop_id = (*self_ptr).add_key_popover_box.base().unwrap().id();
+                ctx.register_widget(pop_id, pop_ptr);
+                ctx.link_ids(self_id, pop_id);
+                (*pop_ptr).set_parent(Some(self_ptr), ctx);
             }
         }
     }
@@ -1061,6 +1185,10 @@ impl Element for TreeList {
         let self_ptr = self as *const Self as *mut Self;
         unsafe {
             list.push(&mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static));
+            list.push(&mut (*self_ptr).add_key_btn as *mut Button as *mut (dyn Element + 'static));
+            if (*self_ptr).add_key_popover_open {
+                list.push(&mut (*self_ptr).add_key_popover_box as *mut TextBox as *mut (dyn Element + 'static));
+            }
             if (*self_ptr).editing_key_idx.is_some() {
                 list.push(&mut (*self_ptr).edit_box as *mut TextBox as *mut (dyn Element + 'static));
             }
@@ -1362,6 +1490,33 @@ impl Element for TreeList {
             });
         }
         self.right_clicked_section = None;
+    }
+
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        if self.add_key_popover_open {
+            Some(self.popover_rect_geom())
+        } else {
+            None
+        }
+    }
+
+    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        if !self.add_key_popover_open { return; }
+        
+        let (rx, ry, rw, rh) = self.popover_rect_geom();
+        
+        // 1. Soft layered drop shadows
+        pc.rect([0.02, 0.02, 0.05, 0.15], rx + 1.0, ry + 1.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.08], rx + 3.0, ry + 3.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.04], rx + 5.0, ry + 5.0, rw, rh);
+
+        let theme = crate::color::active_theme();
+
+        // 2. High-contrast premium outer border
+        pc.rect(theme.surface_border, rx, ry, rw, rh);
+        
+        // 3. Frosted glass background
+        pc.rect(theme.surface_bg, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0); // bg
     }
 }
 
