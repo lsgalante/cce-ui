@@ -714,7 +714,8 @@ impl Element for Dropdown {
 
             let char_mid_x = cur_x + c_w / 2.0;
             let mut skip_char = false;
-            let color = if char_mid_x > fade_start_x {
+            let text_end_x = start_x + total_advance;
+            let color = if text_end_x > right_limit && char_mid_x > fade_start_x {
                 let factor = ((char_mid_x - fade_start_x) / (right_limit - fade_start_x)).clamp(0.0, 1.0);
                 if factor >= 0.9 {
                     skip_char = true;
