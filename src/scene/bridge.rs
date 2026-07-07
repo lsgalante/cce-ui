@@ -155,6 +155,14 @@ mod tests {
         (id, ptr)
     }
 
+    /// Register any real `Element` (not just the test `W`) and return its (id, ptr).
+    fn reg_elem(ctx: &mut UiContext, e: &mut dyn Element) -> (WidgetId, ElemPtr) {
+        let ptr = e.as_ptr_mut();
+        let id = e.base().expect("widget has a base").id();
+        ctx.register_widget(id, ptr);
+        (id, ptr)
+    }
+
     fn rect_of(ptr: ElemPtr) -> Rect {
         let (x, y, w, h) = unsafe { (*ptr).rect() };
         Rect { x, y, width: w, height: h }
@@ -258,5 +266,33 @@ mod tests {
         assert_eq!(rect_of(b_ptr), Rect { x: 50.0, y: 0.0, width: 50.0, height: 40.0 });
         // Grandchild untouched — recursion stopped at the opaque pane.
         assert_eq!(rect_of(g_ptr), Rect { x: 1.0, y: 2.0, width: 7.0, height: 7.0 });
+    }
+
+    #[test]
+    fn sizes_real_labels_to_their_text_content() {
+        // End-to-end content sizing with a production widget: real Labels report intrinsic_size
+        // from measured text, and the engine lays them out at those widths.
+        use crate::widget::display::Label;
+        let mut ctx = UiContext::new();
+        let mut root = W::container(Style::row().gap(5.0));
+        let mut short = Label::new("Hi");
+        let mut long = Label::new("A considerably longer label");
+
+        let (root_id, root_ptr) = reg(&mut ctx, &mut root);
+        let (short_id, short_ptr) = reg_elem(&mut ctx, &mut short);
+        let (long_id, long_ptr) = reg_elem(&mut ctx, &mut long);
+        ctx.link_ids(root_id, short_id);
+        ctx.link_ids(root_id, long_id);
+
+        let w_short = short.intrinsic_size().unwrap().width;
+        let w_long = long.intrinsic_size().unwrap().width;
+        assert!(w_short > 0.0 && w_long > w_short, "longer text must measure wider");
+
+        layout_subtree(&ctx, root_ptr, Rect { x: 0.0, y: 0.0, width: 500.0, height: 50.0 });
+
+        // Each label sized to its own text; laid out left-to-right with the gap between them.
+        assert_eq!(rect_of(short_ptr).width, w_short);
+        assert_eq!(rect_of(long_ptr).width, w_long);
+        assert_eq!(rect_of(long_ptr).x, w_short + 5.0);
     }
 }

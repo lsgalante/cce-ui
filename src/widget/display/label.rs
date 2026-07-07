@@ -45,6 +45,17 @@ impl Element for Label {
 
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
 
+    /// Content size for the scene layout engine (Phase 2b). Width is the measured text extent
+    /// (via the FontSystem-free `measure_text_width`); height is one line at this font size.
+    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
+        let (family, _) = crate::layout::control_label_font_parsed();
+        let text = self.base.label.as_deref().unwrap_or("");
+        let width = crate::widget::display::measure_text_width(text, &family, self.font_size);
+        // Match the line-height factor used elsewhere in the toolkit (e.g. text_box).
+        let height = self.font_size * 1.333;
+        Some(crate::scene::layout::Size::new(width, height))
+    }
+
     fn text_labels(&self) -> Vec<TextLabel> {
         vec![TextLabel {
             text: self.base.label.clone().unwrap_or_default(),
