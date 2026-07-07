@@ -299,6 +299,132 @@ impl Element for SplitBox {
         quads
     }
 
+    // SplitBox is a real layout container: aggregate each child's quads and text
+    // (clipped to our bounds), so a self-rendering widget placed inside the split
+    // is drawn through the widget tree rather than needing to be rendered manually.
+    // Mirrors Backplate's aggregation. A child's own background is emitted through
+    // exactly one path (rounded → all_rounded_quads, otherwise extra_quads), so the
+    // has_rounded guard below prevents a square underlay from doubling a rounded bg.
+    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        let mut quads = self.extra_quads();
+        let (wx, wy, ww, wh) = self.rect();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            let (cx, cy, cw, ch) = widget.rect();
+            let child_has_rounded = widget.rounded_corners() != (false, false, false, false);
+            for (qx, qy, qw, qh, qc) in widget.all_quads(ctx) {
+                if child_has_rounded
+                    && (qx - cx).abs() < 0.1 && (qy - cy).abs() < 0.1
+                    && (qw - cw).abs() < 0.1 && (qh - ch).abs() < 0.1
+                {
+                    continue;
+                }
+                let x0 = qx.max(wx);
+                let y0 = qy.max(wy);
+                let x1 = (qx + qw).min(wx + ww);
+                let y1 = (qy + qh).min(wy + wh);
+                if x1 > x0 && y1 > y0 {
+                    quads.push((x0, y0, x1 - x0, y1 - y0, qc));
+                }
+            }
+        }
+        quads
+    }
+
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        let mut quads = Vec::new();
+        let (wx, wy, ww, wh) = self.rect();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            for (qx, qy, qw, qh, qr, qc, corners) in widget.all_rounded_quads(ctx) {
+                let x0 = qx.max(wx);
+                let y0 = qy.max(wy);
+                let x1 = (qx + qw).min(wx + ww);
+                let y1 = (qy + qh).min(wy + wh);
+                if x1 > x0 && y1 > y0 {
+                    quads.push((x0, y0, x1 - x0, y1 - y0, qr, qc, corners));
+                }
+            }
+        }
+        quads
+    }
+
+    fn text_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            labels.extend(widget.text_labels());
+        }
+        labels
+    }
+
+    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        let mut result = Vec::new();
+        let (wx, wy, ww, wh) = self.rect();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            for (label, bounds) in widget.text_labels_with_bounds(ctx) {
+                let cb = match bounds {
+                    Some(b) => {
+                        let cx0 = b[0].max(wx);
+                        let cy0 = b[1].max(wy);
+                        let cx1 = b[2].min(wx + ww);
+                        let cy1 = b[3].min(wy + wh);
+                        if cx1 > cx0 && cy1 > cy0 {
+                            Some([cx0, cy0, cx1, cy1])
+                        } else {
+                            continue;
+                        }
+                    }
+                    None => Some([wx, wy, wx + ww, wy + wh]),
+                };
+                result.push((label, cb));
+            }
+        }
+        result
+    }
+
+    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let mut result = Vec::new();
+        let (wx, wy, ww, wh) = self.rect();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            for (label, font, bounds) in widget.text_labels_with_font_and_bounds(ctx) {
+                let cb = match bounds {
+                    Some(b) => {
+                        let cx0 = b[0].max(wx);
+                        let cy0 = b[1].max(wy);
+                        let cx1 = b[2].min(wx + ww);
+                        let cy1 = b[3].min(wy + wh);
+                        if cx1 > cx0 && cy1 > cy0 {
+                            Some([cx0, cy0, cx1, cy1])
+                        } else {
+                            continue;
+                        }
+                    }
+                    None => Some([wx, wy, wx + ww, wy + wh]),
+                };
+                result.push((label, font, cb));
+            }
+        }
+        result
+    }
+
+    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
+        let mut result = Vec::new();
+        for &child_ptr in &self.children {
+            let widget = unsafe { &*child_ptr };
+            result.extend(widget.get_text_items());
+        }
+        result
+    }
+
     fn set_hovered(&mut self, v: bool) {
         if !v {
             self.hovered_idx = None;
