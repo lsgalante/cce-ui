@@ -472,6 +472,48 @@ pub fn get_config_path() -> std::path::PathBuf {
     cce_config_dir().join("config.kdl")
 }
 
+struct ConfigCache {
+    last_modified: Option<std::time::SystemTime>,
+    parsed: Option<serde_json::Value>,
+    raw_content: String,
+}
+
+static CONFIG_CACHE: std::sync::RwLock<ConfigCache> = std::sync::RwLock::new(ConfigCache {
+    last_modified: None,
+    parsed: None,
+    raw_content: String::new(),
+});
+
+/// The cce config parsed to JSON, cached on the config file's mtime (per process).
+/// Re-reads and re-parses only when `get_config_path()`'s modification time changes.
+pub fn cached_config() -> serde_json::Value {
+    let path = get_config_path();
+    let current_modified = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+
+    if let Ok(cache) = CONFIG_CACHE.read() {
+        if cache.last_modified.is_some() && cache.last_modified == current_modified {
+            if let Some(ref val) = cache.parsed {
+                return val.clone();
+            }
+        }
+    }
+
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let val = parse_kdl_to_json(&content);
+    if let Ok(mut cache) = CONFIG_CACHE.write() {
+        cache.last_modified = current_modified;
+        cache.parsed = Some(val.clone());
+        cache.raw_content = content;
+    }
+    val
+}
+
+/// The raw text of the cce config, cached alongside [`cached_config`].
+pub fn cached_config_content() -> String {
+    let _ = cached_config();
+    CONFIG_CACHE.read().map(|c| c.raw_content.clone()).unwrap_or_default()
+}
+
 
 
 fn perform_rolling_backup(path: &str) {
