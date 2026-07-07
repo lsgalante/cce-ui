@@ -965,7 +965,7 @@ fn get_application_config_path() -> std::path::PathBuf {
         .parent()
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
+            let home = std::env::var("HOME").unwrap_or_default();
             std::path::PathBuf::from(home).join(".config").join("cce")
         });
 

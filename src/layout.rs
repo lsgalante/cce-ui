@@ -5201,7 +5201,7 @@ pub fn parse_font_for_alias(content: &str, alias: &str) -> Option<String> {
 }
 
 pub fn read_preferred_fonts() -> (String, String, String, String, String, String, String) {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
+    let home = std::env::var("HOME").unwrap_or_default();
     let path = std::path::Path::new(&home).join(".config/fontconfig/fonts.conf");
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     
