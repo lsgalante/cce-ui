@@ -20,6 +20,10 @@ pub struct Plate {
     pub solid_border: Option<([f32; 4], f32)>,
     pub selected: bool,
     pub padding: Option<f32>,
+    /// Optional scene layout-engine style (Phase 2b). When set, the app can route this Plate
+    /// through `scene::bridge::layout_subtree` to lay out its children by the engine. `None`
+    /// (default) leaves the Plate on its legacy `set_rect` path.
+    pub engine_layout: Option<crate::scene::layout::Style>,
 }
 
 impl Plate {
@@ -49,6 +53,7 @@ impl Plate {
             solid_border: None,
             selected: false,
             padding: None,
+            engine_layout: None,
         }
     }
 
@@ -82,6 +87,13 @@ impl Plate {
         self
     }
 
+    /// Set the scene layout-engine style so this Plate's children can be laid out via
+    /// `scene::bridge::layout_subtree`. See [`Plate::engine_layout`].
+    pub fn with_engine_layout(mut self, style: crate::scene::layout::Style) -> Self {
+        self.engine_layout = Some(style);
+        self
+    }
+
     pub fn set_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
         self.bounds = Some((bx, by, bw, bh));
     }
@@ -90,6 +102,7 @@ impl Plate {
 impl Element for Plate {
     fn base(&self) -> Option<&Widget> { Some(&self.base.base) }
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base.base) }
+    fn layout_style(&self) -> Option<crate::scene::layout::Style> { self.engine_layout }
     fn as_any(&self) -> &dyn std::any::Any { self }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
