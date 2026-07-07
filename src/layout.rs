@@ -958,18 +958,20 @@ pub fn reload_config() {
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("list_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
-                let mut changed = false;
-                if let Ok(mut lock) = LIST_FONT.write() {
-                    if *lock != font {
-                        *lock = font;
-                        changed = true;
+                if !rest.starts_with('_') {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                    let rest = mod_rest(rest);
+                    let font = rest.trim().to_string();
+                    let mut changed = false;
+                    if let Ok(mut lock) = LIST_FONT.write() {
+                        if *lock != font {
+                            *lock = font;
+                            changed = true;
+                        }
                     }
-                }
-                if changed {
-                    list_font_changed = true;
+                    if changed {
+                        list_font_changed = true;
+                    }
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("tree_font") {
@@ -2079,9 +2081,11 @@ pub fn list_font() -> String {
             for line in content.lines() {
                 let trimmed = line.trim();
                 if let Some(rest) = trimmed.strip_prefix("list_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
+                    if !rest.starts_with('_') {
+                        let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
+                        let rest = mod_rest(rest);
+                        font = rest.trim().to_string();
+                    }
                 }
             }
         }
@@ -5550,6 +5554,7 @@ mod tests {
 
     #[test]
     fn test_column_gap() {
+        println!("LIST FONT: {:?}", list_font());
         let _ = column_gap();
         set_column_gap(24.0);
         assert_eq!(column_gap(), 24.0);
