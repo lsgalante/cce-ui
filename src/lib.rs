@@ -38,10 +38,24 @@ pub fn icons_dir() -> String {
     })
 }
 
+/// Build a glyphon `FontSystem` loaded with the bundled CCE fonts (house style).
+/// System fonts are loaded only if `$CCE_LOAD_SYSTEM_FONTS` is set. Configured
+/// custom fonts are validated with a warning if missing.
 pub fn create_font_system() -> glyphon::FontSystem {
+    build_font_system(false)
+}
+
+/// Like [`create_font_system`] but always also loads installed system fonts, for
+/// apps that must see every font on the system (e.g. the font picker) or want
+/// them as fallbacks. Additive — bundled CCE fonts are still loaded.
+pub fn create_font_system_with_system_fonts() -> glyphon::FontSystem {
+    build_font_system(true)
+}
+
+fn build_font_system(load_system_fonts: bool) -> glyphon::FontSystem {
     let mut db = glyphon::cosmic_text::fontdb::Database::new();
     db.load_fonts_dir(fonts_dir());
-    if std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
+    if load_system_fonts || std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
         db.load_system_fonts();
     }
 
