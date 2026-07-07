@@ -1749,14 +1749,14 @@ pub fn menubar_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("menubar_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("menubar_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = MENUBAR_FONT.write() {
             *lock = font;
         }
     });
     let lock = MENUBAR_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -1791,14 +1791,14 @@ pub fn statusbar_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("statusbar_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("statusbar_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = STATUSBAR_FONT.write() {
             *lock = font;
         }
     });
     let lock = STATUSBAR_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -1835,14 +1835,14 @@ pub fn font_selector_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("font_selector_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("font_selector_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
             *lock = font;
         }
     });
     let lock = FONT_SELECTOR_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -1878,14 +1878,14 @@ pub fn button_strip_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("button_strip_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("button_strip_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
             *lock = font;
         }
     });
     let lock = BUTTON_STRIP_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -1923,14 +1923,14 @@ pub fn control_label_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("control_label_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("control_label_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
             *lock = font;
         }
     });
     let lock = CONTROL_LABEL_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -1966,14 +1966,14 @@ pub fn control_label_font_detached() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("control_label_font_detached").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("control_label_font_detached").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
             *lock = font;
         }
     });
     let lock = CONTROL_LABEL_FONT_DETACHED.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -2011,14 +2011,14 @@ pub fn list_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("list_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("list_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = LIST_FONT.write() {
             *lock = font;
         }
     });
     let lock = LIST_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -2054,14 +2054,14 @@ pub fn tree_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("tree_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("tree_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = TREE_FONT.write() {
             *lock = font;
         }
     });
     let lock = TREE_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -2097,14 +2097,14 @@ pub fn graph_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("graph_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("graph_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = GRAPH_FONT.write() {
             *lock = font;
         }
     });
     let lock = GRAPH_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -2140,14 +2140,14 @@ pub fn graph_node_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let font = read_config_value("graph_node_font").unwrap_or_else(|| "Outfit".to_string());
+        let font = read_config_value("graph_node_font").unwrap_or_else(|| "Berkeley Mono".to_string());
         if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
             *lock = font;
         }
     });
     let lock = GRAPH_NODE_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -2214,7 +2214,7 @@ pub fn section_label_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
+        let mut font = "Berkeley Mono".to_string();
         if let Some(content) = read_config() {
             for line in content.lines() {
                 let trimmed = line.trim();
@@ -2236,7 +2236,7 @@ pub fn section_label_font() -> String {
     });
     let lock = SECTION_LABEL_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -2252,7 +2252,7 @@ pub fn nested_section_label_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
+        let mut font = "Berkeley Mono".to_string();
         if let Some(content) = read_config() {
             for line in content.lines() {
                 let trimmed = line.trim();
@@ -2274,7 +2274,7 @@ pub fn nested_section_label_font() -> String {
     });
     let lock = NESTED_SECTION_LABEL_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -2290,7 +2290,7 @@ pub fn breadcrumb_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
+        let mut font = "Berkeley Mono".to_string();
         if let Some(content) = read_config() {
             for line in content.lines() {
                 let trimmed = line.trim();
@@ -2312,7 +2312,7 @@ pub fn breadcrumb_font() -> String {
     });
     let lock = BREADCRUMB_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -2328,7 +2328,7 @@ pub fn button_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
+        let mut font = "Berkeley Mono".to_string();
         if let Some(content) = read_config() {
             for line in content.lines() {
                 let trimmed = line.trim();
@@ -2350,7 +2350,7 @@ pub fn button_font() -> String {
     });
     let lock = BUTTON_FONT.read().unwrap();
     if lock.is_empty() {
-        "Outfit".to_string()
+        "Berkeley Mono".to_string()
     } else {
         lock.clone()
     }
@@ -5309,9 +5309,9 @@ mod tests {
         let orig_margin = label_margin();
         set_label_margin(6.0);
         let orig_font = control_label_font();
-        set_control_label_font("Outfit 12");
+        set_control_label_font("Berkeley Mono 12");
         let orig_font_detached = control_label_font_detached();
-        set_control_label_font_detached("Outfit 12");
+        set_control_label_font_detached("Berkeley Mono 12");
         let _ = section_padding();
         set_section_padding(8.0);
         let mut mock_pc = MockRenderTarget { rects: Vec::new() };

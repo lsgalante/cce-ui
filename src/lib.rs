@@ -74,7 +74,7 @@ fn build_font_system(load_system_fonts: bool) -> glyphon::FontSystem {
     ];
 
     for (name, family) in font_getters {
-        if !family.is_empty() && family != "Outfit" && family != "sans-serif" {
+        if !family.is_empty() && family != "Berkeley Mono" && family != "sans-serif" {
             let mut found = false;
             for face in db.faces() {
                 for (fam, _) in &face.families {

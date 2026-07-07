@@ -163,7 +163,7 @@ impl Element for StatusBar {
         if !self.text.is_empty() && self.text_buf.is_none() {
             let (font_fam, font_size) = crate::layout::statusbar_font_parsed();
             let size = if font_size > 0.0 { font_size } else { 12.0 };
-            let fam = if font_fam.is_empty() { "Outfit".to_string() } else { font_fam };
+            let fam = if font_fam.is_empty() { "Berkeley Mono".to_string() } else { font_fam };
             self.text_buf = Some(make_widget_text_buffer(fs, &self.text, size, &fam));
         }
     }
