@@ -298,6 +298,13 @@ impl Element for Dropdown {
         Some(crate::layout::dropdown_height())
     }
 
+    /// Content size for the scene layout engine (Phase 2b): wide enough for the widest option
+    /// (via `content_width`, which already includes the arrow/padding inset), at the configured
+    /// dropdown height — so the control doesn't resize as the selection changes.
+    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
+        Some(crate::scene::layout::Size::new(self.content_width(), crate::layout::dropdown_height()))
+    }
+
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {
         let r = crate::layout::dropdown_corner_radius();
         if r > 0.0 {
@@ -967,6 +974,23 @@ mod tests {
         let dd_no_auto = Dropdown::new(vec!["Short".to_string(), "A much longer option name".to_string()], 0);
         let size_no_auto = dd_no_auto.measure(LayoutConstraints::new(0.0, 500.0, 24.0, 24.0), &dummy);
         assert_eq!(size_no_auto.width, 0.0);
+    }
+
+    #[test]
+    fn intrinsic_size_fits_widest_option() {
+        let wide = Dropdown::new(
+            vec!["Short".to_string(), "A much longer option name".to_string()],
+            0,
+        );
+        let size = wide.intrinsic_size().expect("dropdown reports intrinsic size");
+        assert!(size.width >= wide.content_width(), "width fits the widest option");
+        assert_eq!(size.height, crate::layout::dropdown_height());
+
+        let narrow = Dropdown::new(vec!["Hi".to_string()], 0);
+        assert!(
+            size.width > narrow.intrinsic_size().unwrap().width,
+            "more/longer options measure wider",
+        );
     }
 }
 
