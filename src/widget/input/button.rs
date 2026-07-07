@@ -342,6 +342,32 @@ impl Element for Button {
         }
     }
 
+    /// Content size for the scene layout engine (Phase 2b): the label's measured width plus an
+    /// 8px inset on each side (matching `text_labels`' justify insets), at the configured button
+    /// height. An icon button (SVG, no text) is a square at that height.
+    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
+        let height = crate::layout::button_height();
+        if self.svg.is_some() {
+            return Some(crate::scene::layout::Size::new(height, height));
+        }
+        let label = self.base.label.as_deref().unwrap_or("");
+        let mut font_size = 12.0;
+        let mut font_family = "sans-serif".to_string();
+        if let Some(font_str) = self.widget_font() {
+            let (parsed_fam, parsed_size) = crate::layout::parse_font_string(&font_str);
+            font_family = parsed_fam;
+            if let Some(ps) = parsed_size {
+                font_size = ps;
+            }
+        }
+        let text_w = if label == "📋" {
+            12.0
+        } else {
+            crate::widget::display::measure_text_width(label, &font_family, font_size)
+        };
+        Some(crate::scene::layout::Size::new(text_w + 16.0, height))
+    }
+
     fn widget_font(&self) -> Option<String> {
         if self.kind == ButtonKind::ListRow {
             Some(crate::layout::list_font())
@@ -356,6 +382,26 @@ impl Element for Button {
 
     fn layout_ignore(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intrinsic_size_scales_with_label_and_has_button_height() {
+        let mut short = Button::new(0.0, 0.0, 0.0, 0.0);
+        short.base.label = Some("Hi".to_string());
+        let mut long = Button::new(0.0, 0.0, 0.0, 0.0);
+        long.base.label = Some("A much longer button label".to_string());
+
+        let s = short.intrinsic_size().unwrap();
+        let l = long.intrinsic_size().unwrap();
+        assert!(s.width > 16.0, "includes the horizontal insets");
+        assert!(l.width > s.width, "longer label measures wider");
+        // Height is the configured button height, independent of the (zero) construction rect.
+        assert_eq!(s.height, crate::layout::button_height());
     }
 }
 
