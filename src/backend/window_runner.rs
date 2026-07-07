@@ -1376,7 +1376,18 @@ pub trait Application: Sized + 'static {
     }
     
     fn text_areas(&self, scale_f32: f32, bounds: TextBounds) -> Vec<TextArea<'_>> {
-        let overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let mut overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
+        if let Some(ctx) = self.ui_context() {
+            for popover_ptr in &ctx.active_popovers {
+                unsafe {
+                    if let Some(popover) = popover_ptr.as_ref() {
+                        if let Some((x, y, w, h)) = popover.popover_rect() {
+                            overlay_rects.push((x, y, w, h));
+                        }
+                    }
+                }
+            }
+        }
 
         self.text_items().iter().map(|ti| {
             let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
