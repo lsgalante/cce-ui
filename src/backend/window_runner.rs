@@ -3,6 +3,7 @@ use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_keyboard, delegate_pointer, delegate_registry,
     delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window, delegate_output, delegate_xdg_popup,
+    delegate_layer,
     registry::{ProvidesRegistryState, RegistryState},
     output::{OutputHandler, OutputState},
     seat::{
@@ -15,6 +16,7 @@ use smithay_client_toolkit::{
             window::{Window as XdgWindow, WindowConfigure, WindowHandler, WindowDecorations},
             XdgShell,
         },
+        wlr_layer::{LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         WaylandSurface,
     },
     shm::{Shm, ShmHandler},
@@ -1310,6 +1312,25 @@ pub struct WindowSettings {
     pub min_size: Option<(u32, u32)>,
 }
 
+// Re-export the wlr-layer-shell types apps need to describe a layer surface.
+pub use smithay_client_toolkit::shell::wlr_layer::{
+    Anchor as LayerAnchor, KeyboardInteractivity as LayerKeyboardInteractivity, Layer as LayerKind,
+};
+
+/// Opt-in configuration for running an [`Application`] on a wlr-layer-shell
+/// surface (panels, overlays, notifications) instead of an xdg toplevel.
+/// Return one from [`Application::layer`] to select layer-shell.
+#[derive(Debug, Clone)]
+pub struct LayerSettings {
+    pub layer: LayerKind,
+    pub anchor: LayerAnchor,
+    pub exclusive_zone: i32,
+    pub keyboard_interactivity: LayerKeyboardInteractivity,
+    /// (top, right, bottom, left) margins in logical pixels.
+    pub margin: (i32, i32, i32, i32),
+    pub namespace: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LogicalPosition {
     pub x: f32,
@@ -1343,6 +1364,11 @@ pub trait Application: Sized + 'static {
 
     fn new(qh: &QueueHandle<EngineState<Self>>, sender: calloop::channel::Sender<Self::Message>) -> Self;
     fn settings(&self) -> WindowSettings;
+    /// Return `Some(..)` to run on a wlr-layer-shell surface (overlay/panel)
+    /// instead of an xdg toplevel. Defaults to `None` (a normal window).
+    fn layer(&self) -> Option<LayerSettings> {
+        None
+    }
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
     fn view(&mut self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, size: LogicalSize, scale: f64);
@@ -1503,14 +1529,16 @@ pub struct EngineState<A: Application> {
     pub registry_state: RegistryState,
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShell,
+    pub layer_shell_state: Option<LayerShell>,
     pub shm_state: Shm,
     pub seat_state: SeatState,
     pub output_state: OutputState,
     pub seats: Vec<wl_seat::WlSeat>,
     pub pointer: Option<ThemedPointer>,
     pub keyboard: Option<wl_keyboard::WlKeyboard>,
-    
+
     pub window: Option<XdgWindow>,
+    pub layer_surface: Option<LayerSurface>,
     pub surface: Option<wl_surface::WlSurface>,
     
     pub inner: Option<A>,
@@ -2102,6 +2130,35 @@ impl<A: Application> WindowHandler for EngineState<A> {
     }
 }
 
+impl<A: Application> LayerShellHandler for EngineState<A> {
+    fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
+        self.exit = true;
+    }
+
+    fn configure(
+        &mut self,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+        _layer: &LayerSurface,
+        configure: LayerSurfaceConfigure,
+        _serial: u32,
+    ) {
+        // new_size is in logical pixels; 0 means "client decides", so fall back
+        // to the app's requested size (mirrors the xdg WindowHandler above).
+        let (w, h) = configure.new_size;
+        if w > 0 && h > 0 {
+            self.resize(w as f32, h as f32);
+        } else {
+            let settings = self.inner.as_ref().unwrap().settings();
+            self.resize(settings.width as f32, settings.height as f32);
+        }
+        self.redraw = true;
+        self.frame_callback_pending = false;
+        self.first_configure_received = true;
+        self.just_configured = true;
+    }
+}
+
 impl<A: Application> SeatHandler for EngineState<A> {
     fn seat_state(&mut self) -> &mut SeatState {
         &mut self.seat_state
@@ -2633,6 +2690,7 @@ delegate_compositor!(@<A: Application> EngineState<A>);
 delegate_xdg_shell!(@<A: Application> EngineState<A>);
 delegate_xdg_window!(@<A: Application> EngineState<A>);
 delegate_xdg_popup!(@<A: Application> EngineState<A>);
+delegate_layer!(@<A: Application> EngineState<A>);
 delegate_shm!(@<A: Application> EngineState<A>);
 delegate_seat!(@<A: Application> EngineState<A>);
 delegate_pointer!(@<A: Application> EngineState<A>);
@@ -2735,6 +2793,7 @@ pub fn run<A: Application>() {
 
     let compositor_state = CompositorState::bind(&globals, &qh).unwrap();
     let xdg_shell_state = XdgShell::bind(&globals, &qh).unwrap();
+    let layer_shell_state = LayerShell::bind(&globals, &qh).ok();
     let shm_state = Shm::bind(&globals, &qh).unwrap();
     let seat_state = SeatState::new(&globals, &qh);
     let output_state = OutputState::new(&globals, &qh);
@@ -2746,6 +2805,7 @@ pub fn run<A: Application>() {
         registry_state: RegistryState::new(&globals),
         compositor_state,
         xdg_shell_state,
+        layer_shell_state,
         shm_state,
         seat_state,
         output_state,
@@ -2753,6 +2813,7 @@ pub fn run<A: Application>() {
         pointer: None,
         keyboard: None,
         window: None,
+        layer_surface: None,
         surface: None,
         inner: None,
         wgpu_adapter: None,
@@ -2808,18 +2869,40 @@ pub fn run<A: Application>() {
         region.destroy();
     }
 
-    let window = engine_state.xdg_shell_state.create_window(surface.clone(), WindowDecorations::None, &qh);
-    window.set_title(&settings.title);
-    window.set_app_id(&settings.app_id);
-    if settings.fullscreen {
-        window.set_fullscreen(None);
+    let layer_settings = engine_state.inner.as_ref().unwrap().layer();
+    if let Some(ls) = layer_settings {
+        let layer_shell = engine_state
+            .layer_shell_state
+            .as_ref()
+            .expect("compositor does not support wlr-layer-shell");
+        let layer_surface = layer_shell.create_layer_surface(
+            &qh,
+            surface.clone(),
+            ls.layer,
+            Some(ls.namespace.clone()),
+            None,
+        );
+        layer_surface.set_anchor(ls.anchor);
+        layer_surface.set_exclusive_zone(ls.exclusive_zone);
+        layer_surface.set_keyboard_interactivity(ls.keyboard_interactivity);
+        let (t, r, b, l) = ls.margin;
+        layer_surface.set_margin(t, r, b, l);
+        layer_surface.set_size(settings.width, settings.height);
+        layer_surface.commit();
+        engine_state.layer_surface = Some(layer_surface);
+    } else {
+        let window = engine_state.xdg_shell_state.create_window(surface.clone(), WindowDecorations::None, &qh);
+        window.set_title(&settings.title);
+        window.set_app_id(&settings.app_id);
+        if settings.fullscreen {
+            window.set_fullscreen(None);
+        }
+        if let Some((min_w, min_h)) = settings.min_size {
+            window.set_min_size(Some((min_w, min_h)));
+        }
+        window.commit();
+        engine_state.window = Some(window);
     }
-    if let Some((min_w, min_h)) = settings.min_size {
-        window.set_min_size(Some((min_w, min_h)));
-    }
-    window.commit();
-
-    engine_state.window = Some(window);
     engine_state.surface = Some(surface);
 
     pollster::block_on(engine_state.init_gpu(&conn, settings.width as f32, settings.height as f32));
@@ -2946,7 +3029,7 @@ pub fn run<A: Application>() {
             };
             pw = pw.ceil();
             ph = ph.ceil();
-            if engine_state.active_popup.is_none() {
+            if engine_state.active_popup.is_none() && engine_state.window.is_some() {
                 let positioner = XdgPositioner::new(&engine_state.xdg_shell_state).unwrap();
                 positioner.set_size(pw as i32, ph as i32);
                 

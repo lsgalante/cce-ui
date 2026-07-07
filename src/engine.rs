@@ -1,6 +1,7 @@
 pub use crate::backend::window_runner::{
     ActivePopup, Vertex, LineCap, WindowSettings, LogicalPosition, LogicalSize,
     RenderContext, Application, PressedKey, EngineState, run,
+    LayerSettings, LayerKind, LayerAnchor, LayerKeyboardInteractivity,
     quad_vertices, quad_vertices_with_clip, quad_vertices_clipped, line_vertices,
     vector_vertices, rounded_rect_vertices_corners, push_rounded_rect_vertices_corners,
     rounded_rect_vertices, push_rounded_rect_vertices, plate_bevel_vertices,
