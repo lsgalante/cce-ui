@@ -9,6 +9,7 @@ pub mod arena;
 pub mod bridge;
 pub mod layout;
 pub mod paint;
+pub mod painter;
 pub mod tree;
 
 pub use arena::{Arena, Node, NodeId};

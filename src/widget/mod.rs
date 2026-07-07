@@ -473,6 +473,36 @@ pub trait Element {
         quads
     }
 
+    /// Emit this widget's OWN primitives (non-recursive) into the single paint pass (Phase 3).
+    /// The default composes the pieces the legacy recursive `all_*` emit for one node: rounded
+    /// background, plain/decoration quads, circles, and own text. Widgets with richer painting
+    /// (borders, bevels, arcs, vectors, SVGs) can override. Recursion into children and clipping
+    /// are handled by the paint walk (`scene::painter`), not here.
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        use crate::scene::layout::Rect;
+        let (r1, r2, r3, r4) = self.rounded_corners();
+        if r1 || r2 || r3 || r4 {
+            let (x, y, w, h) = self.rect();
+            let c = self.color();
+            if c[3].abs() > 0.001 {
+                ctx.rounded_rect(Rect { x, y, width: w, height: h }, self.corner_radius(), (r1, r2, r3, r4), c);
+            }
+        }
+        for (x, y, w, h, c) in self.all_quads(ui) {
+            ctx.quad(Rect { x, y, width: w, height: h }, c);
+        }
+        for (cx, cy, r, c) in self.extra_circles() {
+            ctx.circle(cx, cy, r, c);
+        }
+        for tl in self.text_labels() {
+            ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+        }
+    }
+
+    /// Whether the paint walk should clip this widget's children to its rect (scroll/backplate
+    /// containers). Default: no clipping.
+    fn clips_children(&self) -> bool { false }
+
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         if !self.visible() {
             return Vec::new();
