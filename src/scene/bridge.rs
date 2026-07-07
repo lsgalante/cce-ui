@@ -15,7 +15,7 @@
 //! store children locally as well as the default `UiContext`-backed tree.
 
 use crate::scene::arena::{Arena, NodeId};
-use crate::scene::layout::{self, LayoutBox, Rect};
+use crate::scene::layout::{self, LayoutBox, Rect, Size, Style};
 use crate::widget::{Element, UiContext};
 
 type ElemPtr = *mut (dyn Element + 'static);
@@ -34,7 +34,7 @@ type ElemPtr = *mut (dyn Element + 'static);
 pub fn layout_subtree(ctx: &UiContext, root: ElemPtr, area: Rect) {
     let mut arena: Arena<LayoutBox> = Arena::new();
     let mut order: Vec<(NodeId, ElemPtr)> = Vec::new();
-    let root_node = build(&mut arena, ctx, root, &mut order);
+    let root_node = build(&mut arena, ctx, root, None, &mut order);
 
     layout::measure(&mut arena, root_node);
     layout::arrange(&mut arena, root_node, area);
@@ -42,33 +42,61 @@ pub fn layout_subtree(ctx: &UiContext, root: ElemPtr, area: Rect) {
     for &(node, ptr) in &order {
         let r = arena.value(node).expect("layout node missing").rect;
         unsafe {
-            (*ptr).set_rect(r.x, r.y, r.width, r.height);
+            // A participating container's children are already placed by the engine, so we set
+            // only its own rect (writing the base directly) rather than calling its legacy
+            // `set_rect`, which would redundantly re-lay-out the children it no longer owns. An
+            // opaque leaf, by contrast, gets `set_rect` so it lays out its own internals.
+            let participating = (*ptr).layout_style().is_some();
+            match (participating, (*ptr).base_mut()) {
+                (true, Some(base)) => {
+                    base.x = r.x;
+                    base.y = r.y;
+                    base.w = r.width;
+                    base.h = r.height;
+                }
+                _ => (*ptr).set_rect(r.x, r.y, r.width, r.height),
+            }
         }
     }
 }
 
 /// Recursively mirror the widget subtree into `arena`, recording (node, widget) pairs in pre-order.
-fn build(arena: &mut Arena<LayoutBox>, ctx: &UiContext, ptr: ElemPtr, order: &mut Vec<(NodeId, ElemPtr)>) -> NodeId {
-    let (style, intrinsic, children) = unsafe {
-        let style = (*ptr).layout_style().unwrap_or_default();
-        let intrinsic = (*ptr).intrinsic_size();
-        let children = (*ptr).children(ctx);
-        (style, intrinsic, children)
+///
+/// `assigned` is a style handed down by the parent (via [`Element::layout_children`]) that
+/// overrides this widget's own `layout_style`. Recursion only descends into widgets that
+/// themselves opt in (`layout_style` returns `Some`): a non-participating widget is an **opaque
+/// leaf** — the engine gives it a rect, but it keeps laying out its own internals via its own
+/// `set_rect`. That boundary is what lets one container be migrated without disturbing the widgets
+/// nested inside it.
+fn build(
+    arena: &mut Arena<LayoutBox>,
+    ctx: &UiContext,
+    ptr: ElemPtr,
+    assigned: Option<Style>,
+    order: &mut Vec<(NodeId, ElemPtr)>,
+) -> NodeId {
+    let own_style = unsafe { (*ptr).layout_style() };
+    let participates = own_style.is_some();
+    let style = assigned.or(own_style).unwrap_or_default();
+
+    // Only a participating container is descended into; opaque leaves stop the recursion.
+    let (children, child_styles) = if participates {
+        unsafe { ((*ptr).children(ctx), (*ptr).layout_children()) }
+    } else {
+        (Vec::new(), None)
     };
 
-    // A node with children is a container; a childless node is a leaf sized by its intrinsic size.
     let node = if children.is_empty() {
-        match intrinsic {
-            Some(size) => arena.insert(LayoutBox::leaf(style, size)),
-            None => arena.insert(LayoutBox::container(style)),
-        }
+        let intrinsic = unsafe { (*ptr).intrinsic_size() };
+        arena.insert(LayoutBox::leaf(style, intrinsic.unwrap_or(Size::ZERO)))
     } else {
         arena.insert(LayoutBox::container(style))
     };
     order.push((node, ptr));
 
-    for child in children {
-        let child_node = build(arena, ctx, child, order);
+    for (i, child) in children.into_iter().enumerate() {
+        let assigned_child = child_styles.as_ref().and_then(|v| v.get(i).copied());
+        let child_node = build(arena, ctx, child, assigned_child, order);
         arena.append_child(node, child_node);
     }
     node
@@ -86,13 +114,21 @@ mod tests {
         base: Widget,
         style: Option<Style>,
         intrinsic: Option<Size>,
+        child_styles: Option<Vec<Style>>,
     }
     impl W {
         fn container(style: Style) -> Box<W> {
-            Box::new(W { base: Widget::new(), style: Some(style), intrinsic: None })
+            Box::new(W { base: Widget::new(), style: Some(style), intrinsic: None, child_styles: None })
+        }
+        fn container_with_child_styles(style: Style, child_styles: Vec<Style>) -> Box<W> {
+            Box::new(W { base: Widget::new(), style: Some(style), intrinsic: None, child_styles: Some(child_styles) })
         }
         fn leaf(w: f32, h: f32) -> Box<W> {
-            Box::new(W { base: Widget::new(), style: None, intrinsic: Some(Size::new(w, h)) })
+            Box::new(W { base: Widget::new(), style: None, intrinsic: Some(Size::new(w, h)), child_styles: None })
+        }
+        /// A non-participating widget (opaque leaf): no layout_style, no intrinsic.
+        fn opaque() -> Box<W> {
+            Box::new(W { base: Widget::new(), style: None, intrinsic: None, child_styles: None })
         }
     }
     impl Element for W {
@@ -105,6 +141,9 @@ mod tests {
         }
         fn intrinsic_size(&self) -> Option<Size> {
             self.intrinsic
+        }
+        fn layout_children(&self) -> Option<Vec<Style>> {
+            self.child_styles.clone()
         }
     }
 
@@ -185,5 +224,39 @@ mod tests {
         assert_eq!(rect_of(c1_ptr), Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 });
         assert_eq!(rect_of(c2_ptr), Rect { x: 0.0, y: 12.0, width: 10.0, height: 10.0 });
         assert_eq!(rect_of(sib_ptr).x, 10.0, "sibling follows inner's measured width");
+    }
+
+    #[test]
+    fn opaque_child_is_sized_but_not_recursed_into() {
+        // The incremental-migration boundary: a participating container lays out its direct
+        // children (here via parent-supplied grow weights, à la SplitBox), but a non-participating
+        // child is opaque — the engine must NOT descend into it and reposition its grandchildren.
+        let mut ctx = UiContext::new();
+        let mut root = W::container_with_child_styles(
+            Style::row().cross_align(CrossAlign::Stretch),
+            vec![Style::default().grow(1.0), Style::default().grow(1.0)],
+        );
+        let mut pane_a = W::opaque();
+        let mut pane_b = W::opaque();
+        let mut grandchild = W::leaf(7.0, 7.0);
+
+        let (root_id, root_ptr) = reg(&mut ctx, &mut root);
+        let (a_id, a_ptr) = reg(&mut ctx, &mut pane_a);
+        let (b_id, b_ptr) = reg(&mut ctx, &mut pane_b);
+        let (g_id, g_ptr) = reg(&mut ctx, &mut grandchild);
+        ctx.link_ids(root_id, a_id);
+        ctx.link_ids(root_id, b_id);
+        ctx.link_ids(a_id, g_id); // grandchild lives inside the opaque pane A
+
+        // Pre-position the grandchild; the opaque boundary must leave it untouched.
+        unsafe { (*g_ptr).set_rect(1.0, 2.0, 7.0, 7.0) };
+
+        layout_subtree(&ctx, root_ptr, Rect { x: 0.0, y: 0.0, width: 100.0, height: 40.0 });
+
+        // Panes: 50/50 by grow, stretched to full height.
+        assert_eq!(rect_of(a_ptr), Rect { x: 0.0, y: 0.0, width: 50.0, height: 40.0 });
+        assert_eq!(rect_of(b_ptr), Rect { x: 50.0, y: 0.0, width: 50.0, height: 40.0 });
+        // Grandchild untouched — recursion stopped at the opaque pane.
+        assert_eq!(rect_of(g_ptr), Rect { x: 1.0, y: 2.0, width: 7.0, height: 7.0 });
     }
 }

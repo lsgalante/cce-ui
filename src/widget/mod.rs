@@ -176,6 +176,11 @@ pub trait Element {
     /// pass. Ignored for widgets that have children.
     fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> { None }
 
+    /// Per-child layout styles, for containers whose child sizing lives on the parent rather than
+    /// the children (e.g. `SplitBox` proportions). Returned in `children()` order; entry `i`
+    /// overrides child `i`'s own `layout_style`. `None` (default) means children use their own.
+    fn layout_children(&self) -> Option<Vec<crate::scene::layout::Style>> { None }
+
     fn check_out_of_bounds(&self, _event: &Event, _ctx: &UiContext) -> bool {
         false
     }

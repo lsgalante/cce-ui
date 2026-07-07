@@ -95,6 +95,26 @@ impl Element for SplitBox {
         self.children.clone()
     }
 
+    // --- scene layout-engine opt-in (Phase 2b) ---
+    // A SplitBox is a flex row/column whose child sizing lives on the parent (`proportions`).
+    // These hooks let `scene::bridge::layout_subtree` drive the split via the engine; they are
+    // inert unless an app routes this widget through the bridge (legacy `set_rect` is unchanged).
+    fn layout_style(&self) -> Option<crate::scene::layout::Style> {
+        use crate::scene::layout::{CrossAlign, Style};
+        let mut style = match self.direction {
+            SplitDirection::Horizontal => Style::row(),
+            SplitDirection::Vertical => Style::column(),
+        };
+        style.gap = self.gap;
+        style.cross_align = CrossAlign::Stretch; // panes fill the cross axis, as `set_rect` does
+        Some(style)
+    }
+
+    fn layout_children(&self) -> Option<Vec<crate::scene::layout::Style>> {
+        // Each pane grows by its proportion — matching the proportional split in `set_rect`.
+        Some(self.proportions.iter().map(|&p| crate::scene::layout::Style::default().grow(p)).collect())
+    }
+
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         self.parent
     }
