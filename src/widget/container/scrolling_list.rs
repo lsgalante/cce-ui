@@ -38,6 +38,9 @@ pub struct List {
     pub clicked_row: Option<usize>,
     pub double_clicked_row: Option<usize>,
     pub last_click_time: Option<std::time::Instant>,
+    pub search_enabled: bool,
+    pub search_visible: bool,
+    pub search_box: TextBox,
 }
 
 impl List {
@@ -56,7 +59,15 @@ impl List {
             clicked_row: None,
             double_clicked_row: None,
             last_click_time: None,
+            search_enabled: false,
+            search_visible: false,
+            search_box: TextBox::new(String::new()).with_placeholder("Search...").with_update_on_type(true),
         }
+    }
+
+    pub fn with_search(mut self, enabled: bool) -> Self {
+        self.search_enabled = enabled;
+        self
     }
 
     pub fn with_columns(mut self, columns: Vec<ListColumn>) -> Self {
@@ -170,6 +181,59 @@ impl List {
     pub fn set_scroll_y(&mut self, val: f32) {
         self.scroll_box.scroll_y = val;
     }
+
+    pub fn handle_list_navigation(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        if self.columns.is_none() {
+            return false;
+        }
+        if event.state == ElementState::Pressed {
+            let mut current_selected = None;
+            for (idx, r) in self.rows.iter().enumerate() {
+                if r.selected {
+                    current_selected = Some(idx);
+                    break;
+                }
+            }
+
+            let mut next_selected = None;
+            if event.logical_key == Key::Named(NamedKey::ArrowDown) {
+                if let Some(curr) = current_selected {
+                    if curr + 1 < self.rows.len() {
+                        next_selected = Some(curr + 1);
+                    }
+                } else if !self.rows.is_empty() {
+                    next_selected = Some(0);
+                }
+            } else if event.logical_key == Key::Named(NamedKey::ArrowUp) {
+                if let Some(curr) = current_selected {
+                    if curr > 0 {
+                        next_selected = Some(curr - 1);
+                    }
+                }
+            }
+
+            if let Some(next) = next_selected {
+                for (idx, r) in self.rows.iter_mut().enumerate() {
+                    r.selected = idx == next;
+                }
+                self.clicked_row = Some(next);
+
+                let item_height_full = self.item_height + self.item_gap;
+                let item_y = next as f32 * item_height_full + 2.0;
+                let viewport_h = self.scroll_box.viewport_h;
+
+                if item_y < self.scroll_box.scroll_y {
+                    self.scroll_box.scroll_y = item_y;
+                } else if item_y + self.item_height > self.scroll_box.scroll_y + viewport_h {
+                    self.scroll_box.scroll_y = item_y + self.item_height - viewport_h;
+                }
+
+                self.mark_dirty(ctx);
+                return true;
+            }
+        }
+        false
+    }
 }
 
 impl Default for List {
@@ -191,7 +255,16 @@ impl Element for List {
         self.base.y = y;
         self.base.w = w;
         self.base.h = h;
-        self.scroll_box.set_rect(x, y, w, h);
+        if self.search_enabled && self.search_visible {
+            let search_margin_y = 6.0;
+            let search_h = 26.0;
+            let offset_y = search_h + 2.0 * search_margin_y;
+            self.scroll_box.set_rect(x, y, w, h - offset_y);
+            self.search_box.set_rect(x + 8.0, y + h - offset_y + search_margin_y, w - 16.0, search_h);
+        } else {
+            self.scroll_box.set_rect(x, y, w, h);
+            self.search_box.set_rect(x, y + h, w, 0.0);
+        }
         if self.columns.is_some() && !self.rows.is_empty() {
             self.update_bounds_from_rows();
         }
@@ -249,9 +322,15 @@ impl Element for List {
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        let mut handled = false;
+        if self.search_enabled && self.search_visible {
+            if self.search_box.on_cursor_moved(px, py, ctx) {
+                handled = true;
+            }
+        }
         self.scroll_box.cursor_moved(px, py, ctx);
         if self.columns.is_none() {
-            return false;
+            return handled;
         }
         let (x, _, w, _) = self.rect();
         let item_height_full = self.item_height + self.item_gap;
@@ -269,7 +348,7 @@ impl Element for List {
         
         let changed = self.hovered_row != new_hovered;
         self.hovered_row = new_hovered;
-        changed
+        changed || handled
     }
 
     fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
@@ -277,6 +356,12 @@ impl Element for List {
     }
 
     fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        if self.search_enabled && self.search_visible {
+            if self.search_box.mouse_input(button, state, px, py, ctx) {
+                ctx.set_focused(&mut self.search_box);
+                return true;
+            }
+        }
         let (x, _, w, _) = self.rect();
         let was_scroll = self.scroll_box.mouse_input(button, state, px, py, ctx);
         
@@ -430,6 +515,9 @@ impl Element for List {
                     item.2 = Some(sb_bounds);
                 }
             }
+            if self.search_enabled && self.search_visible {
+                labels.extend(self.search_box.text_labels_with_font_and_bounds(ctx));
+            }
             return labels;
         }
         let (x, _, w, _) = self.rect();
@@ -526,61 +614,62 @@ impl Element for List {
                 }
             }
         }
+        if self.search_enabled && self.search_visible {
+            result.extend(self.search_box.text_labels_with_font_and_bounds(ctx));
+        }
         result
     }
 
     fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        if self.search_enabled {
+            let open_key = crate::color::list_open_search_key();
+            let close_key = crate::color::list_close_search_key();
+            
+            if event.state == ElementState::Pressed {
+                if self.search_visible && match_key_shortcut(event, &close_key) {
+                    self.search_visible = false;
+                    self.search_box.text.clear();
+                    self.search_box.edit_buffer.clear();
+                    self.search_box.just_changed = true;
+                    self.search_box.unfocus();
+                    ctx.clear_focus();
+                    
+                    let (lx, ly, lw, lh) = (self.base.x, self.base.y, self.base.w, self.base.h);
+                    self.set_rect(lx, ly, lw, lh);
+                    self.mark_dirty(ctx);
+                    return true;
+                }
+                
+                if !self.search_visible && match_key_shortcut(event, &open_key) {
+                    self.search_visible = true;
+                    let (lx, ly, lw, lh) = (self.base.x, self.base.y, self.base.w, self.base.h);
+                    self.set_rect(lx, ly, lw, lh);
+                    ctx.set_focused(&mut self.search_box);
+                    self.search_box.focus();
+                    self.mark_dirty(ctx);
+                    return true;
+                }
+            }
+            
+            let is_arrow = event.logical_key == Key::Named(NamedKey::ArrowDown) || event.logical_key == Key::Named(NamedKey::ArrowUp);
+            if is_arrow {
+                if self.handle_list_navigation(event, ctx) {
+                    return true;
+                }
+            }
+            
+            if self.search_visible {
+                if self.search_box.keyboard_input(event, ctx) {
+                    return true;
+                }
+            }
+        }
+        
         if self.scroll_box.keyboard_input(event, ctx) {
             return true;
         }
-        if self.columns.is_none() {
-            return false;
-        }
-        if event.state == ElementState::Pressed {
-            let mut current_selected = None;
-            for (idx, r) in self.rows.iter().enumerate() {
-                if r.selected {
-                    current_selected = Some(idx);
-                    break;
-                }
-            }
-
-            let mut next_selected = None;
-            if event.logical_key == Key::Named(NamedKey::ArrowDown) {
-                if let Some(curr) = current_selected {
-                    if curr + 1 < self.rows.len() {
-                        next_selected = Some(curr + 1);
-                    }
-                } else if !self.rows.is_empty() {
-                    next_selected = Some(0);
-                }
-            } else if event.logical_key == Key::Named(NamedKey::ArrowUp) {
-                if let Some(curr) = current_selected {
-                    if curr > 0 {
-                        next_selected = Some(curr - 1);
-                    }
-                }
-            }
-
-            if let Some(next) = next_selected {
-                for (idx, r) in self.rows.iter_mut().enumerate() {
-                    r.selected = idx == next;
-                }
-                self.clicked_row = Some(next);
-
-                let item_height_full = self.item_height + self.item_gap;
-                let item_y = next as f32 * item_height_full + 2.0;
-                let viewport_h = self.scroll_box.viewport_h;
-
-                if item_y < self.scroll_box.scroll_y {
-                    self.scroll_box.scroll_y = item_y;
-                } else if item_y + self.item_height > self.scroll_box.scroll_y + viewport_h {
-                    self.scroll_box.scroll_y = item_y + self.item_height - viewport_h;
-                }
-
-                self.mark_dirty(ctx);
-                return true;
-            }
+        if self.handle_list_navigation(event, ctx) {
+            return true;
         }
         false
     }
@@ -595,10 +684,49 @@ impl Element for List {
     }
 
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.scroll_box.parent(_ctx) }
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) { self.scroll_box.set_parent(parent, ctx); }
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> { self.scroll_box.children(ctx) }
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
+        self.scroll_box.set_parent(parent, ctx);
+        if parent.is_some() {
+            let self_ptr = self as *mut Self;
+            let self_id = self.base.id();
+            unsafe {
+                let sb_ptr = &mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static);
+                let sb_id = (*self_ptr).search_box.base().unwrap().id();
+                ctx.register_widget(sb_id, sb_ptr);
+                ctx.link_ids(self_id, sb_id);
+                (*sb_ptr).set_parent(Some(self_ptr), ctx);
+            }
+        }
+    }
+    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+        let mut list = self.scroll_box.children(ctx);
+        if self.search_enabled && self.search_visible {
+            let self_ptr = self as *const Self as *mut Self;
+            unsafe {
+                list.push(&mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static));
+            }
+        }
+        list
+    }
     fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) { self.scroll_box.add_child(child, ctx); }
     fn clear_children(&mut self, ctx: &mut UiContext) { self.scroll_box.clear_children(ctx); }
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+        if self.search_enabled && self.search_visible {
+            self.search_box.prepare_text(fs);
+        }
+    }
+    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = false;
+        if self.scroll_box.tick(dt, ctx) {
+            changed = true;
+        }
+        if self.search_enabled && self.search_visible {
+            if self.search_box.tick(dt, ctx) {
+                changed = true;
+            }
+        }
+        changed
+    }
 }
 
 unsafe impl Send for List {}

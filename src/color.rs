@@ -103,6 +103,8 @@ static TREE_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]
 static TREE_BORDER_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.25, 0.25, 0.35, 1.0]);
 static TREE_BORDER_FOCUS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.30, 0.50, 0.32, 1.0]);
 static TREE_OPEN_SEARCH_KEY: RwLock<String> = RwLock::new(String::new());
+static LIST_OPEN_SEARCH_KEY: RwLock<String> = RwLock::new(String::new());
+static LIST_CLOSE_SEARCH_KEY: RwLock<String> = RwLock::new(String::new());
 
 static TREE_SECTION_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.07, 0.07, 0.09, 1.0]);
 static TREE_SECTION_BG_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.10, 0.12, 0.18, 1.0]);
@@ -601,6 +603,12 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(k) = val.pointer("/style/data/tree/open_search").and_then(|v| v.as_str()) {
         if let Ok(mut lock) = TREE_OPEN_SEARCH_KEY.write() { *lock = k.to_string(); }
+    }
+    if let Some(k) = val.pointer("/style/data/list/open_search").and_then(|v| v.as_str()) {
+        if let Ok(mut lock) = LIST_OPEN_SEARCH_KEY.write() { *lock = k.to_string(); }
+    }
+    if let Some(k) = val.pointer("/style/data/list/close_search").and_then(|v| v.as_str()) {
+        if let Ok(mut lock) = LIST_CLOSE_SEARCH_KEY.write() { *lock = k.to_string(); }
     }
     if let Some(c) = get_color("/style/control/scrollbar/track_color") {
         if let Ok(mut lock) = SCROLLBAR_TRACK_COLOR.write() { *lock = c; }
@@ -1498,6 +1506,36 @@ pub fn tree_open_search_key() -> String {
 }
 pub fn set_tree_open_search_key(k: String) {
     if let Ok(mut lock) = TREE_OPEN_SEARCH_KEY.write() {
+        *lock = k;
+    }
+}
+
+pub fn list_open_search_key() -> String {
+    load_colors_once();
+    let val = LIST_OPEN_SEARCH_KEY.read().unwrap().clone();
+    if val.is_empty() {
+        "ctrl+f".to_string()
+    } else {
+        val
+    }
+}
+pub fn set_list_open_search_key(k: String) {
+    if let Ok(mut lock) = LIST_OPEN_SEARCH_KEY.write() {
+        *lock = k;
+    }
+}
+
+pub fn list_close_search_key() -> String {
+    load_colors_once();
+    let val = LIST_CLOSE_SEARCH_KEY.read().unwrap().clone();
+    if val.is_empty() {
+        "escape".to_string()
+    } else {
+        val
+    }
+}
+pub fn set_list_close_search_key(k: String) {
+    if let Ok(mut lock) = LIST_CLOSE_SEARCH_KEY.write() {
         *lock = k;
     }
 }

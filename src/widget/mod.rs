@@ -879,3 +879,45 @@ impl CornerRadii {
         Self::new(radius, radius, radius, radius)
     }
 }
+
+pub fn match_key_shortcut(event: &KeyEvent, shortcut_str: &str) -> bool {
+    let shortcut_lower = shortcut_str.to_lowercase();
+    let parts: Vec<&str> = shortcut_lower.split('+').collect();
+    
+    let mut req_ctrl = false;
+    let mut req_shift = false;
+    let mut req_key = "";
+    
+    for part in parts {
+        match part {
+            "ctrl" | "control" => req_ctrl = true,
+            "shift" => req_shift = true,
+            "super" | "win" | "logo" | "alt" | "meta" => {}
+            k => req_key = k,
+        }
+    }
+    
+    if event.ctrl != req_ctrl { return false; }
+    if event.shift != req_shift { return false; }
+    
+    if let Key::Character(ref ch) = event.logical_key {
+        let ch_lower = ch.to_lowercase();
+        if req_key.len() == 1 {
+            return ch_lower == req_key;
+        } else {
+            let mapped_key = match req_key {
+                "slash" => "/",
+                "enter" => "enter",
+                "escape" => "escape",
+                "space" => " ",
+                k => k,
+            };
+            return ch_lower == mapped_key;
+        }
+    } else if let Key::Named(nk) = event.logical_key {
+        let nk_str = format!("{:?}", nk).to_lowercase();
+        return nk_str == req_key;
+    }
+    false
+}
+

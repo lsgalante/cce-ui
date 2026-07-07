@@ -1016,7 +1016,7 @@ impl Element for TreeList {
                                 } else {
                                     Some("rgb")
                                 }
-                            } else if name == "key" || name == "keybind" || name == "shortcut" || name == "open_search" || name == "delete" || name.ends_with("_key") || name.ends_with(".key") || name.ends_with(".keybind") || name.ends_with(".shortcut") || name.ends_with("_delete") || name.ends_with(".delete") {
+                            } else if name == "key" || name == "keybind" || name == "shortcut" || name == "open_search" || name == "close_search" || name == "delete" || name.ends_with("_key") || name.ends_with(".key") || name.ends_with(".keybind") || name.ends_with(".shortcut") || name.ends_with(".open_search") || name.ends_with(".close_search") || name.ends_with("_delete") || name.ends_with(".delete") {
                                 Some("keybind")
                             } else if name == "font" || name.ends_with("_font") || name.ends_with(".font") {
                                 Some("font")

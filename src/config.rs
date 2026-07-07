@@ -884,7 +884,7 @@ pub fn value_to_kdl_with_annotations(
                                     let s_clean = s.trim_start_matches('#');
                                     let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
                                     (format!("\"{}\"", s), Some(ty.to_string()))
-                                } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name == "open_search" || prop_name == "delete" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") || prop_name == "brightness_up" || prop_name == "brightness_down" || prop_name.ends_with(".brightness_up") || prop_name.ends_with(".brightness_down") {
+                                } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name == "open_search" || prop_name == "close_search" || prop_name == "delete" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") || prop_name.ends_with(".open_search") || prop_name.ends_with(".close_search") || prop_name == "brightness_up" || prop_name == "brightness_down" || prop_name.ends_with(".brightness_up") || prop_name.ends_with(".brightness_down") {
                                     (format!("\"{}\"", s), Some("keybind".to_string()))
                                 } else {
                                     (format!("\"{}\"", s), None)
@@ -944,7 +944,7 @@ pub fn value_to_kdl_with_annotations(
                         let s_clean = s.trim_start_matches('#');
                         let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
                         (format!("\"{}\"", s), Some(ty.to_string()))
-                    } else if key == "key" || key == "keybind" || key == "shortcut" || key == "open_search" || key == "delete" || key.ends_with("_key") || key.ends_with(".key") || key.ends_with(".keybind") || key == "brightness_up" || key == "brightness_down" || key.ends_with(".brightness_up") || key.ends_with(".brightness_down") {
+                    } else if key == "key" || key == "keybind" || key == "shortcut" || key == "open_search" || key == "close_search" || key == "delete" || key.ends_with("_key") || key.ends_with(".key") || key.ends_with(".keybind") || key.ends_with(".open_search") || key.ends_with(".close_search") || key == "brightness_up" || key == "brightness_down" || key.ends_with(".brightness_up") || key.ends_with(".brightness_down") {
                         (format!("\"{}\"", s), Some("keybind".to_string()))
                     } else {
                         (format!("\"{}\"", s), None)
