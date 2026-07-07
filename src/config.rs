@@ -460,9 +460,7 @@ pub fn get_config_path() -> std::path::PathBuf {
     dir.join("cce").join("config.kdl")
 }
 
-pub fn get_input_path() -> std::path::PathBuf {
-    get_config_path()
-}
+
 
 fn perform_rolling_backup(path: &str) {
     let config_path = get_config_path();
