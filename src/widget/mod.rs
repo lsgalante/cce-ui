@@ -766,7 +766,8 @@ pub use self::container::{
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     SectionContainer, Header, ContentBg, ParametersBg, List, ListColumn, ListRow, ColumnWidth,
     ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
-    Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel
+    Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel,
+    SplitBox, SplitDirection
 };
 pub use self::display::{
     TextLabel, Label, SectionHeader, StyledLabel, TextItem, Svg, UsageBar,
