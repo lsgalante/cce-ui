@@ -161,11 +161,7 @@ fn link_child(parent_ptr: *mut (dyn Element + 'static), parent_id: WidgetId, chi
         let c_id = c_base.id();
         ctx.register_widget(parent_id, parent_ptr);
         ctx.register_widget(c_id, c_ptr);
-        ctx.layout_tree.parents.insert(c_id, parent_id);
-        let children = ctx.layout_tree.children.entry(parent_id).or_default();
-        if !children.contains(&c_id) {
-            children.push(c_id);
-        }
+        ctx.link_ids(parent_id, c_id);
     }
     child.set_parent(Some(parent_ptr), ctx);
 }

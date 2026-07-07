@@ -338,7 +338,7 @@ impl Element for Plate {
                 ctx.link_ids(p_id, id);
             }
         } else {
-            ctx.layout_tree.parents.remove(&id);
+            ctx.tree.set_parent(id, None);
         }
     }
 

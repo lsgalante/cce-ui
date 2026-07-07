@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::widget::{Element, WidgetId, LayoutTree, Key, NamedKey, MouseButton, ElementState, Event};
+use crate::widget::{Element, WidgetId, Key, NamedKey, MouseButton, ElementState, Event};
 use crate::widget::core::hover_animation::HoverState;
 use crate::widget::core::context_menu::ContextMenuState;
 
@@ -50,8 +50,10 @@ impl SpatialGrid {
 }
 
 pub struct UiContext {
-    pub layout_tree: LayoutTree,
-    pub widget_registry: HashMap<WidgetId, *mut (dyn Element + 'static)>,
+    /// The widget tree + registry, consolidated into one generational store (Phase 1b of the
+    /// core rebuild). Replaces the former `layout_tree` + `widget_registry` maps; see
+    /// `scene/tree.rs`.
+    pub tree: crate::scene::WidgetTree,
     pub focused_widget: Option<*mut (dyn Element + 'static)>,
     pub active_popovers: Vec<*const (dyn Element + 'static)>,
     pub hover_state: HoverState,
@@ -76,11 +78,7 @@ pub struct UiContext {
 impl UiContext {
     pub fn new() -> Self {
         Self {
-            layout_tree: LayoutTree {
-                parents: HashMap::new(),
-                children: HashMap::new(),
-            },
-            widget_registry: HashMap::new(),
+            tree: crate::scene::WidgetTree::new(),
             focused_widget: None,
             active_popovers: Vec::new(),
             hover_state: HoverState::new(),
@@ -104,11 +102,11 @@ impl UiContext {
     }
 
     pub fn get_widget(&self, id: WidgetId) -> Option<&(dyn Element + 'static)> {
-        self.widget_registry.get(&id).map(|&ptr| unsafe { &*ptr })
+        self.tree.get_ptr(id).map(|ptr| unsafe { &*ptr })
     }
 
     pub fn get_widget_mut(&mut self, id: WidgetId) -> Option<&mut (dyn Element + 'static)> {
-        self.widget_registry.get(&id).map(|&ptr| unsafe { &mut *ptr })
+        self.tree.get_ptr(id).map(|ptr| unsafe { &mut *ptr })
     }
 
     pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
@@ -184,7 +182,7 @@ impl UiContext {
                     } else if *state == ElementState::Released {
                         if self.is_dragging {
                             if let Some(target_id) = self.drag_target {
-                                if let Some(target_ptr) = self.widget_registry.get(&target_id).copied() {
+                                if let Some(target_ptr) = self.tree.get_ptr(target_id) {
                                     (*target_ptr).handle_event(&Event::DragEnd, self);
                                     (*target_ptr).mark_dirty(self);
                                 }
@@ -202,7 +200,7 @@ impl UiContext {
                             if self.is_dragging {
                                 let dx = *x - sx;
                                 let dy = *y - sy;
-                                if let Some(target_ptr) = self.widget_registry.get(&target_id).copied() {
+                                if let Some(target_ptr) = self.tree.get_ptr(target_id) {
                                     let (cx, cy, _, _) = (*target_ptr).rect();
                                     let drag_evt = Event::DragUpdate { dx, dy, x: *x, y: *y, local_x: *x - cx, local_y: *y - cy };
                                     let adjusted = (*root).transform_event_for_child(target_ptr, drag_evt, self);
@@ -215,7 +213,7 @@ impl UiContext {
                                 if (dx * dx + dy * dy).sqrt() > 3.0 {
                                     self.is_dragging = true;
                                     self.active_grab = Some(target_id);
-                                    if let Some(target_ptr) = self.widget_registry.get(&target_id).copied() {
+                                    if let Some(target_ptr) = self.tree.get_ptr(target_id) {
                                         (*target_ptr).handle_event(&Event::DragStart { start_x: sx, start_y: sy }, self);
                                         (*target_ptr).mark_dirty(self);
                                     }
@@ -236,7 +234,7 @@ impl UiContext {
                 | Event::DragUpdate { .. }
                 | Event::DragEnd = event
                 {
-                    if let Some(grabbed_ptr) = self.widget_registry.get(&grabbed_id).copied() {
+                    if let Some(grabbed_ptr) = self.tree.get_ptr(grabbed_id) {
                         let handled = (*grabbed_ptr).handle_event(event, self);
                         if handled {
                             (*grabbed_ptr).mark_dirty(self);
@@ -348,7 +346,9 @@ impl UiContext {
 
     pub fn clear_dirty(&mut self) {
         self.any_dirty = false;
-        for &ptr in self.widget_registry.values() {
+        let ptrs: Vec<*mut (dyn Element + 'static)> =
+            self.tree.iter_registered().map(|(_, ptr)| ptr).collect();
+        for ptr in ptrs {
             unsafe {
                 if let Some(b) = (*ptr).base_mut() {
                     b.dirty = false;
@@ -360,12 +360,12 @@ impl UiContext {
 
     pub fn rebuild_spatial_grid(&mut self) {
         self.spatial_grid.clear();
-        for (&id, &ptr) in &self.widget_registry {
+        let entries: Vec<(WidgetId, *mut (dyn Element + 'static))> =
+            self.tree.iter_registered().collect();
+        for (id, ptr) in entries {
             unsafe {
-                if !ptr.is_null() {
-                    let rect = (*ptr).rect();
-                    self.spatial_grid.insert(id, rect);
-                }
+                let rect = (*ptr).rect();
+                self.spatial_grid.insert(id, rect);
             }
         }
     }
@@ -383,19 +383,19 @@ impl UiContext {
     pub fn is_widget_visible(&self, id: WidgetId) -> bool {
         let mut curr = id;
         loop {
-            if let Some(w_ptr) = self.widget_registry.get(&curr) {
+            if let Some(w_ptr) = self.tree.get_ptr(curr) {
                 unsafe {
-                    if !(*(*w_ptr)).visible() {
+                    if !(*w_ptr).visible() {
                         return false;
                     }
                 }
             } else {
                 return false;
             }
-            if let Some(&parent_id) = self.layout_tree.parents.get(&curr) {
-                if let Some(parent_ptr) = self.widget_registry.get(&parent_id) {
+            if let Some(parent_id) = self.tree.parent_id(curr) {
+                if let Some(parent_ptr) = self.tree.get_ptr(parent_id) {
                     unsafe {
-                        if !(*(*parent_ptr)).is_child_visible(curr) {
+                        if !(*parent_ptr).is_child_visible(curr) {
                             return false;
                         }
                     }
@@ -413,7 +413,7 @@ impl UiContext {
         let ids = self.tick_receivers.clone();
         for id in ids {
             if self.is_widget_visible(id) {
-                if let Some(ptr) = self.widget_registry.get(&id).copied() {
+                if let Some(ptr) = self.tree.get_ptr(id) {
                     unsafe {
                         if (*ptr).tick(dt, self) {
                             (*ptr).mark_dirty(self);
@@ -558,9 +558,9 @@ impl UiContext {
         false
     }
 
-    // --- Registry ---
+    // --- Registry (backed by the generational WidgetTree; see scene/tree.rs) ---
     pub fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn Element + 'static)) {
-        self.widget_registry.insert(id, ptr);
+        self.tree.register(id, ptr);
         unsafe {
             if !ptr.is_null() && (*ptr).wants_tick() {
                 self.register_tick_receiver(id);
@@ -569,32 +569,19 @@ impl UiContext {
     }
 
     pub fn link_ids(&mut self, parent: WidgetId, child: WidgetId) {
-        self.layout_tree.parents.insert(child, parent);
-        let children = self.layout_tree.children.entry(parent).or_default();
-        if !children.contains(&child) {
-            children.push(child);
-        }
+        self.tree.link(parent, child);
     }
 
     pub fn unlink_child(&mut self, parent: WidgetId, child: WidgetId) {
-        self.layout_tree.parents.remove(&child);
-        if let Some(children) = self.layout_tree.children.get_mut(&parent) {
-            children.retain(|&x| x != child);
-        }
+        self.tree.unlink(parent, child);
     }
 
     pub fn clear_children_ids(&mut self, parent: WidgetId) {
-        if let Some(children) = self.layout_tree.children.remove(&parent) {
-            for child in children {
-                self.layout_tree.parents.remove(&child);
-            }
-        }
+        self.tree.clear_children(parent);
     }
 
     pub fn clear_hierarchy(&mut self) {
-        self.layout_tree.parents.clear();
-        self.layout_tree.children.clear();
-        self.widget_registry.clear();
+        self.tree.clear_all();
     }
 
     // --- Popovers ---
@@ -632,7 +619,7 @@ impl UiContext {
                 }
             }
         }
-        for &ptr in self.widget_registry.values() {
+        for (_, ptr) in self.tree.iter_registered() {
             let current_data = ptr as *const () as usize;
             if query_address == current_data {
                 continue;
@@ -689,79 +676,11 @@ impl UiContext {
         }
     }
 
-    pub fn tick_hover(&mut self, dt: f32) -> bool {
-        let s = &mut self.hover_state;
-        let decay = 15.0;
-        let mut changed = false;
-
-        if s.current_alpha <= 0.001 && s.target_alpha > 0.0 {
-            if let (Some(tx), Some(ty), Some(tw), Some(th)) = (s.target_x, s.target_y, s.target_w, s.target_h) {
-                s.current_x = tx;
-                s.current_y = ty;
-                s.current_w = tw;
-                s.current_h = th;
-            }
-        }
-
-        if (s.current_alpha - s.target_alpha).abs() > 0.001 {
-            s.current_alpha += (s.target_alpha - s.current_alpha) * (1.0 - (-decay * dt).exp());
-            changed = true;
-        } else if s.current_alpha != s.target_alpha {
-            s.current_alpha = s.target_alpha;
-            changed = true;
-        }
-
-        if let (Some(tx), Some(ty), Some(tw), Some(th)) = (s.target_x, s.target_y, s.target_w, s.target_h) {
-            if (s.current_x - tx).abs() > 0.1 {
-                s.current_x += (tx - s.current_x) * (1.0 - (-decay * dt).exp());
-                changed = true;
-            } else if s.current_x != tx {
-                s.current_x = tx;
-                changed = true;
-            }
-
-            if (s.current_y - ty).abs() > 0.1 {
-                s.current_y += (ty - s.current_y) * (1.0 - (-decay * dt).exp());
-                changed = true;
-            } else if s.current_y != ty {
-                s.current_y = ty;
-                changed = true;
-            }
-
-            if (s.current_w - tw).abs() > 0.1 {
-                s.current_w += (tw - s.current_w) * (1.0 - (-decay * dt).exp());
-                changed = true;
-            } else if s.current_w != tw {
-                s.current_w = tw;
-                changed = true;
-            }
-
-            if (s.current_h - th).abs() > 0.1 {
-                s.current_h += (th - s.current_h) * (1.0 - (-decay * dt).exp());
-                changed = true;
-            } else if s.current_h != th {
-                s.current_h = th;
-                changed = true;
-            }
-        }
-
-        changed
-    }
-
-    pub fn get_hover_quad(&self) -> Option<(f32, f32, f32, f32, [f32; 4])> {
-        let s = &self.hover_state;
-        if s.current_alpha > 0.001 {
-            Some((
-                s.current_x,
-                s.current_y,
-                s.current_w,
-                s.current_h,
-                [1.0, 1.0, 1.0, s.current_alpha],
-            ))
-        } else {
-            None
-        }
-    }
+    // NOTE: the animated hover-highlight for this context previously lived here as
+    // `tick_hover` / `get_hover_quad`, duplicating the live thread-local implementation in
+    // widget/core.rs (`hover_animation`). Both were dead (zero callers workspace-wide) and were
+    // removed; the single source of truth is `hover_animation`. This will be folded into the
+    // Animated<T> primitive in the core rebuild (see cce-ui/docs/rfc-core-rebuild.md, Phase 4).
 
     // --- Context Menu ---
     pub fn is_context_menu_visible(&self) -> bool {
@@ -869,7 +788,7 @@ impl UiContext {
             candidate_ids.dedup();
         }
         for &id in &candidate_ids {
-            if let Some(&ptr) = self.widget_registry.get(&id) {
+            if let Some(ptr) = self.tree.get_ptr(id) {
                 unsafe {
                     if !ptr.is_null() {
                         let w = &*ptr;
@@ -903,7 +822,7 @@ impl UiContext {
             candidate_ids.dedup();
         }
         for &id in &candidate_ids {
-            if let Some(&ptr) = self.widget_registry.get(&id) {
+            if let Some(ptr) = self.tree.get_ptr(id) {
                 unsafe {
                     if !ptr.is_null() {
                         let w = &*ptr;

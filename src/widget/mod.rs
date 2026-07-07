@@ -188,11 +188,9 @@ pub trait Element {
             parent_id = b.id.get();
         }
         if let Some(id) = parent_id {
-            if let Some(&p_id) = ctx.layout_tree.parents.get(&id) {
-                if let Some(&parent_ptr) = ctx.widget_registry.get(&p_id) {
-                    unsafe {
-                        (*parent_ptr).mark_dirty(ctx);
-                    }
+            if let Some(parent_ptr) = ctx.tree.parent_ptr(id) {
+                unsafe {
+                    (*parent_ptr).mark_dirty(ctx);
                 }
             }
         }
@@ -623,9 +621,7 @@ pub trait Element {
 
     fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         let base = self.base()?;
-        let id = base.id();
-        let parent_id = ctx.layout_tree.parents.get(&id).copied()?;
-        ctx.widget_registry.get(&parent_id).copied()
+        ctx.tree.parent_ptr(base.id())
     }
 
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
@@ -637,21 +633,20 @@ pub trait Element {
                     ctx.register_widget(p_id, p_ptr);
                     let self_ptr = self.as_ptr();
                     ctx.register_widget(id, self_ptr);
-                    ctx.layout_tree.parents.insert(id, p_id);
+                    // Symmetric link (Phase 1b): unlike the legacy `parents.insert` this also
+                    // records the child under the parent, keeping `children()` consistent.
+                    ctx.tree.set_parent(id, Some(p_id));
                 }
             } else {
-                ctx.layout_tree.parents.remove(&id);
+                ctx.tree.set_parent(id, None);
             }
         }
     }
 
     fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        if let Some(base) = self.base() {
-            let id = base.id();
-            let child_ids = ctx.layout_tree.children.get(&id).cloned().unwrap_or_default();
-            child_ids.iter().filter_map(|cid| ctx.widget_registry.get(cid).copied()).collect()
-        } else {
-            vec![]
+        match self.base() {
+            Some(base) => ctx.tree.children_ptrs(base.id()),
+            None => vec![],
         }
     }
 
@@ -662,11 +657,7 @@ pub trait Element {
             let self_ptr = self.as_ptr();
             ctx.register_widget(p_id, self_ptr);
             ctx.register_widget(c_id, child);
-            ctx.layout_tree.parents.insert(c_id, p_id);
-            let children = ctx.layout_tree.children.entry(p_id).or_default();
-            if !children.contains(&c_id) {
-                children.push(c_id);
-            }
+            ctx.tree.link(p_id, c_id);
         }
     }
 

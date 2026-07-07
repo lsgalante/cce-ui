@@ -8,6 +8,7 @@ pub mod engine;
 pub mod scale;
 pub mod backend;
 pub mod context;
+pub mod scene;
 pub mod process;
 pub mod file_dialog;
 pub mod ipc;
