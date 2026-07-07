@@ -920,10 +920,8 @@ pub fn reload_config() {
                     }
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("control_label_font_detached") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
+            if key == "control_label_font_detached" {
+                let font = val_str.to_string();
                 let mut changed = false;
                 if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
                     if *lock != font {
@@ -934,10 +932,9 @@ pub fn reload_config() {
                 if changed {
                     label_font_detached_changed = true;
                 }
-            } else if let Some(rest) = trimmed.strip_prefix("control_label_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
+            }
+            if key == "control_label_font" {
+                let font = val_str.to_string();
                 let mut changed = false;
                 if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
                     if *lock != font {
@@ -949,10 +946,8 @@ pub fn reload_config() {
                     label_font_changed = true;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("font_selector_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
+            if key == "font_selector_font" {
+                let font = val_str.to_string();
                 let mut changed = false;
                 if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
                     if *lock != font {
@@ -964,10 +959,8 @@ pub fn reload_config() {
                     font_selector_font_changed = true;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("button_strip_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
+            if key == "button_strip_font" {
+                let font = val_str.to_string();
                 let mut changed = false;
                 if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
                     if *lock != font {
@@ -992,10 +985,8 @@ pub fn reload_config() {
                     list_font_changed = true;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("tree_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
+            if key == "tree_font" {
+                let font = val_str.to_string();
                 let mut changed = false;
                 if let Ok(mut lock) = TREE_FONT.write() {
                     if *lock != font {
@@ -1007,10 +998,8 @@ pub fn reload_config() {
                     tree_font_changed = true;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("graph_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
+            if key == "graph_font" {
+                let font = val_str.to_string();
                 let mut changed = false;
                 if let Ok(mut lock) = GRAPH_FONT.write() {
                     if *lock != font {
@@ -1022,10 +1011,8 @@ pub fn reload_config() {
                     graph_font_changed = true;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("graph_node_font") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                let rest = mod_rest(rest);
-                let font = rest.trim().to_string();
+            if key == "graph_node_font" {
+                let font = val_str.to_string();
                 let mut changed = false;
                 if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
                     if *lock != font {
@@ -1762,22 +1749,7 @@ pub fn menubar_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("menubar_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = rest.trim();
-                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                        &rest[1..rest.len() - 1]
-                    } else {
-                        rest
-                    };
-                    font = val_str.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("menubar_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = MENUBAR_FONT.write() {
             *lock = font;
         }
@@ -1819,22 +1791,7 @@ pub fn statusbar_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("statusbar_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = rest.trim();
-                    let val_str = if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {
-                        &rest[1..rest.len() - 1]
-                    } else {
-                        rest
-                    };
-                    font = val_str.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("statusbar_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = STATUSBAR_FONT.write() {
             *lock = font;
         }
@@ -1878,17 +1835,7 @@ pub fn font_selector_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("font_selector_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("font_selector_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = FONT_SELECTOR_FONT.write() {
             *lock = font;
         }
@@ -1931,17 +1878,7 @@ pub fn button_strip_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("button_strip_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("button_strip_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = BUTTON_STRIP_FONT.write() {
             *lock = font;
         }
@@ -2117,17 +2054,7 @@ pub fn tree_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("tree_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("tree_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = TREE_FONT.write() {
             *lock = font;
         }
@@ -2170,17 +2097,7 @@ pub fn graph_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("graph_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("graph_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = GRAPH_FONT.write() {
             *lock = font;
         }
@@ -2223,17 +2140,7 @@ pub fn graph_node_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("graph_node_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("graph_node_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = GRAPH_NODE_FONT.write() {
             *lock = font;
         }
