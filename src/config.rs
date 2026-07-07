@@ -1003,9 +1003,7 @@ pub fn load_recent_files() -> Vec<String> {
                             if node.name().value() == "file" {
                                 if let Some(entry) = node.entries().first() {
                                     if let kdl::KdlValue::String(s) = entry.value() {
-                                        if std::path::Path::new(s).exists() {
-                                            files.push(s.clone());
-                                        }
+                                        files.push(s.clone());
                                     }
                                 }
                             }
