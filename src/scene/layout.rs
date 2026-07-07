@@ -12,16 +12,15 @@
 //!   * **measure** (bottom-up): each node reports an intrinsic [`Size`] from its children (or, for
 //!     a leaf, its content size). Written into `LayoutBox::measured`.
 //!   * **arrange** (top-down): each node is given a final [`Rect`] and positions its children
-//!     within it — distributing flex `grow`, honoring `gap`/`padding`, and applying main/cross
-//!     alignment. Written into `LayoutBox::rect`.
+//!     within it. Written into `LayoutBox::rect`.
 //!
 //! Because it operates on `Style` + `Size` and writes plain rects, it is fully unit-testable
 //! without a GPU or a Wayland surface (see the tests below).
 //!
-//! Scope of this first cut: a flexbox-style **row/column** model with padding, gap, grow,
-//! main-axis alignment (start/center/end/space-between), cross-axis alignment
-//! (start/center/end/stretch), fixed/auto sizing, and min/max clamps. Deferred to later
-//! increments: shrink weights, wrapping, grid, percentage lengths, and the glyphon text-measure
+//! Layout modes ([`LayoutMode`]): **Flex** (row/column with grow/shrink, gap, padding, main/cross
+//! alignment incl. stretch), **Stack** (Z-overlay with per-axis alignment), and **Grid** (fixed
+//! column count with uniform column width and per-row heights). Deferred to later increments:
+//! wrapping, percentage lengths, width-dependent adaptive grids, and the glyphon text-measure
 //! hook for real leaf widgets (that lands with Phase 2b integration).
 
 use crate::scene::arena::{Arena, NodeId};
@@ -69,11 +68,30 @@ impl Edges {
     }
 }
 
-/// The main-axis direction a container lays its children along.
+/// The main-axis direction a flex container lays its children along.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Axis {
     Row,
     Column,
+}
+
+/// How a node arranges its children.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LayoutMode {
+    /// Row/column flex (uses `Style::axis`).
+    Flex,
+    /// All children overlaid in the same box (Z-stack), aligned per axis.
+    Stack,
+    /// Fixed-column grid, filling left-to-right then top-to-bottom.
+    Grid(GridSpec),
+}
+
+/// A fixed-column grid: uniform column width (max child width), per-row heights.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GridSpec {
+    pub columns: usize,
+    pub col_gap: f32,
+    pub row_gap: f32,
 }
 
 /// A length along one axis.
@@ -85,7 +103,10 @@ pub enum Length {
     Fixed(f32),
 }
 
-/// Distribution of free space along the main axis (when no child grows).
+/// Distribution of free space along the main axis (when no child grows/shrinks). For [`Stack`]
+/// this selects horizontal placement.
+///
+/// [`Stack`]: LayoutMode::Stack
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MainAlign {
     Start,
@@ -94,7 +115,9 @@ pub enum MainAlign {
     SpaceBetween,
 }
 
-/// Placement of each child across the cross axis.
+/// Placement of each child across the cross axis. For [`Stack`] this selects vertical placement.
+///
+/// [`Stack`]: LayoutMode::Stack
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CrossAlign {
     Start,
@@ -107,6 +130,7 @@ pub enum CrossAlign {
 /// Layout inputs for a node.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Style {
+    pub mode: LayoutMode,
     pub axis: Axis,
     pub padding: Edges,
     pub gap: f32,
@@ -116,6 +140,8 @@ pub struct Style {
     pub height: Length,
     /// Flex grow weight: share of leftover main-axis space this node claims.
     pub grow: f32,
+    /// Flex shrink weight: share of a main-axis overflow this node gives up.
+    pub shrink: f32,
     pub min_width: f32,
     pub min_height: f32,
     pub max_width: f32,
@@ -125,6 +151,7 @@ pub struct Style {
 impl Default for Style {
     fn default() -> Self {
         Style {
+            mode: LayoutMode::Flex,
             axis: Axis::Column,
             padding: Edges::ZERO,
             gap: 0.0,
@@ -133,6 +160,7 @@ impl Default for Style {
             width: Length::Auto,
             height: Length::Auto,
             grow: 0.0,
+            shrink: 0.0,
             min_width: 0.0,
             min_height: 0.0,
             max_width: f32::INFINITY,
@@ -143,10 +171,16 @@ impl Default for Style {
 
 impl Style {
     pub fn row() -> Self {
-        Style { axis: Axis::Row, ..Default::default() }
+        Style { mode: LayoutMode::Flex, axis: Axis::Row, ..Default::default() }
     }
     pub fn column() -> Self {
-        Style { axis: Axis::Column, ..Default::default() }
+        Style { mode: LayoutMode::Flex, axis: Axis::Column, ..Default::default() }
+    }
+    pub fn stack() -> Self {
+        Style { mode: LayoutMode::Stack, ..Default::default() }
+    }
+    pub fn grid(columns: usize, col_gap: f32, row_gap: f32) -> Self {
+        Style { mode: LayoutMode::Grid(GridSpec { columns: columns.max(1), col_gap, row_gap }), ..Default::default() }
     }
     pub fn gap(mut self, v: f32) -> Self {
         self.gap = v;
@@ -158,6 +192,10 @@ impl Style {
     }
     pub fn grow(mut self, v: f32) -> Self {
         self.grow = v;
+        self
+    }
+    pub fn shrink(mut self, v: f32) -> Self {
+        self.shrink = v;
         self
     }
     pub fn main_align(mut self, a: MainAlign) -> Self {
@@ -227,19 +265,15 @@ fn make_size(axis: Axis, main: f32, cross: f32) -> Size {
     }
 }
 
+/// Offset that places an item of extent `item` within `container` per a start/center/end rule.
 #[inline]
-fn pad_main(axis: Axis, p: Edges) -> f32 {
-    match axis {
-        Axis::Row => p.left + p.right,
-        Axis::Column => p.top + p.bottom,
-    }
-}
-
-#[inline]
-fn pad_cross(axis: Axis, p: Edges) -> f32 {
-    match axis {
-        Axis::Row => p.top + p.bottom,
-        Axis::Column => p.left + p.right,
+fn align_offset(start: bool, center: bool, container: f32, item: f32) -> f32 {
+    if center {
+        (container - item) / 2.0
+    } else if start {
+        0.0
+    } else {
+        container - item // end
     }
 }
 
@@ -271,6 +305,38 @@ fn child_rect(
     }
 }
 
+#[inline]
+fn content_box(rect: Rect, p: Edges) -> (f32, f32, f32, f32) {
+    (
+        rect.x + p.left,
+        rect.y + p.top,
+        (rect.width - p.left - p.right).max(0.0),
+        (rect.height - p.top - p.bottom).max(0.0),
+    )
+}
+
+/// Resolve the node's own size from its content box: apply explicit width/height, add padding for
+/// `Auto`, then clamp to min/max.
+fn finalize_size(style: &Style, content: Size) -> Size {
+    let padded = Size::new(
+        content.width + style.padding.left + style.padding.right,
+        content.height + style.padding.top + style.padding.bottom,
+    );
+    let mut size = Size {
+        width: match style.width {
+            Length::Fixed(v) => v,
+            Length::Auto => padded.width,
+        },
+        height: match style.height {
+            Length::Fixed(v) => v,
+            Length::Auto => padded.height,
+        },
+    };
+    size.width = size.width.clamp(style.min_width, style.max_width);
+    size.height = size.height.clamp(style.min_height, style.max_height);
+    size
+}
+
 /// Run both passes over the subtree rooted at `root`, laying it out into `available` space at the
 /// origin. Writes `measured` and `rect` into every node.
 pub fn compute_layout(arena: &mut Arena<LayoutBox>, root: NodeId, available: Size) {
@@ -287,44 +353,60 @@ pub fn measure(arena: &mut Arena<LayoutBox>, id: NodeId) -> Size {
     };
     let children = arena.children(id).to_vec();
 
-    let (content_main, content_cross) = if children.is_empty() {
-        let s = intrinsic.unwrap_or(Size::ZERO);
-        (main_of(style.axis, s), cross_of(style.axis, s))
+    let content = if children.is_empty() {
+        intrinsic.unwrap_or(Size::ZERO)
     } else {
-        let mut main = 0.0f32;
-        let mut cross = 0.0f32;
-        for (i, &child) in children.iter().enumerate() {
-            let cs = measure(arena, child);
-            if i > 0 {
-                main += style.gap;
-            }
-            main += main_of(style.axis, cs);
-            cross = cross.max(cross_of(style.axis, cs));
+        match style.mode {
+            LayoutMode::Flex => measure_flex(arena, &style, &children),
+            LayoutMode::Stack => measure_stack(arena, &children),
+            LayoutMode::Grid(spec) => measure_grid(arena, spec, &children),
         }
-        (main, cross)
     };
 
-    let full = make_size(
-        style.axis,
-        content_main + pad_main(style.axis, style.padding),
-        content_cross + pad_cross(style.axis, style.padding),
-    );
-
-    let mut size = Size {
-        width: match style.width {
-            Length::Fixed(v) => v,
-            Length::Auto => full.width,
-        },
-        height: match style.height {
-            Length::Fixed(v) => v,
-            Length::Auto => full.height,
-        },
-    };
-    size.width = size.width.clamp(style.min_width, style.max_width);
-    size.height = size.height.clamp(style.min_height, style.max_height);
-
+    let size = finalize_size(&style, content);
     arena.value_mut(id).expect("measure: stale node").measured = size;
     size
+}
+
+fn measure_flex(arena: &mut Arena<LayoutBox>, style: &Style, children: &[NodeId]) -> Size {
+    let mut main = 0.0f32;
+    let mut cross = 0.0f32;
+    for (i, &child) in children.iter().enumerate() {
+        let cs = measure(arena, child);
+        if i > 0 {
+            main += style.gap;
+        }
+        main += main_of(style.axis, cs);
+        cross = cross.max(cross_of(style.axis, cs));
+    }
+    make_size(style.axis, main, cross)
+}
+
+fn measure_stack(arena: &mut Arena<LayoutBox>, children: &[NodeId]) -> Size {
+    let mut w = 0.0f32;
+    let mut h = 0.0f32;
+    for &child in children {
+        let cs = measure(arena, child);
+        w = w.max(cs.width);
+        h = h.max(cs.height);
+    }
+    Size::new(w, h)
+}
+
+fn measure_grid(arena: &mut Arena<LayoutBox>, spec: GridSpec, children: &[NodeId]) -> Size {
+    let cols = spec.columns.max(1);
+    let sizes: Vec<Size> = children.iter().map(|&c| measure(arena, c)).collect();
+    let cell_w = sizes.iter().fold(0.0f32, |m, s| m.max(s.width));
+    let rows = sizes.len().div_ceil(cols);
+    let mut row_heights = vec![0.0f32; rows];
+    for (i, s) in sizes.iter().enumerate() {
+        let r = i / cols;
+        row_heights[r] = row_heights[r].max(s.height);
+    }
+    let content_w = cols as f32 * cell_w + (cols as f32 - 1.0) * spec.col_gap;
+    let content_h =
+        row_heights.iter().sum::<f32>() + (rows as f32 - 1.0).max(0.0) * spec.row_gap;
+    Size::new(content_w, content_h)
 }
 
 /// Top-down placement. Assigns `rect` to `id`, then positions its children within it.
@@ -336,34 +418,70 @@ pub fn arrange(arena: &mut Arena<LayoutBox>, id: NodeId, rect: Rect) {
     if children.is_empty() {
         return;
     }
+    let (cx, cy, cw, ch) = content_box(rect, style.padding);
 
-    let content_x = rect.x + style.padding.left;
-    let content_y = rect.y + style.padding.top;
-    let content_w = (rect.width - style.padding.left - style.padding.right).max(0.0);
-    let content_h = (rect.height - style.padding.top - style.padding.bottom).max(0.0);
-    let content = Size::new(content_w, content_h);
-    let content_main = main_of(style.axis, content);
-    let content_cross = cross_of(style.axis, content);
+    let placements = match style.mode {
+        LayoutMode::Flex => arrange_flex(arena, &style, &children, cx, cy, cw, ch),
+        LayoutMode::Stack => arrange_stack(arena, &style, &children, cx, cy, cw, ch),
+        LayoutMode::Grid(spec) => arrange_grid(arena, spec, &children, cx, cy),
+    };
 
-    // Snapshot each child's measured main/cross extent and grow weight.
+    for (child, r) in placements {
+        arrange(arena, child, r);
+    }
+}
+
+fn arrange_flex(
+    arena: &Arena<LayoutBox>,
+    style: &Style,
+    children: &[NodeId],
+    cx: f32,
+    cy: f32,
+    cw: f32,
+    ch: f32,
+) -> Vec<(NodeId, Rect)> {
+    let axis = style.axis;
+    let content = Size::new(cw, ch);
+    let content_main = main_of(axis, content);
+    let content_cross = cross_of(axis, content);
+
     let mut child_main = Vec::with_capacity(children.len());
     let mut child_cross = Vec::with_capacity(children.len());
     let mut grows = Vec::with_capacity(children.len());
-    for &child in &children {
+    let mut shrinks = Vec::with_capacity(children.len());
+    for &child in children {
         let b = arena.value(child).unwrap();
-        child_main.push(main_of(style.axis, b.measured));
-        child_cross.push(cross_of(style.axis, b.measured));
+        child_main.push(main_of(axis, b.measured));
+        child_cross.push(cross_of(axis, b.measured));
         grows.push(b.style.grow);
+        shrinks.push(b.style.shrink);
     }
 
     let n = children.len();
     let total_main: f32 = child_main.iter().sum::<f32>() + style.gap * (n as f32 - 1.0);
     let free = content_main - total_main;
     let total_grow: f32 = grows.iter().sum();
-    let extra_per_grow = if total_grow > 0.0 && free > 0.0 { free / total_grow } else { 0.0 };
+    let total_shrink: f32 = shrinks.iter().sum();
 
-    // Alignment only distributes leftover space when nothing grows (grow already consumes it).
-    let (start_offset, spacing_extra) = if total_grow > 0.0 {
+    // Resolve each child's main extent: grow to fill, or shrink to fit, else keep measured.
+    let mut sizes = child_main.clone();
+    let distributed = if free > 0.0 && total_grow > 0.0 {
+        for i in 0..n {
+            sizes[i] += grows[i] / total_grow * free;
+        }
+        true
+    } else if free < 0.0 && total_shrink > 0.0 {
+        let deficit = -free;
+        for i in 0..n {
+            sizes[i] = (child_main[i] - shrinks[i] / total_shrink * deficit).max(0.0);
+        }
+        true
+    } else {
+        false
+    };
+
+    // Alignment only distributes leftover space when grow/shrink didn't consume it.
+    let (start_offset, spacing_extra) = if distributed {
         (0.0, 0.0)
     } else {
         match style.main_align {
@@ -376,10 +494,10 @@ pub fn arrange(arena: &mut Arena<LayoutBox>, id: NodeId, rect: Rect) {
         }
     };
 
-    let mut placements: Vec<(NodeId, Rect)> = Vec::with_capacity(n);
+    let mut out = Vec::with_capacity(n);
     let mut main_pos = start_offset;
     for i in 0..n {
-        let main_size = child_main[i] + grows[i] * extra_per_grow;
+        let main_size = sizes[i];
         let cross_size = match style.cross_align {
             CrossAlign::Stretch => content_cross,
             _ => child_cross[i],
@@ -389,14 +507,74 @@ pub fn arrange(arena: &mut Arena<LayoutBox>, id: NodeId, rect: Rect) {
             CrossAlign::Center => (content_cross - cross_size) / 2.0,
             CrossAlign::End => content_cross - cross_size,
         };
-        let r = child_rect(style.axis, content_x, content_y, main_pos, cross_pos, main_size, cross_size);
-        placements.push((children[i], r));
+        out.push((children[i], child_rect(axis, cx, cy, main_pos, cross_pos, main_size, cross_size)));
         main_pos += main_size + style.gap + spacing_extra;
     }
+    out
+}
 
-    for (child, r) in placements {
-        arrange(arena, child, r);
+fn arrange_stack(
+    arena: &Arena<LayoutBox>,
+    style: &Style,
+    children: &[NodeId],
+    cx: f32,
+    cy: f32,
+    cw: f32,
+    ch: f32,
+) -> Vec<(NodeId, Rect)> {
+    // Stack has no axis: `main_align` places children horizontally, `cross_align` vertically.
+    let (h_start, h_center) =
+        (style.main_align == MainAlign::Start || style.main_align == MainAlign::SpaceBetween,
+         style.main_align == MainAlign::Center);
+    let (v_start, v_center) =
+        (style.cross_align == CrossAlign::Start, style.cross_align == CrossAlign::Center);
+    let stretch_v = style.cross_align == CrossAlign::Stretch;
+
+    let mut out = Vec::with_capacity(children.len());
+    for &child in children {
+        let m = arena.value(child).unwrap().measured;
+        let w = m.width;
+        let h = if stretch_v { ch } else { m.height };
+        let x = cx + align_offset(h_start, h_center, cw, w);
+        let y = cy + if stretch_v { 0.0 } else { align_offset(v_start, v_center, ch, h) };
+        out.push((child, Rect { x, y, width: w, height: h }));
     }
+    out
+}
+
+fn arrange_grid(
+    arena: &Arena<LayoutBox>,
+    spec: GridSpec,
+    children: &[NodeId],
+    cx: f32,
+    cy: f32,
+) -> Vec<(NodeId, Rect)> {
+    let cols = spec.columns.max(1);
+    let sizes: Vec<Size> = children.iter().map(|&c| arena.value(c).unwrap().measured).collect();
+    let cell_w = sizes.iter().fold(0.0f32, |m, s| m.max(s.width));
+    let rows = sizes.len().div_ceil(cols);
+
+    let mut row_heights = vec![0.0f32; rows];
+    for (i, s) in sizes.iter().enumerate() {
+        row_heights[i / cols] = row_heights[i / cols].max(s.height);
+    }
+    // y offset of each row's top.
+    let mut row_y = vec![0.0f32; rows];
+    let mut acc = 0.0;
+    for r in 0..rows {
+        row_y[r] = acc;
+        acc += row_heights[r] + spec.row_gap;
+    }
+
+    let mut out = Vec::with_capacity(children.len());
+    for (i, &child) in children.iter().enumerate() {
+        let col = i % cols;
+        let row = i / cols;
+        let x = cx + col as f32 * (cell_w + spec.col_gap);
+        let y = cy + row_y[row];
+        out.push((child, Rect { x, y, width: sizes[i].width, height: sizes[i].height }));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -442,7 +620,6 @@ mod tests {
     fn grow_distributes_free_space_by_weight() {
         let mut arena = Arena::new();
         let root = arena.insert(LayoutBox::container(Style::row()));
-        // Two 10-wide leaves, grow 1 and 3. Free = 100 - 20 = 80, split 1:3 => +20 and +60.
         let a = arena.insert(LayoutBox::leaf(Style::default().grow(1.0), Size::new(10.0, 10.0)));
         let b = arena.insert(LayoutBox::leaf(Style::default().grow(3.0), Size::new(10.0, 10.0)));
         arena.append_child(root, a);
@@ -451,7 +628,23 @@ mod tests {
         compute_layout(&mut arena, root, Size::new(100.0, 50.0));
         assert_eq!(rect_of(&arena, a).width, 30.0);
         assert_eq!(rect_of(&arena, b).width, 70.0);
-        assert_eq!(rect_of(&arena, b).x, 30.0, "b starts after a's grown width");
+        assert_eq!(rect_of(&arena, b).x, 30.0);
+    }
+
+    #[test]
+    fn shrink_absorbs_overflow_by_weight() {
+        // Two 60-wide leaves in 100px, both shrink 1 => 20px deficit split evenly => 50 each.
+        let mut arena = Arena::new();
+        let root = arena.insert(LayoutBox::container(Style::row()));
+        let a = arena.insert(LayoutBox::leaf(Style::default().shrink(1.0), Size::new(60.0, 10.0)));
+        let b = arena.insert(LayoutBox::leaf(Style::default().shrink(1.0), Size::new(60.0, 10.0)));
+        arena.append_child(root, a);
+        arena.append_child(root, b);
+
+        compute_layout(&mut arena, root, Size::new(100.0, 50.0));
+        assert_eq!(rect_of(&arena, a).width, 50.0);
+        assert_eq!(rect_of(&arena, b).width, 50.0);
+        assert_eq!(rect_of(&arena, b).x, 50.0);
     }
 
     #[test]
@@ -461,14 +654,14 @@ mod tests {
         let a = leaf(&mut arena, 20.0, 10.0);
         arena.append_child(root_c, a);
         compute_layout(&mut arena, root_c, Size::new(100.0, 50.0));
-        assert_eq!(rect_of(&arena, a).x, 40.0, "centered: (100-20)/2");
+        assert_eq!(rect_of(&arena, a).x, 40.0);
 
         let mut arena2 = Arena::new();
         let root_e = arena2.insert(LayoutBox::container(Style::row().main_align(MainAlign::End)));
         let b = arena2.insert(LayoutBox::leaf(Style::default(), Size::new(20.0, 10.0)));
         arena2.append_child(root_e, b);
         compute_layout(&mut arena2, root_e, Size::new(100.0, 50.0));
-        assert_eq!(rect_of(&arena2, b).x, 80.0, "end: 100-20");
+        assert_eq!(rect_of(&arena2, b).x, 80.0);
     }
 
     #[test]
@@ -492,20 +685,19 @@ mod tests {
         let a = leaf(&mut arena, 10.0, 10.0);
         arena.append_child(root, a);
         compute_layout(&mut arena, root, Size::new(100.0, 50.0));
-        assert_eq!(rect_of(&arena, a).y, 20.0, "centered on cross axis: (50-10)/2");
+        assert_eq!(rect_of(&arena, a).y, 20.0);
 
         let mut arena2 = Arena::new();
         let root2 = arena2.insert(LayoutBox::container(Style::row().cross_align(CrossAlign::Stretch)));
         let b = arena2.insert(LayoutBox::leaf(Style::default(), Size::new(10.0, 10.0)));
         arena2.append_child(root2, b);
         compute_layout(&mut arena2, root2, Size::new(100.0, 50.0));
-        assert_eq!(rect_of(&arena2, b).height, 50.0, "stretched to cross content extent");
+        assert_eq!(rect_of(&arena2, b).height, 50.0);
         assert_eq!(rect_of(&arena2, b).y, 0.0);
     }
 
     #[test]
     fn auto_container_measures_to_content() {
-        // A column with two 10x10 leaves and gap 4 should measure 10 wide x 24 tall.
         let mut arena = Arena::new();
         let root = arena.insert(LayoutBox::container(Style::column().gap(4.0)));
         let a = leaf(&mut arena, 10.0, 10.0);
@@ -526,13 +718,12 @@ mod tests {
         arena.append_child(root, a);
 
         let m = measure(&mut arena, root);
-        assert_eq!(m.width, 200.0, "fixed width wins over 10px content");
-        assert_eq!(m.height, 10.0, "auto height still follows content");
+        assert_eq!(m.width, 200.0);
+        assert_eq!(m.height, 10.0);
     }
 
     #[test]
     fn nested_containers_lay_out_recursively() {
-        // root(row) -> [ inner(column, gap 2) -> [c1 10x10, c2 10x10], sibling 5x5 ]
         let mut arena = Arena::new();
         let root = arena.insert(LayoutBox::container(Style::row().gap(0.0)));
         let inner = arena.insert(LayoutBox::container(Style::column().gap(2.0)));
@@ -545,11 +736,55 @@ mod tests {
         arena.append_child(inner, c2);
 
         compute_layout(&mut arena, root, Size::new(100.0, 100.0));
-
-        // inner measures 10 wide x 22 tall; sits at origin; sibling to its right.
         assert_eq!(rect_of(&arena, inner), Rect { x: 0.0, y: 0.0, width: 10.0, height: 22.0 });
         assert_eq!(rect_of(&arena, c1), Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 });
         assert_eq!(rect_of(&arena, c2), Rect { x: 0.0, y: 12.0, width: 10.0, height: 10.0 });
-        assert_eq!(rect_of(&arena, sibling).x, 10.0, "sibling follows inner's width");
+        assert_eq!(rect_of(&arena, sibling).x, 10.0);
+    }
+
+    #[test]
+    fn stack_overlays_children_and_aligns_per_axis() {
+        let mut arena = Arena::new();
+        let root = arena.insert(LayoutBox::container(Style::stack()));
+        let a = leaf(&mut arena, 10.0, 10.0);
+        let b = leaf(&mut arena, 30.0, 20.0);
+        arena.append_child(root, a);
+        arena.append_child(root, b);
+        compute_layout(&mut arena, root, Size::new(100.0, 100.0));
+        // Start/Start: both at the content origin, at their own sizes.
+        assert_eq!(rect_of(&arena, a), Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 });
+        assert_eq!(rect_of(&arena, b), Rect { x: 0.0, y: 0.0, width: 30.0, height: 20.0 });
+
+        // Centered on both axes.
+        let mut arena2 = Arena::new();
+        let root2 = arena2.insert(LayoutBox::container(
+            Style::stack().main_align(MainAlign::Center).cross_align(CrossAlign::Center),
+        ));
+        let c = arena2.insert(LayoutBox::leaf(Style::default(), Size::new(10.0, 10.0)));
+        arena2.append_child(root2, c);
+        compute_layout(&mut arena2, root2, Size::new(100.0, 100.0));
+        assert_eq!(rect_of(&arena2, c), Rect { x: 45.0, y: 45.0, width: 10.0, height: 10.0 });
+    }
+
+    #[test]
+    fn grid_flows_children_by_columns() {
+        // 3 leaves (10x10) in a 2-col grid, gaps 5/5.
+        let mut arena = Arena::new();
+        let root = arena.insert(LayoutBox::container(Style::grid(2, 5.0, 5.0)));
+        let a = leaf(&mut arena, 10.0, 10.0);
+        let b = leaf(&mut arena, 10.0, 10.0);
+        let c = leaf(&mut arena, 10.0, 10.0);
+        arena.append_child(root, a);
+        arena.append_child(root, b);
+        arena.append_child(root, c);
+
+        // measured: 2 cols * 10 + 5 = 25 wide; 2 rows * 10 + 5 = 25 tall.
+        let m = measure(&mut arena, root);
+        assert_eq!(m, Size::new(25.0, 25.0));
+
+        compute_layout(&mut arena, root, Size::new(200.0, 200.0));
+        assert_eq!(rect_of(&arena, a), Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 });
+        assert_eq!(rect_of(&arena, b), Rect { x: 15.0, y: 0.0, width: 10.0, height: 10.0 });
+        assert_eq!(rect_of(&arena, c), Rect { x: 0.0, y: 15.0, width: 10.0, height: 10.0 });
     }
 }
