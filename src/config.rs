@@ -445,19 +445,31 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
     true
 }
 
+/// XDG config base directory: `$XDG_CONFIG_HOME`, else `~/.config`.
+pub fn config_home() -> std::path::PathBuf {
+    match std::env::var("XDG_CONFIG_HOME") {
+        Ok(x) if !x.is_empty() => std::path::PathBuf::from(x),
+        _ => std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config"),
+    }
+}
+
+/// XDG data base directory: `$XDG_DATA_HOME`, else `~/.local/share`.
+pub fn data_home() -> std::path::PathBuf {
+    match std::env::var("XDG_DATA_HOME") {
+        Ok(x) if !x.is_empty() => std::path::PathBuf::from(x),
+        _ => std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+            .join(".local")
+            .join("share"),
+    }
+}
+
+/// The cce config directory (`<config_home>/cce`).
+pub fn cce_config_dir() -> std::path::PathBuf {
+    config_home().join("cce")
+}
+
 pub fn get_config_path() -> std::path::PathBuf {
-    let dir = if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
-        if !xdg_config.is_empty() {
-            std::path::PathBuf::from(xdg_config)
-        } else {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
-            std::path::PathBuf::from(home).join(".config")
-        }
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/lsgalante".to_string());
-        std::path::PathBuf::from(home).join(".config")
-    };
-    dir.join("cce").join("config.kdl")
+    cce_config_dir().join("config.kdl")
 }
 
 
