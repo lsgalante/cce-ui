@@ -16,7 +16,8 @@ impl KeybindRow {
         let key_input = TextBox::new(binding).with_placeholder("e.g. super+shift+q");
         let cmd_input = TextBox::new(command).with_placeholder("e.g. close");
         
-        let remove_svg = Svg::from_file("/home/lsgalante/Dropbox/cce/cce-icons/svg/x.svg", 0.0, 0.0, 14.0, 14.0);
+        let remove_icon = format!("{}/x.svg", crate::icons_dir());
+        let remove_svg = Svg::from_file(&remove_icon, 0.0, 0.0, 14.0, 14.0);
         let mut remove_button = Button::new(0.0, 0.0, 0.0, 0.0);
         if let Some(svg) = remove_svg {
             remove_button = remove_button.with_svg(svg);

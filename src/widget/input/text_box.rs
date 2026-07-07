@@ -7,7 +7,7 @@ pub fn get_font_db() -> &'static resvg::usvg::fontdb::Database {
     FONT_DB.get_or_init(|| {
         let mut db = resvg::usvg::fontdb::Database::new();
         db.load_system_fonts();
-        db.load_fonts_dir("/home/lsgalante/Dropbox/Fonts");
+        db.load_fonts_dir(crate::fonts_dir());
         db
     })
 }

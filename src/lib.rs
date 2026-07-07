@@ -20,15 +20,27 @@ pub const SHADER: &str = include_str!("shader.wgsl");
 pub static IS_VERTICAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static BAR_THICKNESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(24);
 
-pub fn create_font_system() -> glyphon::FontSystem {
-    let mut db = glyphon::cosmic_text::fontdb::Database::new();
-    // Font directory: $CCE_FONTS_DIR if set, else ~/Dropbox/Fonts. Resolving via
-    // $HOME keeps the existing location while dropping the hardcoded username.
-    let fonts_dir = std::env::var("CCE_FONTS_DIR").unwrap_or_else(|_| {
+/// Directory bundled fonts are loaded from: `$CCE_FONTS_DIR`, else `~/Dropbox/Fonts`.
+/// Resolving via `$HOME` keeps the existing location without a hardcoded username.
+pub fn fonts_dir() -> String {
+    std::env::var("CCE_FONTS_DIR").unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_default();
         format!("{home}/Dropbox/Fonts")
-    });
-    db.load_fonts_dir(&fonts_dir);
+    })
+}
+
+/// Directory the bundled cce-icons SVGs are loaded from: `$CCE_ICONS_DIR`, else
+/// `~/Dropbox/cce/cce-icons/svg`.
+pub fn icons_dir() -> String {
+    std::env::var("CCE_ICONS_DIR").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{home}/Dropbox/cce/cce-icons/svg")
+    })
+}
+
+pub fn create_font_system() -> glyphon::FontSystem {
+    let mut db = glyphon::cosmic_text::fontdb::Database::new();
+    db.load_fonts_dir(fonts_dir());
     if std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
         db.load_system_fonts();
     }
