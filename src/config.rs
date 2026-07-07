@@ -514,6 +514,60 @@ pub fn cached_config_content() -> String {
     CONFIG_CACHE.read().map(|c| c.raw_content.clone()).unwrap_or_default()
 }
 
+// ── Typed accessors over the cached config ──────────────────────────────────
+// Each reads the mtime-cached config and extracts a value at a JSON pointer
+// (e.g. "/notifications/enable"), returning the default when absent or mistyped.
+
+/// Read a boolean at `pointer` from the cached config, or `default`.
+pub fn get_bool(pointer: &str, default: bool) -> bool {
+    cached_config().pointer(pointer).and_then(|v| v.as_bool()).unwrap_or(default)
+}
+
+/// Read an f32 at `pointer` from the cached config, or `default`.
+pub fn get_f32(pointer: &str, default: f32) -> f32 {
+    cached_config()
+        .pointer(pointer)
+        .and_then(|v| v.as_f64())
+        .map(|f| f as f32)
+        .unwrap_or(default)
+}
+
+/// Read an i64 at `pointer` from the cached config, or `default`.
+pub fn get_i64(pointer: &str, default: i64) -> i64 {
+    cached_config().pointer(pointer).and_then(|v| v.as_i64()).unwrap_or(default)
+}
+
+/// Read a string at `pointer` from the cached config.
+pub fn get_string(pointer: &str) -> Option<String> {
+    cached_config().pointer(pointer).and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
+/// Read a hex color string at `pointer` and parse it to raw sRGB RGBA (`[0,1]`).
+/// Apply [`crate::color::srgb_to_linear`] if your render target expects linear.
+pub fn get_color(pointer: &str) -> Option<[f32; 4]> {
+    get_string(pointer).as_deref().and_then(crate::color::parse_hex_rgba)
+}
+
+/// Recursively search a JSON value for the first entry whose object key equals
+/// `key`, returning a reference to its value. Depth-first over objects and arrays.
+pub fn find_key<'a>(val: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    match val {
+        serde_json::Value::Object(map) => {
+            if let Some(found) = map.get(key) {
+                return Some(found);
+            }
+            for v in map.values() {
+                if let Some(found) = find_key(v, key) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(arr) => arr.iter().find_map(|v| find_key(v, key)),
+        _ => None,
+    }
+}
+
 
 
 fn perform_rolling_backup(path: &str) {
