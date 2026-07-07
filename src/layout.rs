@@ -218,6 +218,26 @@ fn read_config() -> Option<String> {
     None
 }
 
+pub fn read_config_value(target_key: &str) -> Option<String> {
+    let path = crate::config::get_config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        let val = crate::config::parse_kdl_to_json(&content);
+        let mut flat_props = String::new();
+        flatten_json_to_flat_props(&val, "", &mut flat_props);
+        for line in flat_props.lines() {
+            let trimmed = line.trim();
+            if let Some(eq_idx) = trimmed.find('=') {
+                let key = trimmed[..eq_idx].trim();
+                if key == target_key {
+                    let val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
+                    return Some(val_str.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 pub fn parse_font_string(s: &str) -> (String, Option<f32>) {
     let s = s.trim();
     if let Some(last_space_idx) = s.rfind(' ') {
@@ -345,9 +365,11 @@ pub fn reload_config() {
         let mut graph_node_font_changed = false;
         for line in content.lines() {
             let trimmed = line.trim();
+            let mut key = String::new();
+            let mut val_str = "";
             if let Some(eq_idx) = trimmed.find('=') {
-                let key = trimmed[..eq_idx].trim().to_string();
-                let val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
+                key = trimmed[..eq_idx].trim().to_string();
+                val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
                 if let Ok(mut registry) = get_style_registry().write() {
                     if let Ok(f_val) = val_str.parse::<f32>() {
                         registry.set_float(&key, f_val);
@@ -957,21 +979,17 @@ pub fn reload_config() {
                     button_strip_font_changed = true;
                 }
             }
-            if let Some(rest) = trimmed.strip_prefix("list_font") {
-                if !rest.starts_with('_') {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    let font = rest.trim().to_string();
-                    let mut changed = false;
-                    if let Ok(mut lock) = LIST_FONT.write() {
-                        if *lock != font {
-                            *lock = font;
-                            changed = true;
-                        }
+            if key == "list_font" {
+                let font = val_str.to_string();
+                let mut changed = false;
+                if let Ok(mut lock) = LIST_FONT.write() {
+                    if *lock != font {
+                        *lock = font;
+                        changed = true;
                     }
-                    if changed {
-                        list_font_changed = true;
-                    }
+                }
+                if changed {
+                    list_font_changed = true;
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("tree_font") {
@@ -1968,17 +1986,7 @@ pub fn control_label_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("control_label_font") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("control_label_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
             *lock = font;
         }
@@ -2021,17 +2029,7 @@ pub fn control_label_font_detached() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("control_label_font_detached") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                    let rest = mod_rest(rest);
-                    font = rest.trim().to_string();
-                }
-            }
-        }
+        let font = read_config_value("control_label_font_detached").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
             *lock = font;
         }
@@ -2076,19 +2074,7 @@ pub fn list_font() -> String {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        let mut font = "Outfit".to_string();
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("list_font") {
-                    if !rest.starts_with('_') {
-                        let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=');
-                        let rest = mod_rest(rest);
-                        font = rest.trim().to_string();
-                    }
-                }
-            }
-        }
+        let font = read_config_value("list_font").unwrap_or_else(|| "Outfit".to_string());
         if let Ok(mut lock) = LIST_FONT.write() {
             *lock = font;
         }

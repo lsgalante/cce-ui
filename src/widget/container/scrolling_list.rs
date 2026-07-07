@@ -42,10 +42,12 @@ pub struct List {
 
 impl List {
     pub fn new(item_height: f32, item_gap: f32) -> Self {
+        let (_, font_size) = crate::layout::list_font_parsed();
+        let adjusted_item_height = item_height.max(font_size + 14.0);
         Self {
             base: Widget::new(),
             scroll_box: ScrollBox::new(),
-            item_height,
+            item_height: adjusted_item_height,
             item_gap,
             columns: None,
             rows: Vec::new(),
@@ -451,8 +453,12 @@ impl Element for List {
                 let row_fg = if row.selected { fg } else { [178, 178, 191] };
                 let row_dim = if row.selected { fg } else { text_dim };
 
-                let y_text_12 = crate::layout::center_text_y(draw_y, self.item_height, 12.0);
-                let y_text_11 = crate::layout::center_text_y(draw_y, self.item_height, 11.0);
+                let (_, config_size) = crate::layout::list_font_parsed();
+                let primary_size = config_size;
+                let secondary_size = (config_size - 1.0).max(8.0);
+
+                let y_primary = crate::layout::center_text_y(draw_y, self.item_height, primary_size);
+                let y_secondary = crate::layout::center_text_y(draw_y, self.item_height, secondary_size);
 
                 let mut start_text_offset = 8.0;
                 if let Some(ref icon) = row.icon {
@@ -461,8 +467,8 @@ impl Element for List {
                             TextLabel {
                                 text: icon.clone(),
                                 x: x + col_bounds[0].0 + 12.0,
-                                y: y_text_12,
-                                font_size: 12.0,
+                                y: y_primary,
+                                font_size: primary_size,
                                 color: row_fg,
                             },
                             list_font.clone(),
@@ -482,8 +488,8 @@ impl Element for List {
                     }
 
                     let cell_color = if c_idx == 0 { row_fg } else { row_dim };
-                    let cell_y = if c_idx == 0 { y_text_12 } else { y_text_11 };
-                    let cell_size = if c_idx == 0 { 12.0 } else { 11.0 };
+                    let cell_y = if c_idx == 0 { y_primary } else { y_secondary };
+                    let cell_size = if c_idx == 0 { primary_size } else { secondary_size };
 
                     let cell_draw_x = if c_idx == 0 {
                         x + col_x + start_text_offset

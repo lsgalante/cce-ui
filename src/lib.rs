@@ -26,6 +26,44 @@ pub fn create_font_system() -> glyphon::FontSystem {
     if std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
         db.load_system_fonts();
     }
+
+    // Validate configured custom fonts
+    let font_getters = vec![
+        ("list_font", crate::layout::list_font_parsed().0),
+        ("menubar_font", crate::layout::menubar_font_parsed().0),
+        ("statusbar_font", crate::layout::statusbar_font_parsed().0),
+        ("font_selector_font", crate::layout::font_selector_font_parsed().0),
+        ("button_strip_font", crate::layout::button_strip_font_parsed().0),
+        ("control_label_font", crate::layout::control_label_font_parsed().0),
+        ("control_label_font_detached", crate::layout::control_label_font_detached_parsed().0),
+        ("tree_font", crate::layout::tree_font_parsed().0),
+        ("graph_font", crate::layout::graph_font_parsed().0),
+        ("graph_node_font", crate::layout::graph_node_font_parsed().0),
+    ];
+
+    for (name, family) in font_getters {
+        if !family.is_empty() && family != "Outfit" && family != "sans-serif" {
+            let mut found = false;
+            for face in db.faces() {
+                for (fam, _) in &face.families {
+                    if fam.to_lowercase() == family.to_lowercase() {
+                        found = true;
+                        break;
+                    }
+                }
+                if found {
+                    break;
+                }
+            }
+            if !found {
+                eprintln!(
+                    "WARNING: Configured font family '{}' for property '{}' was not found in the fonts database. Falling back to default font.",
+                    family, name
+                );
+            }
+        }
+    }
+
     glyphon::FontSystem::new_with_locale_and_db("en-US".to_string(), db)
 }
 
