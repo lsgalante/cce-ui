@@ -438,6 +438,7 @@ impl Element for List {
 
         let fg = [230, 230, 242];
         let text_dim = [140, 140, 153];
+        let list_font = self.widget_font();
 
         let view_min = self.scroll_box.viewport_y + 4.0;
         let view_max = self.scroll_box.viewport_y + self.scroll_box.viewport_h - 4.0;
@@ -464,7 +465,7 @@ impl Element for List {
                                 font_size: 12.0,
                                 color: row_fg,
                             },
-                            None,
+                            list_font.clone(),
                             clipping_bounds,
                         ));
                         start_text_offset = 32.0;
@@ -513,7 +514,7 @@ impl Element for List {
                             font_size: cell_size,
                             color: cell_color,
                         },
-                        None,
+                        list_font.clone(),
                         clipping_bounds,
                     ));
                 }
@@ -576,6 +577,15 @@ impl Element for List {
             }
         }
         false
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        let f = crate::layout::list_font();
+        if f.is_empty() {
+            None
+        } else {
+            Some(f)
+        }
     }
 
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.scroll_box.parent(_ctx) }
