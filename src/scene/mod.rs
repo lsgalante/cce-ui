@@ -6,6 +6,7 @@
 //! top of the same node identity.
 
 pub mod arena;
+pub mod layout;
 pub mod tree;
 
 pub use arena::{Arena, Node, NodeId};
