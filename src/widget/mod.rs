@@ -166,6 +166,16 @@ pub trait Element {
     fn base_mut(&mut self) -> Option<&mut Widget> { None }
     fn preferred_height(&self) -> Option<f32> { None }
 
+    /// Opt-in layout style for the scene layout engine (Phase 2b). `None` (the default) means this
+    /// widget does not participate in engine-driven layout yet and keeps its legacy `set_rect`
+    /// path; return `Some(..)` to have the engine size/position it and its children. See
+    /// `scene::bridge`.
+    fn layout_style(&self) -> Option<crate::scene::layout::Style> { None }
+
+    /// Intrinsic content size of a leaf widget (e.g. measured text/icon) for the engine's measure
+    /// pass. Ignored for widgets that have children.
+    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> { None }
+
     fn check_out_of_bounds(&self, _event: &Event, _ctx: &UiContext) -> bool {
         false
     }

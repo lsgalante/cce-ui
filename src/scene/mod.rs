@@ -6,6 +6,7 @@
 //! top of the same node identity.
 
 pub mod arena;
+pub mod bridge;
 pub mod layout;
 pub mod tree;
 
