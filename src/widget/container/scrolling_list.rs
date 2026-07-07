@@ -247,7 +247,7 @@ impl Element for List {
     fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base) }
 
     fn rect(&self) -> (f32, f32, f32, f32) {
-        self.scroll_box.rect()
+        (self.base.x, self.base.y, self.base.w, self.base.h)
     }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
