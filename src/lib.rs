@@ -22,7 +22,13 @@ pub static BAR_THICKNESS: std::sync::atomic::AtomicU32 = std::sync::atomic::Atom
 
 pub fn create_font_system() -> glyphon::FontSystem {
     let mut db = glyphon::cosmic_text::fontdb::Database::new();
-    db.load_fonts_dir("/home/lsgalante/Dropbox/Fonts");
+    // Font directory: $CCE_FONTS_DIR if set, else ~/Dropbox/Fonts. Resolving via
+    // $HOME keeps the existing location while dropping the hardcoded username.
+    let fonts_dir = std::env::var("CCE_FONTS_DIR").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{home}/Dropbox/Fonts")
+    });
+    db.load_fonts_dir(&fonts_dir);
     if std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
         db.load_system_fonts();
     }
