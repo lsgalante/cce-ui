@@ -289,16 +289,7 @@ fn parse_slider_range(ptype: &str) -> (f32, f32) {
 }
 
 fn parse_hex_to_rgb(s: &str) -> Option<[u8; 3]> {
-    let s = s.trim_matches(|c| c == '"' || c == '\'' || c == ' ');
-    let s = s.trim_start_matches('#');
-    if s.len() == 6 || s.len() == 8 {
-        let r = u8::from_str_radix(&s[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&s[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&s[4..6], 16).ok()?;
-        Some([r, g, b])
-    } else {
-        None
-    }
+    crate::color::parse_hex_bytes(s).map(|[r, g, b, _]| [r, g, b])
 }
 
 fn parse_spinbox_range(ptype: &str) -> (i32, i32, i32) {
