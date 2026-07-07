@@ -1767,17 +1767,6 @@ impl<A: Application> EngineState<A> {
         
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
         let areas = self.inner.as_ref().unwrap().text_areas(scale_f32, bounds);
-        eprintln!("AREAS_LEN: {}", areas.len());
-        for (idx, area) in areas.iter().enumerate() {
-            let mut text_snippet = String::new();
-            for run in area.buffer.layout_runs() {
-                text_snippet.push_str(run.text);
-            }
-            eprintln!("TEXT_AREA idx={}: text='{}', left={}, top={}, bounds=[{}, {}, {}, {}]",
-                idx, text_snippet, area.left, area.top,
-                area.bounds.left, area.bounds.top, area.bounds.right, area.bounds.bottom);
-        }
-        
         adapter.text_renderer.prepare(&adapter.device, &adapter.queue, &mut adapter.font_system, &mut adapter.text_atlas, &adapter.text_viewport, areas, &mut adapter.swash_cache).unwrap();
         
         // 3. Render Pass
