@@ -28,7 +28,7 @@
 
 use crate::scene::layout::{Rect, Size, Style};
 use crate::scene::paint::PaintCtx;
-use crate::widget::{Element, UiContext, Widget, WidgetId};
+use crate::widget::{Element, Event, UiContext, Widget, WidgetId};
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
 /// avoid the existing [`Widget`] base struct. Mirrors the opt-in `Element::layout_style` /
@@ -79,6 +79,29 @@ pub trait Paint {
     }
 }
 
+/// The input concern — hit-testing and event handling against the laid-out rect. Mirrors the
+/// legacy `Element::hit_test` / `handle_event` pair, but with the RFC's centralizations: the
+/// default hit is plain rect containment (no per-widget address hacks), and pointer-positioned
+/// events are hit-gated by the adapter *before* they reach [`on_event`](Input::on_event), so a
+/// narrow widget never re-implements the "am I actually under the cursor?" boilerplate that every
+/// legacy `mouse_input` override carries.
+pub trait Input {
+    /// Whether the point `(x, y)` hits this widget, given its laid-out `rect`. Override for
+    /// non-rectangular hit shapes. Default: containment (edges inclusive, matching the legacy
+    /// `hit_test`).
+    fn hit(&self, rect: Rect, x: f32, y: f32) -> bool {
+        x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
+    }
+
+    /// React to `event`, given the laid-out `rect`. Return `true` to consume it (the router marks
+    /// the widget dirty and stops propagation). `MouseButton` / `MouseWheel` events arrive only
+    /// when [`hit`](Input::hit) passed; `MouseEnter` / `MouseLeave` are synthesized by the hover
+    /// machinery. Default: ignore everything.
+    fn on_event(&mut self, _event: &Event, _rect: Rect) -> bool {
+        false
+    }
+}
+
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
 /// [`Widget`] base that `Element`'s rect / id / dirty machinery needs, and forwards the concern
 /// methods to `W`. See the module docs for why this bridge exists rather than a supertrait split.
@@ -109,7 +132,7 @@ impl<W> Adapted<W> {
     }
 }
 
-impl<W: Layout + Paint + 'static> Element for Adapted<W> {
+impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn base(&self) -> Option<&Widget> {
         Some(&self.base)
     }
@@ -151,6 +174,43 @@ impl<W: Layout + Paint + 'static> Element for Adapted<W> {
         let (x, y, w, h) = self.rect();
         Paint::paint(&self.inner, Rect { x, y, width: w, height: h }, ctx);
     }
+
+    // --- Input concern -> `Input` ---
+    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
+        // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
+        // the geometric test to the narrow trait instead of the row/label-offset machinery.
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
+        let (x, y, w, h) = self.rect();
+        Input::hit(&self.inner, Rect { x, y, width: w, height: h }, px, py)
+    }
+
+    fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
+        let (x, y, w, h) = self.rect();
+        let rect = Rect { x, y, width: w, height: h };
+        match event {
+            // Hit-gate pointer-positioned events once, here, so narrow widgets never carry the
+            // per-widget "check hit_test first" boilerplate legacy `mouse_input` overrides do.
+            Event::MouseButton { x: px, y: py, .. } | Event::MouseWheel { x: px, y: py, .. } => {
+                self.hit_test(*px, *py, ctx) && Input::on_event(&mut self.inner, event, rect)
+            }
+            // Offer the raw move to the widget; if unconsumed, run the legacy hover bookkeeping
+            // (base.hovered + MouseEnter/MouseLeave synthesis, which re-enters this method and
+            // reaches `on_event` through the arm below).
+            Event::PointerMove { x: px, y: py, .. } => {
+                if Input::on_event(&mut self.inner, event, rect) {
+                    return true;
+                }
+                let (px, py) = (*px, *py);
+                self.cursor_moved(px, py, ctx)
+            }
+            // Everything else (KeyInput, Tick, Enter/Leave, Drag*, Focus*) forwards directly —
+            // the legacy default dispatch would route these to leaf handlers Adapted never
+            // overrides, so there is no behavior to fall back to.
+            _ => Input::on_event(&mut self.inner, event, rect),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +238,7 @@ mod tests {
             self.color
         }
     }
+    impl Input for Dot {}
 
     /// A narrow container: it drives a column layout ([`Layout`]) and paints nothing.
     struct Col;
@@ -191,6 +252,7 @@ mod tests {
             [0.0, 0.0, 0.0, 0.0]
         }
     }
+    impl Input for Col {}
 
     fn rect_of(ptr: *mut (dyn Element + 'static)) -> Rect {
         let (x, y, w, h) = unsafe { (*ptr).rect() };
@@ -239,5 +301,73 @@ mod tests {
             quads.iter().any(|(r, c)| *r == Rect { x: 0.0, y: 14.0, width: 10.0, height: 20.0 } && c[1] == 1.0),
             "green Dot painted at its laid-out rect: {quads:?}",
         );
+    }
+
+    /// A narrow interactive widget: counts left-clicks and records hover transitions — all
+    /// through [`Input::on_event`], never touching `Element`.
+    struct Clicker {
+        clicks: u32,
+        entered: u32,
+        left: u32,
+    }
+    impl Layout for Clicker {}
+    impl Paint for Clicker {
+        fn color(&self) -> [f32; 4] {
+            [0.5, 0.5, 0.5, 1.0]
+        }
+    }
+    impl Input for Clicker {
+        fn on_event(&mut self, event: &Event, _rect: Rect) -> bool {
+            use crate::widget::{ElementState, MouseButton};
+            match event {
+                Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {
+                    self.clicks += 1;
+                    true
+                }
+                Event::MouseEnter => {
+                    self.entered += 1;
+                    false
+                }
+                Event::MouseLeave => {
+                    self.left += 1;
+                    false
+                }
+                _ => false,
+            }
+        }
+    }
+
+    #[test]
+    fn narrow_widget_receives_routed_events_through_the_adapter() {
+        use crate::widget::{ElementState, MouseButton};
+        let mut ctx = UiContext::new();
+        let mut w = Box::new(Adapted::new(Clicker { clicks: 0, entered: 0, left: 0 }));
+        let (id, ptr) = (w.id(), w.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        unsafe { (*ptr).set_rect(10.0, 10.0, 40.0, 20.0) };
+
+        let click_at = |x: f32, y: f32| Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x,
+            y,
+            local_x: x,
+            local_y: y,
+        };
+
+        // A click inside the rect is hit-gated in, consumed, and counted.
+        assert!(ctx.propagate_event(&click_at(20.0, 15.0), ptr), "in-rect click is consumed");
+        // A click outside never reaches on_event (the adapter's hit gate rejects it).
+        assert!(!ctx.propagate_event(&click_at(200.0, 200.0), ptr), "out-of-rect click passes through");
+        assert_eq!(w.inner().clicks, 1, "only the in-rect click was counted");
+
+        // Hover: moving inside synthesizes MouseEnter (via the legacy bookkeeping the adapter
+        // preserves) and sets the base hover flag; moving away synthesizes MouseLeave.
+        ctx.propagate_event(&Event::PointerMove { x: 20.0, y: 15.0, local_x: 20.0, local_y: 15.0 }, ptr);
+        assert_eq!(w.inner().entered, 1, "MouseEnter reached on_event");
+        assert!(unsafe { (*ptr).hovered() }, "base hover flag set through the adapter");
+        ctx.propagate_event(&Event::PointerMove { x: 200.0, y: 200.0, local_x: 200.0, local_y: 200.0 }, ptr);
+        assert_eq!(w.inner().left, 1, "MouseLeave reached on_event");
+        assert!(!unsafe { (*ptr).hovered() }, "base hover flag cleared");
     }
 }

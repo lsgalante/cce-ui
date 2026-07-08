@@ -357,7 +357,19 @@ Constraint respected: **each crate still builds standalone** — the new core is
     computed rects and the painted quads. Purely additive: no existing widget or app changes, all
     137 cce-ui tests pass. Runtime verification is N/A until a real widget is migrated onto the
     adapter (nothing in a running app uses it yet).
-  - **Still to do:** the `Input` (event) concern trait + adapter forwarding; migrate real widgets
+  - **5b — Input concern: DONE (compile + tests; no runtime surface yet).** `widget/model.rs` —
+    the `Input` trait (`hit` / `on_event`, both against the laid-out rect) plus adapter
+    forwarding with the RFC's centralizations: `Adapted::handle_event` hit-gates pointer-
+    positioned events (`MouseButton`/`MouseWheel`) once, so narrow widgets never carry the
+    per-widget "check hit_test first" boilerplate every legacy `mouse_input` override does;
+    unconsumed `PointerMove` falls back to the legacy hover bookkeeping, so `base.hovered` and
+    the synthesized `MouseEnter`/`MouseLeave` (which re-enter `handle_event` and reach
+    `on_event`) keep working; `hit_test` keeps the occlusion (`is_coordinate_covered`) check
+    while delegating the geometric test to `Input::hit`. A headless test drives a narrow
+    `Clicker` through the *real* `UiContext::propagate_event` router: in-rect click consumed +
+    counted, out-of-rect click gated out, hover enter/leave transitions observed on both the
+    narrow widget and the base flag. 138 cce-ui tests pass.
+  - **Still to do:** migrate real widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10
     cce-ui widgets) with a typed message/command channel; delete `Element` + `Adapted` once the
