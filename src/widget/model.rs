@@ -249,7 +249,9 @@ pub trait Input {
     // --- Drag surface: legacy hosts (designer, control_panel, parameters_bg, graph, audio…)
     // drive drags by calling these directly on the widget, not through events.
 
-    fn draggable(&self) -> bool {
+    /// Whether a press on this widget starts a host-driven drag. Receives the laid-out rect:
+    /// scroll widgets (Spreadsheet) are draggable only while their content overflows it.
+    fn draggable(&self, _rect: Rect) -> bool {
         false
     }
     fn is_dragging(&self) -> bool {
@@ -268,6 +270,28 @@ pub trait Input {
     fn drag_end(&mut self) {}
     /// Movement bounds pushed in by hosts (legacy `Element::set_drag_bounds`).
     fn set_drag_bounds(&mut self, _bx: f32, _by: f32, _bw: f32, _bh: f32) {}
+
+    // --- Tick surface: hosts broadcast `Element::tick(dt)` every frame (the designer's render
+    // loop) to advance time-based widget state — inertial scroll velocity, here. Transitional:
+    // §3.6 `Animated<T>` + arena-driven frame requests replace hand-ticked state.
+
+    /// Advance time-based state by `dt` seconds against the laid-out rect. Return whether
+    /// anything observable changed (drives redraw).
+    fn tick(&mut self, _dt: f32, _rect: Rect) -> bool {
+        false
+    }
+
+    /// Whether this widget wants `tick` calls from tick-gating hosts (legacy
+    /// `Element::wants_tick`; the designer ticks unconditionally and ignores this).
+    fn wants_tick(&self) -> bool {
+        false
+    }
+
+    /// Whether this widget consumes scroll gestures (legacy `Element::is_scrollable`, read by
+    /// the router's scroll-gesture gating).
+    fn scrollable(&self) -> bool {
+        false
+    }
 
     // --- Controller capabilities (transitional, like the polling surface above). The legacy
     // tree reaches a widget's typed API through the `Element::as_*_controller` downcast pairs;
@@ -328,6 +352,11 @@ pub trait Input {
 #[derive(Debug, Clone)]
 pub struct Adapted<W: Layout + Paint + Input + 'static> {
     base: Widget,
+    /// The [`Widget`] base carries no visibility, and the legacy `Element` defaults are a no-op
+    /// `set_visible` + always-true `visible()` — every hideable legacy widget stores its own
+    /// flag. The adapter owns it once for all migrated widgets: hosts toggle panes through
+    /// `Element::set_visible` (the designer), and the hit-test/render bridges gate on it.
+    visible: bool,
     inner: W,
 }
 
@@ -340,7 +369,7 @@ impl<W: Layout + Paint + Input + 'static> Drop for Adapted<W> {
 impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// Wrap `inner` with a fresh [`Widget`] base.
     pub fn new(inner: W) -> Self {
-        Adapted { base: Widget::new(), inner }
+        Adapted { base: Widget::new(), visible: true, inner }
     }
 
     /// The wrapped widget.
@@ -473,6 +502,13 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         self as *mut Self as *mut (dyn Element + 'static)
     }
 
+    fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+    fn visible(&self) -> bool {
+        self.visible
+    }
+
     // --- Layout concern -> `Layout` ---
     fn layout_style(&self) -> Option<Style> {
         Layout::layout_style(&self.inner)
@@ -564,6 +600,9 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// widget draws — inline labels, readouts), plus the base-label text for detached-label
     /// widgets (drawn by the adapter, since the label lives on the base).
     fn text_labels(&self) -> Vec<TextLabel> {
+        if !self.visible() {
+            return Vec::new();
+        }
         let mut out: Vec<TextLabel> = self
             .painted_prims()
             .into_iter()
@@ -667,10 +706,20 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Input::set_selected(&mut self.inner, selected)
     }
     fn draggable(&self) -> bool {
-        Input::draggable(&self.inner)
+        Input::draggable(&self.inner, self.content_rect())
     }
     fn is_dragging(&self) -> bool {
         Input::is_dragging(&self.inner)
+    }
+    fn tick(&mut self, dt: f32, _ctx: &mut UiContext) -> bool {
+        let rect = self.content_rect();
+        Input::tick(&mut self.inner, dt, rect)
+    }
+    fn wants_tick(&self) -> bool {
+        Input::wants_tick(&self.inner)
+    }
+    fn is_scrollable(&self) -> bool {
+        Input::scrollable(&self.inner)
     }
     fn drag_begin(&mut self, px: f32, py: f32) {
         let rect = self.content_rect();
@@ -752,6 +801,12 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         )
     }
     fn keyboard_input(&mut self, event: &crate::widget::KeyEvent, ctx: &mut UiContext) -> bool {
+        // A widget hidden while still holding focus (the designer keys into `focused_widget`;
+        // hiding a pane doesn't unfocus it) must not consume keys — the legacy visibility-toggled
+        // widgets gated their keyboard_input overrides on `visible` themselves.
+        if !self.visible() {
+            return false;
+        }
         self.handle_event(&Event::KeyInput(event.clone()), ctx)
     }
 
@@ -799,6 +854,12 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
+        // Hidden widgets are not hittable. Legacy widgets with a visibility toggle (Spreadsheet)
+        // carry this gate themselves — and need it: hosts broadcast wheel/press dispatch to
+        // every widget (the designer) and rely on hidden ones rejecting the hit.
+        if !self.visible() {
+            return false;
+        }
         // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
         // the geometric test to the narrow trait instead of the row/label-offset machinery.
         if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {

@@ -58,7 +58,7 @@ impl Input for Panel {
         }
     }
 
-    fn draggable(&self) -> bool {
+    fn draggable(&self, _rect: Rect) -> bool {
         true
     }
     fn is_dragging(&self) -> bool {

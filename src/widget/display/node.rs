@@ -174,7 +174,7 @@ impl Input for Node {
         }
     }
 
-    fn draggable(&self) -> bool {
+    fn draggable(&self, _rect: Rect) -> bool {
         !self.toggle_hovered
     }
     fn is_dragging(&self) -> bool {

@@ -385,7 +385,7 @@ impl Input for Slider {
         true
     }
 
-    fn draggable(&self) -> bool {
+    fn draggable(&self, _rect: Rect) -> bool {
         true
     }
     fn is_dragging(&self) -> bool {
@@ -615,7 +615,7 @@ impl Input for RangeSlider {
         }
     }
 
-    fn draggable(&self) -> bool {
+    fn draggable(&self, _rect: Rect) -> bool {
         true
     }
     fn is_dragging(&self) -> bool {
