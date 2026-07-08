@@ -1,6 +1,23 @@
+//! Narrow-trait `Graph` (Phase 5m) — the node-network editor: a pannable/zoomable grid of
+//! draggable nodes with geometry toggles, input/output ports, wire routing, and interactive
+//! connection dragging. [`GraphController`] rides the `Input` capability hooks.
+//!
+//! Rendering serves the legacy dual-geometry contract through the adapter's escape hatch:
+//! [`Paint::paint`] emits the ROUNDED view (what `render_widget` hosts — cce-files — and the
+//! scene walk — cce-graph — consume), while [`Paint::legacy_plain_quads`] serves the same
+//! geometry as plain quads for raw `extra_quads` readers (the designer's render path), with
+//! `all_quads` emptied by the adapter so no host draws it twice. Node-name text is clipped to
+//! the widget rect via [`Paint::text_bounds`]. All grid geometry is in absolute screen space
+//! (hosts pan by moving `grid_origin`); the widget rect only culls and clips.
+
 use crate::colors;
-use crate::widget::*;
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
 use crate::widget::display::TextLabel;
+use crate::widget::{
+    Adapted, ElementState, Event, EventCtx, GraphController, Input, Key, Layout, MouseButton,
+    MouseScrollDelta, Paint,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PortType {
@@ -26,9 +43,12 @@ pub struct GraphNode {
     pub outputs: usize,
 }
 
+/// The widget's own corner style: the legacy `Element` defaults it inherited
+/// (`corner_radius` 12.0, bottom corners rounded).
+const WIDGET_RADIUS: f32 = 12.0;
+const WIDGET_CORNERS: (bool, bool, bool, bool) = (false, false, true, true);
+
 pub struct Graph {
-    x: f32, y: f32, w: f32, h: f32,
-    hovered: bool,
     show_network_grid: bool,
     grid_size_x: f32,
     grid_size_y: f32,
@@ -67,32 +87,7 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn set_uniform_background(&mut self, uniform: bool) {
-        self.uniform_background = uniform;
-    }
-    pub fn set_network_opacity(&mut self, opacity: f32) {
-        self.network_opacity = opacity;
-    }
-    pub fn grid_sizes(&self) -> (f32, f32) {
-        (self.grid_size_x, self.grid_size_y)
-    }
-    pub fn skipped_sizes(&self) -> (f32, f32) {
-        (self.skipped_row_h, self.skipped_col_w)
-    }
-    pub fn grid_origin(&self) -> (f32, f32) {
-        (self.grid_origin_x, self.grid_origin_y)
-    }
-    pub fn grid_snap_enabled(&self) -> bool {
-        self.grid_snap_enabled
-    }
-    pub fn set_cell_color(&mut self, color: [f32; 3]) {
-        self.cell_color = color;
-    }
-    pub fn set_gap_color(&mut self, color: [f32; 3]) {
-        self.gap_color = color;
-    }
-
-    pub fn new() -> Self {
+    pub fn new() -> Adapted<Graph> {
         crate::layout::lazy_init_style_registry();
 
         let grid_size_x = crate::layout::graph_spacing_x();
@@ -102,9 +97,7 @@ impl Graph {
         let cell_col = crate::color::graph_cell_color();
         let gap_col = crate::color::graph_gap_color();
 
-        Self {
-            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
-            hovered: false,
+        Adapted::new(Graph {
             show_network_grid: false,
             grid_size_x,
             grid_size_y,
@@ -133,7 +126,32 @@ impl Graph {
             current_mouse_pos: (0.0, 0.0),
             pending_connection: None,
             hovered_port: None,
-        }
+        })
+    }
+
+    pub fn set_uniform_background(&mut self, uniform: bool) {
+        self.uniform_background = uniform;
+    }
+    pub fn set_network_opacity(&mut self, opacity: f32) {
+        self.network_opacity = opacity;
+    }
+    pub fn grid_sizes(&self) -> (f32, f32) {
+        (self.grid_size_x, self.grid_size_y)
+    }
+    pub fn skipped_sizes(&self) -> (f32, f32) {
+        (self.skipped_row_h, self.skipped_col_w)
+    }
+    pub fn grid_origin(&self) -> (f32, f32) {
+        (self.grid_origin_x, self.grid_origin_y)
+    }
+    pub fn grid_snap_enabled(&self) -> bool {
+        self.grid_snap_enabled
+    }
+    pub fn set_cell_color(&mut self, color: [f32; 3]) {
+        self.cell_color = color;
+    }
+    pub fn set_gap_color(&mut self, color: [f32; 3]) {
+        self.gap_color = color;
     }
 
     pub fn node_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
@@ -222,115 +240,8 @@ impl Graph {
             self.skipped_col_w *= factor;
         }
     }
-}
 
-fn read_zoom_bindings() -> (String, String) {
-    let mut zoom_in_val = "=".to_string();
-    let mut zoom_out_val = "-".to_string();
-    let path = crate::config::get_config_path();
-    if let Ok(content) = std::fs::read_to_string(&path) {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
-            if let Some(zoom_in) = val.pointer("/layout/zoom_in").and_then(|v| v.as_str()) {
-                zoom_in_val = zoom_in.to_string();
-            }
-            if let Some(zoom_out) = val.pointer("/layout/zoom_out").and_then(|v| v.as_str()) {
-                zoom_out_val = zoom_out.to_string();
-            }
-        }
-    }
-    (zoom_in_val, zoom_out_val)
-}
-
-impl Element for Graph {
-    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
-        if event.state == ElementState::Pressed {
-            if let Key::Character(ref ch) = event.logical_key {
-                let (zoom_in_binding, zoom_out_binding) = read_zoom_bindings();
-                if ch == &zoom_in_binding {
-                    self.zoom_in();
-                    return true;
-                } else if ch == &zoom_out_binding {
-                    self.zoom_out();
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
-
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, true, true) }
-
-    fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::graph_node_font())
-    }
-
-
-
-    fn paint(&mut self, ctx: &mut UiContext) {
-        if let Some(hq) = self.highlight_quad(ctx) {
-            if hq.4 == colors::HIGHLIGHT_SECONDARY {
-                ctx.register_hovered(hq.0, hq.1, hq.2, hq.3, hq.4);
-            }
-        }
-    }
-
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-
-    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = Vec::new();
-        if let Some(hq) = self.highlight_quad(ctx) {
-            if hq.4 != colors::HIGHLIGHT_SECONDARY {
-                quads.push(hq);
-            }
-        }
-        quads
-    }
-
-    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
-        let mut rounded = Vec::new();
-        
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if r1 || r2 || r3 || r4 {
-            let bg_color = self.color();
-            let (x, y, w, h) = self.rect();
-            let radius = self.corner_radius();
-            rounded.push((x, y, w, h, radius, bg_color, (r1, r2, r3, r4)));
-        }
-
-        let node_radius = crate::layout::graph_node_corner_radius();
-        let widget_radius = self.corner_radius();
-        let (w_tl, w_tr, w_br, w_bl) = self.rounded_corners();
-        let (wx, wy, ww, wh) = self.rect();
-
-        for (qx, qy, qw, qh, qc) in self.extra_quads() {
-            let is_node = self.is_node_rect(qx, qy, qw, qh);
-            if is_node {
-                rounded.push((qx, qy, qw, qh, node_radius, qc, (true, true, true, true)));
-            } else {
-                let tl = w_tl && qx <= wx + 1.5 && qy <= wy + 1.5;
-                let tr = w_tr && qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5;
-                let br = w_br && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5;
-                let bl = w_bl && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5;
-
-                let r = if tl || tr || br || bl { widget_radius } else { 0.0 };
-                rounded.push((qx, qy, qw, qh, r, qc, (tl, tr, br, bl)));
-            }
-        }
-
-        rounded
-    }
-
-    fn color(&self) -> [f32; 4] {
+    fn bg_color(&self) -> [f32; 4] {
         let mut c = if self.uniform_background {
             [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity]
         } else {
@@ -342,336 +253,15 @@ impl Element for Graph {
         }
         c
     }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
-    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
-            return false;
-        }
-        px >= self.x && px < self.x + self.w && py >= self.y && py < self.y + self.h
-    }
 
-    fn as_graph_controller(&self) -> Option<&dyn GraphController> { Some(self) }
-    fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> { Some(self) }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let mut labels = Vec::new();
-        for (i, node) in self.nodes.iter().enumerate() {
-            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
-                let scale_f = nw / 80.0;
-                let font_size = (14.0 * scale_f).clamp(6.0, 48.0);
-                let lx = nx + nw + 8.0 * scale_f;
-                let ly = crate::layout::align_text_y(ny, nh, font_size, 0.0);
-                let text_w = TextLabel::estimate_width(&node.name, font_size);
-                if lx + text_w >= self.x && lx < self.x + self.w && ly + font_size >= self.y && ly < self.y + self.h {
-                    labels.push(TextLabel {
-                        text: node.name.clone(),
-                        x: lx,
-                        y: ly,
-                        font_size,
-                        color: [0xcc, 0xcc, 0xd4],
-                    });
-                }
-            }
-        }
-        labels
-    }
-
-    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        let bounds = Some([self.x, self.y, self.x + self.w, self.y + self.h]);
-        self.text_labels().into_iter().map(|l| (l, bounds)).collect()
-    }
-
-    fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let font = self.widget_font();
-        let bounds = Some([self.x, self.y, self.x + self.w, self.y + self.h]);
-        self.text_labels().into_iter().map(|l| (l, font.clone(), bounds)).collect()
-    }
-
-    fn focus(&mut self) {
-        focus::set_focused(self);
-    }
-
-    fn is_dragging(&self) -> bool { self.dragging_idx.is_some() }
-    fn draggable(&self) -> bool { self.dragging_idx.is_some() }
-
-    fn drag_begin(&mut self, px: f32, py: f32) {
-        if let Some(idx) = self.dragging_idx {
-            if let Some((nx, ny, _, _)) = self.node_rect(idx) {
-                self.drag_ox = px - nx;
-                self.drag_oy = py - ny;
-                self.drag_node_pos = Some((nx, ny));
-            }
-        }
-    }
-
-    fn drag_update(&mut self, px: f32, py: f32) -> bool {
-        if self.dragging_idx.is_some() {
-            let nx = px - self.drag_ox;
-            let ny = py - self.drag_oy;
-
-            let snap_x = if self.grid_snap_enabled { self.grid_size_x + self.skipped_col_w } else { 0.0 };
-            let snap_y = if self.grid_snap_enabled { self.grid_size_y + self.skipped_row_h } else { 0.0 };
-
-            let nx = if snap_x > 0.0 {
-                let relative = nx - self.grid_origin_x;
-                let snapped = (relative / snap_x).round() * snap_x;
-                snapped + self.grid_origin_x
-            } else { nx };
-
-            let ny = if snap_y > 0.0 {
-                let relative = ny - self.grid_origin_y;
-                let snapped = (relative / snap_y).round() * snap_y;
-                snapped + self.grid_origin_y
-            } else { ny };
-
-            self.drag_node_pos = Some((nx, ny));
-            return true;
-        }
-        false
-    }
-
-    fn drag_end(&mut self) {
-        if let Some((nx, ny)) = self.drag_node_pos.take() {
-            let c = ((nx - self.grid_origin_x) / (self.grid_size_x + self.skipped_col_w)).round();
-            let r = ((ny - self.grid_origin_y) / (self.grid_size_y + self.skipped_row_h)).round();
-            if let Some(idx) = self.dragging_idx.take() {
-                let (nx, ny) = self.find_empty_cell(c, r, Some(idx));
-                self.nodes[idx].position = (nx, ny);
-            }
-        } else {
-            self.dragging_idx = None;
-        }
-        self.dragging_id = None;
-    }
-
-    fn handle_event(&mut self, event: &crate::widget::Event, _ctx: &mut UiContext) -> bool {
-        match event {
-            crate::widget::Event::MouseLeave => {
-                let changed = self.hovered_port.is_some() || self.toggle_hovered_idx.is_some();
-                self.hovered_port = None;
-                self.toggle_hovered_idx = None;
-                return changed;
-            }
-            _ => {}
-        }
-        false
-    }
-
-    fn on_cursor_moved(&mut self, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
-        let mut changed = false;
-        if self.connecting_from.is_some() {
-            self.current_mouse_pos = (px, py);
-            changed = true;
-        }
-        let was_toggle_hovered = self.toggle_hovered_idx;
-        self.toggle_hovered_idx = None;
-        
-        let was_hovered_port = self.hovered_port;
-        self.hovered_port = None;
-
-        let conn_act_r = crate::layout::graph_connector_activation_radius();
-
-        for i in 0..self.nodes.len() {
-            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
-                let scale_f = nw / 80.0;
-                let hit_radius = (conn_act_r * scale_f).max(2.0);
-                let node = &self.nodes[i];
-                
-                for k in 0..node.inputs {
-                    let cx = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
-                    let cy = ny;
-                    if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
-                        self.hovered_port = Some((i, PortType::Input, k));
-                    }
-                }
-                
-                for k in 0..node.outputs {
-                    let cx = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
-                    let cy = ny + nh;
-                    if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
-                        self.hovered_port = Some((i, PortType::Output, k));
-                    }
-                }
-            }
-
-            if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
-                if px >= tx && px < tx + tw && py >= ty && py < ty + th {
-                    self.toggle_hovered_idx = Some(i);
-                }
-            }
-        }
-        
-        if was_toggle_hovered != self.toggle_hovered_idx || was_hovered_port != self.hovered_port {
-            changed = true;
-        }
-        changed
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
-        if button == MouseButton::Right && state == ElementState::Pressed {
-            if self.connecting_from.is_some() {
-                self.connecting_from = None;
-                return true;
-            }
-        }
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {
-                log::debug!("Graph::mouse_input: Pressed px={}, py={}, connecting_from={:?}", px, py, self.connecting_from);
-                for i in (0..self.nodes.len()).rev() {
-                    if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
-                        let scale_f = nw / 80.0;
-                        let conn_act_r = crate::layout::graph_connector_activation_radius();
-                        let port_click_radius = (conn_act_r * scale_f).max(2.0);
-                        let port_click_radius_sq = port_click_radius * port_click_radius;
-
-                        let node = &self.nodes[i];
-                        // Check inputs (top edge)
-                        for k in 0..node.inputs {
-                            let port_x = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
-                            let port_y = ny;
-                            let dx = px - port_x;
-                            let dy = py - port_y;
-                            log::debug!("  Checking input node={} port={} port_x={} port_y={} dist_sq={}", node.name, k, port_x, port_y, dx*dx + dy*dy);
-                            if dx * dx + dy * dy <= port_click_radius_sq {
-                                if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
-                                    if src_idx != i && src_port_type == PortType::Output {
-                                        let output_node = &self.nodes[src_idx];
-                                        let input_node = &self.nodes[i];
-                                        self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
-                                        self.connecting_from = None;
-                                        log::debug!("  Port connection created: Input={} from Output={}", input_node.name, output_node.name);
-                                        return true;
-                                    } else {
-                                        self.connecting_from = None;
-                                        log::debug!("  Port connection aborted (same node or incompatible ports)");
-                                        return true;
-                                    }
-                                } else {
-                                    self.connecting_from = Some((i, PortType::Input, k));
-                                    self.current_mouse_pos = (px, py);
-                                    log::debug!("  Start connecting from Input port of node={}", node.name);
-                                    return true;
-                                }
-                            }
-                        }
-
-                        // Check outputs (bottom edge)
-                        for k in 0..node.outputs {
-                            let port_x = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
-                            let port_y = ny + nh;
-                            let dx = px - port_x;
-                            let dy = py - port_y;
-                            log::debug!("  Checking output node={} port={} port_x={} port_y={} dist_sq={}", node.name, k, port_x, port_y, dx*dx + dy*dy);
-                            if dx * dx + dy * dy <= port_click_radius_sq {
-                                if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
-                                    if src_idx != i && src_port_type == PortType::Input {
-                                        let output_node = &self.nodes[i];
-                                        let input_node = &self.nodes[src_idx];
-                                        self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
-                                        self.connecting_from = None;
-                                        log::debug!("  Port connection created: Input={} from Output={}", input_node.name, output_node.name);
-                                        return true;
-                                    } else {
-                                        self.connecting_from = None;
-                                        log::debug!("  Port connection aborted (same node or incompatible ports)");
-                                        return true;
-                                    }
-                                } else {
-                                    self.connecting_from = Some((i, PortType::Output, k));
-                                    self.current_mouse_pos = (px, py);
-                                    log::debug!("  Start connecting from Output port of node={}", node.name);
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Fallback: If we are actively connecting and clicked on a target node body, connect to its closest compatible port
-                if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
-                    for i in (0..self.nodes.len()).rev() {
-                        if src_idx != i {
-                            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
-                                log::debug!("  Checking fallback body node={} nx={} ny={} nw={} nh={}", self.nodes[i].name, nx, ny, nw, nh);
-                                if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
-                                    let node = &self.nodes[i];
-                                    if src_port_type == PortType::Output && node.inputs > 0 {
-                                        let output_node = &self.nodes[src_idx];
-                                        let input_node = &self.nodes[i];
-                                        self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
-                                        self.connecting_from = None;
-                                        log::debug!("  Fallback connection created: Input={} from Output={}", input_node.name, output_node.name);
-                                        return true;
-                                    } else if src_port_type == PortType::Input && node.outputs > 0 {
-                                        let output_node = &self.nodes[i];
-                                        let input_node = &self.nodes[src_idx];
-                                        self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
-                                        self.connecting_from = None;
-                                        log::debug!("  Fallback connection created: Input={} from Output={}", input_node.name, output_node.name);
-                                        return true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if self.connecting_from.is_some() {
-                    log::debug!("  Clearing connecting_from because it didn't hit any ports or node bodies");
-                    self.connecting_from = None;
-                }
-
-                for i in (0..self.nodes.len()).rev() {
-                    if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
-                        if px >= tx && px < tx + tw && py >= ty && py < ty + th {
-                            self.nodes[i].geom_visible = !self.nodes[i].geom_visible;
-                            self.node_geom_toggled = Some((i, self.nodes[i].geom_visible));
-                            return true;
-                        }
-                    }
-                    if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
-                        if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
-                            let now = std::time::Instant::now();
-                            if let Some((prev_time, prev_idx)) = self.double_click_timer {
-                                if prev_idx == i && now.duration_since(prev_time) < std::time::Duration::from_millis(500) {
-                                    self.double_clicked_idx = Some(i);
-                                }
-                            }
-                            self.double_click_timer = Some((now, i));
-                            self.selected_idx = Some(i);
-                            self.selected_id = Some(self.nodes[i].id.clone());
-                            self.dragging_idx = Some(i);
-                            self.dragging_id = Some(self.nodes[i].id.clone());
-                            self.drag_ox = px - nx;
-                            self.drag_oy = py - ny;
-                            self.drag_node_pos = Some((nx, ny));
-                            self.focus();
-                            return true;
-                        }
-                    }
-                }
-                self.selected_idx = None;
-                self.selected_id = None;
-                false
-            }
-            ElementState::Released => {
-                if self.dragging_idx.is_some() {
-                    self.drag_end();
-                    return true;
-                }
-                false
-            }
-        }
-    }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+    /// The wires / connection preview / grid cells / axes / node bodies / toggles as plain
+    /// quads — the legacy `extra_quads` body, against `rect` instead of a stored rect.
+    fn geometry_quads(&self, rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        let min_x = self.x;
-        let min_y = self.y;
-        let max_x = self.x + self.w;
-        let max_y = self.y + self.h;
+        let min_x = rect.x;
+        let min_y = rect.y;
+        let max_x = rect.x + rect.width;
+        let max_y = rect.y + rect.height;
         let push_clipped = |qx: f32, qy: f32, qw: f32, qh: f32, qc: [f32; 4], q: &mut Vec<(f32, f32, f32, f32, [f32; 4])>| {
             let rx1 = qx.max(min_x);
             let ry1 = qy.max(min_y);
@@ -684,10 +274,28 @@ impl Element for Graph {
             }
         };
 
-        // Draw connection wires
+        // A three-segment orthogonal wire from (start_x, start_y) down/up to (end_x, end_y).
         let scale_f = self.grid_size_x / 80.0;
-        let wire_color = [0.0, 0.75, 1.0, 0.7 * self.network_opacity]; // Vibrant cyan glow
         let wire_thickness = (3.0 * scale_f).clamp(1.0, 15.0);
+        let push_wire = |start_x: f32, start_y: f32, end_x: f32, end_y: f32, color: [f32; 4], q: &mut Vec<(f32, f32, f32, f32, [f32; 4])>| {
+            let mid_y = start_y + (end_y - start_y) / 2.0;
+
+            let v1_min_y = start_y.min(mid_y);
+            let v1_max_y = start_y.max(mid_y);
+            push_clipped(start_x - wire_thickness / 2.0, v1_min_y, wire_thickness, v1_max_y - v1_min_y, color, q);
+
+            let h_min_x = start_x.min(end_x);
+            let h_max_x = start_x.max(end_x);
+            push_clipped(h_min_x, mid_y - wire_thickness / 2.0, h_max_x - h_min_x, wire_thickness, color, q);
+
+            let v2_min_y = mid_y.min(end_y);
+            let v2_max_y = mid_y.max(end_y);
+            push_clipped(end_x - wire_thickness / 2.0, v2_min_y, wire_thickness, v2_max_y - v2_min_y, color, q);
+        };
+
+        // Connection wires: each node with an "input" parameter draws a wire from that source
+        // node's first output port to its own first input port.
+        let wire_color = [0.0, 0.75, 1.0, 0.7 * self.network_opacity]; // Vibrant cyan glow
         for i in 0..self.nodes.len() {
             let node = &self.nodes[i];
             if let Some((_, input_name, _)) = node.parameters.iter().find(|(name, _, _)| name.eq_ignore_ascii_case("input")) {
@@ -710,49 +318,13 @@ impl Element for Graph {
                         };
                         let end_y = ey;
 
-                        let mid_y = start_y + (end_y - start_y) / 2.0;
-
-                        // Vertical segment 1
-                        let v1_min_y = start_y.min(mid_y);
-                        let v1_max_y = start_y.max(mid_y);
-                        push_clipped(
-                            start_x - wire_thickness / 2.0,
-                            v1_min_y,
-                            wire_thickness,
-                            v1_max_y - v1_min_y,
-                            wire_color,
-                            &mut quads,
-                        );
-
-                        // Horizontal segment
-                        let h_min_x = start_x.min(end_x);
-                        let h_max_x = start_x.max(end_x);
-                        push_clipped(
-                            h_min_x,
-                            mid_y - wire_thickness / 2.0,
-                            h_max_x - h_min_x,
-                            wire_thickness,
-                            wire_color,
-                            &mut quads,
-                        );
-
-                        // Vertical segment 2
-                        let v2_min_y = mid_y.min(end_y);
-                        let v2_max_y = mid_y.max(end_y);
-                        push_clipped(
-                            end_x - wire_thickness / 2.0,
-                            v2_min_y,
-                            wire_thickness,
-                            v2_max_y - v2_min_y,
-                            wire_color,
-                            &mut quads,
-                        );
+                        push_wire(start_x, start_y, end_x, end_y, wire_color, &mut quads);
                     }
                 }
             }
         }
 
-        // Draw connection wire preview if in progress
+        // Connection preview while dragging one out
         if let Some((node_idx, port_type, port_idx)) = self.connecting_from {
             if let Some((nx, ny, nw, nh)) = self.node_rect(node_idx) {
                 let start_x = match port_type {
@@ -763,63 +335,23 @@ impl Element for Graph {
                     PortType::Input => ny,
                     PortType::Output => ny + nh,
                 };
-
-                let end_x = self.current_mouse_pos.0;
-                let end_y = self.current_mouse_pos.1;
-
                 let preview_color = [1.0, 0.6, 0.0, 0.8]; // Golden orange preview
-                let mid_y = start_y + (end_y - start_y) / 2.0;
-
-                // Vertical segment 1
-                let v1_min_y = start_y.min(mid_y);
-                let v1_max_y = start_y.max(mid_y);
-                push_clipped(
-                    start_x - wire_thickness / 2.0,
-                    v1_min_y,
-                    wire_thickness,
-                    v1_max_y - v1_min_y,
-                    preview_color,
-                    &mut quads,
-                );
-
-                // Horizontal segment
-                let h_min_x = start_x.min(end_x);
-                let h_max_x = start_x.max(end_x);
-                push_clipped(
-                    h_min_x,
-                    mid_y - wire_thickness / 2.0,
-                    h_max_x - h_min_x,
-                    wire_thickness,
-                    preview_color,
-                    &mut quads,
-                );
-
-                // Vertical segment 2
-                let v2_min_y = mid_y.min(end_y);
-                let v2_max_y = mid_y.max(end_y);
-                push_clipped(
-                    end_x - wire_thickness / 2.0,
-                    v2_min_y,
-                    wire_thickness,
-                    v2_max_y - v2_min_y,
-                    preview_color,
-                    &mut quads,
-                );
+                push_wire(start_x, start_y, self.current_mouse_pos.0, self.current_mouse_pos.1, preview_color, &mut quads);
             }
         }
 
+        // Grid cells + gaps, on rounded pixel boundaries to prevent seams
         if self.show_network_grid && self.grid_size_x > 0.0 && self.grid_size_y > 0.0 && !self.uniform_background {
             let step_y = self.grid_size_y + self.skipped_row_h;
             let step_x = self.grid_size_x + self.skipped_col_w;
 
             if step_y >= 4.0 && step_x >= 4.0 {
-                let ry_start = (((self.y - self.grid_origin_y) / step_y).floor() as i32 - 1).max(-100_000);
-                let ry_end = (((self.y + self.h - self.grid_origin_y) / step_y).ceil() as i32 + 1).min(100_000);
+                let ry_start = (((rect.y - self.grid_origin_y) / step_y).floor() as i32 - 1).max(-100_000);
+                let ry_end = (((rect.y + rect.height - self.grid_origin_y) / step_y).ceil() as i32 + 1).min(100_000);
 
-                let cx_start = (((self.x - self.grid_origin_x) / step_x).floor() as i32 - 1).max(-100_000);
-                let cx_end = (((self.x + self.w - self.grid_origin_x) / step_x).ceil() as i32 + 1).min(100_000);
+                let cx_start = (((rect.x - self.grid_origin_x) / step_x).floor() as i32 - 1).max(-100_000);
+                let cx_end = (((rect.x + rect.width - self.grid_origin_x) / step_x).ceil() as i32 + 1).min(100_000);
 
-                // Draw gap rectangles and cells in a single loop with matching rounded coordinate boundaries to prevent seams
                 for r in ry_start..=ry_end {
                     let y_cell_start = (self.grid_origin_y + (r as f32) * step_y).round();
                     let y_cell_end = (self.grid_origin_y + (r as f32) * step_y + self.grid_size_y).round();
@@ -836,7 +368,8 @@ impl Element for Graph {
                         let cell_w = x_cell_end - x_cell_start;
                         let gap_w = x2 - x_cell_end;
 
-                        // Draw right gap rectangle (shares cell height, sits to the right of the cell)
+                        // Right gap (shares cell height), bottom gap (full step width), then the
+                        // cell itself, all on identical rounded boundaries.
                         push_clipped(
                             x_cell_end,
                             y_cell_start,
@@ -845,8 +378,6 @@ impl Element for Graph {
                             [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity],
                             &mut quads,
                         );
-
-                        // Draw bottom gap rectangle (shares the full step width, sits below the cell/right gap)
                         push_clipped(
                             x_cell_start,
                             y_cell_end,
@@ -855,8 +386,6 @@ impl Element for Graph {
                             [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity],
                             &mut quads,
                         );
-
-                        // Draw cell rectangle with the exact same bounding boundaries
                         push_clipped(
                             x_cell_start,
                             y_cell_start,
@@ -870,17 +399,17 @@ impl Element for Graph {
             }
         }
 
+        // Origin axes, drawn in the gaps beside row/column 0
         if self.grid_size_x > 0.0 && self.grid_size_y > 0.0 {
             let thickness = 2.0;
-            // X axis (horizontal) in the gap below row 0
             let y_center = self.grid_origin_y + self.grid_size_y + self.skipped_row_h / 2.0;
-            push_clipped(self.x, y_center - thickness / 2.0, self.w, thickness, [0.0, 0.0, 0.0, 1.0 * self.network_opacity], &mut quads);
+            push_clipped(rect.x, y_center - thickness / 2.0, rect.width, thickness, [0.0, 0.0, 0.0, 1.0 * self.network_opacity], &mut quads);
 
-            // Y axis (vertical) in the gap to the left of col 0
             let x_center = self.grid_origin_x - self.skipped_col_w / 2.0;
-            push_clipped(x_center - thickness / 2.0, self.y, thickness, self.h, [0.0, 0.0, 0.0, 1.0 * self.network_opacity], &mut quads);
+            push_clipped(x_center - thickness / 2.0, rect.y, thickness, rect.height, [0.0, 0.0, 0.0, 1.0 * self.network_opacity], &mut quads);
         }
 
+        // Node bodies (culled, not clipped — legacy) + geometry toggles (clipped)
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
@@ -918,12 +447,42 @@ impl Element for Graph {
         quads
     }
 
-    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
+    /// The rounded view of the same geometry — the legacy `all_rounded_quads` conversion: the
+    /// widget background, then each plain quad either as a node body (node corner radius, all
+    /// corners) or with the widget's edge-corner resolution.
+    fn rounded_geometry(&self, rect: Rect) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        let mut rounded = Vec::new();
+
+        let (w_tl, w_tr, w_br, w_bl) = WIDGET_CORNERS;
+        rounded.push((rect.x, rect.y, rect.width, rect.height, WIDGET_RADIUS, self.bg_color(), WIDGET_CORNERS));
+
+        let node_radius = crate::layout::graph_node_corner_radius();
+        let (wx, wy, ww, wh) = (rect.x, rect.y, rect.width, rect.height);
+
+        for (qx, qy, qw, qh, qc) in self.geometry_quads(rect) {
+            if self.is_node_rect(qx, qy, qw, qh) {
+                rounded.push((qx, qy, qw, qh, node_radius, qc, (true, true, true, true)));
+            } else {
+                let tl = w_tl && qx <= wx + 1.5 && qy <= wy + 1.5;
+                let tr = w_tr && qx + qw >= wx + ww - 1.5 && qy <= wy + 1.5;
+                let br = w_br && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5;
+                let bl = w_bl && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5;
+
+                let r = if tl || tr || br || bl { WIDGET_RADIUS } else { 0.0 };
+                rounded.push((qx, qy, qw, qh, r, qc, (tl, tr, br, bl)));
+            }
+        }
+
+        rounded
+    }
+
+    /// Input/output port circles, culled to the widget rect (legacy `extra_circles`).
+    fn port_circles(&self, rect: Rect) -> Vec<(f32, f32, f32, [f32; 4])> {
         let mut circles = Vec::new();
-        let min_x = self.x;
-        let min_y = self.y;
-        let max_x = self.x + self.w;
-        let max_y = self.y + self.h;
+        let min_x = rect.x;
+        let min_y = rect.y;
+        let max_x = rect.x + rect.width;
+        let max_y = rect.y + rect.height;
 
         let mut push_circle_clipped = |cx: f32, cy: f32, r: f32, color: [f32; 4]| {
             if cx >= min_x && cx <= max_x && cy >= min_y && cy <= max_y {
@@ -944,15 +503,14 @@ impl Element for Graph {
                 let base_r = port_size / 2.0;
 
                 let node = &self.nodes[i];
-                
-                // Input ports (top edge)
+
                 for k in 0..node.inputs {
                     let cx = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
                     let cy = ny;
-                    
+
                     let is_hovered = self.hovered_port == Some((i, PortType::Input, k));
                     let is_connecting = self.connecting_from == Some((i, PortType::Input, k));
-                    
+
                     let (r, color) = if is_hovered || is_connecting {
                         (base_r * 1.4, conn_hl_color)
                     } else {
@@ -961,14 +519,13 @@ impl Element for Graph {
                     push_circle_clipped(cx, cy, r, color);
                 }
 
-                // Output ports (bottom edge)
                 for k in 0..node.outputs {
                     let cx = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
                     let cy = ny + nh;
-                    
+
                     let is_hovered = self.hovered_port == Some((i, PortType::Output, k));
                     let is_connecting = self.connecting_from == Some((i, PortType::Output, k));
-                    
+
                     let (r, color) = if is_hovered || is_connecting {
                         (base_r * 1.4, conn_hl_color)
                     } else {
@@ -981,49 +538,428 @@ impl Element for Graph {
         circles
     }
 
-
-
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if self.hit_test(px, py, ctx) {
-            if ctx.ctrl_pressed {
-                match delta {
-                    MouseScrollDelta::LineDelta(_x, y) => {
-                        if *y > 0.0 {
-                            self.zoom_by_factor(1.1);
-                        } else if *y < 0.0 {
-                            self.zoom_by_factor(1.0 / 1.1);
-                        }
-                        true
-                    }
-                    MouseScrollDelta::PixelDelta(pos) => {
-                        let factor = 1.0 + (pos.y as f32 * 0.015);
-                        self.zoom_by_factor(factor);
-                        true
-                    }
-                }
-            } else {
-                match delta {
-                    MouseScrollDelta::LineDelta(x, y) => {
-                        self.grid_origin_x += *x * 15.0;
-                        self.grid_origin_y += *y * 15.0;
-                        true
-                    }
-                    MouseScrollDelta::PixelDelta(pos) => {
-                        self.grid_origin_x += pos.x as f32;
-                        self.grid_origin_y += pos.y as f32;
-                        true
-                    }
+    /// Node-name labels beside each node, scaled with the grid, included only when they
+    /// intersect the widget rect (legacy `text_labels`).
+    fn node_labels(&self, rect: Rect) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        for (i, node) in self.nodes.iter().enumerate() {
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                let scale_f = nw / 80.0;
+                let font_size = (14.0 * scale_f).clamp(6.0, 48.0);
+                let lx = nx + nw + 8.0 * scale_f;
+                let ly = crate::layout::align_text_y(ny, nh, font_size, 0.0);
+                let text_w = TextLabel::estimate_width(&node.name, font_size);
+                if lx + text_w >= rect.x && lx < rect.x + rect.width && ly + font_size >= rect.y && ly < rect.y + rect.height {
+                    labels.push(TextLabel {
+                        text: node.name.clone(),
+                        x: lx,
+                        y: ly,
+                        font_size,
+                        color: [0xcc, 0xcc, 0xd4],
+                    });
                 }
             }
-        } else {
-            false
         }
+        labels
     }
 }
 
-impl Drop for Graph {
-    fn drop(&mut self) {
-        clear_widget_references(self);
+fn read_zoom_bindings() -> (String, String) {
+    let mut zoom_in_val = "=".to_string();
+    let mut zoom_out_val = "-".to_string();
+    let path = crate::config::get_config_path();
+    if let Ok(content) = std::fs::read_to_string(&path) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+            if let Some(zoom_in) = val.pointer("/layout/zoom_in").and_then(|v| v.as_str()) {
+                zoom_in_val = zoom_in.to_string();
+            }
+            if let Some(zoom_out) = val.pointer("/layout/zoom_out").and_then(|v| v.as_str()) {
+                zoom_out_val = zoom_out.to_string();
+            }
+        }
+    }
+    (zoom_in_val, zoom_out_val)
+}
+
+impl Layout for Graph {}
+
+impl Paint for Graph {
+    fn color(&self) -> [f32; 4] {
+        self.bg_color()
+    }
+
+    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+        Some((WIDGET_RADIUS, WIDGET_CORNERS))
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::graph_node_font())
+    }
+
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        for (qx, qy, qw, qh, r, c, corners) in self.rounded_geometry(rect) {
+            ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, r, corners, c);
+        }
+        for (cx, cy, r, c) in self.port_circles(rect) {
+            ctx.circle(cx, cy, r, c);
+        }
+        for l in self.node_labels(rect) {
+            ctx.text(l.text, l.x, l.y, l.font_size, l.color);
+        }
+    }
+
+    fn serves_legacy_plain_quads(&self) -> bool {
+        true
+    }
+
+    fn legacy_plain_quads(&self, rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        self.geometry_quads(rect)
+    }
+
+    fn text_bounds(&self, rect: Rect) -> Option<[f32; 4]> {
+        Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height])
+    }
+}
+
+impl Input for Graph {
+    /// Legacy hit test excluded the right/bottom edges.
+    fn hit(&self, rect: Rect, x: f32, y: f32) -> bool {
+        x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
+    }
+
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::PointerMove { x: px, y: py, .. } => {
+                let (px, py) = (*px, *py);
+                let mut changed = false;
+                if self.connecting_from.is_some() {
+                    self.current_mouse_pos = (px, py);
+                    changed = true;
+                }
+                let was_toggle_hovered = self.toggle_hovered_idx;
+                self.toggle_hovered_idx = None;
+
+                let was_hovered_port = self.hovered_port;
+                self.hovered_port = None;
+
+                let conn_act_r = crate::layout::graph_connector_activation_radius();
+
+                for i in 0..self.nodes.len() {
+                    if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                        let scale_f = nw / 80.0;
+                        let hit_radius = (conn_act_r * scale_f).max(2.0);
+                        let node = &self.nodes[i];
+
+                        for k in 0..node.inputs {
+                            let cx = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
+                            let cy = ny;
+                            if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
+                                self.hovered_port = Some((i, PortType::Input, k));
+                            }
+                        }
+
+                        for k in 0..node.outputs {
+                            let cx = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
+                            let cy = ny + nh;
+                            if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
+                                self.hovered_port = Some((i, PortType::Output, k));
+                            }
+                        }
+                    }
+
+                    if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
+                        if px >= tx && px < tx + tw && py >= ty && py < ty + th {
+                            self.toggle_hovered_idx = Some(i);
+                        }
+                    }
+                }
+
+                if was_toggle_hovered != self.toggle_hovered_idx || was_hovered_port != self.hovered_port {
+                    changed = true;
+                }
+                changed
+            }
+            Event::MouseLeave => {
+                let changed = self.hovered_port.is_some() || self.toggle_hovered_idx.is_some();
+                self.hovered_port = None;
+                self.toggle_hovered_idx = None;
+                changed
+            }
+            Event::MouseButton { button: MouseButton::Right, state: ElementState::Pressed, .. } => {
+                if self.connecting_from.is_some() {
+                    self.connecting_from = None;
+                    true
+                } else {
+                    false
+                }
+            }
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x, y, .. } => {
+                self.on_left_press(*x, *y, ectx)
+            }
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Released, .. } => {
+                if self.dragging_idx.is_some() {
+                    self.commit_drag();
+                    true
+                } else {
+                    false
+                }
+            }
+            Event::MouseWheel { delta, x: px, y: py, .. } => {
+                let _ = (px, py); // hit-gated by the adapter
+                let ctrl = ectx.ui.as_deref().map_or(false, |ui| ui.ctrl_pressed);
+                if ctrl {
+                    match delta {
+                        MouseScrollDelta::LineDelta(_x, y) => {
+                            if *y > 0.0 {
+                                self.zoom_by_factor(1.1);
+                            } else if *y < 0.0 {
+                                self.zoom_by_factor(1.0 / 1.1);
+                            }
+                            true
+                        }
+                        MouseScrollDelta::PixelDelta(pos) => {
+                            let factor = 1.0 + (pos.y as f32 * 0.015);
+                            self.zoom_by_factor(factor);
+                            true
+                        }
+                    }
+                } else {
+                    match delta {
+                        MouseScrollDelta::LineDelta(x, y) => {
+                            self.grid_origin_x += *x * 15.0;
+                            self.grid_origin_y += *y * 15.0;
+                            true
+                        }
+                        MouseScrollDelta::PixelDelta(pos) => {
+                            self.grid_origin_x += pos.x as f32;
+                            self.grid_origin_y += pos.y as f32;
+                            true
+                        }
+                    }
+                }
+            }
+            Event::KeyInput(key_event) => {
+                if key_event.state == ElementState::Pressed {
+                    if let Key::Character(ref ch) = key_event.logical_key {
+                        let (zoom_in_binding, zoom_out_binding) = read_zoom_bindings();
+                        if ch == &zoom_in_binding {
+                            self.zoom_in();
+                            return true;
+                        } else if ch == &zoom_out_binding {
+                            self.zoom_out();
+                            return true;
+                        }
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn scrollable(&self) -> bool {
+        false
+    }
+
+    // The graph is "draggable" only once a left press landed on a node body (`on_left_press`
+    // sets `dragging_idx`); hosts then re-init via drag_begin and stream drag_update.
+    fn draggable(&self, _rect: Rect) -> bool {
+        self.dragging_idx.is_some()
+    }
+    fn is_dragging(&self) -> bool {
+        self.dragging_idx.is_some()
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32, _rect: Rect) {
+        if let Some(idx) = self.dragging_idx {
+            if let Some((nx, ny, _, _)) = self.node_rect(idx) {
+                self.drag_ox = px - nx;
+                self.drag_oy = py - ny;
+                self.drag_node_pos = Some((nx, ny));
+            }
+        }
+    }
+
+    fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
+        if self.dragging_idx.is_some() {
+            let nx = px - self.drag_ox;
+            let ny = py - self.drag_oy;
+
+            let snap_x = if self.grid_snap_enabled { self.grid_size_x + self.skipped_col_w } else { 0.0 };
+            let snap_y = if self.grid_snap_enabled { self.grid_size_y + self.skipped_row_h } else { 0.0 };
+
+            let nx = if snap_x > 0.0 {
+                let relative = nx - self.grid_origin_x;
+                (relative / snap_x).round() * snap_x + self.grid_origin_x
+            } else {
+                nx
+            };
+
+            let ny = if snap_y > 0.0 {
+                let relative = ny - self.grid_origin_y;
+                (relative / snap_y).round() * snap_y + self.grid_origin_y
+            } else {
+                ny
+            };
+
+            self.drag_node_pos = Some((nx, ny));
+            return true;
+        }
+        false
+    }
+
+    fn drag_end(&mut self) {
+        self.commit_drag();
+    }
+
+    fn graph_controller(&self) -> Option<&dyn GraphController> {
+        Some(self)
+    }
+    fn graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> {
+        Some(self)
+    }
+}
+
+impl Graph {
+    /// The legacy left-press cascade: ports (start/complete a connection), a node-body
+    /// fallback for an in-flight connection, geometry toggles, then node selection + drag
+    /// arming; an empty-space press clears the selection and stays unconsumed.
+    fn on_left_press(&mut self, px: f32, py: f32, ectx: &mut EventCtx) -> bool {
+        for i in (0..self.nodes.len()).rev() {
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                let scale_f = nw / 80.0;
+                let conn_act_r = crate::layout::graph_connector_activation_radius();
+                let port_click_radius = (conn_act_r * scale_f).max(2.0);
+                let port_click_radius_sq = port_click_radius * port_click_radius;
+
+                let node = &self.nodes[i];
+                // Inputs (top edge)
+                for k in 0..node.inputs {
+                    let port_x = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
+                    let port_y = ny;
+                    let dx = px - port_x;
+                    let dy = py - port_y;
+                    if dx * dx + dy * dy <= port_click_radius_sq {
+                        if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+                            if src_idx != i && src_port_type == PortType::Output {
+                                let output_node = &self.nodes[src_idx];
+                                let input_node = &self.nodes[i];
+                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                self.connecting_from = None;
+                            } else {
+                                self.connecting_from = None;
+                            }
+                        } else {
+                            self.connecting_from = Some((i, PortType::Input, k));
+                            self.current_mouse_pos = (px, py);
+                        }
+                        return true;
+                    }
+                }
+
+                // Outputs (bottom edge)
+                for k in 0..node.outputs {
+                    let port_x = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
+                    let port_y = ny + nh;
+                    let dx = px - port_x;
+                    let dy = py - port_y;
+                    if dx * dx + dy * dy <= port_click_radius_sq {
+                        if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+                            if src_idx != i && src_port_type == PortType::Input {
+                                let output_node = &self.nodes[i];
+                                let input_node = &self.nodes[src_idx];
+                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                self.connecting_from = None;
+                            } else {
+                                self.connecting_from = None;
+                            }
+                        } else {
+                            self.connecting_from = Some((i, PortType::Output, k));
+                            self.current_mouse_pos = (px, py);
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Actively connecting + clicked a target node body: connect to its closest compatible port
+        if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+            for i in (0..self.nodes.len()).rev() {
+                if src_idx != i {
+                    if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                        if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
+                            let node = &self.nodes[i];
+                            if src_port_type == PortType::Output && node.inputs > 0 {
+                                let output_node = &self.nodes[src_idx];
+                                let input_node = &self.nodes[i];
+                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                self.connecting_from = None;
+                                return true;
+                            } else if src_port_type == PortType::Input && node.outputs > 0 {
+                                let output_node = &self.nodes[i];
+                                let input_node = &self.nodes[src_idx];
+                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                self.connecting_from = None;
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if self.connecting_from.is_some() {
+            self.connecting_from = None;
+        }
+
+        for i in (0..self.nodes.len()).rev() {
+            if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
+                if px >= tx && px < tx + tw && py >= ty && py < ty + th {
+                    self.nodes[i].geom_visible = !self.nodes[i].geom_visible;
+                    self.node_geom_toggled = Some((i, self.nodes[i].geom_visible));
+                    return true;
+                }
+            }
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
+                    let now = std::time::Instant::now();
+                    if let Some((prev_time, prev_idx)) = self.double_click_timer {
+                        if prev_idx == i && now.duration_since(prev_time) < std::time::Duration::from_millis(500) {
+                            self.double_clicked_idx = Some(i);
+                        }
+                    }
+                    self.double_click_timer = Some((now, i));
+                    self.selected_idx = Some(i);
+                    self.selected_id = Some(self.nodes[i].id.clone());
+                    self.dragging_idx = Some(i);
+                    self.dragging_id = Some(self.nodes[i].id.clone());
+                    self.drag_ox = px - nx;
+                    self.drag_oy = py - ny;
+                    self.drag_node_pos = Some((nx, ny));
+                    ectx.request_focus();
+                    return true;
+                }
+            }
+        }
+        self.selected_idx = None;
+        self.selected_id = None;
+        false
+    }
+
+    /// Drop the in-flight node drag onto the nearest free grid cell (legacy `drag_end`).
+    fn commit_drag(&mut self) {
+        if let Some((nx, ny)) = self.drag_node_pos.take() {
+            let c = ((nx - self.grid_origin_x) / (self.grid_size_x + self.skipped_col_w)).round();
+            let r = ((ny - self.grid_origin_y) / (self.grid_size_y + self.skipped_row_h)).round();
+            if let Some(idx) = self.dragging_idx.take() {
+                let (nx, ny) = self.find_empty_cell(c, r, Some(idx));
+                self.nodes[idx].position = (nx, ny);
+            }
+        } else {
+            self.dragging_idx = None;
+        }
+        self.dragging_id = None;
     }
 }
 
@@ -1031,7 +967,7 @@ impl GraphController for Graph {
     fn set_nodes(&mut self, nodes: &[GraphNode]) {
         self.nodes = nodes.to_vec();
         self.hovered_port = None;
-        
+
         // Sync selected_idx from selected_id
         if let Some(ref id) = self.selected_id {
             self.selected_idx = self.nodes.iter().position(|n| n.id == *id);
@@ -1085,3 +1021,107 @@ impl GraphController for Graph {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::UiContext;
+    use crate::widget::Element;
+
+    fn two_nodes() -> Adapted<Graph> {
+        let mut g = Graph::new();
+        Element::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
+        g.set_grid_sizes(80.0, 40.0);
+        g.set_skipped_sizes(20.0, 20.0);
+        g.set_grid_origin(100.0, 100.0);
+        g.set_grid_snap_enabled(true);
+        let node = |id: &str, name: &str, col: f32, row: f32| GraphNode {
+            id: id.into(),
+            name: name.into(),
+            position: (col, row),
+            parameters: Vec::new(),
+            geom_visible: true,
+            node_type: String::new(),
+            inputs: 1,
+            outputs: 1,
+        };
+        g.set_nodes(&[node("a", "alpha", 0.0, 0.0), node("b", "beta", 1.0, 1.0)]);
+        g
+    }
+
+    #[test]
+    fn node_press_selects_arms_drag_and_commit_snaps_to_grid() {
+        let mut ctx = UiContext::new();
+        let mut g = two_nodes();
+        let (id, ptr) = (g.id(), g.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+
+        // Node a occupies (100, 100, 80, 40). Press its body (away from ports/toggle).
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
+        assert_eq!(g.selected_node(), Some(0));
+        assert!(Element::is_dragging(&g) && Element::draggable(&g));
+
+        // Drag one grid step right (step_x = 100): snap puts the node at column 1, but cell
+        // (1, 0) is free so it lands there.
+        Element::drag_begin(&mut g, 110.0, 120.0);
+        assert!(Element::drag_update(&mut g, 210.0, 120.0));
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 120.0, &mut ctx));
+        assert!(!Element::is_dragging(&g));
+        assert_eq!(g.get_nodes()[0].position, (1.0, 0.0));
+
+        // An empty-space press clears the selection and is NOT consumed (legacy contract).
+        assert!(!g.mouse_input(MouseButton::Left, ElementState::Pressed, 700.0, 550.0, &mut ctx));
+        assert_eq!(g.selected_node(), None);
+    }
+
+    #[test]
+    fn port_click_starts_and_completes_a_connection() {
+        let mut ctx = UiContext::new();
+        let mut g = two_nodes();
+        let (id, ptr) = (g.id(), g.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+
+        // Node a's output port sits at the bottom-center of (100,100,80,40) => (140, 140).
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 140.0, 140.0, &mut ctx));
+        // Node b's input port: node b at (200, 160, 80, 40) => top-center (240, 160).
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 240.0, 160.0, &mut ctx));
+
+        let elem: &mut dyn Element = &mut g;
+        let pending = elem
+            .as_graph_controller_mut()
+            .expect("Graph exposes GraphController")
+            .take_pending_connection();
+        assert_eq!(pending, Some(("b".to_string(), "alpha".to_string())));
+    }
+
+    #[test]
+    fn dual_geometry_views_stay_consistent() {
+        let mut g = two_nodes();
+        let ctx = UiContext::new();
+
+        // The plain view (designer path) and the rounded view (render_widget path) describe
+        // the same quads: the rounded view adds only the widget background entry up front.
+        let plain = Element::extra_quads(&g);
+        let rounded = Element::all_rounded_quads(&g, &ctx);
+        assert!(!plain.is_empty());
+        assert_eq!(rounded.len(), plain.len() + 1);
+        for ((px, py, pw, ph, pc), (rx, ry, rw, rh, _, rc, _)) in plain.iter().zip(rounded.iter().skip(1)) {
+            assert_eq!((px, py, pw, ph, pc), (rx, ry, rw, rh, rc));
+        }
+
+        // Node bodies carry the node corner radius in the rounded view.
+        let node_radius = crate::layout::graph_node_corner_radius();
+        let node_entries: Vec<_> = rounded
+            .iter()
+            .filter(|(qx, qy, qw, qh, ..)| g.is_node_rect(*qx, *qy, *qw, *qh))
+            .collect();
+        assert_eq!(node_entries.len(), 2, "both node bodies present");
+        for entry in node_entries {
+            assert_eq!(entry.4, node_radius);
+            assert_eq!(entry.6, (true, true, true, true));
+        }
+
+        // And `all_quads` stays empty so render_widget hosts (reading BOTH getters) never
+        // draw the geometry twice — the legacy Graph override's contract.
+        assert!(Element::all_quads(&g, &ctx).is_empty());
+    }
+}

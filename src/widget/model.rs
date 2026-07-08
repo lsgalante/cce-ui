@@ -137,6 +137,33 @@ pub trait Paint {
     /// widgets) store it here; the default discards it, leaving label drawing to the adapter's
     /// base-label machinery.
     fn sync_label(&mut self, _label: &str) {}
+
+    // --- Legacy dual-geometry escape hatch (transitional; Graph is the only user). Legacy
+    // hosts read DIFFERENT getters: the designer's raw render path draws `extra_quads` as
+    // PLAIN quads, while `render_widget` and the scene walk consume the rounded view
+    // (`all_rounded_quads` / `paint_self`). Legacy Graph served both by overriding all three
+    // getters. A migrated widget emits the rounded view from `paint`; when it also serves a
+    // plain view, the adapter returns it verbatim from `extra_quads` and empties `all_quads`
+    // (mirroring legacy Graph's highlight-only override) so render_widget-style hosts that
+    // read BOTH getters never draw the geometry twice. Dies with `Element`.
+
+    /// Whether this widget serves [`legacy_plain_quads`](Paint::legacy_plain_quads).
+    fn serves_legacy_plain_quads(&self) -> bool {
+        false
+    }
+
+    /// The plain-quad view of this widget's geometry for legacy `extra_quads` readers.
+    fn legacy_plain_quads(&self, _rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        Vec::new()
+    }
+
+    /// Clip rect `[x1, y1, x2, y2]` for this widget's text on the legacy bounded-text paths
+    /// (`text_labels_with_bounds` / `text_labels_with_font_and_bounds`). `None` (default) keeps
+    /// the legacy behavior: unbounded, except inside a scroll ancestor. Graph clips its node
+    /// names to its own rect.
+    fn text_bounds(&self, _rect: Rect) -> Option<[f32; 4]> {
+        None
+    }
 }
 
 /// What an event handler may reach beyond its own state — the RFC §3.5 `EventCtx`, grown as
@@ -599,6 +626,62 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// Text derived from the [`Paint::paint`] `Text` prims (one source of truth for what the
     /// widget draws — inline labels, readouts), plus the base-label text for detached-label
     /// widgets (drawn by the adapter, since the label lives on the base).
+    /// The legacy bounded-text getters, honoring [`Paint::text_bounds`] (Graph clips node
+    /// names to its own rect). Without it, `text_labels_with_bounds` matches the unbounded
+    /// `Element` default, and `text_labels_with_font_and_bounds` replicates the default's
+    /// scroll-ancestor walk (an overriding impl can no longer call it).
+    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        let bounds = Paint::text_bounds(&self.inner, self.content_rect());
+        self.text_labels().into_iter().map(|l| (l, bounds)).collect()
+    }
+
+    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let font = Paint::widget_font(&self.inner);
+        if let Some(bounds) = Paint::text_bounds(&self.inner, self.content_rect()) {
+            return self
+                .text_labels()
+                .into_iter()
+                .map(|l| (l, font.clone(), Some(bounds)))
+                .collect();
+        }
+
+        // Replica of the `Element` default: clip to the viewport of a ScrollBox/List ancestor.
+        let mut labels =
+            self.text_labels().into_iter().map(|l| (l, font.clone(), None::<[f32; 4]>)).collect::<Vec<_>>();
+        let mut curr = self.parent(ctx);
+        let mut scroll_box_bounds = None;
+        while let Some(parent_ptr) = curr {
+            let parent = unsafe { &*parent_ptr };
+            if let Some(scroll_box) = parent.as_any().downcast_ref::<crate::widget::ScrollBox>() {
+                let (sb_x, _, sb_w, _) = parent.rect();
+                let view_min = scroll_box.viewport_y + 4.0;
+                let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
+                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
+                break;
+            } else if let Some(list) = parent.as_any().downcast_ref::<crate::widget::List>() {
+                let (sb_x, _, sb_w, _) = parent.rect();
+                let view_min = list.scroll_box.viewport_y + 4.0;
+                let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
+                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
+                break;
+            }
+            curr = parent.parent(ctx);
+        }
+        if let Some(sb_bounds) = scroll_box_bounds {
+            for item in &mut labels {
+                if let Some(ref mut b) = item.2 {
+                    b[0] = b[0].max(sb_bounds[0]);
+                    b[1] = b[1].max(sb_bounds[1]);
+                    b[2] = b[2].min(sb_bounds[2]);
+                    b[3] = b[3].min(sb_bounds[3]);
+                } else {
+                    item.2 = Some(sb_bounds);
+                }
+            }
+        }
+        labels
+    }
+
     fn text_labels(&self) -> Vec<TextLabel> {
         if !self.visible() {
             return Vec::new();
@@ -646,6 +729,9 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         if !self.visible() {
             return Vec::new();
         }
+        if Paint::serves_legacy_plain_quads(&self.inner) {
+            return Paint::legacy_plain_quads(&self.inner, self.content_rect());
+        }
         self.painted_prims()
             .into_iter()
             .filter_map(|prim| match prim {
@@ -653,6 +739,18 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
                 _ => None,
             })
             .collect()
+    }
+
+    /// When the widget serves a legacy plain-quad view, its geometry reaches
+    /// `render_widget`-style hosts (which read BOTH quad getters) through `all_rounded_quads`
+    /// only — `all_quads` must stay empty or they draw it twice. Mirrors legacy Graph's
+    /// highlight-only `all_quads` override. Otherwise: the `Element` default minus the shared
+    /// highlight (suppressed for all adapted widgets via `highlight_quad -> None`).
+    fn all_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if Paint::serves_legacy_plain_quads(&self.inner) {
+            return Vec::new();
+        }
+        self.extra_quads()
     }
 
     fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
