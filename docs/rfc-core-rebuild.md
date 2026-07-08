@@ -475,6 +475,13 @@ Constraint respected: **each crate still builds standalone** — the new core is
     raw-pointer parent/children fields. Skipped for later: `PreviewState` (needs per-label fonts
     on the `Text` prim), `StatusBar` (bigger custom surface), Float3/LayoutPreview (time).
     156 tests pass; workspace builds; test-interface pixel-diff vs the 5h baseline: 1 pixel.
+  - **5j — `InteractiveListItem`. DONE (verified in the live settings render dump: service-row
+    titles/subtitles + themed overlays through the prim bridge).** Button-pattern press/release
+    with themed selected/hover/press overlays. `StatusBar` was surveyed and DEFERRED: it is
+    parent-coupled (reads its parent's backplate state/rect/radius at paint time and owns
+    `parent`/`set_parent`) — that belongs with the container/children design, not the leaf
+    recipe. Also still pending from the leaf tier: Float3, LayoutPreview (time), PreviewState
+    (needs per-label fonts on `Prim::Text`).
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10

@@ -1,6 +1,11 @@
+//! `TextItem` (retained glyphon buffer holder, unchanged) and the narrow-trait
+//! `InteractiveListItem` (Phase 5j): Button-style press/release with themed
+//! selected/hover/press overlays and title/subtitle text.
+
 use crate::colors;
-use crate::widget::*;
-use crate::widget::display::TextLabel;
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
+use crate::widget::{Adapted, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
 #[derive(Debug, Clone)]
 pub struct TextItem {
@@ -23,41 +28,30 @@ impl TextItem {
         bounds: Option<[f32; 4]>,
     ) -> Self {
         let buffer = crate::backend::window_runner::get_text_buffer(fs, text, size, font);
-        Self {
-            buffer,
-            x,
-            y,
-            color,
-            bounds,
-        }
+        Self { buffer, x, y, color, bounds }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct InteractiveListItem {
-    base: Widget,
     pub title: String,
     pub subtitle: Option<String>,
     pub selected: bool,
     pub pressed: bool,
     pub just_clicked: bool,
+    hovered: bool,
 }
 
 impl InteractiveListItem {
-    pub fn new(title: &str) -> Self {
-        Self {
-            base: Widget::new(),
+    pub fn new(title: &str) -> Adapted<InteractiveListItem> {
+        Adapted::new(InteractiveListItem {
             title: title.to_string(),
             subtitle: None,
             selected: false,
             pressed: false,
             just_clicked: false,
-        }
-    }
-
-    pub fn with_subtitle(mut self, subtitle: &str) -> Self {
-        self.subtitle = Some(subtitle.to_string());
-        self
+            hovered: false,
+        })
     }
 
     pub fn set_selected(&mut self, selected: bool) {
@@ -65,102 +59,94 @@ impl InteractiveListItem {
     }
 }
 
-impl Element for InteractiveListItem {
-    crate::impl_widget_base!(InteractiveListItem);
-    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let col = self.color();
-        if col[3] > 0.0 {
-            let (x, y, w, h) = self.rect();
-            vec![(x, y, w, h, col)]
-        } else {
-            vec![]
-        }
+impl Adapted<InteractiveListItem> {
+    pub fn with_subtitle(mut self, subtitle: &str) -> Self {
+        self.subtitle = Some(subtitle.to_string());
+        self
     }
+}
 
+impl Layout for InteractiveListItem {
+    fn inline_label(&self) -> bool {
+        true
+    }
+}
+
+impl Paint for InteractiveListItem {
     fn color(&self) -> [f32; 4] {
         let theme = colors::active_theme();
         if self.selected {
             let mut base_color = colors::highlight_primary_color();
-            if self.pressed { base_color[3] = (base_color[3] + theme.press_overlay[3]).min(1.0); }
-            else if self.base.hovered { base_color[3] = (base_color[3] + theme.hover_overlay[3]).min(1.0); }
+            if self.pressed {
+                base_color[3] = (base_color[3] + theme.press_overlay[3]).min(1.0);
+            } else if self.hovered {
+                base_color[3] = (base_color[3] + theme.hover_overlay[3]).min(1.0);
+            }
+            base_color
+        } else if self.pressed {
+            let mut base_color = theme.surface_bg;
+            base_color[3] = (base_color[3] + theme.press_overlay[3]).min(1.0);
+            base_color
+        } else if self.hovered {
+            let mut base_color = theme.surface_bg;
+            base_color[3] = (base_color[3] + theme.hover_overlay[3]).min(1.0);
             base_color
         } else {
-            if self.pressed {
-                let mut base_color = theme.surface_bg;
-                base_color[3] = (base_color[3] + theme.press_overlay[3]).min(1.0);
-                base_color
-            } else if self.base.hovered {
-                let mut base_color = theme.surface_bg;
-                base_color[3] = (base_color[3] + theme.hover_overlay[3]).min(1.0);
-                base_color
-            } else {
-                [0.0, 0.0, 0.0, 0.0]
-            }
+            [0.0, 0.0, 0.0, 0.0]
         }
     }
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {
-                if self.hit_test(px, py, ctx) {
-                    self.pressed = true;
-                    return true;
-                }
-            }
-            ElementState::Released => {
-                if self.pressed && self.hit_test(px, py, ctx) {
-                    self.just_clicked = true;
-                }
-                let was = self.pressed;
-                self.pressed = false;
-                return was;
-            }
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let col = self.color();
+        if col[3] > 0.0 {
+            ctx.quad(rect, col);
         }
-        false
-    }
 
-    fn take_click(&mut self) -> bool {
-        if self.just_clicked { self.just_clicked = false; true } else { false }
-    }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let (x, y, _w, h) = self.rect();
-        let mut labels = Vec::new();
-        
+        let (x, y, h) = (rect.x, rect.y, rect.height);
         let title_y = if self.subtitle.is_some() {
             crate::layout::align_text_y(y, h, 22.0, 0.0)
         } else {
             crate::layout::align_text_y(y, h, 12.0, 0.0)
         };
-
-        let font_col = colors::list_font_color();
-        let title_col = [
-            (font_col[0] * 255.0) as u8,
-            (font_col[1] * 255.0) as u8,
-            (font_col[2] * 255.0) as u8,
-        ];
-
-        labels.push(TextLabel {
-            text: self.title.clone(),
-            x: x + 8.0,
-            y: title_y,
-            font_size: 12.0,
-            color: title_col,
-        });
-
+        let fc = colors::list_font_color();
+        let title_col = [(fc[0] * 255.0) as u8, (fc[1] * 255.0) as u8, (fc[2] * 255.0) as u8];
+        ctx.text(self.title.clone(), x + 8.0, title_y, 12.0, title_col);
         if let Some(ref sub) = self.subtitle {
-            labels.push(TextLabel {
-                text: sub.clone(),
-                x: x + 8.0,
-                y: title_y + 13.0,
-                font_size: 10.0,
-                color: [140, 140, 153],
-            });
+            ctx.text(sub.clone(), x + 8.0, title_y + 13.0, 10.0, [140, 140, 153]);
         }
+    }
+}
 
-        labels
+impl Input for InteractiveListItem {
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {
+                self.pressed = true;
+                true
+            }
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Released, x, y, .. } => {
+                if self.pressed && self.hit(ectx.rect, *x, *y) {
+                    self.just_clicked = true;
+                }
+                std::mem::take(&mut self.pressed)
+            }
+            Event::MouseEnter => {
+                self.hovered = true;
+                false
+            }
+            Event::MouseLeave => {
+                self.hovered = false;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn take_click(&mut self) -> bool {
+        std::mem::take(&mut self.just_clicked)
+    }
+
+    fn set_selected(&mut self, selected: bool) {
+        self.selected = selected;
     }
 }
