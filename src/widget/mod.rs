@@ -480,16 +480,30 @@ pub trait Element {
     /// are handled by the paint walk (`scene::painter`), not here.
     fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
         use crate::scene::layout::Rect;
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if r1 || r2 || r3 || r4 {
-            let (x, y, w, h) = self.rect();
-            let c = self.color();
-            if c[3].abs() > 0.001 {
-                ctx.rounded_rect(Rect { x, y, width: w, height: h }, self.corner_radius(), (r1, r2, r3, r4), c);
+        let (x, y, w, h) = self.rect();
+        let rect = Rect { x, y, width: w, height: h };
+        let color = self.color();
+        let cr = self.corner_radii();
+        let radii = (cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
+
+        // The widget's own plate — mirrors `push_widget_vertices`: a beveled plate, or a bordered
+        // plate, or (the simple case) a rounded background from `rounded_corners`.
+        if let Some(depth) = self.plate_bevel() {
+            ctx.bevel(rect, radii, color, depth);
+        } else if let Some((border_color, thickness)) = self.solid_border() {
+            ctx.border(rect, radii, color, border_color, thickness);
+        } else if color[3].abs() > 0.001 {
+            let (r1, r2, r3, r4) = self.rounded_corners();
+            if r1 || r2 || r3 || r4 {
+                ctx.rounded_rect(rect, self.corner_radius(), (r1, r2, r3, r4), color);
             }
         }
-        for (x, y, w, h, c) in self.all_quads(ui) {
-            ctx.quad(Rect { x, y, width: w, height: h }, c);
+
+        for (qx, qy, qw, qh, c) in self.all_quads(ui) {
+            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, c);
+        }
+        for (cx, cy, r, t, start, end, c) in self.extra_arcs() {
+            ctx.arc(cx, cy, r, t, start, end, c);
         }
         for (cx, cy, r, c) in self.extra_circles() {
             ctx.circle(cx, cy, r, c);

@@ -29,10 +29,21 @@ pub enum Cap {
 
 /// A single paint primitive in logical pixels (absolute coordinates once emitted). These mirror
 /// the toolkit's existing tessellators so a `DisplayList` maps directly onto them at draw time.
+/// Per-corner radii `(top_left, top_right, bottom_right, bottom_left)`, matching the toolkit's
+/// `CornerRadii` order.
+pub type Radii = (f32, f32, f32, f32);
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prim {
     Quad { rect: Rect, color: [f32; 4] },
     RoundedRect { rect: Rect, radius: f32, corners: (bool, bool, bool, bool), color: [f32; 4] },
+    /// A rounded fill plus a solid border stroke — a widget's own "plate" (mirrors
+    /// `push_widget_vertices`' non-bevel branch: rounded bg + `push_plate_solid_border_vertices`).
+    Border { rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32 },
+    /// A beveled plate: an inset rounded fill plus lightened/darkened edges (mirrors
+    /// `push_widget_vertices`' bevel branch).
+    Bevel { rect: Rect, radii: Radii, color: [f32; 4], depth: f32 },
+    Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
     Vector { x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap },
     Circle { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
     Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3] },
@@ -163,6 +174,21 @@ impl PaintCtx {
         self.push(Prim::Circle { cx: cx + ox, cy: cy + oy, radius, color });
     }
 
+    pub fn border(&mut self, rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Border { rect, radii, fill, border, thickness });
+    }
+
+    pub fn bevel(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Bevel { rect, radii, color, depth });
+    }
+
+    pub fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {
+        let (ox, oy) = self.offset;
+        self.push(Prim::Arc { cx: cx + ox, cy: cy + oy, radius, thickness, start, end, color });
+    }
+
     pub fn text(&mut self, text: impl Into<String>, x: f32, y: f32, font_size: f32, color: [u8; 3]) {
         let (ox, oy) = self.offset;
         self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color });
@@ -274,9 +300,24 @@ mod tests {
         let mut ctx = PaintCtx::new();
         ctx.quad(r(0.0, 0.0, 1.0, 1.0), [0.0; 4]);
         ctx.rounded_rect(r(0.0, 0.0, 1.0, 1.0), 2.0, (true, false, true, false), [0.0; 4]);
+        ctx.border(r(0.0, 0.0, 10.0, 10.0), (2.0, 2.0, 2.0, 2.0), [0.1; 4], [0.9; 4], 1.5);
+        ctx.bevel(r(0.0, 0.0, 10.0, 10.0), (2.0, 2.0, 2.0, 2.0), [0.3; 4], 2.0);
+        ctx.arc(5.0, 5.0, 4.0, 1.0, 0.0, 3.14, [0.0; 4]);
         ctx.vector(0.0, 0.0, 10.0, 0.0, 1.0, [0.0; 4], Cap::Arrow);
         ctx.circle(5.0, 5.0, 3.0, [0.0; 4]);
         ctx.text("hi", 1.0, 2.0, 12.0, [255, 255, 255]);
-        assert_eq!(ctx.finish().len(), 5);
+        assert_eq!(ctx.finish().len(), 8);
+    }
+
+    #[test]
+    fn border_and_bevel_are_offset() {
+        let mut ctx = PaintCtx::new();
+        ctx.translate(10.0, 20.0, |ctx| {
+            ctx.border(r(0.0, 0.0, 5.0, 5.0), (1.0, 1.0, 1.0, 1.0), [0.0; 4], [1.0; 4], 1.0);
+            ctx.bevel(r(0.0, 0.0, 5.0, 5.0), (1.0, 1.0, 1.0, 1.0), [0.0; 4], 1.0);
+        });
+        let list = ctx.finish();
+        assert!(matches!(list.items[0].prim, Prim::Border { rect, .. } if rect.x == 10.0 && rect.y == 20.0));
+        assert!(matches!(list.items[1].prim, Prim::Bevel { rect, .. } if rect.x == 10.0 && rect.y == 20.0));
     }
 }
