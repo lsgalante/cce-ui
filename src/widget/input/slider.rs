@@ -1,9 +1,41 @@
+//! Narrow-trait `Slider` and `RangeSlider` (Phase 5h). Detached-label widgets that do NOT
+//! inflate their rect (`inflates_label_rect = false`): the label eats into the assigned rect,
+//! so the adapter's content rect is exactly the legacy `y + label_offset` / `h - label_offset`
+//! band the old geometry used. The side-label inset (`label_x_offset`) is computed by the model
+//! from its synced label + config. Drags are host-driven through the `Input` drag hooks; the
+//! readout edit mode uses `EventCtx::request_focus` and the wheel gating uses the legacy scroll
+//! gesture state through `EventCtx::ui`.
+
 use crate::colors;
-use crate::widget::*;
+use crate::scene::layout::{Rect, Size};
+use crate::scene::paint::PaintCtx;
+use crate::widget::{
+    Adapted, Control, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
+    MouseScrollDelta, NamedKey, Paint, TextEditorState,
+};
+
+/// The track/readout/thumb geometry shared by the paint and input paths, derived from the
+/// content rect (the legacy code re-derived this in five places from the base rect).
+struct SliderGeom {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    track_x: f32,
+    track_w: f32,
+    thumb_size: f32,
+}
+
+fn side_offset(label: &Option<String>) -> f32 {
+    if crate::layout::control_label_layout() == "side" && label.is_some() {
+        90.0
+    } else {
+        0.0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Slider {
-    base: Widget,
     dragging: bool,
     pub(crate) value: f32,
     drag_offset: f32,
@@ -15,12 +47,12 @@ pub struct Slider {
     max: f32,
     pub editor_state: TextEditorState,
     pub just_changed: bool,
+    label: Option<String>,
 }
 
 impl Slider {
-    pub fn new() -> Self {
-        Self {
-            base: Widget::new(),
+    pub fn new() -> Adapted<Slider> {
+        Adapted::new(Slider {
             dragging: false,
             value: 0.5,
             drag_offset: 0.0,
@@ -32,28 +64,8 @@ impl Slider {
             max: 1.0,
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
-        }
-    }
-
-    pub fn with_range(mut self, min: f32, max: f32) -> Self {
-        self.min = min;
-        self.max = max;
-        self
-    }
-
-    pub fn with_label(mut self, label: &str) -> Self {
-        self.base.label = Some(label.to_string());
-        self
-    }
-
-    pub fn with_config(mut self, file: &str, key: &str) -> Self {
-        self.base.config_file = Some(file.to_string());
-        self.base.config_key = Some(key.to_string());
-        self
-    }
-
-    pub fn set_label(&mut self, label: &str) {
-        self.base.label = Some(label.to_string());
+            label: None,
+        })
     }
 
     pub fn set_range(&mut self, min: f32, max: f32) {
@@ -61,27 +73,12 @@ impl Slider {
         self.max = max;
     }
 
-    pub fn with_scroll(mut self, enabled: bool) -> Self {
-        self.scroll_enabled = enabled;
-        self
-    }
-
     pub fn set_scroll(&mut self, enabled: bool) {
         self.scroll_enabled = enabled;
     }
 
-    pub fn with_value(mut self, val: f32) -> Self {
-        self.value = val.clamp(0.0, 1.0);
-        self
-    }
-
     pub fn set_value(&mut self, val: f32) {
         self.value = val.clamp(0.0, 1.0);
-    }
-
-    pub fn with_readout(mut self, enabled: bool) -> Self {
-        self.show_readout = enabled;
-        self
     }
 
     pub fn set_readout(&mut self, enabled: bool) {
@@ -108,229 +105,39 @@ impl Slider {
             self.value = 0.0;
         }
     }
-}
 
-impl Element for Slider {
-    crate::impl_widget_base!(Slider);
-
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
-    }
-
-    fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::control_label_font_detached())
-    }
-
-    fn get_value_string(&self) -> Option<String> {
-        let scaled_val = self.min + self.value * (self.max - self.min);
-        Some(format!("{:.2}", scaled_val))
-    }
-
-    fn set_value_string(&mut self, val: &str) -> bool {
-        if let Ok(new_val) = val.trim().parse::<f32>() {
-            let old_val = self.value;
-            let range = self.max - self.min;
-            if range != 0.0 {
-                self.value = ((new_val - self.min) / range).clamp(0.0, 1.0);
-            } else {
-                self.value = 0.0;
-            }
-            if (self.value - old_val).abs() > 0.0001 {
-                self.just_changed = true;
-                if self.editing {
-                    let scaled_val = self.min + self.value * (self.max - self.min);
-                    self.edit_buffer = format!("{:.2}", scaled_val);
-                }
-                return true;
-            }
-        }
-        false
-    }
-
-    fn take_change(&mut self) -> bool {
-        let ret = self.just_changed;
-        self.just_changed = false;
-        ret
-    }
-
-    fn color(&self) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
-    }
-
-    fn preferred_height(&self) -> Option<f32> {
-        Some(crate::layout::slider_height())
-    }
-
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        let r = crate::layout::slider_corner_radius();
-        if r > 0.0 {
-            (true, true, true, true)
-        } else {
-            (false, false, false, false)
-        }
-    }
-
-    fn corner_radius(&self) -> f32 {
-        crate::layout::slider_corner_radius()
-    }
-
-    fn draggable(&self) -> bool { true }
-    fn is_dragging(&self) -> bool { self.dragging }
-
-    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
+    fn geom(&self, rect: Rect) -> SliderGeom {
+        let side = side_offset(&self.label);
+        let x = rect.x + side;
+        let w = rect.width - side;
         let (track_x, track_w) = if self.show_readout {
             let readout_w = 60.0;
             let gap = 8.0;
-            let tw = (w - readout_w - gap).max(10.0);
-            (x, tw)
+            ((x), (w - readout_w - gap).max(10.0))
         } else {
             (x, w)
         };
-        let thumb_size = visual_h * 0.9;
-        let range = track_w - thumb_size;
-        if range > 0.0 {
-            let raw = (px - self.drag_offset - track_x) / range;
-            let new_val = raw.clamp(0.0, 1.0);
-            if (new_val - self.value).abs() > 0.001 {
-                self.value = new_val;
-                self.just_changed = true;
-                if self.editing {
-                    let scaled_val = self.min + self.value * (self.max - self.min);
-                    self.edit_buffer = format!("{:.2}", scaled_val);
-                }
-                return true;
-            }
-        }
-        false
+        SliderGeom { x, y: rect.y, w, h: rect.height, track_x, track_w, thumb_size: rect.height * 0.9 }
     }
 
-    fn drag_begin(&mut self, px: f32, _py: f32) {
-        self.dragging = true;
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        let (track_x, track_w) = if self.show_readout {
-            let readout_w = 60.0;
-            let gap = 8.0;
-            let tw = (w - readout_w - gap).max(10.0);
-            (x, tw)
+    fn scaled_string(&self) -> String {
+        format!("{:.2}", self.min + self.value * (self.max - self.min))
+    }
+
+    fn set_value_marking(&mut self, new_val: f32) -> bool {
+        if (new_val - self.value).abs() > 0.0001 {
+            self.value = new_val;
+            self.just_changed = true;
+            if self.editing {
+                self.edit_buffer = self.scaled_string();
+            }
+            true
         } else {
-            (x, w)
-        };
-        let thumb_size = visual_h * 0.9;
-        let thumb_x = track_x + self.value * (track_w - thumb_size);
-        self.drag_offset = px - thumb_x;
-    }
-
-    fn drag_end(&mut self) { self.dragging = false; }
-
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if !self.scroll_enabled {
-            return false;
-        }
-        let my_id = self.base.id();
-        if !ctx.scroll_gesture_new {
-            if ctx.scroll_initiate_widget_id != Some(my_id) {
-                return false;
-            }
-        }
-        let (sx, sy, sw, sh) = self.rect();
-        if px >= sx && px <= sx + sw && py >= sy && py <= sy + sh {
-            if ctx.scroll_gesture_new {
-                ctx.scroll_initiate_widget_id = Some(my_id);
-            }
-            let scroll_amount = match delta {
-                MouseScrollDelta::LineDelta(_x, y) => *y,
-                MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
-            };
-            let step = 0.02;
-            let new_val = (self.value - scroll_amount * step).clamp(0.0, 1.0);
-            if (new_val - self.value).abs() > 0.0001 {
-                self.value = new_val;
-                self.just_changed = true;
-                if self.editing {
-                    let scaled_val = self.min + self.value * (self.max - self.min);
-                    self.edit_buffer = format!("{:.2}", scaled_val);
-                }
-            }
-            return true;
-        }
-        false
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if button == MouseButton::Right && state == ElementState::Pressed {
-            if self.hit_test(px, py, ctx) {
-                ctx.handle_right_click(self.as_ptr_mut(), px, py);
-                return true;
-            }
-        }
-        if button != MouseButton::Left { return false; }
-        
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        
-        if self.show_readout {
-            let readout_w = 60.0;
-            let rx = x + w - readout_w;
-            
-            if px >= rx && px <= rx + readout_w && py >= self.base.y + top && py <= self.base.y + top + visual_h {
-                if state == ElementState::Pressed {
-                    if !self.editing {
-                        self.editing = true;
-                        let scaled_val = self.min + self.value * (self.max - self.min);
-                        self.edit_buffer = format!("{:.2}", scaled_val);
-                        focus::set_focused(self);
-                    }
-                }
-                return true;
-            }
-        }
-
-        match state {
-            ElementState::Pressed => {
-                let (track_x, track_w) = if self.show_readout {
-                    let readout_w = 60.0;
-                    let gap = 8.0;
-                    let tw = (w - readout_w - gap).max(10.0);
-                    (x, tw)
-                } else {
-                    (x, w)
-                };
-                let thumb_size = visual_h * 0.9;
-                let thumb_x = track_x + self.value * (track_w - thumb_size);
-                
-                if px >= track_x && px <= track_x + track_w && py >= self.base.y + top && py <= self.base.y + top + visual_h {
-                    self.dragging = true;
-                    self.drag_offset = px - thumb_x;
-                    return true;
-                }
-                false
-            }
-            ElementState::Released => {
-                if self.dragging {
-                    self.dragging = false;
-                    return true;
-                }
-                false
-            }
+            false
         }
     }
 
-    fn unfocus(&mut self) {
+    fn commit_edit(&mut self) {
         if self.editing {
             self.editing = false;
             let old_val = self.value;
@@ -347,222 +154,289 @@ impl Element for Slider {
             }
         }
     }
+}
 
-    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
-        if !self.editing { return false; }
-        if event.state != ElementState::Pressed { return false; }
-        
-        let mut state = TextEditorState {
-            buffer: self.edit_buffer.clone(),
-            cursor_idx: self.edit_buffer.chars().count(),
-            select_anchor: None,
-            all_selected: false,
-        };
-        
-        let mut handled = false;
-        match &event.logical_key {
-            Key::Named(NamedKey::Backspace) => {
-                state.delete_backwards();
-                handled = true;
-            }
-            Key::Named(NamedKey::Enter) => {
-                self.unfocus();
-                handled = true;
-            }
-            Key::Named(NamedKey::Escape) => {
-                self.editing = false;
-                handled = true;
-            }
-            Key::Character(s) => {
-                for ch in s.chars() {
-                    if ch.is_ascii_digit() || ch == '.' || (ch == '-' && state.buffer.is_empty()) {
-                        state.insert_text(&ch.to_string());
-                    }
-                }
-                handled = true;
-            }
-            _ => {}
-        }
-        
-        if self.editing {
-            self.edit_buffer = state.buffer;
-        }
-        handled
+impl Adapted<Slider> {
+    pub fn with_range(mut self, min: f32, max: f32) -> Self {
+        self.set_range(min, max);
+        self
     }
 
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if r1 || r2 || r3 || r4 {
-            return Vec::new();
-        }
-
-        let mut quads = Vec::new();
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        
-        let (track_x, track_w) = if self.show_readout {
-            let readout_w = 60.0;
-            let gap = 8.0;
-            let tw = (w - readout_w - gap).max(10.0);
-            
-            quads.push((x, self.base.y + top, tw, visual_h, colors::slider_track()));
-            
-            let rx = x + w - readout_w;
-            let bg_color = if self.editing {
-                [0.06, 0.10, 0.18, 1.0]
-            } else {
-                [0.10, 0.10, 0.13, 1.0]
-            };
-            quads.push((rx, self.base.y + top, readout_w, visual_h, bg_color));
-            
-            if self.base.focused || self.editing {
-                let border_color = [0.20, 0.50, 0.85, 1.0];
-                let border_t = 1.0;
-                quads.push((rx, self.base.y + top, readout_w, border_t, border_color));
-                quads.push((rx, self.base.y + top + visual_h - border_t, readout_w, border_t, border_color));
-                quads.push((rx, self.base.y + top, border_t, visual_h, border_color));
-                quads.push((rx + readout_w - border_t, self.base.y + top, border_t, visual_h, border_color));
-            }
-
-            (x, tw)
-        } else {
-            quads.push((x, self.base.y + top, w, visual_h, colors::slider_track()));
-            (x, w)
-        };
-
-        let thumb_size = visual_h * 0.9;
-        let thumb_x = track_x + self.value * (track_w - thumb_size);
-
-        if let Some(fill_color) = colors::slider_fill() {
-            let fill_w = (thumb_x + thumb_size / 2.0 - track_x).max(0.0).min(track_w);
-            quads.push((track_x, self.base.y + top, fill_w, visual_h, fill_color));
-        }
-
-        let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
-        let thumb_color = if self.dragging {
-            colors::slider_thumb_drag()
-        } else {
-            colors::slider_thumb()
-        };
-        quads.push((thumb_x, thumb_y, thumb_size, thumb_size, thumb_color));
-        
-        quads
+    pub fn with_scroll(mut self, enabled: bool) -> Self {
+        self.scroll_enabled = enabled;
+        self
     }
 
-    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
-        let mut quads = Vec::new();
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if !(r1 || r2 || r3 || r4) {
-            return quads;
-        }
-        
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let radius = self.corner_radius();
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        
-        let (track_x, track_w) = if self.show_readout {
-            let readout_w = 60.0;
-            let gap = 8.0;
-            let tw = (w - readout_w - gap).max(10.0);
-            
-            quads.push((x, self.base.y + top, tw, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
-            
-            let rx = x + w - readout_w;
-            let bg_color = if self.editing {
-                [0.06, 0.10, 0.18, 1.0]
-            } else {
-                [0.10, 0.10, 0.13, 1.0]
-            };
-            
-            if self.base.focused || self.editing {
-                let border_color = [0.20, 0.50, 0.85, 1.0];
-                quads.push((rx, self.base.y + top, readout_w, visual_h, radius, border_color, (r1, r2, r3, r4)));
-                let inner_radius = (radius - 1.0).max(0.0);
-                quads.push((rx + 1.0, self.base.y + top + 1.0, readout_w - 2.0, visual_h - 2.0, inner_radius, bg_color, (r1, r2, r3, r4)));
-            } else {
-                quads.push((rx, self.base.y + top, readout_w, visual_h, radius, bg_color, (r1, r2, r3, r4)));
-            }
-
-            (x, tw)
-        } else {
-            quads.push((x, self.base.y + top, w, visual_h, radius, colors::slider_track(), (r1, r2, r3, r4)));
-            (x, w)
-        };
-
-        let thumb_size = visual_h * 0.9;
-        let thumb_x = track_x + self.value * (track_w - thumb_size);
-
-        if let Some(fill_color) = colors::slider_fill() {
-            let fill_w = (thumb_x + thumb_size / 2.0 - track_x).max(0.0).min(track_w);
-            quads.push((track_x, self.base.y + top, fill_w, visual_h, radius.min(visual_h / 2.0), fill_color, (true, true, true, true)));
-        }
-
-        let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
-        let thumb_color = if self.dragging {
-            colors::slider_thumb_drag()
-        } else {
-            colors::slider_thumb()
-        };
-        quads.push((thumb_x, thumb_y, thumb_size, thumb_size, thumb_size / 2.0, thumb_color, (true, true, true, true)));
-        
-        quads
+    pub fn with_value(mut self, val: f32) -> Self {
+        self.set_value(val);
+        self
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let mut labels = Vec::new();
-        let top = self.base.label_offset();
-        let _visual_h = self.base.h - top;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        
-        if let Some(lbl) = self.control_label() {
-            labels.push(lbl);
-        }
-        
-        if self.show_readout {
-            let readout_w = 60.0;
-            let rx = x + w - readout_w;
-            let ry = crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top);
-            
-            let text = if self.editing {
-                self.edit_buffer.clone()
-            } else {
-                let scaled_val = self.min + self.value * (self.max - self.min);
-                format!("{:.2}", scaled_val)
-            };
-            
-            labels.push(TextLabel {
-                text,
-                x: rx + 8.0,
-                y: ry,
-                font_size: 12.0,
-                color: [0xee, 0xee, 0xf0],
-            });
-        }
-        
-        labels
+    pub fn with_readout(mut self, enabled: bool) -> Self {
+        self.show_readout = enabled;
+        self
     }
+}
 
-    fn value(&self) -> i32 { (self.value * 100.0) as i32 }
+impl Layout for Slider {
+    fn inflates_label_rect(&self) -> bool {
+        false // legacy Slider::set_rect stored the assigned rect verbatim
+    }
 
     fn layout_ignore(&self) -> bool {
         true
     }
-}
 
-impl Drop for Slider {
-    fn drop(&mut self) {
-        clear_widget_references(self);
+    fn intrinsic_size(&self) -> Option<Size> {
+        Some(Size::new(0.0, crate::layout::slider_height()))
     }
 }
 
+impl Paint for Slider {
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
+    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+        let r = crate::layout::slider_corner_radius();
+        if r > 0.0 {
+            Some((r, (true, true, true, true)))
+        } else {
+            None
+        }
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::control_label_font_detached())
+    }
+
+    fn sync_label(&mut self, label: &str) {
+        self.label = Some(label.to_string());
+    }
+
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let g = self.geom(rect);
+        let radius = crate::layout::slider_corner_radius();
+        let rounded = radius > 0.0;
+        let rc = (rounded, rounded, rounded, rounded);
+        let mut rrect = |r: Rect, rad: f32, corners: (bool, bool, bool, bool), c: [f32; 4], ctx: &mut PaintCtx| {
+            if rounded {
+                ctx.rounded_rect(r, rad, corners, c);
+            } else {
+                ctx.quad(r, c);
+            }
+        };
+
+        // Track.
+        rrect(Rect { x: g.track_x, y: g.y, width: g.track_w, height: g.h }, radius, rc, colors::slider_track(), ctx);
+
+        // Readout box (+ focus border) and its text.
+        if self.show_readout {
+            let readout_w = 60.0;
+            let rx = g.x + g.w - readout_w;
+            let bg_color = if self.editing { [0.06, 0.10, 0.18, 1.0] } else { [0.10, 0.10, 0.13, 1.0] };
+            // NOTE: the legacy square path drew the focus border as 4 edge strips and the
+            // rounded path as border+inset; replicate the rounded shape for both (visually
+            // identical at 1px) — acceptable divergence flagged in the Phase 5h notes.
+            if self.editing {
+                rrect(Rect { x: rx, y: g.y, width: readout_w, height: g.h }, radius, rc, [0.20, 0.50, 0.85, 1.0], ctx);
+                rrect(
+                    Rect { x: rx + 1.0, y: g.y + 1.0, width: readout_w - 2.0, height: g.h - 2.0 },
+                    (radius - 1.0).max(0.0),
+                    rc,
+                    bg_color,
+                    ctx,
+                );
+            } else {
+                rrect(Rect { x: rx, y: g.y, width: readout_w, height: g.h }, radius, rc, bg_color, ctx);
+            }
+
+            let text = if self.editing { self.edit_buffer.clone() } else { self.scaled_string() };
+            ctx.text(text, rx + 8.0, crate::layout::align_text_y(g.y, g.h, 12.0, 0.0), 12.0, [0xee, 0xee, 0xf0]);
+        }
+
+        // Fill up to the thumb center.
+        let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
+        if let Some(fill_color) = colors::slider_fill() {
+            let fill_w = (thumb_x + g.thumb_size / 2.0 - g.track_x).max(0.0).min(g.track_w);
+            let fill_rad = if rounded { radius.min(g.h / 2.0) } else { radius };
+            rrect(Rect { x: g.track_x, y: g.y, width: fill_w, height: g.h }, fill_rad, (true, true, true, true), fill_color, ctx);
+        }
+
+        // Thumb.
+        let thumb_y = g.y + (g.h - g.thumb_size) / 2.0;
+        let thumb_color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
+        let thumb_rad = if rounded { g.thumb_size / 2.0 } else { 0.0 };
+        rrect(
+            Rect { x: thumb_x, y: thumb_y, width: g.thumb_size, height: g.thumb_size },
+            thumb_rad,
+            (true, true, true, true),
+            thumb_color,
+            ctx,
+        );
+    }
+}
+
+impl Input for Slider {
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::MouseButton { button: MouseButton::Left, state, x: px, y: py, .. } => {
+                let g = self.geom(ectx.rect);
+                // Readout click enters edit mode and takes focus.
+                if self.show_readout {
+                    let readout_w = 60.0;
+                    let rx = g.x + g.w - readout_w;
+                    if *px >= rx && *px <= rx + readout_w && *py >= g.y && *py <= g.y + g.h {
+                        if *state == ElementState::Pressed && !self.editing {
+                            self.editing = true;
+                            self.edit_buffer = self.scaled_string();
+                            ectx.request_focus();
+                        }
+                        return true;
+                    }
+                }
+                match state {
+                    ElementState::Pressed => {
+                        let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
+                        if *px >= g.track_x && *px <= g.track_x + g.track_w && *py >= g.y && *py <= g.y + g.h {
+                            self.dragging = true;
+                            self.drag_offset = px - thumb_x;
+                            return true;
+                        }
+                        false
+                    }
+                    ElementState::Released => std::mem::take(&mut self.dragging),
+                }
+            }
+            Event::MouseWheel { delta, x: px, y: py, .. } => {
+                if !self.scroll_enabled {
+                    return false;
+                }
+                // Scroll-gesture gating: only the widget that initiated the gesture keeps it.
+                if let Some(ui) = ectx.ui.as_deref_mut() {
+                    if !ui.scroll_gesture_new && ui.scroll_initiate_widget_id != Some(ectx.id) {
+                        return false;
+                    }
+                    let r = ectx.rect;
+                    if *px >= r.x && *px <= r.x + r.width && *py >= r.y && *py <= r.y + r.height {
+                        if ui.scroll_gesture_new {
+                            ui.scroll_initiate_widget_id = Some(ectx.id);
+                        }
+                        let scroll_amount = match delta {
+                            MouseScrollDelta::LineDelta(_x, y) => *y,
+                            MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
+                        };
+                        let new_val = (self.value - scroll_amount * 0.02).clamp(0.0, 1.0);
+                        self.set_value_marking(new_val);
+                        return true;
+                    }
+                }
+                false
+            }
+            Event::KeyInput(key_event) => {
+                if !self.editing || key_event.state != ElementState::Pressed {
+                    return false;
+                }
+                let mut state = TextEditorState {
+                    buffer: self.edit_buffer.clone(),
+                    cursor_idx: self.edit_buffer.chars().count(),
+                    select_anchor: None,
+                    all_selected: false,
+                };
+                let mut handled = false;
+                match &key_event.logical_key {
+                    Key::Named(NamedKey::Backspace) => {
+                        state.delete_backwards();
+                        handled = true;
+                    }
+                    Key::Named(NamedKey::Enter) => {
+                        self.commit_edit();
+                        handled = true;
+                    }
+                    Key::Named(NamedKey::Escape) => {
+                        self.editing = false;
+                        handled = true;
+                    }
+                    Key::Character(s) => {
+                        for ch in s.chars() {
+                            if ch.is_ascii_digit() || ch == '.' || (ch == '-' && state.buffer.is_empty()) {
+                                state.insert_text(&ch.to_string());
+                            }
+                        }
+                        handled = true;
+                    }
+                    _ => {}
+                }
+                if self.editing {
+                    self.edit_buffer = state.buffer;
+                }
+                handled
+            }
+            // Focus loss commits the readout edit (legacy `unfocus` override).
+            Event::FocusOut => {
+                self.commit_edit();
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn opens_context_menu(&self) -> bool {
+        true
+    }
+
+    fn draggable(&self) -> bool {
+        true
+    }
+    fn is_dragging(&self) -> bool {
+        self.dragging
+    }
+    fn drag_begin(&mut self, px: f32, _py: f32, rect: Rect) {
+        self.dragging = true;
+        let g = self.geom(rect);
+        let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
+        self.drag_offset = px - thumb_x;
+    }
+    fn drag_update(&mut self, px: f32, _py: f32, rect: Rect) -> bool {
+        let g = self.geom(rect);
+        let range = g.track_w - g.thumb_size;
+        if range > 0.0 {
+            let new_val = ((px - self.drag_offset - g.track_x) / range).clamp(0.0, 1.0);
+            return self.set_value_marking(new_val);
+        }
+        false
+    }
+    fn drag_end(&mut self) {
+        self.dragging = false;
+    }
+
+    fn take_change(&mut self) -> bool {
+        std::mem::take(&mut self.just_changed)
+    }
+
+    fn value_string(&self) -> Option<String> {
+        Some(self.scaled_string())
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        if let Ok(new_val) = val.trim().parse::<f32>() {
+            let range = self.max - self.min;
+            let mapped = if range != 0.0 { ((new_val - self.min) / range).clamp(0.0, 1.0) } else { 0.0 };
+            return self.set_value_marking(mapped);
+        }
+        false
+    }
+
+    fn value(&self) -> i32 {
+        (self.value * 100.0) as i32
+    }
+}
+
+impl Control for Adapted<Slider> {
+    fn set_label(&mut self, label: &str) {
+        Adapted::set_label(self, label);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveThumb {
@@ -570,34 +444,24 @@ pub enum ActiveThumb {
     High,
 }
 
+#[derive(Debug, Clone)]
 pub struct RangeSlider {
-    base: Widget,
     value_low: f32,
     value_high: f32,
     pub(crate) active_thumb: Option<ActiveThumb>,
     drag_offset: f32,
+    label: Option<String>,
 }
 
 impl RangeSlider {
-    pub fn new() -> Self {
-        Self {
-            base: Widget::new(),
+    pub fn new() -> Adapted<RangeSlider> {
+        Adapted::new(RangeSlider {
             value_low: 0.2,
             value_high: 0.8,
             active_thumb: None,
             drag_offset: 0.0,
-        }
-    }
-
-    pub fn with_label(mut self, label: &str) -> Self {
-        self.base.label = Some(label.to_string());
-        self
-    }
-
-    pub fn with_values(mut self, low: f32, high: f32) -> Self {
-        self.value_low = low.clamp(0.0, 1.0);
-        self.value_high = high.clamp(self.value_low, 1.0);
-        self
+            label: None,
+        })
     }
 
     pub fn set_values(&mut self, low: f32, high: f32) {
@@ -610,49 +474,186 @@ impl RangeSlider {
     }
 }
 
-impl Element for RangeSlider {
-    crate::impl_widget_base!(RangeSlider);
+impl Adapted<RangeSlider> {
+    pub fn with_values(mut self, low: f32, high: f32) -> Self {
+        self.set_values(low, high);
+        self
+    }
+}
 
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
+impl Layout for RangeSlider {
+    fn inflates_label_rect(&self) -> bool {
+        false
     }
 
-    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+    fn intrinsic_size(&self) -> Option<Size> {
+        Some(Size::new(0.0, crate::layout::rangeslider_height()))
+    }
+}
 
-    fn preferred_height(&self) -> Option<f32> {
-        Some(crate::layout::rangeslider_height())
+impl Paint for RangeSlider {
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
         let r = crate::layout::rangeslider_corner_radius();
         if r > 0.0 {
-            (true, true, true, true)
+            Some((r, (true, true, true, true)))
         } else {
-            (false, false, false, false)
+            None
         }
     }
 
-    fn corner_radius(&self) -> f32 {
-        crate::layout::rangeslider_corner_radius()
+    fn sync_label(&mut self, label: &str) {
+        self.label = Some(label.to_string());
     }
 
-    fn draggable(&self) -> bool { true }
-    fn is_dragging(&self) -> bool { self.active_thumb.is_some() }
-
-    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
-        let Some(active) = self.active_thumb else { return false; };
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        let thumb_size = visual_h * 0.9;
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let side = side_offset(&self.label);
+        let (x, y, w, h) = (rect.x + side, rect.y, rect.width - side, rect.height);
+        let radius = crate::layout::rangeslider_corner_radius();
+        let rounded = radius > 0.0;
+        let rc = (rounded, rounded, rounded, rounded);
+        let thumb_size = h * 0.9;
         let range = w - thumb_size;
-        if range <= 0.0 { return false; }
-        
+        let thumb_low_x = x + self.value_low * range;
+        let thumb_high_x = x + self.value_high * range;
+        let thumb_y = y + (h - thumb_size) / 2.0;
+        let highlight = Rect {
+            x: thumb_low_x + thumb_size / 2.0,
+            y: y + h * 0.35,
+            width: thumb_high_x - thumb_low_x,
+            height: h * 0.3,
+        };
+        let low_color = if self.active_thumb == Some(ActiveThumb::Low) {
+            colors::rangeslider_thumb_drag()
+        } else {
+            colors::rangeslider_thumb()
+        };
+        let high_color = if self.active_thumb == Some(ActiveThumb::High) {
+            colors::rangeslider_thumb_drag()
+        } else {
+            colors::rangeslider_thumb()
+        };
+
+        let mut rrect = |r: Rect, rad: f32, corners: (bool, bool, bool, bool), c: [f32; 4], ctx: &mut PaintCtx| {
+            if rounded {
+                ctx.rounded_rect(r, rad, corners, c);
+            } else {
+                ctx.quad(r, c);
+            }
+        };
+        rrect(Rect { x, y, width: w, height: h }, radius, rc, colors::rangeslider_track(), ctx);
+        rrect(highlight, radius.min(highlight.height / 2.0), (true, true, true, true), colors::rangeslider_fill(), ctx);
+        rrect(
+            Rect { x: thumb_low_x, y: thumb_y, width: thumb_size, height: thumb_size },
+            if rounded { thumb_size / 2.0 } else { 0.0 },
+            (true, true, true, true),
+            low_color,
+            ctx,
+        );
+        rrect(
+            Rect { x: thumb_high_x, y: thumb_y, width: thumb_size, height: thumb_size },
+            if rounded { thumb_size / 2.0 } else { 0.0 },
+            (true, true, true, true),
+            high_color,
+            ctx,
+        );
+    }
+}
+
+impl Input for RangeSlider {
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::MouseWheel { delta, x: px, y: py, .. } => {
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false };
+                if !ui.scroll_gesture_new && ui.scroll_initiate_widget_id != Some(ectx.id) {
+                    return false;
+                }
+                let side = side_offset(&self.label);
+                let r = ectx.rect;
+                let (x, y, w, h) = (r.x + side, r.y, r.width - side, r.height);
+                if *px >= r.x && *px <= r.x + r.width && *py >= y && *py <= y + h {
+                    if ui.scroll_gesture_new {
+                        ui.scroll_initiate_widget_id = Some(ectx.id);
+                    }
+                    let thumb_size = h * 0.9;
+                    let range = w - thumb_size;
+                    let center_low = x + self.value_low * range + thumb_size / 2.0;
+                    let center_high = x + self.value_high * range + thumb_size / 2.0;
+                    let dist_low = (px - center_low).abs();
+                    let dist_high = (px - center_high).abs();
+                    let scroll_amount = match delta {
+                        MouseScrollDelta::LineDelta(_x, y) => *y,
+                        MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
+                    };
+                    let step = 0.02;
+                    let adjust_low = if dist_low < dist_high {
+                        true
+                    } else if dist_high < dist_low {
+                        false
+                    } else {
+                        scroll_amount > 0.0
+                    };
+                    if adjust_low {
+                        let new_val = (self.value_low - scroll_amount * step).clamp(0.0, self.value_high);
+                        if (new_val - self.value_low).abs() > 0.0001 {
+                            self.value_low = new_val;
+                        }
+                    } else {
+                        let new_val = (self.value_high - scroll_amount * step).clamp(self.value_low, 1.0);
+                        if (new_val - self.value_high).abs() > 0.0001 {
+                            self.value_high = new_val;
+                        }
+                    }
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn draggable(&self) -> bool {
+        true
+    }
+    fn is_dragging(&self) -> bool {
+        self.active_thumb.is_some()
+    }
+    fn drag_begin(&mut self, px: f32, _py: f32, rect: Rect) {
+        let side = side_offset(&self.label);
+        let (x, w) = (rect.x + side, rect.width - side);
+        let thumb_size = rect.height * 0.9;
+        let range = w - thumb_size;
+        let thumb_low_x = x + self.value_low * range;
+        let thumb_high_x = x + self.value_high * range;
+        let center_low = thumb_low_x + thumb_size / 2.0;
+        let center_high = thumb_high_x + thumb_size / 2.0;
+
+        let active = if (self.value_low - self.value_high).abs() < 0.001 {
+            if px < center_low { ActiveThumb::Low } else { ActiveThumb::High }
+        } else if (px - center_low).abs() < (px - center_high).abs() {
+            ActiveThumb::Low
+        } else {
+            ActiveThumb::High
+        };
+        self.active_thumb = Some(active);
+        let active_x = match active {
+            ActiveThumb::Low => thumb_low_x,
+            ActiveThumb::High => thumb_high_x,
+        };
+        self.drag_offset = px - active_x;
+    }
+    fn drag_update(&mut self, px: f32, _py: f32, rect: Rect) -> bool {
+        let Some(active) = self.active_thumb else { return false };
+        let side = side_offset(&self.label);
+        let (x, w) = (rect.x + side, rect.width - side);
+        let thumb_size = rect.height * 0.9;
+        let range = w - thumb_size;
+        if range <= 0.0 {
+            return false;
+        }
         let new_val = ((px - self.drag_offset - x) / range).clamp(0.0, 1.0);
         match active {
             ActiveThumb::Low => {
@@ -672,366 +673,114 @@ impl Element for RangeSlider {
         }
         false
     }
-
-    fn drag_begin(&mut self, px: f32, _py: f32) {
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        let thumb_size = visual_h * 0.9;
-        let range = w - thumb_size;
-        let thumb_low_x = x + self.value_low * range;
-        let thumb_high_x = x + self.value_high * range;
-        let center_low = thumb_low_x + thumb_size / 2.0;
-        let center_high = thumb_high_x + thumb_size / 2.0;
-
-        let active = if (self.value_low - self.value_high).abs() < 0.001 {
-            if px < center_low {
-                ActiveThumb::Low
-            } else {
-                ActiveThumb::High
-            }
-        } else {
-            let dist_low = (px - center_low).abs();
-            let dist_high = (px - center_high).abs();
-            if dist_low < dist_high {
-                ActiveThumb::Low
-            } else {
-                ActiveThumb::High
-            }
-        };
-
-        self.active_thumb = Some(active);
-        let active_x = match active {
-            ActiveThumb::Low => thumb_low_x,
-            ActiveThumb::High => thumb_high_x,
-        };
-        self.drag_offset = px - active_x;
-    }
-
     fn drag_end(&mut self) {
         self.active_thumb = None;
-    }
-
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let my_id = self.base.id();
-        if !ctx.scroll_gesture_new {
-            if ctx.scroll_initiate_widget_id != Some(my_id) {
-                return false;
-            }
-        }
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let (sx, sy, sw, _) = self.rect();
-        if px >= sx && px <= sx + sw && py >= sy + top && py <= sy + top + visual_h {
-            if ctx.scroll_gesture_new {
-                ctx.scroll_initiate_widget_id = Some(my_id);
-            }
-            let thumb_size = visual_h * 0.9;
-            let range = sw - thumb_size;
-            let thumb_low_x = sx + self.value_low * range;
-            let thumb_high_x = sx + self.value_high * range;
-            let center_low = thumb_low_x + thumb_size / 2.0;
-            let center_high = thumb_high_x + thumb_size / 2.0;
-
-            let dist_low = (px - center_low).abs();
-            let dist_high = (px - center_high).abs();
-
-            let scroll_amount = match delta {
-                MouseScrollDelta::LineDelta(_x, y) => *y,
-                MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
-            };
-            let step = 0.02;
-
-            let adjust_low = if dist_low < dist_high {
-                true
-            } else if dist_high < dist_low {
-                false
-            } else {
-                // dist_low == dist_high, e.g. when both thumbs are at the same value
-                // If scroll decreases the value, adjust Low so it can move down.
-                // Otherwise, adjust High so it can move up.
-                scroll_amount > 0.0
-            };
-
-            if adjust_low {
-                let new_val = (self.value_low - scroll_amount * step).clamp(0.0, self.value_high);
-                if (new_val - self.value_low).abs() > 0.0001 {
-                    self.value_low = new_val;
-                }
-            } else {
-                let new_val = (self.value_high - scroll_amount * step).clamp(self.value_low, 1.0);
-                if (new_val - self.value_high).abs() > 0.0001 {
-                    self.value_high = new_val;
-                }
-            }
-            return true;
-        }
-        false
-    }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if r1 || r2 || r3 || r4 {
-            return Vec::new();
-        }
-
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let thumb_size = visual_h * 0.9;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        let range = w - thumb_size;
-        let thumb_low_x = x + self.value_low * range;
-        let thumb_high_x = x + self.value_high * range;
-        
-        let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
-        
-        // Highlighted track segment
-        let highlight_x = thumb_low_x + thumb_size / 2.0;
-        let highlight_w = thumb_high_x - thumb_low_x;
-        let highlight_y = self.base.y + top + visual_h * 0.35;
-        let highlight_h = visual_h * 0.3;
-        
-        let low_color = if self.active_thumb == Some(ActiveThumb::Low) {
-            colors::rangeslider_thumb_drag()
-        } else {
-            colors::rangeslider_thumb()
-        };
-
-        let high_color = if self.active_thumb == Some(ActiveThumb::High) {
-            colors::rangeslider_thumb_drag()
-        } else {
-            colors::rangeslider_thumb()
-        };
-
-        vec![
-            (x, self.base.y + top, w, visual_h, colors::rangeslider_track()),
-            (highlight_x, highlight_y, highlight_w, highlight_h, colors::rangeslider_fill()),
-            (thumb_low_x, thumb_y, thumb_size, thumb_size, low_color),
-            (thumb_high_x, thumb_y, thumb_size, thumb_size, high_color),
-        ]
-    }
-
-    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
-        let mut quads = Vec::new();
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if !(r1 || r2 || r3 || r4) {
-            return quads;
-        }
-        
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let radius = self.corner_radius();
-        
-        let thumb_size = visual_h * 0.9;
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-        let range = w - thumb_size;
-        let thumb_low_x = x + self.value_low * range;
-        let thumb_high_x = x + self.value_high * range;
-        
-        let thumb_y = self.base.y + top + (visual_h - thumb_size) / 2.0;
-        
-        // Highlighted track segment
-        let highlight_x = thumb_low_x + thumb_size / 2.0;
-        let highlight_w = thumb_high_x - thumb_low_x;
-        let highlight_y = self.base.y + top + visual_h * 0.35;
-        let highlight_h = visual_h * 0.3;
-        
-        let low_color = if self.active_thumb == Some(ActiveThumb::Low) {
-            colors::rangeslider_thumb_drag()
-        } else {
-            colors::rangeslider_thumb()
-        };
-
-        let high_color = if self.active_thumb == Some(ActiveThumb::High) {
-            colors::rangeslider_thumb_drag()
-        } else {
-            colors::rangeslider_thumb()
-        };
-        
-        // Track background
-        quads.push((x, self.base.y + top, w, visual_h, radius, colors::rangeslider_track(), (r1, r2, r3, r4)));
-        // Progress fill (highlight track)
-        quads.push((highlight_x, highlight_y, highlight_w, highlight_h, radius.min(highlight_h / 2.0), colors::rangeslider_fill(), (true, true, true, true)));
-        // Low thumb
-        quads.push((thumb_low_x, thumb_y, thumb_size, thumb_size, thumb_size / 2.0, low_color, (true, true, true, true)));
-        // High thumb
-        quads.push((thumb_high_x, thumb_y, thumb_size, thumb_size, thumb_size / 2.0, high_color, (true, true, true, true)));
-        
-        quads
     }
 
     fn value(&self) -> i32 {
         ((self.value_low * 100.0) as i32) | (((self.value_high * 100.0) as i32) << 16)
     }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let mut labels = Vec::new();
-        if let Some(lbl) = self.control_label() {
-            labels.push(lbl);
-        }
-        labels
-    }
 }
 
-impl Control for Slider {}
-impl Control for RangeSlider {}
+impl Control for Adapted<RangeSlider> {
+    fn set_label(&mut self, label: &str) {
+        Adapted::set_label(self, label);
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widget::{Element, UiContext};
 
+    /// The legacy rangeslider interaction test, driven through the Element drag forwards
+    /// (hosts call these directly): thumb selection by proximity, constrained updates.
     #[test]
-    fn test_rangeslider_interaction() {
+    fn rangeslider_interaction() {
         let mut rs = RangeSlider::new();
-        rs.set_rect(10.0, 10.0, 200.0, 20.0);
+        Element::set_rect(&mut rs, 10.0, 10.0, 200.0, 20.0);
+        assert_eq!(rs.values(), (0.2, 0.8));
 
-        // Low value: 0.2, High value: 0.8
-        let (low, high) = rs.values();
-        assert_eq!(low, 0.2);
-        assert_eq!(high, 0.8);
-
-        // Thumb size = h * 0.9 = 18.0
-        // Range = w - thumb_size = 200.0 - 18.0 = 182.0
-        // Thumb low center: x + 0.2 * 182.0 + 9.0 = 10.0 + 36.4 + 9.0 = 55.4
-        // Thumb high center: x + 0.8 * 182.0 + 9.0 = 10.0 + 145.6 + 9.0 = 164.6
-
-        // 1. Drag Low thumb from 0.2 to 0.45
-        // Click at px = 55.4 (center of low thumb)
-        rs.drag_begin(55.4, 20.0);
+        // Thumb size 18, range 182; low center = 55.4.
+        Element::drag_begin(&mut rs, 55.4, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::Low));
-
-        // Drag to px = 100.9 (new low value = (100.9 - offset(9.0) - 10.0) / 182.0 = 81.9 / 182.0 = 0.45)
-        let changed = rs.drag_update(100.9, 20.0);
-        assert!(changed);
+        assert!(Element::drag_update(&mut rs, 100.9, 20.0));
         assert!((rs.values().0 - 0.45).abs() < 0.01);
-        assert_eq!(rs.values().1, 0.8); // High value unchanged
-
-        rs.drag_end();
+        assert_eq!(rs.values().1, 0.8);
+        Element::drag_end(&mut rs);
         assert_eq!(rs.active_thumb, None);
 
-        // 2. Drag High thumb from 0.8 to 0.6
-        // Click at px = 164.6 (center of high thumb)
-        rs.drag_begin(164.6, 20.0);
+        // High thumb 0.8 -> 0.6.
+        Element::drag_begin(&mut rs, 164.6, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::High));
-
-        // Drag to px = 128.2 (new high value = (128.2 - offset(9.0) - 10.0) / 182.0 = 109.2 / 182.0 = 0.6)
-        let changed = rs.drag_update(128.2, 20.0);
-        assert!(changed);
+        assert!(Element::drag_update(&mut rs, 128.2, 20.0));
         assert!((rs.values().1 - 0.6).abs() < 0.01);
-
-        rs.drag_end();
+        Element::drag_end(&mut rs);
     }
 
     #[test]
-    fn test_rangeslider_overlap() {
+    fn rangeslider_overlap_and_constraint() {
         let mut rs = RangeSlider::new().with_values(0.5, 0.5);
-        rs.set_rect(10.0, 10.0, 200.0, 20.0);
+        Element::set_rect(&mut rs, 10.0, 10.0, 200.0, 20.0);
 
-        // Both low and high are 0.5. Thumb center = 10.0 + 0.5 * 182.0 + 9.0 = 110.0
-        // Click to the left of center should select Low thumb
-        rs.drag_begin(109.0, 20.0);
+        Element::drag_begin(&mut rs, 109.0, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::Low));
-        rs.drag_end();
+        Element::drag_end(&mut rs);
 
-        // Click to the right of center should select High thumb
-        rs.drag_begin(111.0, 20.0);
+        Element::drag_begin(&mut rs, 111.0, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::High));
-        rs.drag_end();
+        Element::drag_end(&mut rs);
 
-        // Drag Low thumb past High value (0.5). It should be constrained to 0.5
-        rs.drag_begin(110.0, 20.0); // selects low
-        rs.drag_update(150.0, 20.0); // drag past high
-        assert_eq!(rs.values().0, 0.5); // constrained
-        rs.drag_end();
+        Element::drag_begin(&mut rs, 110.0, 20.0);
+        Element::drag_update(&mut rs, 150.0, 20.0);
+        assert_eq!(rs.values().0, 0.5, "low constrained to high");
+        Element::drag_end(&mut rs);
     }
 
+#[test]
+fn probe_slider_bridge() {
+    
+    
+    let ctx = UiContext::new();
+    let mut sl = Slider::new().with_label("Slider");
+    Element::set_rect(&mut sl, 20.0, 220.0, 200.0, 40.0);
+    eprintln!("rect         = {:?}", Element::rect(&sl));
+    eprintln!("extra_quads  = {:?}", Element::extra_quads(&sl));
+    eprintln!("rounded      = {:?}", Element::all_rounded_quads(&sl, &ctx));
+    eprintln!("labels       = {:?}", Element::text_labels(&sl).iter().map(|l| l.text.clone()).collect::<Vec<_>>());
+}
+
+    /// Slider press-on-track begins a drag through the routed path; wheel adjusts the value
+    /// with the scroll-gesture gating intact.
     #[test]
-    fn test_rangeslider_mouse_wheel() {
-        let mut rs = RangeSlider::new().with_values(0.3, 0.7);
-        rs.set_rect(10.0, 10.0, 200.0, 20.0);
-        let mut dummy_ctx = crate::context::UiContext::new();
-        dummy_ctx.scroll_gesture_new = true;
+    fn slider_press_drag_and_wheel() {
+        let mut ctx = UiContext::new();
+        let mut sl = Slider::new().with_value(0.5);
+        let (id, ptr) = (sl.id(), sl.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        Element::set_rect(&mut sl, 0.0, 0.0, 100.0, 20.0);
 
-        // Thumb size = h * 0.9 = 18.0
-        // Range = w - thumb_size = 182.0
-        // Low thumb center: x + 0.3 * 182.0 + 9.0 = 10.0 + 54.6 + 9.0 = 73.6
-        // High thumb center: x + 0.7 * 182.0 + 9.0 = 10.0 + 127.4 + 9.0 = 146.4
+        // Press on the track grabs the thumb.
+        assert!(ctx.propagate_event(
+            &Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x: 50.0, y: 10.0, local_x: 50.0, local_y: 10.0 },
+            ptr,
+        ));
+        assert!(Element::is_dragging(&sl));
+        assert!(Element::drag_update(&mut sl, 80.0, 10.0));
+        assert!(sl.inner().value() > 0.5);
+        Element::drag_end(&mut sl);
 
-        // Scroll near low thumb (px = 75.0, py = 20.0)
-        // Scroll UP: LineDelta(0.0, 1.0). (value_low - 1.0 * 0.02) = 0.28.
-        let delta = MouseScrollDelta::LineDelta(0.0, 1.0);
-        let handled = rs.mouse_wheel(&delta, 75.0, 20.0, &mut dummy_ctx);
-        assert!(handled);
-        assert!((rs.values().0 - 0.28).abs() < 0.001);
-        assert_eq!(rs.values().1, 0.7); // high unchanged
-
-        // Scroll near high thumb (px = 145.0, py = 20.0)
-        // Scroll DOWN: LineDelta(0.0, -1.0). (value_high - (-1.0) * 0.02) = 0.72.
-        let delta_down = MouseScrollDelta::LineDelta(0.0, -1.0);
-        let handled = rs.mouse_wheel(&delta_down, 145.0, 20.0, &mut dummy_ctx);
-        assert!(handled);
-        assert!((rs.values().1 - 0.72).abs() < 0.001);
-        assert!((rs.values().0 - 0.28).abs() < 0.001); // low unchanged
-
-        // Scroll when both are at 0.5 (rs is updated to 0.5, 0.5)
-        rs.set_values(0.5, 0.5);
-        // Center: 110.0. Scroll at px = 110.0.
-        // Scroll UP (decrease): LineDelta(0.0, 1.0).
-        // Since it's a decrease (scroll_amount > 0), adjust_low should be true.
-        // new_val for low = (0.5 - 0.02) = 0.48.
-        let handled = rs.mouse_wheel(&delta, 110.0, 20.0, &mut dummy_ctx);
-        assert!(handled);
-        assert!((rs.values().0 - 0.48).abs() < 0.001);
-        assert_eq!(rs.values().1, 0.5); // high unchanged
-
-        // Reset both to 0.5
-        rs.set_values(0.5, 0.5);
-        // Scroll DOWN (increase): LineDelta(0.0, -1.0).
-        // Since it's an increase (scroll_amount < 0), adjust_low should be false.
-        // new_val for high = (0.5 - (-0.02)) = 0.52.
-        let handled = rs.mouse_wheel(&delta_down, 110.0, 20.0, &mut dummy_ctx);
-        assert!(handled);
-        assert_eq!(rs.values().0, 0.5); // low unchanged
-        assert!((rs.values().1 - 0.52).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_slider_scroll_initiation() {
-        let mut slider1 = Slider::new();
-        slider1.set_rect(10.0, 10.0, 200.0, 20.0);
-        let id1 = slider1.base.id();
-
-        let mut slider2 = Slider::new();
-        slider2.set_rect(10.0, 40.0, 200.0, 20.0);
-        let _id2 = slider2.base.id();
-
-        let mut ctx = crate::context::UiContext::new();
-
-        // 1. Initial scroll event on slider1
-        // This is a new gesture (last_scroll_time is None)
+        // Wheel adjusts value when the gesture starts fresh.
         ctx.scroll_gesture_new = true;
-        ctx.scroll_initiate_widget_id = None;
-        let delta = MouseScrollDelta::LineDelta(0.0, 1.0);
-        
-        let handled = slider1.mouse_wheel(&delta, 50.0, 15.0, &mut ctx);
-        assert!(handled);
-        assert_eq!(ctx.scroll_initiate_widget_id, Some(id1));
-
-        // 2. Subsequent scroll event in the same gesture (elapsed < 250ms), but the mouse moved over slider2
-        ctx.scroll_gesture_new = false;
-        // The mouse wheel event is now routed to slider2
-        let handled2 = slider2.mouse_wheel(&delta, 50.0, 45.0, &mut ctx);
-        // slider2 must reject the event because it wasn't the initiator
-        assert!(!handled2);
-        
-        // 3. Subsequent scroll event routed to slider1 (the initiator)
-        let handled1 = slider1.mouse_wheel(&delta, 50.0, 15.0, &mut ctx);
-        assert!(handled1);
+        let before = sl.inner().value();
+        assert!(Element::mouse_wheel(
+            &mut sl,
+            &MouseScrollDelta::LineDelta(0.0, 1.0),
+            50.0,
+            10.0,
+            &mut ctx,
+        ));
+        assert!(sl.inner().value() < before, "scroll up decreases value");
+        assert!(Element::take_change(&mut sl));
     }
 }

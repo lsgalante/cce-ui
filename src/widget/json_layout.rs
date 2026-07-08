@@ -434,10 +434,10 @@ impl Element for JsonLayoutWidget {
             Event::PointerMove { x, y, .. } => {
                 if let Some(idx) = self.dragging_slider_idx {
                     if let Some(w) = self.widgets.get_mut(idx) {
-                        if let Some(sl) = w.widget.as_any_mut().downcast_mut::<Slider>() {
-                            if sl.drag_update(*x, *y) {
-                                changed = true;
-                            }
+                        // drag_update is an Element method (the Adapted forward supplies the
+                        // widget's rect); call it on the box, not a concrete downcast.
+                        if w.widget.drag_update(*x, *y) {
+                            changed = true;
                         }
                     }
                 }

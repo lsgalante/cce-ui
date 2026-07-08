@@ -448,6 +448,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
     constantly). Builders mirrored; three app repos' field types updated. Workspace builds;
     155 tests pass; test-interface diff vs the post-Button baseline has a 0x0 bbox at 2%
     threshold (sub-perceptual blend noise only).
+  - **5h — `Slider` + `RangeSlider`, and the event-capability layer. DONE.** Introduced the
+    RFC §3.5 **`EventCtx`** (`on_event(&mut self, event, &mut EventCtx)`): content rect, widget
+    id, `request_focus()` (readout edit mode), and a transitional `ui: Option<&mut UiContext>`
+    for the legacy scroll-gesture gating. Added `Input` drag hooks
+    (`draggable`/`is_dragging`/`drag_begin`/`drag_update`/`drag_end`, rect-carrying — hosts
+    drive drags by direct call) and — critically — **direct-dispatch overrides**: hosts call
+    `mouse_input`/`mouse_wheel`/`keyboard_input`/`focus`/`unfocus` directly on widgets, and
+    without adapter overrides those hit the inert Element defaults (a latent 5e/5f regression:
+    treelist's add-key button and parameters_bg checkboxes were deaf on that path — now routed
+    into `handle_event`). `Layout::inflates_label_rect` distinguishes ProgressBar-style rect
+    inflation from Slider-style label-eats-into-rect. `text_labels` is now prim-derived PLUS
+    base fallback (sliders paint readout text AND have a detached label). **Found the hard
+    way:** hosts under-size labeled sliders, so legacy content height went NEGATIVE and the
+    flipped quads still rasterized — `content_rect` must not clamp at zero or tracks vanish
+    (pixel-diffed to 0 vs baseline after the fix). Slider geometry consolidated into one
+    `geom()` helper (legacy re-derived it in five places). 154 tests pass; workspace builds.
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10

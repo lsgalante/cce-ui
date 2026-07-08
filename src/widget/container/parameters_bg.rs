@@ -10,7 +10,7 @@ pub struct ParametersBg {
     pub focused_param: Option<usize>,
     pub code_editor: Option<TextEditorState>,
     mouse_pos: Option<(f32, f32)>,
-    pub sliders: Vec<Option<Slider>>,
+    pub sliders: Vec<Option<crate::widget::Adapted<Slider>>>,
     pub float3s: Vec<Option<Float3>>,
     pub spinboxes: Vec<Option<Spinbox>>,
     pub buttons: Vec<Option<crate::widget::Adapted<Button>>>,

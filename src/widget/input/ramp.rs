@@ -20,9 +20,9 @@ pub struct ColorRamp {
     pub just_changed: bool,
     
     // Child controls for color editing & deletion
-    pub r_slider: Slider,
-    pub g_slider: Slider,
-    pub b_slider: Slider,
+    pub r_slider: Adapted<Slider>,
+    pub g_slider: Adapted<Slider>,
+    pub b_slider: Adapted<Slider>,
     pub del_button: Adapted<Button>,
     
     pub parent: Option<*mut (dyn Element + 'static)>,
@@ -105,19 +105,19 @@ impl Element for ColorRamp {
         if self.selected_key_idx.is_some() {
             if self.r_slider.tick(dt, ctx) {
                 if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[0] = self.r_slider.value();
+                    self.keys[idx].color[0] = self.r_slider.inner().value();
                 }
                 changed = true;
             }
             if self.g_slider.tick(dt, ctx) {
                 if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[1] = self.g_slider.value();
+                    self.keys[idx].color[1] = self.g_slider.inner().value();
                 }
                 changed = true;
             }
             if self.b_slider.tick(dt, ctx) {
                 if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[2] = self.b_slider.value();
+                    self.keys[idx].color[2] = self.b_slider.inner().value();
                 }
                 changed = true;
             }
@@ -137,9 +137,9 @@ impl Element for ColorRamp {
         let self_ptr = self as *const Self as *mut Self;
         unsafe {
             vec![
-                &mut (*self_ptr).r_slider as *mut Slider as *mut (dyn Element + 'static),
-                &mut (*self_ptr).g_slider as *mut Slider as *mut (dyn Element + 'static),
-                &mut (*self_ptr).b_slider as *mut Slider as *mut (dyn Element + 'static),
+                (*self_ptr).r_slider.as_ptr_mut(),
+                (*self_ptr).g_slider.as_ptr_mut(),
+                (*self_ptr).b_slider.as_ptr_mut(),
                 (*self_ptr).del_button.as_ptr_mut(),
             ]
         }
@@ -358,19 +358,19 @@ impl Element for ColorRamp {
         if self.selected_key_idx.is_some() {
             if self.r_slider.cursor_moved(px, py_event, ctx) {
                 if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[0] = self.r_slider.value();
+                    self.keys[idx].color[0] = self.r_slider.inner().value();
                     changed = true;
                 }
             }
             if self.g_slider.cursor_moved(px, py_event, ctx) {
                 if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[1] = self.g_slider.value();
+                    self.keys[idx].color[1] = self.g_slider.inner().value();
                     changed = true;
                 }
             }
             if self.b_slider.cursor_moved(px, py_event, ctx) {
                 if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].color[2] = self.b_slider.value();
+                    self.keys[idx].color[2] = self.b_slider.inner().value();
                     changed = true;
                 }
             }
@@ -432,7 +432,7 @@ pub struct Ramp {
     pub just_changed: bool,
     
     // Child controls for value editing & deletion
-    pub val_slider: Slider,
+    pub val_slider: Adapted<Slider>,
     pub del_button: Adapted<Button>,
     pub preset_dropdown: Dropdown,
     pub line_type_dropdown: Dropdown,
@@ -607,7 +607,7 @@ impl Element for Ramp {
         if self.selected_key_idx.is_some() {
             if self.val_slider.tick(dt, ctx) {
                 if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].value = self.val_slider.value();
+                    self.keys[idx].value = self.val_slider.inner().value();
                     self.preset_dropdown.selected = 0; // Custom
                 }
                 changed = true;
@@ -633,7 +633,7 @@ impl Element for Ramp {
                 &mut (*self_ptr).line_type_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
             ];
             if self.selected_key_idx.is_some() {
-                list.push(&mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static));
+                list.push((*self_ptr).val_slider.as_ptr_mut());
                 list.push((*self_ptr).del_button.as_ptr_mut());
             }
             list
@@ -664,7 +664,7 @@ impl Element for Ramp {
                     &mut (*self_ptr).line_type_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
                 ];
                 if (*self_ptr).selected_key_idx.is_some() {
-                    list.push(&mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static));
+                    list.push((*self_ptr).val_slider.as_ptr_mut());
                     list.push((*self_ptr).del_button.as_ptr_mut());
                 }
                 list
@@ -966,7 +966,7 @@ impl Element for Ramp {
         if self.selected_key_idx.is_some() {
             if self.val_slider.cursor_moved(px, py_event, ctx) {
                 if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].value = self.val_slider.value();
+                    self.keys[idx].value = self.val_slider.inner().value();
                     self.preset_dropdown.selected = 0; // Custom
                     changed = true;
                 }

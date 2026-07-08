@@ -15,7 +15,7 @@ pub enum InstancedWidget {
     TextBox(TextBox),
     Spinbox(Spinbox),
     Toggle(Adapted<Toggle>),
-    Slider(Slider),
+    Slider(Adapted<Slider>),
 }
 
 impl InstancedWidget {

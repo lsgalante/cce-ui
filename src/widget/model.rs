@@ -66,6 +66,13 @@ pub trait Layout {
     fn layout_ignore(&self) -> bool {
         false
     }
+
+    /// Whether `set_rect` grows the widget past the assigned rect to make room for a detached
+    /// label above (`ProgressBar`'s legacy convention). Sliders keep the assigned rect and let
+    /// the label eat into it instead. Irrelevant for inline-label widgets. Default: grow.
+    fn inflates_label_rect(&self) -> bool {
+        true
+    }
 }
 
 /// The paint concern — a widget's fill color, its own (non-recursive) geometry emission, and
@@ -122,6 +129,32 @@ pub trait Paint {
     fn sync_label(&mut self, _label: &str) {}
 }
 
+/// What an event handler may reach beyond its own state — the RFC §3.5 `EventCtx`, grown as
+/// migrated widgets need capabilities: the laid-out content rect, the widget's id (scroll-gesture
+/// gating keys on it), focus acquisition, and — transitionally — the raw [`UiContext`] for the
+/// legacy shared state some widgets consult (`scroll_gesture_new`, …). `ui` is `None` when the
+/// event was synthesized outside a routed path (the `FocusIn`/`FocusOut` from direct
+/// `focus()`/`unfocus()` calls).
+pub struct EventCtx<'a> {
+    /// The widget's content rect (detached-label region excluded).
+    pub rect: Rect,
+    /// This widget's tree id.
+    pub id: WidgetId,
+    /// The routing context, when routed. **Transitional** — narrow widgets should only touch the
+    /// legacy shared fields (scroll gesture state) until those get typed helpers here.
+    pub ui: Option<&'a mut UiContext>,
+    self_ptr: Option<*mut (dyn Element + 'static)>,
+}
+
+impl EventCtx<'_> {
+    /// Make this widget the global focus target (legacy `focus::set_focused(self)`).
+    pub fn request_focus(&mut self) {
+        if let Some(ptr) = self.self_ptr {
+            unsafe { crate::widget::focus::set_focused(&mut *ptr) };
+        }
+    }
+}
+
 /// The input concern — hit-testing and event handling against the laid-out rect. Mirrors the
 /// legacy `Element::hit_test` / `handle_event` pair, but with the RFC's centralizations: the
 /// default hit is plain rect containment (no per-widget address hacks), and pointer-positioned
@@ -136,11 +169,12 @@ pub trait Input {
         x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
     }
 
-    /// React to `event`, given the laid-out `rect`. Return `true` to consume it (the router marks
-    /// the widget dirty and stops propagation). `MouseButton` / `MouseWheel` events arrive only
-    /// when [`hit`](Input::hit) passed; `MouseEnter` / `MouseLeave` are synthesized by the hover
-    /// machinery. Default: ignore everything.
-    fn on_event(&mut self, _event: &Event, _rect: Rect) -> bool {
+    /// React to `event`. Return `true` to consume it (the router marks the widget dirty and
+    /// stops propagation). `MouseButton` *presses* and `MouseWheel` arrive only when
+    /// [`hit`](Input::hit) passed; *releases* arrive ungated (press-tracking widgets commit or
+    /// cancel from anywhere); `MouseEnter` / `MouseLeave` are synthesized by the hover machinery.
+    /// Default: ignore everything.
+    fn on_event(&mut self, _event: &Event, _ectx: &mut EventCtx) -> bool {
         false
     }
 
@@ -190,6 +224,22 @@ pub trait Input {
 
     /// Selection state pushed in by list/row hosts (legacy `Element::set_selected`).
     fn set_selected(&mut self, _selected: bool) {}
+
+    // --- Drag surface: legacy hosts (designer, control_panel, parameters_bg, graph, audio…)
+    // drive drags by calling these directly on the widget, not through events.
+
+    fn draggable(&self) -> bool {
+        false
+    }
+    fn is_dragging(&self) -> bool {
+        false
+    }
+    fn drag_begin(&mut self, _px: f32, _py: f32, _rect: Rect) {}
+    /// Returns whether the drag changed the widget's value (drives redraw).
+    fn drag_update(&mut self, _px: f32, _py: f32, _rect: Rect) -> bool {
+        false
+    }
+    fn drag_end(&mut self) {}
 }
 
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
@@ -268,7 +318,11 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
             x: self.base.x,
             y: self.base.y + top,
             width: self.base.w,
-            height: (self.base.h - top).max(0.0),
+            // Deliberately NOT clamped at zero: legacy geometry computed `h - label_offset`
+            // raw, and hosts under-size labeled sliders (label taller than the assigned rect);
+            // the resulting negative-height quads still rasterize (flipped), which is what
+            // keeps those tracks visible. Clamping made them vanish — found the hard way.
+            height: self.base.h - top,
         }
     }
 }
@@ -363,7 +417,11 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// `set_rect` overrides). Inline-label widgets ([`Layout::inline_label`]) draw the label
     /// inside their rect and get no inflation. Zero-cost when no label is set.
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        let inflation = if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() };
+        let inflation = if Layout::inline_label(&self.inner) || !Layout::inflates_label_rect(&self.inner) {
+            0.0
+        } else {
+            self.base.label_offset()
+        };
         self.base.x = x;
         self.base.y = y;
         self.base.w = w;
@@ -425,22 +483,24 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
     }
 
-    /// Inline-label widgets: text derived from the [`Paint::paint`] `Text` prims (one source of
-    /// truth for what the widget draws). Detached-label widgets: the legacy base-label text.
+    /// Text derived from the [`Paint::paint`] `Text` prims (one source of truth for what the
+    /// widget draws — inline labels, readouts), plus the base-label text for detached-label
+    /// widgets (drawn by the adapter, since the label lives on the base).
     fn text_labels(&self) -> Vec<TextLabel> {
-        if Layout::inline_label(&self.inner) {
-            self.painted_prims()
-                .into_iter()
-                .filter_map(|prim| match prim {
-                    Prim::Text { text, x, y, font_size, color } => {
-                        Some(TextLabel { text, x, y, font_size, color })
-                    }
-                    _ => None,
-                })
-                .collect()
-        } else {
-            self.base_label_fallback()
+        let mut out: Vec<TextLabel> = self
+            .painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                Prim::Text { text, x, y, font_size, color } => {
+                    Some(TextLabel { text, x, y, font_size, color })
+                }
+                _ => None,
+            })
+            .collect();
+        if !Layout::inline_label(&self.inner) {
+            out.extend(self.base_label_fallback());
         }
+        out
     }
 
     // --- Reverse bridges: [`Paint::paint`] output converted back to the legacy geometry
@@ -529,6 +589,58 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn set_selected(&mut self, selected: bool) {
         Input::set_selected(&mut self.inner, selected)
     }
+    fn draggable(&self) -> bool {
+        Input::draggable(&self.inner)
+    }
+    fn is_dragging(&self) -> bool {
+        Input::is_dragging(&self.inner)
+    }
+    fn drag_begin(&mut self, px: f32, py: f32) {
+        let rect = self.content_rect();
+        Input::drag_begin(&mut self.inner, px, py, rect)
+    }
+    fn drag_update(&mut self, px: f32, py: f32) -> bool {
+        let rect = self.content_rect();
+        Input::drag_update(&mut self.inner, px, py, rect)
+    }
+    fn drag_end(&mut self) {
+        Input::drag_end(&mut self.inner)
+    }
+
+    // --- Legacy direct-dispatch entry points. Hosts (treelist's add-key button, parameters_bg's
+    // checkboxes, app pages) call these ON the widget instead of routing an Event through
+    // `propagate_event`; without these overrides they'd hit the inert Element defaults and the
+    // widget would go deaf on those paths. Route them into `handle_event` so the hit-gating /
+    // context-menu / on_event pipeline applies identically on both paths.
+
+    fn mouse_input(&mut self, button: crate::widget::MouseButton, state: crate::widget::ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        self.handle_event(
+            &Event::MouseButton { button, state, x: px, y: py, local_x: px, local_y: py },
+            ctx,
+        )
+    }
+    fn mouse_wheel(&mut self, delta: &crate::widget::MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        self.handle_event(
+            &Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py },
+            ctx,
+        )
+    }
+    fn keyboard_input(&mut self, event: &crate::widget::KeyEvent, ctx: &mut UiContext) -> bool {
+        self.handle_event(&Event::KeyInput(event.clone()), ctx)
+    }
+
+    /// Focus set/cleared directly (hosts call `w.focus()`/`w.unfocus()`): keep the base flag and
+    /// tell the widget via the same `FocusIn`/`FocusOut` events the router would send.
+    fn focus(&mut self) {
+        self.base.focused = true;
+        let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: None };
+        Input::on_event(&mut self.inner, &Event::FocusIn, &mut ectx);
+    }
+    fn unfocus(&mut self) {
+        self.base.focused = false;
+        let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: None };
+        Input::on_event(&mut self.inner, &Event::FocusOut, &mut ectx);
+    }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
         // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
@@ -541,11 +653,18 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
-        let (x, y, w, h) = self.rect();
-        let rect = Rect { x, y, width: w, height: h };
+        let rect = self.content_rect();
+        let id = self.base.id();
+        let self_ptr = self.as_ptr_mut();
+        macro_rules! ectx {
+            () => {
+                EventCtx { rect, id, ui: Some(ctx), self_ptr: Some(self_ptr) }
+            };
+        }
         match event {
             // A hit right-press on a context-menu widget routes to the shared config menu —
-            // `on_event` can't (no ctx), so the adapter owns this policy.
+            // `on_event` can't (that policy needs the target's Element pointer), so the adapter
+            // owns it.
             Event::MouseButton {
                 button: crate::widget::MouseButton::Right,
                 state: crate::widget::ElementState::Pressed,
@@ -554,7 +673,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
                 ..
             } if Input::opens_context_menu(&self.inner) => {
                 if self.hit_test(*px, *py, ctx) {
-                    ctx.handle_right_click(self.as_ptr_mut(), *px, *py);
+                    ctx.handle_right_click(self_ptr, *px, *py);
                     return true;
                 }
                 false
@@ -563,20 +682,19 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             // per-widget "check hit_test first" boilerplate legacy `mouse_input` overrides do.
             // RELEASES are deliberately NOT gated: a press-tracking widget (Button) must see the
             // release wherever the cursor ended up, to commit or cancel — exactly what legacy
-            // `mouse_input` overrides did by receiving every release. `on_event` has the rect and
-            // the event coords, so in-rect release checks stay one comparison.
+            // `mouse_input` overrides did by receiving every release.
             Event::MouseButton { state: crate::widget::ElementState::Pressed, x: px, y: py, .. }
             | Event::MouseWheel { x: px, y: py, .. } => {
-                self.hit_test(*px, *py, ctx) && Input::on_event(&mut self.inner, event, rect)
+                self.hit_test(*px, *py, ctx) && Input::on_event(&mut self.inner, event, &mut ectx!())
             }
             Event::MouseButton { state: crate::widget::ElementState::Released, .. } => {
-                Input::on_event(&mut self.inner, event, rect)
+                Input::on_event(&mut self.inner, event, &mut ectx!())
             }
             // Offer the raw move to the widget; if unconsumed, run the legacy hover bookkeeping
             // (base.hovered + MouseEnter/MouseLeave synthesis, which re-enters this method and
             // reaches `on_event` through the arm below).
             Event::PointerMove { x: px, y: py, .. } => {
-                if Input::on_event(&mut self.inner, event, rect) {
+                if Input::on_event(&mut self.inner, event, &mut ectx!()) {
                     return true;
                 }
                 let (px, py) = (*px, *py);
@@ -585,7 +703,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             // Everything else (KeyInput, Tick, Enter/Leave, Drag*, Focus*) forwards directly —
             // the legacy default dispatch would route these to leaf handlers Adapted never
             // overrides, so there is no behavior to fall back to.
-            _ => Input::on_event(&mut self.inner, event, rect),
+            _ => Input::on_event(&mut self.inner, event, &mut ectx!()),
         }
     }
 }
@@ -694,7 +812,7 @@ mod tests {
         }
     }
     impl Input for Clicker {
-        fn on_event(&mut self, event: &Event, _rect: Rect) -> bool {
+        fn on_event(&mut self, event: &Event, _ectx: &mut EventCtx) -> bool {
             use crate::widget::{ElementState, MouseButton};
             match event {
                 Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {

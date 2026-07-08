@@ -12,7 +12,7 @@
 use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
-use crate::widget::{Adapted, Control, ElementState, Event, Input, Layout, MouseButton, Paint};
+use crate::widget::{Adapted, Control, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
 fn parse_bool(val: &str) -> Option<bool> {
     match val.trim().to_lowercase().as_str() {
@@ -153,7 +153,7 @@ impl Paint for Checkbox {
 }
 
 impl Input for Checkbox {
-    fn on_event(&mut self, event: &Event, _rect: Rect) -> bool {
+    fn on_event(&mut self, event: &Event, _ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {
                 // Already hit-gated by the adapter.
@@ -388,7 +388,7 @@ impl Paint for Toggle {
 }
 
 impl Input for Toggle {
-    fn on_event(&mut self, event: &Event, _rect: Rect) -> bool {
+    fn on_event(&mut self, event: &Event, _ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {
                 self.toggled = !self.toggled;

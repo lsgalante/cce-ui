@@ -8,8 +8,8 @@ use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
-    Adapted, Control, Element, ElementState, Event, Input, Justification, Layout, MouseButton,
-    Paint, Svg,
+    Adapted, Control, Element, ElementState, Event, EventCtx, Input, Justification, Layout,
+    MouseButton, Paint, Svg,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,7 +338,7 @@ impl Paint for Button {
 }
 
 impl Input for Button {
-    fn on_event(&mut self, event: &Event, rect: Rect) -> bool {
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {
                 // Presses are hit-gated by the adapter.
@@ -348,7 +348,7 @@ impl Input for Button {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Released, x, y, .. } => {
                 // Releases arrive ungated: commit in-rect, cancel anywhere else — the legacy
                 // `mouse_input` released-while-pressed contract.
-                if self.pressed && self.hit(rect, *x, *y) {
+                if self.pressed && self.hit(ectx.rect, *x, *y) {
                     self.just_clicked = true;
                     if let Some(ref cb) = self.on_click_cb {
                         cb();
