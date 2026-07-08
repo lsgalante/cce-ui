@@ -559,12 +559,28 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `Container`; Paginator embeds ButtonStrip + `Vec<Page>`) — embedding means migrating the
     base struct inverts the dependency; those dissolve when their hosts move to the scene
     walk (Phase 6), not through `Adapted`.
+  - **5o — `MenuBar` migrated; standalone `Menu` DELETED (zero constructors workspace-wide —
+    dead code).** MenuBar keeps its legacy `ButtonStrip` EMBEDDED in the model (owned by
+    value, driven through `Element` calls; events reach it via `EventCtx::ui`;
+    `arrange_children` parents it back to the adapter). New adapter surface: `Paint::popover`
+    / `draw_popover` (own dropdowns — the container recursion only covered child popovers),
+    `Layout::z_order`, `Layout::tracked_parent` (serves `Element::parent` from the model's
+    field — legacy parent-chain styling walks use a DUMMY ctx that tree lookups can't
+    answer), `Input::set_modifiers` / `visibility_changed` / `is_focused` (conditional focus:
+    the bar holds the global slot only while something is open) + `EventCtx::release_focus`,
+    the `as_page_selector` capability pair, and `Paint::corner_style` now takes the laid-out
+    rect (corners computed against the parent backplate's edges). Dropped, flagged: the
+    never-read glyphon buffer caches and the vertical-mode dynamic `rect()` (`with_vertical`
+    has no callers). Verified: 168 tests (full open→click→close roundtrip through real
+    adapter dispatch), all four hosts run, live A/B on cce-test-interface pixel-equivalent
+    (the strip has zero diffs above the 8% threshold; the File-click-opens-nothing behavior
+    there is byte-identical pre-existing app behavior). Pending: a designer A/B (menu layer +
+    curved circular-pane mode) once the screen is uncontended.
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining:
-    Menu/MenuBar (needs popover hooks — the adapter's container popover recursion covers
-    child popovers, but Menu draws its own), Paginator (embeds ButtonStrip + Vec<Page>),
-    ParametersBg (real container, 1.8k lines), and the deferred leaves (TextBox, Dropdown,
-    StatusBar, Float3, LayoutPreview, PreviewState); the embedded-base containers
+    Paginator (embeds ButtonStrip + Vec<Page>), ParametersBg (real container, 1.8k lines),
+    and the deferred leaves (TextBox, Dropdown, StatusBar, Float3, LayoutPreview,
+    PreviewState); the embedded-base containers
     (Layer/Container/Page/Plate/Backplate/ScrollBox/List/…) dissolve via Phase 6 scene
     adoption instead. Then delete `Element` + `Adapted` once the last widget is across, at
     which point the `as_*_controller` pairs and the `Input` capability hooks die together
