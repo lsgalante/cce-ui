@@ -483,19 +483,30 @@ pub trait Element {
         let (x, y, w, h) = self.rect();
         let rect = Rect { x, y, width: w, height: h };
         let color = self.color();
-        let cr = self.corner_radii();
-        let radii = (cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
 
-        // The widget's own plate — mirrors `push_widget_vertices`: a beveled plate, or a bordered
-        // plate, or (the simple case) a rounded background from `rounded_corners`.
-        if let Some(depth) = self.plate_bevel() {
-            ctx.bevel(rect, radii, color, depth);
-        } else if let Some((border_color, thickness)) = self.solid_border() {
-            ctx.border(rect, radii, color, border_color, thickness);
-        } else if color[3].abs() > 0.001 {
-            let (r1, r2, r3, r4) = self.rounded_corners();
-            if r1 || r2 || r3 || r4 {
-                ctx.rounded_rect(rect, self.corner_radius(), (r1, r2, r3, r4), color);
+        if self.children(ui).is_empty() {
+            // Leaf: emit its own rounded quads directly. For an ordinary widget this is just the
+            // rounded background; for widgets that override `all_rounded_quads` with custom
+            // geometry (e.g. Graph's nodes and edges) it captures that too. No recursion happens
+            // because there are no children.
+            for (qx, qy, qw, qh, r, c, corners) in self.all_rounded_quads(ui) {
+                ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, r, corners, c);
+            }
+        } else {
+            // Container: reconstruct its own plate (bevel / border / rounded background) — mirrors
+            // `push_widget_vertices`. Its children are drawn by the paint walk, so we must NOT call
+            // `all_rounded_quads` here (that would recurse and double-draw them).
+            let cr = self.corner_radii();
+            let radii = (cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
+            if let Some(depth) = self.plate_bevel() {
+                ctx.bevel(rect, radii, color, depth);
+            } else if let Some((border_color, thickness)) = self.solid_border() {
+                ctx.border(rect, radii, color, border_color, thickness);
+            } else if color[3].abs() > 0.001 {
+                let (r1, r2, r3, r4) = self.rounded_corners();
+                if r1 || r2 || r3 || r4 {
+                    ctx.rounded_rect(rect, self.corner_radius(), (r1, r2, r3, r4), color);
+                }
             }
         }
 
