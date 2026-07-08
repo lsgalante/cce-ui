@@ -25,8 +25,17 @@ type ElemPtr = *mut (dyn Element + 'static);
 /// invariant the rest of the toolkit relies on for its `*mut dyn Element` tree.
 pub fn paint_tree(ui: &UiContext, root: ElemPtr) -> DisplayList {
     let mut pc = PaintCtx::new();
-    paint_node(ui, root, &mut pc);
+    paint_root_into(ui, root, &mut pc);
     pc.finish()
+}
+
+/// Walk one root subtree into an existing [`PaintCtx`], for apps that compose several top-level
+/// widgets (and their own chrome) into a single display list rather than one `root_window` tree.
+///
+/// # Safety
+/// Same as [`paint_tree`]: `root` and its reachable subtree must be live widgets.
+pub fn paint_root_into(ui: &UiContext, root: ElemPtr, pc: &mut PaintCtx) {
+    paint_node(ui, root, pc);
 }
 
 fn paint_node(ui: &UiContext, ptr: ElemPtr, pc: &mut PaintCtx) {
