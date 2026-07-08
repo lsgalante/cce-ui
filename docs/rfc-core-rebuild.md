@@ -504,14 +504,29 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `mouse_input → on_event → path_click` chain. **Node** (ParamController + GeomController,
     self-moving drag with grid snap via `drag_reposition`) has no live constructors in any app
     repo — compile + router-level tests only. 160 tests pass; all 19 client crates build.
+  - **5l — `Spreadsheet` + the tick/scroll adapter surface. DONE (live-verified in the
+    designer: startup and pane-open captures diff 4px/32px vs the stashed legacy build, all in
+    a one-pixel bottom-edge blend strip).** New `Input` surface: `tick(dt, rect)` +
+    `wants_tick` (inertial scroll — hosts broadcast `Element::tick` per frame; §3.6
+    `Animated<T>` eventually replaces this), `scrollable` (→ `is_scrollable`), and
+    `draggable` now takes the laid-out rect (scroll widgets are draggable only while content
+    overflows). **`Adapted` now owns real visibility**: the `Widget` base carries none and the
+    legacy `Element` defaults are no-ops, so each hideable widget stored its own flag; the
+    adapter stores it once, gating `hit_test` (hosts broadcast wheel/press dispatch and rely
+    on hidden widgets rejecting the hit), direct-dispatch `keyboard_input` (hiding a pane
+    doesn't unfocus it), and the `text_labels` bridge. Deliberate fix: `set_visible` on
+    migrated widgets now works instead of being silently ignored. Spreadsheet's 7×-duplicated
+    scroll/thumb math collapsed into one `geom()` helper; its `paint` deliberately does NOT
+    emit the translucent `PARAM_BG` background (the designer draws widget backgrounds itself
+    from `color()` + `corner_style` — emitting it again would double-blend).
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining
-    controller-tier widgets ride the 5k hooks when they migrate: Spreadsheet (needs
-    `tick`/`wants_tick`/`is_scrollable` forwards for its inertial scroll), Graph, and the
-    container-coupled ones (Menu/MenuBar, Paginator, Switcher, ContentBg, ParametersBg — these
-    also need the children/tree concern). Then delete `Element` + `Adapted` once the last
-    widget is across, at which point the `as_*_controller` pairs and the `Input` capability
-    hooks die together (callers hold concrete types or `&dyn XController`).
+    controller-tier widgets ride the 5k hooks when they migrate: Graph (leaf, live in
+    cce-files' network page and behind ContentBg in the designer), then the container-coupled
+    ones (Menu/MenuBar, Paginator, Switcher, ContentBg, ParametersBg — these also need the
+    children/tree concern). Then delete `Element` + `Adapted` once the last widget is across,
+    at which point the `as_*_controller` pairs and the `Input` capability hooks die together
+    (callers hold concrete types or `&dyn XController`).
 - **Phase 6 — Per-app migration.** Move each `cce-*` app onto the new core; delete legacy paths
   once the last app is across.
 
