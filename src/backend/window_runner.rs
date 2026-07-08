@@ -1796,40 +1796,42 @@ impl<A: Application> EngineState<A> {
         let adapter = self.wgpu_adapter.as_mut().unwrap();
         let render_pipeline = self.render_pipeline.as_ref().unwrap();
         
-        // 1. Build and upload vertex buffer
-        let dl_mode = display_list.is_some();
-        let mut dl_batches: Vec<DlBatch> = Vec::new();
-        let mut verts = Vec::new();
-        if let Some(dl) = &display_list {
-            let (v, b) = tessellate_display_list(dl, logical_w, logical_h);
-            verts = v;
-            dl_batches = b;
-        } else {
-            for &(qx, qy, qw, qh, qr, qc, qcorners) in &rounded_quads {
-                if qr > 0.1 {
-                    let radii = crate::widget::CornerRadii::new(
-                        if qcorners.0 { qr } else { 0.0 },
-                        if qcorners.1 { qr } else { 0.0 },
-                        if qcorners.2 { qr } else { 0.0 },
-                        if qcorners.3 { qr } else { 0.0 },
-                    );
-                    push_rounded_rect_vertices_corners(qx, qy, qw, qh, radii, logical_w, logical_h, qc, [0.0, 0.0, 0.0], None, &mut verts);
-                } else {
-                    verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
+        // 1. Build the frame's DisplayList — from the app's display_list() when provided, otherwise
+        // by wrapping its legacy view*/view_vectors geometry — then tessellate it as one path. This
+        // is the Phase 3 single paint path: every app, migrated or not, renders through here.
+        let dl = match display_list {
+            Some(dl) => dl,
+            None => {
+                use crate::scene::layout::Rect;
+                use crate::scene::paint::{Cap, PaintCtx};
+                let mut pc = PaintCtx::new();
+                for &(qx, qy, qw, qh, qr, qc, qcorners) in &rounded_quads {
+                    let rect = Rect { x: qx, y: qy, width: qw, height: qh };
+                    if qr > 0.1 {
+                        pc.rounded_rect(rect, qr, qcorners, qc);
+                    } else {
+                        pc.quad(rect, qc);
+                    }
                 }
+                for &(qx, qy, qw, qh, qc) in &quads {
+                    pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+                }
+                for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
+                    let cap = match vcap {
+                        LineCap::Flat => Cap::Flat,
+                        LineCap::Round => Cap::Round,
+                        LineCap::Arrow => Cap::Arrow,
+                    };
+                    pc.vector(vx1, vy1, vx2, vy2, vthickness, vcolor, cap);
+                }
+                pc.finish()
             }
-            for &(qx, qy, qw, qh, qc) in &quads {
-                verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
-            }
-            for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
-                verts.extend(vector_vertices(vx1, vy1, vx2, vy2, vthickness, logical_w, logical_h, vcolor, vcap));
-            }
-        }
-        // custom_vertices (e.g. graph geometry) still contributes in both modes; in DL mode its
-        // appended range becomes a final unclipped batch drawn on top.
+        };
+        let (mut verts, mut dl_batches) = tessellate_display_list(&dl, logical_w, logical_h);
+        // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
         let pre_custom = verts.len() as u32;
         self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
-        if dl_mode && (verts.len() as u32) > pre_custom {
+        if (verts.len() as u32) > pre_custom {
             dl_batches.push(DlBatch { scissor: None, start: pre_custom, end: verts.len() as u32 });
         }
         self.vertex_count = verts.len() as u32;
@@ -1939,32 +1941,28 @@ impl<A: Application> EngineState<A> {
             if self.vertex_count > 0 {
                 pass.set_pipeline(render_pipeline);
                 pass.set_vertex_buffer(0, self.vertex_buffer.as_ref().unwrap().slice(..));
-                if dl_mode {
-                    // Draw each clip batch under its own GPU scissor (logical clip -> physical px).
-                    for batch in &dl_batches {
-                        match batch.scissor {
-                            Some(clip) => {
-                                let sx = (clip.x * scale_f32).max(0.0) as u32;
-                                let sy = (clip.y * scale_f32).max(0.0) as u32;
-                                if sx >= pw || sy >= ph {
-                                    continue;
-                                }
-                                let sw_px = ((clip.width * scale_f32) as u32).min(pw - sx);
-                                let sh_px = ((clip.height * scale_f32) as u32).min(ph - sy);
-                                if sw_px == 0 || sh_px == 0 {
-                                    continue;
-                                }
-                                pass.set_scissor_rect(sx, sy, sw_px, sh_px);
+                // Draw each clip batch under its own GPU scissor (logical clip -> physical px).
+                for batch in &dl_batches {
+                    match batch.scissor {
+                        Some(clip) => {
+                            let sx = (clip.x * scale_f32).max(0.0) as u32;
+                            let sy = (clip.y * scale_f32).max(0.0) as u32;
+                            if sx >= pw || sy >= ph {
+                                continue;
                             }
-                            None => pass.set_scissor_rect(0, 0, pw, ph),
+                            let sw_px = ((clip.width * scale_f32) as u32).min(pw - sx);
+                            let sh_px = ((clip.height * scale_f32) as u32).min(ph - sy);
+                            if sw_px == 0 || sh_px == 0 {
+                                continue;
+                            }
+                            pass.set_scissor_rect(sx, sy, sw_px, sh_px);
                         }
-                        pass.draw(batch.start..batch.end, 0..1);
+                        None => pass.set_scissor_rect(0, 0, pw, ph),
                     }
-                    // Restore full scissor so text/overlay draws are not clipped.
-                    pass.set_scissor_rect(0, 0, pw, ph);
-                } else {
-                    pass.draw(0..self.vertex_count, 0..1);
+                    pass.draw(batch.start..batch.end, 0..1);
                 }
+                // Restore full scissor so text/overlay draws are not clipped.
+                pass.set_scissor_rect(0, 0, pw, ph);
             }
 
             adapter.text_renderer.render(&adapter.text_atlas, &adapter.text_viewport, &mut pass).unwrap();
