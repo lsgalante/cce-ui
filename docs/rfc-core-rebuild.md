@@ -482,11 +482,36 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `parent`/`set_parent`) — that belongs with the container/children design, not the leaf
     recipe. Also still pending from the leaf tier: Float3, LayoutPreview (time), PreviewState
     (needs per-label fonts on `Prim::Text`).
+  - **5k — Controller capabilities + first controller widgets: `Breadcrumb`, `Node`. DONE.**
+    The controller tier was blocked because `Element` is implemented exactly once (for
+    `Adapted<W>`), so a migrated widget couldn't re-expose its `as_*_controller` downcasts.
+    Resolution: transitional **capability hooks on `Input`** (`menu/graph/spreadsheet/path/
+    param/geom _controller[_mut]`, default `None`) that the adapter forwards the `Element`
+    downcast pairs to — a controller widget returns `Some(self)`. This is the pragmatic half of
+    the §3.5 "typed messages" bullet: the controller *traits* are already the typed surface;
+    what dies with `Element` is reaching them through the god-trait (end state: hold the
+    concrete `Adapted<W>` or a `&dyn XController` directly). Also added:
+    `EventCtx::open_context_menu` (Breadcrumb records the right-clicked segment *before* the
+    shared menu opens — `opens_context_menu` can't express work-before-menu), an
+    `Input::copy_path` forward (context menu "Copy Path"), and an `Adapted::on_cursor_moved`
+    override — another direct-dispatch entry (cce-files drives breadcrumb hover through it)
+    routing the raw move to `on_event` with the base hover bookkeeping as fallback.
+    `ScrollController` was deleted outright: zero implementors and zero live callers
+    workspace-wide (only a dead cce-designer helper, removed there). **Breadcrumb** (first
+    controller widget, live in cce-files + cce-designer) verified on the live compositor:
+    idle/hover captures pixel-identical to the stashed legacy build at the widget, and a
+    breadcrumb-segment click navigates correctly through the direct-dispatch
+    `mouse_input → on_event → path_click` chain. **Node** (ParamController + GeomController,
+    self-moving drag with grid snap via `drag_reposition`) has no live constructors in any app
+    repo — compile + router-level tests only. 160 tests pass; all 19 client crates build.
   - **Still to do:** migrate remaining widgets
-    off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
-    `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10
-    cce-ui widgets) with a typed message/command channel; delete `Element` + `Adapted` once the
-    last widget is across.
+    off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining
+    controller-tier widgets ride the 5k hooks when they migrate: Spreadsheet (needs
+    `tick`/`wants_tick`/`is_scrollable` forwards for its inertial scroll), Graph, and the
+    container-coupled ones (Menu/MenuBar, Paginator, Switcher, ContentBg, ParametersBg — these
+    also need the children/tree concern). Then delete `Element` + `Adapted` once the last
+    widget is across, at which point the `as_*_controller` pairs and the `Input` capability
+    hooks die together (callers hold concrete types or `&dyn XController`).
 - **Phase 6 — Per-app migration.** Move each `cce-*` app onto the new core; delete legacy paths
   once the last app is across.
 
