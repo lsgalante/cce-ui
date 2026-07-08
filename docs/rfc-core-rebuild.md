@@ -519,14 +519,31 @@ Constraint respected: **each crate still builds standalone** — the new core is
     scroll/thumb math collapsed into one `geom()` helper; its `paint` deliberately does NOT
     emit the translucent `PARAM_BG` background (the designer draws widget backgrounds itself
     from `color()` + `corner_style` — emitting it again would double-blend).
+  - **5m — `Graph` + the legacy dual-geometry escape hatch. DONE (designer startup pixel-diffs
+    ZERO; cce-graph diffs to an empty 2%-threshold bbox; cce-files' Graph view verified
+    visually + getter-contract unit test — its pixel A/B was blocked by the live session's
+    terminal covering the capture region).** Graph's three hosts consume DIFFERENT getters
+    (designer: plain `extra_quads` + `extra_circles`; cce-files `render_widget`:
+    `all_rounded_quads` with highlight-only `all_quads`; cce-graph: the scene path's
+    `paint_self`). The model keeps one geometry generator; `paint` emits the rounded view, and
+    transitional `Paint` hooks serve the rest: `serves_legacy_plain_quads`/`legacy_plain_quads`
+    (verbatim through `extra_quads`, with the adapter emptying `all_quads` to preserve the
+    no-double-draw contract) and `text_bounds` (node names clip to the widget rect — the
+    adapter now overrides `text_labels_with_[font_and_]bounds`, replicating the
+    scroll-ancestor walk when the hook is `None`). Also: `Input::hit` override for the legacy
+    edge-exclusive hit test; ctrl-wheel zoom reads `ctrl_pressed` through `EventCtx.ui`;
+    the `Element::paint` register_hovered pre-pass is dropped (shared hover highlight is
+    suppressed for all adapted widgets). Discovered en route: the designer's CONTENT pane IS a
+    real `Graph` (index 1), and `ContentBg` is a standalone grid background whose
+    GraphController impl is mostly stubs — it is NOT a Graph wrapper.
   - **Still to do:** migrate remaining widgets
-    off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining
-    controller-tier widgets ride the 5k hooks when they migrate: Graph (leaf, live in
-    cce-files' network page and behind ContentBg in the designer), then the container-coupled
-    ones (Menu/MenuBar, Paginator, Switcher, ContentBg, ParametersBg — these also need the
-    children/tree concern). Then delete `Element` + `Adapted` once the last widget is across,
-    at which point the `as_*_controller` pairs and the `Input` capability hooks die together
-    (callers hold concrete types or `&dyn XController`).
+    off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). The whole leaf
+    controller tier is now across; what remains is container-coupled (Menu/MenuBar, Paginator,
+    Switcher, ContentBg, ParametersBg — these need the children/tree concern) plus the
+    deferred leaves (TextBox, Dropdown, StatusBar, Float3, LayoutPreview, PreviewState). Then
+    delete `Element` + `Adapted` once the last widget is across, at which point the
+    `as_*_controller` pairs and the `Input` capability hooks die together (callers hold
+    concrete types or `&dyn XController`).
 - **Phase 6 — Per-app migration.** Move each `cce-*` app onto the new core; delete legacy paths
   once the last app is across.
 
