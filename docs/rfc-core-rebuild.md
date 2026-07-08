@@ -369,7 +369,23 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `Clicker` through the *real* `UiContext::propagate_event` router: in-rect click consumed +
     counted, out-of-rect click gated out, hover enter/leave transitions observed on both the
     narrow widget and the base flag. 138 cce-ui tests pass.
-  - **Still to do:** migrate real widgets
+  - **5c — First real widget migrated: `ProgressBar`. DONE (runtime-verified, pixel-identical).**
+    `widget/display/progress_bar.rs` now implements only `Layout` + `Paint` + `Input`;
+    `ProgressBar::new` returns `Adapted<ProgressBar>`, so both construction sites
+    (`cce-ui` demo, `cce-test-interface`, incl. `.with_label`) compile unchanged. The migration
+    forced the adapter to absorb the legacy surface external render loops actually read, all
+    added to `Adapted` in this step: an `all_rounded_quads` **reverse bridge** (the widget's
+    `Paint::paint` output converted back to legacy tuples — cce-test-interface renders via this),
+    `Paint::corner_style` → `corner_radius`/`rounded_corners` (for style-property painters like
+    the demo's `widget_vertices`; transitional, dies with those paths), the detached-label
+    convention (`set_rect` inflation + `with_label` builder + content-rect inset),
+    `preferred_height` ← `intrinsic_size`, `highlight_quad → None` (narrow widgets own their
+    pixels), and `type_name` reporting the *inner* type (layout.rs string-matches
+    `"ProgressBar"` for span-full sizing). **Runtime verification:** ran cce-test-interface and
+    the demo on the live compositor (via `ccectl center-window` + `grim`); an A/B pixel diff of
+    the demo against the pre-migration build showed the two frames identical except a 19×20
+    compositor corner artifact — zero differing pixels at any widget. 141 tests pass.
+  - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10
     cce-ui widgets) with a typed message/command channel; delete `Element` + `Adapted` once the

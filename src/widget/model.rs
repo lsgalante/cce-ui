@@ -27,7 +27,7 @@
 //! concern follows in its own commit.
 
 use crate::scene::layout::{Rect, Size, Style};
-use crate::scene::paint::PaintCtx;
+use crate::scene::paint::{PaintCtx, Prim};
 use crate::widget::{Element, Event, UiContext, Widget, WidgetId};
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
@@ -76,6 +76,15 @@ pub trait Paint {
     /// containers). Default: no.
     fn clips_children(&self) -> bool {
         false
+    }
+
+    /// Corner rounding `(radius, per-corner flags)` of the widget's background. **Transitional:**
+    /// this exists only for legacy render paths that draw widget backgrounds themselves from
+    /// style properties (`widget_vertices` / `push_widget_vertices` readers of
+    /// `Element::corner_radius` + `rounded_corners`) — the widget's real geometry is whatever
+    /// [`paint`](Paint::paint) emits. Dies with those paths. Default: sharp corners.
+    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+        None
     }
 }
 
@@ -130,6 +139,26 @@ impl<W> Adapted<W> {
     pub fn id(&self) -> WidgetId {
         self.base.id()
     }
+
+    /// Attach a detached control label (drawn above the widget by the shared `text_labels`
+    /// machinery). Mirrors the `with_label` builders legacy control widgets carry, so
+    /// construction sites keep their shape when a widget migrates.
+    pub fn with_label(mut self, label: &str) -> Self {
+        self.base.label = Some(label.to_string());
+        self
+    }
+
+    /// The rect the wrapped widget paints into: the widget's rect minus the detached-label
+    /// region at the top (zero inset when there is no label — `Widget::label_offset`).
+    fn content_rect(&self) -> Rect {
+        let top = self.base.label_offset();
+        Rect {
+            x: self.base.x,
+            y: self.base.y + top,
+            width: self.base.w,
+            height: (self.base.h - top).max(0.0),
+        }
+    }
 }
 
 impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
@@ -163,6 +192,35 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Layout::layout_children(&self.inner)
     }
 
+    // --- Legacy structural conventions the adapter owns on the widget's behalf ---
+
+    /// The detached-label convention shared by legacy control widgets: the widget grows past the
+    /// rect its parent assigns to make room for the label above (`ProgressBar`/`Slider`-style
+    /// `set_rect` overrides). Zero-cost when no label is set.
+    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h + self.base.label_offset();
+    }
+
+    fn preferred_height(&self) -> Option<f32> {
+        Layout::intrinsic_size(&self.inner).map(|s| s.height)
+    }
+
+    /// Narrow widgets own every pixel they draw through [`Paint::paint`]; the legacy shared
+    /// hover-highlight overlay is suppressed (matching what most control widgets' `None`
+    /// overrides do today).
+    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        None
+    }
+
+    /// Report the *inner* type's name, not `Adapted<W>`: runtime type-name matching (e.g.
+    /// `layout.rs`' span-full widget list) must keep seeing the widget it knows.
+    fn type_name(&self) -> &'static str {
+        std::any::type_name::<W>().split("::").last().unwrap_or("Widget")
+    }
+
     // --- Paint concern -> `Paint` ---
     fn color(&self) -> [f32; 4] {
         Paint::color(&self.inner)
@@ -170,9 +228,45 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn clips_children(&self) -> bool {
         Paint::clips_children(&self.inner)
     }
+    fn corner_radius(&self) -> f32 {
+        // 12.0 mirrors the `Element` default for widgets without a corner style.
+        Paint::corner_style(&self.inner).map_or(12.0, |(r, _)| r)
+    }
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        Paint::corner_style(&self.inner).map_or((false, false, false, false), |(_, c)| c)
+    }
     fn paint_self(&self, _ui: &UiContext, ctx: &mut PaintCtx) {
-        let (x, y, w, h) = self.rect();
-        Paint::paint(&self.inner, Rect { x, y, width: w, height: h }, ctx);
+        Paint::paint(&self.inner, self.content_rect(), ctx);
+        // The detached label, exactly as the legacy default `paint_self` emits it.
+        for tl in self.text_labels() {
+            ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+        }
+    }
+
+    /// Reverse bridge for legacy render loops that read geometry via `all_rounded_quads` (e.g.
+    /// cce-test-interface's view path): the wrapped widget's [`Paint::paint`] output, converted
+    /// back to the legacy tuples. Covers the widget's OWN geometry only — adapted widgets are
+    /// leaves for now; the recursive child walk belongs to `scene::painter`.
+    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        let mut pc = PaintCtx::new();
+        Paint::paint(&self.inner, self.content_rect(), &mut pc);
+        pc.finish()
+            .items
+            .into_iter()
+            .filter_map(|item| match item.prim {
+                Prim::RoundedRect { rect, radius, corners, color } => {
+                    Some((rect.x, rect.y, rect.width, rect.height, radius, color, corners))
+                }
+                // Radius 0 routes through the backend's plain-quad branch, byte-for-byte.
+                Prim::Quad { rect, color } => {
+                    Some((rect.x, rect.y, rect.width, rect.height, 0.0, color, (false, false, false, false)))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     // --- Input concern -> `Input` ---
