@@ -334,6 +334,34 @@ Constraint respected: **each crate still builds standalone** — the new core is
   hover/press/`network_opacity`; consolidate `hover_animation`.
 - **Phase 5 — Trait split & cleanup.** Split `Element` into `Widget`/`Paint`/`Input`; remove
   `as_*_controller` downcasts; migrate remaining widgets; delete the compatibility shim.
+  - **Approach correction (resolved by experiment).** A *non-breaking supertrait carve-out* of
+    `Element` (`trait Element: Paint + …`) turns out to be impossible in Rust here. The structural
+    methods the passes need (`rect`, `children`, `set_rect`) are overridden in dozens of widgets
+    across cce-ui **and** the app crates (`rect` 31+8, `children` 23+2, `set_rect` 42+4): moving
+    them off `Element` breaks every override, and merely *declaring* them on a supertrait makes
+    every `elem.children()`/`elem.rect()` call site ambiguous (a supertrait method is always in
+    scope on the subtrait). Nor does a blanket "view" `impl<T: Element> Paint for T` let
+    `&dyn Element` coerce to `&dyn Paint` — that coercion exists only for real supertraits. So the
+    split follows the **adapter** path from §5, not a supertrait split: narrow traits independent
+    of `Element`, with `Adapted<W>` bridging a narrow-trait widget into the `*mut dyn Element`
+    tree. The compatibility-shim bullet is thus *this* adapter (there was never a discrete legacy
+    shim to delete — the earlier migration hung hooks directly on `Element`).
+  - **5a — Layout + Paint concerns + adapter: DONE (compile + tests; no runtime surface yet).**
+    `cce-ui/src/widget/model.rs` — the independent `Layout` (`layout_style` / `intrinsic_size` /
+    `layout_children`) and `Paint` (`color` / `paint` / `clips_children`, where `paint` takes the
+    laid-out rect rather than reading a stored one) traits, plus `Adapted<W>`: a wrapper that
+    carries the `Widget` base and forwards the `Element` layout/paint methods to `W`'s narrow
+    traits. A headless test builds a pure narrow-trait tree (a `Col` container + two `Dot` leaves,
+    none of which implement `Element`), wraps each in `Adapted`, and drives it through the
+    *existing* `scene::bridge` layout pass and `scene::painter` paint pass — asserting both the
+    computed rects and the painted quads. Purely additive: no existing widget or app changes, all
+    137 cce-ui tests pass. Runtime verification is N/A until a real widget is migrated onto the
+    adapter (nothing in a running app uses it yet).
+  - **Still to do:** the `Input` (event) concern trait + adapter forwarding; migrate real widgets
+    off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
+    `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10
+    cce-ui widgets) with a typed message/command channel; delete `Element` + `Adapted` once the
+    last widget is across.
 - **Phase 6 — Per-app migration.** Move each `cce-*` app onto the new core; delete legacy paths
   once the last app is across.
 
