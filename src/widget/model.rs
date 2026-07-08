@@ -387,6 +387,13 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         std::any::type_name::<W>().split("::").last().unwrap_or("Widget")
     }
 
+    /// Text-content mutation (legacy `Element::set_text` wrote only `base.label`): keep the base
+    /// copy and the widget's own copy ([`Paint::sync_label`]) in step, like `set_label`.
+    fn set_text(&mut self, text: &str) {
+        self.base.label = Some(text.to_string());
+        Paint::sync_label(&mut self.inner, text);
+    }
+
     // --- Paint concern -> `Paint` ---
     fn color(&self) -> [f32; 4] {
         Paint::color(&self.inner)

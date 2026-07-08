@@ -1,25 +1,38 @@
 use crate::widget::*;
 use crate::widget::display::{TextLabel, TextItem};
+use crate::scene::layout::{Rect, Size};
+use crate::scene::paint::PaintCtx;
 
+/// Narrow-trait text label (Phase 5f leaf sweep). The text lives on the model and is emitted by
+/// `paint` as a `Text` prim, which the adapter's prim-derived `text_labels` bridge serves to
+/// every legacy text path; `set_text` sync comes from the adapter's generic `Element::set_text`
+/// override via [`Paint::sync_label`].
 #[derive(Debug, Clone)]
 pub struct Label {
-    base: Widget,
+    text: String,
     font_size: f32,
     color: [u8; 3],
 }
 
 impl Label {
-    pub fn new(text: &str) -> Self {
-        let mut base = Widget::new();
-        base.label = Some(text.to_string());
+    pub fn new(text: &str) -> Adapted<Label> {
         let (_, font_size) = crate::layout::control_label_font_parsed();
-        Self {
-            base,
+        let mut l = Adapted::new(Label {
+            text: text.to_string(),
             font_size,
             color: colors::control_label_color_u8(),
-        }
+        });
+        // Keep the base copy in step too (context menus, fallback machinery).
+        Element::set_text(&mut l, text);
+        l
     }
 
+    pub fn set_color(&mut self, color: [u8; 3]) {
+        self.color = color;
+    }
+}
+
+impl Adapted<Label> {
     pub fn with_font_size(mut self, size: f32) -> Self {
         self.font_size = size;
         self
@@ -29,41 +42,74 @@ impl Label {
         self.color = color;
         self
     }
-
-    pub fn set_text(&mut self, text: &str) {
-        self.base.label = Some(text.to_string());
-    }
-
-    pub fn set_color(&mut self, color: [u8; 3]) {
-        self.color = color;
-    }
 }
 
-impl Element for Label {
-    crate::impl_widget_base!(Label);
-    fn blocks_backplate_drag(&self) -> bool { false }
-
-    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
+impl Layout for Label {
+    fn inline_label(&self) -> bool {
+        true
+    }
 
     /// Content size for the scene layout engine (Phase 2b). Width is the measured text extent
     /// (via the FontSystem-free `measure_text_width`); height is one line at this font size.
-    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
+    fn intrinsic_size(&self) -> Option<Size> {
         let (family, _) = crate::layout::control_label_font_parsed();
-        let text = self.base.label.as_deref().unwrap_or("");
-        let width = crate::widget::display::measure_text_width(text, &family, self.font_size);
+        let width = crate::widget::display::measure_text_width(&self.text, &family, self.font_size);
         // Match the line-height factor used elsewhere in the toolkit (e.g. text_box).
         let height = self.font_size * 1.333;
-        Some(crate::scene::layout::Size::new(width, height))
+        Some(Size::new(width, height))
+    }
+}
+
+impl Paint for Label {
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        vec![TextLabel {
-            text: self.base.label.clone().unwrap_or_default(),
-            x: self.base.x,
-            y: crate::layout::align_text_y(self.base.y, self.base.h, self.font_size, 0.0),
-            font_size: self.font_size,
-            color: self.color,
-        }]
+    fn sync_label(&mut self, label: &str) {
+        self.text = label.to_string();
+    }
+
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        ctx.text(
+            self.text.clone(),
+            rect.x,
+            crate::layout::align_text_y(rect.y, rect.height, self.font_size, 0.0),
+            self.font_size,
+            self.color,
+        );
+    }
+}
+
+impl Input for Label {
+    fn blocks_backplate_drag(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Legacy `text_labels` parity through the prim bridge, and `set_text` staying in sync
+    /// through the adapter's `Element::set_text` override (the trait method apps actually hit).
+    #[test]
+    fn text_flows_and_set_text_syncs() {
+        let mut l = Label::new("CPU: 3%").with_font_size(13.0).with_color([1, 2, 3]);
+        Element::set_rect(&mut l, 10.0, 20.0, 100.0, 16.0);
+
+        let labels = Element::text_labels(&l);
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].text, "CPU: 3%");
+        assert_eq!(labels[0].x, 10.0);
+        assert_eq!(labels[0].font_size, 13.0);
+        assert_eq!(labels[0].color, [1, 2, 3]);
+
+        Element::set_text(&mut l, "CPU: 99%");
+        assert_eq!(Element::text_labels(&l)[0].text, "CPU: 99%", "set_text reaches the paint source");
+
+        let size = Element::intrinsic_size(&l).unwrap();
+        assert!(size.width > 0.0);
+        assert!(!Element::blocks_backplate_drag(&l));
     }
 }
 

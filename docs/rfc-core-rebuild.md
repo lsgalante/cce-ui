@@ -441,6 +441,13 @@ Constraint respected: **each crate still builds standalone** — the new core is
     pixel-diffs cursor-only vs the 5e baseline; a live hover A/B against the stashed legacy
     build showed the identical fill pixel (the inert hover on that page is pre-existing app
     behavior, not a regression).
+  - **5g — `Label`. DONE.** Text lives on the model, emitted as a `Text` prim; the adapter's
+    prim bridge serves every legacy text path. Added the generic synced `Element::set_text`
+    override on `Adapted` (same trap as `set_label`: the trait method wrote only the base and
+    left the painted text stale — live-updating labels like system-info's CPU readouts hit it
+    constantly). Builders mirrored; three app repos' field types updated. Workspace builds;
+    155 tests pass; test-interface diff vs the post-Button baseline has a 0x0 bbox at 2%
+    threshold (sub-perceptual blend noise only).
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10
