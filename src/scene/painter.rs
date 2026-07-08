@@ -34,6 +34,25 @@ fn paint_node(ui: &UiContext, ptr: ElemPtr, pc: &mut PaintCtx) {
         if !(*ptr).visible() {
             return;
         }
+
+        // Legacy subtree painters (e.g. TreeList) render their own geometry AND their children via
+        // a recursive all_rounded_quads/all_quads; emit those directly and stop descending.
+        if (*ptr).renders_own_subtree() {
+            for (x, y, w, h, r, c, corners) in (*ptr).all_rounded_quads(ui) {
+                pc.rounded_rect(Rect { x, y, width: w, height: h }, r, corners, c);
+            }
+            for (x, y, w, h, c) in (*ptr).all_quads(ui) {
+                pc.quad(Rect { x, y, width: w, height: h }, c);
+            }
+            for (cx, cy, r, t, s, e, c) in (*ptr).extra_arcs() {
+                pc.arc(cx, cy, r, t, s, e, c);
+            }
+            for (cx, cy, r, c) in (*ptr).extra_circles() {
+                pc.circle(cx, cy, r, c);
+            }
+            return;
+        }
+
         (*ptr).paint_self(ui, pc);
 
         let children = (*ptr).children(ui);

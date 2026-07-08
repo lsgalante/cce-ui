@@ -528,6 +528,14 @@ pub trait Element {
     /// containers). Default: no clipping.
     fn clips_children(&self) -> bool { false }
 
+    /// Whether this widget paints its ENTIRE subtree itself through its (recursive)
+    /// `all_rounded_quads` / `all_quads` — a legacy "subtree painter" such as `TreeList`, whose
+    /// row backgrounds and separators live in an `all_rounded_quads` override that also recurses
+    /// into its children. When true, the paint walk emits those directly and does NOT recurse
+    /// (the widget already did). Transitional: such widgets will eventually get a proper
+    /// non-recursive `paint_self`. Default: false.
+    fn renders_own_subtree(&self) -> bool { false }
+
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         if !self.visible() {
             return Vec::new();

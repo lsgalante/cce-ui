@@ -1196,6 +1196,12 @@ impl Element for TreeList {
         list
     }
 
+    // TreeList draws its rows, backgrounds and separators in the recursive all_rounded_quads below,
+    // so the Phase 3 paint walk emits that directly instead of descending (see Element docs).
+    fn renders_own_subtree(&self) -> bool {
+        true
+    }
+
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         let mut quads = Vec::new();
         let (r1, r2, r3, r4) = self.rounded_corners();
