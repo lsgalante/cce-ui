@@ -197,7 +197,7 @@ impl Paint for Slider {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         let r = crate::layout::slider_corner_radius();
         if r > 0.0 {
             Some((r, (true, true, true, true)))
@@ -496,7 +496,7 @@ impl Paint for RangeSlider {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         let r = crate::layout::rangeslider_corner_radius();
         if r > 0.0 {
             Some((r, (true, true, true, true)))

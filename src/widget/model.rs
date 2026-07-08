@@ -29,8 +29,9 @@
 use crate::scene::layout::{Rect, Size, Style};
 use crate::scene::paint::{PaintCtx, Prim};
 use crate::widget::{
-    Element, Event, GeomController, GraphController, MenuController, ParamController,
-    PathController, SpreadsheetController, TextLabel, UiContext, Widget, WidgetId,
+    Element, Event, GeomController, GraphController, MenuController, PageSelector,
+    ParamController, PathController, SpreadsheetController, TextLabel, UiContext, Widget,
+    WidgetId,
 };
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
@@ -122,8 +123,10 @@ pub trait Layout {
     }
 
     /// Position children after a `set_rect` (no ctx available — use the owned pointers).
-    /// Called only while the widget is visible, matching the legacy overrides.
-    fn arrange_children(&mut self, _rect: Rect) {}
+    /// Called only while the widget is visible, matching the legacy overrides. `host` is the
+    /// adapter's `*mut dyn Element` — widgets that embed a legacy child (MenuBar's
+    /// ButtonStrip) parent it back to the host so legacy parent-chain styling walks work.
+    fn arrange_children(&mut self, _rect: Rect, _host: *mut (dyn Element + 'static)) {}
 
     /// Recursive child layout for the `Element::layout` pass (this one has ctx). Called after
     /// the adapter has measured and placed the container itself, only while visible.
@@ -133,6 +136,20 @@ pub trait Layout {
     /// the active child). Default: every child.
     fn child_visible(&self, _child: *mut (dyn Element + 'static)) -> bool {
         true
+    }
+
+    /// Legacy `Element::z_index` (host render ordering; MenuBar's dropdowns layer at 100+).
+    fn z_order(&self) -> i32 {
+        0
+    }
+
+    /// `Some(parent)` when the model tracks its parent pointer itself (via
+    /// [`parent_changed`](Layout::parent_changed)) — the adapter then serves `Element::parent`
+    /// from it instead of the tree. Legacy widgets with parent-dependent styling walk the
+    /// chain with a DUMMY ctx (MenuBar/ButtonStrip backplate checks), which a tree lookup
+    /// cannot answer. `None` (default): use the tree.
+    fn tracked_parent(&self) -> Option<Option<*mut (dyn Element + 'static)>> {
+        None
     }
 }
 
@@ -161,14 +178,25 @@ pub trait Paint {
         false
     }
 
-    /// Corner rounding `(radius, per-corner flags)` of the widget's background. **Transitional:**
-    /// this exists only for legacy render paths that draw widget backgrounds themselves from
-    /// style properties (`widget_vertices` / `push_widget_vertices` readers of
+    /// Corner rounding `(radius, per-corner flags)` of the widget's background, given its
+    /// laid-out rect (MenuBar's corners depend on where it sits against its parent's edges).
+    /// **Transitional:** this exists only for legacy render paths that draw widget backgrounds
+    /// themselves from style properties (`widget_vertices` / `push_widget_vertices` readers of
     /// `Element::corner_radius` + `rounded_corners`) — the widget's real geometry is whatever
     /// [`paint`](Paint::paint) emits. Dies with those paths. Default: sharp corners.
-    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         None
     }
+
+    /// This widget's OWN popover (dropdown) rect, if one is open — hosts float it above
+    /// z-ordered siblings (`register_popover` + `render_popovers`). Containers combine this
+    /// with their children's popovers in the adapter. Default: none.
+    fn popover(&self, _rect: Rect) -> Option<(f32, f32, f32, f32)> {
+        None
+    }
+
+    /// Draw this widget's own popover (legacy `Element::render_popover`).
+    fn draw_popover(&self, _rect: Rect, _pc: &mut dyn crate::layout::RenderTarget) {}
 
     /// Solid border `(color, thickness)` of the widget's background quad. **Transitional**, like
     /// [`corner_style`](Paint::corner_style): `render_widget` gives a widget's background quad a
@@ -239,6 +267,14 @@ impl EventCtx<'_> {
     pub fn request_focus(&mut self) {
         if let Some(ptr) = self.self_ptr {
             unsafe { crate::widget::focus::set_focused(&mut *ptr) };
+        }
+    }
+
+    /// Drop this widget's claim on the global focus if it holds it (legacy
+    /// `focus::clear_if_matches(self)` — MenuBar releases focus when its dropdowns close).
+    pub fn release_focus(&mut self) {
+        if let Some(ptr) = self.self_ptr {
+            unsafe { crate::widget::focus::clear_if_matches(&mut *ptr) };
         }
     }
 
@@ -432,6 +468,28 @@ pub trait Input {
     /// Copy this widget's path/content to the clipboard — the context menu's "Copy Path" action
     /// calls `Element::copy_path` on its target (Breadcrumb is the only implementor).
     fn copy_path(&self) {}
+
+    /// Keyboard modifier state pushed in by hosts before dispatch (legacy
+    /// `Element::set_modifiers`).
+    fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
+
+    /// The widget's visibility flag changed through `Element::set_visible` (the adapter owns
+    /// the flag) — legacy hideable widgets used the setter for side effects (MenuBar closes
+    /// its dropdowns and invalidates layout).
+    fn visibility_changed(&mut self, _visible: bool) {}
+
+    /// The widget's `Element::focused` answer, given the base flag — MenuBar reports focused
+    /// while any of its dropdowns is open, beyond the flag itself. Default: the flag.
+    fn is_focused(&self, base_focused: bool) -> bool {
+        base_focused
+    }
+
+    fn page_selector(&self) -> Option<&dyn PageSelector> {
+        None
+    }
+    fn page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> {
+        None
+    }
 }
 
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
@@ -681,7 +739,10 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
+        if self.visible != visible {
+            self.visible = visible;
+            Input::visibility_changed(&mut self.inner, visible);
+        }
     }
     fn visible(&self) -> bool {
         self.visible
@@ -754,6 +815,32 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         false
     }
 
+    fn z_index(&self) -> i32 {
+        Layout::z_order(&self.inner)
+    }
+
+    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
+        if let Some(tracked) = Layout::tracked_parent(&self.inner) {
+            return tracked;
+        }
+        ctx.tree.parent_ptr(self.base.id())
+    }
+
+    fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
+        Input::set_modifiers(&mut self.inner, ctrl, shift, alt)
+    }
+
+    fn focused(&self, _ctx: &UiContext) -> bool {
+        Input::is_focused(&self.inner, self.base.focused)
+    }
+
+    fn as_page_selector(&self) -> Option<&dyn PageSelector> {
+        Input::page_selector(&self.inner)
+    }
+    fn as_page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> {
+        Input::page_selector_mut(&mut self.inner)
+    }
+
     fn layout(&mut self, origin: crate::widget::Point, constraints: crate::widget::LayoutConstraints, ctx: &mut UiContext) {
         // The Element default (measure + set_rect), plus recursive child layout for visible
         // containers — the ctx-carrying half of the arrangement the model can't do in
@@ -788,13 +875,15 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         if !self.visible() {
             return None;
         }
-        self.visible_children().into_iter().find_map(|c| unsafe { &*c }.popover_rect())
+        Paint::popover(&self.inner, self.content_rect())
+            .or_else(|| self.visible_children().into_iter().find_map(|c| unsafe { &*c }.popover_rect()))
     }
 
     fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
         if !self.visible() {
             return;
         }
+        Paint::draw_popover(&self.inner, self.content_rect(), pc);
         for child in self.visible_children() {
             unsafe { &*child }.render_popover(pc);
         }
@@ -835,7 +924,8 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         // overrides); hidden containers skip it, like the legacy impls.
         if self.visible {
             let content = self.content_rect();
-            Layout::arrange_children(&mut self.inner, content);
+            let host = self.as_ptr_mut();
+            Layout::arrange_children(&mut self.inner, content, host);
         }
     }
 
@@ -872,10 +962,10 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     fn corner_radius(&self) -> f32 {
         // 12.0 mirrors the `Element` default for widgets without a corner style.
-        Paint::corner_style(&self.inner).map_or(12.0, |(r, _)| r)
+        Paint::corner_style(&self.inner, self.content_rect()).map_or(12.0, |(r, _)| r)
     }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        Paint::corner_style(&self.inner).map_or((false, false, false, false), |(_, c)| c)
+        Paint::corner_style(&self.inner, self.content_rect()).map_or((false, false, false, false), |(_, c)| c)
     }
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         Paint::solid_border(&self.inner)
@@ -1208,12 +1298,14 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// tell the widget via the same `FocusIn`/`FocusOut` events the router would send.
     fn focus(&mut self) {
         self.base.focused = true;
-        let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: None };
+        let self_ptr = self.as_ptr_mut();
+        let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: Some(self_ptr) };
         Input::on_event(&mut self.inner, &Event::FocusIn, &mut ectx);
     }
     fn unfocus(&mut self) {
         self.base.focused = false;
-        let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: None };
+        let self_ptr = self.as_ptr_mut();
+        let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: Some(self_ptr) };
         Input::on_event(&mut self.inner, &Event::FocusOut, &mut ectx);
     }
 

@@ -271,7 +271,7 @@ impl Paint for Toggle {
         colors::toggle_bg_color()
     }
 
-    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         let r = crate::layout::toggle_corner_radius();
         if r > 0.0 {
             Some((r, (true, true, true, true)))

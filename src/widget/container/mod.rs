@@ -29,7 +29,7 @@ pub use section_container::SectionContainer;
 pub use header::Header;
 pub use content_bg::ContentBg;
 pub use parameters_bg::ParametersBg;
-pub use menu::{Menu, MenuBar};
+pub use menu::MenuBar;
 pub use breadcrumb::Breadcrumb;
 pub use spreadsheet::Spreadsheet;
 pub use scroll_box::ScrollBox;

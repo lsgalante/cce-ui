@@ -834,7 +834,7 @@ pub use self::container::{
     Container, ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     SectionContainer, Header, ContentBg, ParametersBg, List, ListColumn, ListRow, ColumnWidth,
-    ScrollBox, Menu, MenuBar, Spreadsheet, Breadcrumb, Plate,
+    ScrollBox, MenuBar, Spreadsheet, Breadcrumb, Plate,
     Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel,
     SplitBox, SplitDirection
 };

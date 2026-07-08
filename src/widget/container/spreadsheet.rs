@@ -108,7 +108,7 @@ impl Paint for Spreadsheet {
         colors::PARAM_BG
     }
 
-    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         // Legacy: rounded_corners override (all corners) with the Element-default 12.0 radius.
         Some((12.0, (true, true, true, true)))
     }

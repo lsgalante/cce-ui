@@ -177,7 +177,7 @@ impl Paint for Spinbox {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         let r = crate::layout::spinbox_corner_radius();
         if r > 0.0 {
             Some((r, (true, true, true, true)))

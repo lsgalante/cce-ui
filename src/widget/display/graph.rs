@@ -588,7 +588,7 @@ impl Paint for Graph {
         self.bg_color()
     }
 
-    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         Some((WIDGET_RADIUS, WIDGET_CORNERS))
     }
 

@@ -89,7 +89,7 @@ impl Layout for Switcher {
     }
 
     /// The active child fills the switcher's rect.
-    fn arrange_children(&mut self, rect: Rect) {
+    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn Element + 'static)) {
         if let Some(child) = self.active_child() {
             unsafe {
                 (*child).set_rect(rect.x, rect.y, rect.width, rect.height);
@@ -120,7 +120,7 @@ impl Paint for Switcher {
         }
     }
 
-    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         // Legacy kept the Element-default 12.0 radius and proxied the corner flags.
         let corners = match self.active_child() {
             Some(child) => unsafe { (*child).rounded_corners() },
