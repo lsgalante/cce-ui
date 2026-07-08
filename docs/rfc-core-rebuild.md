@@ -385,6 +385,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
     the demo on the live compositor (via `ccectl center-window` + `grim`); an A/B pixel diff of
     the demo against the pre-migration build showed the two frames identical except a 19×20
     compositor corner artifact — zero differing pixels at any widget. 141 tests pass.
+  - **5d — Leaf sweep: `Separator`, `StatusDot`, `UsageBar`. DONE (runtime-verified via the
+    settings app's render stream).** New adapter machinery this round: `Deref`/`DerefMut` to the
+    wrapped widget (call sites keep `dot.set_status(..)` / `bar.value`); per-prim reverse
+    bridges (`Prim::Quad` → `extra_quads`, `RoundedRect` → `all_rounded_quads`, `Circle`/`Arc` →
+    `extra_circles`/`extra_arcs`) so apps reading BOTH `all_quads` and `all_rounded_quads` draw
+    each prim exactly once; `Input::blocks_backplate_drag`; and the mirrored-by-value-builder
+    pattern (`Adapted<UsageBar>::with_colors`) since builders can't flow through `Deref`.
+    `Separator` had no `Widget` base (public x/y/w/h fields) — its rect now lives on the adapter
+    base, and cce-status-interface's rotation loop was updated to transpose via `rect`/`set_rect`.
+    **One deliberate behavior fix:** legacy `StatusDot` emitted **zero** geometry on every render
+    path (probe-confirmed — `render_widget` reads only `all_quads`/`all_rounded_quads`, both
+    empty for it), so the Processes-page dots were invisible; the narrow `Paint` default emits
+    the color quad, and the dots now render (verified in the live app's render dump: 10×10 rects
+    in exact status colors). UsageBar verified byte-identical in the same dump (bg+fill rects at
+    the exact `with_colors` colors). 147 tests pass; status-interface, system-settings, and
+    test-interface all build.
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10

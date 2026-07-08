@@ -109,6 +109,13 @@ pub trait Input {
     fn on_event(&mut self, _event: &Event, _rect: Rect) -> bool {
         false
     }
+
+    /// Whether pressing on this widget blocks dragging the movable backplate under it. Passive
+    /// display widgets (separators, status dots) return `false` so drags pass through them.
+    /// Default: `true`, matching the legacy `Element` default.
+    fn blocks_backplate_drag(&self) -> bool {
+        true
+    }
 }
 
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
@@ -158,6 +165,34 @@ impl<W> Adapted<W> {
             width: self.base.w,
             height: (self.base.h - top).max(0.0),
         }
+    }
+}
+
+impl<W: Paint> Adapted<W> {
+    /// Run the wrapped widget's [`Paint::paint`] against its content rect and return the emitted
+    /// prims — the shared source for the reverse bridges (`extra_quads`, `all_rounded_quads`,
+    /// `extra_circles`, `extra_arcs`) that legacy render loops read.
+    fn painted_prims(&self) -> Vec<Prim> {
+        let mut pc = PaintCtx::new();
+        Paint::paint(&self.inner, self.content_rect(), &mut pc);
+        pc.finish().items.into_iter().map(|item| item.prim).collect()
+    }
+}
+
+/// Auto-deref to the wrapped widget, so call sites keep using a migrated widget's own state and
+/// methods directly (`dot.status`, `dot.set_status(..)`) without knowing about the wrapper.
+/// (By-value builders can't flow through `Deref` — those get mirrored per-widget, like
+/// `with_label` here or `UsageBar::with_colors`.)
+impl<W> std::ops::Deref for Adapted<W> {
+    type Target = W;
+    fn deref(&self) -> &W {
+        &self.inner
+    }
+}
+
+impl<W> std::ops::DerefMut for Adapted<W> {
+    fn deref_mut(&mut self) -> &mut W {
+        &mut self.inner
     }
 }
 
@@ -243,26 +278,64 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
     }
 
-    /// Reverse bridge for legacy render loops that read geometry via `all_rounded_quads` (e.g.
-    /// cce-test-interface's view path): the wrapped widget's [`Paint::paint`] output, converted
-    /// back to the legacy tuples. Covers the widget's OWN geometry only — adapted widgets are
-    /// leaves for now; the recursive child walk belongs to `scene::painter`.
+    // --- Reverse bridges: [`Paint::paint`] output converted back to the legacy geometry
+    // getters external render loops read (cce-test-interface's `all_*` calls, `render_widget`'s
+    // `all_quads` loop, the demo's `extra_*` loops). Each prim kind maps to the getter legacy
+    // widgets used for it — plain quads to `extra_quads` (→ `all_quads`), rounded to
+    // `all_rounded_quads` — so apps that read BOTH getters draw each prim exactly once. Covers
+    // the widget's OWN geometry only: adapted widgets are leaves for now; recursion belongs to
+    // `scene::painter`.
+
     fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         if !self.visible() {
             return Vec::new();
         }
-        let mut pc = PaintCtx::new();
-        Paint::paint(&self.inner, self.content_rect(), &mut pc);
-        pc.finish()
-            .items
+        self.painted_prims()
             .into_iter()
-            .filter_map(|item| match item.prim {
+            .filter_map(|prim| match prim {
                 Prim::RoundedRect { rect, radius, corners, color } => {
                     Some((rect.x, rect.y, rect.width, rect.height, radius, color, corners))
                 }
-                // Radius 0 routes through the backend's plain-quad branch, byte-for-byte.
-                Prim::Quad { rect, color } => {
-                    Some((rect.x, rect.y, rect.width, rect.height, 0.0, color, (false, false, false, false)))
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        self.painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                Prim::Quad { rect, color } => Some((rect.x, rect.y, rect.width, rect.height, color)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        self.painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                Prim::Circle { cx, cy, radius, color } => Some((cx, cy, radius, color)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        self.painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                Prim::Arc { cx, cy, radius, thickness, start, end, color } => {
+                    Some((cx, cy, radius, thickness, start, end, color))
                 }
                 _ => None,
             })
@@ -270,6 +343,10 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     // --- Input concern -> `Input` ---
+    fn blocks_backplate_drag(&self) -> bool {
+        Input::blocks_backplate_drag(&self.inner)
+    }
+
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
         // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
         // the geometric test to the narrow trait instead of the row/label-offset machinery.

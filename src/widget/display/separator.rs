@@ -1,40 +1,56 @@
-use crate::widget::*;
+//! Narrow-trait separator line (Phase 5c leaf sweep). The legacy struct carried its own public
+//! x/y/w/h fields instead of a `Widget` base; the rect now lives on the [`Adapted`] base, so
+//! callers position it via `set_rect`/`rect` (cce-status-interface's rotation loop was updated
+//! accordingly).
+
+use crate::widget::{Adapted, Element, Input, Layout, Paint};
 
 #[derive(Debug, Clone)]
 pub struct Separator {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
     pub color: [f32; 4],
 }
 
 impl Separator {
-    pub fn new(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Self {
-        Self { x, y, w, h, color }
+    pub fn new(x: f32, y: f32, w: f32, h: f32, color: [f32; 4]) -> Adapted<Separator> {
+        let mut sep = Adapted::new(Separator { color });
+        Element::set_rect(&mut sep, x, y, w, h);
+        sep
     }
 }
 
-impl Element for Separator {
-    fn rect(&self) -> (f32, f32, f32, f32) {
-        (self.x, self.y, self.w, self.h)
-    }
-    fn blocks_backplate_drag(&self) -> bool { false }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
+impl Layout for Separator {}
 
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.x = x;
-        self.y = y;
-        self.w = w;
-        self.h = h;
-    }
-
+impl Paint for Separator {
     fn color(&self) -> [f32; 4] {
         self.color
+    }
+}
+
+impl Input for Separator {
+    fn blocks_backplate_drag(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constructor_places_the_rect_and_bridge_emits_it() {
+        let sep = Separator::new(100.0, 0.0, 1.0, 24.0, [0.3, 0.3, 0.3, 1.0]);
+        assert_eq!(Element::rect(&sep), (100.0, 0.0, 1.0, 24.0));
+        assert_eq!(Element::color(&sep), [0.3, 0.3, 0.3, 1.0]);
+        assert_eq!(Element::extra_quads(&sep), vec![(100.0, 0.0, 1.0, 24.0, [0.3, 0.3, 0.3, 1.0])]);
+        assert!(!Element::blocks_backplate_drag(&sep));
+    }
+
+    /// The status bar's vertical-rotation pattern, post-migration: transpose via rect/set_rect.
+    #[test]
+    fn rotation_via_set_rect() {
+        let mut sep = Separator::new(100.0, 0.0, 1.0, 24.0, [0.3, 0.3, 0.3, 1.0]);
+        let (x, y, w, h) = Element::rect(&sep);
+        Element::set_rect(&mut sep, y, x, h, w);
+        assert_eq!(Element::rect(&sep), (0.0, 100.0, 24.0, 1.0));
     }
 }
