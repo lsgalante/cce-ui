@@ -1,24 +1,30 @@
-use crate::widget::*;
-use crate::widget::display::TextLabel;
+//! Narrow-trait `Switcher` (Phase 5n) — the first container across: it owns externally-managed
+//! child pointers (pages) and exposes exactly one of them at a time. The adapter's container
+//! concern does the subtree plumbing (geometry/text aggregation, tick/popover/text-item
+//! recursion, hit-through-children), filtered to the active child by
+//! [`Layout::child_visible`]; the model keeps the legacy specifics: parent-clamped rects,
+//! active-child arrangement, event proxying (via `EventCtx::ui`), paint-property proxies, and
+//! the [`MenuController`] delegation to the active child.
+
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
+use crate::widget::{
+    Adapted, Element, ElementState, Event, EventCtx, Input, Layout, MenuController, Paint,
+    UiContext,
+};
 
 #[derive(Debug, Clone)]
 pub struct Switcher {
-    pub base: Widget,
-    pub parent: Option<*mut (dyn Element + 'static)>,
-    pub children: Vec<*mut (dyn Element + 'static)>,
-    pub active_index: Option<usize>,
-    pub visible: bool,
+    children: Vec<*mut (dyn Element + 'static)>,
+    parent: Option<*mut (dyn Element + 'static)>,
+    active_index: Option<usize>,
 }
 
 impl Switcher {
-    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self {
-            base: Widget::new_rect(x, y, w, h),
-            parent: None,
-            children: Vec::new(),
-            active_index: None,
-            visible: true,
-        }
+    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Adapted<Switcher> {
+        let mut s = Adapted::new(Switcher { children: Vec::new(), parent: None, active_index: None });
+        Element::set_rect(&mut s, x, y, w, h);
+        s
     }
 
     pub fn set_active_index(&mut self, index: Option<usize>) {
@@ -33,526 +39,305 @@ impl Switcher {
     pub fn active_index(&self) -> Option<usize> {
         self.active_index
     }
+
+    fn active_child(&self) -> Option<*mut (dyn Element + 'static)> {
+        self.children.get(self.active_index?).copied()
+    }
 }
 
-impl Element for Switcher {
-    crate::impl_widget_base!(Switcher);
-    fn blocks_backplate_drag(&self) -> bool { false }
-
-    fn visible(&self) -> bool {
-        self.visible
+impl Layout for Switcher {
+    fn has_container_children(&self) -> bool {
+        true
     }
 
-    fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-
-    fn color(&self) -> [f32; 4] {
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).color() };
-            }
-        }
-        [0.0, 0.0, 0.0, 0.0]
-    }
-
-    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        self.parent
-    }
-
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
-        self.parent = parent;
-    }
-
-    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+    fn container_children(&self) -> Vec<*mut (dyn Element + 'static)> {
         self.children.clone()
     }
 
-    fn is_child_visible(&self, child_id: WidgetId) -> bool {
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                if let Some(b) = unsafe { (*self.children[idx]).base() } {
-                    return b.id() == child_id;
-                }
-            }
-        }
-        false
-    }
-
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
+    fn child_added(&mut self, child: *mut (dyn Element + 'static)) {
         self.children.push(child);
-        let id = self.base.id();
-        let self_ptr = self.as_ptr();
-        if let Some(c_base) = unsafe { (*child).base() } {
-            let c_id = c_base.id();
-            ctx.register_widget(id, self_ptr);
-            ctx.register_widget(c_id, child);
-            ctx.link_ids(id, c_id);
-        }
-        unsafe {
-            (*child).set_parent(Some(self_ptr), ctx);
-        }
-        // Sync visibility of newly added child
+        // Sync visibility of the newly added child with the active selection.
         let idx = self.children.len() - 1;
         unsafe {
             (*child).set_visible(self.active_index == Some(idx));
         }
     }
 
-    fn clear_children(&mut self, ctx: &mut UiContext) {
+    fn children_cleared(&mut self) {
         self.children.clear();
-        let id = self.base.id();
-        ctx.clear_children_ids(id);
     }
 
-    fn rect(&self) -> (f32, f32, f32, f32) {
-        (self.base.x, self.base.y, self.base.w, self.base.h)
+    fn parent_changed(&mut self, parent: Option<*mut (dyn Element + 'static)>) {
+        self.parent = parent;
     }
 
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        let (clamped_x, clamped_y, clamped_w, clamped_h) = if let Some(parent_ptr) = self.parent {
-            let (px, py, pw, ph) = unsafe { (*parent_ptr).rect() };
-            let cx = x.clamp(px, px + pw.max(0.0));
-            let cy = y.clamp(py, py + ph.max(0.0));
-            let cw = w.min((px + pw.max(0.0) - cx).max(0.0));
-            let ch = h.min((py + ph.max(0.0) - cy).max(0.0));
-            (cx, cy, cw, ch)
-        } else {
-            (x, y, w, h)
+    fn child_visible(&self, child: *mut (dyn Element + 'static)) -> bool {
+        self.active_child().map_or(false, |active| std::ptr::eq(active, child))
+    }
+
+    /// Legacy `set_rect` clamped the switcher into its parent's rect.
+    fn adjust_rect(&self, requested: Rect) -> Rect {
+        let Some(parent_ptr) = self.parent else {
+            return requested;
         };
+        let (px, py, pw, ph) = unsafe { (*parent_ptr).rect() };
+        let cx = requested.x.clamp(px, px + pw.max(0.0));
+        let cy = requested.y.clamp(py, py + ph.max(0.0));
+        let cw = requested.width.min((px + pw.max(0.0) - cx).max(0.0));
+        let ch = requested.height.min((py + ph.max(0.0) - cy).max(0.0));
+        Rect { x: cx, y: cy, width: cw, height: ch }
+    }
 
-        self.base.x = clamped_x;
-        self.base.y = clamped_y;
-        self.base.w = clamped_w;
-        self.base.h = clamped_h;
-
-        if !self.visible {
-            return;
-        }
-
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                unsafe {
-                    (*self.children[idx]).set_rect(clamped_x, clamped_y, clamped_w, clamped_h);
-                }
+    /// The active child fills the switcher's rect.
+    fn arrange_children(&mut self, rect: Rect) {
+        if let Some(child) = self.active_child() {
+            unsafe {
+                (*child).set_rect(rect.x, rect.y, rect.width, rect.height);
             }
         }
     }
 
-    fn layout(&mut self, origin: Point, constraints: LayoutConstraints, ctx: &mut UiContext) {
-        let size = self.measure(constraints, ctx);
-        self.set_rect(origin.x, origin.y, size.width, size.height);
-
-        if self.visible {
-            if let Some(idx) = self.active_index {
-                if idx < self.children.len() {
-                    unsafe {
-                        (*self.children[idx]).layout(
-                            Point { x: self.base.x, y: self.base.y },
-                            LayoutConstraints::new(self.base.w, self.base.w, self.base.h, self.base.h),
-                            ctx,
-                        );
-                    }
-                }
+    fn layout_children_ctx(&mut self, rect: Rect, ctx: &mut UiContext) {
+        if let Some(child) = self.active_child() {
+            unsafe {
+                (*child).layout(
+                    crate::widget::Point { x: rect.x, y: rect.y },
+                    crate::widget::LayoutConstraints::new(rect.width, rect.width, rect.height, rect.height),
+                    ctx,
+                );
             }
         }
     }
+}
 
-    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).hit_test(px, py, ctx) };
-            }
-        }
-        false
-    }
-
-    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut quads = Vec::new();
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                let widget = unsafe { &*self.children[idx] };
-                let (wx, wy, ww, wh) = widget.rect();
-                let has_rounded = widget.rounded_corners() != (false, false, false, false);
-                for (qx, qy, qw, qh, qc) in widget.all_quads(ctx) {
-                    if has_rounded && (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - ww).abs() < 0.1 && (qh - wh).abs() < 0.1 {
-                        continue;
-                    }
-                    quads.push((qx, qy, qw, qh, qc));
-                }
-            }
-        }
-        quads
-    }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.visible {
-            return Vec::new();
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).text_labels() };
-            }
-        }
-        Vec::new()
-    }
-
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).text_labels_with_bounds(ctx) };
-            }
-        }
-        Vec::new()
-    }
-
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).text_labels_with_font_and_bounds(ctx) };
-            }
-        }
-        Vec::new()
-    }
-
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).get_text_items() };
-            }
-        }
-        Vec::new()
-    }
-
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
-        if !self.visible {
-            return;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                unsafe {
-                    (*self.children[idx]).prepare_text(fs);
-                }
-            }
+impl Paint for Switcher {
+    /// The switcher shows as whatever its active child shows as (legacy proxied `color`,
+    /// `rounded_corners`, and `solid_border` — style-property painters read these).
+    fn color(&self) -> [f32; 4] {
+        match self.active_child() {
+            Some(child) => unsafe { (*child).color() },
+            None => [0.0, 0.0, 0.0, 0.0],
         }
     }
 
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                let widget = unsafe { &mut *self.children[idx] };
-                if widget.is_dragging() {
-                    return widget.drag_update(px, py);
-                } else {
-                    return widget.cursor_moved(px, py, ctx);
-                }
-            }
-        }
-        false
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                let widget = unsafe { &mut *self.children[idx] };
-                if widget.popover_rect().is_some() {
-                    if widget.mouse_input(button, state, px, py, ctx) {
-                        return true;
-                    }
-                }
-                if widget.mouse_input(button, state, px, py, ctx) {
-                    return true;
-                }
-                if state == ElementState::Pressed && !widget.hit_test(px, py, ctx) {
-                    widget.unfocus();
-                }
-            }
-        }
-        false
-    }
-
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).keyboard_input(event, ctx) };
-            }
-        }
-        false
-    }
-
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).mouse_wheel(delta, px, py, ctx) };
-            }
-        }
-        false
-    }
-
-    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
-        if !self.visible {
-            return None;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).popover_rect() };
-            }
-        }
-        None
-    }
-
-    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
-        if !self.visible {
-            return;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                unsafe {
-                    (*self.children[idx]).render_popover(pc);
-                }
-            }
-        }
-    }
-
-    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).tick(dt, ctx) };
-            }
-        }
-        false
-    }
-
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).rounded_corners() };
-            }
-        }
-        (false, false, false, false)
+    fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
+        // Legacy kept the Element-default 12.0 radius and proxied the corner flags.
+        let corners = match self.active_child() {
+            Some(child) => unsafe { (*child).rounded_corners() },
+            None => (false, false, false, false),
+        };
+        Some((12.0, corners))
     }
 
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).solid_border() };
-            }
-        }
-        None
+        self.active_child().and_then(|child| unsafe { (*child).solid_border() })
     }
 
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
-            return Vec::new();
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).extra_quads() };
-            }
-        }
-        Vec::new()
+    /// No own geometry: the background is the active child's own business, and the adapter's
+    /// container aggregation carries the subtree on the legacy getters (the scene walk
+    /// recurses `children()` itself).
+    fn paint(&self, _rect: Rect, _ctx: &mut PaintCtx) {}
+}
+
+impl Input for Switcher {
+    fn blocks_backplate_drag(&self) -> bool {
+        false
     }
 
-    fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
-            return Vec::new();
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).extra_arcs() };
-            }
-        }
-        Vec::new()
+    fn hits_through_children(&self) -> bool {
+        true
     }
 
-    fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
-        if !self.visible {
-            return Vec::new();
-        }
-        if let Some(idx) = self.active_index {
-            if idx < self.children.len() {
-                return unsafe { (*self.children[idx]).extra_circles() };
-            }
-        }
-        Vec::new()
+    /// Legacy `mouse_input` saw every press to unfocus the child on an outside click.
+    fn gates_presses(&self) -> bool {
+        false
     }
 
-    fn as_menu_controller(&self) -> Option<&dyn MenuController> { Some(self) }
-    fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> { Some(self) }
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        let Some(child_ptr) = self.active_child() else {
+            return false;
+        };
+        let widget = unsafe { &mut *child_ptr };
+        match event {
+            Event::MouseButton { button, state, x: px, y: py, .. } => {
+                let Some(ui) = ectx.ui.as_deref_mut() else {
+                    return false;
+                };
+                // Faithful port of the legacy body, including the double dispatch while a
+                // popover is open.
+                if widget.popover_rect().is_some() {
+                    if widget.mouse_input(*button, *state, *px, *py, ui) {
+                        return true;
+                    }
+                }
+                if widget.mouse_input(*button, *state, *px, *py, ui) {
+                    return true;
+                }
+                if *state == ElementState::Pressed && !widget.hit_test(*px, *py, ui) {
+                    widget.unfocus();
+                }
+                false
+            }
+            Event::PointerMove { x: px, y: py, .. } => {
+                if widget.is_dragging() {
+                    return widget.drag_update(*px, *py);
+                }
+                let Some(ui) = ectx.ui.as_deref_mut() else {
+                    return false;
+                };
+                widget.cursor_moved(*px, *py, ui)
+            }
+            Event::MouseWheel { delta, x: px, y: py, .. } => {
+                let Some(ui) = ectx.ui.as_deref_mut() else {
+                    return false;
+                };
+                widget.mouse_wheel(delta, *px, *py, ui)
+            }
+            Event::KeyInput(key_event) => {
+                let Some(ui) = ectx.ui.as_deref_mut() else {
+                    return false;
+                };
+                widget.keyboard_input(key_event, ui)
+            }
+            _ => false,
+        }
+    }
+
+    fn menu_controller(&self) -> Option<&dyn MenuController> {
+        Some(self)
+    }
+    fn menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> {
+        Some(self)
+    }
 }
 
 impl MenuController for Switcher {
     fn menu_click(&mut self) -> Option<(usize, usize)> {
-        let idx = self.active_index?;
-        let child_ptr = *self.children.get(idx)?;
-        unsafe { &mut *child_ptr }.as_menu_controller_mut()?.menu_click()
+        unsafe { &mut *self.active_child()? }.as_menu_controller_mut()?.menu_click()
     }
     fn trigger_menu_click(&mut self, menu_idx: usize, item_idx: usize) {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &mut **child }.as_menu_controller_mut() {
-                    mc.trigger_menu_click(menu_idx, item_idx);
-                }
+        if let Some(child) = self.active_child() {
+            if let Some(mc) = unsafe { &mut *child }.as_menu_controller_mut() {
+                mc.trigger_menu_click(menu_idx, item_idx);
             }
         }
     }
     fn set_item_checked(&mut self, menu_idx: usize, item_idx: usize, checked: bool) {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &mut **child }.as_menu_controller_mut() {
-                    mc.set_item_checked(menu_idx, item_idx, checked);
-                }
+        if let Some(child) = self.active_child() {
+            if let Some(mc) = unsafe { &mut *child }.as_menu_controller_mut() {
+                mc.set_item_checked(menu_idx, item_idx, checked);
             }
         }
     }
     fn set_menu_items(&mut self, menu_idx: usize, items: &[String]) {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &mut **child }.as_menu_controller_mut() {
-                    mc.set_menu_items(menu_idx, items);
-                }
+        if let Some(child) = self.active_child() {
+            if let Some(mc) = unsafe { &mut *child }.as_menu_controller_mut() {
+                mc.set_menu_items(menu_idx, items);
             }
         }
     }
     fn is_menu_bar(&self) -> bool {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &**child }.as_menu_controller() {
-                    return mc.is_menu_bar();
-                }
-            }
-        }
-        false
+        self.active_child()
+            .and_then(|c| unsafe { &*c }.as_menu_controller().map(|mc| mc.is_menu_bar()))
+            .unwrap_or(false)
     }
     fn is_menu_open(&self) -> bool {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &**child }.as_menu_controller() {
-                    return mc.is_menu_open();
-                }
-            }
-        }
-        false
+        self.active_child()
+            .and_then(|c| unsafe { &*c }.as_menu_controller().map(|mc| mc.is_menu_open()))
+            .unwrap_or(false)
     }
     fn menu_items(&self) -> Vec<String> {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &**child }.as_menu_controller() {
-                    return mc.menu_items();
-                }
-            }
-        }
-        Vec::new()
+        self.active_child()
+            .and_then(|c| unsafe { &*c }.as_menu_controller().map(|mc| mc.menu_items()))
+            .unwrap_or_default()
     }
     fn menu_item_checked(&self) -> Vec<Option<bool>> {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &**child }.as_menu_controller() {
-                    return mc.menu_item_checked();
-                }
-            }
-        }
-        Vec::new()
+        self.active_child()
+            .and_then(|c| unsafe { &*c }.as_menu_controller().map(|mc| mc.menu_item_checked()))
+            .unwrap_or_default()
     }
     fn is_vertical(&self) -> bool {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &**child }.as_menu_controller() {
-                    return mc.is_vertical();
-                }
-            }
-        }
-        false
+        self.active_child()
+            .and_then(|c| unsafe { &*c }.as_menu_controller().map(|mc| mc.is_vertical()))
+            .unwrap_or(false)
     }
     fn menu_names(&self) -> Vec<String> {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &**child }.as_menu_controller() {
-                    return mc.menu_names();
-                }
-            }
-        }
-        Vec::new()
+        self.active_child()
+            .and_then(|c| unsafe { &*c }.as_menu_controller().map(|mc| mc.menu_names()))
+            .unwrap_or_default()
     }
     fn menu_items_list(&self) -> Vec<Vec<String>> {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &**child }.as_menu_controller() {
-                    return mc.menu_items_list();
-                }
-            }
-        }
-        Vec::new()
+        self.active_child()
+            .and_then(|c| unsafe { &*c }.as_menu_controller().map(|mc| mc.menu_items_list()))
+            .unwrap_or_default()
     }
     fn menu_checked_list(&self) -> Vec<Vec<Option<bool>>> {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &**child }.as_menu_controller() {
-                    return mc.menu_checked_list();
-                }
-            }
-        }
-        Vec::new()
+        self.active_child()
+            .and_then(|c| unsafe { &*c }.as_menu_controller().map(|mc| mc.menu_checked_list()))
+            .unwrap_or_default()
     }
     fn take_context_change(&mut self) -> Option<usize> {
-        let idx = self.active_index?;
-        let child_ptr = *self.children.get(idx)?;
-        unsafe { &mut *child_ptr }.as_menu_controller_mut()?.take_context_change()
+        unsafe { &mut *self.active_child()? }.as_menu_controller_mut()?.take_context_change()
     }
     fn set_context_selected(&mut self, selected: usize) {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &mut **child }.as_menu_controller_mut() {
-                    mc.set_context_selected(selected);
-                }
+        if let Some(child) = self.active_child() {
+            if let Some(mc) = unsafe { &mut *child }.as_menu_controller_mut() {
+                mc.set_context_selected(selected);
             }
         }
     }
     fn set_center_items(&mut self, center: bool) {
-        if let Some(idx) = self.active_index {
-            if let Some(child) = self.children.get(idx) {
-                if let Some(mc) = unsafe { &mut **child }.as_menu_controller_mut() {
-                    mc.set_center_items(center);
-                }
+        if let Some(child) = self.active_child() {
+            if let Some(mc) = unsafe { &mut *child }.as_menu_controller_mut() {
+                mc.set_center_items(center);
             }
         }
     }
     fn get_menu_items_at(&self, px: f32, py: f32) -> Option<(usize, String, Vec<String>, f32, f32, f32, f32)> {
-        let idx = self.active_index?;
-        let child_ptr = *self.children.get(idx)?;
-        unsafe { &*child_ptr }.as_menu_controller()?.get_menu_items_at(px, py)
+        unsafe { &*self.active_child()? }.as_menu_controller()?.get_menu_items_at(px, py)
     }
 }
 
 unsafe impl Send for Switcher {}
 unsafe impl Sync for Switcher {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::UiContext;
+    use crate::widget::{Checkbox, Label};
+
+    #[test]
+    fn switcher_exposes_only_the_active_child() {
+        let mut ctx = UiContext::new();
+        let mut a = Label::new("page a");
+        let mut b = Checkbox::new();
+        let mut sw = Switcher::new(0.0, 0.0, 200.0, 100.0);
+        let (sw_id, sw_ptr) = (sw.id(), sw.as_ptr_mut());
+        ctx.register_widget(sw_id, sw_ptr);
+        Element::add_child(&mut sw, a.as_ptr_mut(), &mut ctx);
+        Element::add_child(&mut sw, b.as_ptr_mut(), &mut ctx);
+
+        // add_child parented both children back to the switcher and left them hidden (no
+        // active selection yet).
+        assert!(!Element::visible(&a) && !Element::visible(&b));
+        assert!(Element::children(&sw, &ctx).len() == 2);
+
+        // Activating a child shows it, arranges it into the switcher's rect, and routes the
+        // subtree getters through it alone.
+        sw.set_active_index(Some(1));
+        assert!(!Element::visible(&a) && Element::visible(&b));
+        Element::set_rect(&mut sw, 10.0, 20.0, 300.0, 150.0);
+        assert_eq!(Element::rect(&b), (10.0, 20.0, 300.0, 150.0), "active child fills the rect");
+        assert_ne!(Element::rect(&a), (10.0, 20.0, 300.0, 150.0), "inactive child untouched");
+
+        // Aggregation and hit-testing go through the active child only.
+        assert!(Element::is_child_visible(&sw, b.id()));
+        assert!(!Element::is_child_visible(&sw, a.id()));
+        assert!(Element::hit_test(&sw, 15.0, 25.0, &ctx), "hit lands on the active child");
+
+        // The menu-controller delegation returns None-ish defaults for non-menu children.
+        let elem: &dyn Element = &sw;
+        assert!(elem.as_menu_controller().unwrap().menu_items().is_empty());
+    }
+}

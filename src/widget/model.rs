@@ -83,6 +83,57 @@ pub trait Layout {
     fn detached_label_inset(&self) -> f32 {
         0.0
     }
+
+    // --- Container concern (transitional). Legacy containers own `Vec<*mut dyn Element>`
+    // children (child-arranging `set_rect` has no ctx to reach the tree) and every one
+    // hand-copies the same subtree plumbing: geometry/text aggregation, tick/popover/text-item
+    // recursion, hit-through-children. A migrated container keeps the pointer Vec in its model
+    // (exposed through these hooks) and the ADAPTER does the shared plumbing once, filtered by
+    // `child_visible`. What stays per-widget: child arrangement (`arrange_children` /
+    // `layout_children_ctx`) and any event proxying (in `on_event`, via `EventCtx::ui`).
+    // Dies with `Element`: the arena owns the tree and the scene walk owns recursion.
+
+    /// Whether this widget is a container serving
+    /// [`container_children`](Layout::container_children). Cheap gate, checked per getter.
+    fn has_container_children(&self) -> bool {
+        false
+    }
+
+    /// The container's child pointers, in stacking order.
+    fn container_children(&self) -> Vec<*mut (dyn Element + 'static)> {
+        Vec::new()
+    }
+
+    /// A child was attached through `Element::add_child` (the adapter has already tree-linked
+    /// it and set its parent).
+    fn child_added(&mut self, _child: *mut (dyn Element + 'static)) {}
+
+    /// All children were detached through `Element::clear_children`.
+    fn children_cleared(&mut self) {}
+
+    /// The parent pointer changed through `Element::set_parent` (containers that clamp their
+    /// rect to the parent's keep a copy — the tree default needs a ctx that `set_rect` lacks).
+    fn parent_changed(&mut self, _parent: Option<*mut (dyn Element + 'static)>) {}
+
+    /// Adjust a rect assignment before it lands on the base (Switcher clamps to its parent).
+    /// Default: identity.
+    fn adjust_rect(&self, requested: Rect) -> Rect {
+        requested
+    }
+
+    /// Position children after a `set_rect` (no ctx available — use the owned pointers).
+    /// Called only while the widget is visible, matching the legacy overrides.
+    fn arrange_children(&mut self, _rect: Rect) {}
+
+    /// Recursive child layout for the `Element::layout` pass (this one has ctx). Called after
+    /// the adapter has measured and placed the container itself, only while visible.
+    fn layout_children_ctx(&mut self, _rect: Rect, _ctx: &mut UiContext) {}
+
+    /// Per-child visibility policy for the adapter's subtree plumbing (Switcher exposes only
+    /// the active child). Default: every child.
+    fn child_visible(&self, _child: *mut (dyn Element + 'static)) -> bool {
+        true
+    }
 }
 
 /// The paint concern — a widget's fill color, its own (non-recursive) geometry emission, and
@@ -238,6 +289,20 @@ pub trait Input {
     /// no ctx by design). Default: no.
     fn opens_context_menu(&self) -> bool {
         false
+    }
+
+    /// Container hit policy: hit whenever any [`Layout::child_visible`] child hits (Layer,
+    /// Switcher). The container's own rect is not consulted. Default: own-rect hit.
+    fn hits_through_children(&self) -> bool {
+        false
+    }
+
+    /// Whether the adapter hit-gates `MouseButton` presses before `on_event` (the leaf
+    /// centralization). Event-proxying containers return `false`: legacy container
+    /// `mouse_input` overrides saw every press — Switcher unfocuses its active child when a
+    /// press lands outside it, which a gated `on_event` would never learn about.
+    fn gates_presses(&self) -> bool {
+        true
     }
 
     // --- The legacy polling/value-binding surface (`take_click`, `take_change`,
@@ -469,6 +534,92 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         pc.finish().items.into_iter().map(|item| item.prim).collect()
     }
 
+    /// The container's children that pass the [`Layout::child_visible`] policy — the set the
+    /// adapter's subtree plumbing (aggregation, recursion, hit-through) operates on. Empty for
+    /// non-containers.
+    fn visible_children(&self) -> Vec<*mut (dyn Element + 'static)> {
+        if !Layout::has_container_children(&self.inner) {
+            return Vec::new();
+        }
+        Layout::container_children(&self.inner)
+            .into_iter()
+            .filter(|c| Layout::child_visible(&self.inner, *c))
+            .collect()
+    }
+
+    /// This widget's OWN text (prim-derived + detached base label), before any child
+    /// aggregation — the shared source for the three text getters.
+    fn own_text_labels(&self) -> Vec<TextLabel> {
+        if !self.visible() {
+            return Vec::new();
+        }
+        let mut out: Vec<TextLabel> = self
+            .painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                Prim::Text { text, x, y, font_size, color } => {
+                    Some(TextLabel { text, x, y, font_size, color })
+                }
+                _ => None,
+            })
+            .collect();
+        if !Layout::inline_label(&self.inner) {
+            out.extend(self.base_label_fallback());
+        }
+        out
+    }
+
+    /// Own text with font + bounds: [`Paint::text_bounds`] when the widget provides it, else a
+    /// replica of the `Element` default's scroll-ancestor viewport clipping.
+    fn own_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let font = Paint::widget_font(&self.inner);
+        if let Some(bounds) = Paint::text_bounds(&self.inner, self.content_rect()) {
+            return self
+                .own_text_labels()
+                .into_iter()
+                .map(|l| (l, font.clone(), Some(bounds)))
+                .collect();
+        }
+
+        let mut labels = self
+            .own_text_labels()
+            .into_iter()
+            .map(|l| (l, font.clone(), None::<[f32; 4]>))
+            .collect::<Vec<_>>();
+        let mut curr = Element::parent(self, ctx);
+        let mut scroll_box_bounds = None;
+        while let Some(parent_ptr) = curr {
+            let parent = unsafe { &*parent_ptr };
+            if let Some(scroll_box) = parent.as_any().downcast_ref::<crate::widget::ScrollBox>() {
+                let (sb_x, _, sb_w, _) = parent.rect();
+                let view_min = scroll_box.viewport_y + 4.0;
+                let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
+                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
+                break;
+            } else if let Some(list) = parent.as_any().downcast_ref::<crate::widget::List>() {
+                let (sb_x, _, sb_w, _) = parent.rect();
+                let view_min = list.scroll_box.viewport_y + 4.0;
+                let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
+                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
+                break;
+            }
+            curr = parent.parent(ctx);
+        }
+        if let Some(sb_bounds) = scroll_box_bounds {
+            for item in &mut labels {
+                if let Some(ref mut b) = item.2 {
+                    b[0] = b[0].max(sb_bounds[0]);
+                    b[1] = b[1].max(sb_bounds[1]);
+                    b[2] = b[2].min(sb_bounds[2]);
+                    b[3] = b[3].min(sb_bounds[3]);
+                } else {
+                    item.2 = Some(sb_bounds);
+                }
+            }
+        }
+        labels
+    }
+
     /// The base-label text of a *detached*-label widget — a replica of the legacy default
     /// `Element::text_labels` body (which an overriding impl can no longer call).
     fn base_label_fallback(&self) -> Vec<TextLabel> {
@@ -536,6 +687,119 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         self.visible
     }
 
+    // --- Container concern: tree lifecycle, child layout, and subtree recursion. The tree
+    // itself stays in `ctx.tree` (the Element defaults' store); a container model additionally
+    // keeps its own pointer Vec via the `Layout` hooks, because `set_rect`-time arrangement
+    // has no ctx to reach the tree.
+
+    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+        if Layout::has_container_children(&self.inner) {
+            return Layout::container_children(&self.inner);
+        }
+        ctx.tree.children_ptrs(self.base.id())
+    }
+
+    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
+        // The Element default's tree link…
+        if let Some(c_base) = unsafe { (*child).base() } {
+            let c_id = c_base.id();
+            let p_id = self.base.id();
+            let self_ptr = self.as_ptr();
+            ctx.register_widget(p_id, self_ptr);
+            ctx.register_widget(c_id, child);
+            ctx.tree.link(p_id, c_id);
+        }
+        // …plus, for containers, the legacy container extras: parent the child back (Layer,
+        // Switcher) and record it in the model's own Vec.
+        if Layout::has_container_children(&self.inner) {
+            let self_ptr = self.as_ptr_mut();
+            unsafe { (*child).set_parent(Some(self_ptr), ctx) };
+            Layout::child_added(&mut self.inner, child);
+        }
+    }
+
+    fn clear_children(&mut self, ctx: &mut UiContext) {
+        ctx.clear_children_ids(self.base.id());
+        Layout::children_cleared(&mut self.inner);
+    }
+
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
+        Layout::parent_changed(&mut self.inner, parent);
+        // Replica of the Element default: symmetric tree link.
+        let id = self.base.id();
+        if let Some(p_ptr) = parent {
+            if let Some(p_base) = unsafe { (*p_ptr).base() } {
+                let p_id = p_base.id();
+                ctx.register_widget(p_id, p_ptr);
+                let self_ptr = self.as_ptr();
+                ctx.register_widget(id, self_ptr);
+                ctx.tree.set_parent(id, Some(p_id));
+            }
+        } else {
+            ctx.tree.set_parent(id, None);
+        }
+    }
+
+    fn is_child_visible(&self, child_id: WidgetId) -> bool {
+        if !Layout::has_container_children(&self.inner) {
+            return true;
+        }
+        for child in Layout::container_children(&self.inner) {
+            if let Some(b) = unsafe { (*child).base() } {
+                if b.id() == child_id {
+                    return Layout::child_visible(&self.inner, child);
+                }
+            }
+        }
+        false
+    }
+
+    fn layout(&mut self, origin: crate::widget::Point, constraints: crate::widget::LayoutConstraints, ctx: &mut UiContext) {
+        // The Element default (measure + set_rect), plus recursive child layout for visible
+        // containers — the ctx-carrying half of the arrangement the model can't do in
+        // `arrange_children`.
+        let size = self.measure(constraints, ctx);
+        self.set_rect(origin.x, origin.y, size.width, size.height);
+        if Layout::has_container_children(&self.inner) && self.visible {
+            let rect = self.content_rect();
+            Layout::layout_children_ctx(&mut self.inner, rect, ctx);
+        }
+    }
+
+    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
+        let mut items = Vec::new();
+        if self.visible() {
+            for child in self.visible_children() {
+                items.extend(unsafe { &*child }.get_text_items());
+            }
+        }
+        items
+    }
+
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+        if self.visible() {
+            for child in self.visible_children() {
+                unsafe { (*child).prepare_text(fs) };
+            }
+        }
+    }
+
+    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        if !self.visible() {
+            return None;
+        }
+        self.visible_children().into_iter().find_map(|c| unsafe { &*c }.popover_rect())
+    }
+
+    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        if !self.visible() {
+            return;
+        }
+        for child in self.visible_children() {
+            unsafe { &*child }.render_popover(pc);
+        }
+    }
+
     // --- Layout concern -> `Layout` ---
     fn layout_style(&self) -> Option<Style> {
         Layout::layout_style(&self.inner)
@@ -557,15 +821,22 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// `set_rect` overrides). Inline-label widgets ([`Layout::inline_label`]) draw the label
     /// inside their rect and get no inflation. Zero-cost when no label is set.
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let r = Layout::adjust_rect(&self.inner, Rect { x, y, width: w, height: h });
         let inflation = if Layout::inline_label(&self.inner) || !Layout::inflates_label_rect(&self.inner) {
             0.0
         } else {
             self.base.label_offset()
         };
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h + inflation;
+        self.base.x = r.x;
+        self.base.y = r.y;
+        self.base.w = r.width;
+        self.base.h = r.height + inflation;
+        // Containers position their children from the assigned rect (legacy `set_rect`
+        // overrides); hidden containers skip it, like the legacy impls.
+        if self.visible {
+            let content = self.content_rect();
+            Layout::arrange_children(&mut self.inner, content);
+        }
     }
 
     fn preferred_height(&self) -> Option<f32> {
@@ -627,77 +898,38 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// widget draws — inline labels, readouts), plus the base-label text for detached-label
     /// widgets (drawn by the adapter, since the label lives on the base).
     /// The legacy bounded-text getters, honoring [`Paint::text_bounds`] (Graph clips node
-    /// names to its own rect). Without it, `text_labels_with_bounds` matches the unbounded
-    /// `Element` default, and `text_labels_with_font_and_bounds` replicates the default's
+    /// names to its own rect) and aggregating container children — each child contributes its
+    /// own getter of the same kind, so its fonts/bounds are preserved (the Layer pattern).
+    /// Without a text-bounds hook, `text_labels_with_bounds` matches the unbounded `Element`
+    /// default, and `text_labels_with_font_and_bounds` replicates the default's
     /// scroll-ancestor walk (an overriding impl can no longer call it).
-    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
         let bounds = Paint::text_bounds(&self.inner, self.content_rect());
-        self.text_labels().into_iter().map(|l| (l, bounds)).collect()
+        let mut out: Vec<_> = self.own_text_labels().into_iter().map(|l| (l, bounds)).collect();
+        if self.visible() {
+            for child in self.visible_children() {
+                out.extend(unsafe { &*child }.text_labels_with_bounds(ctx));
+            }
+        }
+        out
     }
 
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let font = Paint::widget_font(&self.inner);
-        if let Some(bounds) = Paint::text_bounds(&self.inner, self.content_rect()) {
-            return self
-                .text_labels()
-                .into_iter()
-                .map(|l| (l, font.clone(), Some(bounds)))
-                .collect();
-        }
-
-        // Replica of the `Element` default: clip to the viewport of a ScrollBox/List ancestor.
-        let mut labels =
-            self.text_labels().into_iter().map(|l| (l, font.clone(), None::<[f32; 4]>)).collect::<Vec<_>>();
-        let mut curr = self.parent(ctx);
-        let mut scroll_box_bounds = None;
-        while let Some(parent_ptr) = curr {
-            let parent = unsafe { &*parent_ptr };
-            if let Some(scroll_box) = parent.as_any().downcast_ref::<crate::widget::ScrollBox>() {
-                let (sb_x, _, sb_w, _) = parent.rect();
-                let view_min = scroll_box.viewport_y + 4.0;
-                let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
-                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
-                break;
-            } else if let Some(list) = parent.as_any().downcast_ref::<crate::widget::List>() {
-                let (sb_x, _, sb_w, _) = parent.rect();
-                let view_min = list.scroll_box.viewport_y + 4.0;
-                let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
-                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
-                break;
-            }
-            curr = parent.parent(ctx);
-        }
-        if let Some(sb_bounds) = scroll_box_bounds {
-            for item in &mut labels {
-                if let Some(ref mut b) = item.2 {
-                    b[0] = b[0].max(sb_bounds[0]);
-                    b[1] = b[1].max(sb_bounds[1]);
-                    b[2] = b[2].min(sb_bounds[2]);
-                    b[3] = b[3].min(sb_bounds[3]);
-                } else {
-                    item.2 = Some(sb_bounds);
-                }
+        let mut own = self.own_labels_with_font_and_bounds(ctx);
+        if self.visible() {
+            for child in self.visible_children() {
+                own.extend(unsafe { &*child }.text_labels_with_font_and_bounds(ctx));
             }
         }
-        labels
+        own
     }
 
     fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.visible() {
-            return Vec::new();
-        }
-        let mut out: Vec<TextLabel> = self
-            .painted_prims()
-            .into_iter()
-            .filter_map(|prim| match prim {
-                Prim::Text { text, x, y, font_size, color } => {
-                    Some(TextLabel { text, x, y, font_size, color })
-                }
-                _ => None,
-            })
-            .collect();
-        if !Layout::inline_label(&self.inner) {
-            out.extend(self.base_label_fallback());
+        let mut out = self.own_text_labels();
+        if self.visible() {
+            for child in self.visible_children() {
+                out.extend(unsafe { &*child }.text_labels());
+            }
         }
         out
     }
@@ -710,11 +942,12 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     // the widget's OWN geometry only: adapted widgets are leaves for now; recursion belongs to
     // `scene::painter`.
 
-    fn all_rounded_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         if !self.visible() {
             return Vec::new();
         }
-        self.painted_prims()
+        let mut out: Vec<_> = self
+            .painted_prims()
             .into_iter()
             .filter_map(|prim| match prim {
                 Prim::RoundedRect { rect, radius, corners, color } => {
@@ -722,7 +955,12 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
                 }
                 _ => None,
             })
-            .collect()
+            .collect();
+        // Containers recurse, matching the `Element` default this override replaces.
+        for child in self.visible_children() {
+            out.extend(unsafe { &*child }.all_rounded_quads(ctx));
+        }
+        out
     }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -746,11 +984,33 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// only — `all_quads` must stay empty or they draw it twice. Mirrors legacy Graph's
     /// highlight-only `all_quads` override. Otherwise: the `Element` default minus the shared
     /// highlight (suppressed for all adapted widgets via `highlight_quad -> None`).
-    fn all_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if Paint::serves_legacy_plain_quads(&self.inner) {
             return Vec::new();
         }
-        self.extra_quads()
+        let mut quads = self.extra_quads();
+        if self.visible() {
+            // Container aggregation, replicating the shared legacy loop (Layer, Switcher):
+            // children contribute their plain quads, except a rounded-cornered child's
+            // background quad — that one arrives through `all_rounded_quads` instead.
+            for child in self.visible_children() {
+                let widget = unsafe { &*child };
+                let (wx, wy, ww, wh) = widget.rect();
+                let has_rounded = widget.rounded_corners() != (false, false, false, false);
+                for (qx, qy, qw, qh, qc) in widget.all_quads(ctx) {
+                    if has_rounded
+                        && (qx - wx).abs() < 0.1
+                        && (qy - wy).abs() < 0.1
+                        && (qw - ww).abs() < 0.1
+                        && (qh - wh).abs() < 0.1
+                    {
+                        continue;
+                    }
+                    quads.push((qx, qy, qw, qh, qc));
+                }
+            }
+        }
+        quads
     }
 
     fn extra_circles(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
@@ -809,9 +1069,15 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn is_dragging(&self) -> bool {
         Input::is_dragging(&self.inner)
     }
-    fn tick(&mut self, dt: f32, _ctx: &mut UiContext) -> bool {
+    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
         let rect = self.content_rect();
-        Input::tick(&mut self.inner, dt, rect)
+        let mut changed = Input::tick(&mut self.inner, dt, rect);
+        if self.visible {
+            for child in self.visible_children() {
+                changed |= unsafe { &mut *child }.tick(dt, ctx);
+            }
+        }
+        changed
     }
     fn wants_tick(&self) -> bool {
         Input::wants_tick(&self.inner)
@@ -958,6 +1224,15 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         if !self.visible() {
             return false;
         }
+        // Containers with a hit-through policy delegate entirely to their visible children
+        // (each child runs its own coverage check) — the legacy Layer/Switcher pattern, which
+        // never consulted the container's own rect or coverage.
+        if Input::hits_through_children(&self.inner) {
+            return self
+                .visible_children()
+                .into_iter()
+                .any(|c| unsafe { &*c }.hit_test(px, py, ctx));
+        }
         // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
         // the geometric test to the narrow trait instead of the row/label-offset machinery.
         if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
@@ -997,7 +1272,15 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             // per-widget "check hit_test first" boilerplate legacy `mouse_input` overrides do.
             // RELEASES are deliberately NOT gated: a press-tracking widget (Button) must see the
             // release wherever the cursor ended up, to commit or cancel — exactly what legacy
-            // `mouse_input` overrides did by receiving every release.
+            // `mouse_input` overrides did by receiving every release. Event-proxying containers
+            // opt out of the press gate (`Input::gates_presses`): legacy container overrides
+            // saw every press (Switcher unfocuses its child on an outside press).
+            Event::MouseButton { state: crate::widget::ElementState::Pressed, x: px, y: py, .. }
+                if !Input::gates_presses(&self.inner) =>
+            {
+                let _ = (px, py);
+                Input::on_event(&mut self.inner, event, &mut ectx!())
+            }
             Event::MouseButton { state: crate::widget::ElementState::Pressed, x: px, y: py, .. }
             | Event::MouseWheel { x: px, y: py, .. } => {
                 self.hit_test(*px, *py, ctx) && Input::on_event(&mut self.inner, event, &mut ectx!())
