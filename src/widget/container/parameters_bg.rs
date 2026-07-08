@@ -16,7 +16,7 @@ pub struct ParametersBg {
     pub buttons: Vec<Option<Button>>,
     pub choices: Vec<Option<Dropdown>>,
     pub texts: Vec<Option<TextBox>>,
-    pub checkboxes: Vec<Option<Checkbox>>,
+    pub checkboxes: Vec<Option<crate::widget::Adapted<Checkbox>>>,
     pub colors: Vec<Option<ColorSelector>>,
     visible: bool,
     pub children: Vec<*mut (dyn Element + 'static)>,

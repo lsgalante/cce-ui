@@ -28,7 +28,7 @@
 
 use crate::scene::layout::{Rect, Size, Style};
 use crate::scene::paint::{PaintCtx, Prim};
-use crate::widget::{Element, Event, UiContext, Widget, WidgetId};
+use crate::widget::{Element, Event, TextLabel, UiContext, Widget, WidgetId};
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
 /// avoid the existing [`Widget`] base struct. Mirrors the opt-in `Element::layout_style` /
@@ -50,6 +50,14 @@ pub trait Layout {
     /// proportions), in `children()` order. See [`Element::layout_children`].
     fn layout_children(&self) -> Option<Vec<Style>> {
         None
+    }
+
+    /// Whether this widget draws its control label *inline* (inside its own rect, like
+    /// `Checkbox`/`Toggle`/`Button`) rather than detached above it (like `ProgressBar`/`Slider`).
+    /// Inline-label widgets get no `set_rect` height inflation and no content-rect inset —
+    /// mirroring the legacy `label_offset` free function's type-name special cases.
+    fn inline_label(&self) -> bool {
+        false
     }
 }
 
@@ -86,6 +94,25 @@ pub trait Paint {
     fn corner_style(&self) -> Option<(f32, (bool, bool, bool, bool))> {
         None
     }
+
+    /// Solid border `(color, thickness)` of the widget's background quad. **Transitional**, like
+    /// [`corner_style`](Paint::corner_style): `render_widget` gives a widget's background quad a
+    /// border+inset treatment when this is `Some` — `Toggle`'s square mode depends on it.
+    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+        None
+    }
+
+    /// Font for this widget's text on legacy text paths (`render_widget` reads
+    /// `Element::widget_font`). **Transitional.**
+    fn widget_font(&self) -> Option<String> {
+        None
+    }
+
+    /// Receive the control label set on the wrapper via [`Adapted::with_label`] (and legacy
+    /// `Control::set_label` paths). Widgets that paint their label themselves (inline-label
+    /// widgets) store it here; the default discards it, leaving label drawing to the adapter's
+    /// base-label machinery.
+    fn sync_label(&mut self, _label: &str) {}
 }
 
 /// The input concern — hit-testing and event handling against the laid-out rect. Mirrors the
@@ -116,17 +143,65 @@ pub trait Input {
     fn blocks_backplate_drag(&self) -> bool {
         true
     }
+
+    /// Whether a right-click on this widget opens the shared config context menu (the adapter
+    /// then routes it to `UiContext::handle_right_click`, which `on_event` can't reach — it has
+    /// no ctx by design). Default: no.
+    fn opens_context_menu(&self) -> bool {
+        false
+    }
+
+    // --- The legacy polling/value-binding surface (`take_click`, `take_change`,
+    // `get_value_string`/`set_value_string`, `value`) apps read widget state through. Kept on
+    // `Input` to avoid a fourth trait bound; replaced by typed messages when RFC §3.5's EventCtx
+    // lands. All default to the inert legacy defaults.
+
+    /// Consume the "was clicked since last asked" flag.
+    fn take_click(&mut self) -> bool {
+        false
+    }
+
+    /// Consume the "value changed since last asked" flag.
+    fn take_change(&mut self) -> bool {
+        false
+    }
+
+    /// The widget's value serialized for the config system.
+    fn value_string(&self) -> Option<String> {
+        None
+    }
+
+    /// Set the widget's value from a config string. Returns whether it parsed and changed.
+    fn set_value_string(&mut self, _val: &str) -> bool {
+        false
+    }
+
+    /// The widget's value as an integer (legacy `Element::value`).
+    fn value(&self) -> i32 {
+        0
+    }
 }
 
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
 /// [`Widget`] base that `Element`'s rect / id / dirty machinery needs, and forwards the concern
 /// methods to `W`. See the module docs for why this bridge exists rather than a supertrait split.
-pub struct Adapted<W> {
+///
+/// The bounds live on the struct (not just the `Element` impl) so `Drop` can clear the global
+/// focus / context-menu references through `&dyn Element` — the same guard legacy widgets with
+/// `Drop` impls (e.g. the old `Checkbox`) carried.
+#[derive(Debug, Clone)]
+pub struct Adapted<W: Layout + Paint + Input + 'static> {
     base: Widget,
     inner: W,
 }
 
-impl<W> Adapted<W> {
+impl<W: Layout + Paint + Input + 'static> Drop for Adapted<W> {
+    fn drop(&mut self) {
+        crate::widget::clear_widget_references(self);
+    }
+}
+
+impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// Wrap `inner` with a fresh [`Widget`] base.
     pub fn new(inner: W) -> Self {
         Adapted { base: Widget::new(), inner }
@@ -147,18 +222,38 @@ impl<W> Adapted<W> {
         self.base.id()
     }
 
-    /// Attach a detached control label (drawn above the widget by the shared `text_labels`
-    /// machinery). Mirrors the `with_label` builders legacy control widgets carry, so
-    /// construction sites keep their shape when a widget migrates.
+    /// Attach a control label. Mirrors the `with_label` builders legacy control widgets carry,
+    /// so construction sites keep their shape when a widget migrates. The label is stored on the
+    /// base (legacy machinery: label offsets, context-menu titles) *and* pushed into the widget
+    /// via [`Paint::sync_label`] for widgets that paint it themselves.
     pub fn with_label(mut self, label: &str) -> Self {
         self.base.label = Some(label.to_string());
+        self.inner.sync_label(label);
         self
     }
 
+    /// Bind this widget to a config file/key (right-click context-menu editing). Mirrors the
+    /// legacy `with_config` builders.
+    pub fn with_config(mut self, file: &str, key: &str) -> Self {
+        self.base.config_file = Some(file.to_string());
+        self.base.config_key = Some(key.to_string());
+        self
+    }
+
+    /// Update the control label, keeping the base copy (legacy machinery) and the widget's own
+    /// copy ([`Paint::sync_label`]) in step. Inherent so it shadows `Control::set_label` — which
+    /// writes only the base and would leave a self-painting label stale — at every call site,
+    /// regardless of which traits are in scope.
+    pub fn set_label(&mut self, label: &str) {
+        self.base.label = Some(label.to_string());
+        self.inner.sync_label(label);
+    }
+
     /// The rect the wrapped widget paints into: the widget's rect minus the detached-label
-    /// region at the top (zero inset when there is no label — `Widget::label_offset`).
+    /// region at the top (zero inset when there is no label, or when the widget draws its label
+    /// inline — `Widget::label_offset` / [`Layout::inline_label`]).
     fn content_rect(&self) -> Rect {
-        let top = self.base.label_offset();
+        let top = if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() };
         Rect {
             x: self.base.x,
             y: self.base.y + top,
@@ -168,14 +263,33 @@ impl<W> Adapted<W> {
     }
 }
 
-impl<W: Paint> Adapted<W> {
+impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// Run the wrapped widget's [`Paint::paint`] against its content rect and return the emitted
     /// prims — the shared source for the reverse bridges (`extra_quads`, `all_rounded_quads`,
-    /// `extra_circles`, `extra_arcs`) that legacy render loops read.
+    /// `extra_circles`, `extra_arcs`, prim-derived `text_labels`) that legacy render loops read.
     fn painted_prims(&self) -> Vec<Prim> {
         let mut pc = PaintCtx::new();
         Paint::paint(&self.inner, self.content_rect(), &mut pc);
         pc.finish().items.into_iter().map(|item| item.prim).collect()
+    }
+
+    /// The base-label text of a *detached*-label widget — a replica of the legacy default
+    /// `Element::text_labels` body (which an overriding impl can no longer call).
+    fn base_label_fallback(&self) -> Vec<TextLabel> {
+        let b = &self.base;
+        if let Some(ref label) = b.label {
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            let color = crate::colors::control_label_color_detached_for_state(b.hovered, b.focused);
+            if crate::layout::control_label_layout() == "side" {
+                let label_x = Element::label_x_offset(self);
+                if label_x > 0.0 {
+                    let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
+                    return vec![TextLabel { text: label.clone(), x: b.x + 4.0, y: y_pos, font_size, color }];
+                }
+            }
+            return vec![TextLabel { text: label.clone(), x: b.x, y: b.y, font_size, color }];
+        }
+        Vec::new()
     }
 }
 
@@ -183,14 +297,14 @@ impl<W: Paint> Adapted<W> {
 /// methods directly (`dot.status`, `dot.set_status(..)`) without knowing about the wrapper.
 /// (By-value builders can't flow through `Deref` — those get mirrored per-widget, like
 /// `with_label` here or `UsageBar::with_colors`.)
-impl<W> std::ops::Deref for Adapted<W> {
+impl<W: Layout + Paint + Input + 'static> std::ops::Deref for Adapted<W> {
     type Target = W;
     fn deref(&self) -> &W {
         &self.inner
     }
 }
 
-impl<W> std::ops::DerefMut for Adapted<W> {
+impl<W: Layout + Paint + Input + 'static> std::ops::DerefMut for Adapted<W> {
     fn deref_mut(&mut self) -> &mut W {
         &mut self.inner
     }
@@ -203,11 +317,13 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn base_mut(&mut self) -> Option<&mut Widget> {
         Some(&mut self.base)
     }
+    // `as_any` exposes the *inner* widget: legacy code downcasts by concrete widget type
+    // (`json_layout`'s `downcast_mut::<Checkbox>()`), and the adapter must be transparent to it.
     fn as_any(&self) -> &dyn std::any::Any {
-        self
+        &self.inner
     }
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        self
+        &mut self.inner
     }
     fn as_ptr(&self) -> *mut (dyn Element + 'static) {
         self as *const Self as *mut Self as *mut (dyn Element + 'static)
@@ -231,12 +347,14 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
 
     /// The detached-label convention shared by legacy control widgets: the widget grows past the
     /// rect its parent assigns to make room for the label above (`ProgressBar`/`Slider`-style
-    /// `set_rect` overrides). Zero-cost when no label is set.
+    /// `set_rect` overrides). Inline-label widgets ([`Layout::inline_label`]) draw the label
+    /// inside their rect and get no inflation. Zero-cost when no label is set.
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let inflation = if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() };
         self.base.x = x;
         self.base.y = y;
         self.base.w = w;
-        self.base.h = h + self.base.label_offset();
+        self.base.h = h + inflation;
     }
 
     fn preferred_height(&self) -> Option<f32> {
@@ -270,11 +388,38 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn rounded_corners(&self) -> (bool, bool, bool, bool) {
         Paint::corner_style(&self.inner).map_or((false, false, false, false), |(_, c)| c)
     }
+    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+        Paint::solid_border(&self.inner)
+    }
+    fn widget_font(&self) -> Option<String> {
+        Paint::widget_font(&self.inner)
+    }
     fn paint_self(&self, _ui: &UiContext, ctx: &mut PaintCtx) {
         Paint::paint(&self.inner, self.content_rect(), ctx);
-        // The detached label, exactly as the legacy default `paint_self` emits it.
-        for tl in self.text_labels() {
-            ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+        // Inline-label widgets emit their own text in `paint`; detached labels come from the
+        // base, exactly as the legacy default `paint_self` emits them.
+        if !Layout::inline_label(&self.inner) {
+            for tl in self.base_label_fallback() {
+                ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+            }
+        }
+    }
+
+    /// Inline-label widgets: text derived from the [`Paint::paint`] `Text` prims (one source of
+    /// truth for what the widget draws). Detached-label widgets: the legacy base-label text.
+    fn text_labels(&self) -> Vec<TextLabel> {
+        if Layout::inline_label(&self.inner) {
+            self.painted_prims()
+                .into_iter()
+                .filter_map(|prim| match prim {
+                    Prim::Text { text, x, y, font_size, color } => {
+                        Some(TextLabel { text, x, y, font_size, color })
+                    }
+                    _ => None,
+                })
+                .collect()
+        } else {
+            self.base_label_fallback()
         }
     }
 
@@ -346,6 +491,21 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn blocks_backplate_drag(&self) -> bool {
         Input::blocks_backplate_drag(&self.inner)
     }
+    fn take_click(&mut self) -> bool {
+        Input::take_click(&mut self.inner)
+    }
+    fn take_change(&mut self) -> bool {
+        Input::take_change(&mut self.inner)
+    }
+    fn get_value_string(&self) -> Option<String> {
+        Input::value_string(&self.inner)
+    }
+    fn set_value_string(&mut self, val: &str) -> bool {
+        Input::set_value_string(&mut self.inner, val)
+    }
+    fn value(&self) -> i32 {
+        Input::value(&self.inner)
+    }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
         // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
@@ -361,6 +521,21 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         let (x, y, w, h) = self.rect();
         let rect = Rect { x, y, width: w, height: h };
         match event {
+            // A hit right-press on a context-menu widget routes to the shared config menu —
+            // `on_event` can't (no ctx), so the adapter owns this policy.
+            Event::MouseButton {
+                button: crate::widget::MouseButton::Right,
+                state: crate::widget::ElementState::Pressed,
+                x: px,
+                y: py,
+                ..
+            } if Input::opens_context_menu(&self.inner) => {
+                if self.hit_test(*px, *py, ctx) {
+                    ctx.handle_right_click(self.as_ptr_mut(), *px, *py);
+                    return true;
+                }
+                false
+            }
             // Hit-gate pointer-positioned events once, here, so narrow widgets never carry the
             // per-widget "check hit_test first" boilerplate legacy `mouse_input` overrides do.
             Event::MouseButton { x: px, y: py, .. } | Event::MouseWheel { x: px, y: py, .. } => {

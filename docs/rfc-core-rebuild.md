@@ -401,6 +401,29 @@ Constraint respected: **each crate still builds standalone** — the new core is
     in exact status colors). UsageBar verified byte-identical in the same dump (bg+fill rects at
     the exact `with_colors` colors). 147 tests pass; status-interface, system-settings, and
     test-interface all build.
+  - **5e — First interactive widgets: `Checkbox` + `Toggle`. DONE (verified end-to-end with an
+    injected live click).** New machinery: the legacy polling/value surface on `Input`
+    (`take_click`/`take_change`/`value_string`/`set_value_string`/`value` — kept there to avoid
+    a fourth bound; dies with RFC §3.5 typed messages); `Input::opens_context_menu` (the adapter
+    routes a hit right-press to `UiContext::handle_right_click`, which ctx-less `on_event`
+    can't); `Layout::inline_label` (Checkbox/Toggle draw the label inside their rect — no
+    `set_rect` inflation/content inset, matching the legacy `label_offset` type-name special
+    cases); `Paint::{solid_border, widget_font, sync_label}` (transitional forwards);
+    prim-derived `text_labels` for inline-label widgets (one paint source feeds every text
+    path) with a base-label fallback replica for detached ones; `as_any` now exposes the *inner*
+    widget so legacy `downcast_mut::<Checkbox>()` sites keep working; `Drop` on `Adapted`
+    clears the global focus/context-menu refs (bounds moved onto the struct for this);
+    `Debug`/`Clone` derives; and an inherent `Adapted::set_label` that shadows
+    `Control::set_label` (which writes only the base and left self-painted labels stale —
+    caught by a test; `Control` impls override to route here). Both widgets track
+    `hovered`/`focused` from the forwarded `MouseEnter`/`MouseLeave`/`FocusIn`/`FocusOut`
+    events — the state that becomes `Animated<f32>` in §3.6. In-crate consumers updated
+    (`json_layout` direct Element calls, `multi_control` enum variant, `parameters_bg` field);
+    app repos updated (system-settings network+notifications, data-editor, layout-interface
+    field types — construction sites unchanged). **Verification:** cce-test-interface pixel-
+    diffed 0 against the pre-migration baseline, and a `wlrctl`-injected click on the live
+    compositor flipped the Toggle's bordered half on-screen — the full input path through the
+    adapter exercised for real. 152 tests pass.
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10

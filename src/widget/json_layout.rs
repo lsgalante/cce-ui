@@ -256,9 +256,9 @@ impl JsonLayoutWidget {
             w_state.w = usable_w;
 
             if w_state.widget_type == "checkbox" {
-                if let Some(cb) = w_state.widget.as_any_mut().downcast_mut::<Checkbox>() {
-                    cb.set_rect(w_state.x, w_state.y + 2.0, 18.0, 18.0);
-                }
+                // set_rect is an Element method; call it on the box directly (the Phase 5
+                // Checkbox is an Adapted widget — as_any downcasts reach the model, not Element).
+                w_state.widget.set_rect(w_state.x, w_state.y + 2.0, 18.0, 18.0);
                 w_state.h = 22.0;
                 w_state.label_text = Some(TextLabel {
                     text: w_state.text.clone(),

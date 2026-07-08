@@ -14,7 +14,7 @@ pub struct InstancedControl {
 pub enum InstancedWidget {
     TextBox(TextBox),
     Spinbox(Spinbox),
-    Toggle(Toggle),
+    Toggle(Adapted<Toggle>),
     Slider(Slider),
 }
 
