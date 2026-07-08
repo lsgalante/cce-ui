@@ -424,6 +424,23 @@ Constraint respected: **each crate still builds standalone** — the new core is
     diffed 0 against the pre-migration baseline, and a `wlrctl`-injected click on the live
     compositor flipped the Toggle's bordered half on-screen — the full input path through the
     adapter exercised for real. 152 tests pass.
+  - **5f — `Button` (widest-radius widget: 19 app files + 8 in-crate). DONE.** The press/release
+    contract forced an adapter refinement: **presses stay hit-gated, releases now flow ungated**
+    — a press-tracking widget must see the release wherever the cursor ended up to commit
+    (in-rect → `take_click` + `on_click_cb`) or cancel, exactly the legacy `mouse_input`
+    contract (pinned by a router-level test incl. out-of-rect cancel). Also added:
+    `Layout::layout_ignore` and `Input::set_selected` forwards. The model ports the per-kind
+    color matrix (Primary/Reset/ListRow/CopyIcon × pressed/hovered/selected + bg overrides),
+    SVG icon quads, per-kind label justification/fonts, and the Phase 2b `intrinsic_size`; the
+    9 by-value builders are mirrored on `Adapted<Button>` (`with_label` comes from the generic
+    + `sync_label`). In-crate consumers fixed (multi_control, keybinds_control, ramp, treelist,
+    parameters_bg fields; json_layout + demo now call `take_click` on the box instead of
+    concrete downcasts); ~11 app repos updated (field types + raw-cast→`as_ptr_mut` cleanups).
+    **Verification:** full workspace (minus compositor, which doesn't use widgets) builds;
+    154 cce-ui tests + cce-cloud's json_layout hover-simulation test pass; test-interface
+    pixel-diffs cursor-only vs the 5e baseline; a live hover A/B against the stashed legacy
+    build showed the identical fill pixel (the inert hover on that page is pre-existing app
+    behavior, not a regression).
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10

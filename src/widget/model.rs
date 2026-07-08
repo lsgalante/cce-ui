@@ -59,6 +59,13 @@ pub trait Layout {
     fn inline_label(&self) -> bool {
         false
     }
+
+    /// Whether legacy container layout passes should skip this widget (the app positions it
+    /// itself — legacy `Element::layout_ignore`, read by `Plate` and the page layout). Default:
+    /// participate.
+    fn layout_ignore(&self) -> bool {
+        false
+    }
 }
 
 /// The paint concern — a widget's fill color, its own (non-recursive) geometry emission, and
@@ -180,6 +187,9 @@ pub trait Input {
     fn value(&self) -> i32 {
         0
     }
+
+    /// Selection state pushed in by list/row hosts (legacy `Element::set_selected`).
+    fn set_selected(&mut self, _selected: bool) {}
 }
 
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
@@ -341,6 +351,9 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     fn layout_children(&self) -> Option<Vec<Style>> {
         Layout::layout_children(&self.inner)
+    }
+    fn layout_ignore(&self) -> bool {
+        Layout::layout_ignore(&self.inner)
     }
 
     // --- Legacy structural conventions the adapter owns on the widget's behalf ---
@@ -506,6 +519,9 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn value(&self) -> i32 {
         Input::value(&self.inner)
     }
+    fn set_selected(&mut self, selected: bool) {
+        Input::set_selected(&mut self.inner, selected)
+    }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
         // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
@@ -536,10 +552,18 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
                 }
                 false
             }
-            // Hit-gate pointer-positioned events once, here, so narrow widgets never carry the
+            // Hit-gate PRESSES and wheel once, here, so narrow widgets never carry the
             // per-widget "check hit_test first" boilerplate legacy `mouse_input` overrides do.
-            Event::MouseButton { x: px, y: py, .. } | Event::MouseWheel { x: px, y: py, .. } => {
+            // RELEASES are deliberately NOT gated: a press-tracking widget (Button) must see the
+            // release wherever the cursor ended up, to commit or cancel — exactly what legacy
+            // `mouse_input` overrides did by receiving every release. `on_event` has the rect and
+            // the event coords, so in-rect release checks stay one comparison.
+            Event::MouseButton { state: crate::widget::ElementState::Pressed, x: px, y: py, .. }
+            | Event::MouseWheel { x: px, y: py, .. } => {
                 self.hit_test(*px, *py, ctx) && Input::on_event(&mut self.inner, event, rect)
+            }
+            Event::MouseButton { state: crate::widget::ElementState::Released, .. } => {
+                Input::on_event(&mut self.inner, event, rect)
             }
             // Offer the raw move to the widget; if unconsumed, run the legacy hover bookkeeping
             // (base.hovered + MouseEnter/MouseLeave synthesis, which re-enters this method and

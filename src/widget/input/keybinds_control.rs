@@ -8,7 +8,7 @@ use crate::widget::TextLabel;
 pub struct KeybindRow {
     pub key_input: TextBox,
     pub cmd_input: TextBox,
-    pub remove_button: Button,
+    pub remove_button: Adapted<Button>,
 }
 
 impl KeybindRow {
@@ -37,7 +37,7 @@ impl KeybindRow {
 pub struct KeybindsControl {
     pub base: Widget,
     pub rows: Vec<KeybindRow>,
-    pub add_button: Button,
+    pub add_button: Adapted<Button>,
     pub just_changed: bool,
 }
 

@@ -161,7 +161,7 @@ pub struct TreeList {
     pub base: Widget,
     pub scroll_box: ScrollBox,
     pub search_box: TextBox,
-    pub add_key_btn: Button,
+    pub add_key_btn: crate::widget::Adapted<Button>,
     pub add_key_popover_open: bool,
     pub add_key_popover_box: TextBox,
     pub new_key_path_request: Option<String>,
@@ -1165,7 +1165,7 @@ impl Element for TreeList {
                 ctx.link_ids(self_id, sb_id);
                 (*sb_ptr).set_parent(Some(self_ptr), ctx);
 
-                let btn_ptr = &mut (*self_ptr).add_key_btn as *mut Button as *mut (dyn Element + 'static);
+                let btn_ptr = (*self_ptr).add_key_btn.as_ptr_mut();
                 let btn_id = (*self_ptr).add_key_btn.base().unwrap().id();
                 ctx.register_widget(btn_id, btn_ptr);
                 ctx.link_ids(self_id, btn_id);
@@ -1185,7 +1185,7 @@ impl Element for TreeList {
         let self_ptr = self as *const Self as *mut Self;
         unsafe {
             list.push(&mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static));
-            list.push(&mut (*self_ptr).add_key_btn as *mut Button as *mut (dyn Element + 'static));
+            list.push((*self_ptr).add_key_btn.as_ptr_mut());
             if (*self_ptr).add_key_popover_open {
                 list.push(&mut (*self_ptr).add_key_popover_box as *mut TextBox as *mut (dyn Element + 'static));
             }

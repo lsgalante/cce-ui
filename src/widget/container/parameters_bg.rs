@@ -13,7 +13,7 @@ pub struct ParametersBg {
     pub sliders: Vec<Option<Slider>>,
     pub float3s: Vec<Option<Float3>>,
     pub spinboxes: Vec<Option<Spinbox>>,
-    pub buttons: Vec<Option<Button>>,
+    pub buttons: Vec<Option<crate::widget::Adapted<Button>>>,
     pub choices: Vec<Option<Dropdown>>,
     pub texts: Vec<Option<TextBox>>,
     pub checkboxes: Vec<Option<crate::widget::Adapted<Checkbox>>>,

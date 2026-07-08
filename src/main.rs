@@ -1337,11 +1337,11 @@ impl PointerHandler for AppState {
                                         if w.page_idx != active_page {
                                             continue;
                                         }
-                                        if let Some(btn_w) = w.widget.as_any_mut().downcast_mut::<cce_ui::widget::Button>() {
-                                            if btn_w.take_click() {
-                                                clicked_btn_id = Some(w.id.clone());
-                                                break;
-                                            }
+                                        // take_click is an Element method; Phase 5 Buttons
+                                        // are Adapted, so ask the box directly.
+                                        if w.widget_type == "button" && w.widget.take_click() {
+                                            clicked_btn_id = Some(w.id.clone());
+                                            break;
                                         }
                                     }
                                 }

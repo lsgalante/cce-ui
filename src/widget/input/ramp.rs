@@ -23,7 +23,7 @@ pub struct ColorRamp {
     pub r_slider: Slider,
     pub g_slider: Slider,
     pub b_slider: Slider,
-    pub del_button: Button,
+    pub del_button: Adapted<Button>,
     
     pub parent: Option<*mut (dyn Element + 'static)>,
 }
@@ -140,7 +140,7 @@ impl Element for ColorRamp {
                 &mut (*self_ptr).r_slider as *mut Slider as *mut (dyn Element + 'static),
                 &mut (*self_ptr).g_slider as *mut Slider as *mut (dyn Element + 'static),
                 &mut (*self_ptr).b_slider as *mut Slider as *mut (dyn Element + 'static),
-                &mut (*self_ptr).del_button as *mut Button as *mut (dyn Element + 'static),
+                (*self_ptr).del_button.as_ptr_mut(),
             ]
         }
     }
@@ -433,7 +433,7 @@ pub struct Ramp {
     
     // Child controls for value editing & deletion
     pub val_slider: Slider,
-    pub del_button: Button,
+    pub del_button: Adapted<Button>,
     pub preset_dropdown: Dropdown,
     pub line_type_dropdown: Dropdown,
     
@@ -634,7 +634,7 @@ impl Element for Ramp {
             ];
             if self.selected_key_idx.is_some() {
                 list.push(&mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static));
-                list.push(&mut (*self_ptr).del_button as *mut Button as *mut (dyn Element + 'static));
+                list.push((*self_ptr).del_button.as_ptr_mut());
             }
             list
         }
@@ -665,7 +665,7 @@ impl Element for Ramp {
                 ];
                 if (*self_ptr).selected_key_idx.is_some() {
                     list.push(&mut (*self_ptr).val_slider as *mut Slider as *mut (dyn Element + 'static));
-                    list.push(&mut (*self_ptr).del_button as *mut Button as *mut (dyn Element + 'static));
+                    list.push((*self_ptr).del_button.as_ptr_mut());
                 }
                 list
             };

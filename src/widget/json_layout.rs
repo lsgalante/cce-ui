@@ -507,10 +507,10 @@ impl Element for JsonLayoutWidget {
                     changed = true;
                 }
                 if w.widget_type == "button" {
-                    if let Some(btn) = w.widget.as_any_mut().downcast_mut::<Button>() {
-                        if w.target_page.is_some() && btn.take_click() {
-                            page_switch = Some(w.target_page.unwrap());
-                        }
+                    // take_click is an Element method; the Phase 5 Button is Adapted, so call it
+                    // on the box directly rather than through a concrete downcast.
+                    if w.target_page.is_some() && w.widget.take_click() {
+                        page_switch = Some(w.target_page.unwrap());
                     }
                 }
             }
