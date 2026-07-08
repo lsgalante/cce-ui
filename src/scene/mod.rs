@@ -5,6 +5,7 @@
 //! node [`Arena`]. Later phases add the layout pass, the paint/display-list, and animation on
 //! top of the same node identity.
 
+pub mod anim;
 pub mod arena;
 pub mod bridge;
 pub mod layout;
