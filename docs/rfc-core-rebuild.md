@@ -536,14 +536,39 @@ Constraint respected: **each crate still builds standalone** — the new core is
     suppressed for all adapted widgets). Discovered en route: the designer's CONTENT pane IS a
     real `Graph` (index 1), and `ContentBg` is a standalone grid background whose
     GraphController impl is mostly stubs — it is NOT a Graph wrapper.
+  - **5n — The container concern + first containers: `Switcher`, `ContentBg`. DONE
+    (render-dump-verified: cce-system-settings — whose every page lives under the Switcher —
+    A/B'd byte-identical across four pages against the stashed legacy build, modulo live
+    system data).** The children/tree design, resolved transitional-first: tree links already
+    live in `ctx.tree` (Phase 1b), so a container needs only (a) its own child-pointer Vec
+    (ctx-less `set_rect` arrangement — the same reason legacy containers kept one) and (b) the
+    subtree plumbing every legacy container hand-copied. (a) stays in the model behind new
+    `Layout` hooks (`has_container_children`/`container_children`/`child_added`/
+    `children_cleared`/`parent_changed`/`adjust_rect`/`arrange_children`/
+    `layout_children_ctx`/`child_visible`); (b) moved into the ADAPTER once, filtered by the
+    `child_visible` policy: plain-quad aggregation with the shared rounded-bg-skip rule,
+    rounded recursion (the Element default this override had been shadowing — a latent
+    container blocker), per-kind text aggregation, `get_text_items`/`prepare_text`/`tick`/
+    popover recursion, container-style `add_child` (parents the child back), the ctx-carrying
+    child layout pass, and `is_child_visible`. `Input` gains `hits_through_children` and
+    `gates_presses` (event-proxying containers must see every press — Switcher unfocuses its
+    child on an outside click). Event proxying itself stays in the model via `EventCtx::ui`,
+    bug-for-bug (including Switcher's double `mouse_input` dispatch while a popover is open).
+    `ContentBg` turned out to be a leaf and rode the ordinary recipe. NOT for this path:
+    deep-composition containers (Page/Plate embed `Layer`; SectionContainer embeds
+    `Container`; Paginator embeds ButtonStrip + `Vec<Page>`) — embedding means migrating the
+    base struct inverts the dependency; those dissolve when their hosts move to the scene
+    walk (Phase 6), not through `Adapted`.
   - **Still to do:** migrate remaining widgets
-    off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). The whole leaf
-    controller tier is now across; what remains is container-coupled (Menu/MenuBar, Paginator,
-    Switcher, ContentBg, ParametersBg — these need the children/tree concern) plus the
-    deferred leaves (TextBox, Dropdown, StatusBar, Float3, LayoutPreview, PreviewState). Then
-    delete `Element` + `Adapted` once the last widget is across, at which point the
-    `as_*_controller` pairs and the `Input` capability hooks die together (callers hold
-    concrete types or `&dyn XController`).
+    off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining:
+    Menu/MenuBar (needs popover hooks — the adapter's container popover recursion covers
+    child popovers, but Menu draws its own), Paginator (embeds ButtonStrip + Vec<Page>),
+    ParametersBg (real container, 1.8k lines), and the deferred leaves (TextBox, Dropdown,
+    StatusBar, Float3, LayoutPreview, PreviewState); the embedded-base containers
+    (Layer/Container/Page/Plate/Backplate/ScrollBox/List/…) dissolve via Phase 6 scene
+    adoption instead. Then delete `Element` + `Adapted` once the last widget is across, at
+    which point the `as_*_controller` pairs and the `Input` capability hooks die together
+    (callers hold concrete types or `&dyn XController`).
 - **Phase 6 — Per-app migration.** Move each `cce-*` app onto the new core; delete legacy paths
   once the last app is across.
 
