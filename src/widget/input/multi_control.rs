@@ -13,7 +13,7 @@ pub struct InstancedControl {
 #[derive(Clone, Debug)]
 pub enum InstancedWidget {
     TextBox(TextBox),
-    Spinbox(Spinbox),
+    Spinbox(Adapted<Spinbox>),
     Toggle(Adapted<Toggle>),
     Slider(Adapted<Slider>),
 }

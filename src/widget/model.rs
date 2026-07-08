@@ -73,6 +73,13 @@ pub trait Layout {
     fn inflates_label_rect(&self) -> bool {
         true
     }
+
+    /// Horizontal inset of the detached base label. Legacy split: `Control::control_label`
+    /// added +4px (Spinbox et al., explicitly zeroed for Slider/RangeSlider); the default
+    /// `text_labels` used none (ProgressBar). Default: none.
+    fn detached_label_inset(&self) -> f32 {
+        0.0
+    }
 }
 
 /// The paint concern — a widget's fill color, its own (non-recursive) geometry emission, and
@@ -239,7 +246,14 @@ pub trait Input {
     fn drag_update(&mut self, _px: f32, _py: f32, _rect: Rect) -> bool {
         false
     }
+    /// For self-moving widgets (Panel, Splitter): the new origin this drag step wants, or `None`
+    /// if unmoved. The adapter applies it to the base rect (the model cannot reach it).
+    fn drag_reposition(&mut self, _px: f32, _py: f32, _rect: Rect) -> Option<(f32, f32)> {
+        None
+    }
     fn drag_end(&mut self) {}
+    /// Movement bounds pushed in by hosts (legacy `Element::set_drag_bounds`).
+    fn set_drag_bounds(&mut self, _bx: f32, _by: f32, _bw: f32, _bh: f32) {}
 }
 
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
@@ -351,7 +365,8 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
                     return vec![TextLabel { text: label.clone(), x: b.x + 4.0, y: y_pos, font_size, color }];
                 }
             }
-            return vec![TextLabel { text: label.clone(), x: b.x, y: b.y, font_size, color }];
+            let inset = Layout::detached_label_inset(&self.inner);
+            return vec![TextLabel { text: label.clone(), x: b.x + inset, y: b.y, font_size, color }];
         }
         Vec::new()
     }
@@ -601,10 +616,18 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     fn drag_update(&mut self, px: f32, py: f32) -> bool {
         let rect = self.content_rect();
+        if let Some((nx, ny)) = Input::drag_reposition(&mut self.inner, px, py, rect) {
+            self.base.x = nx;
+            self.base.y = ny;
+            return true;
+        }
         Input::drag_update(&mut self.inner, px, py, rect)
     }
     fn drag_end(&mut self) {
         Input::drag_end(&mut self.inner)
+    }
+    fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
+        Input::set_drag_bounds(&mut self.inner, bx, by, bw, bh)
     }
 
     // --- Legacy direct-dispatch entry points. Hosts (treelist's add-key button, parameters_bg's

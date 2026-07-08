@@ -464,6 +464,17 @@ Constraint respected: **each crate still builds standalone** — the new core is
     flipped quads still rasterized — `content_rect` must not clamp at zero or tracks vanish
     (pixel-diffed to 0 vs baseline after the fix). Slider geometry consolidated into one
     `geom()` helper (legacy re-derived it in five places). 154 tests pass; workspace builds.
+  - **5i — Display leaves + `Spinbox`: InfoBox, FontPreview, Sidebar, Splitter, Panel, Spinbox.
+    DONE.** New adapter machinery: `Input::drag_reposition` (self-moving widgets — Panel,
+    Splitter — return a new origin; the adapter applies it to the base rect the model can't
+    reach), `Input::set_drag_bounds`, and `Layout::detached_label_inset` (the legacy
+    `Control::control_label` +4px x-offset that the default `text_labels` path lacked — caught
+    as a 4px label shift in the pixel diff, fixed to a 1×1-pixel residual). Spinbox ports the
+    sub-zone hover (-/+ buttons) into `PointerMove` handling, display-click edit mode with
+    cursor placement + `request_focus`, decimals/unit value formatting, and drops its vestigial
+    raw-pointer parent/children fields. Skipped for later: `PreviewState` (needs per-label fonts
+    on the `Text` prim), `StatusBar` (bigger custom surface), Float3/LayoutPreview (time).
+    156 tests pass; workspace builds; test-interface pixel-diff vs the 5h baseline: 1 pixel.
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour); replace the 8 live
     `as_*_controller` downcast pairs (called by `cce-designer`, `cce-test-interface`, and ~10

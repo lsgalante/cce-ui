@@ -1,25 +1,25 @@
-use crate::colors;
-use crate::widget::*;
+//! Narrow-trait sidebar strip (Phase 5i leaf sweep). Pure colored band; the legacy struct's raw
+//! x/y/w/h fields now live on the `Adapted` base.
 
-pub struct Sidebar {
-    x: f32, y: f32, w: f32, h: f32,
-    hovered: bool,
-}
+use crate::colors;
+use crate::widget::{Adapted, Element, Input, Layout, Paint};
+
+pub struct Sidebar;
 
 impl Sidebar {
-    pub fn new(w: f32) -> Self { Self { x: 0.0, y: 0.0, w, h: 0.0, hovered: false } }
+    pub fn new(w: f32) -> Adapted<Sidebar> {
+        let mut s = Adapted::new(Sidebar);
+        Element::set_rect(&mut s, 0.0, 0.0, w, 0.0);
+        s
+    }
 }
 
-impl Element for Sidebar {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn color(&self) -> [f32; 4] { colors::sidebar_bg_color() }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+impl Layout for Sidebar {}
+
+impl Paint for Sidebar {
+    fn color(&self) -> [f32; 4] {
+        colors::sidebar_bg_color()
     }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
 }
+
+impl Input for Sidebar {}

@@ -1,71 +1,51 @@
+//! Narrow-trait info box (Phase 5i leaf sweep). Pure display: themed card + border + title/lines.
+
 use crate::colors;
-use crate::widget::*;
-use crate::widget::display::TextLabel;
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
+use crate::widget::{Adapted, Input, Layout, Paint};
 
 #[derive(Debug, Clone)]
 pub struct InfoBox {
-    base: Widget,
     pub title: String,
     pub lines: Vec<String>,
 }
 
 impl InfoBox {
-    pub fn new(title: &str, lines: Vec<String>) -> Self {
-        Self {
-            base: Widget::new(),
-            title: title.to_string(),
-            lines,
-        }
+    pub fn new(title: &str, lines: Vec<String>) -> Adapted<InfoBox> {
+        Adapted::new(InfoBox { title: title.to_string(), lines })
     }
 }
 
-impl Element for InfoBox {
-    crate::impl_widget_base!(InfoBox);
-    fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
-    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+impl Layout for InfoBox {
+    fn inline_label(&self) -> bool {
+        true // draws its own title text
+    }
+}
 
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (x, y, w, h) = self.rect();
-        let theme = colors::active_theme();
-        let bg_color = theme.surface_bg;
-        let border_color = theme.surface_border;
-        let border_t = 1.0;
-        vec![
-            (x, y, w, h, bg_color),
-            (x, y, w, border_t, border_color),
-            (x, y + h - border_t, w, border_t, border_color),
-            (x, y, border_t, h, border_color),
-            (x + w - border_t, y, border_t, h, border_color),
-        ]
+impl Paint for InfoBox {
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let (x, y, _w, _h) = self.rect();
-        let mut labels = Vec::new();
-        labels.push(TextLabel {
-            text: self.title.clone(),
-            x: x + 16.0,
-            y: y + 12.0,
-            font_size: 12.0,
-            color: [89, 165, 229],
-        });
-        
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
+        let theme = colors::active_theme();
+        let border_t = 1.0;
+        ctx.quad(rect, theme.surface_bg);
+        ctx.quad(Rect { x, y, width: w, height: border_t }, theme.surface_border);
+        ctx.quad(Rect { x, y: y + h - border_t, width: w, height: border_t }, theme.surface_border);
+        ctx.quad(Rect { x, y, width: border_t, height: h }, theme.surface_border);
+        ctx.quad(Rect { x: x + w - border_t, y, width: border_t, height: h }, theme.surface_border);
+
+        ctx.text(self.title.clone(), x + 16.0, y + 12.0, 12.0, [89, 165, 229]);
         let mut current_y = y + 32.0;
         for (idx, line) in self.lines.iter().enumerate() {
-            let color = if idx == self.lines.len() - 1 {
-                [140, 140, 153]
-            } else {
-                [204, 204, 217]
-            };
-            labels.push(TextLabel {
-                text: line.clone(),
-                x: x + 16.0,
-                y: current_y,
-                font_size: 11.0,
-                color,
-            });
+            let color = if idx == self.lines.len() - 1 { [140, 140, 153] } else { [204, 204, 217] };
+            ctx.text(line.clone(), x + 16.0, current_y, 11.0, color);
             current_y += 16.0;
         }
-        labels
     }
 }
+
+impl Input for InfoBox {}

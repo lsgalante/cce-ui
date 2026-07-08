@@ -1,30 +1,24 @@
+//! Narrow-trait movable panel (Phase 5i leaf sweep). Self-moving via
+//! [`Input::drag_reposition`], with movement clamped to bounds pushed in through
+//! [`Input::set_drag_bounds`] (or the inherent `set_bounds`).
+
 use crate::colors;
-use crate::widget::*;
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
+use crate::widget::{Adapted, Element, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
 pub struct Panel {
-    base: Widget,
     dragging: bool,
-    drag_ox: f32, drag_oy: f32,
-    drag_start_x: f32, drag_start_y: f32,
+    drag_ox: f32,
+    drag_oy: f32,
     bounds: Option<(f32, f32, f32, f32)>,
 }
 
 impl Panel {
-    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
-        Self {
-            base: Widget::new_rect(x, y, w, h),
-            dragging: false,
-            drag_ox: 0.0,
-            drag_oy: 0.0,
-            drag_start_x: 0.0,
-            drag_start_y: 0.0,
-            bounds: None,
-        }
-    }
-
-    pub fn with_label(mut self, label: &str) -> Self {
-        self.base.label = Some(label.to_string());
-        self
+    pub fn new(x: f32, y: f32, w: f32, h: f32) -> Adapted<Panel> {
+        let mut p = Adapted::new(Panel { dragging: false, drag_ox: 0.0, drag_oy: 0.0, bounds: None });
+        Element::set_rect(&mut p, x, y, w, h);
+        p
     }
 
     pub fn set_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
@@ -32,63 +26,67 @@ impl Panel {
     }
 }
 
-impl Element for Panel {
-    crate::impl_widget_base!(Panel);
-    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])>{ None }
+impl Layout for Panel {
+    fn inline_label(&self) -> bool {
+        true // legacy Panel never inflated for its label
+    }
+}
 
-    fn color(&self) -> [f32; 4] { if self.dragging { colors::PANEL_DRAG } else { colors::PANEL_IDLE } }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (x, y, w, h) = self.rect();
-        vec![(x, y, w, h, self.color())]
+impl Paint for Panel {
+    fn color(&self) -> [f32; 4] {
+        if self.dragging { colors::PANEL_DRAG } else { colors::PANEL_IDLE }
     }
 
-    fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
-        self.bounds = Some((bx, by, bw, bh));
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        ctx.quad(rect, self.color());
     }
+}
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {
-                if self.hit_test(px, py, ctx) {
-                    self.drag_begin(px, py);
-                    return true;
-                }
+impl Input for Panel {
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x, y, .. } => {
+                self.dragging = true;
+                self.drag_ox = x - ectx.rect.x;
+                self.drag_oy = y - ectx.rect.y;
+                true
             }
-            ElementState::Released => {
-                if self.dragging { self.drag_end(); return true; }
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Released, .. } => {
+                std::mem::take(&mut self.dragging)
             }
+            _ => false,
         }
-        false
     }
 
-    fn is_dragging(&self) -> bool { self.dragging }
-    fn draggable(&self) -> bool { true }
-
-    fn drag_update(&mut self, px: f32, py: f32) -> bool {
+    fn draggable(&self) -> bool {
+        true
+    }
+    fn is_dragging(&self) -> bool {
+        self.dragging
+    }
+    fn drag_begin(&mut self, px: f32, py: f32, rect: Rect) {
+        self.dragging = true;
+        self.drag_ox = px - rect.x;
+        self.drag_oy = py - rect.y;
+    }
+    fn drag_reposition(&mut self, px: f32, py: f32, rect: Rect) -> Option<(f32, f32)> {
         let nx = px - self.drag_ox;
         let ny = py - self.drag_oy;
         let (nx, ny) = if let Some((bx, by, bw, bh)) = self.bounds {
-            (nx.clamp(bx, bx + bw - self.base.w), ny.clamp(by, by + bh - self.base.h))
+            (nx.clamp(bx, bx + bw - rect.width), ny.clamp(by, by + bh - rect.height))
         } else {
             (nx, ny)
         };
-        if (nx - self.base.x).abs() > 0.01 || (ny - self.base.y).abs() > 0.01 {
-            self.base.x = nx;
-            self.base.y = ny;
-            return true;
+        if (nx - rect.x).abs() > 0.01 || (ny - rect.y).abs() > 0.01 {
+            Some((nx, ny))
+        } else {
+            None
         }
-        false
     }
-
-    fn drag_begin(&mut self, px: f32, py: f32) {
-        self.dragging = true;
-        self.drag_ox = px - self.base.x;
-        self.drag_oy = py - self.base.y;
-        self.drag_start_x = self.base.x;
-        self.drag_start_y = self.base.y;
+    fn drag_end(&mut self) {
+        self.dragging = false;
     }
-
-    fn drag_end(&mut self) { self.dragging = false; }
+    fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
+        self.bounds = Some((bx, by, bw, bh));
+    }
 }

@@ -12,7 +12,7 @@ pub struct ParametersBg {
     mouse_pos: Option<(f32, f32)>,
     pub sliders: Vec<Option<crate::widget::Adapted<Slider>>>,
     pub float3s: Vec<Option<Float3>>,
-    pub spinboxes: Vec<Option<Spinbox>>,
+    pub spinboxes: Vec<Option<crate::widget::Adapted<Spinbox>>>,
     pub buttons: Vec<Option<crate::widget::Adapted<Button>>>,
     pub choices: Vec<Option<Dropdown>>,
     pub texts: Vec<Option<TextBox>>,
@@ -1394,7 +1394,7 @@ impl Element for ParametersBg {
                 }
             } else if p.2.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
-                    param_quads.push((sb.base.x, sb.base.y, sb.base.w, sb.base.h, sb.color()));
+                    { let (bx, by, bw, bh) = sb.rect(); param_quads.push((bx, by, bw, bh, sb.color())); }
                     param_quads.extend(sb.extra_quads());
                 }
             } else if p.2 == "toggle" || p.2 == "checkbox" {

@@ -1,74 +1,81 @@
+//! Narrow-trait pane splitter (Phase 5i leaf sweep). A self-moving widget: dragging repositions
+//! the splitter itself via [`Input::drag_reposition`] (the adapter applies the new origin to the
+//! base rect). Hover/drag drive the color, tracked from the forwarded events.
+
 use crate::colors;
-use crate::widget::*;
+use crate::scene::layout::Rect;
+use crate::widget::{Adapted, Element, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
 pub struct Splitter {
-    x: f32, y: f32, w: f32, h: f32,
     hovered: bool,
     dragging: bool,
     drag_ox: f32,
 }
 
 impl Splitter {
-    pub fn new(w: f32) -> Self {
-        Self { x: 0.0, y: 0.0, w, h: 0.0, hovered: false, dragging: false, drag_ox: 0.0 }
+    pub fn new(w: f32) -> Adapted<Splitter> {
+        let mut s = Adapted::new(Splitter { hovered: false, dragging: false, drag_ox: 0.0 });
+        Element::set_rect(&mut s, 0.0, 0.0, w, 0.0);
+        s
     }
 }
 
-impl Element for Splitter {
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) { self.x = x; self.y = y; self.w = w; self.h = h; }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
+impl Layout for Splitter {}
+
+impl Paint for Splitter {
     fn color(&self) -> [f32; 4] {
-        if self.dragging { colors::SPLITTER_DRAG }
-        else if self.hovered { colors::SPLITTER_HOVER }
-        else { colors::SPLITTER_IDLE }
-    }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
-
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let was = self.hovered;
-        self.hovered = self.hit_test(px, py, ctx);
-        was != self.hovered
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if button != MouseButton::Left { return false; }
-        match state {
-            ElementState::Pressed => {
-                if self.hit_test(px, py, ctx) {
-                    self.drag_begin(px, py);
-                    return true;
-                }
-            }
-            ElementState::Released => {
-                if self.dragging { self.drag_end(); return true; }
-            }
+        if self.dragging {
+            colors::SPLITTER_DRAG
+        } else if self.hovered {
+            colors::SPLITTER_HOVER
+        } else {
+            colors::SPLITTER_IDLE
         }
-        false
     }
+}
 
-    fn is_dragging(&self) -> bool { self.dragging }
-    fn draggable(&self) -> bool { true }
-
-    fn drag_update(&mut self, px: f32, _py: f32) -> bool {
-        let new_x = px - self.drag_ox;
-        if (new_x - self.x).abs() > 0.5 {
-            self.x = new_x;
-            return true;
+impl Input for Splitter {
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x, .. } => {
+                self.dragging = true;
+                self.drag_ox = x - ectx.rect.x;
+                true
+            }
+            Event::MouseButton { button: MouseButton::Left, state: ElementState::Released, .. } => {
+                std::mem::take(&mut self.dragging)
+            }
+            Event::MouseEnter => {
+                self.hovered = true;
+                false
+            }
+            Event::MouseLeave => {
+                self.hovered = false;
+                false
+            }
+            _ => false,
         }
-        false
     }
 
-    fn drag_begin(&mut self, px: f32, _py: f32) {
+    fn draggable(&self) -> bool {
+        true
+    }
+    fn is_dragging(&self) -> bool {
+        self.dragging
+    }
+    fn drag_begin(&mut self, px: f32, _py: f32, rect: Rect) {
         self.dragging = true;
-        self.drag_ox = px - self.x;
+        self.drag_ox = px - rect.x;
     }
-
-    fn drag_end(&mut self) { self.dragging = false; }
+    fn drag_reposition(&mut self, px: f32, _py: f32, rect: Rect) -> Option<(f32, f32)> {
+        let new_x = px - self.drag_ox;
+        if (new_x - rect.x).abs() > 0.5 {
+            Some((new_x, rect.y))
+        } else {
+            None
+        }
+    }
+    fn drag_end(&mut self) {
+        self.dragging = false;
+    }
 }
