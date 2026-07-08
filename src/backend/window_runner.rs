@@ -907,6 +907,94 @@ pub fn push_widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, cl
     }
 }
 
+/// A contiguous run of vertices sharing one scissor rect (Phase 3 single paint path). `scissor` is
+/// a logical-pixel clip (`None` = unclipped); `start..end` indexes the flat vertex buffer.
+pub struct DlBatch {
+    pub scissor: Option<crate::scene::layout::Rect>,
+    pub start: u32,
+    pub end: u32,
+}
+
+/// Tessellate a `scene::paint::DisplayList`'s geometry into a flat vertex buffer plus per-clip draw
+/// batches, reusing the same tessellators as the legacy path so vertices are identical. `Text`
+/// prims are skipped here — text is still rendered via the app's `text_areas()` path. `sw`/`sh` are
+/// logical surface dimensions (as everywhere else). Consecutive prims sharing a clip are merged
+/// into one batch.
+pub fn tessellate_display_list(
+    dl: &crate::scene::paint::DisplayList,
+    sw: f32,
+    sh: f32,
+) -> (Vec<Vertex>, Vec<DlBatch>) {
+    use crate::scene::paint::{Cap, Prim};
+    let no = [0.0f32, 0.0, 0.0];
+    let mut verts: Vec<Vertex> = Vec::new();
+    let mut batches: Vec<DlBatch> = Vec::new();
+
+    for item in &dl.items {
+        let start = verts.len() as u32;
+        match &item.prim {
+            Prim::Text { .. } => continue, // text goes through the glyphon/text_areas path
+            Prim::Quad { rect, color } => {
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+            }
+            Prim::RoundedRect { rect, radius, corners, color } => {
+                let radii = crate::widget::CornerRadii::new(
+                    if corners.0 { *radius } else { 0.0 },
+                    if corners.1 { *radius } else { 0.0 },
+                    if corners.2 { *radius } else { 0.0 },
+                    if corners.3 { *radius } else { 0.0 },
+                );
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, radii, sw, sh, *color, no, None, &mut verts);
+            }
+            Prim::Border { rect, radii, fill, border, thickness } => {
+                let cr = crate::widget::CornerRadii::new(radii.0, radii.1, radii.2, radii.3);
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, cr, sw, sh, *fill, no, None, &mut verts);
+                push_plate_solid_border_vertices(rect.x, rect.y, rect.width, rect.height, cr, *thickness, sw, sh, *border, no, &mut verts);
+            }
+            Prim::Bevel { rect, radii, color, depth } => {
+                // Mirror push_widget_vertices' bevel branch: inset rounded fill + bevel edges.
+                let t = *depth;
+                let inner = crate::widget::CornerRadii::new(
+                    (radii.0 - t).max(0.0),
+                    (radii.1 - t).max(0.0),
+                    (radii.2 - t).max(0.0),
+                    (radii.3 - t).max(0.0),
+                );
+                push_rounded_rect_vertices_corners(rect.x + t, rect.y + t, rect.width - 2.0 * t, rect.height - 2.0 * t, inner, sw, sh, *color, no, None, &mut verts);
+                push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, t, sw, sh, *color, no, &mut verts);
+            }
+            Prim::Arc { cx, cy, radius, thickness, start: sa, end: ea, color } => {
+                push_arc_background_vertices(*cx, *cy, *radius, *thickness, *sa, *ea, sw, sh, *color, 16, no, &mut verts);
+            }
+            Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => {
+                let lc = match cap {
+                    Cap::Flat => LineCap::Flat,
+                    Cap::Round => LineCap::Round,
+                    Cap::Arrow => LineCap::Arrow,
+                };
+                verts.extend(vector_vertices(*x1, *y1, *x2, *y2, *thickness, sw, sh, *color, lc));
+            }
+            Prim::Circle { cx, cy, radius, color } => {
+                verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, 16, no));
+            }
+        }
+        let end = verts.len() as u32;
+        if end == start {
+            continue;
+        }
+        // Merge into the previous batch if it shares this clip and is contiguous.
+        if let Some(last) = batches.last_mut() {
+            if last.scissor == item.clip && last.end == start {
+                last.end = end;
+                continue;
+            }
+        }
+        batches.push(DlBatch { scissor: item.clip, start, end });
+    }
+
+    (verts, batches)
+}
+
 pub fn extra_quad_vertices(
     w: &dyn crate::widget::Element,
     qx: f32, qy: f32, qw: f32, qh: f32,
@@ -1501,6 +1589,15 @@ pub trait Application: Sized + 'static {
     fn handle_key_input(&mut self, event: &KeyEvent, needs_rebuild: &mut bool) -> Option<Self::Message>;
 
     fn custom_vertices(&mut self, _verts: &mut Vec<Vertex>, _size: LogicalSize, _scale: f64) {}
+
+    /// Opt into the single paint path (Phase 3): return a display list for this frame and `render()`
+    /// draws its geometry via one batched, GPU-scissor-clipped pass instead of the legacy
+    /// `view*` geometry. Default `None` keeps the legacy path. Text, overlays, and `custom_vertices`
+    /// still go through their existing paths. Typically implemented as
+    /// `Some(cce_ui::scene::painter::paint_tree(&self.ui_context, root_ptr))`.
+    fn display_list(&mut self) -> Option<crate::scene::paint::DisplayList> {
+        None
+    }
 }
 
 pub struct PressedKey {
@@ -1690,32 +1787,51 @@ impl<A: Application> EngineState<A> {
         
         let mut vectors = Vec::new();
         self.inner.as_mut().unwrap().view_vectors(&mut vectors, LogicalSize::new(logical_w, logical_h), scale_factor);
-        
+
+        // Phase 3 single paint path: when the app provides a display list, its geometry replaces the
+        // legacy view* geometry and is drawn as batched, GPU-scissor-clipped runs. Default `None`
+        // keeps the legacy path byte-for-byte.
+        let display_list = self.inner.as_mut().unwrap().display_list();
+
         let adapter = self.wgpu_adapter.as_mut().unwrap();
         let render_pipeline = self.render_pipeline.as_ref().unwrap();
         
         // 1. Build and upload vertex buffer
+        let dl_mode = display_list.is_some();
+        let mut dl_batches: Vec<DlBatch> = Vec::new();
         let mut verts = Vec::new();
-        for &(qx, qy, qw, qh, qr, qc, qcorners) in &rounded_quads {
-            if qr > 0.1 {
-                let radii = crate::widget::CornerRadii::new(
-                    if qcorners.0 { qr } else { 0.0 },
-                    if qcorners.1 { qr } else { 0.0 },
-                    if qcorners.2 { qr } else { 0.0 },
-                    if qcorners.3 { qr } else { 0.0 },
-                );
-                push_rounded_rect_vertices_corners(qx, qy, qw, qh, radii, logical_w, logical_h, qc, [0.0, 0.0, 0.0], None, &mut verts);
-            } else {
+        if let Some(dl) = &display_list {
+            let (v, b) = tessellate_display_list(dl, logical_w, logical_h);
+            verts = v;
+            dl_batches = b;
+        } else {
+            for &(qx, qy, qw, qh, qr, qc, qcorners) in &rounded_quads {
+                if qr > 0.1 {
+                    let radii = crate::widget::CornerRadii::new(
+                        if qcorners.0 { qr } else { 0.0 },
+                        if qcorners.1 { qr } else { 0.0 },
+                        if qcorners.2 { qr } else { 0.0 },
+                        if qcorners.3 { qr } else { 0.0 },
+                    );
+                    push_rounded_rect_vertices_corners(qx, qy, qw, qh, radii, logical_w, logical_h, qc, [0.0, 0.0, 0.0], None, &mut verts);
+                } else {
+                    verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
+                }
+            }
+            for &(qx, qy, qw, qh, qc) in &quads {
                 verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
             }
+            for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
+                verts.extend(vector_vertices(vx1, vy1, vx2, vy2, vthickness, logical_w, logical_h, vcolor, vcap));
+            }
         }
-        for &(qx, qy, qw, qh, qc) in &quads {
-            verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
-        }
-        for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
-            verts.extend(vector_vertices(vx1, vy1, vx2, vy2, vthickness, logical_w, logical_h, vcolor, vcap));
-        }
+        // custom_vertices (e.g. graph geometry) still contributes in both modes; in DL mode its
+        // appended range becomes a final unclipped batch drawn on top.
+        let pre_custom = verts.len() as u32;
         self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
+        if dl_mode && (verts.len() as u32) > pre_custom {
+            dl_batches.push(DlBatch { scissor: None, start: pre_custom, end: verts.len() as u32 });
+        }
         self.vertex_count = verts.len() as u32;
         if self.vertex_count > 0 {
             let data = bytemuck::cast_slice(&verts);
@@ -1823,9 +1939,34 @@ impl<A: Application> EngineState<A> {
             if self.vertex_count > 0 {
                 pass.set_pipeline(render_pipeline);
                 pass.set_vertex_buffer(0, self.vertex_buffer.as_ref().unwrap().slice(..));
-                pass.draw(0..self.vertex_count, 0..1);
+                if dl_mode {
+                    // Draw each clip batch under its own GPU scissor (logical clip -> physical px).
+                    for batch in &dl_batches {
+                        match batch.scissor {
+                            Some(clip) => {
+                                let sx = (clip.x * scale_f32).max(0.0) as u32;
+                                let sy = (clip.y * scale_f32).max(0.0) as u32;
+                                if sx >= pw || sy >= ph {
+                                    continue;
+                                }
+                                let sw_px = ((clip.width * scale_f32) as u32).min(pw - sx);
+                                let sh_px = ((clip.height * scale_f32) as u32).min(ph - sy);
+                                if sw_px == 0 || sh_px == 0 {
+                                    continue;
+                                }
+                                pass.set_scissor_rect(sx, sy, sw_px, sh_px);
+                            }
+                            None => pass.set_scissor_rect(0, 0, pw, ph),
+                        }
+                        pass.draw(batch.start..batch.end, 0..1);
+                    }
+                    // Restore full scissor so text/overlay draws are not clipped.
+                    pass.set_scissor_rect(0, 0, pw, ph);
+                } else {
+                    pass.draw(0..self.vertex_count, 0..1);
+                }
             }
-            
+
             adapter.text_renderer.render(&adapter.text_atlas, &adapter.text_viewport, &mut pass).unwrap();
  
             if self.overlay_vertex_count > 0 {
