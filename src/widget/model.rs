@@ -28,7 +28,10 @@
 
 use crate::scene::layout::{Rect, Size, Style};
 use crate::scene::paint::{PaintCtx, Prim};
-use crate::widget::{Element, Event, TextLabel, UiContext, Widget, WidgetId};
+use crate::widget::{
+    Element, Event, GeomController, GraphController, MenuController, ParamController,
+    PathController, SpreadsheetController, TextLabel, UiContext, Widget, WidgetId,
+};
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
 /// avoid the existing [`Widget`] base struct. Mirrors the opt-in `Element::layout_style` /
@@ -160,6 +163,17 @@ impl EventCtx<'_> {
             unsafe { crate::widget::focus::set_focused(&mut *ptr) };
         }
     }
+
+    /// Open the shared context menu on this widget (legacy `ctx.handle_right_click(self, …)`),
+    /// for widgets that must do work *before* the menu opens — Breadcrumb records which segment
+    /// was right-clicked first, so the menu header can show that segment's path.
+    /// [`Input::opens_context_menu`] can't express that: the adapter's gate runs instead of
+    /// `on_event`, not after it. No-op outside a routed path (no ctx or no self pointer).
+    pub fn open_context_menu(&mut self, px: f32, py: f32) {
+        if let (Some(ptr), Some(ui)) = (self.self_ptr, self.ui.as_deref_mut()) {
+            ui.handle_right_click(ptr, px, py);
+        }
+    }
 }
 
 /// The input concern — hit-testing and event handling against the laid-out rect. Mirrors the
@@ -254,6 +268,54 @@ pub trait Input {
     fn drag_end(&mut self) {}
     /// Movement bounds pushed in by hosts (legacy `Element::set_drag_bounds`).
     fn set_drag_bounds(&mut self, _bx: f32, _by: f32, _bw: f32, _bh: f32) {}
+
+    // --- Controller capabilities (transitional, like the polling surface above). The legacy
+    // tree reaches a widget's typed API through the `Element::as_*_controller` downcast pairs;
+    // `Element` is implemented exactly once (for `Adapted<W>`), so a migrated controller widget
+    // re-exposes its controller impl through these hooks instead — `Some(self)` when `W`
+    // implements the trait. Dies with `Element`: the end state reaches a controller through the
+    // concrete `Adapted<W>` (or a `&dyn XController` held directly), per RFC §3.5.
+
+    fn menu_controller(&self) -> Option<&dyn MenuController> {
+        None
+    }
+    fn menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> {
+        None
+    }
+    fn graph_controller(&self) -> Option<&dyn GraphController> {
+        None
+    }
+    fn graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> {
+        None
+    }
+    fn spreadsheet_controller(&self) -> Option<&dyn SpreadsheetController> {
+        None
+    }
+    fn spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> {
+        None
+    }
+    fn path_controller(&self) -> Option<&dyn PathController> {
+        None
+    }
+    fn path_controller_mut(&mut self) -> Option<&mut dyn PathController> {
+        None
+    }
+    fn param_controller(&self) -> Option<&dyn ParamController> {
+        None
+    }
+    fn param_controller_mut(&mut self) -> Option<&mut dyn ParamController> {
+        None
+    }
+    fn geom_controller(&self) -> Option<&dyn GeomController> {
+        None
+    }
+    fn geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> {
+        None
+    }
+
+    /// Copy this widget's path/content to the clipboard — the context menu's "Copy Path" action
+    /// calls `Element::copy_path` on its target (Breadcrumb is the only implementor).
+    fn copy_path(&self) {}
 }
 
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
@@ -630,6 +692,47 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Input::set_drag_bounds(&mut self.inner, bx, by, bw, bh)
     }
 
+    // --- Controller downcasts -> the `Input` capability hooks ---
+    fn as_menu_controller(&self) -> Option<&dyn MenuController> {
+        Input::menu_controller(&self.inner)
+    }
+    fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> {
+        Input::menu_controller_mut(&mut self.inner)
+    }
+    fn as_graph_controller(&self) -> Option<&dyn GraphController> {
+        Input::graph_controller(&self.inner)
+    }
+    fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> {
+        Input::graph_controller_mut(&mut self.inner)
+    }
+    fn as_spreadsheet_controller(&self) -> Option<&dyn SpreadsheetController> {
+        Input::spreadsheet_controller(&self.inner)
+    }
+    fn as_spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> {
+        Input::spreadsheet_controller_mut(&mut self.inner)
+    }
+    fn as_path_controller(&self) -> Option<&dyn PathController> {
+        Input::path_controller(&self.inner)
+    }
+    fn as_path_controller_mut(&mut self) -> Option<&mut dyn PathController> {
+        Input::path_controller_mut(&mut self.inner)
+    }
+    fn as_param_controller(&self) -> Option<&dyn ParamController> {
+        Input::param_controller(&self.inner)
+    }
+    fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> {
+        Input::param_controller_mut(&mut self.inner)
+    }
+    fn as_geom_controller(&self) -> Option<&dyn GeomController> {
+        Input::geom_controller(&self.inner)
+    }
+    fn as_geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> {
+        Input::geom_controller_mut(&mut self.inner)
+    }
+    fn copy_path(&self) {
+        Input::copy_path(&self.inner)
+    }
+
     // --- Legacy direct-dispatch entry points. Hosts (treelist's add-key button, parameters_bg's
     // checkboxes, app pages) call these ON the widget instead of routing an Event through
     // `propagate_event`; without these overrides they'd hit the inert Element defaults and the
@@ -650,6 +753,36 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     fn keyboard_input(&mut self, event: &crate::widget::KeyEvent, ctx: &mut UiContext) -> bool {
         self.handle_event(&Event::KeyInput(event.clone()), ctx)
+    }
+
+    /// Direct-dispatch pointer moves (hosts call `w.on_cursor_moved(..)` instead of routing a
+    /// `PointerMove` — cce-files drives its breadcrumbs this way): offer the raw move to the
+    /// widget, then fall back to the base hover bookkeeping, mirroring `handle_event`'s
+    /// `PointerMove` arm. Not routed *through* `handle_event`, because the routed path reaches
+    /// this method too (via `cursor_moved`) and would recurse; on that path `on_event` sees the
+    /// same unconsumed move twice, which is fine — a hover recompute is idempotent (anything
+    /// that changed on the first call consumed it there).
+    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        let rect = self.content_rect();
+        let id = self.base.id();
+        let self_ptr = self.as_ptr_mut();
+        let mut ectx = EventCtx { rect, id, ui: Some(ctx), self_ptr: Some(self_ptr) };
+        let event = Event::PointerMove { x: px, y: py, local_x: px, local_y: py };
+        if Input::on_event(&mut self.inner, &event, &mut ectx) {
+            return true;
+        }
+        // The legacy default `Element::on_cursor_moved` body: base hover flag + synthesized
+        // MouseEnter/MouseLeave (which re-enter `handle_event` and reach `on_event`).
+        let was = self.base.hovered;
+        let is_hit = self.hit_test(px, py, ctx);
+        self.base.hovered = is_hit;
+        if was != is_hit {
+            let transition = if is_hit { Event::MouseEnter } else { Event::MouseLeave };
+            self.handle_event(&transition, ctx);
+            true
+        } else {
+            false
+        }
     }
 
     /// Focus set/cleared directly (hosts call `w.focus()`/`w.unfocus()`): keep the base flag and
@@ -887,5 +1020,57 @@ mod tests {
         ctx.propagate_event(&Event::PointerMove { x: 200.0, y: 200.0, local_x: 200.0, local_y: 200.0 }, ptr);
         assert_eq!(w.inner().left, 1, "MouseLeave reached on_event");
         assert!(!unsafe { (*ptr).hovered() }, "base hover flag cleared");
+    }
+
+    /// A narrow widget that is also a controller: it re-exposes its [`PathController`] impl
+    /// through the `Input` capability hooks, and the adapter forwards the legacy
+    /// `Element::as_path_controller` downcasts to them.
+    struct Crumbs {
+        segs: Vec<String>,
+        clicked: Option<usize>,
+    }
+    impl Layout for Crumbs {}
+    impl Paint for Crumbs {
+        fn color(&self) -> [f32; 4] {
+            [0.0; 4]
+        }
+    }
+    impl Input for Crumbs {
+        fn path_controller(&self) -> Option<&dyn PathController> {
+            Some(self)
+        }
+        fn path_controller_mut(&mut self) -> Option<&mut dyn PathController> {
+            Some(self)
+        }
+    }
+    impl PathController for Crumbs {
+        fn set_path(&mut self, segments: &[String]) {
+            self.segs = segments.to_vec();
+        }
+        fn path_click(&mut self) -> Option<usize> {
+            self.clicked.take()
+        }
+    }
+
+    #[test]
+    fn controller_capability_forwards_through_the_element_downcast() {
+        let mut w = Box::new(Adapted::new(Crumbs { segs: Vec::new(), clicked: Some(2) }));
+        let elem: &mut dyn Element = w.as_mut();
+
+        // The legacy downcast pair reaches the narrow widget's controller impl…
+        elem.as_path_controller_mut()
+            .expect("Adapted forwards as_path_controller_mut")
+            .set_path(&["home".to_string(), "user".to_string()]);
+        assert!(elem.as_path_controller().is_some(), "shared-ref downcast forwards too");
+        assert_eq!(elem.as_path_controller_mut().unwrap().path_click(), Some(2));
+
+        // …and lands on the same state the concrete widget sees.
+        assert_eq!(w.inner().segs, vec!["home".to_string(), "user".to_string()]);
+        assert_eq!(w.inner().clicked, None, "path_click drained through the forward");
+
+        // Capabilities the widget does not expose stay None (the Element defaults).
+        let elem: &dyn Element = w.as_ref();
+        assert!(elem.as_menu_controller().is_none());
+        assert!(elem.as_graph_controller().is_none());
     }
 }

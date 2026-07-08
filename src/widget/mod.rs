@@ -694,8 +694,6 @@ pub trait Element {
     fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> { None }
     fn as_geom_controller(&self) -> Option<&dyn GeomController> { None }
     fn as_geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> { None }
-    fn as_scroll_controller(&self) -> Option<&dyn ScrollController> { None }
-    fn as_scroll_controller_mut(&mut self) -> Option<&mut dyn ScrollController> { None }
 
     fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         let base = self.base()?;
@@ -919,11 +917,6 @@ pub trait GeomController {
     fn set_geom_visible(&mut self, visible: bool);
     fn geom_visible(&self) -> bool;
     fn take_geom_toggle(&mut self) -> bool;
-}
-
-pub trait ScrollController {
-    fn update_bounds(&mut self, count: usize, viewport_y: f32, viewport_h: f32);
-    fn get_item_draw_y(&self, idx: usize, offset: f32) -> Option<f32>;
 }
 
 pub fn label_offset(w: &dyn Element) -> f32 {
