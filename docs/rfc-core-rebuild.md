@@ -919,11 +919,27 @@ Constraint respected: **each crate still builds standalone** — the new core is
     new `UiContext::drag_allowed_at` — the `is_movable_backplate_at` candidate walk
     minus the registered-movable-Backplate requirement, because the surface itself is
     the movable plate once the Backplate is gone.
+  - **6n — `cce-graph`'s root Backplate dissolved; two engine input holes fixed. DONE
+    (live-verified: A/B residual 14px over the 8% threshold; View menu → Control Panel
+    toggle → panel renders through the walk).** The 6m recipe applied (plate prims,
+    parentless top-level registration, walk in old child order, `drag_allowed_at`);
+    popovers moved to the 6l ui_context-only registration (the global registration
+    spawned a render-only xdg popup double-drawing the menu; `render_popovers` override
+    deleted). Found en route, both pre-existing: (1) a press inside an OPEN popover's
+    plate could start a window move and swallow the click when the widget beneath does
+    not block dragging (Graph's edge-exclusive canvas hit) — both drag questions now
+    veto via `point_in_active_popover`; (2) the engine's render-only popups took input
+    with their default full input region — they now carry an EMPTY input region.
+    Verification lesson recorded: the compositor drops pointer focus after each click
+    (Leave with no re-Enter on in-window motion), so headless click sequences MUST
+    re-park the pointer (`wlrctl pointer move -10000 -10000`) before every click — a
+    skipped re-park looks exactly like an input regression.
   - **Still to do:**
-    dissolve the remaining root Backplates/Plates with the 6m recipe (graph, fonts,
-    colors, files; settings' tree also carries Switcher/Page/SectionContainer/ScrollBox
-    — the deep-composition set), routed events + scene layout for the widget-tree apps,
-    the demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
+    dissolve the remaining root Backplates/Plates with the 6m recipe (fonts, colors,
+    files; settings' tree also carries Switcher/Page/SectionContainer/ScrollBox — the
+    deep-composition set), plus graph's two remaining Plates (menu row, draggable
+    control panel), routed events + scene layout for the widget-tree apps, the demo
+    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
     `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
     `Adapted` once the last app is across.
 
