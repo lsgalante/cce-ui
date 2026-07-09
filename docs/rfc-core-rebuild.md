@@ -859,17 +859,34 @@ Constraint respected: **each crate still builds standalone** — the new core is
     text emitted as prims in the system mono family; `rebuild_text_items` + hand-rolled
     Buffer shaping deleted; the app `FontSystem` stays for `editor.prepare_text` (glyph
     advances — cursor↔pixel mapping).
-  - **Still to do (per-app, roughly smallest-first):**
-    the remaining three display_list() adopters — data-editor, fonts, graph — flip
-    `display_list_text` + drop their TextItem assembly, one at a time, each A/B'd.
-    All three are paint_tree apps with load-bearing embedded-base containers
-    (Backplate/Plate/List/ScrollBox), so the 6d precondition applies: embedded-base-free
-    tree first. cce-fonts additionally NEEDS system fonts in the render FontSystem for
-    its previews (engine's is bundled-only). Then the widget-tree apps (routed events +
-    scene layout + dissolving the embedded-base containers), the demo
-    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
-    `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
-    `Adapted` once the last app is across.
+  - **6i — the 6d trap is FIXED in the walk; `cce-data-editor` flips `display_list_text`.
+    DONE (live-verified: full-frame parity modulo the uniform ~2px engine line-height
+    shift; row selection → inline value editor + statusbar update; choice-dropdown
+    popover renders and occludes rows beneath).** Engine, two changes that make a
+    `paint_tree` list's text emit exactly once — the embedded-base-dissolution
+    precondition is GONE for the flip step: (1) the legacy `Element::paint_self` default
+    emits text only for LEAVES — the legacy container `text_labels` overrides
+    (Backplate/Layer/Page/SplitBox/Plate) aggregate their children's labels, which the
+    walk reaches itself; a legacy container with OWN text overrides `paint_self` (Plate
+    now serves its label this way; SectionContainer still aggregates from internal
+    non-child widgets and needs the same treatment if it is ever walked). (2) the walk's
+    `renders_own_subtree` branch (TreeList) emits the subtree's text from the recursive
+    `text_labels_with_font_and_bounds` — the walk never descends there, so the aggregate
+    is that subtree's text once, with the tuple pipeline's fonts/bounds. App: the old
+    `view()` body (registration, focus, relayout, inline-editor placement, popover
+    registration) moved into `display_list`; `rebuild_text_items` shrank to a
+    widget-state refresh (rebuild_tree, prepare_text, statusbar text); the toolbar file
+    label is a prim; `add_element_labels` and the TextItem cache deleted (−240 lines).
+  - **Still to do (per-app):**
+    the last two display_list() adopters — fonts, graph — flip `display_list_text`
+    (one at a time, each A/B'd; the 6d trap no longer blocks them). cce-fonts still
+    NEEDS system fonts in the render FontSystem for its previews (engine's is
+    bundled-only) — that wants its own design (per-app font loading or an app-provided
+    FontSystem hook). Then the widget-tree apps (routed events + scene layout +
+    dissolving the embedded-base containers), the demo (`cce-ui/src/main.rs`) as the
+    reference `Application`. Delete the legacy `view*`/`text_items` paths, the
+    per-widget text getters, and finally `Element` + `Adapted` once the last app is
+    across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
