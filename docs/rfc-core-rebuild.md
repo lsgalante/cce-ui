@@ -841,13 +841,32 @@ Constraint respected: **each crate still builds standalone** — the new core is
     Popovers/context menu were never main-surface here: they draw on the engine's
     xdg-popup surface via the `render_popovers` collector, which is orthogonal to the
     flip.
+  - **6h — `cce-text-editor` flips `display_list_text`; `Paint::text_font` lands. DONE
+    (live-verified: frame matches baseline modulo a uniform ~2px baseline shift from
+    engine line-height shaping; File-menu popup + occlusion of editor text beneath it;
+    click cursor placement identical to baseline).** The FIRST app rendering scene-walk
+    text prims — its tree (Adapted Dropdown + Adapted TextBox, no embedded-base
+    containers) was exactly the 6d-safe shape, unblocked by the 6g occlusion clamp.
+    Engine: `own_labels_with_font_and_bounds` split into a parameterized helper — the
+    tuple getters keep `widget_font` for every label (unmigrated apps byte-identical),
+    while the walk view (`own_labels_for_walk`) attaches the new `Paint::text_font`
+    (default = `widget_font`) to prim-derived labels; the detached base label keeps
+    `widget_font`. TextBox overrides `text_font`: a customized `font_family`/`font_size`
+    serves the bare family name so the value text draws in the widget's own font at the
+    label's size (the control-font string's size suffix would otherwise override it) —
+    this is what keeps the editor monospace. App: view()'s side effects (registration,
+    initial focus, relayout, popover registration) moved into `display_list`; chrome
+    text emitted as prims in the system mono family; `rebuild_text_items` + hand-rolled
+    Buffer shaping deleted; the app `FontSystem` stays for `editor.prepare_text` (glyph
+    advances — cursor↔pixel mapping).
   - **Still to do (per-app, roughly smallest-first):**
-    the remaining four display_list() adopters — data-editor, fonts, graph, text-editor —
-    flip `display_list_text` + drop their TextItem assembly, one at a time, each A/B'd.
-    All four are paint_tree/widget-tree apps, so the 6d precondition applies:
-    embedded-base-free tree first (Backplate/Plate/List/ScrollBox still load-bearing in
-    each). Popover occlusion is no longer a blocker (6g). Then the widget-tree apps
-    (routed events + scene layout + dissolving the embedded-base containers), the demo
+    the remaining three display_list() adopters — data-editor, fonts, graph — flip
+    `display_list_text` + drop their TextItem assembly, one at a time, each A/B'd.
+    All three are paint_tree apps with load-bearing embedded-base containers
+    (Backplate/Plate/List/ScrollBox), so the 6d precondition applies: embedded-base-free
+    tree first. cce-fonts additionally NEEDS system fonts in the render FontSystem for
+    its previews (engine's is bundled-only). Then the widget-tree apps (routed events +
+    scene layout + dissolving the embedded-base containers), the demo
     (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
     `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
     `Adapted` once the last app is across.
