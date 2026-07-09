@@ -671,11 +671,44 @@ Constraint respected: **each crate still builds standalone** — the new core is
     animated waveform phase; the `all_quads` gallery path contributes zero residual).
     Sweep: 3 app repos re-typed to `Adapted<Paginator>` (email, files, layout-interface);
     test-interface's `Box<dyn Element>` gallery needed no change.
-  - **Still to do:** migrate remaining widgets
-    off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining:
-    ParametersBg (real container, 1.8k lines),
-    and the deferred leaves (StatusBar, Float3, LayoutPreview,
-    PreviewState); the embedded-base containers
+  - **5s — `ParametersBg` (the designer's parameter panel; the last real container). DONE
+    (live-A/B verified, cce-designer pixel-equivalent across four states).** The model caches
+    its laid-out rect via `Layout::rect_assigned` (all row geometry derives from it — the
+    TextBox pattern; `arrange_children` is the legacy child-stacking tail, visible-gated by
+    the adapter exactly as legacy gated it), keeps the value-owned per-row widget vecs
+    (mostly `Adapted<W>` already) plus the raw-pointer `children` list on the 5n container
+    hooks, and ports the full bespoke event surface into `on_event` arms: the every-press
+    dispatch chain (`gates_presses=false` — the panel consumes every left press, scrollbar
+    thumb drag math, popover-first ordering, per-row-type dispatch with value commit-back,
+    the inline emacs-flavored code editor) and the host-driven drag surface on the `Input`
+    drag hooks. New adapter surface: **`Paint::serves_legacy_labels` /
+    `legacy_labels_with_font_and_bounds(rect, ctx)`** — the text sibling of the 5m
+    dual-geometry hatch: the standard bridge gives every own label ONE font and ONE clip
+    rect, but this panel assigns them PER LABEL (viewport clip everywhere, code-box clip +
+    monospace inside a code row); served as a full replacement, children included. Also
+    **`EventCtx::widget_addr()`** — the wheel arm's occlusion check
+    (`is_coordinate_covered`) keys on the adapter's address, which `on_event` couldn't
+    reach. Reuses 5m's plain-quad hatch for the designer's raw `extra_quads` render path
+    (row chrome, section borders, code cursor, scrollbar — with the panel's translucent
+    PARAM_BG plate deliberately NOT emitted: the designer draws it from
+    `color()`/`corner_style`, the 5l double-blend trap). `window_runner`'s
+    `get_child_widget_for_quad` downcast keeps working unchanged (`as_any` exposes the
+    inner type; the 9 pub sub-widget fields stay pub). Flagged approximation: the legacy
+    scrollbar-press called `self.focus()` (base flag only — nothing reads it; the highlight
+    keys on the ctx focus slot and the designer tracks panes by index); dropped.
+    Verified: 175 tests (4 new: controller roundtrip + row layout, checkbox/code-editor
+    commit flows, hatch split, overflow scrolling), cce-designer builds with ZERO app
+    changes (`Box::new(ParametersBg::new())` coerces), live A/B across startup /
+    wheel-scrolled pane / dropdown-row click / second click identical except the bottom
+    status strip — calibrated as launch-to-launch live-data noise (same 1447×21 bbox,
+    77 px between two launches of the SAME baseline vs 81 px old-vs-new). The wheel state
+    changed 107k px within a build and matched across builds, so the event path is
+    genuinely exercised. (The params-pane Circular-Pane dropdown not opening on click is
+    the pre-existing app behavior recorded in 5o, identical in both builds.)
+  - **Still to do:** migrate the deferred leaves off `impl Element` onto the narrow traits
+    (per-widget, Phase 6 flavour): StatusBar (parent-coupled), Float3, LayoutPreview,
+    PreviewState (per-label fonts now expressible via the 5s labels hatch, or wait for
+    `Prim::Text` font+bounds); the embedded-base containers
     (Layer/Container/Page/Plate/Backplate/ScrollBox/List/…) dissolve via Phase 6 scene
     adoption instead. Then delete `Element` + `Adapted` once the last widget is across, at
     which point the `as_*_controller` pairs and the `Input` capability hooks die together
