@@ -895,16 +895,23 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `create_font_system*` database — the alignment that makes app-side-shaped buffers
     rasterizable engine-side). This was the same face-ID-mismatch class as the 6e
     cce-colors bug, and it predates Phase 6 entirely.
-  - **Still to do (per-app):**
-    cce-fonts flips `display_list_text` — the remaining blocker is that `Prim::Text`
-    carries family+size only: the alphabet preview shapes with per-style
-    `glyphon::Style`/`Weight` attrs (italic/bold/light variants), which prims cannot
-    express yet. Extending Prim::Text + `get_text_buffer` (and its cache key) with
-    optional style/weight is the next engine step. Then the widget-tree apps (routed
-    events + scene layout + dissolving the embedded-base containers), the demo
-    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
-    `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
-    `Adapted` once the last app is across.
+  - **6l — `TextAttrs` lands; `cce-fonts` flips `display_list_text`. ALL TEN display_list
+    adopters are now fully on the single paint path. DONE (live-verified: style popover
+    renders with labels on top and occludes the text beneath via the ui_context-only
+    registration; selecting Italic re-renders the alphabet in the italic face).** Engine:
+    `Prim::Text` gains `attrs: TextAttrs { italic, weight }` (toolkit-plain — no glyphon
+    types in the scene layer), emitted by `PaintCtx::text_attrs`, shaped by
+    `get_text_buffer_attrs` (cache key includes them). App: same recipe, plus the popover
+    drawn INTO the list (replacing `overlay_quads`) with labels bounded to the popover
+    rect, and the open popover registered in `ui_context` ONLY — a global registration
+    would spawn an empty xdg popup (no `render_popovers` here). Restored two more Phase 3
+    view()-quad losses (panel borders, alphabet box) and fixed the alphabet's premature
+    wrapping (legacy passed a LOGICAL width to `set_size` on a physical-unit buffer).
+  - **Still to do:**
+    the widget-tree apps (routed events + scene layout + dissolving the embedded-base
+    containers), the demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete
+    the legacy `view*`/`text_items` paths, the per-widget text getters, and finally
+    `Element` + `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
