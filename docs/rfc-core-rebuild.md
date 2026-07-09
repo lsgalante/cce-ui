@@ -797,8 +797,26 @@ Constraint respected: **each crate still builds standalone** — the new core is
     trees that still contain Layer/Page/etc. — invisible today (text prims unrendered
     without the opt-in), but it means an app can only flip `display_list_text` once its
     tree is embedded-base-free. Consistent with the dissolution plan; revisit per app.
+  - **6e — `cce-colors` flips `display_list_text` (first of the seven adopters). DONE
+    (live-A/B'd; slider drag re-verified via wlrctl).** The whole frame is one
+    `display_list()` — the rebuild check moved off the deleted `view`/`view_rounded_quads`
+    overrides, `rebuild_layout` keeps the flat PageContent text tuples and the list emits
+    them as `text_with` prims; deleted: the app-side `FontSystem`, the `TextItem`
+    assembly, and the `CCE_LEGACY_PAINT` fallback. The A/B exposed a PRE-EXISTING runtime
+    bug this fixes: the app shaped its `TextItem`s with its own
+    `create_font_system_with_system_fonts()`, whose fontdb face IDs don't resolve in the
+    engine's render `FontSystem` — every `font: None` label (slider names, channel
+    values, hex readout) was INVISIBLE at runtime in the baseline (only the bundled-font
+    button labels survived). Shaping through the engine's FontSystem (the dl-text path)
+    is what makes the text render at all. Note for the remaining adopters: an app-side
+    `FontSystem` is not just dead weight, it is a live font-resolution hazard — check
+    each app's text for the same silent invisibility before trusting its baseline
+    capture. cce-colors' safety: no popovers, no paint_tree (flat-list bridge), so
+    neither the popover-occlusion gap nor the 6d embedded-base double-emit applies; its
+    root `Backplate` remains for legacy layout/events (full definition-of-done still
+    pending events + layout).
   - **Still to do (per-app, roughly smallest-first):**
-    the seven display_list() adopters (flip `display_list_text` + drop their TextItem
+    the remaining six display_list() adopters (flip `display_list_text` + drop their TextItem
     assembly, one at a time, each A/B'd — precondition: embedded-base-free tree, see 6d),
     then the widget-tree apps (routed events + scene
     layout + dissolving the embedded-base containers), the demo (`cce-ui/src/main.rs`) as the
