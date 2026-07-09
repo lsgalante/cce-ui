@@ -778,7 +778,29 @@ impl UiContext {
         crate::widget::context_menu::text_labels()
     }
 
+    /// Whether the point lies inside an OPEN popover's plate. Popovers are drawn on top of
+    /// everything and are interactive UI, but they are not spatial-grid widgets — a press
+    /// there must never start a window move (the widgets beneath may not block dragging,
+    /// e.g. Graph's edge-exclusive canvas hit test).
+    fn point_in_active_popover(&self, px: f32, py: f32) -> bool {
+        for popover_ptr in &self.active_popovers {
+            unsafe {
+                if let Some(p) = popover_ptr.as_ref() {
+                    if let Some((x, y, w, h)) = p.popover_rect() {
+                        if px >= x && px <= x + w && py >= y && py <= y + h {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     pub fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
+        if self.point_in_active_popover(px, py) {
+            return false;
+        }
         let mut hit_backplate = false;
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let mut candidate_ids = self.spatial_grid.query(px, py).to_vec();
@@ -819,6 +841,9 @@ impl UiContext {
     /// [`is_movable_backplate_at`](UiContext::is_movable_backplate_at) minus the requirement
     /// that a registered movable `Backplate` is hit.
     pub fn drag_allowed_at(&self, px: f32, py: f32) -> bool {
+        if self.point_in_active_popover(px, py) {
+            return false;
+        }
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let mut candidate_ids = self.spatial_grid.query(px, py).to_vec();
         if scroll_y != 0.0 {

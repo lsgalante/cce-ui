@@ -2509,7 +2509,6 @@ impl<A: Application> PointerHandler for EngineState<A> {
             }
             
             self.cursor_pos = (lx, ly);
-            
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
                     let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
@@ -3336,7 +3335,17 @@ pub fn run<A: Application>() {
                     &engine_state.xdg_shell_state,
                 ).unwrap();
                 sctk_popup.wl_surface().set_buffer_scale(engine_state.scale_factor as i32);
-                    
+                // Render-only popup: give it an EMPTY input region so pointer events pass
+                // through to the main surface beneath (which draws and hit-tests the popover
+                // content itself). With the default full input region the popup swallowed
+                // every click on an open menu — item clicks never reached the app.
+                {
+                    let compositor = engine_state.compositor_state.wl_compositor();
+                    let empty_region = compositor.create_region(&engine_state.qh, ());
+                    sctk_popup.wl_surface().set_input_region(Some(&empty_region));
+                    empty_region.destroy();
+                }
+
                     let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
                     let surface_ptr = sctk_popup.wl_surface().id().as_ptr() as *mut std::ffi::c_void;
                     let wayland_handle = Box::leak(Box::new(WaylandSurfaceHandle {
