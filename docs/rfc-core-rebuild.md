@@ -966,9 +966,20 @@ Constraint respected: **each crate still builds standalone** — the new core is
     bg/track/thumb prims. The bg is a single list_bg layer — the legacy leaf-walk
     stacked rounded + plain copies (the translucent double-compositing class again);
     residual A/B delta is a 2px bottom-edge strip.
+  - **6r — colors' and files' root Backplates dissolved, BOTH A/B'd to AE=0.** These are
+    the flat-pipeline (render_widget) apps, and their dissolution surfaced the legacy
+    aggregate's GLOBAL tuple-order contract: `render_widget(root)` emitted every
+    descendant's PLAIN quads first (via `all_quads` aggregation), then the root's
+    rounded bg, then every descendant's ROUNDED quads — so the root's translucent plate
+    WASHES over the plain content (colors' muted slider gradients depend on it; a
+    naive plate-first order renders saturated). Replication: per-child `render_widget`,
+    partition the tuples by radius, and interleave [plain…, plate, rounded…]. Wheel in
+    colors propagates per-slider; both apps answer dragging via `drag_allowed_at`.
+    Files' view-dropdown popover + breadcrumb context menu re-verified live.
   - **Still to do:**
-    colors' and files' roots, and settings' tree (Switcher/Page/SectionContainer/
-    ScrollBox — the deep-composition set); routed events + scene layout for the
+    settings' tree (Switcher/Page/SectionContainer/ScrollBox — the deep-composition
+    set); files' internal containers (splitters/BrowseContainer/List) and data-editor's
+    SplitBox/TreeList when their turns come; routed events + scene layout for the
     widget-tree apps; the demo (`cce-ui/src/main.rs`) as the reference `Application`.
     Delete the legacy `view*`/`text_items` paths, the per-widget text getters, and
     finally `Element` + `Adapted` once the last app is across.
