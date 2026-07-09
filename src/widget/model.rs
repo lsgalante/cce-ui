@@ -85,6 +85,14 @@ pub trait Layout {
         0.0
     }
 
+    /// Whether `Element::measure` should prefer [`intrinsic_size`](Layout::intrinsic_size)'s
+    /// width over the current rect width (Dropdown's `auto_width` measure override — hosts size
+    /// it from `measure`, e.g. cce-system-settings' page dropdown). Default: keep the legacy
+    /// `Element::measure` width (the current rect's).
+    fn intrinsic_measure_width(&self) -> bool {
+        false
+    }
+
     // --- Container concern (transitional). Legacy containers own `Vec<*mut dyn Element>`
     // children (child-arranging `set_rect` has no ctx to reach the tree) and every one
     // hand-copies the same subtree plumbing: geometry/text aggregation, tick/popover/text-item
@@ -931,6 +939,22 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
 
     fn preferred_height(&self) -> Option<f32> {
         Layout::intrinsic_size(&self.inner).map(|s| s.height)
+    }
+
+    /// The `Element::measure` default, except the width consults the intrinsic size when the
+    /// widget opts in ([`Layout::intrinsic_measure_width`] — Dropdown's `auto_width`).
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, _ctx: &UiContext) -> crate::widget::Size {
+        let (_, _, w, h) = self.rect();
+        let pref_w = if Layout::intrinsic_measure_width(&self.inner) {
+            Layout::intrinsic_size(&self.inner).map_or(w, |s| s.width)
+        } else {
+            w
+        };
+        let pref_h = self.preferred_height().unwrap_or(h);
+        crate::widget::Size {
+            width: pref_w.clamp(constraints.min_width, constraints.max_width),
+            height: pref_h.clamp(constraints.min_height, constraints.max_height),
+        }
     }
 
     /// Narrow widgets own every pixel they draw through [`Paint::paint`]; the legacy shared

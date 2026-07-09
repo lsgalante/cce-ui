@@ -131,7 +131,7 @@ impl InstancedWidget {
 #[derive(Clone, Debug)]
 pub struct MultiControlRow {
     pub key_input: TextBox,
-    pub type_dropdown: Dropdown,
+    pub type_dropdown: Adapted<Dropdown>,
     pub value_widget: InstancedWidget,
     pub remove_button: Adapted<Button>,
     pub layout_y: f32,

@@ -1,79 +1,90 @@
+//! Narrow-trait `Dropdown` (Phase 5p — first popover widget through `Paint::popover` /
+//! `draw_popover`, the 5o surface). Detached-label control on the Slider convention (no rect
+//! inflation; the label eats into the assigned rect), `Control::control_label`'s +4px inset via
+//! `Layout::detached_label_inset`, side-label inset computed from the synced label.
+//!
+//! Parity notes (all legacy-faithful, verified against the pre-migration impl):
+//! - `parent` stays a public, direct-write-only field: legacy `set_parent` never wrote it (the
+//!   Element default only touched the tree — Ramp's dummy-ctx `set_parent` calls were silently
+//!   discarded), so the Ramp popover clamp and the fade-blend parent color activate only for
+//!   callers that assign the field, exactly as before. The backplate-concentric corner walk
+//!   (which legacy ran over the ctx tree) instead starts from a separate pointer captured by
+//!   `Layout::parent_changed` and hops legacy field-based `parent(&dummy)` impls — exact for
+//!   the real consumer (cce-graph: Dropdown → Plate → Backplate, both field-based).
+//! - The row-rect hit expansion (`base.row_x/row_w`) is dropped, consistent with every other
+//!   migrated control: `Input::hit` tests the widget rect plus the open popover.
+//! - `Layout::intrinsic_measure_width` (new hook) preserves the `auto_width` measure behavior
+//!   (cce-system-settings sizes its page dropdown from `Element::measure`).
+
 use crate::colors;
-use crate::widget::*;
+use crate::scene::layout::{Rect, Size};
+use crate::scene::paint::PaintCtx;
+use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
+use crate::widget::{
+    Control, Element, ElementState, Event, Key, MouseButton, NamedKey, UiContext,
+};
+
+/// Side-layout label inset — the legacy `Element::label_x_offset` default for non-exempt
+/// widgets (Dropdown was never in the exempt list).
+fn side_offset(label: &Option<String>) -> f32 {
+    if crate::layout::control_label_layout() == "side" && label.is_some() {
+        90.0
+    } else {
+        0.0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Dropdown {
-    base: Widget,
     pub options: Vec<String>,
     pub selected: usize,
     pub open: bool,
     pub(crate) hovered_item: Option<usize>,
     just_changed: bool,
+    /// Legacy-faithful parent pointer: written ONLY by direct assignment (the Ramp-clamp unit
+    /// test; no production writer). Read by the Ramp popover clamp and the fade-blend parent
+    /// color, like legacy. NOT the corner-walk pointer — see `tracked_parent`.
     pub parent: Option<*mut (dyn Element + 'static)>,
-    pub children: Vec<*mut (dyn Element + 'static)>,
+    /// Captured by [`Layout::parent_changed`] whenever a container `set_parent`s this widget —
+    /// the model-side stand-in for the ctx-tree head the legacy backplate corner walk started
+    /// from (`paint` has no ctx to reach the real tree).
+    tracked_parent: Option<*mut (dyn Element + 'static)>,
     pub font_family: String,
     pub custom_display_text: Option<String>,
     pub open_upward: Option<bool>,
     pub auto_width: bool,
+    /// Synced copy of the control label ([`Paint::sync_label`]) — drives the side/detached
+    /// offsets the base label geometry imposes on the widget's own geometry.
+    label: Option<String>,
+    /// Own hover flag, maintained from `MouseEnter`/`MouseLeave` (the adapter's hover
+    /// bookkeeping hit-tests through [`Input::hit`], which includes the open popover — matching
+    /// the legacy `on_cursor_moved` + popover-aware `hit_test` pair).
+    hovered: bool,
 }
 
 impl Dropdown {
-    pub fn new(options: Vec<String>, selected: usize) -> Self {
-        Self {
-            base: Widget::new(),
+    pub fn new(options: Vec<String>, selected: usize) -> Adapted<Dropdown> {
+        Adapted::new(Dropdown {
             options,
             selected,
             open: false,
             hovered_item: None,
             just_changed: false,
             parent: None,
-            children: Vec::new(),
+            tracked_parent: None,
             font_family: "sans-serif".to_string(),
             custom_display_text: None,
             open_upward: None,
             auto_width: false,
-        }
-    }
-
-    pub fn with_custom_display_text(mut self, text: &str) -> Self {
-        self.custom_display_text = Some(text.to_string());
-        self
-    }
-
-    pub fn with_font_family(mut self, font_family: &str) -> Self {
-        self.font_family = font_family.to_string();
-        self
-    }
-
-    pub fn with_label(mut self, label: &str) -> Self {
-        self.base.label = Some(label.to_string());
-        self
-    }
-
-    pub fn with_open_upward(mut self, open_upward: bool) -> Self {
-        self.open_upward = Some(open_upward);
-        self
-    }
-
-    pub fn with_config(mut self, file: &str, key: &str) -> Self {
-        self.base.config_file = Some(file.to_string());
-        self.base.config_key = Some(key.to_string());
-        self
-    }
-
-    pub fn set_label(&mut self, label: &str) {
-        self.base.label = Some(label.to_string());
+            label: None,
+            hovered: false,
+        })
     }
 
     pub fn take_change(&mut self) -> bool {
         let changed = self.just_changed;
         self.just_changed = false;
         changed
-    }
-
-    pub fn with_auto_width(mut self, auto_width: bool) -> Self {
-        self.auto_width = auto_width;
-        self
     }
 
     pub fn content_width(&self) -> f32 {
@@ -90,40 +101,54 @@ impl Dropdown {
         max_w
     }
 
-    pub fn popover_width(&self) -> f32 {
-        self.base.w.max(self.content_width())
+    /// The detached-label strip height above the content rect — a replica of
+    /// `Widget::label_offset` over the synced label (zero in side layout or unlabeled).
+    fn label_top(&self) -> f32 {
+        if crate::layout::control_label_layout() == "side" {
+            return 0.0;
+        }
+        if self.label.is_some() {
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            font_size + crate::layout::control_label_margin()
+        } else {
+            0.0
+        }
     }
 
-    pub fn get_popover_geom(&self) -> (f32, f32, f32, f32) {
-        let rw = self.popover_width();
+    fn popover_width(&self, content: Rect) -> f32 {
+        content.width.max(self.content_width())
+    }
+
+    /// Popover geometry against the laid-out content rect — the legacy `get_popover_geom`,
+    /// with the base-rect reads rewritten in content-rect terms (`base.y + base.h` ⇒
+    /// `content.y + content.height`, `base.y + label_offset` ⇒ `content.y`).
+    pub fn popover_geom(&self, content: Rect) -> (f32, f32, f32, f32) {
+        let rw = self.popover_width(content);
         let rh = self.options.len() as f32 * 24.0;
-        
-        let open_upward = self.open_upward.unwrap_or_else(|| self.base.y > 400.0);
-        let label_x = self.label_x_offset();
-        
-        let mut rx = self.base.x + label_x;
+
+        let base_y = content.y - self.label_top();
+        let open_upward = self.open_upward.unwrap_or(base_y > 400.0);
+        let label_x = side_offset(&self.label);
+
+        let mut rx = content.x + label_x;
         let mut ry = if open_upward {
-            let label_offset = self.base.label_offset();
-            self.base.y + label_offset - rh
+            content.y - rh
         } else {
-            self.base.y + self.base.h
+            content.y + content.height
         };
-        
+
         let mut is_ramp = false;
         if let Some(parent_ptr) = self.parent {
-            is_ramp = unsafe {
-                (*parent_ptr).as_any().is::<crate::widget::Ramp>()
-            };
+            is_ramp = unsafe { (*parent_ptr).as_any().is::<crate::widget::Ramp>() };
         }
-        
+
         if is_ramp {
             if let Some(parent_ptr) = self.parent {
                 let (px, py, pw_parent, ph_parent) = unsafe { (*parent_ptr).rect() };
                 if pw_parent > 0.0 && ph_parent > 0.0 {
-                    let label_offset = self.base.label_offset();
-                    let dy_down = self.base.y + self.base.h;
-                    let dy_up = self.base.y + label_offset - rh;
-                    
+                    let dy_down = content.y + content.height;
+                    let dy_up = content.y - rh;
+
                     if self.open_upward.is_none() {
                         if dy_down + rh > py + ph_parent && dy_up >= py {
                             ry = dy_up;
@@ -131,7 +156,7 @@ impl Dropdown {
                             ry = dy_down;
                         }
                     }
-                    
+
                     // Clamp X to parent borders
                     if rx < px {
                         rx = px;
@@ -139,7 +164,7 @@ impl Dropdown {
                     if rx + rw > px + pw_parent {
                         rx = px + pw_parent - rw;
                     }
-                    
+
                     // Clamp Y to parent borders
                     if ry < py {
                         ry = py;
@@ -150,476 +175,124 @@ impl Dropdown {
                 }
             }
         }
-        
+
         (rx, ry, rw, rh)
     }
 
-    pub fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
-        if !self.open { return; }
-        
-        let (rx, ry, rw, rh) = self.get_popover_geom();
-        
-        // 1. Soft layered drop shadows
-        pc.rect([0.02, 0.02, 0.05, 0.15], rx + 1.0, ry + 1.0, rw, rh);
-        pc.rect([0.02, 0.02, 0.05, 0.08], rx + 3.0, ry + 3.0, rw, rh);
-        pc.rect([0.02, 0.02, 0.05, 0.04], rx + 5.0, ry + 5.0, rw, rh);
-
-        let theme = colors::active_theme();
-
-        // 2. High-contrast premium outer border
-        pc.rect(theme.surface_border, rx, ry, rw, rh);
-        
-        // 3. Frosted glass background
-        pc.rect(theme.surface_bg, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0); // bg
-        
-        if let Some(h_idx) = self.hovered_item {
-            let iy = ry + h_idx as f32 * 24.0;
-            // 4. Vibrantly colored translucent selection highlight
-            pc.rect(theme.primary_accent, rx + 2.0, iy + 2.0, rw - 4.0, 20.0);
-        }
-        
-        for (idx, opt) in self.options.iter().enumerate() {
-            let iy = crate::layout::align_text_y(ry + idx as f32 * 24.0, 24.0, 12.0, 0.0);
-            
-            if opt == "-" {
-                pc.rect(theme.surface_border, rx + 8.0, ry + idx as f32 * 24.0 + 11.5, rw - 16.0, 1.0);
-                continue;
-            }
-
-            let text_color = if self.hovered_item == Some(idx) {
-                [0xff, 0xff, 0xff]
-            } else if self.selected == idx {
-                [0x3a, 0x9a, 0xff]
-            } else {
-                [0xcc, 0xcc, 0xd4]
-            };
-            
-            let color_f32 = [
-                text_color[0] as f32 / 255.0,
-                text_color[1] as f32 / 255.0,
-                text_color[2] as f32 / 255.0,
-                1.0,
-            ];
-            
-            let bounds = Some([rx, ry, rx + rw, ry + rh]);
-            if let Some(ref font) = self.widget_font() {
-                pc.text_with_font_and_bounds(
-                    opt,
-                    rx + 8.0,
-                    iy,
-                    12.0,
-                    color_f32,
-                    font,
-                    bounds,
-                );
-            } else {
-                pc.text_with_bounds(
-                    opt,
-                    rx + 8.0,
-                    iy,
-                    12.0,
-                    color_f32,
-                    bounds,
-                );
-            }
-        }
-    }
-}
-
-impl Default for Dropdown {
-    fn default() -> Self {
-        Self::new(Vec::new(), 0)
-    }
-}
-
-impl Element for Dropdown {
-    crate::impl_widget_base!(Dropdown);
-
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
-    }
-
-    fn get_value_string(&self) -> Option<String> {
-        self.options.get(self.selected).cloned()
-    }
-
-    fn set_value_string(&mut self, val: &str) -> bool {
-        let val_trimmed = val.trim();
-        for (idx, opt) in self.options.iter().enumerate() {
-            if opt.eq_ignore_ascii_case(val_trimmed) {
-                if self.selected != idx {
-                    self.selected = idx;
-                    self.just_changed = true;
-                    return true;
-                }
-                return false;
-            }
-        }
-        if let Ok(idx) = val_trimmed.parse::<usize>() {
-            if idx < self.options.len() {
-                if self.selected != idx {
-                    self.selected = idx;
-                    self.just_changed = true;
-                    return true;
-                }
-                return false;
-            }
-        }
-        false
-    }
-
-    fn take_change(&mut self) -> bool {
-        self.take_change()
-    }
-
-    fn color(&self) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
-    }
-
-    fn measure(&self, constraints: LayoutConstraints, _ctx: &UiContext) -> Size {
-        let (_, _, w, h) = self.rect();
-        let pref_w = if self.auto_width {
-            self.content_width()
-        } else {
-            w
-        };
-        let pref_h = self.preferred_height().unwrap_or(h);
-        
-        let width = pref_w.clamp(constraints.min_width, constraints.max_width);
-        let height = pref_h.clamp(constraints.min_height, constraints.max_height);
-        
-        Size { width, height }
-    }
-
-    fn preferred_height(&self) -> Option<f32> {
-        Some(crate::layout::dropdown_height())
-    }
-
-    /// Content size for the scene layout engine (Phase 2b): wide enough for the widest option
-    /// (via `content_width`, which already includes the arrow/padding inset), at the configured
-    /// dropdown height — so the control doesn't resize as the selection changes.
-    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
-        Some(crate::scene::layout::Size::new(self.content_width(), crate::layout::dropdown_height()))
-    }
-
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        let r = crate::layout::dropdown_corner_radius();
-        if r > 0.0 {
-            (true, true, true, true)
-        } else {
-            (false, false, false, false)
-        }
-    }
-
-    fn corner_radius(&self) -> f32 {
-        crate::layout::dropdown_corner_radius()
-    }
-
-    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
-        let mut quads = Vec::new();
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if r1 || r2 || r3 || r4 {
-            let top = self.base.label_offset();
-            let visual_h = self.base.h - top;
-            let radius = self.corner_radius();
-            
-            let mut bg_color = colors::dropdown_background_color();
-            bg_color[3] = 1.0; // Force opaque background to prevent subpixel blending artifacts
-            let border_color = if self.open {
-                [0.30, 0.50, 0.32, 1.0]
-            } else if self.base.hovered {
-                let bc = colors::dropdown_border_color();
-                [(bc[0] + 0.15).min(1.0), (bc[1] + 0.15).min(1.0), (bc[2] + 0.15).min(1.0), bc[3]]
-            } else {
-                colors::dropdown_border_color()
-            };
-
-            let label_x = self.label_x_offset();
-            let x = self.base.x + label_x;
-            let w = self.base.w - label_x;
-
-            // Draw border and background (with potential parent-concentric corner adjustment)
-            let inner_radius = (radius - 1.0).max(0.0);
-            let mut adjusted = false;
-            let mut outer_radii = [radius; 4];
-            let mut inner_radii = [inner_radius; 4];
-
-            let mut curr = self.parent(ctx);
-            let mut backplate_ptr = None;
-            while let Some(ptr) = curr {
-                if unsafe { (*ptr).is_backplate() } {
-                    backplate_ptr = Some(ptr);
-                    break;
-                }
-                curr = unsafe { (*ptr).parent(ctx) };
-            }
-
-            if let Some(bp) = backplate_ptr {
-                let (px, py, pw, ph) = unsafe { (*bp).rect() };
-                let pr = unsafe { (*bp).corner_radius() };
-                let (pr1, pr2, pr3, pr4) = unsafe { (*bp).rounded_corners() };
-
-                let g_left = x - px;
-                let g_top = (self.base.y + top) - py;
-                let g_right = (px + pw) - (x + w);
-                let g_bottom = (py + ph) - ((self.base.y + top) + visual_h);
-
-                if pr1 && (g_left - g_top).abs() < 1.0 && g_left >= 0.0 {
-                    outer_radii[0] = (pr - g_left).max(0.0);
-                    inner_radii[0] = (outer_radii[0] - 1.0).max(0.0);
-                    adjusted = true;
-                }
-                if pr2 && (g_right - g_top).abs() < 1.0 && g_right >= 0.0 {
-                    outer_radii[1] = (pr - g_right).max(0.0);
-                    inner_radii[1] = (outer_radii[1] - 1.0).max(0.0);
-                    adjusted = true;
-                }
-                if pr3 && (g_right - g_bottom).abs() < 1.0 && g_right >= 0.0 {
-                    outer_radii[2] = (pr - g_right).max(0.0);
-                    inner_radii[2] = (outer_radii[2] - 1.0).max(0.0);
-                    adjusted = true;
-                }
-                if pr4 && (g_left - g_bottom).abs() < 1.0 && g_left >= 0.0 {
-                    outer_radii[3] = (pr - g_left).max(0.0);
-                    inner_radii[3] = (outer_radii[3] - 1.0).max(0.0);
-                    adjusted = true;
-                }
-            }
-
-            if adjusted {
-                let border_quads = crate::layout::partition_concentric_corners(
-                    x, self.base.y + top, w, visual_h,
-                    radius, outer_radii, border_color
-                );
-                quads.extend(border_quads);
-
-                let bg_quads = crate::layout::partition_concentric_corners(
-                    x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0,
-                    inner_radius, inner_radii, bg_color
-                );
-                quads.extend(bg_quads);
-            } else {
-                quads.push((x, self.base.y + top, w, visual_h, radius, border_color, (r1, r2, r3, r4)));
-                quads.push((x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0, inner_radius, bg_color, (r1, r2, r3, r4)));
-            }
-        }
-        for &child_ptr in &self.children(ctx) {
-            let widget = unsafe { &*child_ptr };
-            quads.extend(widget.all_rounded_quads(ctx));
-        }
-        quads
-    }
-
-    fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::control_label_font_detached())
-    }
-
-    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
-            return false;
-        }
-        let (x, y, w, h) = self.rect();
-        if w <= 0.0 || h <= 0.0 {
-            return false;
-        }
-        let hx = if self.base.row_w > 0.0 { self.base.row_x } else { x };
-        let hw = if self.base.row_w > 0.0 { self.base.row_w } else { w };
+    fn border_color(&self) -> [f32; 4] {
         if self.open {
-            let (rx, ry, rw, rh) = self.get_popover_geom();
-            let hit_trigger = px >= hx && px <= hx + hw && py >= y && py <= y + h;
-            let hit_popover = px >= rx && px <= rx + rw && py >= ry && py <= ry + rh;
-            hit_trigger || hit_popover
-        } else {
-            px >= hx && px <= hx + hw && py >= y && py <= y + h
-        }
-    }
-
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let was_hovered = self.base.hovered;
-        let was_hovered_item = self.hovered_item;
-        
-        self.base.hovered = self.hit_test(px, py, ctx);
-        self.hovered_item = None;
-
-        if self.open {
-            let (rx, ry, rw, rh) = self.get_popover_geom();
-            if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
-                let idx = ((py - ry) / 24.0) as usize;
-                if idx < self.options.len() {
-                    if self.options[idx] != "-" {
-                        self.hovered_item = Some(idx);
-                    }
-                }
-            }
-        }
-
-        self.base.hovered != was_hovered || self.hovered_item != was_hovered_item
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if button == MouseButton::Right && state == ElementState::Pressed {
-            if self.hit_test(px, py, ctx) {
-                ctx.handle_right_click(self.as_ptr_mut(), px, py);
-                return true;
-            }
-        }
-        if button != MouseButton::Left || state != ElementState::Pressed { return false; }
-
-        let (x, y, w, h) = self.rect();
-        let (rx, ry, rw, rh) = self.get_popover_geom();
-
-        let inside_trigger = px >= x && px <= x + w && py >= y && py <= y + h;
-        let inside_popover = self.open && px >= rx && px <= rx + rw && py >= ry && py <= ry + rh;
-
-        if inside_popover {
-            let idx = ((py - ry) / 24.0) as usize;
-            if idx < self.options.len() {
-                if self.options[idx] == "-" {
-                    return true;
-                }
-                if self.selected != idx || self.custom_display_text.is_some() {
-                    self.selected = idx;
-                    self.just_changed = true;
-                }
-            }
-            self.open = false;
-            return true;
-        }
-
-        if inside_trigger {
-            self.open = !self.open;
-            if self.open {
-                self.focus();
-            } else {
-                self.unfocus();
-            }
-            return true;
-        }
-
-        if self.open {
-            self.open = false;
-            return true;
-        }
-
-        false
-    }
-
-    fn focus(&mut self) {
-        focus::set_focused(self);
-    }
-
-    fn unfocus(&mut self) {
-        self.open = false;
-    }
-
-    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
-        if event.state != ElementState::Pressed { return false; }
-        if !self.open {
-            if let Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) = event.logical_key {
-                self.open = true;
-                let mut start_idx = self.selected;
-                if start_idx < self.options.len() && self.options[start_idx] == "-" {
-                    for i in 0..self.options.len() {
-                        if self.options[i] != "-" {
-                            start_idx = i;
-                            break;
-                        }
-                    }
-                }
-                self.hovered_item = Some(start_idx);
-                return true;
-            }
-            return false;
-        }
-        
-        match event.logical_key {
-            Key::Named(NamedKey::ArrowDown) => {
-                let current = self.hovered_item.unwrap_or(self.selected);
-                let mut next = (current + 1) % self.options.len();
-                for _ in 0..self.options.len() {
-                    if self.options[next] != "-" {
-                        self.hovered_item = Some(next);
-                        break;
-                    }
-                    next = (next + 1) % self.options.len();
-                }
-                true
-            }
-            Key::Named(NamedKey::ArrowUp) => {
-                let current = self.hovered_item.unwrap_or(self.selected);
-                let mut prev = if current == 0 { self.options.len() - 1 } else { current - 1 };
-                for _ in 0..self.options.len() {
-                    if self.options[prev] != "-" {
-                        self.hovered_item = Some(prev);
-                        break;
-                    }
-                    prev = if prev == 0 { self.options.len() - 1 } else { prev - 1 };
-                }
-                true
-            }
-            Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
-                if let Some(idx) = self.hovered_item {
-                    if idx < self.options.len() && self.options[idx] != "-" {
-                        if self.selected != idx || self.custom_display_text.is_some() {
-                            self.selected = idx;
-                            self.just_changed = true;
-                        }
-                        self.open = false;
-                    }
-                }
-                true
-            }
-            Key::Named(NamedKey::Escape) => {
-                self.open = false;
-                true
-            }
-            _ => false
-        }
-    }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if r1 || r2 || r3 || r4 {
-            return Vec::new();
-        }
-
-        let mut quads = Vec::new();
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-
-        let mut bg_color = colors::dropdown_background_color();
-        bg_color[3] = 1.0; // Force opaque background to prevent subpixel blending artifacts
-        let border_color = if self.open {
             [0.30, 0.50, 0.32, 1.0]
-        } else if self.base.hovered {
+        } else if self.hovered {
             let bc = colors::dropdown_border_color();
             [(bc[0] + 0.15).min(1.0), (bc[1] + 0.15).min(1.0), (bc[2] + 0.15).min(1.0), bc[3]]
         } else {
             colors::dropdown_border_color()
-        };
-
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-
-        quads.push((x, self.base.y + top, w, visual_h, border_color));
-        quads.push((x + 1.0, self.base.y + top + 1.0, w - 2.0, visual_h - 2.0, bg_color));
-
-        quads
+        }
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let mut labels = Vec::new();
-        let top = self.base.label_offset();
-        let _visual_h = self.base.h - top;
-        
-        if let Some(lbl) = self.control_label() {
-            labels.push(lbl);
+    /// The legacy backplate-ancestor lookup for concentric corners, walked from the tracked
+    /// parent with a dummy ctx (field-based legacy `parent` impls answer; tree-only ones end
+    /// the walk, so deep tree-linked chains lose the adjustment — flagged in the module docs).
+    fn backplate_ancestor(&self) -> Option<*mut (dyn Element + 'static)> {
+        let dummy = crate::context::UiContext::new();
+        let mut curr = self.tracked_parent;
+        while let Some(ptr) = curr {
+            if unsafe { (*ptr).is_backplate() } {
+                return Some(ptr);
+            }
+            curr = unsafe { (*ptr).parent(&dummy) };
+        }
+        None
+    }
+
+    /// Emit the border + background geometry — the legacy `all_rounded_quads` body (rounded,
+    /// with the backplate-concentric corner adjustment) or `extra_quads` (plain) depending on
+    /// the configured radius, byte-for-byte on the same content rect.
+    fn paint_background(&self, content: Rect, ctx: &mut PaintCtx) {
+        let label_x = side_offset(&self.label);
+        let x = content.x + label_x;
+        let w = content.width - label_x;
+        let y = content.y;
+        let visual_h = content.height;
+
+        let mut bg_color = colors::dropdown_background_color();
+        bg_color[3] = 1.0; // Force opaque background to prevent subpixel blending artifacts
+        let border_color = self.border_color();
+
+        let radius = crate::layout::dropdown_corner_radius();
+        if radius <= 0.0 {
+            ctx.quad(Rect { x, y, width: w, height: visual_h }, border_color);
+            ctx.quad(
+                Rect { x: x + 1.0, y: y + 1.0, width: w - 2.0, height: visual_h - 2.0 },
+                bg_color,
+            );
+            return;
         }
 
+        let inner_radius = (radius - 1.0).max(0.0);
+        let mut adjusted = false;
+        let mut outer_radii = [radius; 4];
+        let mut inner_radii = [inner_radius; 4];
+
+        if let Some(bp) = self.backplate_ancestor() {
+            let (px, py, pw, ph) = unsafe { (*bp).rect() };
+            let pr = unsafe { (*bp).corner_radius() };
+            let (pr1, pr2, pr3, pr4) = unsafe { (*bp).rounded_corners() };
+
+            let g_left = x - px;
+            let g_top = y - py;
+            let g_right = (px + pw) - (x + w);
+            let g_bottom = (py + ph) - (y + visual_h);
+
+            if pr1 && (g_left - g_top).abs() < 1.0 && g_left >= 0.0 {
+                outer_radii[0] = (pr - g_left).max(0.0);
+                inner_radii[0] = (outer_radii[0] - 1.0).max(0.0);
+                adjusted = true;
+            }
+            if pr2 && (g_right - g_top).abs() < 1.0 && g_right >= 0.0 {
+                outer_radii[1] = (pr - g_right).max(0.0);
+                inner_radii[1] = (outer_radii[1] - 1.0).max(0.0);
+                adjusted = true;
+            }
+            if pr3 && (g_right - g_bottom).abs() < 1.0 && g_right >= 0.0 {
+                outer_radii[2] = (pr - g_right).max(0.0);
+                inner_radii[2] = (outer_radii[2] - 1.0).max(0.0);
+                adjusted = true;
+            }
+            if pr4 && (g_left - g_bottom).abs() < 1.0 && g_left >= 0.0 {
+                outer_radii[3] = (pr - g_left).max(0.0);
+                inner_radii[3] = (outer_radii[3] - 1.0).max(0.0);
+                adjusted = true;
+            }
+        }
+
+        if adjusted {
+            for (qx, qy, qw, qh, qr, qc, corners) in crate::layout::partition_concentric_corners(
+                x, y, w, visual_h, radius, outer_radii, border_color,
+            ) {
+                ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
+            }
+            for (qx, qy, qw, qh, qr, qc, corners) in crate::layout::partition_concentric_corners(
+                x + 1.0, y + 1.0, w - 2.0, visual_h - 2.0, inner_radius, inner_radii, bg_color,
+            ) {
+                ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
+            }
+        } else {
+            let corners = (true, true, true, true);
+            ctx.rounded_rect(Rect { x, y, width: w, height: visual_h }, radius, corners, border_color);
+            ctx.rounded_rect(
+                Rect { x: x + 1.0, y: y + 1.0, width: w - 2.0, height: visual_h - 2.0 },
+                inner_radius,
+                corners,
+                bg_color,
+            );
+        }
+    }
+
+    /// Emit the selected-text (per-character fade against the right edge) and the ▼ arrow —
+    /// the legacy `text_labels` body minus the control label (the adapter's base-label
+    /// machinery draws that, with the +4px `detached_label_inset`).
+    fn paint_text(&self, content: Rect, ctx: &mut PaintCtx) {
         let selected_text = if let Some(ref custom_text) = self.custom_display_text {
             custom_text.clone()
         } else {
@@ -627,13 +300,13 @@ impl Element for Dropdown {
         };
 
         let (font_family, font_size) = crate::layout::control_label_font_detached_parsed();
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
+        let label_x = side_offset(&self.label);
+        let x = content.x + label_x;
+        let w = content.width - label_x;
         let start_x = x + 8.0;
         let right_limit = x + w - 28.0; // 10px margin before the arrow
         let fade_start_x = (right_limit - 24.0).max(start_x); // Fade out over the last 24px
-        let text_y = crate::layout::center_text_y(self.base.y + top, self.base.h - top, font_size);
+        let text_y = crate::layout::center_text_y(content.y, content.height, font_size);
         let tc = colors::dropdown_text_color();
         let default_color = [
             (colors::linear_to_srgb(tc[0]) * 255.0).round() as u8,
@@ -739,13 +412,7 @@ impl Element for Dropdown {
             };
 
             if !skip_char {
-                labels.push(TextLabel {
-                    text: chars[i].to_string(),
-                    x: cur_x,
-                    y: text_y,
-                    font_size,
-                    color,
-                });
+                ctx.text(chars[i].to_string(), cur_x, text_y, font_size, color);
                 let c_w_ink = if is_monospace {
                     cell_width
                 } else {
@@ -755,58 +422,416 @@ impl Element for Dropdown {
             }
         }
 
-        let label_x = self.label_x_offset();
-        let x = self.base.x + label_x;
-        let w = self.base.w - label_x;
-
-        labels.push(TextLabel {
-            text: "▼".to_string(),
-            x: x + w - 18.0,
-            y: crate::layout::center_text_y(self.base.y + top, self.base.h - top, 10.0),
-            font_size: 10.0,
-            color: [0x83, 0x83, 0x8a],
-        });
-
-        labels
+        ctx.text(
+            "▼",
+            x + w - 18.0,
+            crate::layout::center_text_y(content.y, content.height, 10.0),
+            10.0,
+            [0x83, 0x83, 0x8a],
+        );
     }
 
-    fn value(&self) -> i32 { self.selected as i32 }
-    fn take_click(&mut self) -> bool { self.take_change() }
-    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+    /// Port of the legacy `keyboard_input` body.
+    fn handle_key(&mut self, event: &crate::widget::KeyEvent) -> bool {
+        if event.state != ElementState::Pressed {
+            return false;
+        }
+        if !self.open {
+            if let Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) = event.logical_key {
+                self.open = true;
+                let mut start_idx = self.selected;
+                if start_idx < self.options.len() && self.options[start_idx] == "-" {
+                    for i in 0..self.options.len() {
+                        if self.options[i] != "-" {
+                            start_idx = i;
+                            break;
+                        }
+                    }
+                }
+                self.hovered_item = Some(start_idx);
+                return true;
+            }
+            return false;
+        }
+
+        match event.logical_key {
+            Key::Named(NamedKey::ArrowDown) => {
+                let current = self.hovered_item.unwrap_or(self.selected);
+                let mut next = (current + 1) % self.options.len();
+                for _ in 0..self.options.len() {
+                    if self.options[next] != "-" {
+                        self.hovered_item = Some(next);
+                        break;
+                    }
+                    next = (next + 1) % self.options.len();
+                }
+                true
+            }
+            Key::Named(NamedKey::ArrowUp) => {
+                let current = self.hovered_item.unwrap_or(self.selected);
+                let mut prev = if current == 0 { self.options.len() - 1 } else { current - 1 };
+                for _ in 0..self.options.len() {
+                    if self.options[prev] != "-" {
+                        self.hovered_item = Some(prev);
+                        break;
+                    }
+                    prev = if prev == 0 { self.options.len() - 1 } else { prev - 1 };
+                }
+                true
+            }
+            Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                if let Some(idx) = self.hovered_item {
+                    if idx < self.options.len() && self.options[idx] != "-" {
+                        if self.selected != idx || self.custom_display_text.is_some() {
+                            self.selected = idx;
+                            self.just_changed = true;
+                        }
+                        self.open = false;
+                    }
+                }
+                true
+            }
+            Key::Named(NamedKey::Escape) => {
+                self.open = false;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Adapted<Dropdown> {
+    pub fn with_custom_display_text(mut self, text: &str) -> Self {
+        self.custom_display_text = Some(text.to_string());
+        self
+    }
+
+    pub fn with_font_family(mut self, font_family: &str) -> Self {
+        self.font_family = font_family.to_string();
+        self
+    }
+
+    pub fn with_open_upward(mut self, open_upward: bool) -> Self {
+        self.open_upward = Some(open_upward);
+        self
+    }
+
+    pub fn with_auto_width(mut self, auto_width: bool) -> Self {
+        self.auto_width = auto_width;
+        self
+    }
+
+    /// Popover geometry from the widget's laid-out rect — the legacy inherent
+    /// `get_popover_geom` shape, for callers that hold the wrapper.
+    pub fn get_popover_geom(&self) -> (f32, f32, f32, f32) {
+        let (x, y, w, h) = Element::rect(self);
+        let top = self.inner().label_top();
+        self.inner().popover_geom(Rect { x, y: y + top, width: w, height: h - top })
+    }
+}
+
+impl Layout for Dropdown {
+    fn layout_ignore(&self) -> bool {
+        true
+    }
+
+    fn z_order(&self) -> i32 {
         if self.open {
-            Some(self.get_popover_geom())
+            100
+        } else {
+            0
+        }
+    }
+
+    fn inflates_label_rect(&self) -> bool {
+        false
+    }
+
+    fn detached_label_inset(&self) -> f32 {
+        4.0
+    }
+
+    /// Content size for the scene layout engine (Phase 2b): wide enough for the widest option
+    /// (via `content_width`, which already includes the arrow/padding inset), at the configured
+    /// dropdown height — so the control doesn't resize as the selection changes.
+    fn intrinsic_size(&self) -> Option<Size> {
+        Some(Size::new(self.content_width(), crate::layout::dropdown_height()))
+    }
+
+    fn intrinsic_measure_width(&self) -> bool {
+        self.auto_width
+    }
+
+    fn parent_changed(&mut self, parent: Option<*mut (dyn Element + 'static)>) {
+        self.tracked_parent = parent;
+    }
+}
+
+impl Paint for Dropdown {
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+        let r = crate::layout::dropdown_corner_radius();
+        if r > 0.0 {
+            Some((r, (true, true, true, true)))
+        } else {
+            Some((r, (false, false, false, false)))
+        }
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::control_label_font_detached())
+    }
+
+    fn sync_label(&mut self, label: &str) {
+        self.label = Some(label.to_string());
+    }
+
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        self.paint_background(rect, ctx);
+        self.paint_text(rect, ctx);
+    }
+
+    fn popover(&self, rect: Rect) -> Option<(f32, f32, f32, f32)> {
+        if self.open {
+            Some(self.popover_geom(rect))
         } else {
             None
         }
     }
-    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
-        Dropdown::render_popover(self, pc);
+
+    fn draw_popover(&self, rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
+        if !self.open {
+            return;
+        }
+
+        let (rx, ry, rw, rh) = self.popover_geom(rect);
+
+        // 1. Soft layered drop shadows
+        pc.rect([0.02, 0.02, 0.05, 0.15], rx + 1.0, ry + 1.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.08], rx + 3.0, ry + 3.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.04], rx + 5.0, ry + 5.0, rw, rh);
+
+        let theme = colors::active_theme();
+
+        // 2. High-contrast premium outer border
+        pc.rect(theme.surface_border, rx, ry, rw, rh);
+
+        // 3. Frosted glass background
+        pc.rect(theme.surface_bg, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0); // bg
+
+        if let Some(h_idx) = self.hovered_item {
+            let iy = ry + h_idx as f32 * 24.0;
+            // 4. Vibrantly colored translucent selection highlight
+            pc.rect(theme.primary_accent, rx + 2.0, iy + 2.0, rw - 4.0, 20.0);
+        }
+
+        for (idx, opt) in self.options.iter().enumerate() {
+            let iy = crate::layout::align_text_y(ry + idx as f32 * 24.0, 24.0, 12.0, 0.0);
+
+            if opt == "-" {
+                pc.rect(theme.surface_border, rx + 8.0, ry + idx as f32 * 24.0 + 11.5, rw - 16.0, 1.0);
+                continue;
+            }
+
+            let text_color = if self.hovered_item == Some(idx) {
+                [0xff, 0xff, 0xff]
+            } else if self.selected == idx {
+                [0x3a, 0x9a, 0xff]
+            } else {
+                [0xcc, 0xcc, 0xd4]
+            };
+
+            let color_f32 = [
+                text_color[0] as f32 / 255.0,
+                text_color[1] as f32 / 255.0,
+                text_color[2] as f32 / 255.0,
+                1.0,
+            ];
+
+            let bounds = Some([rx, ry, rx + rw, ry + rh]);
+            let font = crate::layout::control_label_font_detached();
+            pc.text_with_font_and_bounds(opt, rx + 8.0, iy, 12.0, color_f32, &font, bounds);
+        }
+    }
+}
+
+impl Input for Dropdown {
+    /// The legacy geometric test: the widget rect (edges inclusive), extended to the open
+    /// popover. `rect` is the full base rect (label strip included), as legacy `hit_test` used.
+    fn hit(&self, rect: Rect, x: f32, y: f32) -> bool {
+        if rect.width <= 0.0 || rect.height <= 0.0 {
+            return false;
+        }
+        let hit_trigger =
+            x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+        if self.open {
+            let top = self.label_top();
+            let content = Rect { x: rect.x, y: rect.y + top, width: rect.width, height: rect.height - top };
+            let (rx, ry, rw, rh) = self.popover_geom(content);
+            let hit_popover = x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+            hit_trigger || hit_popover
+        } else {
+            hit_trigger
+        }
     }
 
-    fn z_index(&self) -> i32 {
-        if self.open { 100 } else { 0 }
-    }
-
-    fn layout_ignore(&self) -> bool {
+    fn opens_context_menu(&self) -> bool {
         true
     }
-}
 
-impl Drop for Dropdown {
-    fn drop(&mut self) {
-        clear_widget_references(self);
+    /// Ungated presses (legacy `mouse_input` saw every press): an open dropdown must close on
+    /// an outside click it would otherwise never learn about.
+    fn gates_presses(&self) -> bool {
+        false
+    }
+
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::MouseButton {
+                button: MouseButton::Left,
+                state: ElementState::Pressed,
+                x: px,
+                y: py,
+                ..
+            } => {
+                let content = ectx.rect;
+                let top = self.label_top();
+                let (bx, by, bw, bh) = (content.x, content.y - top, content.width, content.height + top);
+                let (rx, ry, rw, rh) = self.popover_geom(content);
+
+                let inside_trigger = *px >= bx && *px <= bx + bw && *py >= by && *py <= by + bh;
+                let inside_popover =
+                    self.open && *px >= rx && *px <= rx + rw && *py >= ry && *py <= ry + rh;
+
+                if inside_popover {
+                    let idx = ((py - ry) / 24.0) as usize;
+                    if idx < self.options.len() {
+                        if self.options[idx] == "-" {
+                            return true;
+                        }
+                        if self.selected != idx || self.custom_display_text.is_some() {
+                            self.selected = idx;
+                            self.just_changed = true;
+                        }
+                    }
+                    self.open = false;
+                    return true;
+                }
+
+                if inside_trigger {
+                    self.open = !self.open;
+                    if self.open {
+                        // Legacy `focus()` claimed only the global slot.
+                        ectx.request_focus();
+                    }
+                    return true;
+                }
+
+                if self.open {
+                    self.open = false;
+                    return true;
+                }
+
+                false
+            }
+            Event::PointerMove { x: px, y: py, .. } => {
+                // The popover-item half of the legacy `on_cursor_moved`; the trigger-hover half
+                // is the adapter's bookkeeping (MouseEnter/MouseLeave below).
+                let was_hovered_item = self.hovered_item;
+                self.hovered_item = None;
+                if self.open {
+                    let (rx, ry, rw, rh) = self.popover_geom(ectx.rect);
+                    if *px >= rx && *px <= rx + rw && *py >= ry && *py <= ry + rh {
+                        let idx = ((py - ry) / 24.0) as usize;
+                        if idx < self.options.len() && self.options[idx] != "-" {
+                            self.hovered_item = Some(idx);
+                        }
+                    }
+                }
+                self.hovered_item != was_hovered_item
+            }
+            Event::MouseEnter => {
+                self.hovered = true;
+                true
+            }
+            Event::MouseLeave => {
+                self.hovered = false;
+                true
+            }
+            Event::KeyInput(key_event) => self.handle_key(key_event),
+            Event::FocusIn => {
+                // Legacy `focus()` claimed the global focus slot on every direct call
+                // (test-interface focuses the ramp's preset dropdown this way).
+                ectx.request_focus();
+                false
+            }
+            Event::FocusOut => {
+                // Legacy `unfocus` closed the dropdown.
+                self.open = false;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn take_click(&mut self) -> bool {
+        self.take_change()
+    }
+
+    fn take_change(&mut self) -> bool {
+        self.take_change()
+    }
+
+    fn value(&self) -> i32 {
+        self.selected as i32
+    }
+
+    fn value_string(&self) -> Option<String> {
+        self.options.get(self.selected).cloned()
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        let val_trimmed = val.trim();
+        for (idx, opt) in self.options.iter().enumerate() {
+            if opt.eq_ignore_ascii_case(val_trimmed) {
+                if self.selected != idx {
+                    self.selected = idx;
+                    self.just_changed = true;
+                    return true;
+                }
+                return false;
+            }
+        }
+        if let Ok(idx) = val_trimmed.parse::<usize>() {
+            if idx < self.options.len() {
+                if self.selected != idx {
+                    self.selected = idx;
+                    self.just_changed = true;
+                    return true;
+                }
+                return false;
+            }
+        }
+        false
     }
 }
-
 
 unsafe impl Send for Dropdown {}
 unsafe impl Sync for Dropdown {}
 
-impl Control for Dropdown {}
+impl Control for Adapted<Dropdown> {
+    fn set_label(&mut self, label: &str) {
+        Adapted::set_label(self, label);
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widget::LayoutConstraints;
 
     #[test]
     fn test_dropdown_widget_interaction() {
@@ -909,7 +934,7 @@ mod tests {
         let mut ramp = crate::widget::Ramp::new();
         // Set the rect of parent Ramp
         ramp.set_rect(20.0, 20.0, 410.0, 260.0);
-        
+
         let options = vec![
             "Option 1".to_string(),
             "Option 2".to_string(),
@@ -920,13 +945,13 @@ mod tests {
         ];
         let mut dd = Dropdown::new(options, 0).with_label("Preset");
         dd.set_rect(30.0, 125.0, 110.0, 20.0);
-        
-        // Link the dropdown parent pointer to the Ramp
+
+        // Link the dropdown parent pointer to the Ramp (the legacy direct-write path)
         dd.parent = Some(&mut ramp as *mut crate::widget::Ramp as *mut (dyn crate::widget::Element + 'static));
-        
+
         // Compute geometry
         let (rx, ry, rw, rh) = dd.get_popover_geom();
-        
+
         // Validate coordinates stay inside the parent Ramp bounds: x in [20, 430], y in [20, 280]
         assert!(rx >= 20.0, "rx {} should be >= 20.0", rx);
         assert!(rx + rw <= 430.0, "rx + rw {} should be <= 430.0", rx + rw);
@@ -941,16 +966,14 @@ mod tests {
         dd.set_rect(10.0, 10.0, 100.0, 24.0); // very narrow dropdown
 
         let labels = dd.text_labels();
-        // Option 0: control_label (none)
-        // Option 1: ▼ (arrow) at the end of labels
-        // Remaining labels are individual characters of selected_text
+        // Labels are individual characters of selected_text, then the ▼ arrow (prim order).
         assert!(labels.len() > 2);
-        
+
         // The last character label (excluding the arrow) should be faded (i.e. not the default color)
         let last_char_idx = labels.len() - 2;
         let first_char = &labels[0];
         let last_char = &labels[last_char_idx];
-        
+
         let tc = colors::dropdown_text_color();
         let expected_color = [
             (colors::linear_to_srgb(tc[0]) * 255.0).round() as u8,
@@ -970,7 +993,7 @@ mod tests {
 
         let size = dd.measure(LayoutConstraints::new(0.0, 500.0, 24.0, 24.0), &dummy);
         assert!(size.width > 50.0, "Measured auto-width {} should be greater than original width 50.0", size.width);
-        
+
         let dd_no_auto = Dropdown::new(vec!["Short".to_string(), "A much longer option name".to_string()], 0);
         let size_no_auto = dd_no_auto.measure(LayoutConstraints::new(0.0, 500.0, 24.0, 24.0), &dummy);
         assert_eq!(size_no_auto.width, 0.0);
@@ -982,15 +1005,38 @@ mod tests {
             vec!["Short".to_string(), "A much longer option name".to_string()],
             0,
         );
-        let size = wide.intrinsic_size().expect("dropdown reports intrinsic size");
+        let size = Layout::intrinsic_size(wide.inner()).expect("dropdown reports intrinsic size");
         assert!(size.width >= wide.content_width(), "width fits the widest option");
         assert_eq!(size.height, crate::layout::dropdown_height());
 
         let narrow = Dropdown::new(vec!["Hi".to_string()], 0);
         assert!(
-            size.width > narrow.intrinsic_size().unwrap().width,
+            size.width > Layout::intrinsic_size(narrow.inner()).unwrap().width,
             "more/longer options measure wider",
         );
     }
-}
 
+    /// Migration additions: popover routing through the adapter (`Element::popover_rect` /
+    /// `render_popover`), outside-press close, and Escape via routed key events.
+    #[test]
+    fn popover_reaches_hosts_through_the_adapter() {
+        let mut dummy = crate::context::UiContext::new();
+        let options = vec!["A".to_string(), "B".to_string()];
+        let mut dd = Dropdown::new(options, 0);
+        dd.set_rect(10.0, 10.0, 100.0, 24.0);
+
+        assert!(Element::popover_rect(&dd).is_none(), "closed dropdown registers no popover");
+
+        dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0, &mut dummy);
+        assert!(dd.open);
+        let (rx, ry, rw, rh) = Element::popover_rect(&dd).expect("open dropdown registers its popover");
+        assert_eq!((rx, ry), (10.0, 34.0), "popover opens under the trigger");
+        assert!(rw >= 100.0 && rh == 48.0);
+
+        // An outside press closes it (ungated presses — `gates_presses` is false).
+        let closed = dd.mouse_input(MouseButton::Left, ElementState::Pressed, 500.0, 500.0, &mut dummy);
+        assert!(closed);
+        assert!(!dd.open);
+        assert!(!dd.take_change(), "outside close does not report a change");
+    }
+}

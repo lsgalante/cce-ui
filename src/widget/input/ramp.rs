@@ -434,8 +434,8 @@ pub struct Ramp {
     // Child controls for value editing & deletion
     pub val_slider: Adapted<Slider>,
     pub del_button: Adapted<Button>,
-    pub preset_dropdown: Dropdown,
-    pub line_type_dropdown: Dropdown,
+    pub preset_dropdown: Adapted<Dropdown>,
+    pub line_type_dropdown: Adapted<Dropdown>,
     
     pub parent: Option<*mut (dyn Element + 'static)>,
 }
@@ -629,8 +629,8 @@ impl Element for Ramp {
         let self_ptr = self as *const Self as *mut Self;
         unsafe {
             let mut list = vec![
-                &mut (*self_ptr).preset_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
-                &mut (*self_ptr).line_type_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
+                (*self_ptr).preset_dropdown.as_ptr_mut(),
+                (*self_ptr).line_type_dropdown.as_ptr_mut(),
             ];
             if self.selected_key_idx.is_some() {
                 list.push((*self_ptr).val_slider.as_ptr_mut());
@@ -660,8 +660,8 @@ impl Element for Ramp {
             let self_ptr = self as *mut Self;
             let mut children = unsafe {
                 let mut list = vec![
-                    &mut (*self_ptr).preset_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
-                    &mut (*self_ptr).line_type_dropdown as *mut Dropdown as *mut (dyn Element + 'static),
+                    (*self_ptr).preset_dropdown.as_ptr_mut(),
+                    (*self_ptr).line_type_dropdown.as_ptr_mut(),
                 ];
                 if (*self_ptr).selected_key_idx.is_some() {
                     list.push((*self_ptr).val_slider.as_ptr_mut());
