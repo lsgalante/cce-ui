@@ -1459,11 +1459,16 @@ pub trait Application: Sized + 'static {
     }
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
-    fn view(&mut self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, size: LogicalSize, scale: f64);
+    /// Legacy geometry sink. Default no-op since Phase 6: an app whose whole frame comes from
+    /// [`display_list`](Application::display_list) (+ [`display_list_text`]) implements neither
+    /// this nor [`text_items`](Application::text_items).
+    fn view(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
     fn view_rounded_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))>, _size: LogicalSize, _scale: f64) {}
     fn view_vectors(&mut self, _vectors: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4], LineCap)>, _size: LogicalSize, _scale: f64) {}
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
-    fn text_items(&self) -> &[TextItem];
+    fn text_items(&self) -> &[TextItem] {
+        &[]
+    }
     fn render_popovers(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
     fn input_regions(&self) -> Option<Vec<(i32, i32, i32, i32)>> {
         None
@@ -1598,6 +1603,21 @@ pub trait Application: Sized + 'static {
     fn display_list(&mut self) -> Option<crate::scene::paint::DisplayList> {
         None
     }
+
+    /// Phase 6 opt-in: render the display list's `Prim::Text` items through the glyphon pass
+    /// (shaped via the shared buffer cache, clipped to the item clip ∩ the prim bounds). A
+    /// fully migrated app's ENTIRE frame — geometry and text — is then one
+    /// [`display_list`](Application::display_list); its [`text_items`](Application::text_items)
+    /// is typically empty. Default `false`: the seven Phase 3 adopters' lists already carry
+    /// Text prims that those apps ALSO push as `TextItem`s — rendering both would double-draw,
+    /// so each app flips this only when it stops pushing its own.
+    ///
+    /// Known limitation (matching scope, not a bug): the legacy `text_areas` popover-occlusion
+    /// clipping is not applied to display-list text — text renders after all geometry, so a
+    /// popover's plate does not hide list text beneath it yet.
+    fn display_list_text(&self) -> bool {
+        false
+    }
 }
 
 pub struct PressedKey {
@@ -1669,6 +1689,10 @@ pub struct EngineState<A: Application> {
     pub pinch_gesture: Option<ZwpPointerGesturePinchV1>,
     pub last_pinch_scale: f32,
     pub cursor_pos: (f32, f32),
+    /// This frame's display-list text, shaped and held here so the glyphon `TextArea`s built
+    /// in the render pass can borrow the buffers (Phase 6 —
+    /// [`Application::display_list_text`]).
+    pub dl_text_items: Vec<TextItem>,
 }
 
 impl<A: Application> EngineState<A> {
@@ -1793,9 +1817,6 @@ impl<A: Application> EngineState<A> {
         // keeps the legacy path byte-for-byte.
         let display_list = self.inner.as_mut().unwrap().display_list();
 
-        let adapter = self.wgpu_adapter.as_mut().unwrap();
-        let render_pipeline = self.render_pipeline.as_ref().unwrap();
-        
         // 1. Build the frame's DisplayList — from the app's display_list() when provided, otherwise
         // by wrapping its legacy view*/view_vectors geometry — then tessellate it as one path. This
         // is the Phase 3 single paint path: every app, migrated or not, renders through here.
@@ -1827,6 +1848,35 @@ impl<A: Application> EngineState<A> {
                 pc.finish()
             }
         };
+
+        // 1a. Phase 6 display-list text: shape the list's Text prims through the shared buffer
+        // cache and hold them for the glyphon pass (the TextAreas built below borrow these).
+        // Clip = the paint walk's item clip ∩ the prim's own bounds, in logical space.
+        self.dl_text_items.clear();
+        if self.inner.as_ref().unwrap().display_list_text() {
+            let fs = &mut self.wgpu_adapter.as_mut().unwrap().font_system;
+            for item in &dl.items {
+                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds } = &item.prim {
+                    let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
+                    let merged = match (clip, *bounds) {
+                        (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
+                        (Some(a), None) => Some(a),
+                        (None, b) => b,
+                    };
+                    let buffer = get_text_buffer(fs, text, *font_size, font.as_deref());
+                    self.dl_text_items.push(TextItem {
+                        buffer,
+                        x: *x,
+                        y: *y,
+                        color: glyphon::Color::rgb(color[0], color[1], color[2]),
+                        bounds: merged,
+                    });
+                }
+            }
+        }
+
+        let adapter = self.wgpu_adapter.as_mut().unwrap();
+        let render_pipeline = self.render_pipeline.as_ref().unwrap();
         let (mut verts, mut dl_batches) = tessellate_display_list(&dl, logical_w, logical_h);
         // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
         let pre_custom = verts.len() as u32;
@@ -1884,7 +1934,30 @@ impl<A: Application> EngineState<A> {
         adapter.text_viewport.update(&adapter.queue, Resolution { width: pw, height: ph });
         
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
-        let areas = self.inner.as_ref().unwrap().text_areas(scale_f32, bounds);
+        let mut areas = self.inner.as_ref().unwrap().text_areas(scale_f32, bounds);
+        // Phase 6 display-list text — the default `text_areas` mapping (scale + surface clamp),
+        // without the popover-occlusion pass (see `Application::display_list_text`).
+        for ti in &self.dl_text_items {
+            let item_bounds = if let Some([l, t, r, b]) = ti.bounds {
+                TextBounds {
+                    left: ((l * scale_f32).round() as i32).clamp(0, bounds.right),
+                    top: ((t * scale_f32).round() as i32).clamp(0, bounds.bottom),
+                    right: ((r * scale_f32).round() as i32).clamp(0, bounds.right),
+                    bottom: ((b * scale_f32).round() as i32).clamp(0, bounds.bottom),
+                }
+            } else {
+                bounds
+            };
+            areas.push(TextArea {
+                buffer: &ti.buffer,
+                left: (ti.x * scale_f32).round(),
+                top: (ti.y * scale_f32).round(),
+                scale: 1.0,
+                bounds: item_bounds,
+                default_color: ti.color,
+                custom_glyphs: &[],
+            });
+        }
         adapter.text_renderer.prepare(&adapter.device, &adapter.queue, &mut adapter.font_system, &mut adapter.text_atlas, &adapter.text_viewport, areas, &mut adapter.swash_cache).unwrap();
         
         // 3. Render Pass
@@ -2971,6 +3044,7 @@ pub fn run<A: Application>() {
         pinch_gesture: None,
         last_pinch_scale: 1.0,
         cursor_pos: (0.0, 0.0),
+        dl_text_items: Vec::new(),
     };
 
     event_queue.roundtrip(&mut engine_state).unwrap();

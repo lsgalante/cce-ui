@@ -46,7 +46,12 @@ pub enum Prim {
     Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
     Vector { x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap },
     Circle { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
-    Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3] },
+    /// Text in sRGB u8 (the `TextLabel` convention). `font` is a font string for
+    /// `get_text_buffer` (family, or "family:size"); `bounds` is a logical `[l, t, r, b]` clip
+    /// for the glyph pass (Phase 6: the backend renders these through glyphon when the app
+    /// opts in via `Application::display_list_text`; the paint walk's clip additionally
+    /// applies through the item's `clip`).
+    Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3], font: Option<String>, bounds: Option<[f32; 4]> },
 }
 
 /// A primitive plus the scissor rect it must be clipped to (`None` = unclipped).
@@ -190,8 +195,25 @@ impl PaintCtx {
     }
 
     pub fn text(&mut self, text: impl Into<String>, x: f32, y: f32, font_size: f32, color: [u8; 3]) {
+        self.text_with(text, x, y, font_size, color, None, None);
+    }
+
+    /// Text with a per-label font and clip rect (`[l, t, r, b]`, local space) — what the
+    /// legacy `text_labels_with_font_and_bounds` tuples carry, expressible in the display
+    /// list since Phase 6.
+    pub fn text_with(
+        &mut self,
+        text: impl Into<String>,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        color: [u8; 3],
+        font: Option<String>,
+        bounds: Option<[f32; 4]>,
+    ) {
         let (ox, oy) = self.offset;
-        self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color });
+        let bounds = bounds.map(|[l, t, r, b]| [l + ox, t + oy, r + ox, b + oy]);
+        self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color, font, bounds });
     }
 
     /// Consume the context and return the accumulated display list.
@@ -320,4 +342,29 @@ mod tests {
         assert!(matches!(list.items[0].prim, Prim::Border { rect, .. } if rect.x == 10.0 && rect.y == 20.0));
         assert!(matches!(list.items[1].prim, Prim::Bevel { rect, .. } if rect.x == 10.0 && rect.y == 20.0));
     }
+    #[test]
+    fn text_with_translates_position_and_bounds() {
+        let mut ctx = PaintCtx::new();
+        ctx.translate(10.0, 20.0, |ctx| {
+            ctx.text_with("hi", 1.0, 2.0, 12.0, [1, 2, 3], Some("Mono".into()), Some([0.0, 0.0, 50.0, 30.0]));
+            ctx.text("plain", 3.0, 4.0, 10.0, [9, 9, 9]);
+        });
+        let list = ctx.finish();
+        match &list.items[0].prim {
+            Prim::Text { x, y, font, bounds, .. } => {
+                assert_eq!((*x, *y), (11.0, 22.0), "position translated");
+                assert_eq!(font.as_deref(), Some("Mono"));
+                assert_eq!(*bounds, Some([10.0, 20.0, 60.0, 50.0]), "bounds translated");
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+        match &list.items[1].prim {
+            Prim::Text { font, bounds, .. } => {
+                assert_eq!(*font, None, "plain text carries no font");
+                assert_eq!(*bounds, None);
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
 }

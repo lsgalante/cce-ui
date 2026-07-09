@@ -790,7 +790,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
             .painted_prims()
             .into_iter()
             .filter_map(|prim| match prim {
-                Prim::Text { text, x, y, font_size, color } => {
+                Prim::Text { text, x, y, font_size, color, .. } => {
                     Some(TextLabel { text, x, y, font_size, color })
                 }
                 _ => None,
