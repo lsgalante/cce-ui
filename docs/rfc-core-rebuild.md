@@ -635,9 +635,45 @@ Constraint respected: **each crate still builds standalone** — the new core is
     (authenticator, data-editor, display-manager, email, files, fonts, layout-interface,
     system-settings, text-editor) + 5 in-crate embedders (treelist, scrolling_list,
     keybinds_control, multi_control's `InstancedWidget` variant, parameters_bg).
+  - **5r — `Paginator` (value-embedded container: ButtonStrip + Vec<Page>). DONE (live-A/B
+    verified, cce-layout-interface byte-identical across four states).** The model owns both
+    embedded legacy widgets by value and proxies events to them (strip first, draining its
+    click into the selection; then the selected page while not hidden); the container
+    concern serves them via `container_children`/`child_visible` (strip always, selected
+    page only), and `arrange_children` is the legacy `set_rect` body. New adapter surface:
+    **`Layout::register_embedded_children(host_id, ctx)`** — legacy `tick`/`layout`
+    re-registered the strip + pages into the ctx registry every frame, and that registration
+    is load-bearing (the spatial grid is rebuilt from registered widgets; the registered
+    strip is what blocks backplate drags over the sidebar —
+    `backplate::tests::test_paginator_blocks_backplate_drag`); the adapter calls it from
+    `Element::tick` and `Element::layout`, the legacy cadence. **`Paint::
+    aggregates_child_extra_quads`** — legacy container `extra_quads` served the CHILDREN's
+    chrome only, while the widget's own background quad lived in `all_quads` alone;
+    cce-email and cce-layout-interface render the tab column through `extra_quads` over
+    their own backgrounds (emitting the bg there would double-blend), and cce-test-interface
+    renders through `all_quads` (dropping the bg there would blank it). The adapter's
+    `all_quads` now draws own prims from a shared `own_plain_quads()` helper instead of
+    `extra_quads()` (identical for every prior migration) so the two views never
+    double-serve. **`Paint::forwarded_highlight(ctx)`** — legacy `highlight_quad` forwarded
+    to the strip's (the hovered-tab tint cce-layout-interface draws by calling
+    `highlight_quad` directly); served only through that getter, kept out of
+    `all_quads`/`paint_self` (gated on `legacy_focus_highlight` now — where the strip's own
+    aggregation already carries it, as legacy container `all_quads` overrides did).
+    `PageSelector` + `MenuController` ride the existing `Input` capability hooks
+    (cce-test-interface reaches `sidebar_w` through an `as_page_selector()` downcast on
+    `dyn Element`). Ported bug-for-bug though unused workspace-wide: the `pages` container
+    surface (`add_widget_to_page`/`set_pages`/…) — every app manages page content itself
+    keyed on `selected_page()`. Verified: 171 tests, all four consumer apps build,
+    cce-layout-interface live A/B **byte-identical (AE=0)** on idle, File-tab hover,
+    Page-tab click, and Page-selected hover (exercises extra_quads aggregation, highlight
+    forwarding, labels, and the click→selection→page-switch path);
+    cce-test-interface A/B equals its launch-to-launch noise exactly (same 7.5k-px bbox —
+    animated waveform phase; the `all_quads` gallery path contributes zero residual).
+    Sweep: 3 app repos re-typed to `Adapted<Paginator>` (email, files, layout-interface);
+    test-interface's `Box<dyn Element>` gallery needed no change.
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining:
-    Paginator (embeds ButtonStrip + Vec<Page>), ParametersBg (real container, 1.8k lines),
+    ParametersBg (real container, 1.8k lines),
     and the deferred leaves (StatusBar, Float3, LayoutPreview,
     PreviewState); the embedded-base containers
     (Layer/Container/Page/Plate/Backplate/ScrollBox/List/…) dissolve via Phase 6 scene
