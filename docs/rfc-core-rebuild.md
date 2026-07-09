@@ -976,13 +976,38 @@ Constraint respected: **each crate still builds standalone** — the new core is
     partition the tuples by radius, and interleave [plain…, plate, rounded…]. Wheel in
     colors propagates per-slider; both apps answer dragging via `drag_allowed_at`.
     Files' view-dropdown popover + breadcrumb context menu re-verified live.
+  - **6s — settings' root Backplate + StatusBar dissolved; `Dropdown::set_corner_frame`
+    lands. DONE (WINDOW_PC tuple stream byte-identical; pixels AE=0; live: dropdown
+    popover → page switch to Processes with statusbar text following, wheel scroll,
+    service-list render).** Settings needed what colors/files didn't: its plate radius
+    is a hardcoded 12, so the legacy aggregate's corner RESOLUTION mattered — a child
+    plain quad flush with a window corner picks up the plate radius there (the
+    `render_widget` extra-corners logic against the ROOT rect). The hand assembly
+    replicates the full aggregate: child plain quads (window-clipped, root-corner-
+    resolved), plate, child rounded quads, root-clamped text, in the old child order.
+    Two parent couplings surfaced (the widgets read their Backplate ancestor):
+    (1) StatusBar — bg falls back from the backplate-statusbar theme color to
+    STATUS_BG, bottom corners round at the PARENT's radius, text color/font are
+    backplate-specific; it dissolves outright (pure chrome in this app) into tuples +
+    a `status_text` String. (2) Dropdown — the backplate-concentric corner cut walks
+    for a Backplate ancestor and silently degrades to a plain rounded box when the
+    walk finds nothing; new `Dropdown::set_corner_frame((rect, radius, corners))`
+    hands it the frame explicitly and takes precedence. Also found (pre-existing,
+    reproduced on the pre-6s baseline): the engine xdg-popup positioner anchors at
+    the widget's BOTTOM edge regardless of the app's open-upward popover rect, so
+    settings' page popover displays below the window while clicks land on the
+    app-side (invisible, in-window) popover rect — the engine popup path's last
+    consumer; fix when settings' popovers move to the 6l ui_context-only pattern.
+    The root's `with_border` was never rendered (a rounded Backplate emits no plain
+    bg quad; the border branch fires only on plain bg quads) — dropped, not ported.
   - **Still to do:**
-    settings' tree (Switcher/Page/SectionContainer/ScrollBox — the deep-composition
-    set); files' internal containers (splitters/BrowseContainer/List) and data-editor's
-    SplitBox/TreeList when their turns come; routed events + scene layout for the
-    widget-tree apps; the demo (`cce-ui/src/main.rs`) as the reference `Application`.
-    Delete the legacy `view*`/`text_items` paths, the per-widget text getters, and
-    finally `Element` + `Adapted` once the last app is across.
+    settings' page tree (Switcher/Page/SectionContainer/ScrollBox — the
+    deep-composition set; the root and status bar are gone as of 6s); files' internal
+    containers (splitters/BrowseContainer/List) and data-editor's SplitBox/TreeList
+    when their turns come; routed events + scene layout for the widget-tree apps; the
+    demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
+    `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
+    `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
