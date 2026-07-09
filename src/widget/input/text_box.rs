@@ -1113,6 +1113,19 @@ impl Paint for TextBox {
         Some(crate::layout::control_label_font_detached())
     }
 
+    /// Content text font for the paint walk: a TextBox whose `font_family`/`font_size` was
+    /// deliberately customized (cce-text-editor's monospace editor) draws its value text in
+    /// that family at the label's own size — a bare family name, so the control-font string's
+    /// size suffix doesn't override `font_size`. Default boxes keep the `widget_font` string
+    /// verbatim (the legacy convention, size suffix included).
+    fn text_font(&self) -> Option<String> {
+        if self.font_family != self.default_font_family || self.font_size != self.default_font_size {
+            Some(self.font_family.clone())
+        } else {
+            self.widget_font()
+        }
+    }
+
     fn sync_label(&mut self, label: &str) {
         self.label = Some(label.to_string());
     }

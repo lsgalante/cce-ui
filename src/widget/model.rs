@@ -250,6 +250,17 @@ pub trait Paint {
         None
     }
 
+    /// Font for the widget's OWN prim-derived text on the scene paint walk (Phase 6). Defaults
+    /// to [`widget_font`](Paint::widget_font) — one font for everything the widget draws, which
+    /// is the legacy tuple-pipeline convention. A widget whose content text deliberately
+    /// differs from its control font (TextBox with a customized `font_family`/`font_size`)
+    /// overrides this; the detached base label always renders in `widget_font`. Only the paint
+    /// walk consults it — the legacy `text_labels_with_font_and_bounds` getters keep serving
+    /// `widget_font` so unmigrated apps stay byte-identical.
+    fn text_font(&self) -> Option<String> {
+        self.widget_font()
+    }
+
     /// Receive the control label set on the wrapper via [`Adapted::with_label`] (and legacy
     /// `Control::set_label` paths). Widgets that paint their label themselves (inline-label
     /// widgets) store it here; the default discards it, leaving label drawing to the adapter's
@@ -803,21 +814,49 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     }
 
     /// Own text with font + bounds: [`Paint::text_bounds`] when the widget provides it, else a
-    /// replica of the `Element` default's scroll-ancestor viewport clipping.
+    /// replica of the `Element` default's scroll-ancestor viewport clipping. The legacy tuple
+    /// getters serve `widget_font` for every label; the paint walk serves
+    /// [`Paint::text_font`] for the prim-derived labels (see `own_labels_for_walk`).
     fn own_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let font = Paint::widget_font(&self.inner);
+        self.own_labels_with_prim_font(ctx, Paint::widget_font(&self.inner))
+    }
+
+    /// The paint-walk view of `own_labels_with_font_and_bounds`: prim-derived text carries the
+    /// widget's content font ([`Paint::text_font`]); the detached base label keeps
+    /// `widget_font` either way (via `own_labels_with_prim_font`).
+    fn own_labels_for_walk(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        self.own_labels_with_prim_font(ctx, Paint::text_font(&self.inner))
+    }
+
+    fn own_labels_with_prim_font(&self, ctx: &UiContext, prim_font: Option<String>) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let base_font = Paint::widget_font(&self.inner);
+        let mut fonted: Vec<(TextLabel, Option<String>)> = Vec::new();
+        if self.visible() {
+            fonted.extend(
+                self.painted_prims()
+                    .into_iter()
+                    .filter_map(|prim| match prim {
+                        Prim::Text { text, x, y, font_size, color, .. } => {
+                            Some((TextLabel { text, x, y, font_size, color }, prim_font.clone()))
+                        }
+                        _ => None,
+                    }),
+            );
+            if !Layout::inline_label(&self.inner) {
+                fonted.extend(self.base_label_fallback().into_iter().map(|l| (l, base_font.clone())));
+            }
+        }
+
         if let Some(bounds) = Paint::text_bounds(&self.inner, self.content_rect()) {
-            return self
-                .own_text_labels()
+            return fonted
                 .into_iter()
-                .map(|l| (l, font.clone(), Some(bounds)))
+                .map(|(l, font)| (l, font, Some(bounds)))
                 .collect();
         }
 
-        let mut labels = self
-            .own_text_labels()
+        let mut labels = fonted
             .into_iter()
-            .map(|l| (l, font.clone(), None::<[f32; 4]>))
+            .map(|(l, font)| (l, font, None::<[f32; 4]>))
             .collect::<Vec<_>>();
         let mut curr = Element::parent(self, ctx);
         let mut scroll_box_bounds = None;
@@ -1235,7 +1274,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         let labels = if Paint::serves_legacy_labels(&self.inner) {
             Paint::legacy_labels_with_font_and_bounds(&self.inner, self.content_rect(), ui)
         } else {
-            self.own_labels_with_font_and_bounds(ui)
+            self.own_labels_for_walk(ui)
         };
         for (tl, font, bounds) in labels {
             ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
