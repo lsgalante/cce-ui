@@ -813,6 +813,36 @@ impl UiContext {
         hit_backplate
     }
 
+    /// The drag question for windows whose root `Backplate` has been DISSOLVED (Phase 6): the
+    /// surface itself is the movable plate, so all that matters is whether a drag-blocking
+    /// widget sits under the cursor — the same walk as
+    /// [`is_movable_backplate_at`](UiContext::is_movable_backplate_at) minus the requirement
+    /// that a registered movable `Backplate` is hit.
+    pub fn drag_allowed_at(&self, px: f32, py: f32) -> bool {
+        let scroll_y = crate::widget::hover_animation::get_scroll_offset();
+        let mut candidate_ids = self.spatial_grid.query(px, py).to_vec();
+        if scroll_y != 0.0 {
+            candidate_ids.extend_from_slice(self.spatial_grid.query(px, py + scroll_y));
+            candidate_ids.sort_unstable();
+            candidate_ids.dedup();
+        }
+        for &id in &candidate_ids {
+            if let Some(ptr) = self.tree.get_ptr(id) {
+                unsafe {
+                    if !ptr.is_null() {
+                        let w = &*ptr;
+                        let is_hit = w.hit_test(px, py, self)
+                            || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self));
+                        if is_hit && !w.is_backplate() && w.blocks_backplate_drag() {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+
     pub fn is_widget_at(&self, px: f32, py: f32) -> bool {
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let mut candidate_ids = self.spatial_grid.query(px, py).to_vec();
@@ -860,5 +890,40 @@ impl UiContext {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::widget::{Element, Widget};
+
+    /// A plain drag-blocking widget (the `Element` default) at a fixed rect.
+    struct Block {
+        base: Widget,
+    }
+    impl Element for Block {
+        crate::impl_widget_base!(Block);
+        fn color(&self) -> [f32; 4] {
+            [0.0, 0.0, 0.0, 1.0]
+        }
+    }
+
+    /// `drag_allowed_at` — the dissolved-root-Backplate drag question: allowed on empty
+    /// surface, denied over a drag-blocking widget (same walk as `is_movable_backplate_at`
+    /// minus the registered-Backplate requirement, which a dissolved window can't meet).
+    #[test]
+    fn drag_allowed_everywhere_except_blocking_widgets() {
+        let mut ctx = UiContext::new();
+        let mut w = Block { base: Widget::new_rect(10.0, 10.0, 50.0, 50.0) };
+        let ptr = w.as_ptr_mut();
+        ctx.register_widget(w.base.id(), ptr);
+        ctx.rebuild_spatial_grid();
+
+        assert!(ctx.drag_allowed_at(200.0, 200.0), "empty surface is draggable");
+        assert!(!ctx.drag_allowed_at(20.0, 20.0), "a drag-blocking widget denies the drag");
+        // The Backplate-rooted question stays false here — no movable Backplate exists,
+        // which is exactly why dissolved windows need drag_allowed_at.
+        assert!(!ctx.is_movable_backplate_at(200.0, 200.0));
     }
 }
