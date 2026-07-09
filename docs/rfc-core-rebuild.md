@@ -748,7 +748,41 @@ Constraint respected: **each crate still builds standalone** — the new core is
     which point the `as_*_controller` pairs and the `Input` capability hooks die together
     (callers hold concrete types or `&dyn XController`).
 - **Phase 6 — Per-app migration.** Move each `cce-*` app onto the new core; delete legacy paths
-  once the last app is across.
+  once the last app is across. **Definition of done per app:** the whole frame — geometry AND
+  text — is one `Application::display_list()` (+ `display_list_text()`), layout runs through
+  the scene solver where the app has a real tree, events reach widgets through routed dispatch
+  rather than hand-rolled per-widget loops, and no embedded-base container
+  (Layer/Page/Plate/Backplate/ScrollBox/List) is load-bearing. Seven apps already feed
+  geometry through `display_list()` (colors, data-editor, files, fonts, graph, text-editor,
+  system-settings) — their remaining gaps are text, layout, and events.
+  - **6a — display-list text. DONE (live-A/B verified via cce-notifier).** `Prim::Text` now
+    carries `font: Option<String>` + `bounds: Option<[f32;4]>` (`PaintCtx::text_with`; plain
+    `text` emits None/None), and the backend renders a list's Text prims through the glyphon
+    pass — shaped via the shared `get_text_buffer` cache, clipped to the item clip ∩ the prim
+    bounds, held in `EngineState::dl_text_items` so the `TextArea`s can borrow the buffers.
+    **Opt-in via `Application::display_list_text()` (default false)**: the seven Phase 3
+    adopters' lists already carry Text prims that those apps ALSO push as `TextItem`s —
+    rendering both would double-draw; each app flips the flag when it stops pushing its own.
+    `Application::view`/`text_items` gained no-op defaults so a fully migrated app implements
+    neither. Known limitation (scoped out, not a bug): the legacy `text_areas`
+    popover-occlusion clip is not applied to display-list text yet — a popover plate does not
+    hide list text beneath it (text draws after all geometry); apps with popovers keep their
+    own text path until that lands. The 5s/5t labels hatches become expressible as prims once
+    hosts consume lists directly.
+  - **6b — `cce-notifier` (first app fully on one path). DONE (live-A/B on a private D-Bus
+    session: text/accent pixel-identical; 60-px residual is compositor translucency noise in
+    the alpha-0.9 background region).** The whole frame is one display list (accent quad +
+    three `text_with` prims in the configured bundled family); deleted: the app-side
+    `FontSystem`, the `TextItem` cache, `rebuild_layout`, and the scale/rebuild bookkeeping.
+    Non-interactive, so no event surface. This is the reference shape for a minimal Phase 6
+    app.
+  - **Still to do (per-app, roughly smallest-first):** wallpaper/screenaver (likely trivial),
+    the seven display_list() adopters (flip `display_list_text` + drop their TextItem
+    assembly, one at a time, each A/B'd), then the widget-tree apps (routed events + scene
+    layout + dissolving the embedded-base containers), the demo (`cce-ui/src/main.rs`) as the
+    reference `Application`, and popover-occlusion for display-list text before any app with
+    popovers flips the flag. Delete the legacy `view*`/`text_items` paths, the per-widget
+    text getters, and finally `Element` + `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
