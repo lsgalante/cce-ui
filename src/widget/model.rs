@@ -180,6 +180,16 @@ pub trait Layout {
     fn tracked_parent(&self) -> Option<Option<*mut (dyn Element + 'static)>> {
         None
     }
+
+    /// Republish value-embedded legacy children into the ctx registry (Paginator's ButtonStrip
+    /// + Pages). Legacy value-owning containers re-registered their children on EVERY `tick` and
+    /// `layout` because the children's addresses move with the owning struct (host struct moves,
+    /// `Vec` reallocation) — and the registration is load-bearing: the spatial grid is rebuilt
+    /// from registered widgets, and it is the registered ButtonStrip (whose
+    /// `blocks_backplate_drag` is true) that makes the sidebar block backplate drags. The
+    /// adapter calls this from `Element::tick` and `Element::layout`, mirroring the legacy
+    /// cadence. `host_id` is the adapter's id, for `link_ids`. Default: nothing embedded.
+    fn register_embedded_children(&mut self, _host_id: WidgetId, _ctx: &mut UiContext) {}
 }
 
 /// The paint concern — a widget's fill color, its own (non-recursive) geometry emission, and
@@ -286,6 +296,29 @@ pub trait Paint {
     /// over its background (data-editor's teal editing wash). Default: suppressed.
     fn legacy_focus_highlight(&self) -> bool {
         false
+    }
+
+    /// Legacy container `extra_quads` aggregation: when `true`, the adapter's `extra_quads`
+    /// serves the visible children's `extra_quads` — and ONLY those, like the legacy container
+    /// overrides (Paginator returned its strip's + selected page's chrome; its own background
+    /// quad lived in `all_quads` alone). Hosts that render a container through the plain
+    /// `extra_quads` getter (cce-email's and cce-layout-interface's sidebar draw) read exactly
+    /// this view. The widget's own [`paint`](Paint::paint) prims still reach `all_quads` and
+    /// the scene walk. Default: off (a leaf's `extra_quads` is its own prims).
+    fn aggregates_child_extra_quads(&self) -> bool {
+        false
+    }
+
+    /// Forward the legacy `Element::highlight_quad` to somewhere else entirely — Paginator
+    /// served its ButtonStrip's highlight (the hovered-tab tint cce-layout-interface draws by
+    /// calling `highlight_quad` directly). Outer `Some` replaces the adapter's highlight logic
+    /// with the inner value; `None` (default) keeps the standard behavior
+    /// ([`legacy_focus_highlight`](Paint::legacy_focus_highlight)). A forwarded highlight is
+    /// served ONLY through the direct `highlight_quad` getter — the adapter keeps it out of
+    /// `all_quads`/`paint_self`, where the child's own aggregation already carries it (legacy
+    /// containers likewise excluded it from their `all_quads` overrides).
+    fn forwarded_highlight(&self, _ctx: &UiContext) -> Option<Option<(f32, f32, f32, f32, [f32; 4])>> {
+        None
     }
 }
 
@@ -673,6 +706,20 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         pc.finish().items.into_iter().map(|item| item.prim).collect()
     }
 
+    /// This widget's OWN plain-quad prims from [`Paint::paint`] — the shared source for the
+    /// `extra_quads`/`all_quads` reverse bridges (kept separate from `extra_quads` itself,
+    /// which may serve the child aggregation instead —
+    /// [`Paint::aggregates_child_extra_quads`]).
+    fn own_plain_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        self.painted_prims()
+            .into_iter()
+            .filter_map(|prim| match prim {
+                Prim::Quad { rect, color } => Some((rect.x, rect.y, rect.width, rect.height, color)),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The container's children that pass the [`Layout::child_visible`] policy — the set the
     /// adapter's subtree plumbing (aggregation, recursion, hit-through) operates on. Empty for
     /// non-containers.
@@ -928,6 +975,8 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         // `arrange_children`.
         let size = self.measure(constraints, ctx);
         self.set_rect(origin.x, origin.y, size.width, size.height);
+        let host_id = self.base.id();
+        Layout::register_embedded_children(&mut self.inner, host_id, ctx);
         if Layout::has_container_children(&self.inner) && self.visible {
             let rect = self.content_rect();
             Layout::layout_children_ctx(&mut self.inner, rect, ctx);
@@ -1043,6 +1092,12 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// `Element` default byte-for-byte: primary tint when ctx-focused (or active), secondary
     /// when hovered, over the row-substituted, side-label-inset span.
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        // A forwarding widget (Paginator → its ButtonStrip) serves the forwarded value here —
+        // and only here; `all_quads`/`paint_self` gate on `legacy_focus_highlight` instead, so
+        // the forwarded quad is never double-drawn.
+        if let Some(forwarded) = Paint::forwarded_highlight(&self.inner, ctx) {
+            return forwarded;
+        }
         if !Paint::legacy_focus_highlight(&self.inner) {
             return None;
         }
@@ -1097,9 +1152,12 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Paint::paint(&self.inner, self.content_rect(), ctx);
         // The legacy default `paint_self` drained `all_quads`, which carries the focus
         // highlight — replicate for opt-in widgets, over the background (same draw order).
-        if let Some((hx, hy, hw, hh, hc)) = Element::highlight_quad(self, ui) {
-            if hc != crate::colors::HIGHLIGHT_SECONDARY {
-                ctx.quad(Rect { x: hx, y: hy, width: hw, height: hh }, hc);
+        // Forwarded highlights stay out: the paint walk reaches the owning child itself.
+        if Paint::legacy_focus_highlight(&self.inner) {
+            if let Some((hx, hy, hw, hh, hc)) = Element::highlight_quad(self, ui) {
+                if hc != crate::colors::HIGHLIGHT_SECONDARY {
+                    ctx.quad(Rect { x: hx, y: hy, width: hw, height: hh }, hc);
+                }
             }
         }
         // Inline-label widgets emit their own text in `paint`; detached labels come from the
@@ -1187,13 +1245,16 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         if Paint::serves_legacy_plain_quads(&self.inner) {
             return Paint::legacy_plain_quads(&self.inner, self.content_rect());
         }
-        self.painted_prims()
-            .into_iter()
-            .filter_map(|prim| match prim {
-                Prim::Quad { rect, color } => Some((rect.x, rect.y, rect.width, rect.height, color)),
-                _ => None,
-            })
-            .collect()
+        // Legacy container aggregation (Paginator): the plain view is the visible children's
+        // chrome, and only that — the widget's own background stays in `all_quads`.
+        if Paint::aggregates_child_extra_quads(&self.inner) {
+            let mut out = Vec::new();
+            for child in self.visible_children() {
+                out.extend(unsafe { &*child }.extra_quads());
+            }
+            return out;
+        }
+        self.own_plain_quads()
     }
 
     /// When the widget serves a legacy plain-quad view, its geometry reaches
@@ -1205,12 +1266,18 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         if Paint::serves_legacy_plain_quads(&self.inner) {
             return Vec::new();
         }
-        let mut quads = self.extra_quads();
+        // Own prims directly (NOT `extra_quads`, which may serve the child aggregation — those
+        // children arrive once, through the recursion below).
+        let mut quads = if self.visible() { self.own_plain_quads() } else { Vec::new() };
         // The `Element` default's highlight inclusion (secondary/hover tint excluded), live
-        // only for widgets that opt into the legacy overlay.
-        if let Some(hq) = Element::highlight_quad(self, ctx) {
-            if hq.4 != crate::colors::HIGHLIGHT_SECONDARY {
-                quads.push(hq);
+        // only for widgets that opt into the legacy overlay. A forwarded highlight
+        // ([`Paint::forwarded_highlight`]) is deliberately excluded: its owner's aggregation
+        // already carries it, matching the legacy container `all_quads` overrides.
+        if Paint::legacy_focus_highlight(&self.inner) {
+            if let Some(hq) = Element::highlight_quad(self, ctx) {
+                if hq.4 != crate::colors::HIGHLIGHT_SECONDARY {
+                    quads.push(hq);
+                }
             }
         }
         if self.visible() {
@@ -1317,6 +1384,10 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Input::is_dragging(&self.inner)
     }
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+        // Legacy value-owning containers healed their children's registry entries every tick
+        // (addresses move with the owning struct); same cadence here.
+        let host_id = self.base.id();
+        Layout::register_embedded_children(&mut self.inner, host_id, ctx);
         let rect = self.content_rect();
         let mut changed = Input::tick(&mut self.inner, dt, rect);
         if self.visible {
