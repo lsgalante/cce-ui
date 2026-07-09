@@ -607,10 +607,38 @@ Constraint respected: **each crate still builds standalone** — the new core is
     text-editor, fonts, layout-interface, system-settings, data-editor, files,
     test-interface) — field types to `Adapted<Dropdown>`, raw casts to `.as_ptr_mut()`,
     two `&mut Dropdown` fn params in cce-files pages.
+  - **5q — `TextBox` (widest-surface leaf; the clipboard/selection tier). DONE (render-dump
+    + live-A/B verified, data-editor byte-identical).** New adapter surface: the `Input`
+    clipboard quintet (`cut_selection`/`copy_selection`/`paste_from_clipboard`/`select_all`/
+    `clear_text` — defaults replicate the whole-value `Element` defaults so earlier
+    migrations keep their shipped behavior), `Paint::prepare_text` (TextBox's glyph shaping
+    is load-bearing: `map_x_to_idx` reads the measured advances), `Layout::hit_row_rect`
+    (restores the legacy row-substituted, side-label-inset hit geometry — cce-files'
+    save-name box relies on row hits; earlier migrations' drop of it stands, opt-in),
+    `Layout::adjust_row_rect` + `Layout::rect_assigned` (the width/max-width clamp on both
+    rect paths; ungated scroll re-clamp on every `set_rect`), `Input::tracks_base_focus`
+    (legacy TextBox's `focus()` never set the base flag — its detached label must not color
+    as focused), and **`Paint::legacy_focus_highlight`**: the shared focus-highlight overlay
+    the adapter suppresses for every migrated widget is re-enabled per-widget — legacy
+    TextBox kept the `Element` default, and the focused editor's primary-tint wash
+    (data-editor's teal editing surface) is real legacy behavior. Found the honest way: the
+    first A/B came back 1.4M pixels apart; after restoring the overlay (replicated
+    byte-for-byte in `Adapted::highlight_quad` + the `all_quads`/`paint_self` inclusion
+    points), data-editor startup AND focused-editor states are **byte-identical (AE=0)**.
+    The asymmetric legacy render split is preserved (non-rounded `extra_quads`: full-width
+    background + disabled special-case; rounded `all_rounded_quads`: side-label inset, no
+    disabled branch). Flagged approximations: releases re-check plain-rect containment
+    (legacy hit-gated them through the row-substituted test); wheel is now hit-gated by the
+    adapter (legacy hosts dispatched it to the hovered widget themselves). Verified: 169
+    tests, workspace builds, settings fonts/processes dumps content-identical (processes
+    modulo live PID/CPU data), cce-data-editor live A/B byte-identical. Sweep: 9 app repos
+    (authenticator, data-editor, display-manager, email, files, fonts, layout-interface,
+    system-settings, text-editor) + 5 in-crate embedders (treelist, scrolling_list,
+    keybinds_control, multi_control's `InstancedWidget` variant, parameters_bg).
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining:
     Paginator (embeds ButtonStrip + Vec<Page>), ParametersBg (real container, 1.8k lines),
-    and the deferred leaves (TextBox, StatusBar, Float3, LayoutPreview,
+    and the deferred leaves (StatusBar, Float3, LayoutPreview,
     PreviewState); the embedded-base containers
     (Layer/Container/Page/Plate/Backplate/ScrollBox/List/…) dissolve via Phase 6 scene
     adoption instead. Then delete `Element` + `Adapted` once the last widget is across, at
