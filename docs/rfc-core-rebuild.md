@@ -886,16 +886,25 @@ Constraint respected: **each crate still builds standalone** — the new core is
     were pushed into `view()`'s plain quads, which the backend DISCARDS when
     `display_list` returns Some — images had only rendered under `CCE_LEGACY_PAINT`
     since the Phase 3 adoption; they now emit into the display list itself.
+  - **6k — `Application::load_system_fonts` lands; cce-fonts opts in. DONE (live-verified:
+    baseline previews Berkeley Mono (bundled) but drew Adwaita Mono (system-only) BLANK —
+    the app's core purpose was broken for installed fonts; with the opt-in Adwaita renders
+    as its own face).** The render-FontSystem design settled as a bool `Application` hook,
+    consulted once at GPU init: the engine's `WgpuAdapter` FontSystem loads system fonts
+    additively (bundled first, so fontdb face IDs stay aligned with every
+    `create_font_system*` database — the alignment that makes app-side-shaped buffers
+    rasterizable engine-side). This was the same face-ID-mismatch class as the 6e
+    cce-colors bug, and it predates Phase 6 entirely.
   - **Still to do (per-app):**
-    the last display_list() adopter — cce-fonts — flips `display_list_text` once the
-    render-FontSystem question is settled: its previews NEED system fonts, and the
-    engine's render FontSystem is bundled-only. That wants its own design (per-app
-    system-font loading for the engine — e.g. an `Application` hook requesting
-    `create_font_system_with_system_fonts` — or an app-provided FontSystem). Then the
-    widget-tree apps (routed events + scene layout + dissolving the embedded-base
-    containers), the demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete
-    the legacy `view*`/`text_items` paths, the per-widget text getters, and finally
-    `Element` + `Adapted` once the last app is across.
+    cce-fonts flips `display_list_text` — the remaining blocker is that `Prim::Text`
+    carries family+size only: the alphabet preview shapes with per-style
+    `glyphon::Style`/`Weight` attrs (italic/bold/light variants), which prims cannot
+    express yet. Extending Prim::Text + `get_text_buffer` (and its cache key) with
+    optional style/weight is the next engine step. Then the widget-tree apps (routed
+    events + scene layout + dissolving the embedded-base containers), the demo
+    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
+    `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
+    `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
