@@ -50,8 +50,19 @@ pub enum Prim {
     /// `get_text_buffer` (family, or "family:size"); `bounds` is a logical `[l, t, r, b]` clip
     /// for the glyph pass (Phase 6: the backend renders these through glyphon when the app
     /// opts in via `Application::display_list_text`; the paint walk's clip additionally
-    /// applies through the item's `clip`).
-    Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3], font: Option<String>, bounds: Option<[f32; 4]> },
+    /// applies through the item's `clip`). `attrs` carries the optional shaping attributes
+    /// beyond family+size (the font picker's italic/weight preview variants).
+    Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3], font: Option<String>, bounds: Option<[f32; 4]>, attrs: TextAttrs },
+}
+
+/// Optional shaping attributes for a [`Prim::Text`] — the subset a widget can request beyond
+/// family + size. `weight` is the OpenType weight (400 regular, 700 bold); `None` leaves the
+/// family default. Kept toolkit-plain (no glyphon types) like the rest of the scene layer;
+/// the backend maps them onto `glyphon::Style`/`Weight` at shape time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TextAttrs {
+    pub italic: bool,
+    pub weight: Option<u16>,
 }
 
 /// A primitive plus the scissor rect it must be clipped to (`None` = unclipped).
@@ -211,9 +222,26 @@ impl PaintCtx {
         font: Option<String>,
         bounds: Option<[f32; 4]>,
     ) {
+        self.text_attrs(text, x, y, font_size, color, font, bounds, TextAttrs::default());
+    }
+
+    /// [`text_with`](PaintCtx::text_with) plus shaping attributes (italic / weight) — what the
+    /// font picker's style-variant previews need beyond family + size.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_attrs(
+        &mut self,
+        text: impl Into<String>,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        color: [u8; 3],
+        font: Option<String>,
+        bounds: Option<[f32; 4]>,
+        attrs: TextAttrs,
+    ) {
         let (ox, oy) = self.offset;
         let bounds = bounds.map(|[l, t, r, b]| [l + ox, t + oy, r + ox, b + oy]);
-        self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color, font, bounds });
+        self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color, font, bounds, attrs });
     }
 
     /// Consume the context and return the accumulated display list.

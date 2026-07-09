@@ -64,6 +64,7 @@ struct BufferCacheKey {
     size_milli: u32,
     font: Option<String>,
     is_vertical: bool,
+    attrs: crate::scene::paint::TextAttrs,
 }
 
 #[derive(Clone)]
@@ -89,6 +90,18 @@ fn find_cased_family(fs: &FontSystem, name: &str) -> Option<String> {
 }
 
 pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
+    get_text_buffer_attrs(fs, text, size, font, crate::scene::paint::TextAttrs::default())
+}
+
+/// [`get_text_buffer`] plus shaping attributes (italic / weight) — the backend's shape entry
+/// for `Prim::Text` prims that carry [`TextAttrs`] (the font picker's style-variant previews).
+pub fn get_text_buffer_attrs(
+    fs: &mut FontSystem,
+    text: &str,
+    size: f32,
+    font: Option<&str>,
+    text_attrs: crate::scene::paint::TextAttrs,
+) -> Buffer {
     let scale = crate::scale::scale_factor();
     let mut font_size = size;
     let mut family_name = None;
@@ -109,6 +122,7 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
         size_milli: size_key,
         font: family_name.clone(),
         is_vertical,
+        attrs: text_attrs,
     };
 
     let cached = BUFFER_CACHE.with(|cache| {
@@ -198,6 +212,12 @@ pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<
         }
     };
     attrs = attrs.family(family);
+    if text_attrs.italic {
+        attrs = attrs.style(glyphon::Style::Italic);
+    }
+    if let Some(w) = text_attrs.weight {
+        attrs = attrs.weight(glyphon::Weight(w));
+    }
     buf.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
     buf.shape_until_scroll(fs, true);
 
@@ -1886,14 +1906,14 @@ impl<A: Application> EngineState<A> {
         if self.inner.as_ref().unwrap().display_list_text() {
             let fs = &mut self.wgpu_adapter.as_mut().unwrap().font_system;
             for item in &dl.items {
-                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds } = &item.prim {
+                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, attrs } = &item.prim {
                     let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
                     let merged = match (clip, *bounds) {
                         (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
                         (Some(a), None) => Some(a),
                         (None, b) => b,
                     };
-                    let buffer = get_text_buffer(fs, text, *font_size, font.as_deref());
+                    let buffer = get_text_buffer_attrs(fs, text, *font_size, font.as_deref(), *attrs);
                     self.dl_text_items.push(TextItem {
                         buffer,
                         x: *x,
