@@ -1634,6 +1634,19 @@ pub trait Application: Sized + 'static {
     fn display_list_text(&self) -> bool {
         false
     }
+
+    /// Opt into system fonts in the ENGINE's render `FontSystem` (the one that shapes
+    /// display-list text and rasterizes every glyph at prepare time). Default `false`: the
+    /// render FontSystem loads only the bundled CCE fonts, and text asking for a family that
+    /// exists only among installed system fonts is silently invisible — buffers shaped
+    /// app-side against a system-fonts `FontSystem` carry fontdb face IDs the engine's
+    /// database doesn't have (the cce-colors Phase 6e bug). An app whose UI must render
+    /// arbitrary installed families (the font picker) returns `true`; its own `FontSystem`,
+    /// if it keeps one for measurement, should be `create_font_system_with_system_fonts()`
+    /// so both databases load identically. Consulted once, at GPU init.
+    fn load_system_fonts(&self) -> bool {
+        false
+    }
 }
 
 pub struct PressedKey {
@@ -1722,7 +1735,8 @@ impl<A: Application> EngineState<A> {
         let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
         let surface_ptr = surface.id().as_ptr() as *mut std::ffi::c_void;
         
-        let adapter = WgpuAdapter::new(display_ptr, surface_ptr, pw, ph).await;
+        let load_system_fonts = self.inner.as_ref().map_or(false, |a| a.load_system_fonts());
+        let adapter = WgpuAdapter::new(display_ptr, surface_ptr, pw, ph, load_system_fonts).await;
         
         let shader = adapter.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),

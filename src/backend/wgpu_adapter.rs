@@ -21,6 +21,7 @@ impl WgpuAdapter {
         surface_ptr: *mut std::ffi::c_void,
         width: u32,
         height: u32,
+        load_system_fonts: bool,
     ) -> Self {
         let wayland_handle = Box::leak(Box::new(WaylandSurfaceHandle {
             display_ptr,
@@ -86,8 +87,14 @@ impl WgpuAdapter {
 
         surface.configure(&device, &config);
 
-        // Initialize text rendering
-        let font_system = crate::create_font_system();
+        // Initialize text rendering. The render FontSystem is bundled-fonts-only unless the
+        // app opts into system fonts (Application::load_system_fonts — the font picker must
+        // shape and rasterize every installed family).
+        let font_system = if load_system_fonts {
+            crate::create_font_system_with_system_fonts()
+        } else {
+            crate::create_font_system()
+        };
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&device);
         let mut text_atlas = TextAtlas::new(&device, &queue, &cache, config.format);
