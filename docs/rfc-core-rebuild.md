@@ -907,11 +907,25 @@ Constraint respected: **each crate still builds standalone** — the new core is
     would spawn an empty xdg popup (no `render_popovers` here). Restored two more Phase 3
     view()-quad losses (panel borders, alphabet box) and fixed the alphabet's premature
     wrapping (legacy passed a LOGICAL width to `set_size` on a physical-unit buffer).
+  - **6m — first container dissolution: `cce-data-editor`'s root Backplate. DONE
+    (live-verified: A/B residual 43px over the 8% threshold — translucency noise;
+    selection/editor/statusbar interactions exercised; held window drag not headlessly
+    drivable, covered by the new unit test).** The root-Backplate dissolution recipe,
+    now established: (1) the plate becomes prims replicating `Backplate::color()`/
+    `corner_radius()` (page-low bg at active backplate opacity, config radius); (2)
+    top-level widgets register directly in `ui_context`, parentless, and the paint walk
+    runs per top-level widget in the old child order (composite widgets keep their own
+    children — the splitter still owns its panes); (3) window dragging answers via the
+    new `UiContext::drag_allowed_at` — the `is_movable_backplate_at` candidate walk
+    minus the registered-movable-Backplate requirement, because the surface itself is
+    the movable plate once the Backplate is gone.
   - **Still to do:**
-    the widget-tree apps (routed events + scene layout + dissolving the embedded-base
-    containers), the demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete
-    the legacy `view*`/`text_items` paths, the per-widget text getters, and finally
-    `Element` + `Adapted` once the last app is across.
+    dissolve the remaining root Backplates/Plates with the 6m recipe (graph, fonts,
+    colors, files; settings' tree also carries Switcher/Page/SectionContainer/ScrollBox
+    — the deep-composition set), routed events + scene layout for the widget-tree apps,
+    the demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
+    `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
+    `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
