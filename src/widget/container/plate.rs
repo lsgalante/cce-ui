@@ -143,6 +143,53 @@ impl Element for Plate {
         self.selected = selected;
     }
 
+    /// Walk emission: the legacy default now emits NO text for containers (Plate's
+    /// `text_labels` aggregates children, which the walk reaches itself), but a Plate's OWN
+    /// label lives here — geometry identical to the default, plus that one label (plain text,
+    /// matching the legacy `widget_font: None`).
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        use crate::scene::layout::Rect;
+        let (x, y, w, h) = self.rect();
+        let rect = Rect { x, y, width: w, height: h };
+        let color = Element::color(self);
+
+        if self.children(ui).is_empty() {
+            for (qx, qy, qw, qh, r, c, corners) in self.all_rounded_quads(ui) {
+                ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, r, corners, c);
+            }
+        } else {
+            let cr = self.corner_radii();
+            let radii = (cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
+            if let Some(depth) = self.plate_bevel() {
+                ctx.bevel(rect, radii, color, depth);
+            } else if let Some((border_color, thickness)) = Element::solid_border(self) {
+                ctx.border(rect, radii, color, border_color, thickness);
+            } else if color[3].abs() > 0.001 {
+                let (r1, r2, r3, r4) = Element::rounded_corners(self);
+                if r1 || r2 || r3 || r4 {
+                    ctx.rounded_rect(rect, Element::corner_radius(self), (r1, r2, r3, r4), color);
+                }
+            }
+        }
+
+        for (qx, qy, qw, qh, c) in self.all_quads(ui) {
+            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, c);
+        }
+        for (cx, cy, r, t, start, end, c) in self.extra_arcs() {
+            ctx.arc(cx, cy, r, t, start, end, c);
+        }
+        for (cx, cy, r, c) in self.extra_circles() {
+            ctx.circle(cx, cy, r, c);
+        }
+
+        if self.visible {
+            if let Some(ref label) = self.base.base.label {
+                let (_, font_size) = crate::layout::control_label_font_parsed();
+                ctx.text(label.clone(), self.base.base.x, self.base.base.y, font_size, colors::control_label_color_u8());
+            }
+        }
+    }
+
     fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {
         for &child_ptr in &self.base.children {
             unsafe {

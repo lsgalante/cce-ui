@@ -519,8 +519,15 @@ pub trait Element {
         for (cx, cy, r, c) in self.extra_circles() {
             ctx.circle(cx, cy, r, c);
         }
-        for tl in self.text_labels() {
-            ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+        // Text: leaves emit their own labels; containers emit NONE — the legacy container
+        // text_labels overrides (Backplate/Layer/Page/SplitBox/Plate) AGGREGATE their
+        // children's labels, and the walk reaches those children itself, so emitting the
+        // aggregate here would double-draw every descendant's text (the Phase 6d trap). A
+        // legacy container with OWN text overrides paint_self to add it (Plate's label).
+        if self.children(ui).is_empty() {
+            for tl in self.text_labels() {
+                ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+            }
         }
     }
 

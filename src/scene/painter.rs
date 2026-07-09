@@ -45,7 +45,9 @@ fn paint_node(ui: &UiContext, ptr: ElemPtr, pc: &mut PaintCtx) {
         }
 
         // Legacy subtree painters (e.g. TreeList) render their own geometry AND their children via
-        // a recursive all_rounded_quads/all_quads; emit those directly and stop descending.
+        // a recursive all_rounded_quads/all_quads; emit those directly and stop descending. Their
+        // text comes from the recursive bounded getter for the same reason — the walk never
+        // reaches the subtree's widgets, so the aggregate is the subtree's text, emitted once.
         if (*ptr).renders_own_subtree() {
             for (x, y, w, h, r, c, corners) in (*ptr).all_rounded_quads(ui) {
                 pc.rounded_rect(Rect { x, y, width: w, height: h }, r, corners, c);
@@ -58,6 +60,9 @@ fn paint_node(ui: &UiContext, ptr: ElemPtr, pc: &mut PaintCtx) {
             }
             for (cx, cy, r, c) in (*ptr).extra_circles() {
                 pc.circle(cx, cy, r, c);
+            }
+            for (tl, font, bounds) in (*ptr).text_labels_with_font_and_bounds(ui) {
+                pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
             }
             return;
         }
