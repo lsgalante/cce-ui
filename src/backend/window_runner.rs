@@ -1667,6 +1667,15 @@ pub trait Application: Sized + 'static {
     fn load_system_fonts(&self) -> bool {
         false
     }
+
+    /// Phase 6 opt-in: this app draws its popovers and context menu INTO its display list
+    /// (registered in `ui_context` for the occlusion clamp) — the engine must NOT spawn its
+    /// render-only xdg popup for globally-registered popovers or the global context menu.
+    /// Default `false`: unmigrated apps keep the popup surface + `render_popovers` collector
+    /// path. The popup path (and this flag) go away once its last consumer is across.
+    fn draws_own_popovers(&self) -> bool {
+        false
+    }
 }
 
 pub struct PressedKey {
@@ -1998,6 +2007,17 @@ impl<A: Application> EngineState<A> {
                     }
                 }
             }
+        }
+        // An app drawing its own context menu into the list (draws_own_popovers) gets the
+        // same occlusion for it: the menu rect clamps list text beneath, and the menu's own
+        // labels are exempt because they carry bounds equal to the rect.
+        if self.inner.as_ref().unwrap().draws_own_popovers() && crate::widget::context_menu::is_visible() {
+            dl_overlay_rects.push((
+                crate::widget::context_menu::x(),
+                crate::widget::context_menu::y(),
+                crate::widget::context_menu::w(),
+                crate::widget::context_menu::h(),
+            ));
         }
         for ti in &self.dl_text_items {
             let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
@@ -3270,16 +3290,19 @@ pub fn run<A: Application>() {
             last_title = current_title;
         }
 
+        // Apps that draw popovers/context menu into their own display list (Phase 6) opt out
+        // of the render-only popup surface entirely.
+        let draws_own = engine_state.inner.as_ref().map_or(false, |a| a.draws_own_popovers());
         let active_popovers = crate::widget::popovers::get_active();
         let context_menu_visible = crate::widget::context_menu::is_visible();
 
         let mut active_popover_rect = None;
-        if !active_popovers.is_empty() {
+        if !draws_own && !active_popovers.is_empty() {
             let popover_widget = unsafe { &*active_popovers[0] };
             active_popover_rect = popover_widget.popover_rect();
         }
 
-        if active_popover_rect.is_some() || context_menu_visible {
+        if active_popover_rect.is_some() || (context_menu_visible && !draws_own) {
             let (px, py, mut pw, mut ph, is_context_menu) = if let Some((x, y, w, h)) = active_popover_rect {
                 (x, y, w.max(1.0), h.max(1.0), false)
             } else {
