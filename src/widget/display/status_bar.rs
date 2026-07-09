@@ -1,12 +1,20 @@
+//! Narrow-trait `StatusBar` (Phase 5t) — a one-line text bar whose theming is parent-coupled
+//! exactly like MenuBar's: when its tracked parent is a Backplate it pulls the backplate
+//! statusbar color/text-color/blur and derives its rounded corners from where it sits against
+//! the parent's edges ([`Paint::corner_style`] + the corners walk). Two text paths, both
+//! legacy: `TextLabel`s out of [`Paint::paint`] (container aggregation — deliberately with NO
+//! `widget_font`, matching the legacy default-font behavior on that path), and pre-shaped
+//! glyphon buffers through [`Paint::text_items`] (new with this migration) for manual hosts —
+//! cce-status-interface calls `prepare_text` then `get_text_items` into its own paint.
+
 use crate::colors;
-use crate::widget::*;
-use crate::widget::display::{TextLabel, make_widget_text_buffer};
-use crate::context::UiContext;
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
+use crate::widget::display::make_widget_text_buffer;
+use crate::widget::{Adapted, Element, Input, Layout, Paint};
 
 pub struct StatusBar {
-    pub base: Widget,
-    x: f32, y: f32, w: f32, h: f32,
-    hovered: bool,
+    rect: Rect,
     pub text: String,
     pub text_buf: Option<glyphon::Buffer>,
     pub text_offset_x: Option<f32>,
@@ -16,38 +24,18 @@ pub struct StatusBar {
 }
 
 impl StatusBar {
-    pub fn new() -> Self {
-        Self {
-            base: Widget::new_rect(0.0, 0.0, 0.0, 0.0),
-            x: 0.0,
-            y: 0.0,
-            w: 0.0,
-            h: 0.0,
-            hovered: false,
+    pub fn new() -> Adapted<StatusBar> {
+        Adapted::new(StatusBar {
+            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             text: String::new(),
             text_buf: None,
             text_offset_x: None,
             text_color: None,
             bg_color: None,
             parent: None,
-        }
+        })
     }
-    pub fn with_text(mut self, text: &str) -> Self {
-        self.text = text.to_string();
-        self
-    }
-    pub fn with_text_offset_x(mut self, offset: f32) -> Self {
-        self.text_offset_x = Some(offset);
-        self
-    }
-    pub fn with_text_color(mut self, color: [f32; 4]) -> Self {
-        self.text_color = Some(color);
-        self
-    }
-    pub fn with_bg_color(mut self, color: [f32; 4]) -> Self {
-        self.bg_color = Some(color);
-        self
-    }
+
     pub fn set_text_offset_x(&mut self, offset: f32) {
         self.text_offset_x = Some(offset);
     }
@@ -75,23 +63,8 @@ impl StatusBar {
         }
         false
     }
-}
 
-impl Element for StatusBar {
-    fn base(&self) -> Option<&Widget> { Some(&self.base) }
-    fn base_mut(&mut self) -> Option<&mut Widget> { Some(&mut self.base) }
-    fn rect(&self) -> (f32, f32, f32, f32) { (self.x, self.y, self.w, self.h) }
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.x = x; self.y = y; self.w = w; self.h = h;
-        self.base.x = x; self.base.y = y; self.base.w = w; self.base.h = h;
-    }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
-    }
-    fn color(&self) -> [f32; 4] {
+    fn bg(&self) -> [f32; 4] {
         if let Some(p_ptr) = self.parent {
             if unsafe { (*p_ptr).is_backplate() } {
                 let theme_color = crate::colors::backplate_statusbar_color();
@@ -102,27 +75,16 @@ impl Element for StatusBar {
         }
         self.bg_color.unwrap_or(colors::STATUS_BG)
     }
-    fn set_hovered(&mut self, v: bool) { self.hovered = v; }
-    fn hovered(&self) -> bool { self.hovered }
-    fn blocks_backplate_drag(&self) -> bool { false }
 
-    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        self.parent
-    }
-
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) {
-        self.parent = parent;
-    }
-
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+    fn corners_against_parent(&self, rect: Rect) -> (bool, bool, bool, bool) {
         if let Some(p_ptr) = self.parent {
             let is_bp = unsafe { (*p_ptr).is_backplate() };
             if is_bp {
                 let (px, py, pw, ph) = unsafe { (*p_ptr).rect() };
-                let (x, y, w, h) = self.rect();
+                let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
                 let is_at_top = (y - py).abs() < 0.1;
                 let is_at_bottom = (y + h - (py + ph)).abs() < 0.1;
-                
+
                 if is_at_top && is_at_bottom {
                     let is_at_left = (x - px).abs() < 0.1;
                     let is_at_right = (x + w - (px + pw)).abs() < 0.1;
@@ -137,54 +99,91 @@ impl Element for StatusBar {
         (false, false, false, false)
     }
 
-    fn corner_radius(&self) -> f32 {
-        if let Some(p_ptr) = self.parent {
-            unsafe { (*p_ptr).corner_radius() }
-        } else {
-            0.0
-        }
+    fn statusbar_font_size(&self) -> f32 {
+        let (_, font_size) = crate::layout::statusbar_font_parsed();
+        if font_size > 0.0 { font_size } else { 12.0 }
+    }
+}
+
+impl Adapted<StatusBar> {
+    pub fn with_text(mut self, text: &str) -> Self {
+        self.text = text.to_string();
+        self
+    }
+    pub fn with_text_offset_x(mut self, offset: f32) -> Self {
+        self.text_offset_x = Some(offset);
+        self
+    }
+    pub fn with_text_color(mut self, color: [f32; 4]) -> Self {
+        self.text_color = Some(color);
+        self
+    }
+    pub fn with_bg_color(mut self, color: [f32; 4]) -> Self {
+        self.bg_color = Some(color);
+        self
+    }
+}
+
+impl Layout for StatusBar {
+    /// The status text draws inside the bar; the base label must never inflate the rect or
+    /// emit a detached label (`Element::set_text` writes both the base copy and
+    /// [`Paint::sync_label`]).
+    fn inline_label(&self) -> bool {
+        true
     }
 
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        if !r1 && !r2 && !r3 && !r4 {
-            vec![(self.x, self.y, self.w, self.h, self.color())]
-        } else {
-            Vec::new()
-        }
+    fn rect_assigned(&mut self, rect: Rect) {
+        self.rect = rect;
     }
-    fn set_text(&mut self, text: &str) {
-        if self.text != text {
-            self.text = text.to_string();
+
+    fn parent_changed(&mut self, parent: Option<*mut (dyn Element + 'static)>) {
+        self.parent = parent;
+    }
+
+    fn tracked_parent(&self) -> Option<Option<*mut (dyn Element + 'static)>> {
+        Some(self.parent)
+    }
+}
+
+impl Paint for StatusBar {
+    fn color(&self) -> [f32; 4] {
+        self.bg()
+    }
+
+    fn corner_style(&self, rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+        let radius = match self.parent {
+            Some(p_ptr) => unsafe { (*p_ptr).corner_radius() },
+            None => 0.0,
+        };
+        Some((radius, self.corners_against_parent(rect)))
+    }
+
+    /// `Element::set_text` lands here: swap the text and drop the shaped buffer so
+    /// `prepare_text` rebuilds it.
+    fn sync_label(&mut self, label: &str) {
+        if self.text != label {
+            self.text = label.to_string();
             self.text_buf = None;
         }
     }
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
-        if !self.text.is_empty() && self.text_buf.is_none() {
-            let (font_fam, font_size) = crate::layout::statusbar_font_parsed();
-            let size = if font_size > 0.0 { font_size } else { 12.0 };
-            let fam = if font_fam.is_empty() { "Berkeley Mono".to_string() } else { font_fam };
-            self.text_buf = Some(make_widget_text_buffer(fs, &self.text, size, &fam));
+
+    /// Background exactly on the legacy split: a plain quad when cornerless (the legacy
+    /// `extra_quads` body), a rounded rect against the parent's corners otherwise (the legacy
+    /// default `all_rounded_quads` path) — plus the text label (the legacy `text_labels`
+    /// body; deliberately no `widget_font`, see module docs).
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let corners = self.corners_against_parent(rect);
+        let bg = self.bg();
+        if corners == (false, false, false, false) {
+            ctx.quad(rect, bg);
+        } else if bg[3].abs() > 0.001 {
+            let radius = match self.parent {
+                Some(p_ptr) => unsafe { (*p_ptr).corner_radius() },
+                None => 0.0,
+            };
+            ctx.rounded_rect(rect, radius, corners, bg);
         }
-    }
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if let Some(ref text_buf) = self.text_buf {
-            let offset_x = self.text_offset_x.unwrap_or(12.0);
-            let c = self.get_actual_text_color();
-            let color = glyphon::Color::rgb(
-                (c[0] * 255.0) as u8,
-                (c[1] * 255.0) as u8,
-                (c[2] * 255.0) as u8,
-            );
-            let (_, font_size) = crate::layout::statusbar_font_parsed();
-            let size = if font_size > 0.0 { font_size } else { 12.0 };
-            let text_y = crate::layout::align_text_y(self.y, self.h, size, 0.0);
-            vec![(text_buf, self.x + offset_x, text_y, color)]
-        } else {
-            Vec::new()
-        }
-    }
-    fn text_labels(&self) -> Vec<TextLabel> {
+
         if !self.text.is_empty() {
             let offset_x = self.text_offset_x.unwrap_or(12.0);
             let c = self.get_actual_text_color();
@@ -193,18 +192,76 @@ impl Element for StatusBar {
                 (c[1] * 255.0) as u8,
                 (c[2] * 255.0) as u8,
             ];
-            let (_, font_size) = crate::layout::statusbar_font_parsed();
+            let size = self.statusbar_font_size();
+            let text_y = crate::layout::align_text_y(rect.y, rect.height, size, 0.0);
+            ctx.text(self.text.clone(), rect.x + offset_x, text_y, size, color);
+        }
+    }
+
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem, _rect: Rect) {
+        if !self.text.is_empty() && self.text_buf.is_none() {
+            let (font_fam, font_size) = crate::layout::statusbar_font_parsed();
             let size = if font_size > 0.0 { font_size } else { 12.0 };
-            let text_y = crate::layout::align_text_y(self.y, self.h, size, 0.0);
-            vec![TextLabel {
-                text: self.text.clone(),
-                x: self.x + offset_x,
-                y: text_y,
-                font_size: size,
-                color,
-            }]
+            let fam = if font_fam.is_empty() { "Berkeley Mono".to_string() } else { font_fam };
+            self.text_buf = Some(make_widget_text_buffer(fs, &self.text, size, &fam));
+        }
+    }
+
+    fn text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
+        if let Some(ref text_buf) = self.text_buf {
+            let offset_x = self.text_offset_x.unwrap_or(12.0);
+            let c = self.get_actual_text_color();
+            let color = glyphon::Color::rgb(
+                (c[0] * 255.0) as u8,
+                (c[1] * 255.0) as u8,
+                (c[2] * 255.0) as u8,
+            );
+            let size = self.statusbar_font_size();
+            let text_y = crate::layout::align_text_y(self.rect.y, self.rect.height, size, 0.0);
+            vec![(text_buf, self.rect.x + offset_x, text_y, color)]
         } else {
             Vec::new()
         }
+    }
+}
+
+impl Input for StatusBar {
+    fn blocks_backplate_drag(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::widget::Element;
+
+    /// The manual-host path cce-status-interface drives by hand: `set_text` drops the shaped
+    /// buffer, `prepare_text` rebuilds it, `get_text_items` serves it (the new
+    /// `Paint::text_items` hook) at the bar's rect.
+    #[test]
+    fn manual_host_text_pipeline() {
+        let mut fs = glyphon::FontSystem::new();
+        let mut bar = StatusBar::new().with_text("hello").with_text_offset_x(15.0);
+        Element::set_rect(&mut bar, 0.0, 570.0, 800.0, 30.0);
+
+        assert!(Element::get_text_items(&bar).is_empty(), "no buffer before prepare_text");
+        Element::prepare_text(&mut bar, &mut fs);
+        let items = Element::get_text_items(&bar);
+        assert_eq!(items.len(), 1, "one shaped buffer");
+        assert_eq!(items[0].1, 15.0, "x = rect.x + text_offset_x");
+
+        // set_text drops the stale buffer; prepare_text reshapes.
+        Element::set_text(&mut bar, "world");
+        assert!(Element::get_text_items(&bar).is_empty(), "buffer dropped on text change");
+        Element::prepare_text(&mut bar, &mut fs);
+        assert_eq!(Element::get_text_items(&bar).len(), 1);
+        assert_eq!(bar.text, "world");
+
+        // Parentless: cornerless plain bg through the plain-quad bridge, at STATUS_BG.
+        let extra = Element::extra_quads(&bar);
+        assert_eq!(extra.len(), 1, "cornerless bg quad");
+        assert_eq!(Element::rounded_corners(&bar), (false, false, false, false));
+        assert!(!Element::blocks_backplate_drag(&bar));
     }
 }

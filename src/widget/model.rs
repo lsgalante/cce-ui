@@ -340,6 +340,17 @@ pub trait Paint {
     fn legacy_labels_with_font_and_bounds(&self, _rect: Rect, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         Vec::new()
     }
+
+    /// Shaped glyphon buffers for the legacy `Element::get_text_items` path — hosts that
+    /// build text off pre-shaped buffers instead of `TextLabel`s (cce-status-interface drives
+    /// its StatusBar by hand: `prepare_text` then `get_text_items` into its own paint).
+    /// Prim-derived text can't serve this (the getter returns borrows of buffers the widget
+    /// owns), so the widget serves them itself; shape the buffers in
+    /// [`prepare_text`](Paint::prepare_text). Default: none — the `Element` default most
+    /// widgets kept.
+    fn text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
+        Vec::new()
+    }
 }
 
 /// What an event handler may reach beyond its own state — the RFC §3.5 `EventCtx`, grown as
@@ -655,6 +666,14 @@ pub struct Adapted<W: Layout + Paint + Input + 'static> {
 impl<W: Layout + Paint + Input + 'static> Drop for Adapted<W> {
     fn drop(&mut self) {
         crate::widget::clear_widget_references(self);
+    }
+}
+
+/// Plain-data widgets constructed via `Default` (PreviewState in cce-files) keep their
+/// construction sites when the wrapper lands.
+impl<W: Layout + Paint + Input + Default + 'static> Default for Adapted<W> {
+    fn default() -> Self {
+        Adapted::new(W::default())
     }
 }
 
@@ -1014,6 +1033,9 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
         let mut items = Vec::new();
         if self.visible() {
+            // Own shaped buffers ([`Paint::text_items`] — StatusBar's manual-host path), then
+            // the container recursion.
+            items.extend(Paint::text_items(&self.inner));
             for child in self.visible_children() {
                 items.extend(unsafe { &*child }.get_text_items());
             }

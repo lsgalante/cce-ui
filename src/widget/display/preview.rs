@@ -1,6 +1,17 @@
+//! Narrow-trait `PreviewState` (Phase 5t) — cce-files' file-preview pane: a procedural render
+//! of a preview section (text lines in monospace, RLE-drawn image pixels) over a details
+//! section, produced by an internal `WidgetCanvas: RenderTarget`. The canvas labels carry
+//! per-label fonts (content lines are monospace, metadata is default-font), which is exactly
+//! the [`Paint::serves_legacy_labels`] hatch from Phase 5s; the quads flow from
+//! [`Paint::paint`]. Plain `text_labels` stays EMPTY like legacy (the pane's text is served
+//! only through the font-and-bounds getter — emitting it as prims too would double-render
+//! under container aggregation). The app owns all the data fields and mutates them through
+//! `Deref`; scrolling is the inherent [`PreviewState::handle_mouse_wheel`], driven by hand.
+
 use std::path::PathBuf;
-use crate::widget::{Widget, Element};
-use crate::context::UiContext;
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
+use crate::widget::{Input, Layout, Paint, UiContext};
 use crate::layout::{RenderTarget, SectionContext};
 use crate::color;
 
@@ -11,9 +22,9 @@ pub struct ImagePreviewData {
     pub pixels: Vec<[u8; 4]>,
 }
 
+#[derive(Debug, Clone)]
 pub struct PreviewState {
-    pub base: Widget,
-    pub visible: bool,
+    rect: Rect,
     pub path: Option<PathBuf>,
     pub path_display: String,
     pub name: String,
@@ -31,8 +42,7 @@ pub struct PreviewState {
 impl Default for PreviewState {
     fn default() -> Self {
         Self {
-            base: Widget::new(),
-            visible: true,
+            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             path: None,
             path_display: String::new(),
             name: String::new(),
@@ -45,48 +55,6 @@ impl Default for PreviewState {
             content_preview: None,
             image_preview: None,
             scroll_line: 0,
-        }
-    }
-}
-
-impl std::fmt::Debug for PreviewState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PreviewState")
-            .field("base", &self.base)
-            .field("visible", &self.visible)
-            .field("path", &self.path)
-            .field("path_display", &self.path_display)
-            .field("name", &self.name)
-            .field("is_dir", &self.is_dir)
-            .field("size", &self.size)
-            .field("permissions", &self.permissions)
-            .field("modified", &self.modified)
-            .field("file_type", &self.file_type)
-            .field("target", &self.target)
-            .field("content_preview", &self.content_preview)
-            .field("image_preview", &self.image_preview)
-            .field("scroll_line", &self.scroll_line)
-            .finish()
-    }
-}
-
-impl Clone for PreviewState {
-    fn clone(&self) -> Self {
-        Self {
-            base: self.base.clone(),
-            visible: self.visible,
-            path: self.path.clone(),
-            path_display: self.path_display.clone(),
-            name: self.name.clone(),
-            is_dir: self.is_dir,
-            size: self.size.clone(),
-            permissions: self.permissions.clone(),
-            modified: self.modified.clone(),
-            file_type: self.file_type.clone(),
-            target: self.target.clone(),
-            content_preview: self.content_preview.clone(),
-            image_preview: self.image_preview.clone(),
-            scroll_line: self.scroll_line,
         }
     }
 }
@@ -231,11 +199,11 @@ impl RenderTarget for WidgetCanvas {
 impl PreviewState {
     fn render_to_canvas(&self) -> WidgetCanvas {
         let mut canvas = WidgetCanvas::new();
-        
-        let cx = self.base.x;
-        let cy = self.base.y;
-        let cw = self.base.w;
-        let ch = self.base.h;
+
+        let cx = self.rect.x;
+        let cy = self.rect.y;
+        let cw = self.rect.width;
+        let ch = self.rect.height;
 
         let text_fg = color::TEXT_FG;
         let text_dim = color::TEXT_DIM;
@@ -264,17 +232,17 @@ impl PreviewState {
             let box_h = rect_h;
             let img_w = image_data.width as f32;
             let img_h = image_data.height as f32;
-            
+
             let scale_x = box_w / img_w;
             let scale_y = box_h / img_h;
             let scale = scale_x.min(scale_y).min(4.0).max(1.0);
-            
+
             let draw_w = img_w * scale;
             let draw_h = img_h * scale;
-            
+
             let start_x = cx + 12.0 + (box_w - draw_w) * 0.5;
             let start_y = rect_y + (box_h - draw_h) * 0.5;
-            
+
             for row in 0..image_data.height {
                 let mut col = 0;
                 while col < image_data.width {
@@ -287,7 +255,7 @@ impl PreviewState {
                     let g = pixel[1];
                     let b = pixel[2];
                     let a = pixel[3];
-                    
+
                     let mut run_len = 1;
                     while col + run_len < image_data.width {
                         let next_idx = (row * image_data.width + col + run_len) as usize;
@@ -300,13 +268,13 @@ impl PreviewState {
                             break;
                         }
                     }
-                    
+
                     let alpha = a as f32 / 255.0;
                     if alpha > 0.0 {
                         let rf = r as f32 / 255.0;
                         let gf = g as f32 / 255.0;
                         let bf = b as f32 / 255.0;
-                        
+
                         canvas.rect(
                             [rf, gf, bf, alpha],
                             start_x + col as f32 * scale,
@@ -315,7 +283,7 @@ impl PreviewState {
                             scale,
                         );
                     }
-                    
+
                     col += run_len;
                 }
             }
@@ -364,7 +332,7 @@ impl PreviewState {
 
         let header_y = details_content_start_y + 6.0;
         canvas.text(icon, cx + 12.0, header_y, 20.0, text_fg);
-        
+
         let name_truncated = if self.name.len() > 30 {
             format!("{}...", &self.name[..27])
         } else {
@@ -375,7 +343,7 @@ impl PreviewState {
         let mut y = details_content_start_y + 36.0;
         for (label, val) in &details {
             canvas.text(label, cx + 12.0, y, 12.0, label_fg);
-            
+
             let val_str = if val.len() > 40 {
                 format!("...{}", &val[val.len() - 37..])
             } else {
@@ -388,7 +356,7 @@ impl PreviewState {
         if !self.target.is_empty() {
             y += 8.0;
             canvas.text("Target", cx + 12.0, y, 12.0, label_fg);
-            
+
             let target_str = if self.target.len() > 40 {
                 format!("...{}", &self.target[self.target.len() - 37..])
             } else {
@@ -401,32 +369,33 @@ impl PreviewState {
     }
 }
 
-impl Element for PreviewState {
-    crate::impl_widget_base!(PreviewState);
+impl Layout for PreviewState {
+    fn rect_assigned(&mut self, rect: Rect) {
+        self.rect = rect;
+    }
+}
 
+impl Paint for PreviewState {
     fn color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn visible(&self) -> bool {
-        self.visible
-    }
-
-    fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-
-    fn all_quads(&self, _ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
-            return Vec::new();
+    /// Quads only: the canvas text carries per-label fonts and is served exclusively through
+    /// the labels hatch — legacy's plain `text_labels` was empty, and the scene path (which
+    /// drained it) accordingly showed no text either.
+    fn paint(&self, _rect: Rect, ctx: &mut PaintCtx) {
+        for (qx, qy, qw, qh, qc) in self.render_to_canvas().quads {
+            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
-        self.render_to_canvas().quads
     }
 
-    fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(crate::widget::display::TextLabel, Option<String>, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
+    fn serves_legacy_labels(&self) -> bool {
+        true
+    }
+
+    fn legacy_labels_with_font_and_bounds(&self, _rect: Rect, _ctx: &UiContext) -> Vec<(crate::widget::display::TextLabel, Option<String>, Option<[f32; 4]>)> {
         self.render_to_canvas().labels
     }
 }
+
+impl Input for PreviewState {}

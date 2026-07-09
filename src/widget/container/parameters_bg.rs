@@ -27,7 +27,7 @@ use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};
 use crate::widget::input::{Button, Checkbox, ColorSelector, Dropdown, Slider, Spinbox, TextBox};
 use crate::widget::{
-    Adapted, Element, ElementState, Event, EventCtx, Input, Key, KeyEvent, Layout, MouseButton,
+    Adapted, Element, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
     MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext,
 };
 
@@ -39,7 +39,7 @@ pub struct ParametersBg {
     pub code_editor: Option<TextEditorState>,
     mouse_pos: Option<(f32, f32)>,
     pub sliders: Vec<Option<Adapted<Slider>>>,
-    pub float3s: Vec<Option<Float3>>,
+    pub float3s: Vec<Option<Adapted<Float3>>>,
     pub spinboxes: Vec<Option<Adapted<Spinbox>>>,
     pub buttons: Vec<Option<Adapted<Button>>>,
     pub choices: Vec<Option<Adapted<Dropdown>>>,
