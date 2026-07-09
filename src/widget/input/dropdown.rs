@@ -60,6 +60,11 @@ pub struct Dropdown {
     /// bookkeeping hit-tests through [`Input::hit`], which includes the open popover — matching
     /// the legacy `on_cursor_moved` + popover-aware `hit_test` pair).
     hovered: bool,
+    /// App-owned concentric frame (Phase 6s): `(rect, radius, corners)` of the rounded plate
+    /// the dropdown sits in. When set, the corner adjustment uses it INSTEAD of walking for a
+    /// `Backplate` ancestor — the hook that keeps the adjustment after an app dissolves its
+    /// root Backplate (the walk finds nothing once the widget is parentless).
+    corner_frame: Option<((f32, f32, f32, f32), f32, (bool, bool, bool, bool))>,
 }
 
 impl Dropdown {
@@ -78,7 +83,13 @@ impl Dropdown {
             auto_width: false,
             label: None,
             hovered: false,
+            corner_frame: None,
         })
+    }
+
+    /// Set (or clear) the app-owned concentric frame — see the `corner_frame` field docs.
+    pub fn set_corner_frame(&mut self, frame: Option<((f32, f32, f32, f32), f32, (bool, bool, bool, bool))>) {
+        self.corner_frame = frame;
     }
 
     pub fn take_change(&mut self) -> bool {
@@ -234,11 +245,12 @@ impl Dropdown {
         let mut outer_radii = [radius; 4];
         let mut inner_radii = [inner_radius; 4];
 
-        if let Some(bp) = self.backplate_ancestor() {
-            let (px, py, pw, ph) = unsafe { (*bp).rect() };
-            let pr = unsafe { (*bp).corner_radius() };
-            let (pr1, pr2, pr3, pr4) = unsafe { (*bp).rounded_corners() };
-
+        let frame = self.corner_frame.or_else(|| {
+            self.backplate_ancestor().map(|bp| unsafe {
+                ((*bp).rect(), (*bp).corner_radius(), (*bp).rounded_corners())
+            })
+        });
+        if let Some(((px, py, pw, ph), pr, (pr1, pr2, pr3, pr4))) = frame {
             let g_left = x - px;
             let g_top = y - py;
             let g_right = (px + pw) - (x + w);
