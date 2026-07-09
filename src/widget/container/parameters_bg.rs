@@ -1,22 +1,50 @@
+//! Narrow-trait `ParametersBg` (Phase 5s) — the designer's parameter panel: a scrollable column
+//! of param rows (sliders, spinboxes, dropdowns, text boxes, checkboxes, colors, float3s,
+//! buttons, section borders, and an inline emacs-flavored code editor), each row's widget owned
+//! by value in parallel `Vec<Option<..>>` fields (most already `Adapted<W>` from earlier
+//! phases), plus a raw-pointer `children` container list. The designer stores it as
+//! `Box<dyn Element>` and drives it through direct `dyn Element` calls; `window_runner`'s
+//! `get_child_widget_for_quad` downcasts to the concrete type through `as_any` (which the
+//! adapter forwards to the inner widget) and reads the pub sub-widget fields — both keep
+//! working unchanged.
+//!
+//! The model caches its laid-out rect via [`Layout::rect_assigned`] (all row geometry derives
+//! from it — the TextBox pattern), and serves BOTH legacy escape hatches: the plain-quad view
+//! ([`Paint::serves_legacy_plain_quads`] — the designer renders params through raw
+//! `extra_quads`, and the panel's own background is drawn by the host from
+//! [`Paint::color`]/[`Paint::corner_style`], NOT emitted here), and the per-label text view
+//! ([`Paint::serves_legacy_labels`], new with this migration — each label clips to the
+//! viewport but the code editor's clip to the code box, in monospace, which the one-font
+//! one-bounds prim bridge can't express).
+//!
+//! Flagged approximation: the legacy scrollbar-press called `self.focus()` (base flag only —
+//! nothing reads it: the highlight keys on the ctx focus slot, and the designer tracks its
+//! focused pane by index); the `on_event` arm drops it.
+
 use crate::colors;
-use crate::widget::*;
-use crate::widget::input::{Slider, Spinbox, Button, Dropdown, TextBox, Checkbox, ColorSelector};
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};
+use crate::widget::input::{Button, Checkbox, ColorSelector, Dropdown, Slider, Spinbox, TextBox};
+use crate::widget::{
+    Adapted, Element, ElementState, Event, EventCtx, Input, Key, KeyEvent, Layout, MouseButton,
+    MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext,
+};
 
 pub struct ParametersBg {
-    pub base: Widget,
+    rect: Rect,
     display_params: Vec<(String, String, String)>,
     dragging_param: Option<usize>,
     pub focused_param: Option<usize>,
     pub code_editor: Option<TextEditorState>,
     mouse_pos: Option<(f32, f32)>,
-    pub sliders: Vec<Option<crate::widget::Adapted<Slider>>>,
+    pub sliders: Vec<Option<Adapted<Slider>>>,
     pub float3s: Vec<Option<Float3>>,
-    pub spinboxes: Vec<Option<crate::widget::Adapted<Spinbox>>>,
-    pub buttons: Vec<Option<crate::widget::Adapted<Button>>>,
-    pub choices: Vec<Option<crate::widget::Adapted<Dropdown>>>,
-    pub texts: Vec<Option<crate::widget::Adapted<TextBox>>>,
-    pub checkboxes: Vec<Option<crate::widget::Adapted<Checkbox>>>,
+    pub spinboxes: Vec<Option<Adapted<Spinbox>>>,
+    pub buttons: Vec<Option<Adapted<Button>>>,
+    pub choices: Vec<Option<Adapted<Dropdown>>>,
+    pub texts: Vec<Option<Adapted<TextBox>>>,
+    pub checkboxes: Vec<Option<Adapted<Checkbox>>>,
     pub colors: Vec<Option<ColorSelector>>,
     visible: bool,
     pub children: Vec<*mut (dyn Element + 'static)>,
@@ -28,9 +56,9 @@ pub struct ParametersBg {
 }
 
 impl ParametersBg {
-    pub fn new() -> Self {
-        Self {
-            base: Widget::new(),
+    pub fn new() -> Adapted<ParametersBg> {
+        Adapted::new(ParametersBg {
+            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             display_params: Vec::new(),
             dragging_param: None,
             focused_param: None,
@@ -51,7 +79,7 @@ impl ParametersBg {
             content_h: 0.0,
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
-        }
+        })
     }
 
     pub fn get_total_content_height(&self) -> f32 {
@@ -92,7 +120,7 @@ impl ParametersBg {
 
     pub fn get_param_rects(&self) -> Vec<(f32, f32, f32, f32)> {
         let mut rects = Vec::new();
-        let mut cur_y = self.base.y + 30.0 - self.scroll_y;
+        let mut cur_y = self.rect.y + 30.0 - self.scroll_y;
         for (i, p) in self.display_params.iter().enumerate() {
             let h = if p.2 == "code" {
                 let val_text = if self.focused_param == Some(i) {
@@ -122,20 +150,20 @@ impl ParametersBg {
             } else {
                 20.0
             };
-            rects.push((self.base.x + 8.0, cur_y, self.base.w - 16.0, h));
+            rects.push((self.rect.x + 8.0, cur_y, self.rect.width - 16.0, h));
             cur_y += h + 8.0;
         }
         rects
     }
 
     pub fn hit_test_scrollbar(&self, px: f32, py: f32) -> bool {
-        if self.content_h <= self.base.h {
+        if self.content_h <= self.rect.height {
             return false;
         }
         let sb_w = crate::layout::scrollbar_width();
-        let sb_x = self.base.x + self.base.w - sb_w - 4.0;
-        let sb_track_h = self.base.h - 8.0;
-        let sb_track_y = self.base.y + 4.0;
+        let sb_x = self.rect.x + self.rect.width - sb_w - 4.0;
+        let sb_track_h = self.rect.height - 8.0;
+        let sb_track_y = self.rect.y + 4.0;
 
         px >= sb_x - 4.0 && px <= sb_x + sb_w + 4.0
             && py >= sb_track_y && py <= sb_track_y + sb_track_h
@@ -193,6 +221,15 @@ impl ParametersBg {
         }
     }
 
+    /// The legacy `set_rect`/`set_display_params` tail: recompute the content height, clamp the
+    /// scroll into it, re-lay the rows.
+    fn refresh_scroll_metrics(&mut self) {
+        self.content_h = self.get_total_content_height();
+        let max_scroll = (self.content_h - self.rect.height).max(0.0);
+        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+        self.update_slider_rects();
+    }
+
     fn own_text_labels(&self) -> Vec<TextLabel> {
         let rects = self.get_param_rects();
         let mut labels = Vec::new();
@@ -209,7 +246,7 @@ impl ParametersBg {
             } else if ptype == "section" {
                 labels.push(TextLabel {
                     text: name.clone(),
-                    x: self.base.x + 12.0,
+                    x: self.rect.x + 12.0,
                     y: r.1 + 2.0,
                     font_size: 13.0,
                     color: [0xee, 0xee, 0xf0],
@@ -217,7 +254,7 @@ impl ParametersBg {
             } else if ptype == "code" {
                 labels.push(TextLabel {
                     text: format!("{}:", name),
-                    x: self.base.x + 12.0,
+                    x: self.rect.x + 12.0,
                     y: r.1,
                     font_size: 12.0,
                     color: [0xaa, 0xaa, 0xbb],
@@ -265,7 +302,7 @@ impl ParametersBg {
             } else {
                 labels.push(TextLabel {
                     text: format!("{}: {}", name, value),
-                    x: self.base.x + 8.0,
+                    x: self.rect.x + 8.0,
                     y: r.1,
                     font_size: 12.0,
                     color: [0xaa, 0xaa, 0xbb],
@@ -274,143 +311,37 @@ impl ParametersBg {
         }
         labels
     }
-}
 
-fn parse_slider_range(ptype: &str) -> (f32, f32) {
-    if ptype.starts_with("slider:") || ptype.starts_with("float3:") {
-        let parts: Vec<&str> = ptype.split(':').collect();
-        if parts.len() >= 3 {
-            if let (Ok(min), Ok(max)) = (parts[1].parse::<f32>(), parts[2].parse::<f32>()) {
-                return (min, max);
-            }
-        }
-    }
-    (0.0, 2.0)
-}
-
-fn parse_hex_to_rgb(s: &str) -> Option<[u8; 3]> {
-    crate::color::parse_hex_bytes(s).map(|[r, g, b, _]| [r, g, b])
-}
-
-fn parse_spinbox_range(ptype: &str) -> (i32, i32, i32) {
-    if ptype.starts_with("spinbox:") {
-        let parts: Vec<&str> = ptype.split(':').collect();
-        if parts.len() >= 4 {
-            if let (Ok(min), Ok(max), Ok(step)) = (parts[1].parse::<i32>(), parts[2].parse::<i32>(), parts[3].parse::<i32>()) {
-                return (min, max, step);
-            }
-        } else if parts.len() == 3 {
-            if let (Ok(min), Ok(max)) = (parts[1].parse::<i32>(), parts[2].parse::<i32>()) {
-                return (min, max, 1);
-            }
-        }
-    }
-    (0, 10000, 1)
-}
-
-fn parse_float3_value(val_str: &str, min: f32, max: f32) -> [f32; 3] {
-    let mut out = [0.5, 0.5, 0.5];
-    let parts: Vec<&str> = val_str
-        .split(|c| c == ':' || c == ',' || c == ' ')
-        .filter(|s| !s.is_empty())
-        .collect();
-    for i in 0..3 {
-        if i < parts.len() {
-            if let Ok(v) = parts[i].parse::<f32>() {
-                let range = max - min;
-                if range != 0.0 {
-                    out[i] = ((v - min) / range).clamp(0.0, 1.0);
-                } else {
-                    out[i] = 0.0;
+    /// The dropdown rows' popover, if one is open — the widget's OWN popover surface
+    /// ([`Paint::popover`]); the raw `children`'s popovers are the adapter's recursion.
+    fn choices_popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        for d_opt in &self.choices {
+            if let Some(d) = d_opt {
+                if let Some(r) = d.popover_rect() {
+                    return Some(r);
                 }
             }
         }
-    }
-    out
-}
-
-impl Element for ParametersBg {
-    crate::impl_widget_base!(ParametersBg);
-    fn is_scrollable(&self) -> bool { true }
-    fn blocks_backplate_drag(&self) -> bool { true }
-
-    fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::control_label_font())
+        None
     }
 
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (true, true, true, true) }
-
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        if let Some(b) = self.base_mut() {
-            b.x = x;
-            b.y = y;
-            b.w = w;
-            b.h = h;
+    /// The full legacy popover reach (choices, then children) — hit-testing extends to it.
+    fn own_popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        if let Some(r) = self.choices_popover_rect() {
+            return Some(r);
         }
-        self.content_h = self.get_total_content_height();
-        let max_scroll = (self.content_h - h).max(0.0);
-        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
-        self.update_slider_rects();
-
-        // Layout child widgets vertically
-        if !self.visible {
-            return;
-        }
-        let padding_x = 8.0;
-        let padding_y = 10.0;
-        let left_x = x + padding_x;
-        let available_w = (w - 2.0 * padding_x).max(1.0);
-        let mut current_y = y + padding_y;
-        let spacing = 8.0;
-
-        for &child_ptr in &self.children {
-            let child = unsafe { &mut *child_ptr };
-            let (_, _, _, ch) = child.rect();
-            let use_h = if ch > 0.0 { ch } else { 42.0 };
-            child.set_rect(left_x, current_y, available_w, use_h);
-            current_y += use_h + spacing;
-        }
-    }
-
-    fn color(&self) -> [f32; 4] {
-        if !self.visible {
-            return [0.0, 0.0, 0.0, 0.0];
-        }
-        colors::PARAM_BG
-    }
-
-    fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-
-    fn visible(&self) -> bool {
-        self.visible
-    }
-
-    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
-            return false;
-        }
-        let (x, y, w, h) = self.rect();
-        let hit_base = px >= x && px <= x + w && py >= y && py <= y + h;
-        if hit_base {
-            return true;
-        }
-        if let Some((pop_x, pop_y, pop_w, pop_h)) = self.popover_rect() {
-            if px >= pop_x && px <= pop_x + pop_w && py >= pop_y && py <= pop_y + pop_h {
-                return true;
+        for &widget_ptr in self.children.iter().rev() {
+            let widget = unsafe { &*widget_ptr };
+            if let Some(r) = widget.popover_rect() {
+                return Some(r);
             }
         }
-        false
+        None
     }
 
-    fn as_param_controller(&self) -> Option<&dyn ParamController> { Some(self) }
-    fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> { Some(self) }
-
-    fn unfocus(&mut self) {
+    /// The state half of the legacy `unfocus`: commit the focused row's in-flight value back
+    /// into `display_params`, drop the code editor, and unfocus the raw children.
+    fn commit_and_unfocus(&mut self) {
         if let Some(idx) = self.focused_param {
             if idx < self.display_params.len() {
                 let p = &mut self.display_params[idx];
@@ -470,817 +401,18 @@ impl Element for ParametersBg {
         }
     }
 
-    fn draggable(&self) -> bool {
-        self.scrollbar_dragging
-            || self.dragging_param.is_some() 
-            || self.display_params.iter().any(|p| p.2.starts_with("slider") || p.2.starts_with("float3"))
-    }
-
-    fn is_dragging(&self) -> bool {
-        self.scrollbar_dragging || self.dragging_param.is_some()
-    }
-
-    fn drag_begin(&mut self, px: f32, py: f32) {
-        if self.scrollbar_dragging {
-            return;
-        }
-        let rects = self.get_param_rects();
-        for (i, p) in self.display_params.iter().enumerate() {
-            if p.2.starts_with("slider") {
-                let r = rects[i];
-                if let Some(s) = &mut self.sliders[i] {
-                    let top = crate::widget::label_offset(s);
-                    if py >= r.1 + top && py <= r.1 + r.3 {
-                        s.drag_begin(px, py);
-                        self.dragging_param = Some(i);
-                        break;
-                    }
-                }
-            } else if p.2.starts_with("float3") {
-                let r = rects[i];
-                if py >= r.1 && py <= r.1 + r.3 {
-                    if let Some(f) = &mut self.float3s[i] {
-                        let mut dummy = crate::context::UiContext::new();
-                        if f.mouse_input(MouseButton::Left, ElementState::Pressed, px, py, &mut dummy) {
-                            self.dragging_param = Some(i);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    fn drag_update(&mut self, px: f32, py: f32) -> bool {
-        if self.scrollbar_dragging {
-            let sb_track_h = self.base.h - 8.0;
-            let sb_track_y = self.base.y + 4.0;
-            let visible_ratio = self.base.h / self.content_h;
-            let thumb_h = if sb_track_h <= 20.0 {
-                sb_track_h
-            } else {
-                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-            };
-            let max_scroll = (self.content_h - self.base.h).max(0.0);
-            
-            let target_thumb_y = py - self.drag_offset_y;
-            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            
-            let old_scroll = self.scroll_y;
-            self.scroll_y = new_scroll_ratio * max_scroll;
-            if (self.scroll_y - old_scroll).abs() > 0.01 {
-                self.update_slider_rects();
-                return true;
-            }
-            return false;
-        }
-
-        if let Some(i) = self.dragging_param {
-            if let Some(s) = &mut self.sliders[i] {
-                if s.drag_update(px, py) {
-                    let (min, max) = parse_slider_range(&self.display_params[i].2);
-                    let new_val = min + s.value * (max - min);
-                    let old_val = &self.display_params[i].1;
-                    let new_val_str = format!("{:.2}", new_val);
-                    if *old_val != new_val_str {
-                        self.display_params[i].1 = new_val_str;
-                        return true;
-                    }
-                }
-            } else if let Some(f) = &mut self.float3s[i] {
-                if f.drag_update(px, py) {
-                    let (min, max) = parse_slider_range(&self.display_params[i].2);
-                    let val0 = min + f.values[0] * (max - min);
-                    let val1 = min + f.values[1] * (max - min);
-                    let val2 = min + f.values[2] * (max - min);
-                    let new_val_str = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
-                    let old_val = &self.display_params[i].1;
-                    if *old_val != new_val_str {
-                        self.display_params[i].1 = new_val_str;
-                        return true;
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    fn drag_end(&mut self) {
-        if self.scrollbar_dragging {
-            self.scrollbar_dragging = false;
-            return;
-        }
-        if let Some(i) = self.dragging_param.take() {
-            if let Some(s) = &mut self.sliders[i] {
-                s.drag_end();
-            } else if let Some(f) = &mut self.float3s[i] {
-                f.drag_end();
-            }
-        }
-    }
-
-    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        self.parent
-    }
-
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        self.parent = parent;
-        let id = self.base.id();
-        if let Some(p_ptr) = parent {
-            if let Some(p_base) = unsafe { (*p_ptr).base() } {
-                let p_id = p_base.id();
-                ctx.register_widget(p_id, p_ptr);
-                ctx.register_widget(id, self as *mut Self as *mut (dyn Element + 'static));
-                ctx.link_ids(p_id, id);
-            }
-        } else {
-            ctx.tree.set_parent(id, None);
-        }
-    }
-
-    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        self.children.clone()
-    }
-
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
-        self.children.push(child);
-        let id = self.base.id();
-        if let Some(c_base) = unsafe { (*child).base() } {
-            let c_id = c_base.id();
-            let self_ptr = self.as_ptr();
-            ctx.register_widget(id, self_ptr);
-            ctx.register_widget(c_id, child);
-            ctx.link_ids(id, c_id);
-        }
-    }
-
-    fn clear_children(&mut self, ctx: &mut UiContext) {
-        self.children.clear();
-        let id = self.base.id();
-        ctx.clear_children_ids(id);
-    }
-
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.mouse_pos = Some((px, py));
-        let was = self.base.hovered;
-        let is_hit = self.hit_test(px, py, ctx);
-        self.base.hovered = is_hit;
-        let mut changed = was != is_hit;
-
-        if self.scrollbar_dragging {
-            let sb_track_h = self.base.h - 8.0;
-            let sb_track_y = self.base.y + 4.0;
-            let visible_ratio = self.base.h / self.content_h;
-            let thumb_h = if sb_track_h <= 20.0 {
-                sb_track_h
-            } else {
-                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-            };
-            let max_scroll = (self.content_h - self.base.h).max(0.0);
-            
-            let target_thumb_y = py - self.drag_offset_y;
-            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            
-            let old_scroll = self.scroll_y;
-            self.scroll_y = new_scroll_ratio * max_scroll;
-            if (self.scroll_y - old_scroll).abs() > 0.01 {
-                self.update_slider_rects();
-                changed = true;
-            }
-        }
-
-        for sb_opt in &mut self.spinboxes {
-            if let Some(sb) = sb_opt {
-                if sb.on_cursor_moved(px, py, ctx) {
-                    changed = true;
-                }
-            }
-        }
-        for f_opt in &mut self.float3s {
-            if let Some(f) = f_opt {
-                if f.on_cursor_moved(px, py, ctx) {
-                    changed = true;
-                }
-            }
-        }
-        for b_opt in &mut self.buttons {
-            if let Some(b) = b_opt {
-                if b.on_cursor_moved(px, py, ctx) {
-                    changed = true;
-                }
-            }
-        }
-        for d_opt in &mut self.choices {
-            if let Some(d) = d_opt {
-                if d.on_cursor_moved(px, py, ctx) {
-                    changed = true;
-                }
-            }
-        }
-        for tb_opt in &mut self.texts {
-            if let Some(tb) = tb_opt {
-                if tb.on_cursor_moved(px, py, ctx) {
-                    changed = true;
-                }
-            }
-        }
-        for cb_opt in &mut self.checkboxes {
-            if let Some(cb) = cb_opt {
-                if cb.on_cursor_moved(px, py, ctx) {
-                    changed = true;
-                }
-            }
-        }
-        for c_opt in &mut self.colors {
-            if let Some(c) = c_opt {
-                if c.on_cursor_moved(px, py, ctx) {
-                    changed = true;
-                }
-            }
-        }
-
-        for &widget_ptr in &self.children {
-            let widget = unsafe { &mut *widget_ptr };
-            if widget.is_dragging() {
-                if widget.drag_update(px, py) {
-                    changed = true;
-                }
-            } else if widget.cursor_moved(px, py, ctx) {
-                changed = true;
-            }
-        }
-        changed
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-
-        if button == MouseButton::Left {
-            if state == ElementState::Pressed {
-                if self.hit_test_scrollbar(px, py) {
-                    self.focus();
-                    self.scrollbar_dragging = true;
-                    
-                    let sb_track_h = self.base.h - 8.0;
-                    let sb_track_y = self.base.y + 4.0;
-                    let visible_ratio = self.base.h / self.content_h;
-                    let thumb_h = if sb_track_h <= 20.0 {
-                        sb_track_h
-                    } else {
-                        (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-                    };
-                    let max_scroll = (self.content_h - self.base.h).max(0.0);
-                    let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
-                    let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
-                    
-                    let click_offset = py - thumb_y;
-                    if click_offset >= 0.0 && click_offset <= thumb_h {
-                        self.drag_offset_y = click_offset;
-                    } else {
-                        // Clicked outside the thumb: jump thumb center to py
-                        self.drag_offset_y = thumb_h / 2.0;
-                        let target_thumb_y = py - self.drag_offset_y;
-                        let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
-                            ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        self.scroll_y = new_scroll_ratio * max_scroll;
-                        self.update_slider_rects();
-                    }
-                    return true;
-                }
-            } else if state == ElementState::Released {
-                if self.scrollbar_dragging {
-                    self.scrollbar_dragging = false;
-                    return true;
-                }
-            }
-        }
-
-        // 1. Check open dropdown popovers first (since they are drawn on top)
-        for (i, d_opt) in self.choices.iter_mut().enumerate() {
-            if let Some(d) = d_opt {
-                if d.popover_rect().is_some() {
-                    if d.mouse_input(button, state, px, py, ctx) {
-                        if d.take_change() {
-                            if let Some(val) = d.get_value_string() {
-                                self.display_params[i].1 = val;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            }
-        }
-
-        for &widget_ptr in self.children.iter().rev() {
-            let widget = unsafe { &mut *widget_ptr };
-            if widget.popover_rect().is_some() {
-                if widget.mouse_input(button, state, px, py, ctx) {
-                    return true;
-                }
-            }
-        }
-
-        // 2. Propagate to our widgets
-        for (i, p) in self.display_params.iter_mut().enumerate() {
-            if p.2.starts_with("choice") {
-                if let Some(d) = &mut self.choices[i] {
-                    if d.mouse_input(button, state, px, py, ctx) {
-                        if d.take_change() {
-                            if let Some(val) = d.get_value_string() {
-                                p.1 = val;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2 == "button" {
-                if let Some(b) = &mut self.buttons[i] {
-                    if b.mouse_input(button, state, px, py, ctx) {
-                        if b.take_click() {
-                            p.1 = "clicked".to_string();
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2 == "text" {
-                if let Some(tb) = &mut self.texts[i] {
-                    if tb.mouse_input(button, state, px, py, ctx) {
-                        if tb.editing {
-                            self.focused_param = Some(i);
-                        } else {
-                            if self.focused_param == Some(i) {
-                                self.focused_param = None;
-                            }
-                        }
-                        if tb.take_change() {
-                            if let Some(val) = tb.get_value_string() {
-                                p.1 = val;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2.starts_with("spinbox") {
-                if let Some(sb) = &mut self.spinboxes[i] {
-                    if sb.mouse_input(button, state, px, py, ctx) {
-                        p.1 = sb.value.to_string();
-                        if sb.editing {
-                            self.focused_param = Some(i);
-                        } else {
-                            if self.focused_param == Some(i) {
-                                self.focused_param = None;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2 == "toggle" || p.2 == "checkbox" {
-                if let Some(cb) = &mut self.checkboxes[i] {
-                    if cb.mouse_input(button, state, px, py, ctx) {
-                        if cb.take_change() {
-                            if let Some(val) = cb.get_value_string() {
-                                p.1 = val;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                if let Some(c) = &mut self.colors[i] {
-                    if c.mouse_input(button, state, px, py, ctx) {
-                        if let Some(val) = c.get_value_string() {
-                            p.1 = val;
-                        }
-                        if c.editing {
-                            self.focused_param = Some(i);
-                        } else {
-                            if self.focused_param == Some(i) {
-                                self.focused_param = None;
-                            }
-                        }
-                        return true;
-                    }
-                }
-            }
-        }
-
-        for &widget_ptr in self.children.iter().rev() {
-            let widget = unsafe { &mut *widget_ptr };
-            if widget.mouse_input(button, state, px, py, ctx) {
-                return true;
-            }
-            if state == ElementState::Pressed && !widget.hit_test(px, py, ctx) {
-                widget.unfocus();
-            }
-        }
-
-        if button == MouseButton::Left && state == ElementState::Pressed {
-            let rects = self.get_param_rects();
-            let mut clicked_any_focusable = false;
-            for (i, p) in self.display_params.iter_mut().enumerate() {
-                if p.2 == "code" {
-                    let r = rects[i];
-                    if px >= r.0 && px <= r.0 + r.2 && py >= r.1 + 18.0 && py <= r.1 + r.3 {
-                        self.focused_param = Some(i);
-                        let mut editor = TextEditorState::new(p.1.clone());
-                        let click_x = px - (r.0 + 12.0);
-                        let click_y = py - (r.1 + 22.0);
-                        let line = (click_y / 16.0).floor().max(0.0) as usize;
-                        let col = (click_x / 7.2 + 0.5).floor().max(0.0) as usize;
-                        editor.cursor_idx = map_2d_to_1d(&editor.buffer, line, col);
-                        self.code_editor = Some(editor);
-                        clicked_any_focusable = true;
-                        break;
-                    }
-                } else if p.2.starts_with("slider") {
-                    let r = rects[i];
-                    if py >= r.1 && py <= r.1 + r.3 {
-                        if let Some(s) = &mut self.sliders[i] {
-                            if s.mouse_input(button, state, px, py, ctx) {
-                                if s.editing {
-                                    self.focused_param = Some(i);
-                                    clicked_any_focusable = true;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                } else if p.2.starts_with("float3") {
-                    let r = rects[i];
-                    if py >= r.1 && py <= r.1 + r.3 {
-                        if let Some(f) = &mut self.float3s[i] {
-                            if f.mouse_input(button, state, px, py, ctx) {
-                                if f.editing_idx.is_some() {
-                                    self.focused_param = Some(i);
-                                    clicked_any_focusable = true;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            if !clicked_any_focusable {
-                self.unfocus();
-            }
-            return true;
-        }
-        false
-    }
-
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        for &widget_ptr in &self.children {
-            let widget = unsafe { &mut *widget_ptr };
-            if widget.keyboard_input(event, ctx) {
-                return true;
-            }
-        }
-
-        if let Some(idx) = self.focused_param {
-            if event.state == ElementState::Pressed {
-                let p = &mut self.display_params[idx];
-                if p.2 == "code" {
-                    if let Some(mut editor) = self.code_editor.take() {
-                        let mut changed = false;
-                        let mut handled = true;
-                        let mut should_unfocus = false;
-                        match &event.logical_key {
-                            Key::Named(NamedKey::Backspace) => {
-                                changed = editor.delete_backwards();
-                            }
-                            Key::Named(NamedKey::Delete) => {
-                                changed = editor.delete_forwards();
-                            }
-                            Key::Named(NamedKey::Enter) => {
-                                editor.insert_text("\n");
-                                changed = true;
-                            }
-                            Key::Named(NamedKey::Escape) => {
-                                should_unfocus = true;
-                            }
-                            Key::Named(NamedKey::ArrowLeft) => {
-                                editor.move_cursor_left(false);
-                            }
-                            Key::Named(NamedKey::ArrowRight) => {
-                                editor.move_cursor_right(false);
-                            }
-                            Key::Named(NamedKey::ArrowUp) => {
-                                let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                                if line > 0 {
-                                    editor.cursor_idx = map_2d_to_1d(&editor.buffer, line - 1, col);
-                                }
-                            }
-                            Key::Named(NamedKey::ArrowDown) => {
-                                let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                                let total_lines = editor.buffer.split('\n').count();
-                                if line + 1 < total_lines {
-                                    editor.cursor_idx = map_2d_to_1d(&editor.buffer, line + 1, col);
-                                }
-                            }
-                            Key::Named(NamedKey::Home) => {
-                                editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
-                            }
-                            Key::Named(NamedKey::End) => {
-                                editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
-                            }
-                            Key::Character(s) => {
-                                if event.ctrl {
-                                    match s.to_lowercase().as_str() {
-                                        "f" => {
-                                            editor.move_cursor_right(false);
-                                        }
-                                        "b" => {
-                                            editor.move_cursor_left(false);
-                                        }
-                                        "p" => {
-                                            let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                                            if line > 0 {
-                                                editor.cursor_idx = map_2d_to_1d(&editor.buffer, line - 1, col);
-                                            }
-                                        }
-                                        "n" => {
-                                            let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                                            let total_lines = editor.buffer.split('\n').count();
-                                            if line + 1 < total_lines {
-                                                editor.cursor_idx = map_2d_to_1d(&editor.buffer, line + 1, col);
-                                            }
-                                        }
-                                        "a" => {
-                                            editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
-                                        }
-                                        "e" => {
-                                            editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
-                                        }
-                                        "d" => {
-                                            changed = editor.delete_forwards();
-                                        }
-                                        "h" => {
-                                            changed = editor.delete_backwards();
-                                        }
-                                        "k" => {
-                                            let current_idx = editor.cursor_idx;
-                                            let end_idx = get_line_end(&editor.buffer, current_idx);
-                                            let chars: Vec<char> = editor.buffer.chars().collect();
-                                            if chars.is_empty() {
-                                                // do nothing
-                                            } else if current_idx < chars.len() {
-                                                let delete_end = if chars[current_idx] == '\n' {
-                                                    current_idx + 1
-                                                } else {
-                                                    end_idx
-                                                };
-                                                let mut new_buf = String::new();
-                                                for i in 0..current_idx {
-                                                    new_buf.push(chars[i]);
-                                                }
-                                                for i in delete_end..chars.len() {
-                                                    new_buf.push(chars[i]);
-                                                }
-                                                editor.buffer = new_buf;
-                                                changed = true;
-                                            }
-                                        }
-                                        _ => {
-                                            handled = false;
-                                        }
-                                    }
-                                } else {
-                                    editor.insert_text(s);
-                                    changed = true;
-                                }
-                            }
-                            _ => {
-                                handled = false;
-                            }
-                        }
-                        if changed {
-                            p.1 = editor.buffer.clone();
-                        }
-                        if should_unfocus {
-                            p.1 = editor.buffer;
-                            self.focused_param = None;
-                            self.code_editor = None;
-                        } else {
-                            self.code_editor = Some(editor);
-                        }
-                        if handled {
-                            return true;
-                        }
-                    }
-                } else if p.2 == "text" {
-                    if let Some(tb) = &mut self.texts[idx] {
-                        if tb.keyboard_input(event, ctx) {
-                            if !tb.editing {
-                                p.1 = tb.text.clone();
-                                self.focused_param = None;
-                            } else {
-                                p.1 = tb.edit_buffer.clone();
-                            }
-                            return true;
-                        }
-                    }
-                } else if p.2.starts_with("choice") {
-                    if let Some(d) = &mut self.choices[idx] {
-                        if d.keyboard_input(event, ctx) {
-                            if !d.open {
-                                if let Some(val) = d.get_value_string() {
-                                    p.1 = val;
-                                }
-                                self.focused_param = None;
-                            }
-                            return true;
-                        }
-                    }
-                } else if p.2.starts_with("spinbox") {
-                    if let Some(sb) = &mut self.spinboxes[idx] {
-                        if sb.keyboard_input(event, ctx) {
-                            if !sb.editing {
-                                p.1 = sb.value.to_string();
-                                self.focused_param = None;
-                            } else {
-                                p.1 = sb.edit_buffer.clone();
-                            }
-                            return true;
-                        }
-                    }
-                } else if p.2.starts_with("slider") {
-                    if let Some(s) = &mut self.sliders[idx] {
-                        if s.keyboard_input(event, ctx) {
-                            let (min, max) = parse_slider_range(&p.2);
-                            let new_val = min + s.value * (max - min);
-                            p.1 = format!("{:.2}", new_val);
-                            if !s.editing {
-                                self.focused_param = None;
-                            }
-                            return true;
-                        }
-                    }
-                } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                    if let Some(c) = &mut self.colors[idx] {
-                        if c.keyboard_input(event, ctx) {
-                            if let Some(val) = c.get_value_string() {
-                                p.1 = val;
-                            }
-                            if !c.editing {
-                                self.focused_param = None;
-                            }
-                            return true;
-                        }
-                    }
-                } else if p.2.starts_with("float3") {
-                    if let Some(f) = &mut self.float3s[idx] {
-                        if f.keyboard_input(event, ctx) {
-                            let (min, max) = parse_slider_range(&p.2);
-                            let val0 = min + f.values[0] * (max - min);
-                            let val1 = min + f.values[1] * (max - min);
-                            let val2 = min + f.values[2] * (max - min);
-                            p.1 = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
-                            if f.editing_idx.is_none() {
-                                self.focused_param = None;
-                            }
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
-    }
-
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if !self.visible {
-            return false;
-        }
-        for &widget_ptr in self.children.iter().rev() {
-            let widget = unsafe { &mut *widget_ptr };
-            if widget.mouse_wheel(delta, px, py, ctx) {
-                return true;
-            }
-        }
-
-        let mut changed = false;
-        let rects = self.get_param_rects();
-        for (i, p) in self.display_params.iter_mut().enumerate() {
-            if p.2.starts_with("slider") {
-                let r = rects[i];
-                let row_y = r.1;
-                if py >= row_y - 2.0 && py <= row_y + r.3 && px >= self.base.x && px <= self.base.x + self.base.w {
-                    if let Some(s) = &mut self.sliders[i] {
-                        let was_scroll = s.scroll_enabled;
-                        s.set_scroll(true);
-                        if s.mouse_wheel(delta, px, py, ctx) {
-                            let (min, max) = parse_slider_range(&p.2);
-                            let new_val = min + s.value * (max - min);
-                            let old_val = &p.1;
-                            let new_val_str = format!("{:.2}", new_val);
-                            if *old_val != new_val_str {
-                                p.1 = new_val_str;
-                                changed = true;
-                            }
-                        }
-                        s.set_scroll(was_scroll);
-                    }
-                }
-            } else if p.2.starts_with("float3") {
-                let r = rects[i];
-                let row_y = r.1;
-                if py >= row_y && py <= row_y + r.3 && px >= self.base.x && px <= self.base.x + self.base.w {
-                    if let Some(f) = &mut self.float3s[i] {
-                        let rects_inner = f.get_row_rects();
-                        for j in 0..3 {
-                            let r_inner = rects_inner[j];
-                            if py >= r_inner.1 && py <= r_inner.1 + r_inner.3 {
-                                let scroll_amount = match delta {
-                                    MouseScrollDelta::LineDelta(_x, y) => *y,
-                                    MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
-                                };
-                                let step = 0.02;
-                                let new_val = (f.values[j] - scroll_amount * step).clamp(0.0, 1.0);
-                                if (new_val - f.values[j]).abs() > 0.0001 {
-                                    f.values[j] = new_val;
-                                    if f.editing_idx == Some(j) {
-                                        let scaled_val = f.mins[j] + f.values[j] * (f.maxs[j] - f.mins[j]);
-                                        f.edit_buffer = format!("{:.2}", scaled_val);
-                                    }
-                                    let (min, max) = parse_slider_range(&p.2);
-                                    let val0 = min + f.values[0] * (max - min);
-                                    let val1 = min + f.values[1] * (max - min);
-                                    let val2 = min + f.values[2] * (max - min);
-                                    let new_val_str = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
-                                    if p.1 != new_val_str {
-                                        p.1 = new_val_str;
-                                        changed = true;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else if p.2.starts_with("spinbox") {
-                let r = rects[i];
-                let row_y = r.1;
-                if py >= row_y && py <= row_y + r.3 && px >= self.base.x && px <= self.base.x + self.base.w {
-                    if let Some(sb) = &mut self.spinboxes[i] {
-                        let scroll_amount = match delta {
-                            MouseScrollDelta::LineDelta(_x, y) => *y as i32,
-                            MouseScrollDelta::PixelDelta(pos) => {
-                                let dy = pos.y;
-                                if dy > 0.0 { 1 } else if dy < 0.0 { -1 } else { 0 }
-                            }
-                        };
-                        let new_val = (sb.value + scroll_amount * sb.step).clamp(sb.min, sb.max);
-                        if sb.value != new_val {
-                            sb.value = new_val;
-                            p.1 = new_val.to_string();
-                            changed = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if !changed && self.hit_test(px, py, ctx) {
-            let scroll_speed = 24.0;
-            let dy = match delta {
-                MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
-                MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
-            };
-            let old_scroll = self.scroll_y;
-            let max_scroll = (self.content_h - self.base.h).max(0.0);
-            self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
-            if (self.scroll_y - old_scroll).abs() > 0.01 {
-                self.update_slider_rects();
-                changed = true;
-            }
-        }
-
-        changed
-    }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+    /// The legacy `extra_quads` body: section border boxes, every row's chrome (slider/spinbox
+    /// backgrounds read via `rect()`+`color()`, the code editor's box/border/cursor), the raw
+    /// children via [`collect_child_quads`], all clipped to the viewport — plus the unclipped
+    /// scrollbar. Served verbatim through [`Paint::legacy_plain_quads`].
+    fn plain_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if !self.visible {
             return Vec::new();
         }
         let mut quads = Vec::new();
         let rects = self.get_param_rects();
-        let view_min = self.base.y + 4.0;
-        let view_max = self.base.y + self.base.h - 4.0;
+        let view_min = self.rect.y + 4.0;
+        let view_max = self.rect.y + self.rect.height - 4.0;
 
         let clip_quad = |q: (f32, f32, f32, f32, [f32; 4])| -> Option<(f32, f32, f32, f32, [f32; 4])> {
             let (qx, qy, qw, qh, qc) = q;
@@ -1325,14 +457,14 @@ impl Element for ParametersBg {
             if start <= end && start < rects.len() && end < rects.len() {
                 let r_start = rects[start];
                 let r_end = rects[end];
-                let bx = self.base.x + 4.0;
-                let bw = self.base.w - 8.0;
+                let bx = self.rect.x + 4.0;
+                let bw = self.rect.width - 8.0;
                 let by = r_start.1 - 4.0;
                 let bh = (r_end.1 + r_end.3 + 4.0) - by;
-                
+
                 let border_color = [0.18, 0.18, 0.27, 1.0];
                 let border_t = 1.0;
-                
+
                 // Top border
                 param_quads.push((bx, by, bw, border_t, border_color));
                 // Bottom border
@@ -1423,23 +555,23 @@ impl Element for ParametersBg {
         }
 
         // Draw Scrollbar (unclipped) if content_h > base.h
-        if self.content_h > self.base.h {
+        if self.content_h > self.rect.height {
             let sb_w = crate::layout::scrollbar_width();
-            let sb_x = self.base.x + self.base.w - sb_w - 4.0;
-            let sb_track_h = self.base.h - 8.0;
-            let sb_track_y = self.base.y + 4.0;
+            let sb_x = self.rect.x + self.rect.width - sb_w - 4.0;
+            let sb_track_h = self.rect.height - 8.0;
+            let sb_track_y = self.rect.y + 4.0;
 
             // Track
             quads.push((sb_x, sb_track_y, sb_w, sb_track_h, crate::color::scrollbar_track_color()));
 
             // Thumb
-            let visible_ratio = self.base.h / self.content_h;
+            let visible_ratio = self.rect.height / self.content_h;
             let thumb_h = if sb_track_h <= 20.0 {
                 sb_track_h
             } else {
                 (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
             };
-            let max_scroll = self.content_h - self.base.h;
+            let max_scroll = self.content_h - self.rect.height;
             let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
             let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
             quads.push((sb_x, thumb_y, sb_w, thumb_h, crate::color::scrollbar_thumb_color()));
@@ -1447,53 +579,122 @@ impl Element for ParametersBg {
 
         quads
     }
+}
 
-    fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut quads = self.extra_quads();
-        if let Some(hq) = self.highlight_quad(ctx) {
-            if hq.4 != colors::HIGHLIGHT_SECONDARY {
-                quads.push(hq);
-            }
-        }
-        quads
+impl Layout for ParametersBg {
+    fn has_container_children(&self) -> bool {
+        true
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.visible {
-            return Vec::new();
+    fn container_children(&self) -> Vec<*mut (dyn Element + 'static)> {
+        self.children.clone()
+    }
+
+    fn child_added(&mut self, child: *mut (dyn Element + 'static)) {
+        self.children.push(child);
+    }
+
+    fn children_cleared(&mut self) {
+        self.children.clear();
+    }
+
+    fn parent_changed(&mut self, parent: Option<*mut (dyn Element + 'static)>) {
+        self.parent = parent;
+    }
+
+    fn tracked_parent(&self) -> Option<Option<*mut (dyn Element + 'static)>> {
+        Some(self.parent)
+    }
+
+    /// Ungated rect landing (the legacy `set_rect` head, before its visibility gate): cache the
+    /// rect all row geometry derives from, then re-derive content height/scroll/row rects.
+    fn rect_assigned(&mut self, rect: Rect) {
+        self.rect = rect;
+        self.refresh_scroll_metrics();
+    }
+
+    /// The legacy `set_rect` tail (visible-gated there and by the adapter here): stack the raw
+    /// container children vertically.
+    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn Element + 'static)) {
+        let padding_x = 8.0;
+        let padding_y = 10.0;
+        let left_x = rect.x + padding_x;
+        let available_w = (rect.width - 2.0 * padding_x).max(1.0);
+        let mut current_y = rect.y + padding_y;
+        let spacing = 8.0;
+
+        for &child_ptr in &self.children {
+            let child = unsafe { &mut *child_ptr };
+            let (_, _, _, ch) = child.rect();
+            let use_h = if ch > 0.0 { ch } else { 42.0 };
+            child.set_rect(left_x, current_y, available_w, use_h);
+            current_y += use_h + spacing;
         }
-        let view_min = self.base.y + 4.0;
-        let view_max = self.base.y + self.base.h - 4.0;
-        let mut labels = Vec::new();
+    }
+}
+
+impl Paint for ParametersBg {
+    /// Transparent while hidden, like legacy — the designer draws the panel's background plate
+    /// itself from `color()` + the corner style (`push_widget_vertices`), so this must NOT be
+    /// emitted as a quad anywhere (the translucent PARAM_BG would double-blend).
+    fn color(&self) -> [f32; 4] {
+        if !self.visible {
+            return [0.0, 0.0, 0.0, 0.0];
+        }
+        colors::PARAM_BG
+    }
+
+    /// Legacy `rounded_corners` all-true at the default 12.0 radius.
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+        Some((12.0, (true, true, true, true)))
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::control_label_font())
+    }
+
+    /// Scene-path emission (the designer renders through the legacy hatches instead): the row
+    /// chrome plus the viewport-filtered labels. The background plate stays out — see
+    /// [`color`](Paint::color).
+    fn paint(&self, _rect: Rect, ctx: &mut PaintCtx) {
+        for (qx, qy, qw, qh, qc) in self.plain_quads() {
+            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+        }
+        let view_min = self.rect.y + 4.0;
+        let view_max = self.rect.y + self.rect.height - 4.0;
         for l in self.own_text_labels() {
             if l.y >= view_min - 20.0 && l.y <= view_max + 20.0 {
-                labels.push(l);
+                ctx.text(l.text, l.x, l.y, l.font_size, l.color);
             }
         }
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            labels.extend(widget.text_labels());
-        }
-        labels
     }
 
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let view_min = self.base.y + 4.0;
-        let view_max = self.base.y + self.base.h - 4.0;
+    fn serves_legacy_plain_quads(&self) -> bool {
+        true
+    }
+
+    fn legacy_plain_quads(&self, _rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        self.plain_quads()
+    }
+
+    fn serves_legacy_labels(&self) -> bool {
+        true
+    }
+
+    /// The legacy `text_labels_with_font_and_bounds` body: every label clipped to the panel
+    /// viewport in the control-label font, except labels inside a code row — those clip to the
+    /// code box (or hide when it's scrolled out) and render monospace.
+    fn legacy_labels_with_font_and_bounds(&self, _rect: Rect, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let view_min = self.rect.y + 4.0;
+        let view_max = self.rect.y + self.rect.height - 4.0;
         let mut result = Vec::new();
-        let font = self.widget_font();
+        let font = Paint::widget_font(self);
         let rects = self.get_param_rects();
         for l in self.own_text_labels() {
             if l.y < view_min - 20.0 || l.y > view_max + 20.0 {
                 continue;
             }
-            let mut bounds = Some([self.base.x + 4.0, view_min, self.base.x + self.base.w - 4.0, view_max]);
+            let mut bounds = Some([self.rect.x + 4.0, view_min, self.rect.x + self.rect.width - 4.0, view_max]);
             let mut label_font = font.clone();
             for (i, p) in self.display_params.iter().enumerate() {
                 if p.2 == "code" {
@@ -1520,61 +721,928 @@ impl Element for ParametersBg {
         result
     }
 
-    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
-        if !self.visible {
-            return None;
-        }
-        for d_opt in &self.choices {
-            if let Some(d) = d_opt {
-                if let Some(r) = d.popover_rect() {
-                    return Some(r);
-                }
-            }
-        }
-        for &widget_ptr in self.children.iter().rev() {
-            let widget = unsafe { &*widget_ptr };
-            if let Some(r) = widget.popover_rect() {
-                return Some(r);
-            }
-        }
-        None
+    fn popover(&self, _rect: Rect) -> Option<(f32, f32, f32, f32)> {
+        self.choices_popover_rect()
     }
 
-    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
-        if !self.visible {
-            return;
-        }
+    /// The dropdown rows' popovers; the raw children's are the adapter's recursion.
+    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
         for d_opt in &self.choices {
             if let Some(d) = d_opt {
                 d.render_popover(pc);
             }
         }
-        for &widget_ptr in self.children.iter().rev() {
-            let widget = unsafe { &*widget_ptr };
-            widget.render_popover(pc);
+    }
+}
+
+impl Input for ParametersBg {
+    fn scrollable(&self) -> bool {
+        true
+    }
+
+    /// Legacy `mouse_input` saw every press (and consumes every left press — the designer
+    /// relies on the panel swallowing clicks anywhere while it's the dispatch target).
+    fn gates_presses(&self) -> bool {
+        false
+    }
+
+    /// Legacy hit reach: the panel rect, or an open popover (a dropdown row's list extends
+    /// below the panel).
+    fn hit(&self, rect: Rect, px: f32, py: f32) -> bool {
+        if px >= rect.x && px <= rect.x + rect.width && py >= rect.y && py <= rect.y + rect.height {
+            return true;
+        }
+        if let Some((pop_x, pop_y, pop_w, pop_h)) = self.own_popover_rect() {
+            if px >= pop_x && px <= pop_x + pop_w && py >= pop_y && py <= pop_y + pop_h {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn param_controller(&self) -> Option<&dyn ParamController> {
+        Some(self)
+    }
+    fn param_controller_mut(&mut self) -> Option<&mut dyn ParamController> {
+        Some(self)
+    }
+
+    // --- The host-driven drag surface (the designer routes pointer drags here directly). ---
+
+    fn draggable(&self, _rect: Rect) -> bool {
+        self.scrollbar_dragging
+            || self.dragging_param.is_some()
+            || self.display_params.iter().any(|p| p.2.starts_with("slider") || p.2.starts_with("float3"))
+    }
+
+    fn is_dragging(&self) -> bool {
+        self.scrollbar_dragging || self.dragging_param.is_some()
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32, _rect: Rect) {
+        if self.scrollbar_dragging {
+            return;
+        }
+        let rects = self.get_param_rects();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if p.2.starts_with("slider") {
+                let r = rects[i];
+                if let Some(s) = &mut self.sliders[i] {
+                    let top = crate::widget::label_offset(s);
+                    if py >= r.1 + top && py <= r.1 + r.3 {
+                        s.drag_begin(px, py);
+                        self.dragging_param = Some(i);
+                        break;
+                    }
+                }
+            } else if p.2.starts_with("float3") {
+                let r = rects[i];
+                if py >= r.1 && py <= r.1 + r.3 {
+                    if let Some(f) = &mut self.float3s[i] {
+                        let mut dummy = crate::context::UiContext::new();
+                        if f.mouse_input(MouseButton::Left, ElementState::Pressed, px, py, &mut dummy) {
+                            self.dragging_param = Some(i);
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 
-    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+    fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
+        if self.scrollbar_dragging {
+            let sb_track_h = self.rect.height - 8.0;
+            let sb_track_y = self.rect.y + 4.0;
+            let visible_ratio = self.rect.height / self.content_h;
+            let thumb_h = if sb_track_h <= 20.0 {
+                sb_track_h
+            } else {
+                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+            };
+            let max_scroll = (self.content_h - self.rect.height).max(0.0);
+
+            let target_thumb_y = py - self.drag_offset_y;
+            let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+
+            let old_scroll = self.scroll_y;
+            self.scroll_y = new_scroll_ratio * max_scroll;
+            if (self.scroll_y - old_scroll).abs() > 0.01 {
+                self.update_slider_rects();
+                return true;
+            }
+            return false;
+        }
+
+        if let Some(i) = self.dragging_param {
+            if let Some(s) = &mut self.sliders[i] {
+                if s.drag_update(px, py) {
+                    let (min, max) = parse_slider_range(&self.display_params[i].2);
+                    let new_val = min + s.value * (max - min);
+                    let old_val = &self.display_params[i].1;
+                    let new_val_str = format!("{:.2}", new_val);
+                    if *old_val != new_val_str {
+                        self.display_params[i].1 = new_val_str;
+                        return true;
+                    }
+                }
+            } else if let Some(f) = &mut self.float3s[i] {
+                if f.drag_update(px, py) {
+                    let (min, max) = parse_slider_range(&self.display_params[i].2);
+                    let val0 = min + f.values[0] * (max - min);
+                    let val1 = min + f.values[1] * (max - min);
+                    let val2 = min + f.values[2] * (max - min);
+                    let new_val_str = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
+                    let old_val = &self.display_params[i].1;
+                    if *old_val != new_val_str {
+                        self.display_params[i].1 = new_val_str;
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn drag_end(&mut self) {
+        if self.scrollbar_dragging {
+            self.scrollbar_dragging = false;
+            return;
+        }
+        if let Some(i) = self.dragging_param.take() {
+            if let Some(s) = &mut self.sliders[i] {
+                s.drag_end();
+            } else if let Some(f) = &mut self.float3s[i] {
+                f.drag_end();
+            }
+        }
+    }
+
+    /// Legacy `tick` forwarded to the raw children (the adapter's recursion now) and the
+    /// checkbox rows. The checkbox tick never touches the ctx (a leaf `Adapted` tick is
+    /// ctx-free), so the in-file dummy-ctx convention (`drag_begin`, `collect_child_quads`)
+    /// applies.
+    fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
         if !self.visible {
             return false;
         }
         let mut changed = false;
-        for &widget_ptr in &self.children {
-            let widget = unsafe { &mut *widget_ptr };
-            if widget.tick(dt, ctx) {
-                changed = true;
-            }
-        }
+        let mut dummy = crate::context::UiContext::new();
         for cb_opt in &mut self.checkboxes {
             if let Some(cb) = cb_opt {
-                if cb.tick(dt, ctx) {
+                if cb.tick(dt, &mut dummy) {
                     changed = true;
                 }
             }
         }
         changed
     }
+
+    fn visibility_changed(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        // Copied before `ectx.ui` is borrowed: the wheel arm's occlusion check keys on the
+        // adapter's address (the pointer hosts register/popover-track).
+        let self_addr = ectx.widget_addr();
+        match event {
+            // Hosts call `unfocus()` directly (the designer's pane switches): commit the
+            // focused row and unfocus the children. Needs no ctx, so the direct path's
+            // ui-less synthesis works too.
+            Event::FocusOut => {
+                self.commit_and_unfocus();
+                true
+            }
+            Event::PointerMove { x: px, y: py, .. } => {
+                let (px, py) = (*px, *py);
+                self.mouse_pos = Some((px, py));
+                let Some(ui) = ectx.ui.as_deref_mut() else {
+                    return false;
+                };
+                let mut changed = false;
+
+                if self.scrollbar_dragging {
+                    let sb_track_h = self.rect.height - 8.0;
+                    let sb_track_y = self.rect.y + 4.0;
+                    let visible_ratio = self.rect.height / self.content_h;
+                    let thumb_h = if sb_track_h <= 20.0 {
+                        sb_track_h
+                    } else {
+                        (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+                    };
+                    let max_scroll = (self.content_h - self.rect.height).max(0.0);
+
+                    let target_thumb_y = py - self.drag_offset_y;
+                    let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                        ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+
+                    let old_scroll = self.scroll_y;
+                    self.scroll_y = new_scroll_ratio * max_scroll;
+                    if (self.scroll_y - old_scroll).abs() > 0.01 {
+                        self.update_slider_rects();
+                        changed = true;
+                    }
+                }
+
+                for sb_opt in &mut self.spinboxes {
+                    if let Some(sb) = sb_opt {
+                        if sb.on_cursor_moved(px, py, ui) {
+                            changed = true;
+                        }
+                    }
+                }
+                for f_opt in &mut self.float3s {
+                    if let Some(f) = f_opt {
+                        if f.on_cursor_moved(px, py, ui) {
+                            changed = true;
+                        }
+                    }
+                }
+                for b_opt in &mut self.buttons {
+                    if let Some(b) = b_opt {
+                        if b.on_cursor_moved(px, py, ui) {
+                            changed = true;
+                        }
+                    }
+                }
+                for d_opt in &mut self.choices {
+                    if let Some(d) = d_opt {
+                        if d.on_cursor_moved(px, py, ui) {
+                            changed = true;
+                        }
+                    }
+                }
+                for tb_opt in &mut self.texts {
+                    if let Some(tb) = tb_opt {
+                        if tb.on_cursor_moved(px, py, ui) {
+                            changed = true;
+                        }
+                    }
+                }
+                for cb_opt in &mut self.checkboxes {
+                    if let Some(cb) = cb_opt {
+                        if cb.on_cursor_moved(px, py, ui) {
+                            changed = true;
+                        }
+                    }
+                }
+                for c_opt in &mut self.colors {
+                    if let Some(c) = c_opt {
+                        if c.on_cursor_moved(px, py, ui) {
+                            changed = true;
+                        }
+                    }
+                }
+
+                for &widget_ptr in &self.children {
+                    let widget = unsafe { &mut *widget_ptr };
+                    if widget.is_dragging() {
+                        if widget.drag_update(px, py) {
+                            changed = true;
+                        }
+                    } else if widget.cursor_moved(px, py, ui) {
+                        changed = true;
+                    }
+                }
+                changed
+            }
+            Event::MouseButton { button, state, x: px, y: py, .. } => {
+                if !self.visible {
+                    return false;
+                }
+                let (button, state, px, py) = (*button, *state, *px, *py);
+                let Some(ui) = ectx.ui.as_deref_mut() else {
+                    return false;
+                };
+
+                if button == MouseButton::Left {
+                    if state == ElementState::Pressed {
+                        if self.hit_test_scrollbar(px, py) {
+                            // Legacy called `self.focus()` here — base flag only, which
+                            // nothing reads (see module docs).
+                            self.scrollbar_dragging = true;
+
+                            let sb_track_h = self.rect.height - 8.0;
+                            let sb_track_y = self.rect.y + 4.0;
+                            let visible_ratio = self.rect.height / self.content_h;
+                            let thumb_h = if sb_track_h <= 20.0 {
+                                sb_track_h
+                            } else {
+                                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+                            };
+                            let max_scroll = (self.content_h - self.rect.height).max(0.0);
+                            let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+                            let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
+
+                            let click_offset = py - thumb_y;
+                            if click_offset >= 0.0 && click_offset <= thumb_h {
+                                self.drag_offset_y = click_offset;
+                            } else {
+                                // Clicked outside the thumb: jump thumb center to py
+                                self.drag_offset_y = thumb_h / 2.0;
+                                let target_thumb_y = py - self.drag_offset_y;
+                                let new_scroll_ratio = if sb_track_h - thumb_h > 0.0 {
+                                    ((target_thumb_y - sb_track_y) / (sb_track_h - thumb_h)).clamp(0.0, 1.0)
+                                } else {
+                                    0.0
+                                };
+                                self.scroll_y = new_scroll_ratio * max_scroll;
+                                self.update_slider_rects();
+                            }
+                            return true;
+                        }
+                    } else if state == ElementState::Released {
+                        if self.scrollbar_dragging {
+                            self.scrollbar_dragging = false;
+                            return true;
+                        }
+                    }
+                }
+
+                // 1. Check open dropdown popovers first (since they are drawn on top)
+                for (i, d_opt) in self.choices.iter_mut().enumerate() {
+                    if let Some(d) = d_opt {
+                        if d.popover_rect().is_some() {
+                            if d.mouse_input(button, state, px, py, ui) {
+                                if d.take_change() {
+                                    if let Some(val) = d.get_value_string() {
+                                        self.display_params[i].1 = val;
+                                    }
+                                }
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                for &widget_ptr in self.children.iter().rev() {
+                    let widget = unsafe { &mut *widget_ptr };
+                    if widget.popover_rect().is_some() {
+                        if widget.mouse_input(button, state, px, py, ui) {
+                            return true;
+                        }
+                    }
+                }
+
+                // 2. Propagate to our widgets
+                for (i, p) in self.display_params.iter_mut().enumerate() {
+                    if p.2.starts_with("choice") {
+                        if let Some(d) = &mut self.choices[i] {
+                            if d.mouse_input(button, state, px, py, ui) {
+                                if d.take_change() {
+                                    if let Some(val) = d.get_value_string() {
+                                        p.1 = val;
+                                    }
+                                }
+                                return true;
+                            }
+                        }
+                    } else if p.2 == "button" {
+                        if let Some(b) = &mut self.buttons[i] {
+                            if b.mouse_input(button, state, px, py, ui) {
+                                if b.take_click() {
+                                    p.1 = "clicked".to_string();
+                                }
+                                return true;
+                            }
+                        }
+                    } else if p.2 == "text" {
+                        if let Some(tb) = &mut self.texts[i] {
+                            if tb.mouse_input(button, state, px, py, ui) {
+                                if tb.editing {
+                                    self.focused_param = Some(i);
+                                } else {
+                                    if self.focused_param == Some(i) {
+                                        self.focused_param = None;
+                                    }
+                                }
+                                if tb.take_change() {
+                                    if let Some(val) = tb.get_value_string() {
+                                        p.1 = val;
+                                    }
+                                }
+                                return true;
+                            }
+                        }
+                    } else if p.2.starts_with("spinbox") {
+                        if let Some(sb) = &mut self.spinboxes[i] {
+                            if sb.mouse_input(button, state, px, py, ui) {
+                                p.1 = sb.value.to_string();
+                                if sb.editing {
+                                    self.focused_param = Some(i);
+                                } else {
+                                    if self.focused_param == Some(i) {
+                                        self.focused_param = None;
+                                    }
+                                }
+                                return true;
+                            }
+                        }
+                    } else if p.2 == "toggle" || p.2 == "checkbox" {
+                        if let Some(cb) = &mut self.checkboxes[i] {
+                            if cb.mouse_input(button, state, px, py, ui) {
+                                if cb.take_change() {
+                                    if let Some(val) = cb.get_value_string() {
+                                        p.1 = val;
+                                    }
+                                }
+                                return true;
+                            }
+                        }
+                    } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+                        if let Some(c) = &mut self.colors[i] {
+                            if c.mouse_input(button, state, px, py, ui) {
+                                if let Some(val) = c.get_value_string() {
+                                    p.1 = val;
+                                }
+                                if c.editing {
+                                    self.focused_param = Some(i);
+                                } else {
+                                    if self.focused_param == Some(i) {
+                                        self.focused_param = None;
+                                    }
+                                }
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                for &widget_ptr in self.children.iter().rev() {
+                    let widget = unsafe { &mut *widget_ptr };
+                    if widget.mouse_input(button, state, px, py, ui) {
+                        return true;
+                    }
+                    if state == ElementState::Pressed && !widget.hit_test(px, py, ui) {
+                        widget.unfocus();
+                    }
+                }
+
+                if button == MouseButton::Left && state == ElementState::Pressed {
+                    let rects = self.get_param_rects();
+                    let mut clicked_any_focusable = false;
+                    for (i, p) in self.display_params.iter_mut().enumerate() {
+                        if p.2 == "code" {
+                            let r = rects[i];
+                            if px >= r.0 && px <= r.0 + r.2 && py >= r.1 + 18.0 && py <= r.1 + r.3 {
+                                self.focused_param = Some(i);
+                                let mut editor = TextEditorState::new(p.1.clone());
+                                let click_x = px - (r.0 + 12.0);
+                                let click_y = py - (r.1 + 22.0);
+                                let line = (click_y / 16.0).floor().max(0.0) as usize;
+                                let col = (click_x / 7.2 + 0.5).floor().max(0.0) as usize;
+                                editor.cursor_idx = map_2d_to_1d(&editor.buffer, line, col);
+                                self.code_editor = Some(editor);
+                                clicked_any_focusable = true;
+                                break;
+                            }
+                        } else if p.2.starts_with("slider") {
+                            let r = rects[i];
+                            if py >= r.1 && py <= r.1 + r.3 {
+                                if let Some(s) = &mut self.sliders[i] {
+                                    if s.mouse_input(button, state, px, py, ui) {
+                                        if s.editing {
+                                            self.focused_param = Some(i);
+                                            clicked_any_focusable = true;
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        } else if p.2.starts_with("float3") {
+                            let r = rects[i];
+                            if py >= r.1 && py <= r.1 + r.3 {
+                                if let Some(f) = &mut self.float3s[i] {
+                                    if f.mouse_input(button, state, px, py, ui) {
+                                        if f.editing_idx.is_some() {
+                                            self.focused_param = Some(i);
+                                            clicked_any_focusable = true;
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !clicked_any_focusable {
+                        self.commit_and_unfocus();
+                    }
+                    return true;
+                }
+                false
+            }
+            Event::KeyInput(event) => {
+                if !self.visible {
+                    return false;
+                }
+                let Some(ui) = ectx.ui.as_deref_mut() else {
+                    return false;
+                };
+                for &widget_ptr in &self.children {
+                    let widget = unsafe { &mut *widget_ptr };
+                    if widget.keyboard_input(event, ui) {
+                        return true;
+                    }
+                }
+
+                if let Some(idx) = self.focused_param {
+                    if event.state == ElementState::Pressed {
+                        let p = &mut self.display_params[idx];
+                        if p.2 == "code" {
+                            if let Some(mut editor) = self.code_editor.take() {
+                                let mut changed = false;
+                                let mut handled = true;
+                                let mut should_unfocus = false;
+                                match &event.logical_key {
+                                    Key::Named(NamedKey::Backspace) => {
+                                        changed = editor.delete_backwards();
+                                    }
+                                    Key::Named(NamedKey::Delete) => {
+                                        changed = editor.delete_forwards();
+                                    }
+                                    Key::Named(NamedKey::Enter) => {
+                                        editor.insert_text("\n");
+                                        changed = true;
+                                    }
+                                    Key::Named(NamedKey::Escape) => {
+                                        should_unfocus = true;
+                                    }
+                                    Key::Named(NamedKey::ArrowLeft) => {
+                                        editor.move_cursor_left(false);
+                                    }
+                                    Key::Named(NamedKey::ArrowRight) => {
+                                        editor.move_cursor_right(false);
+                                    }
+                                    Key::Named(NamedKey::ArrowUp) => {
+                                        let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                        if line > 0 {
+                                            editor.cursor_idx = map_2d_to_1d(&editor.buffer, line - 1, col);
+                                        }
+                                    }
+                                    Key::Named(NamedKey::ArrowDown) => {
+                                        let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                        let total_lines = editor.buffer.split('\n').count();
+                                        if line + 1 < total_lines {
+                                            editor.cursor_idx = map_2d_to_1d(&editor.buffer, line + 1, col);
+                                        }
+                                    }
+                                    Key::Named(NamedKey::Home) => {
+                                        editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
+                                    }
+                                    Key::Named(NamedKey::End) => {
+                                        editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
+                                    }
+                                    Key::Character(s) => {
+                                        if event.ctrl {
+                                            match s.to_lowercase().as_str() {
+                                                "f" => {
+                                                    editor.move_cursor_right(false);
+                                                }
+                                                "b" => {
+                                                    editor.move_cursor_left(false);
+                                                }
+                                                "p" => {
+                                                    let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                                    if line > 0 {
+                                                        editor.cursor_idx = map_2d_to_1d(&editor.buffer, line - 1, col);
+                                                    }
+                                                }
+                                                "n" => {
+                                                    let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                                    let total_lines = editor.buffer.split('\n').count();
+                                                    if line + 1 < total_lines {
+                                                        editor.cursor_idx = map_2d_to_1d(&editor.buffer, line + 1, col);
+                                                    }
+                                                }
+                                                "a" => {
+                                                    editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
+                                                }
+                                                "e" => {
+                                                    editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
+                                                }
+                                                "d" => {
+                                                    changed = editor.delete_forwards();
+                                                }
+                                                "h" => {
+                                                    changed = editor.delete_backwards();
+                                                }
+                                                "k" => {
+                                                    let current_idx = editor.cursor_idx;
+                                                    let end_idx = get_line_end(&editor.buffer, current_idx);
+                                                    let chars: Vec<char> = editor.buffer.chars().collect();
+                                                    if chars.is_empty() {
+                                                        // do nothing
+                                                    } else if current_idx < chars.len() {
+                                                        let delete_end = if chars[current_idx] == '\n' {
+                                                            current_idx + 1
+                                                        } else {
+                                                            end_idx
+                                                        };
+                                                        let mut new_buf = String::new();
+                                                        for i in 0..current_idx {
+                                                            new_buf.push(chars[i]);
+                                                        }
+                                                        for i in delete_end..chars.len() {
+                                                            new_buf.push(chars[i]);
+                                                        }
+                                                        editor.buffer = new_buf;
+                                                        changed = true;
+                                                    }
+                                                }
+                                                _ => {
+                                                    handled = false;
+                                                }
+                                            }
+                                        } else {
+                                            editor.insert_text(s);
+                                            changed = true;
+                                        }
+                                    }
+                                    _ => {
+                                        handled = false;
+                                    }
+                                }
+                                if changed {
+                                    p.1 = editor.buffer.clone();
+                                }
+                                if should_unfocus {
+                                    p.1 = editor.buffer;
+                                    self.focused_param = None;
+                                    self.code_editor = None;
+                                } else {
+                                    self.code_editor = Some(editor);
+                                }
+                                if handled {
+                                    return true;
+                                }
+                            }
+                        } else if p.2 == "text" {
+                            if let Some(tb) = &mut self.texts[idx] {
+                                if tb.keyboard_input(event, ui) {
+                                    if !tb.editing {
+                                        p.1 = tb.text.clone();
+                                        self.focused_param = None;
+                                    } else {
+                                        p.1 = tb.edit_buffer.clone();
+                                    }
+                                    return true;
+                                }
+                            }
+                        } else if p.2.starts_with("choice") {
+                            if let Some(d) = &mut self.choices[idx] {
+                                if d.keyboard_input(event, ui) {
+                                    if !d.open {
+                                        if let Some(val) = d.get_value_string() {
+                                            p.1 = val;
+                                        }
+                                        self.focused_param = None;
+                                    }
+                                    return true;
+                                }
+                            }
+                        } else if p.2.starts_with("spinbox") {
+                            if let Some(sb) = &mut self.spinboxes[idx] {
+                                if sb.keyboard_input(event, ui) {
+                                    if !sb.editing {
+                                        p.1 = sb.value.to_string();
+                                        self.focused_param = None;
+                                    } else {
+                                        p.1 = sb.edit_buffer.clone();
+                                    }
+                                    return true;
+                                }
+                            }
+                        } else if p.2.starts_with("slider") {
+                            if let Some(s) = &mut self.sliders[idx] {
+                                if s.keyboard_input(event, ui) {
+                                    let (min, max) = parse_slider_range(&p.2);
+                                    let new_val = min + s.value * (max - min);
+                                    p.1 = format!("{:.2}", new_val);
+                                    if !s.editing {
+                                        self.focused_param = None;
+                                    }
+                                    return true;
+                                }
+                            }
+                        } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+                            if let Some(c) = &mut self.colors[idx] {
+                                if c.keyboard_input(event, ui) {
+                                    if let Some(val) = c.get_value_string() {
+                                        p.1 = val;
+                                    }
+                                    if !c.editing {
+                                        self.focused_param = None;
+                                    }
+                                    return true;
+                                }
+                            }
+                        } else if p.2.starts_with("float3") {
+                            if let Some(f) = &mut self.float3s[idx] {
+                                if f.keyboard_input(event, ui) {
+                                    let (min, max) = parse_slider_range(&p.2);
+                                    let val0 = min + f.values[0] * (max - min);
+                                    let val1 = min + f.values[1] * (max - min);
+                                    let val2 = min + f.values[2] * (max - min);
+                                    p.1 = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
+                                    if f.editing_idx.is_none() {
+                                        self.focused_param = None;
+                                    }
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            Event::MouseWheel { delta, x: px, y: py, .. } => {
+                if !self.visible {
+                    return false;
+                }
+                let (px, py) = (*px, *py);
+                let Some(ui) = ectx.ui.as_deref_mut() else {
+                    return false;
+                };
+                for &widget_ptr in self.children.iter().rev() {
+                    let widget = unsafe { &mut *widget_ptr };
+                    if widget.mouse_wheel(delta, px, py, ui) {
+                        return true;
+                    }
+                }
+
+                let mut changed = false;
+                let rects = self.get_param_rects();
+                for (i, p) in self.display_params.iter_mut().enumerate() {
+                    if p.2.starts_with("slider") {
+                        let r = rects[i];
+                        let row_y = r.1;
+                        if py >= row_y - 2.0 && py <= row_y + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
+                            if let Some(s) = &mut self.sliders[i] {
+                                let was_scroll = s.scroll_enabled;
+                                s.set_scroll(true);
+                                if s.mouse_wheel(delta, px, py, ui) {
+                                    let (min, max) = parse_slider_range(&p.2);
+                                    let new_val = min + s.value * (max - min);
+                                    let old_val = &p.1;
+                                    let new_val_str = format!("{:.2}", new_val);
+                                    if *old_val != new_val_str {
+                                        p.1 = new_val_str;
+                                        changed = true;
+                                    }
+                                }
+                                s.set_scroll(was_scroll);
+                            }
+                        }
+                    } else if p.2.starts_with("float3") {
+                        let r = rects[i];
+                        let row_y = r.1;
+                        if py >= row_y && py <= row_y + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
+                            if let Some(f) = &mut self.float3s[i] {
+                                let rects_inner = f.get_row_rects();
+                                for j in 0..3 {
+                                    let r_inner = rects_inner[j];
+                                    if py >= r_inner.1 && py <= r_inner.1 + r_inner.3 {
+                                        let scroll_amount = match delta {
+                                            MouseScrollDelta::LineDelta(_x, y) => *y,
+                                            MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
+                                        };
+                                        let step = 0.02;
+                                        let new_val = (f.values[j] - scroll_amount * step).clamp(0.0, 1.0);
+                                        if (new_val - f.values[j]).abs() > 0.0001 {
+                                            f.values[j] = new_val;
+                                            if f.editing_idx == Some(j) {
+                                                let scaled_val = f.mins[j] + f.values[j] * (f.maxs[j] - f.mins[j]);
+                                                f.edit_buffer = format!("{:.2}", scaled_val);
+                                            }
+                                            let (min, max) = parse_slider_range(&p.2);
+                                            let val0 = min + f.values[0] * (max - min);
+                                            let val1 = min + f.values[1] * (max - min);
+                                            let val2 = min + f.values[2] * (max - min);
+                                            let new_val_str = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
+                                            if p.1 != new_val_str {
+                                                p.1 = new_val_str;
+                                                changed = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if p.2.starts_with("spinbox") {
+                        let r = rects[i];
+                        let row_y = r.1;
+                        if py >= row_y && py <= row_y + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
+                            if let Some(sb) = &mut self.spinboxes[i] {
+                                let scroll_amount = match delta {
+                                    MouseScrollDelta::LineDelta(_x, y) => *y as i32,
+                                    MouseScrollDelta::PixelDelta(pos) => {
+                                        let dy = pos.y;
+                                        if dy > 0.0 { 1 } else if dy < 0.0 { -1 } else { 0 }
+                                    }
+                                };
+                                let new_val = (sb.value + scroll_amount * sb.step).clamp(sb.min, sb.max);
+                                if sb.value != new_val {
+                                    sb.value = new_val;
+                                    p.1 = new_val.to_string();
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // The legacy tail's `self.hit_test(px, py, ctx)`: occlusion via the adapter's
+                // address, then rect-or-popover containment.
+                if !changed && !ui.is_coordinate_covered(self_addr, px, py) {
+                    let in_rect = px >= self.rect.x
+                        && px <= self.rect.x + self.rect.width
+                        && py >= self.rect.y
+                        && py <= self.rect.y + self.rect.height;
+                    let in_popover = self.own_popover_rect().map_or(false, |(rx, ry, rw, rh)| {
+                        px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
+                    });
+                    if in_rect || in_popover {
+                        let scroll_speed = 24.0;
+                        let dy = match delta {
+                            MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
+                            MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+                        };
+                        let old_scroll = self.scroll_y;
+                        let max_scroll = (self.content_h - self.rect.height).max(0.0);
+                        self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
+                        if (self.scroll_y - old_scroll).abs() > 0.01 {
+                            self.update_slider_rects();
+                            changed = true;
+                        }
+                    }
+                }
+
+                changed
+            }
+            _ => false,
+        }
+    }
+}
+
+fn parse_slider_range(ptype: &str) -> (f32, f32) {
+    if ptype.starts_with("slider:") || ptype.starts_with("float3:") {
+        let parts: Vec<&str> = ptype.split(':').collect();
+        if parts.len() >= 3 {
+            if let (Ok(min), Ok(max)) = (parts[1].parse::<f32>(), parts[2].parse::<f32>()) {
+                return (min, max);
+            }
+        }
+    }
+    (0.0, 2.0)
+}
+
+fn parse_hex_to_rgb(s: &str) -> Option<[u8; 3]> {
+    crate::color::parse_hex_bytes(s).map(|[r, g, b, _]| [r, g, b])
+}
+
+fn parse_spinbox_range(ptype: &str) -> (i32, i32, i32) {
+    if ptype.starts_with("spinbox:") {
+        let parts: Vec<&str> = ptype.split(':').collect();
+        if parts.len() >= 4 {
+            if let (Ok(min), Ok(max), Ok(step)) = (parts[1].parse::<i32>(), parts[2].parse::<i32>(), parts[3].parse::<i32>()) {
+                return (min, max, step);
+            }
+        } else if parts.len() == 3 {
+            if let (Ok(min), Ok(max)) = (parts[1].parse::<i32>(), parts[2].parse::<i32>()) {
+                return (min, max, 1);
+            }
+        }
+    }
+    (0, 10000, 1)
+}
+
+fn parse_float3_value(val_str: &str, min: f32, max: f32) -> [f32; 3] {
+    let mut out = [0.5, 0.5, 0.5];
+    let parts: Vec<&str> = val_str
+        .split(|c| c == ':' || c == ',' || c == ' ')
+        .filter(|s| !s.is_empty())
+        .collect();
+    for i in 0..3 {
+        if i < parts.len() {
+            if let Ok(v) = parts[i].parse::<f32>() {
+                let range = max - min;
+                if range != 0.0 {
+                    out[i] = ((v - min) / range).clamp(0.0, 1.0);
+                } else {
+                    out[i] = 0.0;
+                }
+            }
+        }
+    }
+    out
 }
 
 fn collect_child_quads(widget: &dyn Element) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -1744,10 +1812,7 @@ impl ParamController for ParametersBg {
                 }
             }
         }
-        self.content_h = self.get_total_content_height();
-        let max_scroll = (self.content_h - self.base.h).max(0.0);
-        self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
-        self.update_slider_rects();
+        self.refresh_scroll_metrics();
     }
 }
 
@@ -1810,4 +1875,112 @@ fn get_line_end(buffer: &str, cursor_idx: usize) -> usize {
     map_2d_to_1d(buffer, line, line_len)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::UiContext;
 
+    fn panel_with(params: &[(&str, &str, &str)]) -> Adapted<ParametersBg> {
+        let mut p = ParametersBg::new();
+        let params: Vec<(String, String, String)> = params
+            .iter()
+            .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
+            .collect();
+        {
+            let elem: &mut dyn Element = &mut p;
+            elem.as_param_controller_mut().unwrap().set_display_params(&params);
+        }
+        Element::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
+        p
+    }
+
+    #[test]
+    fn param_controller_roundtrip_and_row_widgets() {
+        let p = panel_with(&[
+            ("Size", "1.00", "slider:0:2"),
+            ("Mode", "b", "choice:a,b,c"),
+            ("On", "true", "checkbox"),
+        ]);
+        let elem: &dyn Element = &p;
+        let pc = elem.as_param_controller().unwrap();
+        assert_eq!(pc.node_params().len(), 3);
+        assert!(p.sliders[0].is_some() && p.choices[1].is_some() && p.checkboxes[2].is_some());
+        // Rows were laid out from the cached rect.
+        let (sx, _, sw, _) = p.sliders[0].as_ref().unwrap().rect();
+        assert_eq!((sx, sw), (8.0, 284.0), "row rect derives from the assigned rect");
+    }
+
+    #[test]
+    fn checkbox_click_commits_value_and_unfocus_commits_editor() {
+        let mut ctx = UiContext::new();
+        let mut p = panel_with(&[("On", "false", "checkbox")]);
+        let (cx, cy, _, ch) = p.checkboxes[0].as_ref().unwrap().rect();
+        // Click the checkbox row (presses are ungated for this widget; the panel consumes
+        // every left press, so the return is true either way — assert the value flip).
+        p.mouse_input(MouseButton::Left, ElementState::Pressed, cx + 6.0, cy + ch / 2.0, &mut ctx);
+        p.mouse_input(MouseButton::Left, ElementState::Released, cx + 6.0, cy + ch / 2.0, &mut ctx);
+        let elem: &dyn Element = &p;
+        assert_eq!(elem.as_param_controller().unwrap().node_params()[0].1, "true");
+
+        // Code editor: focus it via a click, type, then unfocus commits the buffer.
+        let mut p = panel_with(&[("Src", "let x = 1;", "code")]);
+        let rects = p.get_param_rects();
+        let r = rects[0];
+        p.mouse_input(MouseButton::Left, ElementState::Pressed, r.0 + 20.0, r.1 + 30.0, &mut ctx);
+        assert_eq!(p.focused_param, Some(0), "code row focused");
+        assert!(p.code_editor.is_some());
+        p.code_editor.as_mut().unwrap().insert_text("y");
+        Element::unfocus(&mut p);
+        assert_eq!(p.focused_param, None);
+        assert!(p.code_editor.is_none());
+        let elem: &dyn Element = &p;
+        assert!(elem.as_param_controller().unwrap().node_params()[0].1.contains('y'), "editor buffer committed on unfocus");
+    }
+
+    #[test]
+    fn plain_view_serves_row_chrome_and_all_quads_stays_empty() {
+        let ctx = UiContext::new();
+        let p = panel_with(&[("Size", "1.00", "slider:0:2")]);
+        // The designer's plain path: extra_quads carries the row chrome (clipped), including
+        // the slider background it reads via rect()+color()...
+        let extra = Element::extra_quads(&p);
+        assert!(!extra.is_empty(), "row chrome served through extra_quads");
+        // ...but NOT the panel's own PARAM_BG plate (the host draws that from color()).
+        let (x, y, w, h) = Element::rect(&p);
+        assert!(
+            !extra.iter().any(|q| (q.0, q.1, q.2, q.3) == (x, y, w, h)),
+            "panel bg plate is the host's, not extra_quads'"
+        );
+        // The no-double-draw contract of the plain-quad hatch.
+        assert!(Element::all_quads(&p, &ctx).is_empty());
+        // Per-label hatch: labels carry the widget font and viewport bounds.
+        let labels = Element::text_labels_with_font_and_bounds(&p, &ctx);
+        assert!(!labels.is_empty());
+        assert!(labels.iter().all(|(_, font, bounds)| font.is_some() && bounds.is_some()));
+    }
+
+    #[test]
+    fn scroll_wheel_scrolls_when_content_overflows() {
+        let mut ctx = UiContext::new();
+        let rows: Vec<(String, String, String)> = (0..30)
+            .map(|i| (format!("P{i}"), "1.00".to_string(), "slider:0:2".to_string()))
+            .collect();
+        let mut p = ParametersBg::new();
+        {
+            let elem: &mut dyn Element = &mut p;
+            elem.as_param_controller_mut().unwrap().set_display_params(&rows);
+        }
+        Element::set_rect(&mut p, 0.0, 0.0, 300.0, 200.0);
+        assert!(p.content_h > 200.0);
+        assert!(Element::is_scrollable(&p));
+        // Wheel over the panel body but off every slider row's x-span is impossible (rows are
+        // full-width), so scroll via the region below the last visible row: use a y between
+        // rows (the 2px slack above a row) — simplest is the bottom padding strip.
+        let before = p.scroll_y;
+        p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), 150.0, 199.0, &mut ctx);
+        // Either a slider consumed it (value change) or the panel scrolled; both mark change.
+        // The panel-scroll path must work when no slider is under the pointer:
+        p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), 2.0, 2.0, &mut ctx);
+        assert!(p.scroll_y >= before, "scroll never decreases on a downward wheel");
+    }
+}

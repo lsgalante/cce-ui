@@ -320,6 +320,26 @@ pub trait Paint {
     fn forwarded_highlight(&self, _ctx: &UiContext) -> Option<Option<(f32, f32, f32, f32, [f32; 4])>> {
         None
     }
+
+    /// Whether this widget serves
+    /// [`legacy_labels_with_font_and_bounds`](Paint::legacy_labels_with_font_and_bounds) —
+    /// the text sibling of the dual-geometry escape hatch. The adapter's standard text bridge
+    /// gives every own label ONE font ([`widget_font`](Paint::widget_font)) and ONE clip rect
+    /// ([`text_bounds`](Paint::text_bounds)); a widget whose legacy
+    /// `text_labels_with_font_and_bounds` override assigns them PER LABEL (ParametersBg clips
+    /// each label to its viewport but its code editor's to the code box, in monospace) serves
+    /// that view verbatim instead. Transitional — dies when `Prim::Text` carries font+bounds.
+    fn serves_legacy_labels(&self) -> bool {
+        false
+    }
+
+    /// The per-label font+bounds text view for legacy `text_labels_with_font_and_bounds`
+    /// readers. Served as a FULL replacement: the adapter adds no child aggregation on top, so
+    /// a container's implementation must include its children (as the legacy overrides did —
+    /// hence the ctx, which the child recursion needs).
+    fn legacy_labels_with_font_and_bounds(&self, _rect: Rect, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        Vec::new()
+    }
 }
 
 /// What an event handler may reach beyond its own state — the RFC §3.5 `EventCtx`, grown as
@@ -364,6 +384,14 @@ impl EventCtx<'_> {
         if let (Some(ptr), Some(ui)) = (self.self_ptr, self.ui.as_deref_mut()) {
             ui.handle_right_click(ptr, px, py);
         }
+    }
+
+    /// This widget's identity address for the legacy address-keyed walks
+    /// (`UiContext::is_coordinate_covered` excludes the querying widget by pointer — the
+    /// adapter's, which is also what hosts register/popover-track). Zero outside a routed
+    /// path; the coverage walk then simply excludes nothing.
+    pub fn widget_addr(&self) -> usize {
+        self.self_ptr.map(|p| p as *const () as usize).unwrap_or(0)
     }
 }
 
@@ -1190,6 +1218,14 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        // Per-label font+bounds escape hatch (ParametersBg): the widget's view is served
+        // verbatim, children included — no aggregation on top.
+        if Paint::serves_legacy_labels(&self.inner) {
+            if !self.visible() {
+                return Vec::new();
+            }
+            return Paint::legacy_labels_with_font_and_bounds(&self.inner, self.content_rect(), ctx);
+        }
         let mut own = self.own_labels_with_font_and_bounds(ctx);
         if self.visible() {
             for child in self.visible_children() {
