@@ -934,12 +934,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
     (Leave with no re-Enter on in-window motion), so headless click sequences MUST
     re-park the pointer (`wlrctl pointer move -10000 -10000`) before every click — a
     skipped re-park looks exactly like an input regression.
+  - **6o — graph's two Plates dissolved: `cce-graph` is EMBEDDED-BASE-FREE (the first app
+    to get there via dissolution; text-editor was born free). DONE (dropdown row A/B'd to
+    the solver's exact rects after switching to the bridge's own sizing entry,
+    `Element::intrinsic_size` — a `measure` call returns display-label widths instead;
+    control-panel area A/B: AE=0).** The transparent dropdown-row Plate (pure layout
+    shim) became direct placement; the draggable control panel became app state + prims
+    replicating Plate's exact visual (config plate color / drag tint, plate opacity,
+    negative-alpha blur flag, border, radius) with the label walked standalone via
+    Plate's centered-first-child rule. Panel drag reimplemented properly app-side —
+    NB the legacy `Plate::on_cursor_moved` forwarded drags only to CHILDREN, so the old
+    panel's own drag likely never moved it (manual drag check pending).
   - **Still to do:**
     dissolve the remaining root Backplates/Plates with the 6m recipe (fonts, colors,
     files; settings' tree also carries Switcher/Page/SectionContainer/ScrollBox — the
-    deep-composition set), plus graph's two remaining Plates (menu row, draggable
-    control panel), routed events + scene layout for the widget-tree apps, the demo
-    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
+    deep-composition set), routed events + scene layout for the widget-tree apps, the
+    demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
     `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
     `Adapted` once the last app is across.
 
