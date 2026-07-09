@@ -945,13 +945,24 @@ Constraint respected: **each crate still builds standalone** — the new core is
     Plate's centered-first-child rule. Panel drag reimplemented properly app-side —
     NB the legacy `Plate::on_cursor_moved` forwarded drags only to CHILDREN, so the old
     panel's own drag likely never moved it (manual drag check pending).
+  - **6p — cce-fonts' root Backplate + all three Plates dissolved. DONE (live-verified:
+    family select, style popover + occlusion, Oblique re-render, select-mode bar).** The
+    6m/6o recipes at full width, plus the first APP-OWNED EVENT DISPATCH: a
+    `dispatch_widgets` list replicating the Plates' forwarding — popover-first press
+    pass, unfocus-on-missed-press, `drag_update` forwarding for dragging children
+    (scrollbar thumbs), panel-grouped order. The A/B surfaced another legacy
+    double-draw: `Plate::paint_self` aggregated child plain-quads while the walk painted
+    the child again, double-compositing the ScrollBox background (~22 units darker) —
+    the dissolved single-draw is the correct rendering. Remaining in fonts: `ScrollBox`
+    (mid-panel scroll state/scrollbar) and `List` (browse-list scroll/frame) — the last
+    two embedded-base types in the app.
   - **Still to do:**
-    dissolve the remaining root Backplates/Plates with the 6m recipe (fonts, colors,
-    files; settings' tree also carries Switcher/Page/SectionContainer/ScrollBox — the
-    deep-composition set), routed events + scene layout for the widget-tree apps, the
-    demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
-    `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
-    `Adapted` once the last app is across.
+    dissolve fonts' ScrollBox + List, colors' and files' roots, and settings' tree
+    (Switcher/Page/SectionContainer/ScrollBox — the deep-composition set); routed events
+    + scene layout for the widget-tree apps; the demo (`cce-ui/src/main.rs`) as the
+    reference `Application`. Delete the legacy `view*`/`text_items` paths, the
+    per-widget text getters, and finally `Element` + `Adapted` once the last app is
+    across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
