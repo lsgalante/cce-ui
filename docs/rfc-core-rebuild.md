@@ -828,14 +828,29 @@ Constraint respected: **each crate still builds standalone** — the new core is
     dl-text occlusion pass only blocks apps that rely on the DEFAULT `text_areas`
     popover clamp (`ui_context().active_popovers`), e.g. widget-tree apps whose popovers
     register through `register_popover`.
+  - **6g — popover occlusion for display-list text lands; `cce-system-settings` flips
+    `display_list_text`. DONE (live-A/B pixel-identical, AE=0; page-dropdown popup, page
+    switch, service-list scroll, live process refresh exercised).** Engine:
+    `popover_occlusion_clamp` extracted from the default `text_areas` mapping and applied
+    to `dl_text_items` in `render()`, driven by `ui_context().active_popovers` — the
+    display_list_text known limitation is gone; apps whose popovers register through
+    `register_popover` (which `render_widget` does for any open `popover_rect`) can flip.
+    App: same mechanical shape as 6e/6f, with the app-side `FontSystem` kept for
+    button-label width measurement (centering) and the search-match highlight rect, and
+    the wheel fast-path mutating tuple y/bounds in place exactly as it did TextItems.
+    Popovers/context menu were never main-surface here: they draw on the engine's
+    xdg-popup surface via the `render_popovers` collector, which is orthogonal to the
+    flip.
   - **Still to do (per-app, roughly smallest-first):**
-    the remaining five display_list() adopters (flip `display_list_text` + drop their TextItem
-    assembly, one at a time, each A/B'd — precondition: embedded-base-free tree, see 6d),
-    then the widget-tree apps (routed events + scene
-    layout + dissolving the embedded-base containers), the demo (`cce-ui/src/main.rs`) as the
-    reference `Application`, and popover-occlusion for display-list text before any app with
-    popovers flips the flag. Delete the legacy `view*`/`text_items` paths, the per-widget
-    text getters, and finally `Element` + `Adapted` once the last app is across.
+    the remaining four display_list() adopters — data-editor, fonts, graph, text-editor —
+    flip `display_list_text` + drop their TextItem assembly, one at a time, each A/B'd.
+    All four are paint_tree/widget-tree apps, so the 6d precondition applies:
+    embedded-base-free tree first (Backplate/Plate/List/ScrollBox still load-bearing in
+    each). Popover occlusion is no longer a blocker (6g). Then the widget-tree apps
+    (routed events + scene layout + dissolving the embedded-base containers), the demo
+    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
+    `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
+    `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
