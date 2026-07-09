@@ -574,8 +574,14 @@ Constraint respected: **each crate still builds standalone** — the new core is
     has no callers). Verified: 168 tests (full open→click→close roundtrip through real
     adapter dispatch), all four hosts run, live A/B on cce-test-interface pixel-equivalent
     (the strip has zero diffs above the 8% threshold; the File-click-opens-nothing behavior
-    there is byte-identical pre-existing app behavior). Pending: a designer A/B (menu layer +
-    curved circular-pane mode) once the screen is uncontended.
+    there is byte-identical pre-existing app behavior). Designer A/B (was pending on screen
+    contention): DONE — startup, params-pane dropdown clicks, circular-pane mode, and a
+    View→Circular-Pane `trigger_menu_click` roundtrip all pixel-equivalent vs the f1523ab^
+    baseline (all residual diffs are composited-cursor + bottom-status-strip artifacts).
+    Driven deterministically via the designer's embedded HTTP API on :3000
+    (`{"action":"toggle_circular_pane"}`, `{"action":"menu_click","widget_idx":8,
+    "menu_idx":2,"item_idx":2}`); the params-pane Circular-Pane dropdown not opening on
+    click is pre-existing app behavior, identical in both builds.
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining:
     Paginator (embeds ButtonStrip + Vec<Page>), ParametersBg (real container, 1.8k lines),
