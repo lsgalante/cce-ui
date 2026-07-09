@@ -1198,8 +1198,26 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn widget_font(&self) -> Option<String> {
         Paint::widget_font(&self.inner)
     }
+    /// Scene-path emission. Geometry comes from [`Paint::paint`]; its plain `Text` prims are
+    /// REPLACED by the same font+bounds view the standard text bridges serve
+    /// (`own_labels_with_font_and_bounds`, or the per-label hatch), so a display list built by
+    /// the paint walk carries per-widget fonts and clip rects (Phase 6 — text ordering
+    /// relative to geometry is immaterial: glyphs always render in the later text pass).
     fn paint_self(&self, ui: &UiContext, ctx: &mut PaintCtx) {
-        Paint::paint(&self.inner, self.content_rect(), ctx);
+        let mut tmp = PaintCtx::new();
+        Paint::paint(&self.inner, self.content_rect(), &mut tmp);
+        for item in tmp.finish().items {
+            match item.prim {
+                Prim::Text { .. } => {}
+                Prim::Quad { rect, color } => ctx.quad(rect, color),
+                Prim::RoundedRect { rect, radius, corners, color } => ctx.rounded_rect(rect, radius, corners, color),
+                Prim::Border { rect, radii, fill, border, thickness } => ctx.border(rect, radii, fill, border, thickness),
+                Prim::Bevel { rect, radii, color, depth } => ctx.bevel(rect, radii, color, depth),
+                Prim::Arc { cx, cy, radius, thickness, start, end, color } => ctx.arc(cx, cy, radius, thickness, start, end, color),
+                Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => ctx.vector(x1, y1, x2, y2, thickness, color, cap),
+                Prim::Circle { cx, cy, radius, color } => ctx.circle(cx, cy, radius, color),
+            }
+        }
         // The legacy default `paint_self` drained `all_quads`, which carries the focus
         // highlight — replicate for opt-in widgets, over the background (same draw order).
         // Forwarded highlights stay out: the paint walk reaches the owning child itself.
@@ -1210,12 +1228,17 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
                 }
             }
         }
-        // Inline-label widgets emit their own text in `paint`; detached labels come from the
-        // base, exactly as the legacy default `paint_self` emits them.
-        if !Layout::inline_label(&self.inner) {
-            for tl in self.base_label_fallback() {
-                ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
-            }
+        // Own text with per-label font+bounds: the hatch view verbatim for hatched widgets
+        // (caveat: its contract includes raw container children — those few widgets keep the
+        // hatch until their hosts adopt the walk), else the standard own-labels bridge (prim
+        // text + the detached base label, one font, text_bounds or the scroll-ancestor clip).
+        let labels = if Paint::serves_legacy_labels(&self.inner) {
+            Paint::legacy_labels_with_font_and_bounds(&self.inner, self.content_rect(), ui)
+        } else {
+            self.own_labels_with_font_and_bounds(ui)
+        };
+        for (tl, font, bounds) in labels {
+            ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
         }
     }
 
@@ -1912,4 +1935,47 @@ mod tests {
         assert!(elem.as_menu_controller().is_none());
         assert!(elem.as_graph_controller().is_none());
     }
+    /// Phase 6: the paint walk's text prims carry the widget's font and clip rect (what the
+    /// display-list text path renders), not the bare `Paint::paint` text.
+    #[test]
+    fn paint_walk_text_carries_font_and_bounds() {
+        struct Tag;
+        impl Layout for Tag {}
+        impl Paint for Tag {
+            fn color(&self) -> [f32; 4] {
+                [0.0; 4]
+            }
+            fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+                ctx.text("hi", rect.x + 2.0, rect.y + 2.0, 12.0, [1, 2, 3]);
+            }
+            fn widget_font(&self) -> Option<String> {
+                Some("Mono:12".into())
+            }
+            fn text_bounds(&self, rect: Rect) -> Option<[f32; 4]> {
+                Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height])
+            }
+        }
+        impl Input for Tag {}
+
+        let mut ctx = UiContext::new();
+        let mut w = Box::new(Adapted::new(Tag));
+        let (id, ptr) = (w.id(), w.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        unsafe { (*ptr).set_rect(10.0, 20.0, 100.0, 30.0) };
+
+        let list = paint_tree(&ctx, ptr);
+        let texts: Vec<_> = list
+            .items
+            .iter()
+            .filter_map(|it| match &it.prim {
+                Prim::Text { text, font, bounds, .. } => Some((text.clone(), font.clone(), *bounds)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts.len(), 1, "one text prim, no plain duplicate");
+        assert_eq!(texts[0].0, "hi");
+        assert_eq!(texts[0].1.as_deref(), Some("Mono:12"), "widget_font attached");
+        assert_eq!(texts[0].2, Some([10.0, 20.0, 110.0, 50.0]), "text_bounds attached");
+    }
+
 }

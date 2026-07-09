@@ -776,9 +776,31 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `FontSystem`, the `TextItem` cache, `rebuild_layout`, and the scale/rebuild bookkeeping.
     Non-interactive, so no event surface. This is the reference shape for a minimal Phase 6
     app.
-  - **Still to do (per-app, roughly smallest-first):** wallpaper/screenaver (likely trivial),
+  - **6c — `cce-wallpaper` + `cce-screenaver` across; `display_list` gains `(size, scale)`.
+    DONE (wallpaper live-A/B AE=0; screensaver background-fill verified live, sim quads are
+    the same mechanical loop).** The Phase 6 frame entry point now receives the frame's
+    logical size and HiDPI scale like `view` did (fullscreen apps size geometry from it);
+    mechanical sweep across the eight implementors. Both apps' dead `TextItem` caches
+    deleted.
+  - **6d — the paint walk carries per-widget fonts + clip rects. DONE (179 tests; cce-graph
+    live A/B shows zero structural diff — all residual below the 8% translucency-noise
+    amplitude).** `Adapted::paint_self` no longer forwards `Paint::paint`'s plain Text prims:
+    it re-emits the geometry verbatim (through the ctx so the walk's offset/clip apply
+    once) and serves text as `text_with` prims from the SAME views the standard text bridges
+    use — `own_labels_with_font_and_bounds` (prim text + detached base label, `widget_font`,
+    `text_bounds` or the scroll-ancestor clip) or the 5s per-label hatch verbatim (caveat
+    noted in-code: the hatch contract includes raw container children). This makes a
+    `paint_tree` display list's text renderable-correct for migrated widgets, which is the
+    precondition for the seven adopters flipping `display_list_text`. Found and recorded on
+    the way: the LEGACY `Element::paint_self` default drains the child-aggregating
+    `text_labels` for legacy containers, so scene-path text double-emits under the walk for
+    trees that still contain Layer/Page/etc. — invisible today (text prims unrendered
+    without the opt-in), but it means an app can only flip `display_list_text` once its
+    tree is embedded-base-free. Consistent with the dissolution plan; revisit per app.
+  - **Still to do (per-app, roughly smallest-first):**
     the seven display_list() adopters (flip `display_list_text` + drop their TextItem
-    assembly, one at a time, each A/B'd), then the widget-tree apps (routed events + scene
+    assembly, one at a time, each A/B'd — precondition: embedded-base-free tree, see 6d),
+    then the widget-tree apps (routed events + scene
     layout + dissolving the embedded-base containers), the demo (`cce-ui/src/main.rs`) as the
     reference `Application`, and popover-occlusion for display-list text before any app with
     popovers flips the flag. Delete the legacy `view*`/`text_items` paths, the per-widget
