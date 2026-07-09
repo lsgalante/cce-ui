@@ -705,10 +705,44 @@ Constraint respected: **each crate still builds standalone** — the new core is
     changed 107k px within a build and matched across builds, so the event path is
     genuinely exercised. (The params-pane Circular-Pane dropdown not opening on click is
     the pre-existing app behavior recorded in 5o, identical in both builds.)
-  - **Still to do:** migrate the deferred leaves off `impl Element` onto the narrow traits
-    (per-widget, Phase 6 flavour): StatusBar (parent-coupled), Float3, LayoutPreview,
-    PreviewState (per-label fonts now expressible via the 5s labels hatch, or wait for
-    `Prim::Text` font+bounds); the embedded-base containers
+  - **5t — the deferred leaves: `Float3`, `LayoutPreview`, `PreviewState`, `StatusBar`.
+    DONE (live-A/B verified: cce-files byte-identical ×3 states, cce-designer params pane
+    byte-identical ×3 states, cce-system-settings byte-identical whole-window).**
+    Consumer survey first (it reshaped the work): every external `Float3` grep hit is the
+    MATH type (designer `GAttribute::Float3` / wgpu `Float32x3`) — the widget's only
+    consumer is ParametersBg, whose pub-field reach (`values`/`mins`/`maxs`/`edit_buffer`/
+    `editing_idx`) flows through `Deref` unchanged; LayoutPreview has ZERO consumers
+    (definition + re-exports only); PreviewState is cce-files' preview pane; StatusBar has
+    six construction sites across five apps plus the demo.
+    **Float3**: rect cached via `rect_assigned` (`get_row_rects` is pub API with no rect
+    param), readout-edit + track-drag into `on_event`/the drag hooks, the readout click's
+    legacy `focus::set_focused(self)` rides `EventCtx::request_focus`, commit-on-unfocus via
+    the FocusOut arm. **LayoutPreview**: mechanical (paint = quads + text; the duplicated
+    SimNode match collapsed into one helper). **PreviewState**: the widget the 5s labels
+    hatch was built for — canvas quads flow from `paint`, canvas labels (per-label
+    monospace for content lines) through `serves_legacy_labels`; plain `text_labels` stays
+    EMPTY like legacy (emitting the text as prims too would double-render under container
+    aggregation — the legacy scene path showed no text either, preserved). The adapter
+    gains a blanket `impl Default for Adapted<W: Default>` (cce-files constructs it via
+    `Default`); the app's struct-literal update became field mutation (the private cached
+    rect can't ride functional-update syntax — and now survives updates instead of zeroing
+    until the next layout pass). **StatusBar**: the MenuBar parent-coupling pattern
+    (tracked parent, backplate-aware color/text-color/blur, corners-against-parent at the
+    parent's radius) plus ONE new hook — **`Paint::text_items()`**: pre-shaped glyphon
+    buffers for the legacy `get_text_items` path, which prim-derived text cannot serve (it
+    returns borrows of widget-owned buffers); cce-status-interface drives the bar by hand
+    (`prepare_text` → `get_text_items` into its own paint) and data-editor/system-settings
+    host it as a Backplate child. `inline_label` keeps `Element::set_text`'s base-label
+    write from leaking a detached label. Deliberately preserved asymmetry: NO
+    `widget_font`, so the container text path keeps rendering the bar's text in the
+    default font while the buffer path uses the statusbar font, exactly as legacy.
+    Verified: 177 tests (Float3 readout/drag flow; StatusBar manual-host pipeline —
+    covering the path of the one app, cce-status-interface, not A/B'd live: it is the
+    user's session status bar). Sweep: 4 app repos (files: field + literal→mutation;
+    data-editor: field + one raw `*mut StatusBar` cast → `as_ptr_mut()`; system-settings +
+    status-interface: field types).
+  - **Phase 5 widget migration COMPLETE.** Everything remaining on `impl Element` is
+    embedded-base machinery by design: the containers
     (Layer/Container/Page/Plate/Backplate/ScrollBox/List/…) dissolve via Phase 6 scene
     adoption instead. Then delete `Element` + `Adapted` once the last widget is across, at
     which point the `as_*_controller` pairs and the `Input` capability hooks die together
