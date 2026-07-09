@@ -160,10 +160,10 @@ fn build_tree(
 pub struct TreeList {
     pub base: Widget,
     pub scroll_box: ScrollBox,
-    pub search_box: TextBox,
+    pub search_box: crate::widget::Adapted<TextBox>,
     pub add_key_btn: crate::widget::Adapted<Button>,
     pub add_key_popover_open: bool,
-    pub add_key_popover_box: TextBox,
+    pub add_key_popover_box: crate::widget::Adapted<TextBox>,
     pub new_key_path_request: Option<String>,
     pub flat_keys: Vec<(String, serde_json::Value)>,
     pub annotations: Vec<Option<String>>,
@@ -179,7 +179,7 @@ pub struct TreeList {
     pub last_scroll_y: f32,
     pub scrollbar_activity_timer: f32,
     pub deleted_key_path: Option<String>,
-    pub edit_box: TextBox,
+    pub edit_box: crate::widget::Adapted<TextBox>,
     pub editing_key_idx: Option<usize>,
     pub double_click_timer: Option<(std::time::Instant, usize)>,
     pub rename_request: Option<(String, String)>,
@@ -540,7 +540,7 @@ impl Element for TreeList {
                         let self_ptr = self as *mut Self;
                         let self_id = self.base.id();
                         unsafe {
-                            let eb_ptr = &mut (*self_ptr).edit_box as *mut TextBox as *mut (dyn Element + 'static);
+                            let eb_ptr = (*self_ptr).edit_box.as_ptr_mut();
                             let eb_id = (*self_ptr).edit_box.base().unwrap().id();
                             ctx.register_widget(eb_id, eb_ptr);
                             ctx.link_ids(self_id, eb_id);
@@ -1159,7 +1159,7 @@ impl Element for TreeList {
             let self_ptr = self as *mut Self;
             let self_id = self.base.id();
             unsafe {
-                let sb_ptr = &mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static);
+                let sb_ptr = (*self_ptr).search_box.as_ptr_mut();
                 let sb_id = (*self_ptr).search_box.base().unwrap().id();
                 ctx.register_widget(sb_id, sb_ptr);
                 ctx.link_ids(self_id, sb_id);
@@ -1171,7 +1171,7 @@ impl Element for TreeList {
                 ctx.link_ids(self_id, btn_id);
                 (*btn_ptr).set_parent(Some(self_ptr), ctx);
 
-                let pop_ptr = &mut (*self_ptr).add_key_popover_box as *mut TextBox as *mut (dyn Element + 'static);
+                let pop_ptr = (*self_ptr).add_key_popover_box.as_ptr_mut();
                 let pop_id = (*self_ptr).add_key_popover_box.base().unwrap().id();
                 ctx.register_widget(pop_id, pop_ptr);
                 ctx.link_ids(self_id, pop_id);
@@ -1184,13 +1184,13 @@ impl Element for TreeList {
         let mut list = self.children.clone();
         let self_ptr = self as *const Self as *mut Self;
         unsafe {
-            list.push(&mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static));
+            list.push((*self_ptr).search_box.as_ptr_mut());
             list.push((*self_ptr).add_key_btn.as_ptr_mut());
             if (*self_ptr).add_key_popover_open {
-                list.push(&mut (*self_ptr).add_key_popover_box as *mut TextBox as *mut (dyn Element + 'static));
+                list.push((*self_ptr).add_key_popover_box.as_ptr_mut());
             }
             if (*self_ptr).editing_key_idx.is_some() {
-                list.push(&mut (*self_ptr).edit_box as *mut TextBox as *mut (dyn Element + 'static));
+                list.push((*self_ptr).edit_box.as_ptr_mut());
             }
         }
         list

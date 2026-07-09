@@ -40,7 +40,7 @@ pub struct List {
     pub last_click_time: Option<std::time::Instant>,
     pub search_enabled: bool,
     pub search_visible: bool,
-    pub search_box: TextBox,
+    pub search_box: crate::widget::Adapted<TextBox>,
 }
 
 impl List {
@@ -690,7 +690,7 @@ impl Element for List {
             let self_ptr = self as *mut Self;
             let self_id = self.base.id();
             unsafe {
-                let sb_ptr = &mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static);
+                let sb_ptr = (*self_ptr).search_box.as_ptr_mut();
                 let sb_id = (*self_ptr).search_box.base().unwrap().id();
                 ctx.register_widget(sb_id, sb_ptr);
                 ctx.link_ids(self_id, sb_id);
@@ -703,7 +703,7 @@ impl Element for List {
         if self.search_enabled && self.search_visible {
             let self_ptr = self as *const Self as *mut Self;
             unsafe {
-                list.push(&mut (*self_ptr).search_box as *mut TextBox as *mut (dyn Element + 'static));
+                list.push((*self_ptr).search_box.as_ptr_mut());
             }
         }
         list

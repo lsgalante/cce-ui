@@ -6,8 +6,8 @@ use crate::widget::TextLabel;
 
 #[derive(Clone, Debug)]
 pub struct KeybindRow {
-    pub key_input: TextBox,
-    pub cmd_input: TextBox,
+    pub key_input: crate::widget::Adapted<TextBox>,
+    pub cmd_input: crate::widget::Adapted<TextBox>,
     pub remove_button: Adapted<Button>,
 }
 

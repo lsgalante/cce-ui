@@ -12,7 +12,7 @@ pub struct InstancedControl {
 
 #[derive(Clone, Debug)]
 pub enum InstancedWidget {
-    TextBox(TextBox),
+    TextBox(Adapted<TextBox>),
     Spinbox(Adapted<Spinbox>),
     Toggle(Adapted<Toggle>),
     Slider(Adapted<Slider>),
@@ -130,7 +130,7 @@ impl InstancedWidget {
 
 #[derive(Clone, Debug)]
 pub struct MultiControlRow {
-    pub key_input: TextBox,
+    pub key_input: Adapted<TextBox>,
     pub type_dropdown: Adapted<Dropdown>,
     pub value_widget: InstancedWidget,
     pub remove_button: Adapted<Button>,

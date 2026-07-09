@@ -93,6 +93,27 @@ pub trait Layout {
         false
     }
 
+    /// Whether the adapter's hit test substitutes the base row rect (`row_x`/`row_w`, pushed in
+    /// by row-layout hosts via `set_row_rect`) plus the side-label inset — the legacy
+    /// `Element::hit_test` default geometry. Migrated controls so far dropped it (accepted
+    /// drift); TextBox restores it (cce-files' save-name box relies on row hits). Default: off,
+    /// keeping the other migrated widgets exactly as they shipped.
+    fn hit_row_rect(&self) -> bool {
+        false
+    }
+
+    /// Adjust a row-rect assignment before it lands on the base (`Element::set_row_rect` —
+    /// TextBox clamps the row width to its `width`/`max_width`). Default: identity.
+    fn adjust_row_rect(&self, x: f32, w: f32) -> (f32, f32) {
+        (x, w)
+    }
+
+    /// The final base rect landed from a `set_rect`, visible or not — unlike
+    /// [`arrange_children`](Layout::arrange_children), which the adapter gates on visibility.
+    /// TextBox caches it (its cursor/scroll math reads the laid-out rect between events) and
+    /// re-clamps its scroll, the legacy `set_rect` side effect. Default: ignore.
+    fn rect_assigned(&mut self, _rect: Rect) {}
+
     // --- Container concern (transitional). Legacy containers own `Vec<*mut dyn Element>`
     // children (child-arranging `set_rect` has no ctx to reach the tree) and every one
     // hand-copies the same subtree plumbing: geometry/text aggregation, tick/popover/text-item
@@ -251,6 +272,21 @@ pub trait Paint {
     fn text_bounds(&self, _rect: Rect) -> Option<[f32; 4]> {
         None
     }
+
+    /// Per-frame text shaping against the app's `FontSystem` (legacy `Element::prepare_text`
+    /// overrides). TextBox measures its glyph advances here — load-bearing for cursor↔pixel
+    /// mapping, not just a render cache. Receives the laid-out content rect. Default: nothing
+    /// to shape.
+    fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem, _rect: Rect) {}
+
+    /// Whether the adapter re-enables the legacy shared focus/hover highlight overlay
+    /// (`Element::highlight_quad`'s default) for this widget. The adapter suppresses it for
+    /// migrated widgets — matching the `None` overrides most legacy controls carried — but
+    /// legacy TextBox kept the default: the focused editor gets the primary-highlight tint
+    /// over its background (data-editor's teal editing wash). Default: suppressed.
+    fn legacy_focus_highlight(&self) -> bool {
+        false
+    }
 }
 
 /// What an event handler may reach beyond its own state — the RFC §3.5 `EventCtx`, grown as
@@ -377,6 +413,43 @@ pub trait Input {
     /// The widget's value as an integer (legacy `Element::value`).
     fn value(&self) -> i32 {
         0
+    }
+
+    // --- Clipboard/selection surface (the context menu's Cut/Copy/Paste/Select-All actions
+    // call these on their target Element). The defaults replicate the `Element` defaults
+    // byte-for-byte (whole-value copy through the value-string pair), so widgets migrated
+    // before these hooks existed keep their exact behavior; TextBox overrides with real
+    // selection-aware implementations.
+
+    fn cut_selection(&mut self) -> bool {
+        if let Some(val) = self.value_string() {
+            crate::widget::clipboard::copy_to_clipboard(&val);
+            self.set_value_string("")
+        } else {
+            false
+        }
+    }
+    fn copy_selection(&self) {
+        if let Some(val) = self.value_string() {
+            crate::widget::clipboard::copy_to_clipboard(&val);
+        }
+    }
+    fn paste_from_clipboard(&mut self) -> bool {
+        if let Some(text) = crate::widget::clipboard::read_from_clipboard() {
+            self.set_value_string(&text)
+        } else {
+            false
+        }
+    }
+    fn select_all(&mut self) {}
+    fn clear_text(&mut self) {}
+
+    /// Whether direct `focus()`/`unfocus()` calls flip the base `focused` flag. Legacy widgets
+    /// differ: most set it in their `focus` overrides, but TextBox never did — its detached
+    /// label must not color as focused. Default: flip it (what every widget migrated so far
+    /// has shipped with).
+    fn tracks_base_focus(&self) -> bool {
+        true
     }
 
     /// Selection state pushed in by list/row hosts (legacy `Element::set_selected`).
@@ -873,6 +946,8 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         if self.visible() {
+            let rect = self.content_rect();
+            Paint::prepare_text(&mut self.inner, fs, rect);
             for child in self.visible_children() {
                 unsafe { (*child).prepare_text(fs) };
             }
@@ -928,6 +1003,10 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         self.base.y = r.y;
         self.base.w = r.width;
         self.base.h = r.height + inflation;
+        // Ungated rect notification (TextBox re-clamps scroll on every assignment, hidden or
+        // not — the legacy `set_rect` side effect).
+        let landed = Rect { x: self.base.x, y: self.base.y, width: self.base.w, height: self.base.h };
+        Layout::rect_assigned(&mut self.inner, landed);
         // Containers position their children from the assigned rect (legacy `set_rect`
         // overrides); hidden containers skip it, like the legacy impls.
         if self.visible {
@@ -959,9 +1038,26 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
 
     /// Narrow widgets own every pixel they draw through [`Paint::paint`]; the legacy shared
     /// hover-highlight overlay is suppressed (matching what most control widgets' `None`
-    /// overrides do today).
-    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
-        None
+    /// overrides do today) — unless the widget opts back in
+    /// ([`Paint::legacy_focus_highlight`], TextBox), in which case this replicates the
+    /// `Element` default byte-for-byte: primary tint when ctx-focused (or active), secondary
+    /// when hovered, over the row-substituted, side-label-inset span.
+    fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
+        if !Paint::legacy_focus_highlight(&self.inner) {
+            return None;
+        }
+        let is_focused = ctx.is_focused_addr(self as *const Self as *const () as usize);
+        let hc = if is_focused {
+            crate::colors::highlight_primary_color()
+        } else if self.base.hovered {
+            crate::colors::HIGHLIGHT_SECONDARY
+        } else {
+            return None;
+        };
+        let label_x = Element::label_x_offset(self);
+        let hx = if self.base.row_w > 0.0 { self.base.row_x } else { self.base.x } + label_x;
+        let hw = if self.base.row_w > 0.0 { self.base.row_w } else { self.base.w } - label_x;
+        Some((hx, self.base.y, hw, self.base.h, hc))
     }
 
     /// Report the *inner* type's name, not `Adapted<W>`: runtime type-name matching (e.g.
@@ -997,8 +1093,15 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn widget_font(&self) -> Option<String> {
         Paint::widget_font(&self.inner)
     }
-    fn paint_self(&self, _ui: &UiContext, ctx: &mut PaintCtx) {
+    fn paint_self(&self, ui: &UiContext, ctx: &mut PaintCtx) {
         Paint::paint(&self.inner, self.content_rect(), ctx);
+        // The legacy default `paint_self` drained `all_quads`, which carries the focus
+        // highlight — replicate for opt-in widgets, over the background (same draw order).
+        if let Some((hx, hy, hw, hh, hc)) = Element::highlight_quad(self, ui) {
+            if hc != crate::colors::HIGHLIGHT_SECONDARY {
+                ctx.quad(Rect { x: hx, y: hy, width: hw, height: hh }, hc);
+            }
+        }
         // Inline-label widgets emit their own text in `paint`; detached labels come from the
         // base, exactly as the legacy default `paint_self` emits them.
         if !Layout::inline_label(&self.inner) {
@@ -1103,6 +1206,13 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             return Vec::new();
         }
         let mut quads = self.extra_quads();
+        // The `Element` default's highlight inclusion (secondary/hover tint excluded), live
+        // only for widgets that opt into the legacy overlay.
+        if let Some(hq) = Element::highlight_quad(self, ctx) {
+            if hq.4 != crate::colors::HIGHLIGHT_SECONDARY {
+                quads.push(hq);
+            }
+        }
         if self.visible() {
             // Container aggregation, replicating the shared legacy loop (Layer, Switcher):
             // children contribute their plain quads, except a rounded-cornered child's
@@ -1176,6 +1286,29 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     fn set_selected(&mut self, selected: bool) {
         Input::set_selected(&mut self.inner, selected)
+    }
+    fn cut_selection(&mut self) -> bool {
+        Input::cut_selection(&mut self.inner)
+    }
+    fn copy_selection(&self) {
+        Input::copy_selection(&self.inner)
+    }
+    fn paste_from_clipboard(&mut self) -> bool {
+        Input::paste_from_clipboard(&mut self.inner)
+    }
+    fn select_all(&mut self) {
+        Input::select_all(&mut self.inner)
+    }
+    fn clear_text(&mut self) {
+        Input::clear_text(&mut self.inner)
+    }
+    /// Row-rect assignment (row-layout hosts): apply the widget's clamp
+    /// ([`Layout::adjust_row_rect`] — TextBox's `width`/`max_width`), then the base write the
+    /// `Element` default does.
+    fn set_row_rect(&mut self, x: f32, w: f32) {
+        let (rx, rw) = Layout::adjust_row_rect(&self.inner, x, w);
+        self.base.row_x = rx;
+        self.base.row_w = rw;
     }
     fn draggable(&self) -> bool {
         Input::draggable(&self.inner, self.content_rect())
@@ -1318,16 +1451,22 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
     }
 
-    /// Focus set/cleared directly (hosts call `w.focus()`/`w.unfocus()`): keep the base flag and
-    /// tell the widget via the same `FocusIn`/`FocusOut` events the router would send.
+    /// Focus set/cleared directly (hosts call `w.focus()`/`w.unfocus()`): keep the base flag
+    /// (unless the widget opts out — [`Input::tracks_base_focus`], TextBox's legacy `focus`
+    /// never set it) and tell the widget via the same `FocusIn`/`FocusOut` events the router
+    /// would send.
     fn focus(&mut self) {
-        self.base.focused = true;
+        if Input::tracks_base_focus(&self.inner) {
+            self.base.focused = true;
+        }
         let self_ptr = self.as_ptr_mut();
         let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: Some(self_ptr) };
         Input::on_event(&mut self.inner, &Event::FocusIn, &mut ectx);
     }
     fn unfocus(&mut self) {
-        self.base.focused = false;
+        if Input::tracks_base_focus(&self.inner) {
+            self.base.focused = false;
+        }
         let self_ptr = self.as_ptr_mut();
         let mut ectx = EventCtx { rect: self.content_rect(), id: self.base.id(), ui: None, self_ptr: Some(self_ptr) };
         Input::on_event(&mut self.inner, &Event::FocusOut, &mut ectx);
@@ -1355,6 +1494,19 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             return false;
         }
         let (x, y, w, h) = self.rect();
+        // Row-hit opt-in ([`Layout::hit_row_rect`]): replicate the legacy `hit_test` default's
+        // geometry — substitute the host-pushed row span and inset by the side label — before
+        // the narrow test. The width<=0 reject also comes from that default.
+        if Layout::hit_row_rect(&self.inner) {
+            if w <= 0.0 || h <= 0.0 {
+                return false;
+            }
+            let (mut hx, mut hw) = if self.base.row_w > 0.0 { (self.base.row_x, self.base.row_w) } else { (x, w) };
+            let label_x = Element::label_x_offset(self);
+            hx += label_x;
+            hw -= label_x;
+            return Input::hit(&self.inner, Rect { x: hx, y, width: hw, height: h }, px, py);
+        }
         Input::hit(&self.inner, Rect { x, y, width: w, height: h }, px, py)
     }
 
