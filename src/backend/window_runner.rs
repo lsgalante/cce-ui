@@ -1597,10 +1597,12 @@ pub trait Application: Sized + 'static {
 
     /// Opt into the single paint path (Phase 3): return a display list for this frame and `render()`
     /// draws its geometry via one batched, GPU-scissor-clipped pass instead of the legacy
-    /// `view*` geometry. Default `None` keeps the legacy path. Text, overlays, and `custom_vertices`
-    /// still go through their existing paths. Typically implemented as
+    /// `view*` geometry. Default `None` keeps the legacy path. Overlays and `custom_vertices`
+    /// still go through their existing paths; text renders from the list when
+    /// [`display_list_text`](Application::display_list_text) opts in. Receives the frame's
+    /// logical size and HiDPI scale, like `view`. Typically implemented as
     /// `Some(cce_ui::scene::painter::paint_tree(&self.ui_context, root_ptr))`.
-    fn display_list(&mut self) -> Option<crate::scene::paint::DisplayList> {
+    fn display_list(&mut self, _size: LogicalSize, _scale: f64) -> Option<crate::scene::paint::DisplayList> {
         None
     }
 
@@ -1815,7 +1817,7 @@ impl<A: Application> EngineState<A> {
         // Phase 3 single paint path: when the app provides a display list, its geometry replaces the
         // legacy view* geometry and is drawn as batched, GPU-scissor-clipped runs. Default `None`
         // keeps the legacy path byte-for-byte.
-        let display_list = self.inner.as_mut().unwrap().display_list();
+        let display_list = self.inner.as_mut().unwrap().display_list(LogicalSize::new(logical_w, logical_h), scale_factor);
 
         // 1. Build the frame's DisplayList — from the app's display_list() when provided, otherwise
         // by wrapping its legacy view*/view_vectors geometry — then tessellate it as one path. This
