@@ -956,13 +956,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
     the dissolved single-draw is the correct rendering. Remaining in fonts: `ScrollBox`
     (mid-panel scroll state/scrollbar) and `List` (browse-list scroll/frame) — the last
     two embedded-base types in the app.
+  - **6q — fonts' ScrollBox + List dissolved: cce-fonts is FULLY EMBEDDED-BASE-FREE.
+    DONE (live-verified: wheel scroll, scrollbar track-jump lands proportionally, family
+    click after deep scroll + scroll_to_index, alphabet re-render in the new family).**
+    Both were pure scroll frames in this app (List with columns=None; the rows are
+    standalone Buttons), so they reduce to one app-owned `ScrollRegion` (~150 lines):
+    scroll state, wheel, thumb-grab/track-jump/drag, hover-scoped keyboard scrolling,
+    item-y math with List's silently adjusted item height (max(24, list font + 14)), and
+    bg/track/thumb prims. The bg is a single list_bg layer — the legacy leaf-walk
+    stacked rounded + plain copies (the translucent double-compositing class again);
+    residual A/B delta is a 2px bottom-edge strip.
   - **Still to do:**
-    dissolve fonts' ScrollBox + List, colors' and files' roots, and settings' tree
-    (Switcher/Page/SectionContainer/ScrollBox — the deep-composition set); routed events
-    + scene layout for the widget-tree apps; the demo (`cce-ui/src/main.rs`) as the
-    reference `Application`. Delete the legacy `view*`/`text_items` paths, the
-    per-widget text getters, and finally `Element` + `Adapted` once the last app is
-    across.
+    colors' and files' roots, and settings' tree (Switcher/Page/SectionContainer/
+    ScrollBox — the deep-composition set); routed events + scene layout for the
+    widget-tree apps; the demo (`cce-ui/src/main.rs`) as the reference `Application`.
+    Delete the legacy `view*`/`text_items` paths, the per-widget text getters, and
+    finally `Element` + `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
