@@ -877,16 +877,25 @@ Constraint respected: **each crate still builds standalone** — the new core is
     registration) moved into `display_list`; `rebuild_text_items` shrank to a
     widget-state refresh (rebuild_tree, prepare_text, statusbar text); the toolbar file
     label is a prim; `add_element_labels` and the TextItem cache deleted (−240 lines).
+  - **6j — `cce-graph` flips `display_list_text`. DONE (live-verified: static A/B
+    residual is only the uniform ~2px engine line-height text shift; node selection,
+    View-menu popover occluding the node beneath, control-panel toggle with its
+    multi-line info text via the 6i container fix).** Same recipe as 6i; the app
+    `FontSystem` deleted outright (no prepare_text dependency). Also fixed a latent
+    Phase 3 loss found on the way: the loaded-image pixel quads and selection borders
+    were pushed into `view()`'s plain quads, which the backend DISCARDS when
+    `display_list` returns Some — images had only rendered under `CCE_LEGACY_PAINT`
+    since the Phase 3 adoption; they now emit into the display list itself.
   - **Still to do (per-app):**
-    the last two display_list() adopters — fonts, graph — flip `display_list_text`
-    (one at a time, each A/B'd; the 6d trap no longer blocks them). cce-fonts still
-    NEEDS system fonts in the render FontSystem for its previews (engine's is
-    bundled-only) — that wants its own design (per-app font loading or an app-provided
-    FontSystem hook). Then the widget-tree apps (routed events + scene layout +
-    dissolving the embedded-base containers), the demo (`cce-ui/src/main.rs`) as the
-    reference `Application`. Delete the legacy `view*`/`text_items` paths, the
-    per-widget text getters, and finally `Element` + `Adapted` once the last app is
-    across.
+    the last display_list() adopter — cce-fonts — flips `display_list_text` once the
+    render-FontSystem question is settled: its previews NEED system fonts, and the
+    engine's render FontSystem is bundled-only. That wants its own design (per-app
+    system-font loading for the engine — e.g. an `Application` hook requesting
+    `create_font_system_with_system_fonts` — or an app-provided FontSystem). Then the
+    widget-tree apps (routed events + scene layout + dissolving the embedded-base
+    containers), the demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete
+    the legacy `view*`/`text_items` paths, the per-widget text getters, and finally
+    `Element` + `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
