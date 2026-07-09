@@ -1000,12 +1000,34 @@ Constraint respected: **each crate still builds standalone** — the new core is
     consumer; fix when settings' popovers move to the 6l ui_context-only pattern.
     The root's `with_border` was never rendered (a rounded Backplate emits no plain
     bg quad; the border branch fires only on plain bg quads) — dropped, not ported.
+  - **6t — settings' popovers + context menu draw INTO the frame;
+    `Application::draws_own_popovers` lands. DONE (live-verified: dropdown popover
+    in-window with page geometry occluded beneath, item click switches pages both
+    ways, spinbox right-click context menu at cursor with dl-text occluded beneath,
+    dismissal).** This fixes the 6s finding at the source: the engine's render-only
+    xdg popup anchored at the widget's bottom edge regardless of the app's open-upward
+    popover rect, so settings' page popover displayed BELOW the window while clicks
+    landed on the app-side in-window rect. The app now runs the same
+    `render_popovers` collector into its own tuple stream (appended above window/
+    page/search content; kept out of the scrollable vecs so the wheel fast-path can't
+    shift popover content) and deletes the override. Page-widget popovers
+    (notifications/fonts menus) shift by −scroll_y — the subtraction the popup
+    positioner used to apply — keeping display aligned with hit-testing under scroll.
+    Engine: `draws_own_popovers` (default false) gates BOTH popup spawn triggers (the
+    global popover registry and global context-menu visibility), and under the flag
+    `render()` adds the visible context menu's rect to the dl-text occlusion overlays
+    (the menu is engine-global state, not a `ui_context` popover; its own labels are
+    exempt via bounds == rect). Remaining popup-path consumers: cce-data-editor and
+    cce-text-editor (`render_popovers` overrides) — the popup surface, `ActivePopup`,
+    `PopoverCollector`, and this flag all go away once they draw their own.
   - **Still to do:**
     settings' page tree (Switcher/Page/SectionContainer/ScrollBox — the
-    deep-composition set; the root and status bar are gone as of 6s); files' internal
-    containers (splitters/BrowseContainer/List) and data-editor's SplitBox/TreeList
-    when their turns come; routed events + scene layout for the widget-tree apps; the
-    demo (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
+    deep-composition set; the root and status bar are gone as of 6s, popovers
+    in-frame as of 6t); data-editor + text-editor off the engine popup path, then
+    delete the popup surface machinery; files' internal containers
+    (splitters/BrowseContainer/List) and data-editor's SplitBox/TreeList when their
+    turns come; routed events + scene layout for the widget-tree apps; the demo
+    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
     `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
     `Adapted` once the last app is across.
 
