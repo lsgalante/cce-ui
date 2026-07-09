@@ -226,6 +226,64 @@ fn make_text_buffer_with_font(fs: &mut FontSystem, text: &str, size: f32, font: 
     get_text_buffer(fs, text, size, font)
 }
 
+/// The popover-occlusion clamp shared by the default [`Application::text_areas`] mapping and
+/// the display-list text path: clip a text item's bounds so it does not bleed through an open
+/// popover's plate. A text item whose own bounds coincide with a popover rect IS that popover's
+/// text and is left alone; anything else that intersects gets clamped horizontally toward
+/// whichever side of the popover it starts on.
+fn popover_occlusion_clamp(
+    overlay_rects: &[(f32, f32, f32, f32)],
+    ti: &TextItem,
+    scale_f32: f32,
+    item_bounds: &mut TextBounds,
+) {
+    for &(ox, oy, ow, oh) in overlay_rects {
+        let ol = (ox * scale_f32).round() as i32;
+        let ot = (oy * scale_f32).round() as i32;
+        let or = ((ox + ow) * scale_f32).round() as i32;
+        let ob = ((oy + oh) * scale_f32).round() as i32;
+
+        let is_overlay_text = if let Some([l, t, r, b]) = ti.bounds {
+            (l - ox).abs() < 1.0
+                && (t - oy).abs() < 1.0
+                && (r - (ox + ow)).abs() < 1.0
+                && (b - (oy + oh)).abs() < 1.0
+        } else {
+            false
+        };
+
+        if !is_overlay_text {
+            let tx_pixel = ti.x * scale_f32;
+            let ty_pixel = ti.y * scale_f32;
+
+            let mut text_w = 0.0f32;
+            let mut run_count = 0;
+            for run in ti.buffer.layout_runs() {
+                text_w = text_w.max(run.line_w);
+                run_count += 1;
+            }
+            let text_h = run_count as f32 * ti.buffer.metrics().line_height;
+
+            let actual_left = tx_pixel;
+            let actual_right = tx_pixel + text_w;
+            let actual_top = ty_pixel;
+            let actual_bottom = ty_pixel + text_h;
+
+            if actual_left < or as f32
+                && actual_right > ol as f32
+                && actual_top < ob as f32
+                && actual_bottom > ot as f32
+            {
+                if tx_pixel < ol as f32 {
+                    item_bounds.right = item_bounds.right.min(ol);
+                } else {
+                    item_bounds.left = item_bounds.left.max(or);
+                }
+            }
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -1520,51 +1578,7 @@ pub trait Application: Sized + 'static {
                 bounds
             };
 
-            for &(ox, oy, ow, oh) in &overlay_rects {
-                let ol = (ox * scale_f32).round() as i32;
-                let ot = (oy * scale_f32).round() as i32;
-                let or = ((ox + ow) * scale_f32).round() as i32;
-                let ob = ((oy + oh) * scale_f32).round() as i32;
-
-                let is_overlay_text = if let Some([l, t, r, b]) = ti.bounds {
-                    (l - ox).abs() < 1.0
-                        && (t - oy).abs() < 1.0
-                        && (r - (ox + ow)).abs() < 1.0
-                        && (b - (oy + oh)).abs() < 1.0
-                } else {
-                    false
-                };
-
-                if !is_overlay_text {
-                    let tx_pixel = ti.x * scale_f32;
-                    let ty_pixel = ti.y * scale_f32;
-
-                    let mut text_w = 0.0f32;
-                    let mut run_count = 0;
-                    for run in ti.buffer.layout_runs() {
-                        text_w = text_w.max(run.line_w);
-                        run_count += 1;
-                    }
-                    let text_h = run_count as f32 * ti.buffer.metrics().line_height;
-
-                    let actual_left = tx_pixel;
-                    let actual_right = tx_pixel + text_w;
-                    let actual_top = ty_pixel;
-                    let actual_bottom = ty_pixel + text_h;
-
-                    if actual_left < or as f32
-                        && actual_right > ol as f32
-                        && actual_top < ob as f32
-                        && actual_bottom > ot as f32
-                    {
-                        if tx_pixel < ol as f32 {
-                            item_bounds.right = item_bounds.right.min(ol);
-                        } else {
-                            item_bounds.left = item_bounds.left.max(or);
-                        }
-                    }
-                }
-            }
+            popover_occlusion_clamp(&overlay_rects, ti, scale_f32, &mut item_bounds);
 
             TextArea {
                 buffer: &ti.buffer,
@@ -1614,9 +1628,9 @@ pub trait Application: Sized + 'static {
     /// Text prims that those apps ALSO push as `TextItem`s — rendering both would double-draw,
     /// so each app flips this only when it stops pushing its own.
     ///
-    /// Known limitation (matching scope, not a bug): the legacy `text_areas` popover-occlusion
-    /// clipping is not applied to display-list text — text renders after all geometry, so a
-    /// popover's plate does not hide list text beneath it yet.
+    /// Display-list text gets the same popover-occlusion clamp as the legacy `text_areas`
+    /// mapping (`popover_occlusion_clamp`, driven by `ui_context().active_popovers`), so an
+    /// open popover's plate clips list text beneath it on both paths.
     fn display_list_text(&self) -> bool {
         false
     }
@@ -1938,9 +1952,21 @@ impl<A: Application> EngineState<A> {
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
         let mut areas = self.inner.as_ref().unwrap().text_areas(scale_f32, bounds);
         // Phase 6 display-list text — the default `text_areas` mapping (scale + surface clamp),
-        // without the popover-occlusion pass (see `Application::display_list_text`).
+        // including the popover-occlusion clamp against the app's registered popovers.
+        let mut dl_overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
+        if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
+            for popover_ptr in &ctx.active_popovers {
+                unsafe {
+                    if let Some(popover) = popover_ptr.as_ref() {
+                        if let Some((x, y, w, h)) = popover.popover_rect() {
+                            dl_overlay_rects.push((x, y, w, h));
+                        }
+                    }
+                }
+            }
+        }
         for ti in &self.dl_text_items {
-            let item_bounds = if let Some([l, t, r, b]) = ti.bounds {
+            let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
                 TextBounds {
                     left: ((l * scale_f32).round() as i32).clamp(0, bounds.right),
                     top: ((t * scale_f32).round() as i32).clamp(0, bounds.bottom),
@@ -1950,6 +1976,7 @@ impl<A: Application> EngineState<A> {
             } else {
                 bounds
             };
+            popover_occlusion_clamp(&dl_overlay_rects, ti, scale_f32, &mut item_bounds);
             areas.push(TextArea {
                 buffer: &ti.buffer,
                 left: (ti.x * scale_f32).round(),
