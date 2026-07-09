@@ -815,8 +815,21 @@ Constraint respected: **each crate still builds standalone** — the new core is
     neither the popover-occlusion gap nor the 6d embedded-base double-emit applies; its
     root `Backplate` remains for legacy layout/events (full definition-of-done still
     pending events + layout).
+  - **6f — `cce-files` flips `display_list_text`. DONE (live-A/B pixel-identical, AE=0;
+    dropdown popover + breadcrumb context menu re-verified live).** Same mechanical shape
+    as 6e: rebuild check into `display_list()`, `rebuild_layout`'s text tuples emitted as
+    `text_with` prims, `view*`/`CCE_LEGACY_PAINT`/TextItem assembly deleted. Two deltas
+    from colors: the app-side `FontSystem` STAYS (TextBox/List `prepare_text` measurement
+    still needs it — it's `create_font_system()`, bundled-only, so no 6e invisibility
+    hazard), and popover occlusion needed nothing from the engine — cce-files folds
+    popover/context-menu/dialog occlusion into each text's clip bounds app-side
+    (`occlude_against`, both axes), and those bounds ride along as prim bounds. That's
+    the general pattern for flat-list-bridge apps with popovers: the engine's missing
+    dl-text occlusion pass only blocks apps that rely on the DEFAULT `text_areas`
+    popover clamp (`ui_context().active_popovers`), e.g. widget-tree apps whose popovers
+    register through `register_popover`.
   - **Still to do (per-app, roughly smallest-first):**
-    the remaining six display_list() adopters (flip `display_list_text` + drop their TextItem
+    the remaining five display_list() adopters (flip `display_list_text` + drop their TextItem
     assembly, one at a time, each A/B'd — precondition: embedded-base-free tree, see 6d),
     then the widget-tree apps (routed events + scene
     layout + dissolving the embedded-base containers), the demo (`cce-ui/src/main.rs`) as the
