@@ -1020,16 +1020,36 @@ Constraint respected: **each crate still builds standalone** — the new core is
     exempt via bounds == rect). Remaining popup-path consumers: cce-data-editor and
     cce-text-editor (`render_popovers` overrides) — the popup surface, `ActivePopup`,
     `PopoverCollector`, and this flag all go away once they draw their own.
+  - **6u — settings' Switcher + Page dissolved; the System page comes back from the
+    dead. DONE (audio A/B: window tuple stream byte-identical, pixels AE=0;
+    live-verified across six pages — spinboxes, context menu, page switching, wheel
+    + fallback, System governor dropdown + scroll, notifications dropdown, fonts
+    textbox focus).** The top two tree layers reduce to app state: the active page
+    was always `app.current_page`, page scroll was already `scroll_y`, so what was
+    load-bearing was Page's scrollbar child, its out-of-bounds event gate, keyboard
+    scrolling, and being the propagate root. `dispatch_page_event` replicates the
+    routing (OOB gate with scrollbar-drag bypass; scrollbar first with the y-unshift,
+    then sections in reverse child order; PointerMove visits all, others stop at the
+    first handler) against the app-held SectionContainer clones; the scrollbar is an
+    app field whose quads collect into the window assembly's plain slot with the
+    legacy one-frame-stale content height. Found on the way: the System page's
+    widget-tree render path — the only page not on immediate-mode — SEGFAULTED at
+    launch on the pre-6u baseline (raw-pointer one-time section/label tree; the
+    use-after-free class this rebuild exists to kill). A complete immediate-mode
+    view for it existed in the file, never wired to the `AppPage` impl; 6u flips it
+    (labels → `sec.text`, InfoBoxes advance the section cursor, menus linked into
+    the clone sections like every other page). Pre-existing, deferred to the
+    List/ScrollBox dissolution: the processes lists' inner wheel is dead; the page
+    scrollbar's right half sits in the compositor's 8px edge-resize zone.
   - **Still to do:**
-    settings' page tree (Switcher/Page/SectionContainer/ScrollBox — the
-    deep-composition set; the root and status bar are gone as of 6s, popovers
-    in-frame as of 6t); data-editor + text-editor off the engine popup path, then
-    delete the popup surface machinery; files' internal containers
-    (splitters/BrowseContainer/List) and data-editor's SplitBox/TreeList when their
-    turns come; routed events + scene layout for the widget-tree apps; the demo
-    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
-    `view*`/`text_items` paths, the per-widget text getters, and finally `Element` +
-    `Adapted` once the last app is across.
+    settings' SectionContainer/ScrollBox/List (the last embedded bases there — the
+    sections are thin [header, container] dispatch shells now); data-editor +
+    text-editor off the engine popup path, then delete the popup surface machinery;
+    files' internal containers (splitters/BrowseContainer/List) and data-editor's
+    SplitBox/TreeList when their turns come; routed events + scene layout for the
+    widget-tree apps; the demo (`cce-ui/src/main.rs`) as the reference
+    `Application`. Delete the legacy `view*`/`text_items` paths, the per-widget
+    text getters, and finally `Element` + `Adapted` once the last app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
