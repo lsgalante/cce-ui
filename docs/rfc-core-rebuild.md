@@ -582,10 +582,35 @@ Constraint respected: **each crate still builds standalone** — the new core is
     (`{"action":"toggle_circular_pane"}`, `{"action":"menu_click","widget_idx":8,
     "menu_idx":2,"item_idx":2}`); the params-pane Circular-Pane dropdown not opening on
     click is pre-existing app behavior, identical in both builds.
+  - **5p — `Dropdown` (first popover widget through the 5o `Paint::popover`/`draw_popover`
+    surface). DONE (render-dump + live-A/B verified).** Slider label convention
+    (`inflates_label_rect=false`), `Control::control_label`'s +4px via
+    `detached_label_inset`, `gates_presses=false` (an open dropdown must see the outside
+    press that closes it), `opens_context_menu`, dynamic `z_order` (100 while open), and
+    focus parity bug-for-bug: `FocusIn` re-claims the global slot (direct `focus()` callers —
+    test-interface), `FocusOut` closes without releasing it. New adapter surface:
+    `Layout::intrinsic_measure_width` + an `Element::measure` override on `Adapted`
+    (identical to the `Element` default unless a widget opts in — preserves `auto_width`
+    measuring, which cce-system-settings sizes its page dropdown through). Parity decisions,
+    flagged: the public `parent` field stays direct-write-only (legacy `set_parent` never
+    wrote it — Ramp's dummy-ctx `set_parent` calls were silently discarded, so the Ramp
+    popover clamp and fade-blend parent color were dormant in production and stay dormant);
+    the backplate-concentric corner walk starts from a `parent_changed`-tracked pointer and
+    hops field-based legacy `parent(&dummy)` impls (exact for cce-graph's
+    Dropdown→Plate→Backplate chain; deep tree-only chains lose the adjustment); the row-rect
+    hit expansion is dropped, consistent with every migrated control. Verified: 169 tests,
+    full workspace builds, cce-system-settings fonts/notifications render dumps
+    content-identical (only the detached label's emission order shifts — adapter appends it
+    after the widget's prims), cce-graph startup/open/close live A/B **byte-identical**
+    (AE=0 open state on a clean run; run-to-run compositor translucency noise ~15k AE dwarfs
+    any residual), cce-fonts + cce-test-interface smoke-run. App sweep: 8 repos (graph,
+    text-editor, fonts, layout-interface, system-settings, data-editor, files,
+    test-interface) — field types to `Adapted<Dropdown>`, raw casts to `.as_ptr_mut()`,
+    two `&mut Dropdown` fn params in cce-files pages.
   - **Still to do:** migrate remaining widgets
     off `impl Element` onto the narrow traits (per-widget, Phase 6 flavour). Remaining:
     Paginator (embeds ButtonStrip + Vec<Page>), ParametersBg (real container, 1.8k lines),
-    and the deferred leaves (TextBox, Dropdown, StatusBar, Float3, LayoutPreview,
+    and the deferred leaves (TextBox, StatusBar, Float3, LayoutPreview,
     PreviewState); the embedded-base containers
     (Layer/Container/Page/Plate/Backplate/ScrollBox/List/…) dissolve via Phase 6 scene
     adoption instead. Then delete `Element` + `Adapted` once the last widget is across, at
