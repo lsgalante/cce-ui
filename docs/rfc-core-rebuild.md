@@ -1169,7 +1169,25 @@ Constraint respected: **each crate still builds standalone** — the new core is
     (renders_own_subtree) whose internal ScrollBox never leaks — porting it
     app-side buys no hazard reduction; it converts to narrow traits with the
     `Element` deletion instead. Held divider drag — user spot-check pending.
-  - **Still to do:** routed events + scene layout for the widget-tree apps; the demo
+  - **6ab — cce-text-editor on routed events + scene-solver layout: the FIRST app
+    fully on the target architecture, end to end. DONE (live-verified: menu-open
+    pixels match the pre-change capture at 0.13% = cursor sprite; menu item
+    click through the routed release; editor click focus; the
+    focused-border-after-outside-click oddity reproduced byte-identically on
+    the stashed pre-change binary — pre-existing).** Layout: the frame is a
+    plain `Arena<LayoutBox>` tree solved by `scene::layout::compute_layout` —
+    no Element in the loop, the solver used directly by the app (stretched
+    column [top bar fixed 42 / content grow padded 10 / status fixed 30], menu
+    a fixed leaf, editor growing) — and it reproduces the legacy hand-math
+    rects exactly, clamps included. Events: each handler builds one `Event` and
+    routes it through `UiContext::propagate_event` per root; the router owns
+    press hit-gating, Enter/Leave synthesis, drag-target recording, and
+    KeyInput-to-focused delivery, leaving the app take_change plumbing and
+    app-level shortcuts only. This is the shape the remaining widget-tree apps
+    (data-editor foremost) migrate toward, and the pattern the demo
+    (`cce-ui/src/main.rs`) should teach.
+  - **Still to do:** routed events + scene layout for data-editor (the last
+    widget-tree app on direct legacy-method dispatch); the demo
     (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
     `view*`/`text_items` paths, the per-widget text getters, the write-only
     global popovers registry, and finally `Element` + `Adapted` once the last
