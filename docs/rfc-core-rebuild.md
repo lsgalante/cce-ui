@@ -1283,8 +1283,21 @@ Constraint respected: **each crate still builds standalone** — the new core is
     exit 144, left the tree clean at the old file) — had to re-apply and commit
     immediately. Verify `git log`/`grep display_list` actually stuck before
     moving on.
-  - **Still to do:** migrate the three remaining legacy-path apps (email,
-    layout-interface, status-interface), then delete `view*`/`text_items` + the
+  - **6ai — cce-email across (4 of 6); the flip FIXED invisible list/detail text.
+    DONE (live-verified: inbox list of 3 emails, detail placeholder, and on click
+    the full detail view — subject/From/To/Date/body + Reply/Delete/Mark-Unread
+    toolbar).** view() body (all plain quads) → display_list() via a small
+    `__EmailQuadSink` shim mapping the ported quads.push/extend to PaintCtx::quad;
+    rebuild_text_items → emit_text_prims(&mut pc). The 6e face-ID class AGAIN
+    (create_font_system_with_system_fonts): the list rows, detail metadata/body,
+    and placeholder were all invisible — only the paginator tabs showed. Fix:
+    switch the app FontSystem to bundled create_font_system() (KEPT for the
+    TextBoxes' prepare_text measurement — now matching the engine render FS) and
+    render via prims. Note the AE-vs-baseline metric is misleading for these
+    invisible-text fixes (tiny % of dark-on-dark pixels change) — judge by
+    whether text APPEARS, not by AE.
+  - **Still to do:** migrate the two remaining legacy-path apps
+    (layout-interface, status-interface), then delete `view*`/`text_items` + the
     backend tuple-wrapping path, then the per-widget text getters, then
     `Element` + `Adapted`.
 
