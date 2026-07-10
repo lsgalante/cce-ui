@@ -2,7 +2,7 @@ use std::time::Instant;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_keyboard, delegate_pointer, delegate_registry,
-    delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window, delegate_output, delegate_xdg_popup,
+    delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window, delegate_output,
     delegate_layer,
     registry::{ProvidesRegistryState, RegistryState},
     output::{OutputHandler, OutputState},
@@ -31,32 +31,15 @@ use wayland_protocols::wp::pointer_gestures::zv1::client::{
     zwp_pointer_gesture_pinch_v1::{self, ZwpPointerGesturePinchV1},
     zwp_pointer_gestures_v1::{self as zwp_pointer_gestures, ZwpPointerGesturesV1},
 };
-use smithay_client_toolkit::shell::xdg::popup::{Popup, PopupHandler, PopupConfigure};
-use smithay_client_toolkit::shell::xdg::{XdgPositioner, XdgSurface};
-use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_positioner::{Anchor, Gravity, ConstraintAdjustment};
-
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
 use glyphon::{
-    Cache, FontSystem, Resolution, TextArea,
-    TextBounds, Viewport, Buffer, Attrs, Metrics,
+    FontSystem, Resolution, TextArea,
+    TextBounds, Buffer, Attrs, Metrics,
 };
 use crate::widget::{Element, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey, Position};
-use crate::wayland::{WaylandSurfaceHandle, detect_scale_factor};
+use crate::wayland::detect_scale_factor;
 use crate::backend::WgpuAdapter;
-
-pub struct ActivePopup {
-    pub sctk_popup: Popup,
-    pub wgpu_surface: wgpu::Surface<'static>,
-    pub config: wgpu::SurfaceConfiguration,
-    pub logical_width: f32,
-    pub logical_height: f32,
-    pub configured: bool,
-    pub viewport: Viewport,
-    pub x: f32,
-    pub y: f32,
-    pub vertex_buffer: Option<wgpu::Buffer>,
-}
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 struct BufferCacheKey {
@@ -240,10 +223,6 @@ pub fn get_text_buffer_attrs(
     });
 
     buf
-}
-
-fn make_text_buffer_with_font(fs: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
-    get_text_buffer(fs, text, size, font)
 }
 
 /// The popover-occlusion clamp shared by the default [`Application::text_areas`] mapping and
@@ -1547,7 +1526,6 @@ pub trait Application: Sized + 'static {
     fn text_items(&self) -> &[TextItem] {
         &[]
     }
-    fn render_popovers(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
     fn input_regions(&self) -> Option<Vec<(i32, i32, i32, i32)>> {
         None
     }
@@ -1667,15 +1645,6 @@ pub trait Application: Sized + 'static {
     fn load_system_fonts(&self) -> bool {
         false
     }
-
-    /// Phase 6 opt-in: this app draws its popovers and context menu INTO its display list
-    /// (registered in `ui_context` for the occlusion clamp) — the engine must NOT spawn its
-    /// render-only xdg popup for globally-registered popovers or the global context menu.
-    /// Default `false`: unmigrated apps keep the popup surface + `render_popovers` collector
-    /// path. The popup path (and this flag) go away once its last consumer is across.
-    fn draws_own_popovers(&self) -> bool {
-        false
-    }
 }
 
 pub struct PressedKey {
@@ -1739,7 +1708,6 @@ pub struct EngineState<A: Application> {
     pub logo_pressed: bool,
     pub pressed_key: Option<PressedKey>,
     pub sender: calloop::channel::Sender<A::Message>,
-    pub active_popup: Option<ActivePopup>,
     pub current_cursor_icon: Option<CursorIcon>,
     pub qh: QueueHandle<EngineState<A>>,
     pub just_configured: bool,
@@ -2008,10 +1976,11 @@ impl<A: Application> EngineState<A> {
                 }
             }
         }
-        // An app drawing its own context menu into the list (draws_own_popovers) gets the
-        // same occlusion for it: the menu rect clamps list text beneath, and the menu's own
-        // labels are exempt because they carry bounds equal to the rect.
-        if self.inner.as_ref().unwrap().draws_own_popovers() && crate::widget::context_menu::is_visible() {
+        // The global context menu draws into the app's display list (the render-only xdg
+        // popup is gone), so it gets the same occlusion: the menu rect clamps list text
+        // beneath, and the menu's own labels are exempt because they carry bounds equal
+        // to the rect.
+        if crate::widget::context_menu::is_visible() {
             dl_overlay_rects.push((
                 crate::widget::context_menu::x(),
                 crate::widget::context_menu::y(),
@@ -2137,139 +2106,7 @@ impl<A: Application> EngineState<A> {
 
         adapter.queue.submit(std::iter::once(encoder.finish()));
         output.present();
-        
-        if let Some(ref mut popup) = self.active_popup {
-            if popup.configured {
-                let mut collector = crate::layout::PopoverCollector::new();
-                self.inner.as_mut().unwrap().render_popovers(&mut collector);
- 
-                let mut verts = Vec::new();
-                for &(color, qx, qy, qw, qh) in &collector.rects {
-                    let qx_local = qx - popup.x;
-                    let qy_local = qy - popup.y;
-                    verts.extend(quad_vertices(qx_local, qy_local, qw, qh, popup.logical_width, popup.logical_height, color));
-                }
- 
-                let vertex_count = verts.len() as u32;
-                if vertex_count > 0 {
-                    let data = bytemuck::cast_slice(&verts);
-                    let needed = data.len() as wgpu::BufferAddress;
-                    let mut vbuf = popup.vertex_buffer.as_ref();
-                    if vbuf.map_or(true, |v| needed > v.size()) {
-                        let new_vbuf = adapter.device.create_buffer(&wgpu::BufferDescriptor {
-                            label: Some("Popup Vertex Buffer"),
-                            size: needed,
-                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                            mapped_at_creation: false,
-                        });
-                        popup.vertex_buffer = Some(new_vbuf);
-                        vbuf = popup.vertex_buffer.as_ref();
-                    }
-                    adapter.queue.write_buffer(vbuf.unwrap(), 0, data);
-                }
- 
-                let mut text_items = Vec::new();
-                for (content, size, tx, ty, color, font, bounds) in collector.texts {
-                    let tx_local = tx - popup.x;
-                    let ty_local = ty - popup.y;
-                    text_items.push(TextItem {
-                        buffer: make_text_buffer_with_font(&mut adapter.font_system, &content, size, font.as_deref()),
-                        x: tx_local,
-                        y: ty_local,
-                        color: glyphon::Color::rgb(
-                            (color[0] * 255.0).clamp(0.0, 255.0) as u8,
-                            (color[1] * 255.0).clamp(0.0, 255.0) as u8,
-                            (color[2] * 255.0).clamp(0.0, 255.0) as u8,
-                        ),
-                        bounds,
-                    });
-                }
- 
-                let scale_f32 = scale_factor as f32;
-                let bounds = TextBounds {
-                    left: 0,
-                    top: 0,
-                    right: (popup.logical_width * scale_f32) as i32,
-                    bottom: (popup.logical_height * scale_f32) as i32,
-                };
-                let areas: Vec<TextArea<'_>> = text_items.iter().map(|ti| TextArea {
-                    buffer: &ti.buffer,
-                    left: (ti.x * scale_f32).round(),
-                    top: (ti.y * scale_f32).round(),
-                    scale: 1.0,
-                    bounds,
-                    default_color: ti.color,
-                    custom_glyphs: &[],
-                }).collect();
- 
-                popup.viewport.update(&adapter.queue, Resolution {
-                    width: (popup.logical_width * scale_f32) as u32,
-                    height: (popup.logical_height * scale_f32) as u32,
-                });
- 
-                adapter.text_renderer.prepare(
-                    &adapter.device,
-                    &adapter.queue,
-                    &mut adapter.font_system,
-                    &mut adapter.text_atlas,
-                    &popup.viewport,
-                    areas,
-                    &mut adapter.swash_cache,
-                ).unwrap();
- 
-                let popup_output = match popup.wgpu_surface.get_current_texture() {
-                    Ok(t) => t,
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        popup.wgpu_surface.configure(&adapter.device, &popup.config);
-                        match popup.wgpu_surface.get_current_texture() {
-                            Ok(t) => t,
-                            Err(e) => {
-                                log::error!("Popup surface error after configure: {e:?}");
-                                return;
-                            }
-                        }
-                    }
-                    Err(wgpu::SurfaceError::Timeout) => return,
-                    Err(e) => {
-                        log::error!("Popup surface error: {e:?}");
-                        return;
-                    }
-                };
-                let popup_view = popup_output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-                let mut popup_encoder = adapter.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Popup Encoder"),
-                });
- 
-                {
-                    let mut pass = popup_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                        label: Some("Popup Render Pass"),
-                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                            view: &popup_view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        })],
-                        depth_stencil_attachment: None,
-                        timestamp_writes: None,
-                        occlusion_query_set: None,
-                    });
- 
-                    if vertex_count > 0 {
-                        pass.set_pipeline(render_pipeline);
-                        pass.set_vertex_buffer(0, popup.vertex_buffer.as_ref().unwrap().slice(..));
-                        pass.draw(0..vertex_count, 0..1);
-                    }
- 
-                    adapter.text_renderer.render(&adapter.text_atlas, &popup.viewport, &mut pass).unwrap();
-                }
- 
-                adapter.queue.submit(std::iter::once(popup_encoder.finish()));
-                popup_output.present();
-            }
-        }
- 
+
         adapter.text_atlas.trim();
     }
 }
@@ -2518,16 +2355,9 @@ impl<A: Application> PointerHandler for EngineState<A> {
 
         for event in events {
             let (x, y) = event.position;
-            let mut lx = x as f32;
-            let mut ly = y as f32;
-            
-            if let Some(ref popup) = self.active_popup {
-                if event.surface == *popup.sctk_popup.wl_surface() {
-                    lx += popup.x;
-                    ly += popup.y;
-                }
-            }
-            
+            let lx = x as f32;
+            let ly = y as f32;
+
             self.cursor_pos = (lx, ly);
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
@@ -2942,37 +2772,9 @@ impl<A: Application> wayland_client::Dispatch<crate::protocol::zcce_inspector_v1
     ) {}
 }
 
-impl<A: Application> PopupHandler for EngineState<A> {
-    fn configure(
-        &mut self,
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _popup: &Popup,
-        _config: PopupConfigure,
-    ) {
-        if let Some(ref mut p) = self.active_popup {
-            p.configured = true;
-        }
-        self.redraw = true;
-    }
-
-    fn done(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _popup: &Popup) {
-        for popover_ptr in crate::widget::popovers::get_active() {
-            unsafe {
-                let popover = &mut *(popover_ptr as *mut dyn crate::widget::Element);
-                popover.unfocus();
-            }
-        }
-        crate::widget::context_menu::hide();
-        self.active_popup = None;
-        self.redraw = true;
-    }
-}
-
 delegate_compositor!(@<A: Application> EngineState<A>);
 delegate_xdg_shell!(@<A: Application> EngineState<A>);
 delegate_xdg_window!(@<A: Application> EngineState<A>);
-delegate_xdg_popup!(@<A: Application> EngineState<A>);
 delegate_layer!(@<A: Application> EngineState<A>);
 delegate_shm!(@<A: Application> EngineState<A>);
 delegate_seat!(@<A: Application> EngineState<A>);
@@ -3118,7 +2920,6 @@ pub fn run<A: Application>() {
         logo_pressed: false,
         pressed_key: None,
         sender,
-        active_popup: None,
         current_cursor_icon: None,
         qh: qh.clone(),
         just_configured: false,
@@ -3288,126 +3089,6 @@ pub fn run<A: Application>() {
                 window.commit();
             }
             last_title = current_title;
-        }
-
-        // Apps that draw popovers/context menu into their own display list (Phase 6) opt out
-        // of the render-only popup surface entirely.
-        let draws_own = engine_state.inner.as_ref().map_or(false, |a| a.draws_own_popovers());
-        let active_popovers = crate::widget::popovers::get_active();
-        let context_menu_visible = crate::widget::context_menu::is_visible();
-
-        let mut active_popover_rect = None;
-        if !draws_own && !active_popovers.is_empty() {
-            let popover_widget = unsafe { &*active_popovers[0] };
-            active_popover_rect = popover_widget.popover_rect();
-        }
-
-        if active_popover_rect.is_some() || (context_menu_visible && !draws_own) {
-            let (px, py, mut pw, mut ph, is_context_menu) = if let Some((x, y, w, h)) = active_popover_rect {
-                (x, y, w.max(1.0), h.max(1.0), false)
-            } else {
-                (
-                    crate::widget::context_menu::x(),
-                    crate::widget::context_menu::y(),
-                    crate::widget::context_menu::w().max(1.0),
-                    crate::widget::context_menu::h().max(1.0),
-                    true,
-                )
-            };
-            pw = pw.ceil();
-            ph = ph.ceil();
-            if engine_state.active_popup.is_none() && engine_state.window.is_some() {
-                let positioner = XdgPositioner::new(&engine_state.xdg_shell_state).unwrap();
-                positioner.set_size(pw as i32, ph as i32);
-                
-                if !is_context_menu {
-                    let popover_widget = unsafe { &*active_popovers[0] };
-                    let (rx, ry, rw, rh) = popover_widget.rect();
-                    let scroll_y = crate::widget::hover_animation::get_scroll_offset();
-                    let screen_ry = ry - scroll_y;
-                    let lw = engine_state.logical_width as i32;
-                    let lh = engine_state.logical_height as i32;
-                    let ax = (rx as i32).clamp(0, (lw - 1).max(0));
-                    let ay = (screen_ry as i32).clamp(0, (lh - 1).max(0));
-                    let aw = (rw as i32).clamp(1, (lw - ax).max(1));
-                    let ah = (rh as i32).clamp(1, (lh - ay).max(1));
-                    positioner.set_anchor_rect(ax, ay, aw, ah);
-                    positioner.set_anchor(Anchor::BottomLeft);
-                    positioner.set_gravity(Gravity::BottomRight);
-                } else {
-                    let lw = engine_state.logical_width as i32;
-                    let lh = engine_state.logical_height as i32;
-                    let ax = (px as i32).clamp(0, (lw - 1).max(0));
-                    let ay = (py as i32).clamp(0, (lh - 1).max(0));
-                    let aw = 1.clamp(1, (lw - ax).max(1));
-                    let ah = 1.clamp(1, (lh - ay).max(1));
-                    positioner.set_anchor_rect(ax, ay, aw, ah);
-                    positioner.set_anchor(Anchor::TopLeft);
-                    positioner.set_gravity(Gravity::BottomRight);
-                }
-                positioner.set_constraint_adjustment(
-                    ConstraintAdjustment::SlideX | ConstraintAdjustment::SlideY
-                );
-                
-                let parent_xdg_surface = XdgSurface::xdg_surface(engine_state.window.as_ref().unwrap());
-                let sctk_popup = Popup::new(
-                    parent_xdg_surface,
-                    &positioner,
-                    &engine_state.qh,
-                    &engine_state.compositor_state,
-                    &engine_state.xdg_shell_state,
-                ).unwrap();
-                sctk_popup.wl_surface().set_buffer_scale(engine_state.scale_factor as i32);
-                // Render-only popup: give it an EMPTY input region so pointer events pass
-                // through to the main surface beneath (which draws and hit-tests the popover
-                // content itself). With the default full input region the popup swallowed
-                // every click on an open menu — item clicks never reached the app.
-                {
-                    let compositor = engine_state.compositor_state.wl_compositor();
-                    let empty_region = compositor.create_region(&engine_state.qh, ());
-                    sctk_popup.wl_surface().set_input_region(Some(&empty_region));
-                    empty_region.destroy();
-                }
-
-                    let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
-                    let surface_ptr = sctk_popup.wl_surface().id().as_ptr() as *mut std::ffi::c_void;
-                    let wayland_handle = Box::leak(Box::new(WaylandSurfaceHandle {
-                        display_ptr,
-                        surface_ptr,
-                    }));
-                    let instance = &engine_state.wgpu_adapter.as_ref().unwrap().instance;
-                    let wgpu_surface = instance.create_surface(wayland_handle).expect("failed to create popup wgpu surface");
-                    
-                    let device = &engine_state.wgpu_adapter.as_ref().unwrap().device;
-                    let main_config = &engine_state.wgpu_adapter.as_ref().unwrap().config;
-                    
-                    let scale_f32 = engine_state.scale_factor as f32;
-                    let mut popup_config = main_config.clone();
-                    popup_config.width = ((pw * scale_f32) as u32).max(1);
-                    popup_config.height = ((ph * scale_f32) as u32).max(1);
-                    wgpu_surface.configure(device, &popup_config);
-                    
-                    let cache = Cache::new(device);
-                    let viewport = Viewport::new(device, &cache);
-                    
-                    engine_state.active_popup = Some(ActivePopup {
-                        sctk_popup,
-                        wgpu_surface,
-                        config: popup_config,
-                        logical_width: pw,
-                        logical_height: ph,
-                        configured: false,
-                        viewport,
-                        x: px,
-                        y: py,
-                        vertex_buffer: None,
-                    });
-                }
-        } else {
-            if engine_state.active_popup.is_some() {
-                engine_state.active_popup = None;
-                engine_state.redraw = true;
-            }
         }
 
         if engine_state.redraw && !engine_state.frame_callback_pending {

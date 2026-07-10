@@ -1092,9 +1092,31 @@ Constraint respected: **each crate still builds standalone** — the new core is
     focus pointer kept aiming at it — it survived only because same-size Vec
     reallocation tends to reuse the freed block. Ctrl-nav is not headlessly
     drivable (no virtual-keyboard protocol) — user spot-check pending.
+  - **6x — data-editor + text-editor off the engine popup path; the render-only xdg
+    popup machinery is DELETED. DONE (live-verified: text-editor File menu open +
+    item click; data-editor recent-files menu → config.kdl load, tree context menu
+    with occlusion + Copy Key through the clipboard; settings page dropdown +
+    page switch unaffected after losing its gate).** Both apps now collect their
+    ui_context-registered popovers via `PopoverCollector` and emit them last in
+    the display list (data-editor appends the global context menu too), labels
+    bounded to the overlay rect — the 6l/6t recipe; registration is
+    ui_context-only. With the last consumers across, the engine sheds the whole
+    popup path: `ActivePopup` (wgpu surface + viewport + vertex buffer per
+    popover), the xdg positioner/spawn/despawn block in the event loop, the popup
+    render pass, the popup-surface pointer-coordinate translation, the
+    `PopupHandler` + `delegate_xdg_popup` plumbing, and the
+    `Application::render_popovers` + `draws_own_popovers` hooks (settings'
+    override removed; the context-menu dl-text occlusion rect is now
+    unconditional). Every popover in the workspace is app-drawn, in-frame, where
+    it hit-tests — the 6s below-window-popover class of positioner bugs is
+    unrepresentable. NOTE: the compositor-side dismissal in `PopupHandler::done`
+    (unfocus popovers + hide context menu when the popup was dismissed) went with
+    it — in-frame apps already own dismissal (press-outside), same as
+    fonts/settings. The global `widget::popovers` registry is now write-only
+    (apps still clear/register into it) — delete it with the legacy paths.
+    Drive-by: cce-designer had not compiled since 6k (direct `WgpuAdapter::new`
+    call missing the new `load_system_fonts` bool) — fixed.
   - **Still to do:**
-    data-editor +
-    text-editor off the engine popup path, then delete the popup surface machinery;
     files' internal containers (splitters/BrowseContainer/List) and data-editor's
     SplitBox/TreeList when their turns come; routed events + scene layout for the
     widget-tree apps; the demo (`cce-ui/src/main.rs`) as the reference
