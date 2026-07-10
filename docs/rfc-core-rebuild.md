@@ -1312,9 +1312,29 @@ Constraint respected: **each crate still builds standalone** — the new core is
     virtual keyboard to type a clear coordinate; it renders via the identical
     dl_text_items path as the confirmed-visible text. User spot-check: place +
     drag a text box onto open page, confirm wrap + alignment.
-  - **Still to do:** migrate the last legacy-path app (status-interface,
-    layer-shell), then delete `view*`/`text_items` + the backend tuple-wrapping
-    path, then the per-widget text getters, then `Element` + `Adapted`.
+  - **6ak — cce-status-interface across (6 of 6, LAST legacy-path app). DONE
+    (live-verified: an isolated `--module clock` instance renders "Friday, July
+    10, 2026 … PM" with its rounded background pill through the display list).**
+    The persistent layer-shell bar. view() + view_rounded_quads() bodies move
+    into display_list() (rounded boxes, then status-bar bg / module rects /
+    separators as prims, in the wrapper's ROUNDED-then-plain order); module text
+    becomes fresh Prim::Text each frame. overlay_quads() stays a separate on-top
+    pass (tray hover highlights over text). The status bar's OWN text is never
+    set in this app (get_text_items was a no-op), so its text_items()/custom
+    text_areas() overrides are deleted; self.font_system is kept only for the
+    modules' measure-then-position shaping. Mechanism: modules build a
+    StyledLabel to measure width, then emit via the new StyledLabel::into_prim
+    (cce-ui 005a53f) through a draw_label helper — the vertical bar's centered
+    per-char text rides the boxed-text TextLayout. Bundled create_font_system(),
+    so NO 6e invisible-text hazard — a byte-match flip. Full multi-module A/B was
+    avoided (the no-arg binary is a launcher daemon that would spawn a bar
+    conflicting with the user's live one); a single isolated module segment was
+    the test surface.
+  - **All six legacy-path apps are now across.** The `view*`/`text_items`
+    Application-trait deletion is unblocked.
+  - **Still to do:** delete `view*`/`text_items`/`text_areas` + the backend
+    tuple-wrapping path, then the per-widget text getters, then `Element` +
+    `Adapted`.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
