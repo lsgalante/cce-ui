@@ -21,9 +21,10 @@ set outright.
   **glyphon** for text. There is no HTML/DOM — the UI is GPU primitives (quads, rounded rects with
   per-corner radii, vectors with caps, arcs, circles, bevels). Tessellators live in
   `backend/window_runner.rs` and are re-exported through `src/engine.rs`.
-- It is **both a library and a binary.** `src/lib.rs` is the toolkit; `src/main.rs` is a
-  standalone demo/reference `AppState` (see `demo_positions`) — a runnable example of the
-  `Application` contract, not something clients use.
+- It is **both a library and a binary.** `src/lib.rs` is the toolkit; `src/main.rs` is
+  `DemoApp`, the reference `Application` — a small widget gallery on the Phase 6 target
+  architecture (display-list frame, scene-solver layout, routed events, in-frame
+  popovers). Copy it when starting a new client.
 
 ## Build, test, run
 

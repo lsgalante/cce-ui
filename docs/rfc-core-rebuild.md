@@ -1206,11 +1206,26 @@ Constraint respected: **each crate still builds standalone** — the new core is
     widget state instead (Enter→ApplyValue now checks the value editor was
     editing when the key arrived). Keyboard flows not headlessly drivable —
     user spot-check (typing, Enter-apply, tree search, keybind recording).
-  - **Still to do:** the demo
-    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
-    `view*`/`text_items` paths, the per-widget text getters, the write-only
-    global popovers registry, and finally `Element` + `Adapted` once the last
-    app is across.
+  - **6ad — the demo rewritten as `DemoApp`, the reference `Application`. DONE
+    (live-verified: button click, toggle with app-state re-assert, slider wheel
+    nudge, dropdown popover open/select with the occlusion clamp visibly
+    working, all through routed dispatch).** `src/main.rs` had never been the
+    "reference Application" the docs claimed — it was a 1925-line fossil
+    predating the engine entirely: a raw Wayland client with its own
+    CompositorHandler/SeatHandler impls, its own wgpu state, and hand-copied
+    tessellators. Replaced by ~450 teaching-commented lines on the full target
+    architecture: display-list frame + display_list_text, solver-driven layout
+    (with `shrink` demonstrated for min-width rows), routed events with the
+    KeyInput short-circuit rule and state-gated `drain_widget_changes`
+    plumbing, ui_context-only popover registration with the in-frame draw, the
+    dissolved-root window plate, and `drag_allowed_at` window dragging. API
+    footgun surfaced for the log: `Slider::set_value` takes the NORMALIZED
+    0..1 value (`with_range` only scales `get_scaled_value`) — passing a
+    ranged value silently clamps to 1.0.
+  - **Still to do:** the legacy deletion — the `view*`/`text_items` paths, the
+    per-widget text getters, the write-only global popovers registry, and
+    finally `Element` + `Adapted` (TreeList converting to narrow traits with
+    it).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
