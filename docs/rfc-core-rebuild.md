@@ -1243,7 +1243,19 @@ Constraint respected: **each crate still builds standalone** — the new core is
       consumers move to `paint_self`-only trees.
     - `Element` + `Adapted` go last, after both of the above; TreeList
       converts to narrow traits then.
-  - **Still to do:** migrate the six legacy-path apps (above), then delete
+  - **6af — cce-test-interface across (1 of 6). DONE (A/B: zero >8%-amplitude
+    pixel diffs; live-verified — full gallery render, page-dropdown popover
+    in-frame, page switch updating the MenuBar title and the status prim).**
+    The recipe for the remaining five: move the `view()` +
+    `view_rounded_quads()` bodies into `display_list()` in the engine wrapper's
+    order (ROUNDED first, then plain, then popover rects — the wrapper reversed
+    the intuitive order and apps' visuals bake it in), and re-emit the
+    `rebuild_text_items` assembly as `Prim::Text` built fresh per frame,
+    deleting the cache + its invalidation call sites + the app FontSystem +
+    any `text_areas` override (its extra areas become prims).
+    `custom_vertices` stays. Remaining queue: authenticator (verify carefully —
+    lock screen), display-manager, email, layout-interface, status-interface.
+  - **Still to do:** migrate the five remaining legacy-path apps, then delete
     `view*`/`text_items` + the backend tuple-wrapping path, then the per-widget
     text getters, then `Element` + `Adapted`.
 
