@@ -225,6 +225,59 @@ pub fn get_text_buffer_attrs(
     buf
 }
 
+/// Shape a boxed [`Prim::Text`] (word-wrap + alignment) and return `(buffer, vertical_offset)`.
+/// Reuses [`get_text_buffer_attrs`] for all the family resolution — that returns a *clone* of the
+/// cached single-run buffer, so re-applying metrics/size/align here does not touch the cache — then
+/// re-lays-it-out: a 1.4 line-height (the placed-text convention), the wrap width, per-line
+/// horizontal alignment, and re-shapes. The vertical offset positions the shaped block inside the
+/// box per `align_v`. Uncached by construction (each box may differ in width/align).
+pub fn get_text_buffer_laid_out(
+    fs: &mut FontSystem,
+    text: &str,
+    size: f32,
+    font: Option<&str>,
+    text_attrs: crate::scene::paint::TextAttrs,
+    layout: crate::scene::paint::TextLayout,
+) -> (Buffer, f32) {
+    use crate::scene::paint::{AlignH, AlignV};
+    let scale = crate::scale::scale_factor();
+
+    // Resolved family + attrs come for free (a cache clone we are free to mutate).
+    let mut buf = get_text_buffer_attrs(fs, text, size, font, text_attrs);
+
+    // The font string may override the size ("family:size") — mirror get_text_buffer_attrs.
+    let mut font_size = size;
+    if let Some(font_str) = font {
+        if let (_, Some(ps)) = crate::layout::parse_font_string(font_str) {
+            font_size = ps;
+        }
+    }
+    let physical_size = font_size * scale;
+    let line_height = physical_size * 1.4;
+    buf.set_metrics(fs, Metrics::new(physical_size, line_height));
+    buf.set_size(fs, layout.wrap_width.map(|w| w * scale), Some(layout.box_height * scale));
+
+    let align = match layout.align_h {
+        AlignH::Left => glyphon::cosmic_text::Align::Left,
+        AlignH::Center => glyphon::cosmic_text::Align::Center,
+        AlignH::Right => glyphon::cosmic_text::Align::Right,
+    };
+    for line in &mut buf.lines {
+        line.set_align(Some(align));
+    }
+    buf.shape_until_scroll(fs, true);
+
+    // Vertical offset (logical) from the shaped run count, matching the legacy per-app math.
+    let runs = buf.layout_runs().count();
+    let total_h = runs as f32 * font_size * 1.4;
+    let voff = match layout.align_v {
+        AlignV::Top => 0.0,
+        AlignV::Middle => ((layout.box_height - total_h) / 2.0).max(0.0),
+        AlignV::Bottom => (layout.box_height - total_h).max(0.0),
+    };
+    (buf, voff)
+}
+
 /// The popover-occlusion clamp shared by the default [`Application::text_areas`] mapping and
 /// the display-list text path: clip a text item's bounds so it does not bleed through an open
 /// popover's plate. A text item whose own bounds coincide with a popover rect IS that popover's
@@ -1883,18 +1936,23 @@ impl<A: Application> EngineState<A> {
         if self.inner.as_ref().unwrap().display_list_text() {
             let fs = &mut self.wgpu_adapter.as_mut().unwrap().font_system;
             for item in &dl.items {
-                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, attrs } = &item.prim {
+                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, attrs, layout } = &item.prim {
                     let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
                     let merged = match (clip, *bounds) {
                         (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
                         (Some(a), None) => Some(a),
                         (None, b) => b,
                     };
-                    let buffer = get_text_buffer_attrs(fs, text, *font_size, font.as_deref(), *attrs);
+                    // Boxed text (wrap/align) shapes uncached and shifts down by the vertical
+                    // offset; ordinary labels take the shared cached buffer.
+                    let (buffer, y_off) = match layout {
+                        Some(l) => get_text_buffer_laid_out(fs, text, *font_size, font.as_deref(), *attrs, *l),
+                        None => (get_text_buffer_attrs(fs, text, *font_size, font.as_deref(), *attrs), 0.0),
+                    };
                     self.dl_text_items.push(TextItem {
                         buffer,
                         x: *x,
-                        y: *y,
+                        y: *y + y_off,
                         color: glyphon::Color::rgb(color[0], color[1], color[2]),
                         bounds: merged,
                     });

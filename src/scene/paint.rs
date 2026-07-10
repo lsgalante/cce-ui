@@ -51,8 +51,42 @@ pub enum Prim {
     /// for the glyph pass (Phase 6: the backend renders these through glyphon when the app
     /// opts in via `Application::display_list_text`; the paint walk's clip additionally
     /// applies through the item's `clip`). `attrs` carries the optional shaping attributes
-    /// beyond family+size (the font picker's italic/weight preview variants).
-    Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3], font: Option<String>, bounds: Option<[f32; 4]>, attrs: TextAttrs },
+    /// beyond family+size (the font picker's italic/weight preview variants). `layout`, when
+    /// `Some`, requests box layout — word-wrap at a width and horizontal/vertical alignment
+    /// within a box (the placed-text-box case, e.g. cce-layout-interface's canvas elements);
+    /// `None` is the ordinary single-run label.
+    Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3], font: Option<String>, bounds: Option<[f32; 4]>, attrs: TextAttrs, layout: Option<TextLayout> },
+}
+
+/// Horizontal alignment of laid-out (boxed) text — the toolkit-plain mirror of
+/// `glyphon::cosmic_text::Align`, mapped at shape time.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AlignH {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// Vertical alignment of laid-out text within its box.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum AlignV {
+    #[default]
+    Top,
+    Middle,
+    Bottom,
+}
+
+/// Box layout for a [`Prim::Text`]: word-wrap width (`Some` ⇒ multiline wrap; `None` ⇒ single
+/// run) and horizontal/vertical alignment within a box of `box_height`. All lengths are logical.
+/// The backend shapes an uncached buffer (`get_text_buffer_laid_out`) so the wrap/align do not
+/// pollute the shared single-run cache, and applies the vertical offset from the shaped height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextLayout {
+    pub wrap_width: Option<f32>,
+    pub box_height: f32,
+    pub align_h: AlignH,
+    pub align_v: AlignV,
 }
 
 /// Optional shaping attributes for a [`Prim::Text`] — the subset a widget can request beyond
@@ -241,7 +275,38 @@ impl PaintCtx {
     ) {
         let (ox, oy) = self.offset;
         let bounds = bounds.map(|[l, t, r, b]| [l + ox, t + oy, r + ox, b + oy]);
-        self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color, font, bounds, attrs });
+        self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color, font, bounds, attrs, layout: None });
+    }
+
+    /// Boxed text: word-wrap + horizontal/vertical alignment within a box (a placed text box).
+    /// Unlike [`text_with`](PaintCtx::text_with), the backend shapes this uncached with the box
+    /// layout applied. `x, y` are the box's top-left; the backend applies the vertical offset.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_boxed(
+        &mut self,
+        text: impl Into<String>,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        color: [u8; 3],
+        font: Option<String>,
+        bounds: Option<[f32; 4]>,
+        attrs: TextAttrs,
+        layout: TextLayout,
+    ) {
+        let (ox, oy) = self.offset;
+        let bounds = bounds.map(|[l, t, r, b]| [l + ox, t + oy, r + ox, b + oy]);
+        self.push(Prim::Text {
+            text: text.into(),
+            x: x + ox,
+            y: y + oy,
+            font_size,
+            color,
+            font,
+            bounds,
+            attrs,
+            layout: Some(layout),
+        });
     }
 
     /// Consume the context and return the accumulated display list.
