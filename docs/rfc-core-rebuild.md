@@ -1071,9 +1071,29 @@ Constraint respected: **each crate still builds standalone** — the new core is
     the focused border tint shows through the translucent bg as a green wash
     (legacy did this too, darker under its doubled bg). Not headlessly drivable,
     user spot-check pending: held thumb drag, arrow/PageUp/Down over a hovered list.
+  - **6w — settings' SectionContainer dissolved; cce-system-settings is
+    embedded-base-FREE. DONE (A/B render dumps: all nine pages byte-identical
+    modulo live data — the sections never painted; live-verified — notifications
+    spinbox + menu open/select with in-frame occlusion, audio spinbox round trip
+    through pactl and the watcher, processes filter-box click-to-focus, services
+    list wheel).** The per-rebuild section clones were pure event/focus plumbing:
+    propagate roots whose `container` children were the pages' widgets, plus the
+    ctrl-nav focus targets. `AppPage::section_widgets()` (one widget-pointer group
+    per section, old count/order) replaces `get_section_containers` +
+    `link_children` + `clear_children`; the widgets dispatch directly as propagate
+    roots flattened in the legacy order, and section-level keyboard focus is an
+    app-side index, single-slot with the global widget focus exactly as when both
+    lived in `FOCUSED_WIDGET` (entry → section 0; ctrl+j/k cycle; ctrl+i descends
+    to the section's first widget — the legacy walk went through the
+    header/container intermediates; ctrl+u ascends from a widget to its section;
+    a focus-taking click and page switches drop the highlight). Also killed a
+    latent use-after-free of exactly the class this rebuild targets: the focused
+    section clone was dropped and reallocated EVERY rebuild while the global
+    focus pointer kept aiming at it — it survived only because same-size Vec
+    reallocation tends to reuse the freed block. Ctrl-nav is not headlessly
+    drivable (no virtual-keyboard protocol) — user spot-check pending.
   - **Still to do:**
-    settings' SectionContainer (the last embedded base there — the
-    sections are thin [header, container] dispatch shells now); data-editor +
+    data-editor +
     text-editor off the engine popup path, then delete the popup surface machinery;
     files' internal containers (splitters/BrowseContainer/List) and data-editor's
     SplitBox/TreeList when their turns come; routed events + scene layout for the
