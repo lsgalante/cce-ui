@@ -3202,19 +3202,34 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
     for (qx, qy, qw, qh, qr, qc, qcorners) in w.all_rounded_quads(ctx) {
         pc.rect_with_radius_corners(qc, qx, qy, qw, qh, qr, qcorners);
     }
-    let font_opt = w.widget_font();
-    for (label, font, bounds) in w.text_labels_with_font_and_bounds(ctx) {
-        let color_f32 = [
-            label.color[0] as f32 / 255.0,
-            label.color[1] as f32 / 255.0,
-            label.color[2] as f32 / 255.0,
-            1.0,
-        ];
-        let active_font = font.or_else(|| font_opt.clone());
-        if let Some(ref font) = active_font {
-            pc.text_with_font_and_bounds(&label.text, label.x, label.y, label.font_size, color_f32, font, bounds);
-        } else {
-            pc.text_with_bounds(&label.text, label.x, label.y, label.font_size, color_f32, bounds);
+    // Text via the paint walk: `paint_self` emits each widget's Text prims (content font +
+    // scroll-ancestor clip) exactly as the live display-list render does. render_widget already
+    // drew the geometry via `all_quads`/`all_rounded_quads` above, so we take only the Text prims
+    // from the walk. This drops the legacy `widget_font` + `text_labels_with_font_and_bounds`
+    // getters from render_widget — the prim already carries the per-widget font+bounds.
+    let w_ptr = w.as_ptr_mut();
+    let mut text_scratch = crate::scene::paint::PaintCtx::new();
+    crate::scene::painter::paint_root_into(&*ctx, w_ptr, &mut text_scratch);
+    for item in text_scratch.finish().items {
+        if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, .. } = item.prim {
+            let color_f32 = [
+                color[0] as f32 / 255.0,
+                color[1] as f32 / 255.0,
+                color[2] as f32 / 255.0,
+                1.0,
+            ];
+            // Compose the walk's container clip with the prim's own bounds (the engine's dl-text
+            // merge), so a clipping ancestor still bounds the text.
+            let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
+            let merged = match (clip, bounds) {
+                (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
+                (Some(a), None) => Some(a),
+                (None, b) => b,
+            };
+            match font {
+                Some(ref f) => pc.text_with_font_and_bounds(&text, x, y, font_size, color_f32, f, merged),
+                None => pc.text_with_bounds(&text, x, y, font_size, color_f32, merged),
+            }
         }
     }
     if w.popover_rect().is_some() {
