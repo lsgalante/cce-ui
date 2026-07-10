@@ -1569,16 +1569,9 @@ pub trait Application: Sized + 'static {
     }
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
-    /// Legacy geometry sink. Default no-op since Phase 6: an app whose whole frame comes from
-    /// [`display_list`](Application::display_list) (+ [`display_list_text`]) implements neither
-    /// this nor [`text_items`](Application::text_items).
-    fn view(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
-    fn view_rounded_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))>, _size: LogicalSize, _scale: f64) {}
-    fn view_vectors(&mut self, _vectors: &mut Vec<(f32, f32, f32, f32, f32, [f32; 4], LineCap)>, _size: LogicalSize, _scale: f64) {}
+    /// On-top overlay quads drawn after the display list and its text (e.g. the status bar's
+    /// tray-hover highlights). Deliberately separate from the single paint path.
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
-    fn text_items(&self) -> &[TextItem] {
-        &[]
-    }
     fn input_regions(&self) -> Option<Vec<(i32, i32, i32, i32)>> {
         None
     }
@@ -1603,46 +1596,6 @@ pub trait Application: Sized + 'static {
         }
     }
     
-    fn text_areas(&self, scale_f32: f32, bounds: TextBounds) -> Vec<TextArea<'_>> {
-        let mut overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
-        if let Some(ctx) = self.ui_context() {
-            for popover_ptr in &ctx.active_popovers {
-                unsafe {
-                    if let Some(popover) = popover_ptr.as_ref() {
-                        if let Some((x, y, w, h)) = popover.popover_rect() {
-                            overlay_rects.push((x, y, w, h));
-                        }
-                    }
-                }
-            }
-        }
-
-        self.text_items().iter().map(|ti| {
-            let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
-                TextBounds {
-                    left: ((l * scale_f32).round() as i32).clamp(0, bounds.right),
-                    top: ((t * scale_f32).round() as i32).clamp(0, bounds.bottom),
-                    right: ((r * scale_f32).round() as i32).clamp(0, bounds.right),
-                    bottom: ((b * scale_f32).round() as i32).clamp(0, bounds.bottom),
-                }
-            } else {
-                bounds
-            };
-
-            popover_occlusion_clamp(&overlay_rects, ti, scale_f32, &mut item_bounds);
-
-            TextArea {
-                buffer: &ti.buffer,
-                left: (ti.x * scale_f32).round(),
-                top: (ti.y * scale_f32).round(),
-                scale: 1.0,
-                bounds: item_bounds,
-                default_color: ti.color,
-                custom_glyphs: &[],
-            }
-        }).collect()
-    }
-    
     fn clear_color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
     }
@@ -1660,24 +1613,22 @@ pub trait Application: Sized + 'static {
 
     fn custom_vertices(&mut self, _verts: &mut Vec<Vertex>, _size: LogicalSize, _scale: f64) {}
 
-    /// Opt into the single paint path (Phase 3): return a display list for this frame and `render()`
-    /// draws its geometry via one batched, GPU-scissor-clipped pass instead of the legacy
-    /// `view*` geometry. Default `None` keeps the legacy path. Overlays and `custom_vertices`
-    /// still go through their existing paths; text renders from the list when
-    /// [`display_list_text`](Application::display_list_text) opts in. Receives the frame's
-    /// logical size and HiDPI scale, like `view`. Typically implemented as
+    /// The frame's geometry, drawn via one batched, GPU-scissor-clipped pass (the single
+    /// paint path). Every rendering app implements this — the legacy `view*` sinks are gone;
+    /// `None` yields an empty frame. Overlays ([`overlay_quads`](Application::overlay_quads))
+    /// and [`custom_vertices`](Application::custom_vertices) still go through their own paths;
+    /// text renders from the list when [`display_list_text`](Application::display_list_text)
+    /// opts in. Receives the frame's logical size and HiDPI scale. Typically implemented as
     /// `Some(cce_ui::scene::painter::paint_tree(&self.ui_context, root_ptr))`.
     fn display_list(&mut self, _size: LogicalSize, _scale: f64) -> Option<crate::scene::paint::DisplayList> {
         None
     }
 
-    /// Phase 6 opt-in: render the display list's `Prim::Text` items through the glyphon pass
-    /// (shaped via the shared buffer cache, clipped to the item clip ∩ the prim bounds). A
-    /// fully migrated app's ENTIRE frame — geometry and text — is then one
-    /// [`display_list`](Application::display_list); its [`text_items`](Application::text_items)
-    /// is typically empty. Default `false`: the seven Phase 3 adopters' lists already carry
-    /// Text prims that those apps ALSO push as `TextItem`s — rendering both would double-draw,
-    /// so each app flips this only when it stops pushing its own.
+    /// Opt in to render the display list's `Prim::Text` items through the glyphon pass
+    /// (shaped via the shared buffer cache, clipped to the item clip ∩ the prim bounds). An
+    /// app's ENTIRE frame — geometry and text — is then one
+    /// [`display_list`](Application::display_list). Default `false` draws no text (an app that
+    /// only draws geometry, or none at all).
     ///
     /// Display-list text gets the same popover-occlusion clamp as the legacy `text_areas`
     /// mapping (`popover_occlusion_clamp`, driven by `ui_context().active_popovers`), so an
@@ -1870,9 +1821,6 @@ impl<A: Application> EngineState<A> {
         let logical_w = self.logical_width;
         let logical_h = self.logical_height;
         let scale_factor = self.scale_factor;
-        
-        let mut quads = Vec::new();
-        self.inner.as_mut().unwrap().view(&mut quads, LogicalSize::new(logical_w, logical_h), scale_factor);
 
         if let Some(ref surface) = self.surface {
             if let Some(regions) = self.inner.as_ref().unwrap().input_regions() {
@@ -1886,48 +1834,12 @@ impl<A: Application> EngineState<A> {
             }
         }
         
-        let mut rounded_quads = Vec::new();
-        self.inner.as_mut().unwrap().view_rounded_quads(&mut rounded_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
-        
-        let mut vectors = Vec::new();
-        self.inner.as_mut().unwrap().view_vectors(&mut vectors, LogicalSize::new(logical_w, logical_h), scale_factor);
-
-        // Phase 3 single paint path: when the app provides a display list, its geometry replaces the
-        // legacy view* geometry and is drawn as batched, GPU-scissor-clipped runs. Default `None`
-        // keeps the legacy path byte-for-byte.
-        let display_list = self.inner.as_mut().unwrap().display_list(LogicalSize::new(logical_w, logical_h), scale_factor);
-
-        // 1. Build the frame's DisplayList — from the app's display_list() when provided, otherwise
-        // by wrapping its legacy view*/view_vectors geometry — then tessellate it as one path. This
-        // is the Phase 3 single paint path: every app, migrated or not, renders through here.
-        let dl = match display_list {
-            Some(dl) => dl,
-            None => {
-                use crate::scene::layout::Rect;
-                use crate::scene::paint::{Cap, PaintCtx};
-                let mut pc = PaintCtx::new();
-                for &(qx, qy, qw, qh, qr, qc, qcorners) in &rounded_quads {
-                    let rect = Rect { x: qx, y: qy, width: qw, height: qh };
-                    if qr > 0.1 {
-                        pc.rounded_rect(rect, qr, qcorners, qc);
-                    } else {
-                        pc.quad(rect, qc);
-                    }
-                }
-                for &(qx, qy, qw, qh, qc) in &quads {
-                    pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
-                }
-                for &(vx1, vy1, vx2, vy2, vthickness, vcolor, vcap) in &vectors {
-                    let cap = match vcap {
-                        LineCap::Flat => Cap::Flat,
-                        LineCap::Round => Cap::Round,
-                        LineCap::Arrow => Cap::Arrow,
-                    };
-                    pc.vector(vx1, vy1, vx2, vy2, vthickness, vcolor, cap);
-                }
-                pc.finish()
-            }
-        };
+        // 1. The frame's geometry IS the app's display list — the single paint path. Tessellated
+        // below as one batched, GPU-scissor-clipped pass. An app that draws nothing returns
+        // `None`, giving an empty frame (the legacy view*/tuple-wrapping path is gone).
+        let dl = self.inner.as_mut().unwrap()
+            .display_list(LogicalSize::new(logical_w, logical_h), scale_factor)
+            .unwrap_or_else(|| crate::scene::paint::PaintCtx::new().finish());
 
         // 1a. Phase 6 display-list text: shape the list's Text prims through the shared buffer
         // cache and hold them for the glyphon pass (the TextAreas built below borrow these).
@@ -2019,9 +1931,10 @@ impl<A: Application> EngineState<A> {
         adapter.text_viewport.update(&adapter.queue, Resolution { width: pw, height: ph });
         
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
-        let mut areas = self.inner.as_ref().unwrap().text_areas(scale_f32, bounds);
-        // Phase 6 display-list text — the default `text_areas` mapping (scale + surface clamp),
-        // including the popover-occlusion clamp against the app's registered popovers.
+        // All text is display-list text now (the legacy text_items/text_areas path is gone):
+        // map each dl Text prim with the default mapping (scale + surface clamp) plus the
+        // popover-occlusion clamp against the app's registered popovers.
+        let mut areas: Vec<TextArea<'_>> = Vec::new();
         let mut dl_overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
         if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
             for popover_ptr in &ctx.active_popovers {
