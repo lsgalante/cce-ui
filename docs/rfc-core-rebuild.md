@@ -1332,9 +1332,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
     the test surface.
   - **All six legacy-path apps are now across.** The `view*`/`text_items`
     Application-trait deletion is unblocked.
-  - **Still to do:** delete `view*`/`text_items`/`text_areas` + the backend
-    tuple-wrapping path, then the per-widget text getters, then `Element` +
-    `Adapted`.
+  - **6al — legacy `view*`/`text_items`/`text_areas` DELETED. DONE (16 client
+    apps compile; 180 tests pass; settings live-verified).** With every app on
+    `display_list()`, the legacy geometry/text trait surface was dead code:
+    removed `view` / `view_rounded_quads` / `view_vectors` / `text_items` and the
+    default `text_areas` mapping from the `Application` trait; in `render()`,
+    dropped the `quads`/`rounded_quads`/`vectors` collection + the tuple-wrapping
+    `None =>` branch (so `dl = display_list().unwrap_or_else(empty)`) and the
+    `text_areas()` call (an empty `areas` vec the dl-text loop fills). KEPT:
+    `overlay_quads` (status-bar tray hover), `custom_vertices` (display-manager
+    card, test-interface gallery), `display_list` / `display_list_text`. Pure
+    dead-path removal — every implementor already took the `Some(dl)`/empty-text
+    arms. (cce-designer + cce-cloud drive `WgpuAdapter` directly, never implement
+    `Application`, so they're untouched.)
+  - **Still to do:** the per-widget text getters (after moving the paint walk's
+    legacy branches + the migrated apps' hand aggregates to `paint_self`-only),
+    then `Element` + `Adapted` (TreeList → narrow traits).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
