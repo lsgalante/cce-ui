@@ -20,7 +20,6 @@ pub mod treelist;
 pub mod control_panel;
 pub mod vbox;
 pub mod hbox;
-pub mod splitbox;
 
 pub use container::Container;
 pub use control_panel::ControlPanel;
@@ -44,4 +43,3 @@ pub use scroll_bar::ScrollBar;
 pub use treelist::{TreeList, TreeElement};
 pub use vbox::VBox;
 pub use hbox::HBox;
-pub use splitbox::{SplitBox, SplitDirection};

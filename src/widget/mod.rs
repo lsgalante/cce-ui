@@ -834,16 +834,14 @@ pub use self::core::focus::link_parent_child;
 pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, Canvas, get_font_db, ActiveThumb, FontSelector,
-    ButtonStrip, MultiControl, InstancedControl, InstancedWidget, MultiControlRow,
-    KeybindsControl, KeybindRow, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey
+    ButtonStrip, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey
 };
 pub use self::container::{
     Container, ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     SectionContainer, Header, ContentBg, ParametersBg, List, ListColumn, ListRow, ColumnWidth,
     ScrollBox, MenuBar, Spreadsheet, Breadcrumb, Plate,
-    Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel,
-    SplitBox, SplitDirection
+    Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel
 };
 pub use self::display::{
     TextLabel, Label, SectionHeader, StyledLabel, LabelPrim, TextItem, Svg, UsageBar,

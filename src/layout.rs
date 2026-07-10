@@ -3140,116 +3140,6 @@ impl RenderTarget for PopoverCollector {
     }
 }
 
-fn get_multicontrol_sub_widget_info(
-    mc: &crate::widget::input::MultiControl,
-    qx: f32, qy: f32, qw: f32, qh: f32,
-) -> Option<((bool, bool, bool, bool), f32, (f32, f32, f32, f32), f32)> {
-    // Check add_button
-    let (bx, by, bw, bh) = mc.add_button.rect();
-    if qx >= bx - 0.1 && qx + qw <= bx + bw + 0.1 && qy >= by - 0.1 && qy + qh <= by + bh + 0.1 {
-        return Some((
-            mc.add_button.rounded_corners(),
-            mc.add_button.corner_radius(),
-            (bx, by, bw, bh),
-            crate::widget::label_offset(&mc.add_button),
-        ));
-    }
-    // Check rows
-    for row in &mc.rows {
-        // key_input
-        let (kx, ky, kw, kh) = row.key_input.rect();
-        if qx >= kx - 0.1 && qx + qw <= kx + kw + 0.1 && qy >= ky - 0.1 && qy + qh <= ky + kh + 0.1 {
-            return Some((
-                row.key_input.rounded_corners(),
-                row.key_input.corner_radius(),
-                (kx, ky, kw, kh),
-                crate::widget::label_offset(&row.key_input),
-            ));
-        }
-        // type_dropdown
-        let (tx, ty, tw, th) = row.type_dropdown.rect();
-        if qx >= tx - 0.1 && qx + qw <= tx + tw + 0.1 && qy >= ty - 0.1 && qy + qh <= ty + th + 0.1 {
-            return Some((
-                row.type_dropdown.rounded_corners(),
-                row.type_dropdown.corner_radius(),
-                (tx, ty, tw, th),
-                crate::widget::label_offset(&row.type_dropdown),
-            ));
-        }
-        // remove_button
-        let (rx, ry, rw, rh) = row.remove_button.rect();
-        if qx >= rx - 0.1 && qx + qw <= rx + rw + 0.1 && qy >= ry - 0.1 && qy + qh <= ry + rh + 0.1 {
-            return Some((
-                row.remove_button.rounded_corners(),
-                row.remove_button.corner_radius(),
-                (rx, ry, rw, rh),
-                crate::widget::label_offset(&row.remove_button),
-            ));
-        }
-        // value_widget
-        let (vx, vy, vw, vh) = row.value_widget.rect();
-        if qx >= vx - 0.1 && qx + qw <= vx + vw + 0.1 && qy >= vy - 0.1 && qy + qh <= vy + vh + 0.1 {
-            let (corners, radius, label_offset) = match &row.value_widget {
-                crate::widget::input::InstancedWidget::TextBox(w) => (w.rounded_corners(), w.corner_radius(), crate::widget::label_offset(w)),
-                crate::widget::input::InstancedWidget::Spinbox(w) => (w.rounded_corners(), w.corner_radius(), crate::widget::label_offset(w)),
-                crate::widget::input::InstancedWidget::Toggle(w) => (w.rounded_corners(), w.corner_radius(), crate::widget::label_offset(w)),
-                crate::widget::input::InstancedWidget::Slider(w) => (w.rounded_corners(), w.corner_radius(), crate::widget::label_offset(w)),
-            };
-            return Some((corners, radius, (vx, vy, vw, vh), label_offset));
-        }
-    }
-    None
-}
-
-fn get_keybinds_control_sub_widget_info(
-    kc: &crate::widget::input::KeybindsControl,
-    qx: f32, qy: f32, qw: f32, qh: f32,
-) -> Option<((bool, bool, bool, bool), f32, (f32, f32, f32, f32), f32)> {
-    // Check add_button
-    let (bx, by, bw, bh) = kc.add_button.rect();
-    if qx >= bx - 0.1 && qx + qw <= bx + bw + 0.1 && qy >= by - 0.1 && qy + qh <= by + bh + 0.1 {
-        return Some((
-            kc.add_button.rounded_corners(),
-            kc.add_button.corner_radius(),
-            (bx, by, bw, bh),
-            crate::widget::label_offset(&kc.add_button),
-        ));
-    }
-    // Check rows
-    for row in &kc.rows {
-        // key_input
-        let (kx, ky, kw, kh) = row.key_input.rect();
-        if qx >= kx - 0.1 && qx + qw <= kx + kw + 0.1 && qy >= ky - 0.1 && qy + qh <= ky + kh + 0.1 {
-            return Some((
-                row.key_input.rounded_corners(),
-                row.key_input.corner_radius(),
-                (kx, ky, kw, kh),
-                crate::widget::label_offset(&row.key_input),
-            ));
-        }
-        // cmd_input
-        let (cx, cy, cw, ch) = row.cmd_input.rect();
-        if qx >= cx - 0.1 && qx + qw <= cx + cw + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + ch + 0.1 {
-            return Some((
-                row.cmd_input.rounded_corners(),
-                row.cmd_input.corner_radius(),
-                (cx, cy, cw, ch),
-                crate::widget::label_offset(&row.cmd_input),
-            ));
-        }
-        // remove_button
-        let (rx, ry, rw, rh) = row.remove_button.rect();
-        if qx >= rx - 0.1 && qx + qw <= rx + rw + 0.1 && qy >= ry - 0.1 && qy + qh <= ry + rh + 0.1 {
-            return Some((
-                row.remove_button.rounded_corners(),
-                row.remove_button.corner_radius(),
-                (rx, ry, rw, rh),
-                crate::widget::label_offset(&row.remove_button),
-            ));
-        }
-    }
-    None
-}
 
 pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
     let id = w.base().map(|b| b.id());
@@ -3269,35 +3159,6 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
     whh -= top_room;
  
     for (qx, qy, qw, qh, qc) in w.all_quads(ctx) {
-        let mut corners = corners;
-        let mut r = r;
-        let mut wx = wx;
-        let mut wy = wy;
-        let mut www = www;
-        let mut whh = whh;
- 
-        if let Some(mc) = w.as_any().downcast_ref::<crate::widget::input::MultiControl>() {
-            if let Some((sub_corners, sub_radius, (sub_x, sub_y, sub_w, sub_h), sub_label_offset)) = get_multicontrol_sub_widget_info(mc, qx, qy, qw, qh) {
-                corners = sub_corners;
-                r = sub_radius;
-                wx = sub_x;
-                wy = sub_y + sub_label_offset;
-                www = sub_w;
-                whh = sub_h - sub_label_offset;
-            }
-        }
-
-        if let Some(kc) = w.as_any().downcast_ref::<crate::widget::input::KeybindsControl>() {
-            if let Some((sub_corners, sub_radius, (sub_x, sub_y, sub_w, sub_h), sub_label_offset)) = get_keybinds_control_sub_widget_info(kc, qx, qy, qw, qh) {
-                corners = sub_corners;
-                r = sub_radius;
-                wx = sub_x;
-                wy = sub_y + sub_label_offset;
-                www = sub_w;
-                whh = sub_h - sub_label_offset;
-            }
-        }
-
         let extra_corners = (
             corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
             corners.1 && qx + qw >= wx + www - 1.5 && qy <= wy + 1.5,
@@ -3688,9 +3549,7 @@ impl Section {
         let total_h = wh + top_room;
 
         let name = w.type_name();
-        let span_full = name == "KeybindsControl"
-            || name == "MultiControl"
-            || name == "Trackpad"
+        let span_full = name == "Trackpad"
             || name == "Canvas"
             || name == "UsageBar"
             || name == "ProgressBar"
@@ -4857,9 +4716,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let total_h = wh + top_room;
 
         let name = w.type_name();
-        let span_full = name == "KeybindsControl"
-            || name == "MultiControl"
-            || name == "Trackpad"
+        let span_full = name == "Trackpad"
             || name == "Canvas"
             || name == "UsageBar"
             || name == "ProgressBar"

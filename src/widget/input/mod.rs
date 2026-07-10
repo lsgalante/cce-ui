@@ -9,8 +9,6 @@ pub mod text_box;
 pub mod trackpad;
 pub mod font_selector;
 pub mod button_strip;
-pub mod multi_control;
-pub mod keybinds_control;
 pub mod keybind_recorder;
 pub mod ramp;
 
@@ -25,8 +23,6 @@ pub use text_box::{TextBox, get_font_db};
 pub use trackpad::{Trackpad, Finger};
 pub use font_selector::FontSelector;
 pub use button_strip::ButtonStrip;
-pub use multi_control::{MultiControl, InstancedControl, InstancedWidget, MultiControlRow};
-pub use keybinds_control::{KeybindsControl, KeybindRow};
 pub use keybind_recorder::KeybindRecorder;
 pub use ramp::{Ramp, RampKey, ColorRamp, ColorRampKey};
 
