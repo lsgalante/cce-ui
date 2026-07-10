@@ -1296,10 +1296,25 @@ Constraint respected: **each crate still builds standalone** — the new core is
     render via prims. Note the AE-vs-baseline metric is misleading for these
     invisible-text fixes (tiny % of dark-on-dark pixels change) — judge by
     whether text APPEARS, not by AE.
-  - **Still to do:** migrate the two remaining legacy-path apps
-    (layout-interface, status-interface), then delete `view*`/`text_items` + the
-    backend tuple-wrapping path, then the per-widget text getters, then
-    `Element` + `Adapted`.
+  - **6aj — cce-layout-interface across (5 of 6); needed + consumes the new
+    boxed-text prim; the flip FIXED invisible text. DONE (live-verified: the
+    whole properties/geometry/alignment/add-elements UI renders where the
+    baseline showed nothing; 104→0 font-ID warnings).** This app forced the
+    boxed-text feature (previous commit): its canvas Element::Text boxes need
+    word-wrap + h/v alignment, unrepresentable as a plain Text prim. view() +
+    view_vectors() → display_list() (a __LayoutQuadSink shim for the
+    quads.push/extend body; vectors → PaintCtx::vector); rebuild_text_items →
+    text-prim tuples carrying an optional TextLayout, emitted via text_with /
+    text_boxed. Same 6e face-ID class (create_font_system_with_system_fonts);
+    fixed by bundled FS + prims. VERIFY GAP: the canvas boxed prim itself
+    (wrap/align on the page) could not be pinned headlessly — a placed text box
+    defaults to page x=40, behind the ~540px properties panel, and there is no
+    virtual keyboard to type a clear coordinate; it renders via the identical
+    dl_text_items path as the confirmed-visible text. User spot-check: place +
+    drag a text box onto open page, confirm wrap + alignment.
+  - **Still to do:** migrate the last legacy-path app (status-interface,
+    layer-shell), then delete `view*`/`text_items` + the backend tuple-wrapping
+    path, then the per-widget text getters, then `Element` + `Adapted`.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
