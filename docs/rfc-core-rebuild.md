@@ -1155,9 +1155,21 @@ Constraint respected: **each crate still builds standalone** — the new core is
     scroll-into-view snaps the wheel back while the selected row would leave
     the viewport. Search typing not headlessly drivable — user spot-check
     pending.
-  - **Still to do:**
-    data-editor's SplitBox/TreeList when their
-    turns come; routed events + scene layout for the widget-tree apps; the demo
+  - **6aa — data-editor's SplitBox dissolved. DONE (live-verified: empty-state
+    pixels identical modulo the cursor sprite; config load via the File menu,
+    tree wheel, tree row select with the inline value editor, divider hover tint
+    via crop diff).** The 6y `SplitPane` recipe on the scene-walk app: panes
+    positioned directly from the pane rects and walked as separate roots, the
+    divider quad emitted in the splitter's old walk slot. Removes the app's last
+    raw-pointer child container and retires the Phase 2b
+    `scene::bridge::layout_subtree` showcase that drove the split (the layout
+    engine's app-facing debut now waits for the routed-events/scene-layout
+    phase). TreeList intentionally NOT dissolved: at ~1.8k lines of tree
+    expansion/inline-edit/annotation logic it is a self-contained walked widget
+    (renders_own_subtree) whose internal ScrollBox never leaks — porting it
+    app-side buys no hazard reduction; it converts to narrow traits with the
+    `Element` deletion instead. Held divider drag — user spot-check pending.
+  - **Still to do:** routed events + scene layout for the widget-tree apps; the demo
     (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
     `view*`/`text_items` paths, the per-widget text getters, the write-only
     global popovers registry, and finally `Element` + `Adapted` once the last
