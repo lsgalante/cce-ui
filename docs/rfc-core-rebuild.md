@@ -1255,7 +1255,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
     any `text_areas` override (its extra areas become prims).
     `custom_vertices` stays. Remaining queue: authenticator (verify carefully —
     lock screen), display-manager, email, layout-interface, status-interface.
-  - **Still to do:** migrate the five remaining legacy-path apps, then delete
+  - **6ag — cce-authenticator across (2 of 6); the flip FIXED runtime-invisible
+    text. DONE (live-verified --standalone + CCE_AUTH_SIMULATE: full dialog text
+    renders, zero font-ID warnings — was hundreds per frame — fingerprint-scan
+    click drives the animated glow + hint).** It is an xdg-toplevel polkit auth
+    dialog (NOT a session lock — safe to run; needs `--standalone` +
+    `CCE_AUTH_SIMULATE=1` to show a window without a live polkit request, and it
+    auto-exits ~3s in simulate mode so capture fast). The single `view()` (both
+    geometry and text) → `display_list()`; the `text_items` assembly → prims;
+    app FontSystem / make_text_buffer / text_items field+getter deleted. The
+    6e face-ID class again, and worse here — the app used
+    `create_font_system_with_system_fonts()`, so EVERY label was invisible at
+    runtime; the migration is the fix. General lesson reinforced: any
+    legacy-path app with its own FontSystem is a latent-invisible-text
+    candidate — don't trust its baseline capture.
+  - **Still to do:** migrate the four remaining legacy-path apps
+    (display-manager, email, layout-interface, status-interface), then delete
     `view*`/`text_items` + the backend tuple-wrapping path, then the per-widget
     text getters, then `Element` + `Adapted`.
 
