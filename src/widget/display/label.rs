@@ -153,6 +153,26 @@ pub struct StyledLabel {
     pub g_color: glyphon::Color,
     pub strikethrough: bool,
     pub strikethrough_color: Option<[f32; 4]>,
+    // Source retained so the label can be re-emitted as a display-list Text prim (Phase 6ak):
+    // the (possibly vertical-transformed) text, its size, family, and the box layout for the
+    // vertical case (per-char lines + centered wrap). `buffer` above is kept for the legacy
+    // draw()/width measurement path.
+    src_text: String,
+    src_size: f32,
+    src_family: String,
+    prim_layout: Option<crate::scene::paint::TextLayout>,
+}
+
+/// The data to emit a [`StyledLabel`] as a display-list `Prim::Text`: what
+/// [`StyledLabel::into_prim`] returns, matching `PaintCtx::text_with` / `text_boxed` args.
+pub struct LabelPrim {
+    pub text: String,
+    pub size: f32,
+    pub x: f32,
+    pub y: f32,
+    pub color: [u8; 3],
+    pub font: Option<String>,
+    pub layout: Option<crate::scene::paint::TextLayout>,
 }
 
 impl StyledLabel {
@@ -186,6 +206,21 @@ impl StyledLabel {
             (color[1] * 255.0) as u8,
             (color[2] * 255.0) as u8,
         );
+        // Vertical text is boxed: the per-char-newline `final_text` wrapped to the bar
+        // thickness and centered — the same set_size + center-align the buffer path applied.
+        let prim_layout = if is_vert {
+            let bar_thickness = crate::BAR_THICKNESS.load(std::sync::atomic::Ordering::Relaxed) as f32;
+            Some(crate::scene::paint::TextLayout {
+                // Effectively unbounded height (the legacy vertical path used height None);
+                // align_v Top means no vertical offset, so only set_size's height sees this.
+                wrap_width: Some(bar_thickness),
+                box_height: 100_000.0,
+                align_h: crate::scene::paint::AlignH::Center,
+                align_v: crate::scene::paint::AlignV::Top,
+            })
+        } else {
+            None
+        };
         Self {
             buffer,
             w,
@@ -193,6 +228,30 @@ impl StyledLabel {
             g_color,
             strikethrough: false,
             strikethrough_color: None,
+            src_text: final_text,
+            src_size: size,
+            src_family: family.to_string(),
+            prim_layout,
+        }
+    }
+
+    /// Consume the label and return the data to emit it as a display-list `Prim::Text`
+    /// (Phase 6ak): the source text, size, family, and — for vertical bars — the box layout.
+    /// `x, y` are the draw position; vertical labels pin `y` to 0 (as `draw` did).
+    pub fn into_prim(self, x: f32, y: f32) -> LabelPrim {
+        let is_vert = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
+        LabelPrim {
+            text: self.src_text,
+            size: self.src_size,
+            x,
+            y: if is_vert { 0.0 } else { y },
+            color: [
+                (self.color[0] * 255.0) as u8,
+                (self.color[1] * 255.0) as u8,
+                (self.color[2] * 255.0) as u8,
+            ],
+            font: Some(self.src_family),
+            layout: self.prim_layout,
         }
     }
 

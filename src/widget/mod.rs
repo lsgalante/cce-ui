@@ -846,7 +846,7 @@ pub use self::container::{
     SplitBox, SplitDirection
 };
 pub use self::display::{
-    TextLabel, Label, SectionHeader, StyledLabel, TextItem, Svg, UsageBar,
+    TextLabel, Label, SectionHeader, StyledLabel, LabelPrim, TextItem, Svg, UsageBar,
     LayoutPreview, FontPreview, InfoBox, StatusDot, InteractiveListItem,
     GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
     DotStatus, PreviewLayoutMode, Sidebar, Panel, PreviewState, ImagePreviewData, serialize_widgets,

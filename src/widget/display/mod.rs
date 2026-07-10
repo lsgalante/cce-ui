@@ -25,7 +25,7 @@ pub(crate) use self::text_label::make_widget_text_buffer;
 pub use self::sidebar::Sidebar;
 pub use self::panel::Panel;
 pub use self::node::Node;
-pub use self::label::{Label, SectionHeader, StyledLabel};
+pub use self::label::{Label, SectionHeader, StyledLabel, LabelPrim};
 pub use self::svg::Svg;
 pub use self::float3::Float3;
 pub use self::progress_bar::ProgressBar;
