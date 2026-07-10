@@ -1186,8 +1186,27 @@ Constraint respected: **each crate still builds standalone** — the new core is
     app-level shortcuts only. This is the shape the remaining widget-tree apps
     (data-editor foremost) migrate toward, and the pattern the demo
     (`cce-ui/src/main.rs`) should teach.
-  - **Still to do:** routed events + scene layout for data-editor (the last
-    widget-tree app on direct legacy-method dispatch); the demo
+  - **6ac — data-editor on routed events + scene-solver layout; the
+    routed-events/scene-layout item is COMPLETE. DONE (live-verified:
+    empty-state pixels match 6aa at 0.06% (cursor + caret); config load through
+    the routed menu; tree row select → inline choice editor + raw-span sync;
+    choice popover open/select; tree wheel).** Layout: chrome + panes are one
+    solver tree (stretched column [menubar fixed 42 + File-menu leaf / content
+    row grow with pad 10, gap = divider width, panes growing by the SplitPane
+    fractions / statusbar fixed 30]) reproducing the 6aa hand rects exactly;
+    the SplitPane keeps divider input state, its frame derived from the solved
+    panes; the inline value editors stay hand-positioned (they float over tree
+    rows). Events: all 30 direct dispatch call sites route one `Event` through
+    `propagate_event` per root with the plumbing intact. THE ROUTING TRAP worth
+    remembering: the router delivers KeyInput to the ctx-focused widget FIRST
+    on every propagate call, so a legacy non-short-circuited keyboard chain
+    would deliver a typed key to the focused widget once per call site
+    (N-time character insertion) — short-circuit the chain on first handled,
+    and re-gate any plumbing that keyed off WHICH call returned true onto
+    widget state instead (Enter→ApplyValue now checks the value editor was
+    editing when the key arrived). Keyboard flows not headlessly drivable —
+    user spot-check (typing, Enter-apply, tree search, keybind recording).
+  - **Still to do:** the demo
     (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
     `view*`/`text_items` paths, the per-widget text getters, the write-only
     global popovers registry, and finally `Element` + `Adapted` once the last
