@@ -1134,9 +1134,29 @@ Constraint respected: **each crate still builds standalone** — the new core is
     Motion — nudge (`move 2 2`) after warping or app hover state never updates
     (cost an hour chasing a "broken" divider tint that was fine). Held divider
     drag is not headlessly drivable — user spot-check pending.
+  - **6z — files' List dissolved; cce-files is embedded-base-FREE. DONE
+    (live-verified: row click select with preview/details update, double-click
+    navigation, breadcrumb navigation, wheel scroll with selection retained,
+    hover tint, item count; 3 new RowList unit tests).** The column-mode List
+    flavor ports verbatim to the app-owned `RowList`
+    (`cce-files/src/row_list.rs`): column_bounds (Flex/Absolute/RightOffset),
+    row virtualization + hit math, 400ms double-click, the scrollbar, and the
+    cell layout (icon column, primary/secondary tints, char-estimate truncation,
+    viewport-inset clip bounds). The in-List search box became a standalone
+    BrowseState TextBox; the open/close shortcuts and SearchChanged plumbing
+    move app-side (close returns the empty SearchChanged the legacy
+    just_changed flag produced). Two fixes: the 6v sandwich again
+    (render_widget emitted scrollbar + row overlays UNDER the rounded bg), and
+    a NEW DISSOLUTION TRAP for the checklist — a dissolved widget no longer
+    blocks window drags via its registered `blocks_backplate_drag`, so
+    `is_movable_backplate_at` must veto its rect app-side; without it every row
+    press became a compositor window-move grab and the app saw only the release
+    (looked exactly like a dead click). Kept legacy: the view's
+    scroll-into-view snaps the wheel back while the selected row would leave
+    the viewport. Search typing not headlessly drivable — user spot-check
+    pending.
   - **Still to do:**
-    files' List (the column-mode rows/selection/search flavor — richer than the
-    6q/6v pure scroll frames) and data-editor's SplitBox/TreeList when their
+    data-editor's SplitBox/TreeList when their
     turns come; routed events + scene layout for the widget-tree apps; the demo
     (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
     `view*`/`text_items` paths, the per-widget text getters, the write-only
