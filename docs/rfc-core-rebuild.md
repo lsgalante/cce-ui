@@ -1041,8 +1041,38 @@ Constraint respected: **each crate still builds standalone** — the new core is
     the clone sections like every other page). Pre-existing, deferred to the
     List/ScrollBox dissolution: the processes lists' inner wheel is dead; the page
     scrollbar's right half sits in the compositor's 8px edge-resize zone.
+  - **6v — settings' List/ScrollBox dissolved (all five lists). DONE (A/B render
+    dumps on processes/packages/radios: rect streams byte-identical minus one
+    duplicated pair per list, see below; live-verified — per-list wheel, page-scroll
+    fallback, scrollbar track-jump that sticks, focus tint, package row click →
+    selection + info fetch, scroll state surviving watcher rebuilds).** Every
+    settings list was a pure scroll frame (`List` with `columns: None`; the pages
+    draw the rows), so the recipe is fonts' 6q `ScrollRegion` ported app-side
+    (`cce-settings/src/scroll_region.rs`) with the List-flavored visuals (1px
+    focus/hover-tinted rounded border + inset bg) and the List-mirroring API the
+    pages already used. Routing: `AppPage` grows `extra_dispatch_roots` — the
+    `InteractiveListItem` rows dispatch directly as propagate roots (`Adapted`'s
+    press/wheel hit-gate makes misses fall through, so root order is immaterial) —
+    plus `handle_mouse_wheel` (after widget dispatch, before the manual page-scroll
+    fallback: the legacy "inner ScrollBoxes take the wheel first" slot) and
+    `handle_key_input` (hover/focus-scoped, before the page's scroll-key fallback);
+    regions ride the existing pointer down/move/up hooks (audio's slider-drag slots).
+    This FIXES the 6u-deferred dead inner wheel, and two latent visuals of the
+    columns=None List path: `List::extra_quads`' early return never removed the
+    ScrollBox bg quad, so `render_widget` emitted the border+bg pair TWICE (plain
+    bg through the solid-border branch + `all_rounded_quads`) — the 6p double-
+    composite class — with the scrollbar track/thumb sandwiched UNDER the second
+    translucent bg wash. Single-drawn now; the inner scrollbars are visible for the
+    first time. Only other A/B delta: item-label clip bounds relax by ScrollBox's
+    4px text inset (rows are fully-visible-culled, nothing renders in that band).
+    Replication trap for other apps: the region's `focused` is a local bool
+    (press-inside sets, press-miss clears) standing in for the global
+    `focus::set_focused(scroll_box)` — ctrl-nav can no longer land on a list, and
+    the focused border tint shows through the translucent bg as a green wash
+    (legacy did this too, darker under its doubled bg). Not headlessly drivable,
+    user spot-check pending: held thumb drag, arrow/PageUp/Down over a hovered list.
   - **Still to do:**
-    settings' SectionContainer/ScrollBox/List (the last embedded bases there — the
+    settings' SectionContainer (the last embedded base there — the
     sections are thin [header, container] dispatch shells now); data-editor +
     text-editor off the engine popup path, then delete the popup surface machinery;
     files' internal containers (splitters/BrowseContainer/List) and data-editor's
