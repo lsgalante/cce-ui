@@ -1269,10 +1269,24 @@ Constraint respected: **each crate still builds standalone** — the new core is
     runtime; the migration is the fix. General lesson reinforced: any
     legacy-path app with its own FontSystem is a latent-invisible-text
     candidate — don't trust its baseline capture.
-  - **Still to do:** migrate the four remaining legacy-path apps
-    (display-manager, email, layout-interface, status-interface), then delete
-    `view*`/`text_items` + the backend tuple-wrapping path, then the per-widget
-    text getters, then `Element` + `Adapted`.
+  - **6ah — cce-display-manager across (3 of 6). DONE (A/B: 131px AE = 0.004%
+    caret blink, zero >8%-amplitude diffs; live-verified --greeter renders
+    identically).** The greetd login greeter — run the GUI standalone with
+    `--greeter` (daemon mode needs root/greetd). Bundled fonts, byte-match flip.
+    view() + view_rounded_quads() → display_list() (rounded then plain, both
+    skipping the card); rebuild_text_items → prims; FontSystem / make_text_buffer
+    / info_buffer / text_items machinery deleted. The card — a soft radial-glow
+    blob drawn with the circular clip disabled — STAYS in custom_vertices
+    (escape-hatch layer, on top, untouched). REPO HAZARD hit here: these crates
+    live under ~/Dropbox, and a Dropbox sync reverted the edited main.rs to disk
+    AFTER build+test but BEFORE the commit landed (a harness-interrupted commit,
+    exit 144, left the tree clean at the old file) — had to re-apply and commit
+    immediately. Verify `git log`/`grep display_list` actually stuck before
+    moving on.
+  - **Still to do:** migrate the three remaining legacy-path apps (email,
+    layout-interface, status-interface), then delete `view*`/`text_items` + the
+    backend tuple-wrapping path, then the per-widget text getters, then
+    `Element` + `Adapted`.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
