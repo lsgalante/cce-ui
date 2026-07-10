@@ -1362,21 +1362,25 @@ Constraint respected: **each crate still builds standalone** — the new core is
       `render.rs`: text-buffer cache + curved-menu-text special cases). Designer
       + cce-cloud never implement `Application` — they were skipped by all of
       Phase 6 and still drive `WgpuAdapter` directly.
-    - `text_labels_with_font_and_bounds` + `widget_font` → **`layout::render_widget`**,
-      the backbone of cce-system-settings' rendering (spinboxes, list rows,
-      buttons, bars, dropdowns). `render_widget` aggregates text via the getters;
-      `Adapted::paint_self` already emits the same text via `own_labels_for_walk`
-      WITHOUT them — so the keystone is reimplementing `render_widget`'s text on
-      the `paint_self` mechanism (mind `text_font` vs `widget_font` for TextBox).
+    - ~~`text_labels_with_font_and_bounds` + `widget_font` → `layout::render_widget`~~
+      **DONE (6an).** render_widget now sources its text from the scene walk
+      (`paint_root_into` → keep only `Prim::Text` → emit onto the RenderTarget),
+      keeping its own geometry path; the prim carries the per-widget font+clip so
+      the getters are gone from here. Settings A/B AE=0 on Accounts + (stash-based)
+      the spinbox-heavy Audio page. The last difference vs the getter is
+      widget_font→text_font, which coincides except for a custom-font TextBox.
     - `.text_labels()` / `.text_labels_with_bounds()` → **four hand-aggregate
       apps** (email, authenticator, display-manager, layout-interface) whose
       `display_list()` emits widget text by calling the getter per widget.
     - Note: the "orphaned" containers Layer / Page are NOT deletable — Layer is
       the embedded base of the live Plate/Page; Page is embedded by the live
       Paginator (transitive liveness through inheritance, not direct app use).
-  - **Still to do:** move the three getter consumer classes above to
-    `paint_self`/prims, THEN delete the getters, then `Element` + `Adapted`
-    (TreeList → narrow traits).
+  - **6an — render_widget off the getters (see above). DONE (all 18 apps
+    compile; 176 tests; settings A/B AE=0 on Accounts + Audio).** One of the
+    three getter-consumer classes cleared.
+  - **Still to do:** the two remaining getter-consumer classes — cce-designer's
+    custom render loop and the four hand-aggregate apps' `.text_labels()` — THEN
+    delete the getters, then `Element` + `Adapted` (TreeList → narrow traits).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
