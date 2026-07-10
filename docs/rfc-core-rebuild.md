@@ -1222,10 +1222,30 @@ Constraint respected: **each crate still builds standalone** — the new core is
     footgun surfaced for the log: `Slider::set_value` takes the NORMALIZED
     0..1 value (`with_range` only scales `get_scaled_value`) — passing a
     ranged value silently clamps to 1.0.
-  - **Still to do:** the legacy deletion — the `view*`/`text_items` paths, the
-    per-widget text getters, the write-only global popovers registry, and
-    finally `Element` + `Adapted` (TreeList converting to narrow traits with
-    it).
+  - **6ae — legacy deletion, part 1: the global `widget::popovers` registry is
+    DELETED. DONE (write-only since 6x; the mod, its `render_widget` write, and
+    the four apps' `clear()` calls are gone; settings' popover renders
+    byte-identically after).** Part 1 also produced a CORRECTED precondition
+    map for the rest of the deletion — the endgame list had been assuming "the
+    last app is across," and it is not:
+    - The `view*`/`text_items` paths CANNOT be deleted yet: SIX apps still
+      implement them — cce-test-interface (2.1k), cce-authenticator (0.9k),
+      cce-display-manager (1.5k), cce-email (2.5k), cce-layout-interface
+      (3.8k), cce-status-interface (4.2k). Each needs its own Phase-6-style
+      migration (display-list flip at minimum; dissolutions as found).
+      Suggested order: smallest/least-critical first (test-interface,
+      authenticator — NOTE it may be the lock screen, verify carefully),
+      status-interface last (layer-shell, always-running).
+    - The per-widget text getters are additionally load-bearing for the walk's
+      legacy branches (`renders_own_subtree`, container `text_labels`
+      aggregation) and the migrated apps' hand-rolled window aggregates
+      (settings' `collect_window_child`, files' assembly) — they go when those
+      consumers move to `paint_self`-only trees.
+    - `Element` + `Adapted` go last, after both of the above; TreeList
+      converts to narrow traits then.
+  - **Still to do:** migrate the six legacy-path apps (above), then delete
+    `view*`/`text_items` + the backend tuple-wrapping path, then the per-widget
+    text getters, then `Element` + `Adapted`.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.

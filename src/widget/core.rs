@@ -153,59 +153,6 @@ pub mod focus {
     }
 }
 
-pub mod popovers {
-    use super:: Element;
-    use std::cell::RefCell;
-
-    thread_local! {
-        static ACTIVE_POPOVERS: RefCell<Vec<*const (dyn Element + 'static)>> = RefCell::new(Vec::new());
-    }
-
-    pub fn clear() {
-        ACTIVE_POPOVERS.with(|list| {
-            list.borrow_mut().clear();
-        });
-    }
-
-    pub fn register(w: &(dyn Element + 'static)) {
-        ACTIVE_POPOVERS.with(|list| {
-            let ptr = w as *const (dyn Element + 'static);
-            let mut list = list.borrow_mut();
-            if !list.contains(&ptr) {
-                list.push(ptr);
-            }
-        });
-    }
-
-    pub fn get_active() -> Vec<*const (dyn Element + 'static)> {
-        ACTIVE_POPOVERS.with(|list| {
-            list.borrow().clone()
-        })
-    }
-
-    pub fn is_coordinate_covered(query_address: usize, px: f32, py: f32) -> bool {
-        ACTIVE_POPOVERS.with(|list| {
-            let list = list.borrow();
-            for popover_ptr in list.iter() {
-                let current_data = *popover_ptr as *const () as usize;
-                if query_address == current_data {
-                    continue;
-                }
-                unsafe {
-                    if let Some(popover) = popover_ptr.as_ref() {
-                        if let Some((x, y, width, height)) = popover.popover_rect() {
-                            if px >= x && px <= x + width && py >= y && py <= y + height {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            false
-        })
-    }
-}
-
 pub mod hover_animation {
     use std::cell::RefCell;
 

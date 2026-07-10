@@ -3358,7 +3358,6 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
     }
     if w.popover_rect().is_some() {
         ctx.register_popover(w);
-        crate::widget::popovers::register(w);
     }
 }
 
@@ -3434,7 +3433,6 @@ impl UiFrame {
     pub fn start(scroll_offset: f32) -> Self {
         crate::widget::hover_animation::reset_frame_registration();
         crate::widget::hover_animation::set_scroll_offset(scroll_offset);
-        crate::widget::popovers::clear();
         Self
     }
 
