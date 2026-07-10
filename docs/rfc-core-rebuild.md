@@ -1116,12 +1116,32 @@ Constraint respected: **each crate still builds standalone** — the new core is
     (apps still clear/register into it) — delete it with the legacy paths.
     Drive-by: cce-designer had not compiled since 6k (direct `WgpuAdapter::new`
     call missing the new `load_system_fonts` bool) — fixed.
+  - **6y — files' SplitBoxes + BrowseContainer/NetworkContainer dissolved. DONE
+    (browse page A/B: zero >8%-amplitude pixel diffs; network page's only diff is
+    a removed paint bug, see below; live-verified — row select, double-click
+    navigation, view-dropdown page switch, divider hover tint via hover-on/off
+    crop diff, preview populate).** The split reduces to an app-owned `SplitPane`
+    (frac + divider drag/hover + divider quad — the SplitBox two-child horizontal
+    math verbatim); the pane containers were pure layout shims whose child copies
+    the pages have always re-rendered on top (the Phase 0 double-paint), so the
+    window assembly now emits only the divider quad and the preview pane
+    (`render_widget` at the right pane rect, text clamped to the pane like the
+    legacy SplitBox bounds clamp). Killed on the way: the left pane's under-copy
+    double-compositing every translucent quad, including the NetworkContainer's
+    full-width breadcrumb-copy strip that visibly leaked behind the graph page's
+    top bar — the exact class the Phase 0 stopgap patched for Browse only.
+    Verification trap for the log: `wlrctl` pointer warps land as Enter WITHOUT
+    Motion — nudge (`move 2 2`) after warping or app hover state never updates
+    (cost an hour chasing a "broken" divider tint that was fine). Held divider
+    drag is not headlessly drivable — user spot-check pending.
   - **Still to do:**
-    files' internal containers (splitters/BrowseContainer/List) and data-editor's
-    SplitBox/TreeList when their turns come; routed events + scene layout for the
-    widget-tree apps; the demo (`cce-ui/src/main.rs`) as the reference
-    `Application`. Delete the legacy `view*`/`text_items` paths, the per-widget
-    text getters, and finally `Element` + `Adapted` once the last app is across.
+    files' List (the column-mode rows/selection/search flavor — richer than the
+    6q/6v pure scroll frames) and data-editor's SplitBox/TreeList when their
+    turns come; routed events + scene layout for the widget-tree apps; the demo
+    (`cce-ui/src/main.rs`) as the reference `Application`. Delete the legacy
+    `view*`/`text_items` paths, the per-widget text getters, the write-only
+    global popovers registry, and finally `Element` + `Adapted` once the last
+    app is across.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
