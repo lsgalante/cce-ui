@@ -1345,9 +1345,38 @@ Constraint respected: **each crate still builds standalone** — the new core is
     dead-path removal — every implementor already took the `Some(dl)`/empty-text
     arms. (cce-designer + cce-cloud drive `WgpuAdapter` directly, never implement
     `Application`, so they're untouched.)
-  - **Still to do:** the per-widget text getters (after moving the paint walk's
-    legacy branches + the migrated apps' hand aggregates to `paint_self`-only),
-    then `Element` + `Adapted` (TreeList → narrow traits).
+  - **6am — dead widgets SplitBox / MultiControl / KeybindsControl DELETED.
+    DONE (cce-ui + all 18 apps compile; 175 tests pass; settings A/B AE=0).**
+    Phase-6 dissolutions orphaned all three — no client app (nor live cce-ui
+    path) constructs them. Removed the files, re-exports, the two
+    `get_*_sub_widget_info` helpers + their `render_widget`/`window_runner`
+    downcast blocks (fire only when the widget IS that type — none is, so
+    behavior-preserving), the dead `name == "MultiControl"/"KeybindsControl"`
+    span-full terms, and `render_widget`'s now-redundant `let mut corners = …`
+    shadows. Each carried the full legacy text-getter aggregation, so this trims
+    a big slice of the getter consumer graph.
+  - **Per-widget text getters — GATED, not yet deletable.** Investigation
+    (6am) established that every getter still has a LIVE consumer, so none can
+    be removed until those move to `paint_self`/prims first:
+    - `get_text_items` → **cce-designer** (custom `WgpuAdapter` render loop in
+      `render.rs`: text-buffer cache + curved-menu-text special cases). Designer
+      + cce-cloud never implement `Application` — they were skipped by all of
+      Phase 6 and still drive `WgpuAdapter` directly.
+    - `text_labels_with_font_and_bounds` + `widget_font` → **`layout::render_widget`**,
+      the backbone of cce-system-settings' rendering (spinboxes, list rows,
+      buttons, bars, dropdowns). `render_widget` aggregates text via the getters;
+      `Adapted::paint_self` already emits the same text via `own_labels_for_walk`
+      WITHOUT them — so the keystone is reimplementing `render_widget`'s text on
+      the `paint_self` mechanism (mind `text_font` vs `widget_font` for TextBox).
+    - `.text_labels()` / `.text_labels_with_bounds()` → **four hand-aggregate
+      apps** (email, authenticator, display-manager, layout-interface) whose
+      `display_list()` emits widget text by calling the getter per widget.
+    - Note: the "orphaned" containers Layer / Page are NOT deletable — Layer is
+      the embedded base of the live Plate/Page; Page is embedded by the live
+      Paginator (transitive liveness through inheritance, not direct app use).
+  - **Still to do:** move the three getter consumer classes above to
+    `paint_self`/prims, THEN delete the getters, then `Element` + `Adapted`
+    (TreeList → narrow traits).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
