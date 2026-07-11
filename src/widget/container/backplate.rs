@@ -1,6 +1,6 @@
 use crate::widget::*;
 use crate::context::UiContext;
-use crate::widget::display::TextLabel;
+
 
 #[derive(Debug, Clone)]
 pub struct Backplate {
@@ -249,86 +249,6 @@ impl Element for Backplate {
             }
         }
         quads
-    }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut labels = Vec::new();
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            labels.extend(widget.text_labels());
-        }
-        labels
-    }
-
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut result = Vec::new();
-        let (wx, wy, ww, wh) = self.rect();
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            for (label, bounds) in widget.text_labels_with_bounds(ctx) {
-                let cb = if let Some(b) = bounds {
-                    let cx0 = b[0].max(wx);
-                    let cy0 = b[1].max(wy);
-                    let cx1 = b[2].min(wx + ww);
-                    let cy1 = b[3].min(wy + wh);
-                    if cx1 > cx0 && cy1 > cy0 {
-                        Some([cx0, cy0, cx1, cy1])
-                    } else {
-                        continue;
-                    }
-                } else {
-                    Some([wx, wy, wx + ww, wy + wh])
-                };
-                result.push((label, cb));
-            }
-        }
-        result
-    }
-
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut result = Vec::new();
-        let (wx, wy, ww, wh) = self.rect();
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            for (label, font, bounds) in widget.text_labels_with_font_and_bounds(ctx) {
-                let cb = if let Some(b) = bounds {
-                    let cx0 = b[0].max(wx);
-                    let cy0 = b[1].max(wy);
-                    let cx1 = b[2].min(wx + ww);
-                    let cy1 = b[3].min(wy + wh);
-                    if cx1 > cx0 && cy1 > cy0 {
-                        Some([cx0, cy0, cx1, cy1])
-                    } else {
-                        continue;
-                    }
-                } else {
-                    Some([wx, wy, wx + ww, wy + wh])
-                };
-                result.push((label, font, cb));
-            }
-        }
-        result
-    }
-
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut result = Vec::new();
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            result.extend(widget.get_text_items());
-        }
-        result
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {

@@ -237,11 +237,11 @@ impl ParametersBg {
             let r = rects[i];
             if ptype.starts_with("slider") {
                 if let Some(s) = &self.sliders[i] {
-                    labels.extend(s.text_labels());
+                    labels.extend(s.own_text_labels());
                 }
             } else if ptype.starts_with("float3") {
                 if let Some(f) = &self.float3s[i] {
-                    labels.extend(f.text_labels());
+                    labels.extend(f.own_text_labels());
                 }
             } else if ptype == "section" {
                 labels.push(TextLabel {
@@ -277,27 +277,27 @@ impl ParametersBg {
                 });
             } else if ptype.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
-                    labels.extend(sb.text_labels());
+                    labels.extend(sb.own_text_labels());
                 }
             } else if ptype == "text" {
                 if let Some(tb) = &self.texts[i] {
-                    labels.extend(tb.text_labels());
+                    labels.extend(tb.own_text_labels());
                 }
             } else if ptype.starts_with("choice") {
                 if let Some(d) = &self.choices[i] {
-                    labels.extend(d.text_labels());
+                    labels.extend(d.own_text_labels());
                 }
             } else if ptype == "button" {
                 if let Some(b) = &self.buttons[i] {
-                    labels.extend(b.text_labels());
+                    labels.extend(b.own_text_labels());
                 }
             } else if ptype == "toggle" || ptype == "checkbox" {
                 if let Some(cb) = &self.checkboxes[i] {
-                    labels.extend(cb.text_labels());
+                    labels.extend(cb.own_text_labels());
                 }
             } else if ptype.starts_with("color") || ptype == "rgb" || ptype == "rgba" {
                 if let Some(c) = &self.colors[i] {
-                    labels.extend(c.text_labels());
+                    labels.extend(c.own_labels());
                 }
             } else {
                 labels.push(TextLabel {
@@ -715,8 +715,15 @@ impl Paint for ParametersBg {
             result.push((l, label_font, bounds));
         }
         for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            result.extend(widget.text_labels_with_font_and_bounds(ctx));
+            // The trait text getters are gone: the raw children's labels come off the
+            // paint walk (fonts + clip bounds composed into the prims).
+            let mut scratch = crate::scene::paint::PaintCtx::new();
+            crate::scene::painter::append_widget_text(ctx, unsafe { &*child_ptr }, &mut scratch);
+            for item in scratch.finish().items {
+                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, .. } = item.prim {
+                    result.push((TextLabel { text, x, y, font_size, color }, font, bounds));
+                }
+            }
         }
         result
     }
@@ -1953,10 +1960,20 @@ mod tests {
         );
         // The no-double-draw contract of the plain-quad hatch.
         assert!(Element::all_quads(&p, &ctx).is_empty());
-        // Per-label hatch: labels carry the widget font and viewport bounds.
-        let labels = Element::text_labels_with_font_and_bounds(&p, &ctx);
+        // Per-label hatch: the walk's text prims carry the widget font and viewport bounds.
+        let mut scratch = crate::scene::paint::PaintCtx::new();
+        crate::scene::painter::append_widget_text(&ctx, &p, &mut scratch);
+        let labels: Vec<_> = scratch
+            .finish()
+            .items
+            .into_iter()
+            .filter_map(|item| match item.prim {
+                crate::scene::paint::Prim::Text { font, bounds, .. } => Some((font, bounds)),
+                _ => None,
+            })
+            .collect();
         assert!(!labels.is_empty());
-        assert!(labels.iter().all(|(_, font, bounds)| font.is_some() && bounds.is_some()));
+        assert!(labels.iter().all(|(font, bounds)| font.is_some() && bounds.is_some()));
     }
 
     #[test]

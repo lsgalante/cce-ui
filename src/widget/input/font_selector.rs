@@ -46,6 +46,12 @@ impl FontSelector {
 impl Element for FontSelector {
     crate::impl_widget_base!(FontSelector);
 
+    // Leaf legacy widget: own fonted labels via paint_self (the default no longer
+    // drains the text getters).
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        crate::scene::painter::paint_legacy_leaf(self, ui, ctx, self.own_fonted_labels());
+    }
+
     fn preferred_height(&self) -> Option<f32> {
         Some(crate::layout::font_selector_height())
     }
@@ -146,7 +152,33 @@ impl Element for FontSelector {
         quads
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
+    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
+        let r = crate::layout::font_selector_corner_radius();
+        if r > 0.0 {
+            (true, true, true, true)
+        } else {
+            (false, false, false, false)
+        }
+    }
+
+    fn corner_radius(&self) -> f32 {
+        crate::layout::font_selector_corner_radius()
+    }
+}
+
+impl Drop for FontSelector {
+    fn drop(&mut self) {
+        clear_widget_references(self);
+    }
+}
+
+unsafe impl Send for FontSelector {}
+unsafe impl Sync for FontSelector {}
+
+impl Control for FontSelector {}
+
+impl FontSelector {
+    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let top = self.base.label_offset();
         let _visual_h = self.base.h - top;
@@ -227,13 +259,13 @@ impl Element for FontSelector {
         labels
     }
 
-    fn text_labels_with_font_and_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    pub(crate) fn own_fonted_labels(&self) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let font = self.widget_font();
         let top = self.base.label_offset();
         let clip_right = self.base.x + self.base.w - 24.0;
         let bounds = Some([self.base.x, self.base.y + top, clip_right, self.base.y + self.base.h]);
         
-        let labels = self.text_labels();
+        let labels = self.own_labels();
         let count = labels.len();
         labels.into_iter().enumerate().map(|(idx, l)| {
             let has_control = self.control_label().is_some();
@@ -249,28 +281,4 @@ impl Element for FontSelector {
             }
         }).collect()
     }
-
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        let r = crate::layout::font_selector_corner_radius();
-        if r > 0.0 {
-            (true, true, true, true)
-        } else {
-            (false, false, false, false)
-        }
-    }
-
-    fn corner_radius(&self) -> f32 {
-        crate::layout::font_selector_corner_radius()
-    }
 }
-
-impl Drop for FontSelector {
-    fn drop(&mut self) {
-        clear_widget_references(self);
-    }
-}
-
-unsafe impl Send for FontSelector {}
-unsafe impl Sync for FontSelector {}
-
-impl Control for FontSelector {}

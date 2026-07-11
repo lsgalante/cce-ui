@@ -352,16 +352,6 @@ pub trait Paint {
         Vec::new()
     }
 
-    /// Shaped glyphon buffers for the legacy `Element::get_text_items` path — hosts that
-    /// build text off pre-shaped buffers instead of `TextLabel`s (cce-status-interface drives
-    /// its StatusBar by hand: `prepare_text` then `get_text_items` into its own paint).
-    /// Prim-derived text can't serve this (the getter returns borrows of buffers the widget
-    /// owns), so the widget serves them itself; shape the buffers in
-    /// [`prepare_text`](Paint::prepare_text). Default: none — the `Element` default most
-    /// widgets kept.
-    fn text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        Vec::new()
-    }
 }
 
 /// What an event handler may reach beyond its own state — the RFC §3.5 `EventCtx`, grown as
@@ -793,7 +783,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
 
     /// This widget's OWN text (prim-derived + detached base label), before any child
     /// aggregation — the shared source for the three text getters.
-    fn own_text_labels(&self) -> Vec<TextLabel> {
+    pub(crate) fn own_text_labels(&self) -> Vec<TextLabel> {
         if !self.visible() {
             return Vec::new();
         }
@@ -814,10 +804,11 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     }
 
     /// Own text with font + bounds: [`Paint::text_bounds`] when the widget provides it, else a
-    /// replica of the `Element` default's scroll-ancestor viewport clipping. The legacy tuple
-    /// getters serve `widget_font` for every label; the paint walk serves
-    /// [`Paint::text_font`] for the prim-derived labels (see `own_labels_for_walk`).
-    fn own_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    /// replica of the deleted `Element` default's scroll-ancestor viewport clipping, with
+    /// `widget_font` on every label (the legacy tuple convention). pub(crate) so legacy
+    /// composites (TreeList, List) can read their concrete Adapted fields' labels now that
+    /// the trait getters are gone.
+    pub(crate) fn own_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         self.own_labels_with_prim_font(ctx, Paint::widget_font(&self.inner))
     }
 
@@ -1069,19 +1060,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
     }
 
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        let mut items = Vec::new();
-        if self.visible() {
-            // Own shaped buffers ([`Paint::text_items`] — StatusBar's manual-host path), then
-            // the container recursion.
-            items.extend(Paint::text_items(&self.inner));
-            for child in self.visible_children() {
-                items.extend(unsafe { &*child }.get_text_items());
-            }
-        }
-        items
-    }
-
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
         if self.visible() {
             let rect = self.content_rect();
@@ -1281,53 +1259,10 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
     }
 
-    /// Text derived from the [`Paint::paint`] `Text` prims (one source of truth for what the
-    /// widget draws — inline labels, readouts), plus the base-label text for detached-label
-    /// widgets (drawn by the adapter, since the label lives on the base).
-    /// The legacy bounded-text getters, honoring [`Paint::text_bounds`] (Graph clips node
-    /// names to its own rect) and aggregating container children — each child contributes its
-    /// own getter of the same kind, so its fonts/bounds are preserved (the Layer pattern).
-    /// Without a text-bounds hook, `text_labels_with_bounds` matches the unbounded `Element`
-    /// default, and `text_labels_with_font_and_bounds` replicates the default's
-    /// scroll-ancestor walk (an overriding impl can no longer call it).
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        let bounds = Paint::text_bounds(&self.inner, self.content_rect());
-        let mut out: Vec<_> = self.own_text_labels().into_iter().map(|l| (l, bounds)).collect();
-        if self.visible() {
-            for child in self.visible_children() {
-                out.extend(unsafe { &*child }.text_labels_with_bounds(ctx));
-            }
-        }
-        out
-    }
-
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        // Per-label font+bounds escape hatch (ParametersBg): the widget's view is served
-        // verbatim, children included — no aggregation on top.
-        if Paint::serves_legacy_labels(&self.inner) {
-            if !self.visible() {
-                return Vec::new();
-            }
-            return Paint::legacy_labels_with_font_and_bounds(&self.inner, self.content_rect(), ctx);
-        }
-        let mut own = self.own_labels_with_font_and_bounds(ctx);
-        if self.visible() {
-            for child in self.visible_children() {
-                own.extend(unsafe { &*child }.text_labels_with_font_and_bounds(ctx));
-            }
-        }
-        own
-    }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let mut out = self.own_text_labels();
-        if self.visible() {
-            for child in self.visible_children() {
-                out.extend(unsafe { &*child }.text_labels());
-            }
-        }
-        out
-    }
+    // The legacy per-widget text getters are deleted from `Element`: this adapter's text
+    // reaches the frame through `paint_self` above (prim-derived own labels + the
+    // detached base label), and composites that need a concrete Adapted child's labels
+    // call `own_labels_with_font_and_bounds` directly (pub(crate)).
 
     // --- Reverse bridges: [`Paint::paint`] output converted back to the legacy geometry
     // getters external render loops read (cce-test-interface's `all_*` calls, `render_widget`'s

@@ -41,6 +41,15 @@ impl KeybindRecorder {
 impl Element for KeybindRecorder {
     crate::impl_widget_base!(KeybindRecorder);
 
+    // Leaf legacy widget: own fonted labels via paint_self (the default no longer
+    // drains the text getters).
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        crate::scene::painter::paint_legacy_leaf(
+            self, ui, ctx,
+            crate::scene::painter::fonted_leaf_labels(self, ui, self.own_labels()),
+        );
+    }
+
     fn preferred_height(&self) -> Option<f32> {
         Some(crate::layout::textbox_height())
     }
@@ -200,7 +209,17 @@ impl Element for KeybindRecorder {
         quads
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
+
+
+    fn unfocus(&mut self) {
+        self.recording = false;
+    }
+}
+
+impl Control for KeybindRecorder {}
+
+impl KeybindRecorder {
+    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let top = self.base.label_offset();
         
@@ -229,9 +248,4 @@ impl Element for KeybindRecorder {
         labels
     }
 
-    fn unfocus(&mut self) {
-        self.recording = false;
-    }
 }
-
-impl Control for KeybindRecorder {}

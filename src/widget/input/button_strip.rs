@@ -407,7 +407,58 @@ impl Element for ButtonStrip {
         quads
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
+    // Leaf legacy widget: own fonted labels via paint_self (the trait text getters
+    // are deleted).
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        crate::scene::painter::paint_legacy_leaf(
+            self, ui, ctx,
+            crate::scene::painter::fonted_leaf_labels(self, ui, self.own_labels()),
+        );
+    }
+
+    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
+        if event.state != ElementState::Pressed { return false; }
+        if self.buttons.is_empty() { return false; }
+
+        let current = self.selected.unwrap_or(0);
+        let next;
+
+        match event.logical_key {
+            Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowUp) => {
+                if current > 0 {
+                    next = current - 1;
+                } else {
+                    next = self.buttons.len() - 1;
+                }
+            }
+            Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowDown) => {
+                if current + 1 < self.buttons.len() {
+                    next = current + 1;
+                } else {
+                    next = 0;
+                }
+            }
+            _ => return false,
+        }
+
+        if Some(next) != self.selected {
+            self.selected = Some(next);
+            self.just_clicked = Some(next);
+            self.generate_rotated_labels();
+            return true;
+        }
+        false
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(self.current_font())
+    }
+}
+
+impl Control for ButtonStrip {}
+
+impl ButtonStrip {
+    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         let font_info = self.current_font_parsed();
         let font_fam = font_info.0;
@@ -454,44 +505,4 @@ impl Element for ButtonStrip {
         }
         labels
     }
-
-    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
-        if event.state != ElementState::Pressed { return false; }
-        if self.buttons.is_empty() { return false; }
-
-        let current = self.selected.unwrap_or(0);
-        let next;
-
-        match event.logical_key {
-            Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowUp) => {
-                if current > 0 {
-                    next = current - 1;
-                } else {
-                    next = self.buttons.len() - 1;
-                }
-            }
-            Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowDown) => {
-                if current + 1 < self.buttons.len() {
-                    next = current + 1;
-                } else {
-                    next = 0;
-                }
-            }
-            _ => return false,
-        }
-
-        if Some(next) != self.selected {
-            self.selected = Some(next);
-            self.just_clicked = Some(next);
-            self.generate_rotated_labels();
-            return true;
-        }
-        false
-    }
-
-    fn widget_font(&self) -> Option<String> {
-        Some(self.current_font())
-    }
 }
-
-impl Control for ButtonStrip {}

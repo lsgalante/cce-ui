@@ -46,6 +46,15 @@ impl Trackpad {
 impl Element for Trackpad {
     crate::impl_widget_base!(Trackpad);
 
+    // Leaf legacy widget: own fonted labels via paint_self (the default no longer
+    // drains the text getters).
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        crate::scene::painter::paint_legacy_leaf(
+            self, ui, ctx,
+            crate::scene::painter::fonted_leaf_labels(self, ui, self.own_labels()),
+        );
+    }
+
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.x = x;
         self.base.y = y;
@@ -105,37 +114,27 @@ impl Element for Trackpad {
         quads
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let (rx_rect, y, rw_rect, h) = self.rect();
-        let label_x = self.label_x_offset();
-        let x = rx_rect + label_x;
-        let _w = rw_rect - label_x;
-        let top = self.label_offset();
-        let visual_h = h - top;
-        let mut labels = Vec::new();
-
-        // Render "Touchpad Area" label
-        labels.push(TextLabel {
-            text: "Touchpad Area".to_string(),
-            x: x + 12.0,
-            y: y + top + visual_h - 22.0,
-            font_size: 11.0,
-            color: [0x73, 0x73, 0x8c],
-        });
-
-        // Optional widget-base label on top
-        if let Some(ref label) = self.base.label {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            labels.push(TextLabel {
-                text: label.clone(),
-                x: rx_rect,
-                y,
-                font_size,
-                color: colors::control_label_color_detached_for_state(self.base.hovered, self.base.focused),
-            });
+    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
+        if button == MouseButton::Left {
+            let (rx_rect, y, rw_rect, h) = self.rect();
+            let label_x = self.label_x_offset();
+            let x = rx_rect + label_x;
+            let w = rw_rect - label_x;
+            let top = self.label_offset();
+            let visual_h = h - top;
+            if px >= x && px <= x + w && py >= y + top && py <= y + top + visual_h {
+                if state == ElementState::Pressed {
+                    let rx = ((px - x) / w).clamp(0.0, 1.0);
+                    let ry = ((py - (y + top)) / visual_h).clamp(0.0, 1.0);
+                    self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
+                    return true;
+                } else {
+                    self.fingers.clear();
+                    return true;
+                }
+            }
         }
-
-        labels
+        false
     }
 
     fn draggable(&self) -> bool { true }
@@ -175,27 +174,40 @@ impl Element for Trackpad {
     fn drag_end(&mut self) {
         self.fingers.clear();
     }
+}
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
-        if button == MouseButton::Left {
-            let (rx_rect, y, rw_rect, h) = self.rect();
-            let label_x = self.label_x_offset();
-            let x = rx_rect + label_x;
-            let w = rw_rect - label_x;
-            let top = self.label_offset();
-            let visual_h = h - top;
-            if px >= x && px <= x + w && py >= y + top && py <= y + top + visual_h {
-                if state == ElementState::Pressed {
-                    let rx = ((px - x) / w).clamp(0.0, 1.0);
-                    let ry = ((py - (y + top)) / visual_h).clamp(0.0, 1.0);
-                    self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
-                    return true;
-                } else {
-                    self.fingers.clear();
-                    return true;
-                }
-            }
+impl Trackpad {
+    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
+        let (rx_rect, y, rw_rect, h) = self.rect();
+        let label_x = self.label_x_offset();
+        let x = rx_rect + label_x;
+        let _w = rw_rect - label_x;
+        let top = self.label_offset();
+        let visual_h = h - top;
+        let mut labels = Vec::new();
+
+        // Render "Touchpad Area" label
+        labels.push(TextLabel {
+            text: "Touchpad Area".to_string(),
+            x: x + 12.0,
+            y: y + top + visual_h - 22.0,
+            font_size: 11.0,
+            color: [0x73, 0x73, 0x8c],
+        });
+
+        // Optional widget-base label on top
+        if let Some(ref label) = self.base.label {
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            labels.push(TextLabel {
+                text: label.clone(),
+                x: rx_rect,
+                y,
+                font_size,
+                color: colors::control_label_color_detached_for_state(self.base.hovered, self.base.focused),
+            });
         }
-        false
+
+        labels
     }
+
 }

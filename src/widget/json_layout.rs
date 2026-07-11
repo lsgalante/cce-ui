@@ -380,53 +380,6 @@ impl Element for JsonLayoutWidget {
         quads
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let mut labels = Vec::new();
-        let active_page = self.active_page;
-
-        for w in &self.widgets {
-            if w.page_idx != active_page {
-                continue;
-            }
-            if w.widget_type == "checkbox" {
-                if let Some(tl) = &w.label_text {
-                    labels.push(tl.clone());
-                }
-            } else {
-                labels.extend(w.widget.text_labels());
-            }
-        }
-        labels
-    }
-
-    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        let mut labels = Vec::new();
-        let (bx, by, bw, bh) = self.rect();
-
-        let active_page = self.active_page;
-        let pad_x = 16.0;
-        let content_bounds = Some([bx + pad_x - 4.0, by, bx + bw, by + bh]);
-
-        for w in &self.widgets {
-            if w.page_idx != active_page {
-                continue;
-            }
-            let w_labels = if w.widget_type == "checkbox" {
-                if let Some(tl) = &w.label_text {
-                    vec![tl.clone()]
-                } else {
-                    Vec::new()
-                }
-            } else {
-                w.widget.text_labels()
-            };
-            for l in w_labels {
-                labels.push((l, content_bounds));
-            }
-        }
-        labels
-    }
-
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         let mut changed = false;
 
@@ -637,8 +590,53 @@ impl Element for JsonLayoutWidget {
         for (cx, cy, r, c) in self.extra_circles() {
             pc.circle(cx, cy, r, c);
         }
-        for (tl, bounds) in self.text_labels_with_bounds(ui) {
+        for (tl, bounds) in self.own_labels_with_bounds(ui) {
             pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, None, bounds);
         }
+    }
+}
+
+impl JsonLayoutWidget {
+    pub(crate) fn own_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
+        let mut labels = Vec::new();
+        let (bx, by, bw, bh) = self.rect();
+
+        let active_page = self.active_page;
+        let pad_x = 16.0;
+        let content_bounds = Some([bx + pad_x - 4.0, by, bx + bw, by + bh]);
+
+        for w in &self.widgets {
+            if w.page_idx != active_page {
+                continue;
+            }
+            let w_labels = if w.widget_type == "checkbox" {
+                if let Some(tl) = &w.label_text {
+                    vec![tl.clone()]
+                } else {
+                    Vec::new()
+                }
+            } else {
+                // The trait text getters are gone: read the child's text off the paint
+                // walk (same prims, fonts dropped — this consumer shapes with its own
+                // control font, as the legacy getter path did).
+                let mut scratch = crate::scene::paint::PaintCtx::new();
+                crate::scene::painter::append_widget_text(ctx, unsafe { &*w.widget.as_ptr() }, &mut scratch);
+                scratch
+                    .finish()
+                    .items
+                    .into_iter()
+                    .filter_map(|item| match item.prim {
+                        crate::scene::paint::Prim::Text { text, x, y, font_size, color, .. } => {
+                            Some(TextLabel { text, x, y, font_size, color })
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            };
+            for l in w_labels {
+                labels.push((l, content_bounds));
+            }
+        }
+        labels
     }
 }

@@ -977,7 +977,7 @@ mod tests {
         let mut dd = Dropdown::new(options, 0);
         dd.set_rect(10.0, 10.0, 100.0, 24.0); // very narrow dropdown
 
-        let labels = dd.text_labels();
+        let labels = dd.own_text_labels();
         // Labels are individual characters of selected_text, then the ▼ arrow (prim order).
         assert!(labels.len() > 2);
 

@@ -660,7 +660,7 @@ impl Paint for MenuBar {
             ctx.text(display_title, x_pos, text_y, font_size, text_color);
         }
 
-        for l in self.menus.text_labels() {
+        for l in self.menus.own_labels() {
             ctx.text(l.text, l.x, l.y, l.font_size, l.color);
         }
     }

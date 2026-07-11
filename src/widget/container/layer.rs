@@ -1,6 +1,6 @@
 use crate::widget::*;
 use crate::context::UiContext;
-use crate::widget::display::TextLabel;
+
 
 #[derive(Debug, Clone)]
 pub struct Layer {
@@ -131,54 +131,6 @@ impl Element for Layer {
             }
         }
         quads
-    }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut labels = Vec::new();
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            labels.extend(widget.text_labels());
-        }
-        labels
-    }
-
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut result = Vec::new();
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            result.extend(widget.text_labels_with_bounds(ctx));
-        }
-        result
-    }
-
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut result = Vec::new();
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            result.extend(widget.text_labels_with_font_and_bounds(ctx));
-        }
-        result
-    }
-
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut result = Vec::new();
-        for &child_ptr in &self.children {
-            let widget = unsafe { &*child_ptr };
-            result.extend(widget.get_text_items());
-        }
-        result
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {

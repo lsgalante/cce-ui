@@ -14,7 +14,7 @@
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::{DisplayList, PaintCtx, Prim};
-use crate::widget::{Element, UiContext};
+use crate::widget::{Element, TextLabel, UiContext};
 
 type ElemPtr = *mut (dyn Element + 'static);
 
@@ -63,6 +63,92 @@ pub fn append_widget_text(ui: &UiContext, root: &dyn Element, pc: &mut PaintCtx)
             pc.text_with(text, x, y, font_size, color, font, merged);
         }
     }
+}
+
+/// The `Element` default `paint_self`'s LEAF branch as a reusable body: leaf geometry
+/// (rounded quads, plain quads, arcs, circles) followed by the widget's fonted labels.
+/// Legacy leaf widgets' `paint_self` overrides call this with their own labels — the
+/// labels are PASSED IN rather than fetched through the per-widget text getters, so this
+/// helper (and every override built on it) survives the getters' deletion. `pub` so
+/// app-local legacy widgets (display-manager's status/session widgets, cloud's fuzzel)
+/// can use it too.
+pub fn paint_legacy_leaf(
+    w: &dyn Element,
+    ui: &UiContext,
+    pc: &mut PaintCtx,
+    labels: Vec<(TextLabel, Option<String>, Option<[f32; 4]>)>,
+) {
+    for (x, y, qw, qh, r, c, corners) in w.all_rounded_quads(ui) {
+        pc.rounded_rect(Rect { x, y, width: qw, height: qh }, r, corners, c);
+    }
+    for (x, y, qw, qh, c) in w.all_quads(ui) {
+        pc.quad(Rect { x, y, width: qw, height: qh }, c);
+    }
+    for (cx, cy, r, t, s, e, c) in w.extra_arcs() {
+        pc.arc(cx, cy, r, t, s, e, c);
+    }
+    for (cx, cy, r, c) in w.extra_circles() {
+        pc.circle(cx, cy, r, c);
+    }
+    for (tl, font, bounds) in labels {
+        pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
+    }
+}
+
+/// The scroll-ancestor text clamp the deleted default fonted getter applied: the nearest
+/// ScrollBox/List ancestor's viewport, if any.
+pub fn scroll_ancestor_text_bounds(w: &dyn Element, ui: &UiContext) -> Option<[f32; 4]> {
+    let mut curr = w.parent(ui);
+    while let Some(parent_ptr) = curr {
+        let parent = unsafe { &*parent_ptr };
+        if let Some(scroll_box) = parent.as_any().downcast_ref::<crate::widget::ScrollBox>() {
+            let (sb_x, _, sb_w, _) = scroll_box.rect();
+            let view_min = scroll_box.viewport_y + 4.0;
+            let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
+            return Some([sb_x, view_min, sb_x + sb_w, view_max]);
+        } else if let Some(list) = parent.as_any().downcast_ref::<crate::widget::List>() {
+            let (sb_x, _, sb_w, _) = list.rect();
+            let view_min = list.scroll_box.viewport_y + 4.0;
+            let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
+            return Some([sb_x, view_min, sb_x + sb_w, view_max]);
+        }
+        curr = parent.parent(ui);
+    }
+    None
+}
+
+/// The deleted `Element::text_labels` default's base-label synthesis: the control label
+/// stored on the widget base, positioned by the configured control-label layout. For
+/// legacy widgets whose only text was that label (List's columns=None frame).
+pub fn base_control_label(w: &dyn Element) -> Vec<TextLabel> {
+    if let Some(b) = w.base() {
+        if let Some(ref label) = b.label {
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            let color = crate::colors::control_label_color_detached_for_state(b.hovered, b.focused);
+            if crate::layout::control_label_layout() == "side" {
+                let label_x = w.label_x_offset();
+                if label_x > 0.0 {
+                    let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
+                    return vec![TextLabel { text: label.clone(), x: b.x + 4.0, y: y_pos, font_size, color }];
+                }
+            }
+            return vec![TextLabel { text: label.clone(), x: b.x, y: b.y, font_size, color }];
+        }
+    }
+    Vec::new()
+}
+
+/// Map a legacy leaf's own plain labels to the (label, font, bounds) triples the deleted
+/// default fonted getter produced: the widget's control font on every label plus the
+/// scroll-ancestor clamp.
+pub fn fonted_leaf_labels(
+    w: &dyn Element,
+    ui: &UiContext,
+    labels: Vec<TextLabel>,
+) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    let font = w.widget_font();
+    let bounds = scroll_ancestor_text_bounds(w, ui);
+    labels.into_iter().map(|l| (l, font.clone(), bounds)).collect()
 }
 
 fn paint_node(ui: &UiContext, ptr: ElemPtr, pc: &mut PaintCtx) {

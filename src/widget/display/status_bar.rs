@@ -207,22 +207,6 @@ impl Paint for StatusBar {
         }
     }
 
-    fn text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if let Some(ref text_buf) = self.text_buf {
-            let offset_x = self.text_offset_x.unwrap_or(12.0);
-            let c = self.get_actual_text_color();
-            let color = glyphon::Color::rgb(
-                (c[0] * 255.0) as u8,
-                (c[1] * 255.0) as u8,
-                (c[2] * 255.0) as u8,
-            );
-            let size = self.statusbar_font_size();
-            let text_y = crate::layout::align_text_y(self.rect.y, self.rect.height, size, 0.0);
-            vec![(text_buf, self.rect.x + offset_x, text_y, color)]
-        } else {
-            Vec::new()
-        }
-    }
 }
 
 impl Input for StatusBar {
@@ -236,26 +220,24 @@ mod tests {
     use super::*;
     use crate::widget::Element;
 
-    /// The manual-host path cce-status-interface drives by hand: `set_text` drops the shaped
-    /// buffer, `prepare_text` rebuilds it, `get_text_items` serves it (the new
-    /// `Paint::text_items` hook) at the bar's rect.
+    /// The shaped-buffer lifecycle behind the old manual-host path: `set_text` drops the
+    /// buffer, `prepare_text` rebuilds it. (The `get_text_items` getter that served it is
+    /// deleted; the bar's rendered text is the `Paint::paint` prim.)
     #[test]
     fn manual_host_text_pipeline() {
         let mut fs = glyphon::FontSystem::new();
         let mut bar = StatusBar::new().with_text("hello").with_text_offset_x(15.0);
         Element::set_rect(&mut bar, 0.0, 570.0, 800.0, 30.0);
 
-        assert!(Element::get_text_items(&bar).is_empty(), "no buffer before prepare_text");
+        assert!(bar.text_buf.is_none(), "no buffer before prepare_text");
         Element::prepare_text(&mut bar, &mut fs);
-        let items = Element::get_text_items(&bar);
-        assert_eq!(items.len(), 1, "one shaped buffer");
-        assert_eq!(items[0].1, 15.0, "x = rect.x + text_offset_x");
+        assert!(bar.text_buf.is_some(), "one shaped buffer");
 
         // set_text drops the stale buffer; prepare_text reshapes.
         Element::set_text(&mut bar, "world");
-        assert!(Element::get_text_items(&bar).is_empty(), "buffer dropped on text change");
+        assert!(bar.text_buf.is_none(), "buffer dropped on text change");
         Element::prepare_text(&mut bar, &mut fs);
-        assert_eq!(Element::get_text_items(&bar).len(), 1);
+        assert!(bar.text_buf.is_some());
         assert_eq!(bar.text, "world");
 
         // Parentless: cornerless plain bg through the plain-quad bridge, at STATUS_BG.

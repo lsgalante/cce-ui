@@ -113,6 +113,15 @@ impl ColorSelector {
 impl Element for ColorSelector {
     crate::impl_widget_base!(ColorSelector);
 
+    // Leaf legacy widget: own fonted labels via paint_self (the default no longer
+    // drains the text getters).
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        crate::scene::painter::paint_legacy_leaf(
+            self, ui, ctx,
+            crate::scene::painter::fonted_leaf_labels(self, ui, self.own_labels()),
+        );
+    }
+
     fn get_value_string(&self) -> Option<String> {
         if self.with_alpha {
             Some(format!("#{:02x}{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2], self.alpha))
@@ -509,23 +518,7 @@ impl Element for ColorSelector {
         quads
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let mut labels = Vec::new();
-        if let Some(lbl) = self.control_label() {
-            labels.push(lbl);
-        }
-        let hex = if self.editing { self.edit_buffer.clone() } else { self.get_value_string().unwrap() };
-        let top = self.base.label_offset();
-        let _visual_h = self.base.h - top;
-        labels.push(TextLabel {
-            text: hex,
-            x: self.base.x + 4.0,
-            y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
-            font_size: 12.0,
-            color: [0xcc, 0xcc, 0xd4],
-        });
-        labels
-    }
+
 }
 
 impl Drop for ColorSelector {
@@ -754,3 +747,22 @@ mod tests {
     }
 }
 
+impl ColorSelector {
+    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
+        let mut labels = Vec::new();
+        if let Some(lbl) = self.control_label() {
+            labels.push(lbl);
+        }
+        let hex = if self.editing { self.edit_buffer.clone() } else { self.get_value_string().unwrap() };
+        let top = self.base.label_offset();
+        let _visual_h = self.base.h - top;
+        labels.push(TextLabel {
+            text: hex,
+            x: self.base.x + 4.0,
+            y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
+            font_size: 12.0,
+            color: [0xcc, 0xcc, 0xd4],
+        });
+        labels
+    }
+}

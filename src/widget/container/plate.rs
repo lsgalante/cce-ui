@@ -1,6 +1,6 @@
 use crate::colors;
 use crate::widget::*;
-use crate::widget::display::TextLabel;
+
 
 #[derive(Debug, Clone)]
 pub struct Plate {
@@ -473,91 +473,6 @@ impl Element for Plate {
             }
         }
         quads
-    }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut labels = Vec::new();
-        if let Some(ref label) = self.base.base.label {
-            let (_, font_size) = crate::layout::control_label_font_parsed();
-            labels.push(TextLabel {
-                text: label.clone(),
-                x: self.base.base.x,
-                y: self.base.base.y,
-                font_size,
-                color: colors::control_label_color_u8(),
-            });
-        }
-        for &child_ptr in &self.base.children {
-            let widget = unsafe { &*child_ptr };
-            labels.extend(widget.text_labels());
-        }
-        labels
-    }
-
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut result = Vec::new();
-        if let Some(ref label) = self.base.base.label {
-            let (_, font_size) = crate::layout::control_label_font_parsed();
-            result.push((
-                TextLabel {
-                    text: label.clone(),
-                    x: self.base.base.x,
-                    y: self.base.base.y,
-                    font_size,
-                    color: colors::control_label_color_u8(),
-                },
-                None,
-            ));
-        }
-        for &child_ptr in &self.base.children {
-            let widget = unsafe { &*child_ptr };
-            result.extend(widget.text_labels_with_bounds(ctx));
-        }
-        result
-    }
-
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut result = Vec::new();
-        if let Some(ref label) = self.base.base.label {
-            let (_, font_size) = crate::layout::control_label_font_parsed();
-            result.push((
-                TextLabel {
-                    text: label.clone(),
-                    x: self.base.base.x,
-                    y: self.base.base.y,
-                    font_size,
-                    color: colors::control_label_color_u8(),
-                },
-                None,
-                None,
-            ));
-        }
-        for &child_ptr in &self.base.children {
-            let widget = unsafe { &*child_ptr };
-            result.extend(widget.text_labels_with_font_and_bounds(ctx));
-        }
-        result
-    }
-
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut items = Vec::new();
-        for &child_ptr in &self.base.children {
-            let widget = unsafe { &*child_ptr };
-            items.extend(widget.get_text_items());
-        }
-        items
     }
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {

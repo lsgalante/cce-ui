@@ -97,7 +97,7 @@ mod tests {
         let mut l = Label::new("CPU: 3%").with_font_size(13.0).with_color([1, 2, 3]);
         Element::set_rect(&mut l, 10.0, 20.0, 100.0, 16.0);
 
-        let labels = Element::text_labels(&l);
+        let labels = l.own_text_labels();
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "CPU: 3%");
         assert_eq!(labels[0].x, 10.0);
@@ -105,7 +105,7 @@ mod tests {
         assert_eq!(labels[0].color, [1, 2, 3]);
 
         Element::set_text(&mut l, "CPU: 99%");
-        assert_eq!(Element::text_labels(&l)[0].text, "CPU: 99%", "set_text reaches the paint source");
+        assert_eq!(l.own_text_labels()[0].text, "CPU: 99%", "set_text reaches the paint source");
 
         let size = Element::intrinsic_size(&l).unwrap();
         assert!(size.width > 0.0);
@@ -128,20 +128,21 @@ impl SectionHeader {
 
 impl Element for SectionHeader {
     crate::impl_widget_base!(SectionHeader);
+
+    // Leaf legacy widget: own fonted labels via paint_self (the default no longer
+    // drains the text getters).
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        crate::scene::painter::paint_legacy_leaf(
+            self, ui, ctx,
+            crate::scene::painter::fonted_leaf_labels(self, ui, self.own_labels()),
+        );
+    }
     fn blocks_backplate_drag(&self) -> bool { false }
     fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         vec![(self.base.x + 8.0, self.base.y + 22.0, self.base.w - 16.0, 1.0, [0.18, 0.18, 0.27, 1.0])]
     }
-    fn text_labels(&self) -> Vec<TextLabel> {
-        vec![TextLabel {
-            text: self.base.label.clone().unwrap_or_default(),
-            x: self.base.x + 12.0,
-            y: self.base.y,
-            font_size: 14.0,
-            color: [212, 212, 212],
-        }]
-    }
+
 }
 
 // Styled label builder with optional strikethrough
@@ -295,5 +296,17 @@ impl StyledLabel {
         } else {
             None
         }
+    }
+}
+
+impl SectionHeader {
+    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
+        vec![TextLabel {
+            text: self.base.label.clone().unwrap_or_default(),
+            x: self.base.x + 12.0,
+            y: self.base.y,
+            font_size: 14.0,
+            color: [212, 212, 212],
+        }]
     }
 }

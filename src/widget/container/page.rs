@@ -1,6 +1,6 @@
 use crate::widget::*;
 use crate::context::UiContext;
-use crate::widget::display::TextLabel;
+
 use super::layer::Layer;
 
 use super::container_layout::ContainerLayout;
@@ -228,87 +228,6 @@ impl Element for Page {
         }
 
         quads
-    }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let (_, py, _, ph) = self.rect();
-        let mut result = Vec::new();
-        for label in self.base.text_labels() {
-            if label.y >= py && label.y + label.font_size <= py + ph {
-                result.push(label);
-            }
-        }
-        result
-    }
-
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let (px, py, pw, ph) = self.rect();
-        let page_bounds = [px, py, px + pw, py + ph];
-
-        let mut result = Vec::new();
-        for (label, bounds) in self.base.text_labels_with_bounds(ctx) {
-            let intersected_bounds = if let Some([l, t, r, b]) = bounds {
-                let il = l.max(page_bounds[0]);
-                let it = t.max(page_bounds[1]);
-                let ir = r.min(page_bounds[2]);
-                let ib = b.min(page_bounds[3]);
-                if il < ir && it < ib {
-                    Some([il, it, ir, ib])
-                } else {
-                    continue;
-                }
-            } else {
-                if label.y + label.font_size < py || label.y > py + ph {
-                    continue;
-                }
-                Some(page_bounds)
-            };
-            result.push((label, intersected_bounds));
-        }
-        result
-    }
-
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let (px, py, pw, ph) = self.rect();
-        let page_bounds = [px, py, px + pw, py + ph];
-
-        let mut result = Vec::new();
-        for (label, font, bounds) in self.base.text_labels_with_font_and_bounds(ctx) {
-            let intersected_bounds = if let Some([l, t, r, b]) = bounds {
-                let il = l.max(page_bounds[0]);
-                let it = t.max(page_bounds[1]);
-                let ir = r.min(page_bounds[2]);
-                let ib = b.min(page_bounds[3]);
-                if il < ir && it < ib {
-                    Some([il, it, ir, ib])
-                } else {
-                    continue;
-                }
-            } else {
-                if label.y + label.font_size < py || label.y > py + ph {
-                    continue;
-                }
-                Some(page_bounds)
-            };
-            result.push((label, font, intersected_bounds));
-        }
-        result
-    }
-
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if !self.visible {
-            return Vec::new();
-        }
-        self.base.get_text_items()
     }
 
     fn hit_test(&self, px: f32, py: f32, _ctx: &UiContext) -> bool {

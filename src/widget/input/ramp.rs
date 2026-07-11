@@ -384,27 +384,6 @@ impl Element for ColorRamp {
         changed
     }
     
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let mut labels = Vec::new();
-        if self.selected_key_idx.is_some() {
-            labels.extend(self.r_slider.text_labels_with_font_and_bounds(ctx));
-            labels.extend(self.g_slider.text_labels_with_font_and_bounds(ctx));
-            labels.extend(self.b_slider.text_labels_with_font_and_bounds(ctx));
-            labels.extend(self.del_button.text_labels_with_font_and_bounds(ctx));
-        }
-        labels
-    }
-    
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        let mut items = Vec::new();
-        if self.selected_key_idx.is_some() {
-            items.extend(self.r_slider.get_text_items());
-            items.extend(self.g_slider.get_text_items());
-            items.extend(self.b_slider.get_text_items());
-            items.extend(self.del_button.get_text_items());
-        }
-        items
-    }
 }
 
 impl Drop for ColorRamp {
@@ -991,22 +970,6 @@ impl Element for Ramp {
         self.line_type_dropdown.render_popover(pc);
     }
     
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let mut labels: Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> = self
-            .own_control_labels()
-            .into_iter()
-            .map(|(l, f)| (l, f, None))
-            .collect();
-
-        labels.extend(self.preset_dropdown.text_labels_with_font_and_bounds(ctx));
-        labels.extend(self.line_type_dropdown.text_labels_with_font_and_bounds(ctx));
-        if self.selected_key_idx.is_some() {
-            labels.extend(self.val_slider.text_labels_with_font_and_bounds(ctx));
-            labels.extend(self.del_button.text_labels_with_font_and_bounds(ctx));
-        }
-        labels
-    }
-
     /// The walk drops a container's own text (assumed child aggregate) — Ramp's control
     /// labels are its OWN; the children (dropdowns/slider/button) are painted by the
     /// walk's descent, so only the own labels are emitted here, over the default's
@@ -1042,16 +1005,6 @@ impl Element for Ramp {
         }
     }
     
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        let mut items = Vec::new();
-        items.extend(self.preset_dropdown.get_text_items());
-        items.extend(self.line_type_dropdown.get_text_items());
-        if self.selected_key_idx.is_some() {
-            items.extend(self.val_slider.get_text_items());
-            items.extend(self.del_button.get_text_items());
-        }
-        items
-    }
 }
 
 impl Ramp {

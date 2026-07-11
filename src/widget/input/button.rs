@@ -458,7 +458,7 @@ mod tests {
             assert!(rounded.is_empty() && !plain.is_empty(), "square config -> plain path only");
         }
 
-        let labels = Element::text_labels(&b);
+        let labels = b.own_text_labels();
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "Go");
         let est = b.label_width("Go");

@@ -913,242 +913,6 @@ impl Element for TreeList {
         quads
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        let f32_to_rgb = |c: [f32; 4]| -> [u8; 3] {
-            [
-                (crate::color::linear_to_srgb(c[0]) * 255.0).round() as u8,
-                (crate::color::linear_to_srgb(c[1]) * 255.0).round() as u8,
-                (crate::color::linear_to_srgb(c[2]) * 255.0).round() as u8,
-            ]
-        };
-
-        let (_, tree_font_size) = crate::layout::tree_font_parsed();
-        let header_font_size = (tree_font_size - 1.0).max(8.0);
-
-        let mut labels = Vec::new();
-        let list_left = self.scroll_box.base.x;
-        let list_top = self.scroll_box.viewport_y;
-        let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
-
-        let search_margin_y = 6.0;
-        let search_h = 26.0;
-        let offset_y = search_h + 2.0 * search_margin_y;
-
-        labels.push(TextLabel {
-            text: "Key".to_string(),
-            x: list_left + 8.0,
-            y: self.base.y + offset_y + 6.0,
-            font_size: header_font_size,
-            color: [200, 200, 210],
-        });
-        labels.push(TextLabel {
-            text: "Type".to_string(),
-            x: list_left + 180.0 + 8.0,
-            y: self.base.y + offset_y + 6.0,
-            font_size: header_font_size,
-            color: [200, 200, 210],
-        });
-        labels.push(TextLabel {
-            text: "Value".to_string(),
-            x: list_left + 235.0 + 8.0,
-            y: self.base.y + offset_y + 6.0,
-            font_size: header_font_size,
-            color: [200, 200, 210],
-        });
-
-        for (i, item) in self.items.iter().enumerate() {
-            let row_y = list_top + i as f32 * self.item_height - self.scroll_box.scroll_y;
-            if row_y + self.item_height < list_top || row_y > list_bottom {
-                continue;
-            }
-
-            match item {
-                TreeElement::Section { name, indent, collapsed, .. } => {
-                    if self.editing_key_idx != Some(i) {
-                        let display_text = format!("{} {}", if *collapsed { "▶" } else { "▼" }, name);
-                        labels.push(TextLabel {
-                            text: display_text,
-                            x: list_left + 8.0 + *indent as f32 * 12.0,
-                            y: row_y + 6.0,
-                            font_size: tree_font_size,
-                            color: f32_to_rgb(crate::color::tree_section_text_color()),
-                        });
-                    }
-                }
-                TreeElement::Leaf { name, indent, val, original_idx, .. } => {
-                    let val_str = serde_json::to_string(val).unwrap_or_default();
-                    let display_val = if val_str.len() > 18 {
-                        format!("{}...", &val_str[..15])
-                    } else {
-                        val_str
-                    };
-
-                    let color = if Some(*original_idx) == self.selected_key_idx {
-                        f32_to_rgb(crate::color::tree_leaf_text_selected_color())
-                    } else {
-                        f32_to_rgb(crate::color::tree_leaf_text_color())
-                    };
-
-                    if self.editing_key_idx != Some(i) {
-                        labels.push(TextLabel {
-                            text: name.clone(),
-                            x: list_left + 8.0 + *indent as f32 * 12.0,
-                            y: row_y + 6.0,
-                            font_size: tree_font_size,
-                            color,
-                        });
-                    }
-
-                    let val_ty = match val {
-                        serde_json::Value::Bool(_) => Some("bool"),
-                        serde_json::Value::Number(num) => {
-                            if num.is_f64() {
-                                Some("f64")
-                            } else {
-                                Some("i64")
-                            }
-                        }
-                        serde_json::Value::String(s) => {
-                            if s.starts_with('#') {
-                                let s_clean = s.trim_start_matches('#');
-                                if s_clean.len() == 8 {
-                                    Some("rgba")
-                                } else {
-                                    Some("rgb")
-                                }
-                            } else if name == "key" || name == "keybind" || name == "shortcut" || name == "open_search" || name == "close_search" || name == "delete" || name.ends_with("_key") || name.ends_with(".key") || name.ends_with(".keybind") || name.ends_with(".shortcut") || name.ends_with(".open_search") || name.ends_with(".close_search") || name.ends_with("_delete") || name.ends_with(".delete") {
-                                Some("keybind")
-                            } else if name == "font" || name.ends_with("_font") || name.ends_with(".font") {
-                                Some("font")
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    };
-                    let mut display_ty = val_ty.map(|s| s.to_string());
-                    if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
-                        if anno.starts_with("menu:") {
-                            display_ty = Some("menu".to_string());
-                        } else if anno == "button" || anno.starts_with("button:") {
-                            display_ty = Some("button".to_string());
-                        } else {
-                            display_ty = Some(anno.clone());
-                        }
-                    } else if display_ty.is_none() {
-                        if let serde_json::Value::String(_) = val {
-                            display_ty = Some("string".to_string());
-                        }
-                    }
-
-                    if let Some(ty) = display_ty {
-                        let ty_text = format!("({})", ty);
-                        labels.push(TextLabel {
-                            text: ty_text,
-                            x: list_left + 190.0,
-                            y: row_y + 6.0,
-                            font_size: tree_font_size,
-                            color: f32_to_rgb(crate::color::tree_type_text_color()),
-                        });
-                    }
-
-                    if Some(*original_idx) != self.selected_key_idx {
-                        let mut is_button = false;
-                        if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
-                            if anno == "button" || anno.starts_with("button:") {
-                                is_button = true;
-                            }
-                        }
-
-                        let is_color = if let serde_json::Value::String(s) = val {
-                            s.starts_with('#')
-                        } else {
-                            false
-                        };
-                        
-                        let label_x = if is_color {
-                            list_left + 267.0
-                        } else {
-                            list_left + 245.0
-                        };
-
-                        if is_button {
-                            labels.push(TextLabel {
-                                text: display_val,
-                                x: list_left + 245.0 + 8.0,
-                                y: row_y + 6.0,
-                                font_size: tree_font_size,
-                                color: [240, 240, 245],
-                            });
-                        } else {
-                            labels.push(TextLabel {
-                                text: display_val,
-                                x: label_x,
-                                y: row_y + 6.0,
-                                font_size: tree_font_size,
-                                color: f32_to_rgb(crate::color::tree_value_text_color()),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-        labels
-    }
-
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        let (x, y, w, _h) = self.rect();
-        
-        let search_margin_y = 6.0;
-        let search_h = 26.0;
-        let offset_y = search_h + 2.0 * search_margin_y;
-        let header_h = 26.0;
-
-        let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
-        let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
-        
-        let mut labels = self.text_labels().into_iter().enumerate().map(|(idx, l)| {
-            let b = if idx < 3 {
-                header_bounds
-            } else {
-                list_bounds
-            };
-            (l, b)
-        }).collect::<Vec<_>>();
-
-        labels.extend(self.search_box.text_labels_with_bounds(ctx));
-        labels
-    }
-
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let font = self.widget_font();
-        let (x, y, w, _h) = self.rect();
-        
-        let search_margin_y = 6.0;
-        let search_h = 26.0;
-        let offset_y = search_h + 2.0 * search_margin_y;
-        let header_h = 26.0;
-
-        let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
-        let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
-        
-        let mut labels = self.text_labels().into_iter().enumerate().map(|(idx, l)| {
-            let b = if idx < 3 {
-                header_bounds
-            } else {
-                list_bounds
-            };
-            (l, font.clone(), b)
-        }).collect::<Vec<_>>();
-
-        labels.extend(self.search_box.text_labels_with_font_and_bounds(ctx));
-        labels.extend(self.add_key_btn.text_labels_with_font_and_bounds(ctx));
-        if self.add_key_popover_open {
-            labels.extend(self.add_key_popover_box.text_labels_with_font_and_bounds(ctx));
-        }
-        labels
-    }
-
     fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         self.parent
     }
@@ -1219,7 +983,7 @@ impl Element for TreeList {
         for (cx, cy, r, c) in self.extra_circles() {
             pc.circle(cx, cy, r, c);
         }
-        for (tl, font, bounds) in self.text_labels_with_font_and_bounds(ui) {
+        for (tl, font, bounds) in self.subtree_fonted_labels(ui) {
             pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
         }
     }
@@ -1688,7 +1452,7 @@ mod tests {
             ("input.accel_profile".to_string(), serde_json::Value::String("flat".to_string()))
         ]);
         
-        let labels = tree_list.text_labels();
+        let labels = tree_list.own_labels();
         for label in &labels {
             println!("TEST LABEL: {:?}", label);
         }
@@ -1700,7 +1464,7 @@ mod tests {
     #[test]
     fn test_treelist_headers() {
         let tree_list = TreeList::new();
-        let labels = tree_list.text_labels();
+        let labels = tree_list.own_labels();
         assert!(labels.iter().any(|l| l.text == "Key"), "Should have Key header!");
         assert!(labels.iter().any(|l| l.text == "Type"), "Should have Type header!");
         assert!(labels.iter().any(|l| l.text == "Value"), "Should have Value header!");
@@ -1806,5 +1570,219 @@ mod tests {
 
         let req = tree_list.take_rename_request();
         assert_eq!(req, Some(("style.control.dropdown.color".to_string(), "style.control.dropdown.bg_color".to_string())));
+    }
+}
+
+impl TreeList {
+    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
+        let f32_to_rgb = |c: [f32; 4]| -> [u8; 3] {
+            [
+                (crate::color::linear_to_srgb(c[0]) * 255.0).round() as u8,
+                (crate::color::linear_to_srgb(c[1]) * 255.0).round() as u8,
+                (crate::color::linear_to_srgb(c[2]) * 255.0).round() as u8,
+            ]
+        };
+
+        let (_, tree_font_size) = crate::layout::tree_font_parsed();
+        let header_font_size = (tree_font_size - 1.0).max(8.0);
+
+        let mut labels = Vec::new();
+        let list_left = self.scroll_box.base.x;
+        let list_top = self.scroll_box.viewport_y;
+        let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
+
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+
+        labels.push(TextLabel {
+            text: "Key".to_string(),
+            x: list_left + 8.0,
+            y: self.base.y + offset_y + 6.0,
+            font_size: header_font_size,
+            color: [200, 200, 210],
+        });
+        labels.push(TextLabel {
+            text: "Type".to_string(),
+            x: list_left + 180.0 + 8.0,
+            y: self.base.y + offset_y + 6.0,
+            font_size: header_font_size,
+            color: [200, 200, 210],
+        });
+        labels.push(TextLabel {
+            text: "Value".to_string(),
+            x: list_left + 235.0 + 8.0,
+            y: self.base.y + offset_y + 6.0,
+            font_size: header_font_size,
+            color: [200, 200, 210],
+        });
+
+        for (i, item) in self.items.iter().enumerate() {
+            let row_y = list_top + i as f32 * self.item_height - self.scroll_box.scroll_y;
+            if row_y + self.item_height < list_top || row_y > list_bottom {
+                continue;
+            }
+
+            match item {
+                TreeElement::Section { name, indent, collapsed, .. } => {
+                    if self.editing_key_idx != Some(i) {
+                        let display_text = format!("{} {}", if *collapsed { "▶" } else { "▼" }, name);
+                        labels.push(TextLabel {
+                            text: display_text,
+                            x: list_left + 8.0 + *indent as f32 * 12.0,
+                            y: row_y + 6.0,
+                            font_size: tree_font_size,
+                            color: f32_to_rgb(crate::color::tree_section_text_color()),
+                        });
+                    }
+                }
+                TreeElement::Leaf { name, indent, val, original_idx, .. } => {
+                    let val_str = serde_json::to_string(val).unwrap_or_default();
+                    let display_val = if val_str.len() > 18 {
+                        format!("{}...", &val_str[..15])
+                    } else {
+                        val_str
+                    };
+
+                    let color = if Some(*original_idx) == self.selected_key_idx {
+                        f32_to_rgb(crate::color::tree_leaf_text_selected_color())
+                    } else {
+                        f32_to_rgb(crate::color::tree_leaf_text_color())
+                    };
+
+                    if self.editing_key_idx != Some(i) {
+                        labels.push(TextLabel {
+                            text: name.clone(),
+                            x: list_left + 8.0 + *indent as f32 * 12.0,
+                            y: row_y + 6.0,
+                            font_size: tree_font_size,
+                            color,
+                        });
+                    }
+
+                    let val_ty = match val {
+                        serde_json::Value::Bool(_) => Some("bool"),
+                        serde_json::Value::Number(num) => {
+                            if num.is_f64() {
+                                Some("f64")
+                            } else {
+                                Some("i64")
+                            }
+                        }
+                        serde_json::Value::String(s) => {
+                            if s.starts_with('#') {
+                                let s_clean = s.trim_start_matches('#');
+                                if s_clean.len() == 8 {
+                                    Some("rgba")
+                                } else {
+                                    Some("rgb")
+                                }
+                            } else if name == "key" || name == "keybind" || name == "shortcut" || name == "open_search" || name == "close_search" || name == "delete" || name.ends_with("_key") || name.ends_with(".key") || name.ends_with(".keybind") || name.ends_with(".shortcut") || name.ends_with(".open_search") || name.ends_with(".close_search") || name.ends_with("_delete") || name.ends_with(".delete") {
+                                Some("keybind")
+                            } else if name == "font" || name.ends_with("_font") || name.ends_with(".font") {
+                                Some("font")
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    let mut display_ty = val_ty.map(|s| s.to_string());
+                    if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
+                        if anno.starts_with("menu:") {
+                            display_ty = Some("menu".to_string());
+                        } else if anno == "button" || anno.starts_with("button:") {
+                            display_ty = Some("button".to_string());
+                        } else {
+                            display_ty = Some(anno.clone());
+                        }
+                    } else if display_ty.is_none() {
+                        if let serde_json::Value::String(_) = val {
+                            display_ty = Some("string".to_string());
+                        }
+                    }
+
+                    if let Some(ty) = display_ty {
+                        let ty_text = format!("({})", ty);
+                        labels.push(TextLabel {
+                            text: ty_text,
+                            x: list_left + 190.0,
+                            y: row_y + 6.0,
+                            font_size: tree_font_size,
+                            color: f32_to_rgb(crate::color::tree_type_text_color()),
+                        });
+                    }
+
+                    if Some(*original_idx) != self.selected_key_idx {
+                        let mut is_button = false;
+                        if let Some(Some(ref anno)) = self.annotations.get(*original_idx) {
+                            if anno == "button" || anno.starts_with("button:") {
+                                is_button = true;
+                            }
+                        }
+
+                        let is_color = if let serde_json::Value::String(s) = val {
+                            s.starts_with('#')
+                        } else {
+                            false
+                        };
+                        
+                        let label_x = if is_color {
+                            list_left + 267.0
+                        } else {
+                            list_left + 245.0
+                        };
+
+                        if is_button {
+                            labels.push(TextLabel {
+                                text: display_val,
+                                x: list_left + 245.0 + 8.0,
+                                y: row_y + 6.0,
+                                font_size: tree_font_size,
+                                color: [240, 240, 245],
+                            });
+                        } else {
+                            labels.push(TextLabel {
+                                text: display_val,
+                                x: label_x,
+                                y: row_y + 6.0,
+                                font_size: tree_font_size,
+                                color: f32_to_rgb(crate::color::tree_value_text_color()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        labels
+    }
+
+    pub(crate) fn subtree_fonted_labels(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let font = self.widget_font();
+        let (x, y, w, _h) = self.rect();
+        
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+        let header_h = 26.0;
+
+        let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
+        let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
+        
+        let mut labels = self.own_labels().into_iter().enumerate().map(|(idx, l)| {
+            let b = if idx < 3 {
+                header_bounds
+            } else {
+                list_bounds
+            };
+            (l, font.clone(), b)
+        }).collect::<Vec<_>>();
+
+        labels.extend(self.search_box.own_labels_with_font_and_bounds(ctx));
+        labels.extend(self.add_key_btn.own_labels_with_font_and_bounds(ctx));
+        if self.add_key_popover_open {
+            labels.extend(self.add_key_popover_box.own_labels_with_font_and_bounds(ctx));
+        }
+        labels
     }
 }

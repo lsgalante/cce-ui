@@ -79,6 +79,18 @@ impl Element for ControlPanel {
         self.children.clone()
     }
 
+    // ControlPanel is a legacy scroll frame: children are laid out UNSCROLLED and the
+    // scroll offset is applied at aggregate time (all_* / the fonted getter). The walk
+    // must emit those aggregates and not descend — descending would paint the children
+    // unshifted, desyncing text from geometry as soon as the panel scrolls.
+    fn renders_own_subtree(&self) -> bool {
+        true
+    }
+
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        crate::scene::painter::paint_legacy_leaf(self, ui, ctx, self.scrolled_child_labels(ui));
+    }
+
     fn color(&self) -> [f32; 4] {
         colors::control_panel_color()
     }
@@ -537,17 +549,28 @@ impl Element for ControlPanel {
         false
     }
 
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let mut labels = Vec::new();
+}
+
+impl Drop for ControlPanel {
+    fn drop(&mut self) {
+        clear_widget_references(self);
+    }
+}
+
+impl ControlPanel {
+    /// Children's walk text with the panel's scroll shift and viewport clamp — what the
+    /// deleted fonted getter served: children are laid out UNSCROLLED and the offset is
+    /// an aggregate-time transform.
+    pub(crate) fn scrolled_child_labels(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let scroll_y = self.scroll_box.scroll_y;
         let (x, y, w, h) = self.rect();
-        unsafe {
-            for child_ptr in &self.children {
-                let mut child_labels = (**child_ptr).text_labels_with_font_and_bounds(ctx);
-                for (label, _font, bounds) in &mut child_labels {
-                    label.y -= scroll_y;
-                    
-                    let new_bounds = if let Some([l, t, r, b]) = *bounds {
+        let mut labels = Vec::new();
+        for &child_ptr in &self.children {
+            let mut scratch = crate::scene::paint::PaintCtx::new();
+            crate::scene::painter::append_widget_text(ctx, unsafe { &*child_ptr }, &mut scratch);
+            for item in scratch.finish().items {
+                if let crate::scene::paint::Prim::Text { text, x: lx, y: ly, font_size, color, font, bounds, .. } = item.prim {
+                    let new_bounds = if let Some([l, t, r, b]) = bounds {
                         let nl = l.max(x);
                         let nt = (t - scroll_y).max(y);
                         let nr = r.min(x + w);
@@ -556,27 +579,14 @@ impl Element for ControlPanel {
                     } else {
                         Some([x, y, x + w, y + h])
                     };
-                    *bounds = new_bounds;
+                    labels.push((
+                        TextLabel { text, x: lx, y: ly - scroll_y, font_size, color },
+                        font,
+                        new_bounds,
+                    ));
                 }
-                labels.extend(child_labels);
             }
         }
         labels
-    }
-
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        let mut items = Vec::new();
-        unsafe {
-            for child_ptr in &self.children {
-                items.extend((**child_ptr).get_text_items());
-            }
-        }
-        items
-    }
-}
-
-impl Drop for ControlPanel {
-    fn drop(&mut self) {
-        clear_widget_references(self);
     }
 }

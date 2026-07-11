@@ -1,6 +1,6 @@
 use crate::widget::*;
 use crate::context::UiContext;
-use crate::widget::display::TextLabel;
+
 use super::container::Container;
 use super::container_layout::ContainerLayout;
 
@@ -131,42 +131,6 @@ impl Element for SectionContainer {
         let mut quads = self.header.all_quads(ctx);
         quads.extend(self.container.all_quads(ctx));
         quads
-    }
-
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if !self.draw_children {
-            return Vec::new();
-        }
-        let mut labels = self.header.text_labels();
-        labels.extend(self.container.text_labels());
-        labels
-    }
-
-    fn text_labels_with_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        if !self.draw_children {
-            return Vec::new();
-        }
-        let mut labels = self.header.text_labels_with_bounds(ctx);
-        labels.extend(self.container.text_labels_with_bounds(ctx));
-        labels
-    }
-
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        if !self.draw_children {
-            return Vec::new();
-        }
-        let mut labels = self.header.text_labels_with_font_and_bounds(ctx);
-        labels.extend(self.container.text_labels_with_font_and_bounds(ctx));
-        labels
-    }
-
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        if !self.draw_children {
-            return Vec::new();
-        }
-        let mut items = self.header.get_text_items();
-        items.extend(self.container.get_text_items());
-        items
     }
 
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {

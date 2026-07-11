@@ -490,13 +490,138 @@ impl Element for List {
         quads
     }
 
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+        if self.search_enabled {
+            let open_key = crate::color::list_open_search_key();
+            let close_key = crate::color::list_close_search_key();
+            
+            if event.state == ElementState::Pressed {
+                if self.search_visible && match_key_shortcut(event, &close_key) {
+                    self.search_visible = false;
+                    self.search_box.text.clear();
+                    self.search_box.edit_buffer.clear();
+                    self.search_box.just_changed = true;
+                    self.search_box.unfocus();
+                    ctx.clear_focus();
+                    
+                    let (lx, ly, lw, lh) = (self.base.x, self.base.y, self.base.w, self.base.h);
+                    self.set_rect(lx, ly, lw, lh);
+                    self.mark_dirty(ctx);
+                    return true;
+                }
+                
+                if !self.search_visible && match_key_shortcut(event, &open_key) {
+                    self.search_visible = true;
+                    let (lx, ly, lw, lh) = (self.base.x, self.base.y, self.base.w, self.base.h);
+                    self.set_rect(lx, ly, lw, lh);
+                    ctx.set_focused(&mut self.search_box);
+                    self.search_box.focus();
+                    self.mark_dirty(ctx);
+                    return true;
+                }
+            }
+            
+            let is_arrow = event.logical_key == Key::Named(NamedKey::ArrowDown) || event.logical_key == Key::Named(NamedKey::ArrowUp);
+            if is_arrow {
+                if self.handle_list_navigation(event, ctx) {
+                    return true;
+                }
+            }
+            
+            if self.search_visible {
+                if self.search_box.keyboard_input(event, ctx) {
+                    return true;
+                }
+            }
+        }
+        
+        if self.scroll_box.keyboard_input(event, ctx) {
+            return true;
+        }
+        if self.handle_list_navigation(event, ctx) {
+            return true;
+        }
+        false
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        let f = crate::layout::list_font();
+        if f.is_empty() {
+            None
+        } else {
+            Some(f)
+        }
+    }
+
+    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.scroll_box.parent(_ctx) }
+    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
+        self.scroll_box.set_parent(parent, ctx);
+        if parent.is_some() {
+            let self_ptr = self as *mut Self;
+            let self_id = self.base.id();
+            unsafe {
+                let sb_ptr = (*self_ptr).search_box.as_ptr_mut();
+                let sb_id = (*self_ptr).search_box.base().unwrap().id();
+                ctx.register_widget(sb_id, sb_ptr);
+                ctx.link_ids(self_id, sb_id);
+                (*sb_ptr).set_parent(Some(self_ptr), ctx);
+            }
+        }
+    }
+    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+        let mut list = self.scroll_box.children(ctx);
+        if self.search_enabled && self.search_visible {
+            let self_ptr = self as *const Self as *mut Self;
+            unsafe {
+                list.push((*self_ptr).search_box.as_ptr_mut());
+            }
+        }
+        list
+    }
+
+    // List renders its own subtree: column-mode rows are List-drawn cells (no child
+    // widgets), and columns=None rows live behind the internal ScrollBox with the
+    // viewport offset/clip applied by the aggregates — the walk emits those and must
+    // not also descend.
+    fn renders_own_subtree(&self) -> bool {
+        true
+    }
+
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        crate::scene::painter::paint_legacy_leaf(self, ui, ctx, self.own_fonted_labels(ui));
+    }
+    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) { self.scroll_box.add_child(child, ctx); }
+    fn clear_children(&mut self, ctx: &mut UiContext) { self.scroll_box.clear_children(ctx); }
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+        if self.search_enabled && self.search_visible {
+            self.search_box.prepare_text(fs);
+        }
+    }
+    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
+        let mut changed = false;
+        if self.scroll_box.tick(dt, ctx) {
+            changed = true;
+        }
+        if self.search_enabled && self.search_visible {
+            if self.search_box.tick(dt, ctx) {
+                changed = true;
+            }
+        }
+        changed
+    }
+}
+
+unsafe impl Send for List {}
+unsafe impl Sync for List {}
+
+impl List {
+    pub(crate) fn own_fonted_labels(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         if !self.visible() {
             return Vec::new();
         }
         if self.columns.is_none() {
             let font = self.widget_font();
-            let mut labels = self.text_labels().into_iter().map(|l| (l, font.clone(), None::<[f32; 4]>)).collect::<Vec<_>>();
+            let mut labels = crate::scene::painter::base_control_label(self).into_iter().map(|l| (l, font.clone(), None::<[f32; 4]>)).collect::<Vec<_>>();
             let mut curr = self.parent(ctx);
             let mut scroll_box_bounds = None;
             while let Some(parent_ptr) = curr {
@@ -516,7 +641,7 @@ impl Element for List {
                 }
             }
             if self.search_enabled && self.search_visible {
-                labels.extend(self.search_box.text_labels_with_font_and_bounds(ctx));
+                labels.extend(self.search_box.own_labels_with_font_and_bounds(ctx));
             }
             return labels;
         }
@@ -615,119 +740,8 @@ impl Element for List {
             }
         }
         if self.search_enabled && self.search_visible {
-            result.extend(self.search_box.text_labels_with_font_and_bounds(ctx));
+            result.extend(self.search_box.own_labels_with_font_and_bounds(ctx));
         }
         result
     }
-
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
-        if self.search_enabled {
-            let open_key = crate::color::list_open_search_key();
-            let close_key = crate::color::list_close_search_key();
-            
-            if event.state == ElementState::Pressed {
-                if self.search_visible && match_key_shortcut(event, &close_key) {
-                    self.search_visible = false;
-                    self.search_box.text.clear();
-                    self.search_box.edit_buffer.clear();
-                    self.search_box.just_changed = true;
-                    self.search_box.unfocus();
-                    ctx.clear_focus();
-                    
-                    let (lx, ly, lw, lh) = (self.base.x, self.base.y, self.base.w, self.base.h);
-                    self.set_rect(lx, ly, lw, lh);
-                    self.mark_dirty(ctx);
-                    return true;
-                }
-                
-                if !self.search_visible && match_key_shortcut(event, &open_key) {
-                    self.search_visible = true;
-                    let (lx, ly, lw, lh) = (self.base.x, self.base.y, self.base.w, self.base.h);
-                    self.set_rect(lx, ly, lw, lh);
-                    ctx.set_focused(&mut self.search_box);
-                    self.search_box.focus();
-                    self.mark_dirty(ctx);
-                    return true;
-                }
-            }
-            
-            let is_arrow = event.logical_key == Key::Named(NamedKey::ArrowDown) || event.logical_key == Key::Named(NamedKey::ArrowUp);
-            if is_arrow {
-                if self.handle_list_navigation(event, ctx) {
-                    return true;
-                }
-            }
-            
-            if self.search_visible {
-                if self.search_box.keyboard_input(event, ctx) {
-                    return true;
-                }
-            }
-        }
-        
-        if self.scroll_box.keyboard_input(event, ctx) {
-            return true;
-        }
-        if self.handle_list_navigation(event, ctx) {
-            return true;
-        }
-        false
-    }
-
-    fn widget_font(&self) -> Option<String> {
-        let f = crate::layout::list_font();
-        if f.is_empty() {
-            None
-        } else {
-            Some(f)
-        }
-    }
-
-    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.scroll_box.parent(_ctx) }
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        self.scroll_box.set_parent(parent, ctx);
-        if parent.is_some() {
-            let self_ptr = self as *mut Self;
-            let self_id = self.base.id();
-            unsafe {
-                let sb_ptr = (*self_ptr).search_box.as_ptr_mut();
-                let sb_id = (*self_ptr).search_box.base().unwrap().id();
-                ctx.register_widget(sb_id, sb_ptr);
-                ctx.link_ids(self_id, sb_id);
-                (*sb_ptr).set_parent(Some(self_ptr), ctx);
-            }
-        }
-    }
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        let mut list = self.scroll_box.children(ctx);
-        if self.search_enabled && self.search_visible {
-            let self_ptr = self as *const Self as *mut Self;
-            unsafe {
-                list.push((*self_ptr).search_box.as_ptr_mut());
-            }
-        }
-        list
-    }
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) { self.scroll_box.add_child(child, ctx); }
-    fn clear_children(&mut self, ctx: &mut UiContext) { self.scroll_box.clear_children(ctx); }
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
-        if self.search_enabled && self.search_visible {
-            self.search_box.prepare_text(fs);
-        }
-    }
-    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
-        let mut changed = false;
-        if self.scroll_box.tick(dt, ctx) {
-            changed = true;
-        }
-        if self.search_enabled && self.search_visible {
-            if self.search_box.tick(dt, ctx) {
-                changed = true;
-            }
-        }
-        changed
-    }
 }
-
-unsafe impl Send for List {}
-unsafe impl Sync for List {}

@@ -519,21 +519,11 @@ pub trait Element {
         for (cx, cy, r, c) in self.extra_circles() {
             ctx.circle(cx, cy, r, c);
         }
-        // Text: leaves emit their own labels; containers emit NONE — the legacy container
-        // text_labels overrides (Backplate/Layer/Page/Plate) AGGREGATE their children's
-        // labels, and the walk reaches those children itself, so emitting the aggregate
-        // here would double-draw every descendant's text (the Phase 6d trap). A legacy
-        // container with OWN text overrides paint_self to add it (Plate's label).
-        // Leaves use the FONTED getter (font + scroll-viewport bounds) — the same labels
-        // every legacy tuple consumer served; composites like Ramp only aggregate their
-        // internal field widgets here. This is the ONE remaining trait-getter use in the
-        // paint path; it is deleted together with the getters once every live legacy
-        // widget carries its own paint_self.
-        if self.children(ui).is_empty() {
-            for (tl, font, bounds) in self.text_labels_with_font_and_bounds(ui) {
-                ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
-            }
-        }
+        // Text: NONE by default. Every live legacy widget with own text carries a
+        // paint_self override (most via `scene::painter::paint_legacy_leaf` + its own
+        // labels); containers' text_labels aggregates are covered by the walk's descent
+        // (emitting them here would double-draw every descendant's text — the Phase 6d
+        // trap). Migrated widgets go through `Adapted::paint_self`, never this default.
     }
 
     /// Whether the paint walk should clip this widget's children to its rect (scroll/backplate
@@ -577,79 +567,12 @@ pub trait Element {
         }
     }
 
-    fn text_labels(&self) -> Vec<TextLabel> {
-        if let Some(b) = self.base() {
-            if let Some(ref label) = b.label {
-                let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-                let color = colors::control_label_color_detached_for_state(b.hovered, b.focused);
-                if crate::layout::control_label_layout() == "side" {
-                    let label_x = self.label_x_offset();
-                    if label_x > 0.0 {
-                        let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
-                        return vec![TextLabel {
-                            text: label.clone(),
-                            x: b.x + 4.0,
-                            y: y_pos,
-                            font_size,
-                            color,
-                        }];
-                    }
-                }
-                return vec![TextLabel {
-                    text: label.clone(),
-                    x: b.x,
-                    y: b.y,
-                    font_size,
-                    color,
-                }];
-            }
-        }
-        Vec::new()
-    }
-    
-    fn text_labels_with_bounds(&self, _ctx: &UiContext) -> Vec<(TextLabel, Option<[f32; 4]>)> {
-        self.text_labels().into_iter().map(|l| (l, None)).collect()
-    }
-    
-    fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let font = self.widget_font();
-        let mut labels = self.text_labels().into_iter().map(|l| (l, font.clone(), None::<[f32; 4]>)).collect::<Vec<_>>();
-
-        let mut curr = self.parent(ctx);
-        let mut scroll_box_bounds = None;
-        while let Some(parent_ptr) = curr {
-            let parent = unsafe { &*parent_ptr };
-            if let Some(scroll_box) = parent.as_any().downcast_ref::<crate::widget::ScrollBox>() {
-                let (sb_x, _, sb_w, _) = scroll_box.rect();
-                let view_min = scroll_box.viewport_y + 4.0;
-                let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
-                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
-                break;
-            } else if let Some(list) = parent.as_any().downcast_ref::<crate::widget::List>() {
-                let (sb_x, _, sb_w, _) = list.rect();
-                let view_min = list.scroll_box.viewport_y + 4.0;
-                let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
-                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
-                break;
-            }
-            curr = parent.parent(ctx);
-        }
-
-        if let Some(sb_bounds) = scroll_box_bounds {
-            for item in &mut labels {
-                if let Some(ref mut b) = item.2 {
-                    b[0] = b[0].max(sb_bounds[0]);
-                    b[1] = b[1].max(sb_bounds[1]);
-                    b[2] = b[2].min(sb_bounds[2]);
-                    b[3] = b[3].min(sb_bounds[3]);
-                } else {
-                    item.2 = Some(sb_bounds);
-                }
-            }
-        }
-
-        labels
-    }
+    // The per-widget text getters (text_labels / text_labels_with_bounds /
+    // text_labels_with_font_and_bounds / get_text_items) are GONE: every widget emits
+    // its own text as display-list prims via paint_self (Adapted::paint_self for
+    // migrated widgets; paint_legacy_leaf-based overrides for the legacy leaves). The
+    // deleted default's base-label synthesis lives on in Adapted's base-label fallback,
+    // and its scroll-ancestor clamp in scene::painter::scroll_ancestor_text_bounds.
 
     fn widget_font(&self) -> Option<String> { None }
     fn value(&self) -> i32 { 0 }
@@ -681,7 +604,6 @@ pub trait Element {
         ctx.is_focused_addr(self as *const Self as *const () as usize)
     }
     fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem) {}
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> { Vec::new() }
     fn set_selected(&mut self, _selected: bool) {}
     fn keyboard_input(&mut self, _event: &KeyEvent, _ctx: &mut UiContext) -> bool { false }
 

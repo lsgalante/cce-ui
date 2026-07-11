@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(quads[0].4, colors::checkbox_hover());
 
         // Label text comes through the prim-derived text bridge at the legacy position.
-        let labels = Element::text_labels(&cb);
+        let labels = cb.own_text_labels();
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "Enable");
         assert_eq!(labels[0].x, 8.0);
@@ -563,7 +563,7 @@ mod tests {
         let mut t = Toggle::new();
         Element::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
         t.set_label("ON"); // the network.rs pattern: live label updates through Deref
-        let labels = Element::text_labels(&t);
+        let labels = t.own_text_labels();
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "ON");
     }

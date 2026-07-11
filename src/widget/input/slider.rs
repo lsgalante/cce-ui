@@ -747,7 +747,7 @@ fn probe_slider_bridge() {
     eprintln!("rect         = {:?}", Element::rect(&sl));
     eprintln!("extra_quads  = {:?}", Element::extra_quads(&sl));
     eprintln!("rounded      = {:?}", Element::all_rounded_quads(&sl, &ctx));
-    eprintln!("labels       = {:?}", Element::text_labels(&sl).iter().map(|l| l.text.clone()).collect::<Vec<_>>());
+    eprintln!("labels       = {:?}", sl.own_text_labels().iter().map(|l| l.text.clone()).collect::<Vec<_>>());
 }
 
     /// Slider press-on-track begins a drag through the routed path; wheel adjusts the value
