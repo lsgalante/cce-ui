@@ -1407,9 +1407,26 @@ Constraint respected: **each crate still builds standalone** — the new core is
       by value is a dangling-registry candidate — audit any remaining
       `link_parent_child` calls made before the owning struct reaches its
       final address.
-  - **Still to do:** the last getter-consumer class — cce-designer's custom
-    render loop (`get_text_items`) — THEN delete the getters, then `Element` +
-    `Adapted` (TreeList → narrow traits).
+  - **6ap — cce-designer's render loop off the getters. DONE (default +
+    circular-pane A/B pixel-identical; add_node label renders via the new
+    path; full workspace builds).** The custom `WgpuAdapter` loop's two text
+    sources (`get_text_items` widget-buffer fast path +
+    `text_labels_with_font_and_bounds` fallback) became one walk: per
+    non-menubar widget, `append_widget_text` → text prims, shaped app-side in
+    `text_buffer_cache` with the same size*1.4 metrics the fallback always
+    used. Per-widget special cases (plate-ancestor bounds, circular cull,
+    network opacity, curved-ring feed) operate on prim fields unchanged. The
+    curved-ring branch is unreachable today (menubars are skipped before its
+    condition) — preserved verbatim, flagged for a future dead-code decision.
+    **ALL app-side getter consumers are now gone.**
+  - **Still to do (getter deletion preconditions, all internal now):**
+    (1) the walk's own legacy branches — default `paint_self` drains
+    `text_labels()` for leaves; `renders_own_subtree` (TreeList) uses the
+    recursive bounded getter; (2) app-local legacy widgets that implement
+    `text_labels` as their text source and rely on that default —
+    display-manager's LoginCard/StatusLabel/SessionList, designer's
+    NodePalette — each needs a small `paint_self` override; THEN delete the
+    getters, then `Element` + `Adapted` (TreeList → narrow traits).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
