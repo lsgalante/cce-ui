@@ -623,6 +623,18 @@ pub trait Input {
     /// calls `Element::copy_path` on its target (Breadcrumb is the only implementor).
     fn copy_path(&self) {}
 
+    /// The tree context-menu actions ("Copy Key" / "Copy Value" / "Delete" / "Expand" /
+    /// "Collapse" / "Expand All" / "Collapse All") — the global context menu dispatches them
+    /// on its `dyn Element` target; `Adapted` forwards here. TreeList is the only implementor
+    /// (transitional, dies with the `Element` deletion like the controller hooks above).
+    fn copy_key(&self) {}
+    fn copy_value(&self) {}
+    fn delete_key(&mut self) {}
+    fn expand_node(&mut self) {}
+    fn collapse_node(&mut self) {}
+    fn expand_all_nodes(&mut self) {}
+    fn collapse_all_nodes(&mut self) {}
+
     /// Keyboard modifier state pushed in by hosts before dispatch (legacy
     /// `Element::set_modifiers`).
     fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
@@ -1511,6 +1523,28 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     fn copy_path(&self) {
         Input::copy_path(&self.inner)
+    }
+
+    fn copy_key(&self) {
+        Input::copy_key(&self.inner)
+    }
+    fn copy_value(&self) {
+        Input::copy_value(&self.inner)
+    }
+    fn delete_key(&mut self) {
+        Input::delete_key(&mut self.inner)
+    }
+    fn expand_node(&mut self) {
+        Input::expand_node(&mut self.inner)
+    }
+    fn collapse_node(&mut self) {
+        Input::collapse_node(&mut self.inner)
+    }
+    fn expand_all_nodes(&mut self) {
+        Input::expand_all_nodes(&mut self.inner)
+    }
+    fn collapse_all_nodes(&mut self) {
+        Input::collapse_all_nodes(&mut self.inner)
     }
 
     // --- Legacy direct-dispatch entry points. Hosts (treelist's add-key button, parameters_bg's
