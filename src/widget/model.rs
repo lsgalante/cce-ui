@@ -300,6 +300,16 @@ pub trait Paint {
     /// to shape.
     fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem, _rect: Rect) {}
 
+    /// Whether [`paint`](Paint::paint) emits the widget's ENTIRE subtree, so the paint walk
+    /// must not also descend into its (ctx-linked) children — the legacy
+    /// `Element::renders_own_subtree` contract. TreeList: its field widgets stay ctx-linked
+    /// for event propagation, but their pixels come from `paint`'s own child pass (which
+    /// gates the add-key popover box on the popover actually being open).
+    fn paints_own_subtree(&self) -> bool {
+        false
+    }
+
+
     /// Whether the adapter re-enables the legacy shared focus/hover highlight overlay
     /// (`Element::highlight_quad`'s default) for this widget. The adapter suppresses it for
     /// migrated widgets — matching the `None` overrides most legacy controls carried — but
@@ -404,6 +414,14 @@ impl EventCtx<'_> {
     /// path; the coverage walk then simply excludes nothing.
     pub fn widget_addr(&self) -> usize {
         self.self_ptr.map(|p| p as *const () as usize).unwrap_or(0)
+    }
+
+    /// The adapter's pointer, for legacy sites that must hand it onward — TreeList makes
+    /// itself the focus target (`set_focused_ptr`) and the context-menu target
+    /// (`show_context_menu`) with the pointer hosts registered. Transitional; dies with
+    /// `Element`. None outside a routed path.
+    pub(crate) fn host_ptr(&self) -> Option<*mut (dyn Element + 'static)> {
+        self.self_ptr
     }
 }
 
@@ -560,6 +578,14 @@ pub trait Input {
     /// Advance time-based state by `dt` seconds against the laid-out rect. Return whether
     /// anything observable changed (drives redraw).
     fn tick(&mut self, _dt: f32, _rect: Rect) -> bool {
+        false
+    }
+
+    /// Context-carrying tick for legacy stateful containers whose per-frame work needs the
+    /// routing context — TreeList commits its inline rename editor, re-targets focus, and
+    /// drains its search box on tick. Runs right after [`tick`](Input::tick) with a routed
+    /// [`EventCtx`] (ui + the adapter's id/pointer). Transitional, like the capability hooks.
+    fn tick_ctx(&mut self, _dt: f32, _ectx: &mut EventCtx) -> bool {
         false
     }
 
@@ -1232,6 +1258,10 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// (`own_labels_with_font_and_bounds`, or the per-label hatch), so a display list built by
     /// the paint walk carries per-widget fonts and clip rects (Phase 6 — text ordering
     /// relative to geometry is immaterial: glyphs always render in the later text pass).
+    fn renders_own_subtree(&self) -> bool {
+        Paint::paints_own_subtree(&self.inner)
+    }
+
     fn paint_self(&self, ui: &UiContext, ctx: &mut PaintCtx) {
         let mut tmp = PaintCtx::new();
         Paint::paint(&self.inner, self.content_rect(), &mut tmp);
@@ -1457,6 +1487,11 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Layout::register_embedded_children(&mut self.inner, host_id, ctx);
         let rect = self.content_rect();
         let mut changed = Input::tick(&mut self.inner, dt, rect);
+        {
+            let self_ptr = self.as_ptr_mut();
+            let mut ectx = EventCtx { rect, id: host_id, ui: Some(&mut *ctx), self_ptr: Some(self_ptr) };
+            changed |= Input::tick_ctx(&mut self.inner, dt, &mut ectx);
+        }
         if self.visible {
             for child in self.visible_children() {
                 changed |= unsafe { &mut *child }.tick(dt, ctx);

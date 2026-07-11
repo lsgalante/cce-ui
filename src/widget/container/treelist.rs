@@ -1,6 +1,9 @@
 use crate::widget::*;
 use crate::widget::container::scroll_box::ScrollBox;
 use crate::widget::display::TextLabel;
+use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -174,8 +177,6 @@ pub struct TreeList {
     pub item_height: f32,
     pub clicked_item: Option<TreeElement>,
     pub right_clicked_section: Option<String>,
-    pub parent: Option<*mut (dyn Element + 'static)>,
-    pub children: Vec<*mut (dyn Element + 'static)>,
     pub last_scroll_y: f32,
     pub scrollbar_activity_timer: f32,
     pub deleted_key_path: Option<String>,
@@ -186,10 +187,10 @@ pub struct TreeList {
 }
 
 impl TreeList {
-    pub fn new() -> Self {
+    pub fn new() -> Adapted<TreeList> {
         let mut scroll_box = ScrollBox::new();
         scroll_box.show_background = false;
-        Self {
+        Adapted::new(TreeList {
             base: Widget::new(),
             scroll_box,
             search_box: TextBox::new(String::new()).with_placeholder("Search...").with_update_on_type(true),
@@ -206,8 +207,6 @@ impl TreeList {
             item_height: 28.0,
             clicked_item: None,
             right_clicked_section: None,
-            parent: None,
-            children: Vec::new(),
             last_scroll_y: 0.0,
             scrollbar_activity_timer: 0.0,
             deleted_key_path: None,
@@ -215,7 +214,7 @@ impl TreeList {
             editing_key_idx: None,
             double_click_timer: None,
             rename_request: None,
-        }
+        })
     }
 
     pub fn take_new_key_path_request(&mut self) -> Option<String> {
@@ -245,7 +244,7 @@ impl TreeList {
         let query = self.search_box.text.clone();
         self.items = build_tree(&self.flat_keys, &self.annotations, &self.collapsed_sections, &query);
         let content_h = self.items.len() as f32 * self.item_height;
-        let (_, _, _, h) = self.rect();
+        let h = self.base.h;
         let search_margin_y = 6.0;
         let search_h = 26.0;
         let offset_y = search_h + 2.0 * search_margin_y;
@@ -284,14 +283,6 @@ impl TreeList {
         self.rename_request.take()
     }
 
-    pub fn check_scroll_activity(&mut self, ctx: &mut UiContext) {
-        if (self.scroll_box.scroll_y - self.last_scroll_y).abs() > 0.01 {
-            self.scrollbar_activity_timer = 1.0;
-            ctx.register_tick_receiver(self.base.id());
-            self.last_scroll_y = self.scroll_box.scroll_y;
-            self.mark_dirty(ctx);
-        }
-    }
 
     pub fn scroll_to_selected_key(&mut self) {
         if let Some(selected_idx) = self.selected_key_idx {
@@ -349,59 +340,16 @@ impl TreeList {
     }
 }
 
-impl Element for TreeList {
-    crate::impl_widget_base!(TreeList);
-
-    fn blocks_backplate_drag(&self) -> bool {
-        true
-    }
-
-    fn widget_font(&self) -> Option<String> {
-        Some(crate::layout::tree_font())
-    }
-
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
-        
-        let search_margin_x = 8.0;
-        let search_margin_y = 6.0;
-        let search_h = 26.0;
-        let offset_y = search_h + 2.0 * search_margin_y;
-        
-        let button_width = 80.0;
-        let button_height = search_h;
-        let button_x = x + w - search_margin_x - button_width;
-        
-        self.search_box.set_rect(x + search_margin_x, y + search_margin_y, w - 2.0 * search_margin_x - button_width - 6.0, search_h);
-        self.add_key_btn.set_rect(button_x, y + search_margin_y, button_width, button_height);
-        
-        let (px, py, pw, ph) = self.popover_rect_geom();
-        self.add_key_popover_box.set_rect(px + 8.0, py + 5.0, pw - 16.0, ph - 10.0);
-        
-        let header_h = 26.0;
-        self.scroll_box.set_rect(x, y + offset_y + header_h, w, h - offset_y - header_h);
-        
-        let content_h = self.items.len() as f32 * self.item_height;
-        self.scroll_box.update_bounds(content_h, y + offset_y + header_h, h - offset_y - header_h);
-        self.last_scroll_y = self.scroll_box.scroll_y;
-    }
-
-    fn color(&self) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
-    }
-
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        (true, true, true, true)
-    }
-
-    fn corner_radius(&self) -> f32 {
+impl TreeList {
+    fn tree_radius(&self) -> f32 {
         crate::layout::tree_corner_radius()
     }
 
-    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+    fn tree_corners(&self) -> (bool, bool, bool, bool) {
+        (true, true, true, true)
+    }
+
+    fn tree_border(&self) -> Option<([f32; 4], f32)> {
         if self.scroll_box.show_border {
             Some((crate::color::tree_border_color(), 1.0))
         } else {
@@ -409,36 +357,17 @@ impl Element for TreeList {
         }
     }
 
-    fn focus(&mut self) {
-        focus::set_focused(self);
-    }
-    fn unfocus(&mut self) {
-        self.add_key_popover_open = false;
-        self.add_key_popover_box.unfocus();
-    }
-
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
-        self.search_box.prepare_text(fs);
-        self.add_key_btn.prepare_text(fs);
-        if self.add_key_popover_open {
-            self.add_key_popover_box.prepare_text(fs);
-        }
-        self.scroll_box.prepare_text(fs);
-        if self.editing_key_idx.is_some() {
-            self.edit_box.prepare_text(fs);
-        }
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    fn mouse_body(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, host: Option<*mut (dyn Element + 'static)>, host_id: WidgetId) -> bool {
+        let _ = host_id;
         if self.editing_key_idx.is_some() {
             if button == MouseButton::Left && state == ElementState::Pressed {
                 let (ex, ey, ew, eh) = self.edit_box.rect();
                 if px >= ex && px <= ex + ew && py >= ey && py <= ey + eh {
-                    if self.edit_box.mouse_input(button, state, px, py, ctx) {
+                    if self.edit_box.mouse_input(button, state, px, py, ui) {
                         return true;
                     }
                 } else {
-                    ctx.clear_focus();
+                    ui.clear_focus();
                     return true;
                 }
             }
@@ -452,11 +381,11 @@ impl Element for TreeList {
             if button == MouseButton::Left && state == ElementState::Pressed {
                 if px < px_rect || px > px_rect + pw || py < py_rect || py > py_rect + ph {
                     self.add_key_popover_open = false;
-                    ctx.clear_focus();
+                    ui.clear_focus();
                     changed = true;
                 } else {
-                    if self.add_key_popover_box.mouse_input(button, state, px, py, ctx) {
-                        ctx.set_focused(&mut self.add_key_popover_box);
+                    if self.add_key_popover_box.mouse_input(button, state, px, py, ui) {
+                        ui.set_focused(&mut self.add_key_popover_box);
                         changed = true;
                     }
                 }
@@ -467,14 +396,14 @@ impl Element for TreeList {
             }
         }
 
-        if self.scroll_box.mouse_input(button, state, px, py, ctx) {
+        if self.scroll_box.mouse_input(button, state, px, py, ui) {
             changed = true;
         }
-        if self.search_box.mouse_input(button, state, px, py, ctx) {
-            ctx.set_focused(&mut self.search_box);
+        if self.search_box.mouse_input(button, state, px, py, ui) {
+            ui.set_focused(&mut self.search_box);
             changed = true;
         }
-        if self.add_key_btn.mouse_input(button, state, px, py, ctx) {
+        if self.add_key_btn.mouse_input(button, state, px, py, ui) {
             if self.add_key_btn.take_click() {
                 self.add_key_popover_open = !self.add_key_popover_open;
                 if self.add_key_popover_open {
@@ -484,16 +413,15 @@ impl Element for TreeList {
                     self.add_key_popover_box.select_anchor = None;
                     self.add_key_popover_box.all_selected = false;
                     self.add_key_popover_box.editing = true;
-                    ctx.set_focused(&mut self.add_key_popover_box);
+                    ui.set_focused(&mut self.add_key_popover_box);
                     self.add_key_popover_box.focus();
                 } else {
-                    ctx.clear_focus();
+                    ui.clear_focus();
                 }
             }
             changed = true;
         }
-        self.check_scroll_activity(ctx);
-
+        
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
         let list_top = self.scroll_box.viewport_y;
@@ -502,8 +430,7 @@ impl Element for TreeList {
         if button == MouseButton::Left && state == ElementState::Pressed {
             let on_scrollbar = self.scroll_box.hit_test_scrollbar(px, py) || self.scroll_box.scrollbar_dragging;
             if !on_scrollbar && px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
-                ctx.set_focused(self);
-                self.focus();
+                if let Some(h) = host { ui.set_focused_ptr(h); }
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
                 let row_idx = (relative_y / self.item_height) as usize;
                 if row_idx < self.items.len() {
@@ -537,17 +464,12 @@ impl Element for TreeList {
                         self.edit_box.cursor_idx = self.edit_box.text.chars().count();
                         self.edit_box.select_anchor = Some(0);
                         
-                        let self_ptr = self as *mut Self;
-                        let self_id = self.base.id();
-                        unsafe {
-                            let eb_ptr = (*self_ptr).edit_box.as_ptr_mut();
-                            let eb_id = (*self_ptr).edit_box.base().unwrap().id();
-                            ctx.register_widget(eb_id, eb_ptr);
-                            ctx.link_ids(self_id, eb_id);
-                            (*eb_ptr).set_parent(Some(self_ptr), ctx);
-                        }
+                        let eb_ptr = self.edit_box.as_ptr_mut();
+                        let eb_id = self.edit_box.base().unwrap().id();
+                        ui.register_widget(eb_id, eb_ptr);
+                        ui.link_ids(host_id, eb_id);
                         
-                        ctx.set_focused(&mut self.edit_box);
+                        ui.set_focused(&mut self.edit_box);
                         return true;
                     }
 
@@ -585,8 +507,7 @@ impl Element for TreeList {
 
         if button == MouseButton::Right && state == ElementState::Pressed {
             if px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
-                ctx.set_focused(self);
-                self.focus();
+                if let Some(h) = host { ui.set_focused_ptr(h); }
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
                 let row_idx = (relative_y / self.item_height) as usize;
                 if row_idx < self.items.len() {
@@ -605,7 +526,7 @@ impl Element for TreeList {
                             options.push("Collapse All".to_string());
                             
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
-                            ctx.show_context_menu(px, py - scroll_offset, options, 1, self.as_ptr_mut());
+                            if let Some(h) = host { ui.show_context_menu(px, py - scroll_offset, options, 1, h); }
                             changed = true;
                         }
                         TreeElement::Leaf { original_idx, ref path, ref name, indent, ref val } => {
@@ -625,7 +546,7 @@ impl Element for TreeList {
                                 "Delete".to_string(),
                             ];
                             let scroll_offset = crate::widget::hover_animation::get_scroll_offset();
-                            ctx.show_context_menu(px, py - scroll_offset, options, 1, self.as_ptr_mut());
+                            if let Some(h) = host { ui.show_context_menu(px, py - scroll_offset, options, 1, h); }
                             changed = true;
                         }
                     }
@@ -633,18 +554,19 @@ impl Element for TreeList {
             }
         }
         changed
+    
     }
 
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let mut changed = self.scroll_box.on_cursor_moved(px, py, ctx);
-        if self.search_box.on_cursor_moved(px, py, ctx) {
+    fn move_body(&mut self, px: f32, py: f32, ui: &mut UiContext) -> bool {
+        let mut changed = self.scroll_box.on_cursor_moved(px, py, ui);
+        if self.search_box.on_cursor_moved(px, py, ui) {
             changed = true;
         }
-        if self.add_key_btn.on_cursor_moved(px, py, ctx) {
+        if self.add_key_btn.on_cursor_moved(px, py, ui) {
             changed = true;
         }
         if self.add_key_popover_open {
-            if self.add_key_popover_box.on_cursor_moved(px, py, ctx) {
+            if self.add_key_popover_box.on_cursor_moved(px, py, ui) {
                 changed = true;
             }
         }
@@ -670,338 +592,135 @@ impl Element for TreeList {
             changed = true;
         }
         changed
+    
     }
 
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let changed = self.scroll_box.mouse_wheel(delta, px, py, ctx);
-        self.check_scroll_activity(ctx);
-        changed
-    }
-
-    fn draggable(&self) -> bool {
-        self.scroll_box.draggable()
-    }
-
-    fn drag_begin(&mut self, px: f32, py: f32) {
-        self.scroll_box.drag_begin(px, py);
-    }
-
-    fn drag_update(&mut self, px: f32, py: f32) -> bool {
-        self.scroll_box.drag_update(px, py)
-    }
-
-    fn drag_end(&mut self) {
-        self.scroll_box.drag_end();
-    }
-
-    fn wants_tick(&self) -> bool {
-        true
-    }
-
-    fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
-        let mut changed = false;
-        if self.search_box.tick(dt, ctx) {
-            changed = true;
-        }
-        if self.add_key_btn.tick(dt, ctx) {
-            changed = true;
-        }
-        if self.add_key_popover_open {
-            if self.add_key_popover_box.tick(dt, ctx) {
-                changed = true;
-            }
-            if !self.add_key_popover_box.editing {
-                let path = self.add_key_popover_box.text.trim().to_string();
-                if !path.is_empty() {
-                    self.new_key_path_request = Some(path);
-                }
-                self.add_key_popover_open = false;
-                ctx.clear_focus();
-                changed = true;
-            }
-        }
-        if self.search_box.take_change() {
-            self.rebuild_tree();
-            self.mark_dirty(ctx);
-            changed = true;
-        }
-        
+    fn key_body(&mut self, event: &KeyEvent, ui: &mut UiContext) -> bool {
         if self.editing_key_idx.is_some() {
-            if self.edit_box.tick(dt, ctx) {
-                changed = true;
-            }
-            if let Some(row_idx) = self.editing_key_idx {
-                if row_idx < self.items.len() {
-                    let list_left = self.scroll_box.base.x;
-                    let list_top = self.scroll_box.viewport_y;
-                    let row_y = list_top + row_idx as f32 * self.item_height - self.scroll_box.scroll_y;
-                    let box_x = list_left + 5.0;
-                    let box_y = row_y + 2.0;
-                    self.edit_box.set_rect(box_x, box_y, 170.0, 24.0);
-                }
-            }
-            if !self.edit_box.editing {
-                let row_idx = self.editing_key_idx.unwrap();
-                if row_idx < self.items.len() {
-                    let (old_path, relative_name) = match &self.items[row_idx] {
-                        TreeElement::Section { path, name, .. } => (path.clone(), name.clone()),
-                        TreeElement::Leaf { path, name, .. } => (path.clone(), name.clone()),
-                    };
-                    let new_name = self.edit_box.text.trim().to_string();
-                    if !new_name.is_empty() && new_name != relative_name {
-                        let new_path = if let Some(pos) = old_path.rfind('.') {
-                            format!("{}.{}", &old_path[..pos], new_name)
-                        } else {
-                            new_name
-                        };
-                        self.rename_request = Some((old_path, new_path));
-                    }
-                }
-                self.editing_key_idx = None;
-                ctx.set_focused(self);
-                self.mark_dirty(ctx);
-                changed = true;
-            }
-        }
-
-        if (self.scroll_box.scroll_y - self.last_scroll_y).abs() > 0.01 {
-            self.last_scroll_y = self.scroll_box.scroll_y;
-            self.scrollbar_activity_timer = 1.0;
-            self.mark_dirty(ctx);
-            changed = true;
-        }
-        if self.scrollbar_activity_timer > 0.0 {
-            self.scrollbar_activity_timer = (self.scrollbar_activity_timer - dt).max(0.0);
-            changed = true;
-        }
-        changed
-    }
-
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
-        if self.editing_key_idx.is_some() {
-            if self.edit_box.keyboard_input(event, ctx) {
+            if self.edit_box.keyboard_input(event, ui) {
                 return true;
             }
         }
         if self.add_key_popover_open {
-            if self.add_key_popover_box.keyboard_input(event, ctx) {
+            if self.add_key_popover_box.keyboard_input(event, ui) {
                 return true;
             }
         }
-        if self.search_box.keyboard_input(event, ctx) {
+        if self.search_box.keyboard_input(event, ui) {
             return true;
         }
         false
+    
     }
+}
 
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        let has_rounded = r1 || r2 || r3 || r4;
-        if has_rounded {
-            return Vec::new();
-        }
-
-        let mut quads = self.scroll_box.extra_quads();
-
-        let list_left = self.scroll_box.base.x;
-        let list_width = self.scroll_box.base.w;
-
+impl Layout for TreeList {
+    /// The legacy `set_rect` body: cache the rect on the internal base and arrange the
+    /// field widgets (search box, add-key button, popover box, scroll box).
+    fn rect_assigned(&mut self, rect: Rect) {
+        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
+        self.base.x = x;
+        self.base.y = y;
+        self.base.w = w;
+        self.base.h = h;
+        
+        let search_margin_x = 8.0;
         let search_margin_y = 6.0;
         let search_h = 26.0;
         let offset_y = search_h + 2.0 * search_margin_y;
-
-        // Draw Header background and border
+        
+        let button_width = 80.0;
+        let button_height = search_h;
+        let button_x = x + w - search_margin_x - button_width;
+        
+        self.search_box.set_rect(x + search_margin_x, y + search_margin_y, w - 2.0 * search_margin_x - button_width - 6.0, search_h);
+        self.add_key_btn.set_rect(button_x, y + search_margin_y, button_width, button_height);
+        
+        let (px, py, pw, ph) = self.popover_rect_geom();
+        self.add_key_popover_box.set_rect(px + 8.0, py + 5.0, pw - 16.0, ph - 10.0);
+        
         let header_h = 26.0;
-        let header_bg_color = [0.12, 0.12, 0.16, 1.0]; // Dark header color
-        let header_border_color = [0.18, 0.18, 0.22, 1.0];
+        self.scroll_box.set_rect(x, y + offset_y + header_h, w, h - offset_y - header_h);
         
-        // Header background
-        quads.push((list_left, self.base.y + offset_y, list_width, header_h, header_bg_color));
-        
-        // Separator line below header
-        quads.push((list_left, self.base.y + offset_y + header_h - 1.0, list_width, 1.0, header_border_color));
-        
-        // Vertical separators inside header
-        quads.push((list_left + 180.0, self.base.y + offset_y, 1.0, header_h, header_border_color));
-        quads.push((list_left + 235.0, self.base.y + offset_y, 1.0, header_h, header_border_color));
-
-        let list_top = self.scroll_box.viewport_y;
-        let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
-
-        for (i, item) in self.items.iter().enumerate() {
-            let row_y = list_top + i as f32 * self.item_height - self.scroll_box.scroll_y;
-            if row_y + self.item_height < list_top || row_y > list_bottom {
-                continue;
-            }
-            
-            let draw_y = row_y.max(list_top);
-            let draw_bottom = (row_y + self.item_height).min(list_bottom);
-            let draw_h = draw_bottom - draw_y;
-            if draw_h <= 0.0 { continue; }
-            
-            let bg_color = match item {
-                TreeElement::Section { .. } => {
-                    if Some(i) == self.hovered_row_idx {
-                        crate::color::tree_section_bg_hover_color()
-                    } else {
-                        crate::color::tree_section_bg_color()
-                    }
-                }
-                TreeElement::Leaf { original_idx, .. } => {
-                    if Some(*original_idx) == self.selected_key_idx {
-                        crate::color::tree_leaf_bg_selected_color()
-                    } else if Some(i) == self.hovered_row_idx {
-                        crate::color::tree_leaf_bg_hover_color()
-                    } else if i % 2 == 0 {
-                        crate::color::tree_leaf_bg_even_color()
-                    } else {
-                        crate::color::tree_leaf_bg_odd_color()
-                    }
-                }
-            };
-            
-            quads.push((list_left + 1.0, draw_y, list_width - 2.0, draw_h, bg_color));
-            
-            // Draw column separator lines and color preview for Leaf rows
-            if let TreeElement::Leaf { ref val, original_idx, .. } = item {
-                let separator_color = crate::color::tree_separator_color();
-                quads.push((list_left + 180.0, draw_y, 1.0, draw_h, separator_color));
-                quads.push((list_left + 235.0, draw_y, 1.0, draw_h, separator_color));
-
-                // Color preview in 3rd column next to value string (only when not selected)
-                if Some(*original_idx) != self.selected_key_idx {
-                    if let serde_json::Value::String(s) = val {
-                        if s.starts_with('#') {
-                            if let Some(rgba) = parse_hex_f32(s) {
-                                let preview_x = list_left + 245.0;
-                                let preview_y = row_y + 4.0;
-                                let preview_bottom = (row_y + 20.0).min(list_bottom);
-                                let preview_draw_y = preview_y.max(list_top);
-                                let preview_draw_h = preview_bottom - preview_draw_y;
-                                if preview_draw_h > 0.0 {
-                                    // Checkerboard pattern
-                                    let grid_size = 8.0;
-                                    quads.push((preview_x, preview_draw_y, 16.0, preview_draw_h, [1.0, 1.0, 1.0, 1.0]));
-                                    let cols = (16.0f32 / grid_size).ceil() as i32;
-                                    let rows = (preview_draw_h as f32 / grid_size).ceil() as i32;
-                                    for r in 0..rows {
-                                        for c in 0..cols {
-                                            if (r + c) % 2 == 1 {
-                                                let qx = preview_x + c as f32 * grid_size;
-                                                let qy = preview_draw_y + r as f32 * grid_size;
-                                                let qw = grid_size.min(preview_x + 16.0 - qx);
-                                                let qh = grid_size.min(preview_draw_y + preview_draw_h - qy);
-                                                if qw > 0.0 && qh > 0.0 {
-                                                    quads.push((qx, qy, qw, qh, [0.8, 0.8, 0.8, 1.0]));
-                                                }
-                                            }
-                                        }
-                                    }
-                                    quads.push((preview_x, preview_draw_y, 16.0, preview_draw_h, rgba));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if row_y + self.item_height <= list_bottom {
-                quads.push((list_left + 1.0, row_y + self.item_height - 1.0, list_width - 2.0, 1.0, [0.13, 0.13, 0.17, 1.0]));
-            }
-        }
-
-        quads
+        let content_h = self.items.len() as f32 * self.item_height;
+        self.scroll_box.update_bounds(content_h, y + offset_y + header_h, h - offset_y - header_h);
+        self.last_scroll_y = self.scroll_box.scroll_y;
+    
     }
 
-    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        self.parent
-    }
+    /// Keep the field widgets registered/linked under the adapter every tick (the legacy
+    /// `set_parent` side effect; also heals the inline rename editor's registry entry).
+    fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
+        let sb_ptr = self.search_box.as_ptr_mut();
+        let sb_id = self.search_box.base().unwrap().id();
+        ctx.register_widget(sb_id, sb_ptr);
+        ctx.link_ids(host_id, sb_id);
 
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        self.parent = parent;
-        if parent.is_some() {
-            let self_ptr = self as *mut Self;
-            let self_id = self.base.id();
-            unsafe {
-                let sb_ptr = (*self_ptr).search_box.as_ptr_mut();
-                let sb_id = (*self_ptr).search_box.base().unwrap().id();
-                ctx.register_widget(sb_id, sb_ptr);
-                ctx.link_ids(self_id, sb_id);
-                (*sb_ptr).set_parent(Some(self_ptr), ctx);
+        let btn_ptr = self.add_key_btn.as_ptr_mut();
+        let btn_id = self.add_key_btn.base().unwrap().id();
+        ctx.register_widget(btn_id, btn_ptr);
+        ctx.link_ids(host_id, btn_id);
 
-                let btn_ptr = (*self_ptr).add_key_btn.as_ptr_mut();
-                let btn_id = (*self_ptr).add_key_btn.base().unwrap().id();
-                ctx.register_widget(btn_id, btn_ptr);
-                ctx.link_ids(self_id, btn_id);
-                (*btn_ptr).set_parent(Some(self_ptr), ctx);
+        let pop_ptr = self.add_key_popover_box.as_ptr_mut();
+        let pop_id = self.add_key_popover_box.base().unwrap().id();
+        ctx.register_widget(pop_id, pop_ptr);
+        ctx.link_ids(host_id, pop_id);
 
-                let pop_ptr = (*self_ptr).add_key_popover_box.as_ptr_mut();
-                let pop_id = (*self_ptr).add_key_popover_box.base().unwrap().id();
-                ctx.register_widget(pop_id, pop_ptr);
-                ctx.link_ids(self_id, pop_id);
-                (*pop_ptr).set_parent(Some(self_ptr), ctx);
-            }
+        if self.editing_key_idx.is_some() {
+            let eb_ptr = self.edit_box.as_ptr_mut();
+            let eb_id = self.edit_box.base().unwrap().id();
+            ctx.register_widget(eb_id, eb_ptr);
+            ctx.link_ids(host_id, eb_id);
         }
     }
+}
 
-    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        let mut list = self.children.clone();
-        let self_ptr = self as *const Self as *mut Self;
-        unsafe {
-            list.push((*self_ptr).search_box.as_ptr_mut());
-            list.push((*self_ptr).add_key_btn.as_ptr_mut());
-            if (*self_ptr).add_key_popover_open {
-                list.push((*self_ptr).add_key_popover_box.as_ptr_mut());
-            }
-            if (*self_ptr).editing_key_idx.is_some() {
-                list.push((*self_ptr).edit_box.as_ptr_mut());
-            }
-        }
-        list
+impl Paint for TreeList {
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
     }
 
-    // TreeList draws its rows, backgrounds and separators in the recursive all_rounded_quads below,
-    // so the Phase 3 paint walk emits that directly instead of descending (see Element docs).
-    fn renders_own_subtree(&self) -> bool {
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::tree_font())
+    }
+
+    // The field widgets stay ctx-linked (event propagation descends them), but their
+    // pixels come from `paint`'s child pass — the walk must not also descend.
+    fn paints_own_subtree(&self) -> bool {
         true
     }
 
-    /// The whole subtree — geometry via the recursive `all_*` aggregates, text via the
-    /// recursive bounded getter — emitted here so the paint walk's `renders_own_subtree`
-    /// branch is just `paint_self` + no descent, with no trait-getter use left in the walk.
-    fn paint_self(&self, ui: &UiContext, pc: &mut crate::scene::paint::PaintCtx) {
-        use crate::scene::layout::Rect;
-        for (x, y, w, h, r, c, corners) in self.all_rounded_quads(ui) {
-            pc.rounded_rect(Rect { x, y, width: w, height: h }, r, corners, c);
-        }
-        for (x, y, w, h, c) in self.all_quads(ui) {
-            pc.quad(Rect { x, y, width: w, height: h }, c);
-        }
-        for (cx, cy, r, t, s, e, c) in self.extra_arcs() {
-            pc.arc(cx, cy, r, t, s, e, c);
-        }
-        for (cx, cy, r, c) in self.extra_circles() {
-            pc.circle(cx, cy, r, c);
-        }
-        for (tl, font, bounds) in self.subtree_fonted_labels(ui) {
-            pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
-        }
+    // Legacy TreeList kept the default Element focus/hover highlight overlay (the teal
+    // wash over the focused tree, drawn by the old all_quads default) — opt back in
+    // (the 5q TextBox trap).
+    fn legacy_focus_highlight(&self) -> bool {
+        true
     }
 
-    fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
-        let mut quads = Vec::new();
-        let (r1, r2, r3, r4) = self.rounded_corners();
-        let has_rounded = r1 || r2 || r3 || r4;
-        if !has_rounded {
-            for &child_ptr in &self.children(ctx) {
-                let widget = unsafe { &*child_ptr };
-                quads.extend(widget.all_rounded_quads(ctx));
-            }
-            return quads;
+    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem, _rect: Rect) {
+        self.search_box.prepare_text(fs);
+        self.add_key_btn.prepare_text(fs);
+        if self.add_key_popover_open {
+            self.add_key_popover_box.prepare_text(fs);
         }
+        self.scroll_box.prepare_text(fs);
+        if self.editing_key_idx.is_some() {
+            self.edit_box.prepare_text(fs);
+        }
+    
+    }
 
-        let radius = self.corner_radius();
-        let (x, y, w, h) = self.rect();
+    /// The whole tree — container border/background, search/header chrome, virtualized
+    /// rows (backgrounds, separators, color previews, button pills), the scrollbar, the
+    /// row/header labels, and the field children (search box, add-key button, the add-key
+    /// popover box while open, the inline rename editor while editing). Ported verbatim
+    /// from the legacy `all_rounded_quads` rounded branch + `subtree_fonted_labels`;
+    /// children paint through their own adapters (dummy ctx — none of their paint reads it).
+    fn paint(&self, rect: Rect, pc: &mut PaintCtx) {
+        let (r1, r2, r3, r4) = self.tree_corners();
+        let mut quads: Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> = Vec::new();
+        let radius = self.tree_radius();
+        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         
         let opacity = crate::layout::tree_opacity();
         let apply_opacity = |mut c: [f32; 4]| -> [f32; 4] {
@@ -1010,7 +729,7 @@ impl Element for TreeList {
         };
 
         // 1. Draw container border and background
-        if let Some((border_color, thickness)) = self.solid_border() {
+        if let Some((border_color, thickness)) = self.tree_border() {
             quads.push((x, y, w, h, radius, apply_opacity(border_color), (r1, r2, r3, r4)));
             quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, apply_opacity(crate::color::tree_background_color()), (r1, r2, r3, r4)));
         } else {
@@ -1182,22 +901,225 @@ impl Element for TreeList {
         if show_on_top {
             quads.extend(get_scrollbar_quads());
         }
-
-        for &child_ptr in &self.children(ctx) {
-            let widget = unsafe { &*child_ptr };
-            quads.extend(widget.all_rounded_quads(ctx));
+        for (qx, qy, qw, qh, qr, qc, qcorners) in quads {
+            if qr > 0.1 {
+                pc.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, qcorners, qc);
+            } else {
+                pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+            }
         }
-        quads
+
+        // Row/header labels with the legacy header/list viewport bounds.
+        let font = Some(crate::layout::tree_font());
+        let (x, y, w, _h) = (rect.x, rect.y, rect.width, rect.height);
+        let search_margin_y = 6.0;
+        let search_h = 26.0;
+        let offset_y = search_h + 2.0 * search_margin_y;
+        let header_h = 26.0;
+        let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
+        let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
+        for (idx, l) in self.own_labels().into_iter().enumerate() {
+            let b = if idx < 3 { header_bounds } else { list_bounds };
+            pc.text_with(l.text, l.x, l.y, l.font_size, l.color, font.clone(), b);
+        }
+
+        // Field children, in the legacy children() order.
+        let dummy = UiContext::new();
+        self.search_box.paint_self(&dummy, pc);
+        self.add_key_btn.paint_self(&dummy, pc);
+        if self.add_key_popover_open {
+            self.add_key_popover_box.paint_self(&dummy, pc);
+        }
+        if self.editing_key_idx.is_some() {
+            self.edit_box.paint_self(&dummy, pc);
+        }
     }
 
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), _ctx: &mut UiContext) {
-        self.children.push(child);
+    fn popover(&self, _rect: Rect) -> Option<(f32, f32, f32, f32)> {
+        if self.add_key_popover_open {
+            Some(self.popover_rect_geom())
+        } else {
+            None
+        }
+    
     }
 
-    fn clear_children(&mut self, _ctx: &mut UiContext) {
-        self.children.clear();
+    fn draw_popover(&self, _rect: Rect, pc: &mut dyn crate::layout::RenderTarget) {
+        if !self.add_key_popover_open { return; }
+        
+        let (rx, ry, rw, rh) = self.popover_rect_geom();
+        
+        // 1. Soft layered drop shadows
+        pc.rect([0.02, 0.02, 0.05, 0.15], rx + 1.0, ry + 1.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.08], rx + 3.0, ry + 3.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.04], rx + 5.0, ry + 5.0, rw, rh);
+
+        let theme = crate::color::active_theme();
+
+        // 2. High-contrast premium outer border
+        pc.rect(theme.surface_border, rx, ry, rw, rh);
+        
+        // 3. Frosted glass background
+        pc.rect(theme.surface_bg, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0); // bg
+    
+    }
+}
+
+impl Input for TreeList {
+    fn blocks_backplate_drag(&self) -> bool {
+        true
     }
 
+    /// The tree must see every press: outside presses dismiss the add-key popover and
+    /// commit/cancel the inline rename editor (the legacy ungated `mouse_input` contract).
+    fn gates_presses(&self) -> bool {
+        false
+    }
+
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
+    fn draggable(&self, _rect: Rect) -> bool {
+        self.scroll_box.draggable()
+    }
+
+    fn is_dragging(&self) -> bool {
+        self.scroll_box.is_dragging()
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32, _rect: Rect) {
+        self.scroll_box.drag_begin(px, py);
+    }
+
+    fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
+        self.scroll_box.drag_update(px, py)
+    }
+
+    fn drag_end(&mut self) {
+        self.scroll_box.drag_end();
+    }
+
+    /// The legacy `tick` body: advances the field widgets, drains the add-key popover and
+    /// search box, positions/commits the inline rename editor (re-targeting focus to the
+    /// adapter on commit), and runs the scrollbar activity fade.
+    fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
+        let host = ectx.host_ptr();
+        let Some(ui) = ectx.ui.as_deref_mut() else {
+            return false;
+        };
+        let mut changed = false;
+        if self.search_box.tick(dt, ui) {
+            changed = true;
+        }
+        if self.add_key_btn.tick(dt, ui) {
+            changed = true;
+        }
+        if self.add_key_popover_open {
+            if self.add_key_popover_box.tick(dt, ui) {
+                changed = true;
+            }
+            if !self.add_key_popover_box.editing {
+                let path = self.add_key_popover_box.text.trim().to_string();
+                if !path.is_empty() {
+                    self.new_key_path_request = Some(path);
+                }
+                self.add_key_popover_open = false;
+                ui.clear_focus();
+                changed = true;
+            }
+        }
+        if self.search_box.take_change() {
+            self.rebuild_tree();
+            changed = true;
+        }
+        
+        if self.editing_key_idx.is_some() {
+            if self.edit_box.tick(dt, ui) {
+                changed = true;
+            }
+            if let Some(row_idx) = self.editing_key_idx {
+                if row_idx < self.items.len() {
+                    let list_left = self.scroll_box.base.x;
+                    let list_top = self.scroll_box.viewport_y;
+                    let row_y = list_top + row_idx as f32 * self.item_height - self.scroll_box.scroll_y;
+                    let box_x = list_left + 5.0;
+                    let box_y = row_y + 2.0;
+                    self.edit_box.set_rect(box_x, box_y, 170.0, 24.0);
+                }
+            }
+            if !self.edit_box.editing {
+                let row_idx = self.editing_key_idx.unwrap();
+                if row_idx < self.items.len() {
+                    let (old_path, relative_name) = match &self.items[row_idx] {
+                        TreeElement::Section { path, name, .. } => (path.clone(), name.clone()),
+                        TreeElement::Leaf { path, name, .. } => (path.clone(), name.clone()),
+                    };
+                    let new_name = self.edit_box.text.trim().to_string();
+                    if !new_name.is_empty() && new_name != relative_name {
+                        let new_path = if let Some(pos) = old_path.rfind('.') {
+                            format!("{}.{}", &old_path[..pos], new_name)
+                        } else {
+                            new_name
+                        };
+                        self.rename_request = Some((old_path, new_path));
+                    }
+                }
+                self.editing_key_idx = None;
+                if let Some(h) = host { ui.set_focused_ptr(h); }
+                changed = true;
+            }
+        }
+
+        if (self.scroll_box.scroll_y - self.last_scroll_y).abs() > 0.01 {
+            self.last_scroll_y = self.scroll_box.scroll_y;
+            self.scrollbar_activity_timer = 1.0;
+            changed = true;
+        }
+        if self.scrollbar_activity_timer > 0.0 {
+            self.scrollbar_activity_timer = (self.scrollbar_activity_timer - dt).max(0.0);
+            changed = true;
+        }
+        changed
+    
+    }
+
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        let host = ectx.host_ptr();
+        let host_id = ectx.id;
+        match event {
+            Event::MouseButton { button, state, x, y, .. } => {
+                let (button, state, px, py) = (*button, *state, *x, *y);
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
+                self.mouse_body(button, state, px, py, ui, host, host_id)
+            }
+            Event::PointerMove { x, y, .. } => {
+                let (px, py) = (*x, *y);
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
+                self.move_body(px, py, ui)
+            }
+            Event::MouseWheel { delta, x, y, .. } => {
+                let (delta, px, py) = (delta.clone(), *x, *y);
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
+                self.scroll_box.mouse_wheel(&delta, px, py, ui)
+            }
+            Event::KeyInput(ev) => {
+                let ev = ev.clone();
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
+                self.key_body(&ev, ui)
+            }
+            Event::FocusOut => {
+        self.add_key_popover_open = false;
+        self.add_key_popover_box.unfocus();
+    
+                false
+            }
+            _ => false,
+        }
+    }
+
+    // The tree context-menu actions, dispatched by the global context menu through the
+    // adapter's Element forwards.
     fn copy_key(&self) {
         if let Some(idx) = self.selected_key_idx {
             if idx < self.flat_keys.len() {
@@ -1301,32 +1223,6 @@ impl Element for TreeList {
         self.right_clicked_section = None;
     }
 
-    fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
-        if self.add_key_popover_open {
-            Some(self.popover_rect_geom())
-        } else {
-            None
-        }
-    }
-
-    fn render_popover(&self, pc: &mut dyn crate::layout::RenderTarget) {
-        if !self.add_key_popover_open { return; }
-        
-        let (rx, ry, rw, rh) = self.popover_rect_geom();
-        
-        // 1. Soft layered drop shadows
-        pc.rect([0.02, 0.02, 0.05, 0.15], rx + 1.0, ry + 1.0, rw, rh);
-        pc.rect([0.02, 0.02, 0.05, 0.08], rx + 3.0, ry + 3.0, rw, rh);
-        pc.rect([0.02, 0.02, 0.05, 0.04], rx + 5.0, ry + 5.0, rw, rh);
-
-        let theme = crate::color::active_theme();
-
-        // 2. High-contrast premium outer border
-        pc.rect(theme.surface_border, rx, ry, rw, rh);
-        
-        // 3. Frosted glass background
-        pc.rect(theme.surface_bg, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0); // bg
-    }
 }
 
 impl TreeList {
@@ -1757,32 +1653,4 @@ impl TreeList {
         labels
     }
 
-    pub(crate) fn subtree_fonted_labels(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let font = self.widget_font();
-        let (x, y, w, _h) = self.rect();
-        
-        let search_margin_y = 6.0;
-        let search_h = 26.0;
-        let offset_y = search_h + 2.0 * search_margin_y;
-        let header_h = 26.0;
-
-        let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
-        let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
-        
-        let mut labels = self.own_labels().into_iter().enumerate().map(|(idx, l)| {
-            let b = if idx < 3 {
-                header_bounds
-            } else {
-                list_bounds
-            };
-            (l, font.clone(), b)
-        }).collect::<Vec<_>>();
-
-        labels.extend(self.search_box.own_labels_with_font_and_bounds(ctx));
-        labels.extend(self.add_key_btn.own_labels_with_font_and_bounds(ctx));
-        if self.add_key_popover_open {
-            labels.extend(self.add_key_popover_box.own_labels_with_font_and_bounds(ctx));
-        }
-        labels
-    }
 }
