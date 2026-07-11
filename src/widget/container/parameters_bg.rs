@@ -45,7 +45,7 @@ pub struct ParametersBg {
     pub choices: Vec<Option<Adapted<Dropdown>>>,
     pub texts: Vec<Option<Adapted<TextBox>>>,
     pub checkboxes: Vec<Option<Adapted<Checkbox>>>,
-    pub colors: Vec<Option<ColorSelector>>,
+    pub colors: Vec<Option<crate::widget::Adapted<ColorSelector>>>,
     visible: bool,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub parent: Option<*mut (dyn Element + 'static)>,
@@ -297,7 +297,7 @@ impl ParametersBg {
                 }
             } else if ptype.starts_with("color") || ptype == "rgb" || ptype == "rgba" {
                 if let Some(c) = &self.colors[i] {
-                    labels.extend(c.own_labels());
+                    labels.extend(c.own_text_labels());
                 }
             } else {
                 labels.push(TextLabel {

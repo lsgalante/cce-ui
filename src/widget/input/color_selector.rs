@@ -1,9 +1,11 @@
 use crate::colors;
+use crate::scene::layout::{Rect, Size};
+use crate::scene::paint::PaintCtx;
+use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
 use crate::widget::*;
 
 #[derive(Debug)]
 pub struct ColorSelector {
-    pub(crate) base: Widget,
     pub color: [u8; 3],
     pub alpha: u8,
     just_clicked: bool,
@@ -12,8 +14,7 @@ pub struct ColorSelector {
     pub cursor_idx: usize,
     pub font_family: String,
     pub command: String,
-    pub parent: Option<*mut (dyn Element + 'static)>,
-    pub children: Vec<*mut (dyn Element + 'static)>,
+    hovered: bool,
     child: std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>,
     pub editor_state: TextEditorState,
     pub just_changed: bool,
@@ -23,7 +24,6 @@ pub struct ColorSelector {
 impl Clone for ColorSelector {
     fn clone(&self) -> Self {
         Self {
-            base: self.base.clone(),
             color: self.color,
             alpha: self.alpha,
             just_clicked: self.just_clicked,
@@ -32,8 +32,7 @@ impl Clone for ColorSelector {
             cursor_idx: self.cursor_idx,
             font_family: self.font_family.clone(),
             command: self.command.clone(),
-            parent: self.parent,
-            children: self.children.clone(),
+            hovered: self.hovered,
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: self.editor_state.clone(),
             just_changed: self.just_changed,
@@ -43,9 +42,8 @@ impl Clone for ColorSelector {
 }
 
 impl ColorSelector {
-    pub fn new(color: [u8; 3]) -> Self {
-        Self {
-            base: Widget::new(),
+    pub fn new(color: [u8; 3]) -> Adapted<ColorSelector> {
+        Adapted::new(ColorSelector {
             color,
             alpha: 255,
             just_clicked: false,
@@ -54,18 +52,16 @@ impl ColorSelector {
             cursor_idx: 0,
             font_family: crate::layout::color_selector_font(),
             command: "cce-colors".to_string(),
-            parent: None,
-            children: Vec::new(),
+            hovered: false,
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             with_alpha: false,
-        }
+        })
     }
 
-    pub fn new_rgba(color: [u8; 4]) -> Self {
-        Self {
-            base: Widget::new(),
+    pub fn new_rgba(color: [u8; 4]) -> Adapted<ColorSelector> {
+        Adapted::new(ColorSelector {
             color: [color[0], color[1], color[2]],
             alpha: color[3],
             just_clicked: false,
@@ -74,28 +70,19 @@ impl ColorSelector {
             cursor_idx: 0,
             font_family: crate::layout::color_selector_font(),
             command: "cce-colors".to_string(),
-            parent: None,
-            children: Vec::new(),
+            hovered: false,
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             with_alpha: true,
-        }
+        })
     }
 
+}
+
+impl Adapted<ColorSelector> {
     pub fn with_alpha(mut self, with_alpha: bool) -> Self {
         self.with_alpha = with_alpha;
-        self
-    }
-
-    pub fn with_label(mut self, label: &str) -> Self {
-        self.base.label = Some(label.to_string());
-        self
-    }
-
-    pub fn with_config(mut self, file: &str, key: &str) -> Self {
-        self.base.config_file = Some(file.to_string());
-        self.base.config_key = Some(key.to_string());
         self
     }
 
@@ -110,72 +97,31 @@ impl ColorSelector {
     }
 }
 
-impl Element for ColorSelector {
-    crate::impl_widget_base!(ColorSelector);
-
-    // Leaf legacy widget: own fonted labels via paint_self (the default no longer
-    // drains the text getters).
-    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
-        crate::scene::painter::paint_legacy_leaf(
-            self, ui, ctx,
-            crate::scene::painter::fonted_leaf_labels(self, ui, self.own_labels()),
-        );
-    }
-
-    fn get_value_string(&self) -> Option<String> {
+impl ColorSelector {
+    fn value_hex(&self) -> String {
         if self.with_alpha {
             Some(format!("#{:02x}{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2], self.alpha))
         } else {
             Some(format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]))
         }
+    
+        .unwrap()
     }
 
-    fn set_value_string(&mut self, val: &str) -> bool {
-        if let Some(c) = parse_hex(val) {
-            let target_color = [c[0], c[1], c[2]];
-            let target_alpha = if self.with_alpha { c[3] } else { 255 };
-            if self.color != target_color || (self.with_alpha && self.alpha != target_alpha) {
-                self.color = target_color;
-                self.alpha = target_alpha;
-                self.just_changed = true;
-                if self.editing {
-                    self.edit_buffer = self.get_value_string().unwrap();
-                    self.cursor_idx = self.edit_buffer.chars().count();
-                }
-                return true;
-            }
-        }
-        false
+    fn begin_edit(&mut self) {
+        self.editing = true;
+        self.edit_buffer = self.value_hex();
+        self.cursor_idx = self.edit_buffer.chars().count();
     }
+}
 
-    fn take_change(&mut self) -> bool {
-        let ret = self.just_changed;
-        self.just_changed = false;
-        ret
+impl Layout for ColorSelector {
+    fn intrinsic_size(&self) -> Option<Size> {
+        Some(Size::new(0.0, crate::layout::color_selector_height()))
     }
+}
 
-    fn preferred_height(&self) -> Option<f32> {
-        Some(crate::layout::color_selector_height())
-    }
-
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        let r = crate::layout::color_selector_corner_radius();
-        if r > 0.0 {
-            (true, true, true, true)
-        } else {
-            (false, false, false, false)
-        }
-    }
-
-    fn corner_radius(&self) -> f32 {
-        crate::layout::color_selector_corner_radius()
-    }
-
-    fn widget_font(&self) -> Option<String> {
-        Some(self.font_family.clone())
-    }
-
-
+impl Paint for ColorSelector {
     fn color(&self) -> [f32; 4] {
         colors::to_linear([
             self.color[0] as f32 / 255.0,
@@ -185,195 +131,26 @@ impl Element for ColorSelector {
         ])
     }
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if button == MouseButton::Right && state == ElementState::Pressed {
-            if self.hit_test(px, py, ctx) {
-                ctx.handle_right_click(self.as_ptr_mut(), px, py);
-                return true;
-            }
-        }
-        if button != MouseButton::Left { return false; }
-        if state != ElementState::Pressed { return false; }
-        if !self.hit_test(px, py, ctx) { return false; }
-        if px >= self.base.x + self.base.w * 0.65 {
-            let hex = self.get_value_string().unwrap();
-            let mut child_guard = self.child.lock().unwrap();
-            if let Some(mut old_child) = child_guard.take() {
-                let _ = old_child.kill();
-            }
-
-            let cmd_path = if let Ok(mut exe_path) = std::env::current_exe() {
-                exe_path.pop(); // remove executable name
-                let local_path = exe_path.join(&self.command);
-                if local_path.exists() {
-                    local_path.to_string_lossy().into_owned()
-                } else {
-                    let home = std::env::var("HOME").unwrap_or_default();
-                    let local_bin = std::path::Path::new(&home).join(".local/bin").join(&self.command);
-                    if local_bin.exists() {
-                        local_bin.to_string_lossy().into_owned()
-                    } else {
-                        self.command.clone()
-                    }
-                }
-            } else {
-                self.command.clone()
-            };
-
-            let mut cmd = std::process::Command::new(&cmd_path);
-            cmd.arg(&hex);
-            if self.with_alpha {
-                cmd.arg("--alpha");
-            }
-            if let Ok(child) = cmd.stdout(std::process::Stdio::piped()).spawn() {
-                *child_guard = Some(child);
-            }
-            return true;
-        }
-        self.focus();
-        true
+    fn widget_font(&self) -> Option<String> {
+        Some(self.font_family.clone())
     }
 
-    fn take_click(&mut self) -> bool {
-        if self.just_clicked { self.just_clicked = false; true } else { false }
-    }
-
-    fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool {
-        let mut child_opt = self.child.lock().unwrap();
-        if let Some(ref mut child) = *child_opt {
-            match child.try_wait() {
-                Ok(Some(_status)) => {
-                    let child = child_opt.take().unwrap();
-                    if let Ok(output) = child.wait_with_output() {
-                        let stdout_str = String::from_utf8_lossy(&output.stdout);
-                        for line in stdout_str.lines().rev() {
-                            if let Some(c) = parse_hex(line.trim()) {
-                                self.color = [c[0], c[1], c[2]];
-                                self.alpha = if self.with_alpha { c[3] } else { 255 };
-                                self.just_clicked = true;
-                                self.just_changed = true;
-                                return true;
-                            }
-                        }
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    log::error!("Error checking color selector child process: {:?}", e);
-                    *child_opt = None;
-                }
-            }
-        }
-        false
-    }
-
-    fn wants_tick(&self) -> bool {
-        true
-    }
-
-    fn focus(&mut self) {
-        self.editing = true;
-        self.edit_buffer = self.get_value_string().unwrap();
-        self.cursor_idx = self.edit_buffer.chars().count();
-        focus::set_focused(self);
-    }
-
-    fn unfocus(&mut self) {
-        if self.editing {
-            self.editing = false;
-            if let Some(c) = parse_hex(&self.edit_buffer) {
-                self.color = [c[0], c[1], c[2]];
-                self.alpha = if self.with_alpha { c[3] } else { 255 };
-            }
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+        let r = crate::layout::color_selector_corner_radius();
+        if r > 0.0 {
+            Some((r, (true, true, true, true)))
+        } else {
+            None
         }
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
-        if !self.editing { return false; }
-        if event.state != ElementState::Pressed { return false; }
-        
-        let mut state = TextEditorState {
-            buffer: self.edit_buffer.clone(),
-            cursor_idx: self.cursor_idx,
-            select_anchor: None,
-            all_selected: false,
-        };
-        
-        let mut handled = false;
-        match &event.logical_key {
-            Key::Named(NamedKey::Backspace) => {
-                state.delete_backwards();
-                handled = true;
-            }
-            Key::Named(NamedKey::Delete) => {
-                state.delete_forwards();
-                handled = true;
-            }
-            Key::Named(NamedKey::ArrowLeft) => {
-                state.move_cursor_left(false);
-                handled = true;
-            }
-            Key::Named(NamedKey::ArrowRight) => {
-                state.move_cursor_right(false);
-                handled = true;
-            }
-            Key::Named(NamedKey::Enter) => {
-                if let Some(c) = parse_hex(&state.buffer) {
-                    self.color = [c[0], c[1], c[2]];
-                    self.alpha = if self.with_alpha { c[3] } else { 255 };
-                }
-                self.editing = false;
-                handled = true;
-            }
-            Key::Named(NamedKey::Escape) => {
-                self.editing = false;
-                handled = true;
-            }
-            _ => {
-                if let Some(text) = &event.text {
-                    for ch in text.chars() {
-                        match ch {
-                            '#' => {
-                                if state.buffer.is_empty() {
-                                    state.insert_text("#");
-                                    handled = true;
-                                } else if state.cursor_idx == 0 && !state.buffer.starts_with('#') {
-                                    state.insert_text("#");
-                                    handled = true;
-                                }
-                            }
-                            '0'..='9' | 'a'..='f' | 'A'..='F' => {
-                                let count = state.buffer.chars().count();
-                                let max_len = if state.buffer.starts_with('#') {
-                                    if self.with_alpha { 9 } else { 7 }
-                                } else {
-                                    if self.with_alpha { 8 } else { 6 }
-                                };
-                                if count < max_len {
-                                    state.insert_text(&ch.to_ascii_lowercase().to_string());
-                                    handled = true;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        }
-        
-        if self.editing {
-            self.edit_buffer = state.buffer;
-            self.cursor_idx = state.cursor_idx;
-        }
-        handled
-    }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = Vec::new();
-        let top = self.base.label_offset();
-        let visual_h = self.base.h - top;
-        let pick_x = self.base.x + self.base.w * 0.65;
-        let pick_w = self.base.w * 0.35;
+    /// The legacy `extra_quads` body against the laid-out rect (field, caret while
+    /// editing, and the soft-glow rounded color preview), plus the hex readout label.
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let mut quads: Vec<(f32, f32, f32, f32, [f32; 4])> = Vec::new();
+        let visual_h = rect.height;
+        let pick_x = rect.x + rect.width * 0.65;
+        let pick_w = rect.width * 0.35;
 
         let bg_color = if self.editing {
             [0.06, 0.10, 0.18, 1.0]
@@ -382,22 +159,22 @@ impl Element for ColorSelector {
         };
         let border_color = if self.editing {
             [0.20, 0.50, 0.85, 1.0]
-        } else if self.base.hovered {
+        } else if self.hovered {
             [0.25, 0.25, 0.35, 1.0]
         } else {
             [0.18, 0.18, 0.24, 1.0]
         };
 
-        quads.push((self.base.x, self.base.y + top, self.base.w, visual_h, border_color));
-        quads.push((self.base.x + 1.0, self.base.y + top + 1.0, self.base.w - 2.0, visual_h - 2.0, bg_color));
+        quads.push((rect.x, rect.y, rect.width, visual_h, border_color));
+        quads.push((rect.x + 1.0, rect.y + 1.0, rect.width - 2.0, visual_h - 2.0, bg_color));
 
         if self.editing {
             let font_size = 12.0;
             let cursor_text: String = self.edit_buffer.chars().take(self.cursor_idx).collect();
             let text_w = crate::widget::display::measure_text(&cursor_text, font_size);
-            let caret_x = self.base.x + 4.0 + text_w;
+            let caret_x = rect.x + 4.0 + text_w;
             let caret_h = font_size * 1.15;
-            let caret_y = self.base.y + top + (visual_h - caret_h) / 2.0;
+            let caret_y = rect.y + (visual_h - caret_h) / 2.0;
             quads.push((caret_x, caret_y, 1.5, caret_h, [0.80, 0.80, 0.85, 1.0]));
         }
 
@@ -418,7 +195,7 @@ impl Element for ColorSelector {
         let preview_margin = crate::layout::color_selector_preview_margin();
 
         let px = pick_x + preview_margin;
-        let py = self.base.y + top + preview_margin;
+        let py = rect.y + preview_margin;
         let pw = (pick_w - 2.0 * preview_margin).max(0.0);
         let ph = (visual_h - 2.0 * preview_margin).max(0.0);
 
@@ -512,26 +289,260 @@ impl Element for ColorSelector {
             (ph - 2.0 * border_w).max(0.0),
             (preview_radius - border_w).max(0.0),
         );
-        quads
+    
+        for (qx, qy, qw, qh, qc) in quads {
+            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+        }
+
+        let hex = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
+        ctx.text(
+            hex,
+            rect.x + 4.0,
+            crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0),
+            12.0,
+            [0xcc, 0xcc, 0xd4],
+        );
     }
-
-
 }
 
-impl Drop for ColorSelector {
-    fn drop(&mut self) {
-        clear_widget_references(self);
+impl Input for ColorSelector {
+    fn opens_context_menu(&self) -> bool {
+        true
+    }
+
+    fn take_click(&mut self) -> bool {
+        if self.just_clicked { self.just_clicked = false; true } else { false }
+    }
+
+    fn take_change(&mut self) -> bool {
+        let ret = self.just_changed;
+        self.just_changed = false;
+        ret
+    }
+
+    fn value_string(&self) -> Option<String> {
+        Some(self.value_hex())
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        if let Some(c) = parse_hex(val) {
+            let target_color = [c[0], c[1], c[2]];
+            let target_alpha = if self.with_alpha { c[3] } else { 255 };
+            if self.color != target_color || (self.with_alpha && self.alpha != target_alpha) {
+                self.color = target_color;
+                self.alpha = target_alpha;
+                self.just_changed = true;
+                if self.editing {
+                    self.edit_buffer = self.value_hex();
+                    self.cursor_idx = self.edit_buffer.chars().count();
+                }
+                return true;
+            }
+        }
+        false
+    
+    }
+
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
+    fn tick(&mut self, _dt: f32, _rect: Rect) -> bool {
+        let mut child_opt = self.child.lock().unwrap();
+        if let Some(ref mut child) = *child_opt {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    let child = child_opt.take().unwrap();
+                    if let Ok(output) = child.wait_with_output() {
+                        let stdout_str = String::from_utf8_lossy(&output.stdout);
+                        for line in stdout_str.lines().rev() {
+                            if let Some(c) = parse_hex(line.trim()) {
+                                self.color = [c[0], c[1], c[2]];
+                                self.alpha = if self.with_alpha { c[3] } else { 255 };
+                                self.just_clicked = true;
+                                self.just_changed = true;
+                                return true;
+                            }
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    log::error!("Error checking color selector child process: {:?}", e);
+                    *child_opt = None;
+                }
+            }
+        }
+        false
+    
+    }
+
+    fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::MouseButton { button, state, x, y, .. } => {
+                if *button != MouseButton::Left {
+                    return false;
+                }
+                if *state != ElementState::Pressed {
+                    return false;
+                }
+                let (px, py) = (*x, *y);
+                let _ = py;
+                let rect = ectx.rect;
+                if px >= rect.x + rect.width * 0.65 {
+            let hex = self.value_hex();
+            let mut child_guard = self.child.lock().unwrap();
+            if let Some(mut old_child) = child_guard.take() {
+                let _ = old_child.kill();
+            }
+
+            let cmd_path = if let Ok(mut exe_path) = std::env::current_exe() {
+                exe_path.pop(); // remove executable name
+                let local_path = exe_path.join(&self.command);
+                if local_path.exists() {
+                    local_path.to_string_lossy().into_owned()
+                } else {
+                    let home = std::env::var("HOME").unwrap_or_default();
+                    let local_bin = std::path::Path::new(&home).join(".local/bin").join(&self.command);
+                    if local_bin.exists() {
+                        local_bin.to_string_lossy().into_owned()
+                    } else {
+                        self.command.clone()
+                    }
+                }
+            } else {
+                self.command.clone()
+            };
+
+            let mut cmd = std::process::Command::new(&cmd_path);
+            cmd.arg(&hex);
+            if self.with_alpha {
+                cmd.arg("--alpha");
+            }
+            if let Ok(child) = cmd.stdout(std::process::Stdio::piped()).spawn() {
+                *child_guard = Some(child);
+            }
+                    return true;
+                }
+                ectx.request_focus();
+                true
+            }
+            Event::KeyInput(event) => {
+                if event.state != ElementState::Pressed {
+                    return false;
+                }
+                if !self.editing {
+                    return false;
+                }
+
+
+        
+        let mut state = TextEditorState {
+            buffer: self.edit_buffer.clone(),
+            cursor_idx: self.cursor_idx,
+            select_anchor: None,
+            all_selected: false,
+        };
+        
+        let mut handled = false;
+        match &event.logical_key {
+            Key::Named(NamedKey::Backspace) => {
+                state.delete_backwards();
+                handled = true;
+            }
+            Key::Named(NamedKey::Delete) => {
+                state.delete_forwards();
+                handled = true;
+            }
+            Key::Named(NamedKey::ArrowLeft) => {
+                state.move_cursor_left(false);
+                handled = true;
+            }
+            Key::Named(NamedKey::ArrowRight) => {
+                state.move_cursor_right(false);
+                handled = true;
+            }
+            Key::Named(NamedKey::Enter) => {
+                if let Some(c) = parse_hex(&state.buffer) {
+                    self.color = [c[0], c[1], c[2]];
+                    self.alpha = if self.with_alpha { c[3] } else { 255 };
+                }
+                self.editing = false;
+                handled = true;
+            }
+            Key::Named(NamedKey::Escape) => {
+                self.editing = false;
+                handled = true;
+            }
+            _ => {
+                if let Some(text) = &event.text {
+                    for ch in text.chars() {
+                        match ch {
+                            '#' => {
+                                if state.buffer.is_empty() {
+                                    state.insert_text("#");
+                                    handled = true;
+                                } else if state.cursor_idx == 0 && !state.buffer.starts_with('#') {
+                                    state.insert_text("#");
+                                    handled = true;
+                                }
+                            }
+                            '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                                let count = state.buffer.chars().count();
+                                let max_len = if state.buffer.starts_with('#') {
+                                    if self.with_alpha { 9 } else { 7 }
+                                } else {
+                                    if self.with_alpha { 8 } else { 6 }
+                                };
+                                if count < max_len {
+                                    state.insert_text(&ch.to_ascii_lowercase().to_string());
+                                    handled = true;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        
+        if self.editing {
+            self.edit_buffer = state.buffer;
+            self.cursor_idx = state.cursor_idx;
+        }
+        handled
+    
+            }
+            Event::MouseEnter => {
+                self.hovered = true;
+                false
+            }
+            Event::MouseLeave => {
+                self.hovered = false;
+                false
+            }
+            Event::FocusIn => {
+                self.begin_edit();
+                false
+            }
+            Event::FocusOut => {
+                if self.editing {
+                    self.editing = false;
+                    if let Some(c) = parse_hex(&self.edit_buffer) {
+                        self.color = [c[0], c[1], c[2]];
+                        self.alpha = if self.with_alpha { c[3] } else { 255 };
+                    }
+                }
+                false
+            }
+            _ => false,
+        }
     }
 }
 
 fn parse_hex(s: &str) -> Option<[u8; 4]> {
     crate::color::parse_hex_bytes(s)
 }
-
-impl Control for ColorSelector {}
-
-unsafe impl Send for ColorSelector {}
-unsafe impl Sync for ColorSelector {}
 
 #[cfg(test)]
 mod tests {
@@ -744,22 +755,3 @@ mod tests {
     }
 }
 
-impl ColorSelector {
-    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
-        let mut labels = Vec::new();
-        if let Some(lbl) = self.control_label() {
-            labels.push(lbl);
-        }
-        let hex = if self.editing { self.edit_buffer.clone() } else { self.get_value_string().unwrap() };
-        let top = self.base.label_offset();
-        let _visual_h = self.base.h - top;
-        labels.push(TextLabel {
-            text: hex,
-            x: self.base.x + 4.0,
-            y: crate::layout::align_text_y(self.base.y, self.base.h, 12.0, top),
-            font_size: 12.0,
-            color: [0xcc, 0xcc, 0xd4],
-        });
-        labels
-    }
-}
