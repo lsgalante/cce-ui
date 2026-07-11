@@ -13,7 +13,7 @@
 //! (with GPU `set_scissor_rect` per clip) is the runtime-gated follow-up.
 
 use crate::scene::layout::Rect;
-use crate::scene::paint::{DisplayList, PaintCtx};
+use crate::scene::paint::{DisplayList, PaintCtx, Prim};
 use crate::widget::{Element, UiContext};
 
 type ElemPtr = *mut (dyn Element + 'static);
@@ -36,6 +36,33 @@ pub fn paint_tree(ui: &UiContext, root: ElemPtr) -> DisplayList {
 /// Same as [`paint_tree`]: `root` and its reachable subtree must be live widgets.
 pub fn paint_root_into(ui: &UiContext, root: ElemPtr, pc: &mut PaintCtx) {
     paint_node(ui, root, pc);
+}
+
+/// Append ONLY the text of the widget subtree at `root` to `pc` — the paint walk's `Prim::Text`
+/// items (per-widget content font, and the walk's container clip composed into each prim's
+/// bounds). For hosts that build their frame as a [`PaintCtx`] and already emit a widget's
+/// geometry another way, but want its text without re-deriving it through the legacy
+/// `text_labels*` getters (the four hand-aggregate clients). The walk only reads through the
+/// widget, so a shared `&dyn Element` is enough.
+pub fn append_widget_text(ui: &UiContext, root: &dyn Element, pc: &mut PaintCtx) {
+    // SAFETY: the walk only reads through `root` (paint_self/children/visible are all `&self`),
+    // and widgets are concrete `'static` types — the invariant the toolkit's whole
+    // `*mut dyn Element` tree already relies on. Erase the borrowed trait-object lifetime bound
+    // to the `'static` `ElemPtr` the walk takes.
+    let ptr: ElemPtr = unsafe { std::mem::transmute::<*const dyn Element, ElemPtr>(root as *const dyn Element) };
+    let mut scratch = PaintCtx::new();
+    paint_node(ui, ptr, &mut scratch);
+    for item in scratch.finish().items {
+        if let Prim::Text { text, x, y, font_size, color, font, bounds, .. } = item.prim {
+            let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
+            let merged = match (clip, bounds) {
+                (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
+                (Some(a), None) => Some(a),
+                (None, b) => b,
+            };
+            pc.text_with(text, x, y, font_size, color, font, merged);
+        }
+    }
 }
 
 fn paint_node(ui: &UiContext, ptr: ElemPtr, pc: &mut PaintCtx) {
