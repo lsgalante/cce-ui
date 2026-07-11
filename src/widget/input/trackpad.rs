@@ -1,3 +1,6 @@
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
+use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
 use crate::widget::*;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -7,164 +10,199 @@ pub struct Finger {
     pub y: f32,
 }
 
+/// Touchpad visualization/input area (narrow-trait model, Phase 6as leaf sweep). The
+/// content rect is cached on assignment (the ParametersBg pattern) because the finger
+/// math runs from events and drags as well as paint; the control label stays
+/// model-drawn (`inline_label`) to keep the legacy detached-top layout byte-identical.
 #[derive(Debug, Clone)]
 pub struct Trackpad {
-    base: Widget,
+    rect: Rect,
+    label: Option<String>,
+    hovered: bool,
     pub fingers: Vec<Finger>,
 }
 
 impl Trackpad {
-    pub fn new() -> Self {
-        Self {
-            base: Widget::new(),
+    pub fn new() -> Adapted<Trackpad> {
+        Adapted::new(Trackpad {
+            rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+            label: None,
+            hovered: false,
             fingers: Vec::new(),
-        }
-    }
-
-    pub fn with_label(mut self, label: &str) -> Self {
-        self.base.label = Some(label.to_string());
-        self
+        })
     }
 
     pub fn set_fingers(&mut self, fingers: Vec<Finger>) {
         self.fingers = fingers;
     }
 
-    pub fn label_offset(&self) -> f32 {
+    fn label_offset(&self) -> f32 {
         if crate::layout::control_label_layout() == "side" {
             return 0.0;
         }
-        if self.base.label.is_some() {
+        if self.label.is_some() {
             let (_, font_size) = crate::layout::control_label_font_detached_parsed();
             font_size + crate::layout::control_label_margin()
         } else {
             0.0
         }
     }
+
+    fn label_x_offset(&self) -> f32 {
+        if crate::layout::control_label_layout() == "side" && self.label.is_some() {
+            90.0
+        } else {
+            0.0
+        }
+    }
+
+    /// The inner touch area (content rect minus the detached-label reservation).
+    fn touch_area(&self) -> (f32, f32, f32, f32) {
+        let label_x = self.label_x_offset();
+        let x = self.rect.x + label_x;
+        let w = self.rect.width - label_x;
+        let top = self.label_offset();
+        let visual_h = self.rect.height - top;
+        (x, self.rect.y + top, w, visual_h)
+    }
+
+    fn finger_at(&self, px: f32, py: f32) -> Finger {
+        let (x, y, w, h) = self.touch_area();
+        Finger {
+            slot: 0,
+            x: ((px - x) / w).clamp(0.0, 1.0),
+            y: ((py - y) / h).clamp(0.0, 1.0),
+        }
+    }
 }
 
-impl Element for Trackpad {
-    crate::impl_widget_base!(Trackpad);
-
-    // Leaf legacy widget: own fonted labels via paint_self (the default no longer
-    // drains the text getters).
-    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
-        crate::scene::painter::paint_legacy_leaf(
-            self, ui, ctx,
-            crate::scene::painter::fonted_leaf_labels(self, ui, self.own_labels()),
-        );
+impl Layout for Trackpad {
+    fn inline_label(&self) -> bool {
+        true
     }
 
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
+    fn rect_assigned(&mut self, rect: Rect) {
+        self.rect = rect;
     }
+}
 
+impl Paint for Trackpad {
     fn color(&self) -> [f32; 4] {
         [0.11, 0.11, 0.16, 0.85]
     }
 
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let (rx_rect, y, rw_rect, h) = self.rect();
-        let label_x = self.label_x_offset();
-        let x = rx_rect + label_x;
-        let w = rw_rect - label_x;
-        let top = self.label_offset();
-        let visual_h = h - top;
-        let mut quads = Vec::new();
+    fn sync_label(&mut self, label: &str) {
+        self.label = Some(label.to_string());
+    }
+
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let _ = rect; // geometry reads the assignment cache (events/drags share it)
+        let (x, y, w, visual_h) = self.touch_area();
 
         // 1. Background
-        quads.push((x, y + top, w, visual_h, [0.11, 0.11, 0.16, 0.85]));
+        ctx.quad(Rect { x, y, width: w, height: visual_h }, [0.11, 0.11, 0.16, 0.85]);
 
         // 2. Borders
         let border_color = [0.28, 0.28, 0.38, 1.0];
-        quads.push((x, y + top, w, 1.0, border_color));             // Top
-        quads.push((x, y + top + visual_h - 1.0, w, 1.0, border_color));     // Bottom
-        quads.push((x, y + top, 1.0, visual_h, border_color));             // Left
-        quads.push((x + w - 1.0, y + top, 1.0, visual_h, border_color));     // Right
+        ctx.quad(Rect { x, y, width: w, height: 1.0 }, border_color);
+        ctx.quad(Rect { x, y: y + visual_h - 1.0, width: w, height: 1.0 }, border_color);
+        ctx.quad(Rect { x, y, width: 1.0, height: visual_h }, border_color);
+        ctx.quad(Rect { x: x + w - 1.0, y, width: 1.0, height: visual_h }, border_color);
 
         // 3. Fingers
         for finger in &self.fingers {
             let rx = finger.x.clamp(0.0, 1.0);
             let ry = finger.y.clamp(0.0, 1.0);
             let fx = x + rx * w;
-            let fy = y + top + ry * visual_h;
+            let fy = y + ry * visual_h;
             let dot_size = 12.0;
 
-            // Render glow (outer light blue rectangle)
-            quads.push((
-                fx - (dot_size + 6.0) / 2.0,
-                fy - (dot_size + 6.0) / 2.0,
-                dot_size + 6.0,
-                dot_size + 6.0,
+            // Glow (outer light blue), then core (solid blue/purple)
+            ctx.quad(
+                Rect {
+                    x: fx - (dot_size + 6.0) / 2.0,
+                    y: fy - (dot_size + 6.0) / 2.0,
+                    width: dot_size + 6.0,
+                    height: dot_size + 6.0,
+                },
                 [0.35, 0.55, 0.95, 0.4],
-            ));
-            // Render core (solid blue/purple rectangle)
-            quads.push((
-                fx - dot_size / 2.0,
-                fy - dot_size / 2.0,
-                dot_size,
-                dot_size,
+            );
+            ctx.quad(
+                Rect { x: fx - dot_size / 2.0, y: fy - dot_size / 2.0, width: dot_size, height: dot_size },
                 [0.45, 0.65, 1.0, 1.0],
-            ));
+            );
         }
 
-        quads
+        // 4. Labels ("Touchpad Area" hint + the model-drawn control label)
+        ctx.text(
+            "Touchpad Area".to_string(),
+            x + 12.0,
+            y + visual_h - 22.0,
+            11.0,
+            [0x73, 0x73, 0x8c],
+        );
+        if let Some(ref label) = self.label {
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            ctx.text(
+                label.clone(),
+                self.rect.x,
+                self.rect.y,
+                font_size,
+                colors::control_label_color_detached_for_state(self.hovered, false),
+            );
+        }
     }
+}
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
-        if button == MouseButton::Left {
-            let (rx_rect, y, rw_rect, h) = self.rect();
-            let label_x = self.label_x_offset();
-            let x = rx_rect + label_x;
-            let w = rw_rect - label_x;
-            let top = self.label_offset();
-            let visual_h = h - top;
-            if px >= x && px <= x + w && py >= y + top && py <= y + top + visual_h {
-                if state == ElementState::Pressed {
-                    let rx = ((px - x) / w).clamp(0.0, 1.0);
-                    let ry = ((py - (y + top)) / visual_h).clamp(0.0, 1.0);
-                    self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
-                    return true;
-                } else {
-                    self.fingers.clear();
+impl Input for Trackpad {
+    fn on_event(&mut self, event: &Event, _ectx: &mut EventCtx) -> bool {
+        match event {
+            Event::MouseButton { button, state, x, y, .. } => {
+                if *button != MouseButton::Left {
+                    return false;
+                }
+                let (ax, ay, aw, ah) = self.touch_area();
+                if *x >= ax && *x <= ax + aw && *y >= ay && *y <= ay + ah {
+                    if *state == ElementState::Pressed {
+                        self.fingers = vec![self.finger_at(*x, *y)];
+                    } else {
+                        self.fingers.clear();
+                    }
                     return true;
                 }
+                false
             }
-        }
-        false
-    }
-
-    fn draggable(&self) -> bool { true }
-    fn is_dragging(&self) -> bool { !self.fingers.is_empty() }
-
-    fn drag_begin(&mut self, px: f32, py: f32) {
-        let (rx_rect, y, rw_rect, h) = self.rect();
-        let label_x = self.label_x_offset();
-        let x = rx_rect + label_x;
-        let w = rw_rect - label_x;
-        let top = self.label_offset();
-        let visual_h = h - top;
-        if w > 0.0 && visual_h > 0.0 {
-            let rx = ((px - x) / w).clamp(0.0, 1.0);
-            let ry = ((py - (y + top)) / visual_h).clamp(0.0, 1.0);
-            self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
+            Event::MouseEnter => {
+                self.hovered = true;
+                false
+            }
+            Event::MouseLeave => {
+                self.hovered = false;
+                false
+            }
+            _ => false,
         }
     }
 
-    fn drag_update(&mut self, px: f32, py: f32) -> bool {
-        let (rx_rect, y, rw_rect, h) = self.rect();
-        let label_x = self.label_x_offset();
-        let x = rx_rect + label_x;
-        let w = rw_rect - label_x;
-        let top = self.label_offset();
-        let visual_h = h - top;
-        if w > 0.0 && visual_h > 0.0 {
-            let rx = ((px - x) / w).clamp(0.0, 1.0);
-            let ry = ((py - (y + top)) / visual_h).clamp(0.0, 1.0);
-            self.fingers = vec![Finger { slot: 0, x: rx, y: ry }];
+    fn draggable(&self, _rect: Rect) -> bool {
+        true
+    }
+
+    fn is_dragging(&self) -> bool {
+        !self.fingers.is_empty()
+    }
+
+    fn drag_begin(&mut self, px: f32, py: f32, _rect: Rect) {
+        let (_, _, w, h) = self.touch_area();
+        if w > 0.0 && h > 0.0 {
+            self.fingers = vec![self.finger_at(px, py)];
+        }
+    }
+
+    fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
+        let (_, _, w, h) = self.touch_area();
+        if w > 0.0 && h > 0.0 {
+            self.fingers = vec![self.finger_at(px, py)];
             true
         } else {
             false
@@ -174,40 +212,4 @@ impl Element for Trackpad {
     fn drag_end(&mut self) {
         self.fingers.clear();
     }
-}
-
-impl Trackpad {
-    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
-        let (rx_rect, y, rw_rect, h) = self.rect();
-        let label_x = self.label_x_offset();
-        let x = rx_rect + label_x;
-        let _w = rw_rect - label_x;
-        let top = self.label_offset();
-        let visual_h = h - top;
-        let mut labels = Vec::new();
-
-        // Render "Touchpad Area" label
-        labels.push(TextLabel {
-            text: "Touchpad Area".to_string(),
-            x: x + 12.0,
-            y: y + top + visual_h - 22.0,
-            font_size: 11.0,
-            color: [0x73, 0x73, 0x8c],
-        });
-
-        // Optional widget-base label on top
-        if let Some(ref label) = self.base.label {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            labels.push(TextLabel {
-                text: label.clone(),
-                x: rx_rect,
-                y,
-                font_size,
-                color: colors::control_label_color_detached_for_state(self.base.hovered, self.base.focused),
-            });
-        }
-
-        labels
-    }
-
 }
