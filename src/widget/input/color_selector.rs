@@ -175,9 +175,6 @@ impl Element for ColorSelector {
         Some(self.font_family.clone())
     }
 
-    fn color_u8(&self) -> Option<[u8; 4]> {
-        Some([self.color[0], self.color[1], self.color[2], self.alpha])
-    }
 
     fn color(&self) -> [f32; 4] {
         colors::to_linear([

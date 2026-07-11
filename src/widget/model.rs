@@ -1491,9 +1491,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> {
         Input::graph_controller_mut(&mut self.inner)
     }
-    fn as_spreadsheet_controller(&self) -> Option<&dyn SpreadsheetController> {
-        Input::spreadsheet_controller(&self.inner)
-    }
     fn as_spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> {
         Input::spreadsheet_controller_mut(&mut self.inner)
     }
@@ -1508,9 +1505,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> {
         Input::param_controller_mut(&mut self.inner)
-    }
-    fn as_geom_controller(&self) -> Option<&dyn GeomController> {
-        Input::geom_controller(&self.inner)
     }
     fn as_geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> {
         Input::geom_controller_mut(&mut self.inner)

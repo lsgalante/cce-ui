@@ -559,13 +559,6 @@ pub trait Element {
         quads
     }
 
-    fn paint(&mut self, ctx: &mut UiContext) {
-        if let Some(hq) = self.highlight_quad(ctx) {
-            if hq.4 == colors::HIGHLIGHT_SECONDARY {
-                ctx.register_hovered(hq.0, hq.1, hq.2, hq.3, hq.4);
-            }
-        }
-    }
 
     // The per-widget text getters (text_labels / text_labels_with_bounds /
     // text_labels_with_font_and_bounds / get_text_items) are GONE: every widget emits
@@ -620,13 +613,11 @@ pub trait Element {
     fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> { None }
     fn as_graph_controller(&self) -> Option<&dyn GraphController> { None }
     fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> { None }
-    fn as_spreadsheet_controller(&self) -> Option<&dyn SpreadsheetController> { None }
     fn as_spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> { None }
     fn as_path_controller(&self) -> Option<&dyn PathController> { None }
     fn as_path_controller_mut(&mut self) -> Option<&mut dyn PathController> { None }
     fn as_param_controller(&self) -> Option<&dyn ParamController> { None }
     fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> { None }
-    fn as_geom_controller(&self) -> Option<&dyn GeomController> { None }
     fn as_geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> { None }
 
     fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
@@ -681,7 +672,6 @@ pub trait Element {
     fn z_index(&self) -> i32 { 0 }
     fn is_plate(&self) -> bool { false }
     fn is_page(&self) -> bool { false }
-    fn is_layer(&self) -> bool { false }
     fn is_backplate(&self) -> bool { false }
     fn is_movable_backplate(&self) -> bool { false }
     fn is_scrollable(&self) -> bool { false }
@@ -701,7 +691,6 @@ pub trait Element {
         )
     }
     fn layout_ignore(&self) -> bool { false }
-    fn color_u8(&self) -> Option<[u8; 4]> { None }
 }
 
 pub trait Control: Element {
