@@ -1202,6 +1202,28 @@ impl Element for TreeList {
         true
     }
 
+    /// The whole subtree — geometry via the recursive `all_*` aggregates, text via the
+    /// recursive bounded getter — emitted here so the paint walk's `renders_own_subtree`
+    /// branch is just `paint_self` + no descent, with no trait-getter use left in the walk.
+    fn paint_self(&self, ui: &UiContext, pc: &mut crate::scene::paint::PaintCtx) {
+        use crate::scene::layout::Rect;
+        for (x, y, w, h, r, c, corners) in self.all_rounded_quads(ui) {
+            pc.rounded_rect(Rect { x, y, width: w, height: h }, r, corners, c);
+        }
+        for (x, y, w, h, c) in self.all_quads(ui) {
+            pc.quad(Rect { x, y, width: w, height: h }, c);
+        }
+        for (cx, cy, r, t, s, e, c) in self.extra_arcs() {
+            pc.arc(cx, cy, r, t, s, e, c);
+        }
+        for (cx, cy, r, c) in self.extra_circles() {
+            pc.circle(cx, cy, r, c);
+        }
+        for (tl, font, bounds) in self.text_labels_with_font_and_bounds(ui) {
+            pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
+        }
+    }
+
     fn all_rounded_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         let mut quads = Vec::new();
         let (r1, r2, r3, r4) = self.rounded_corners();

@@ -520,13 +520,18 @@ pub trait Element {
             ctx.circle(cx, cy, r, c);
         }
         // Text: leaves emit their own labels; containers emit NONE — the legacy container
-        // text_labels overrides (Backplate/Layer/Page/SplitBox/Plate) AGGREGATE their
-        // children's labels, and the walk reaches those children itself, so emitting the
-        // aggregate here would double-draw every descendant's text (the Phase 6d trap). A
-        // legacy container with OWN text overrides paint_self to add it (Plate's label).
+        // text_labels overrides (Backplate/Layer/Page/Plate) AGGREGATE their children's
+        // labels, and the walk reaches those children itself, so emitting the aggregate
+        // here would double-draw every descendant's text (the Phase 6d trap). A legacy
+        // container with OWN text overrides paint_self to add it (Plate's label).
+        // Leaves use the FONTED getter (font + scroll-viewport bounds) — the same labels
+        // every legacy tuple consumer served; composites like Ramp only aggregate their
+        // internal field widgets here. This is the ONE remaining trait-getter use in the
+        // paint path; it is deleted together with the getters once every live legacy
+        // widget carries its own paint_self.
         if self.children(ui).is_empty() {
-            for tl in self.text_labels() {
-                ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+            for (tl, font, bounds) in self.text_labels_with_font_and_bounds(ui) {
+                ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, bounds);
             }
         }
     }

@@ -614,4 +614,31 @@ impl Element for JsonLayoutWidget {
     fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
         self.widgets.iter().map(|w| w.widget.as_ptr()).collect()
     }
+
+    // JsonLayout renders its whole subtree itself: page-filtered aggregates plus the
+    // checkbox side-labels that belong to the container, not to any child widget. The
+    // paint walk must emit these once and not descend (descending would draw inactive
+    // pages' widgets and miss the side-labels).
+    fn renders_own_subtree(&self) -> bool {
+        true
+    }
+
+    fn paint_self(&self, ui: &UiContext, pc: &mut crate::scene::paint::PaintCtx) {
+        use crate::scene::layout::Rect;
+        for (x, y, w, h, r, c, corners) in self.all_rounded_quads(ui) {
+            pc.rounded_rect(Rect { x, y, width: w, height: h }, r, corners, c);
+        }
+        for (x, y, w, h, c) in self.all_quads(ui) {
+            pc.quad(Rect { x, y, width: w, height: h }, c);
+        }
+        for (cx, cy, r, t, s, e, c) in self.extra_arcs() {
+            pc.arc(cx, cy, r, t, s, e, c);
+        }
+        for (cx, cy, r, c) in self.extra_circles() {
+            pc.circle(cx, cy, r, c);
+        }
+        for (tl, bounds) in self.text_labels_with_bounds(ui) {
+            pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, None, bounds);
+        }
+    }
 }

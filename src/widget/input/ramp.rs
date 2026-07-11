@@ -992,14 +992,80 @@ impl Element for Ramp {
     }
     
     fn text_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+        let mut labels: Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> = self
+            .own_control_labels()
+            .into_iter()
+            .map(|(l, f)| (l, f, None))
+            .collect();
+
+        labels.extend(self.preset_dropdown.text_labels_with_font_and_bounds(ctx));
+        labels.extend(self.line_type_dropdown.text_labels_with_font_and_bounds(ctx));
+        if self.selected_key_idx.is_some() {
+            labels.extend(self.val_slider.text_labels_with_font_and_bounds(ctx));
+            labels.extend(self.del_button.text_labels_with_font_and_bounds(ctx));
+        }
+        labels
+    }
+
+    /// The walk drops a container's own text (assumed child aggregate) — Ramp's control
+    /// labels are its OWN; the children (dropdowns/slider/button) are painted by the
+    /// walk's descent, so only the own labels are emitted here, over the default's
+    /// container geometry.
+    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
+        use crate::scene::layout::Rect;
+        let (x, y, w, h) = self.rect();
+        let rect = Rect { x, y, width: w, height: h };
+        let color = self.color();
+        let cr = self.corner_radii();
+        let radii = (cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
+        if let Some(depth) = self.plate_bevel() {
+            ctx.bevel(rect, radii, color, depth);
+        } else if let Some((border_color, thickness)) = self.solid_border() {
+            ctx.border(rect, radii, color, border_color, thickness);
+        } else if color[3].abs() > 0.001 {
+            let (r1, r2, r3, r4) = self.rounded_corners();
+            if r1 || r2 || r3 || r4 {
+                ctx.rounded_rect(rect, self.corner_radius(), (r1, r2, r3, r4), color);
+            }
+        }
+        for (qx, qy, qw, qh, c) in self.all_quads(ui) {
+            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, c);
+        }
+        for (cx, cy, r, t, start, end, c) in self.extra_arcs() {
+            ctx.arc(cx, cy, r, t, start, end, c);
+        }
+        for (cx, cy, r, c) in self.extra_circles() {
+            ctx.circle(cx, cy, r, c);
+        }
+        for (tl, font) in self.own_control_labels() {
+            ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, None);
+        }
+    }
+    
+    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
+        let mut items = Vec::new();
+        items.extend(self.preset_dropdown.get_text_items());
+        items.extend(self.line_type_dropdown.get_text_items());
+        if self.selected_key_idx.is_some() {
+            items.extend(self.val_slider.get_text_items());
+            items.extend(self.del_button.get_text_items());
+        }
+        items
+    }
+}
+
+impl Ramp {
+    /// The ramp's OWN control labels (Preset / Line Type / Value-when-selected), each
+    /// with its control's font — shared by the legacy fonted getter and `paint_self`.
+    fn own_control_labels(&self) -> Vec<(TextLabel, Option<String>)> {
         let mut labels = Vec::new();
-        
+
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         let h = self.base.h;
         let gh = (h - 70.0).max(30.0);
         let sy = self.base.y + gh + 15.0;
-        
+
         let gap = 10.0;
         let col_w = if self.selected_key_idx.is_some() {
             let del_w = 70.0;
@@ -1008,7 +1074,7 @@ impl Element for Ramp {
         } else {
             (track_w - gap) / 2.0
         };
-        
+
         let (_, font_size) = crate::layout::control_label_font_detached_parsed();
         let label_color = colors::control_label_color_detached_u8();
 
@@ -1021,9 +1087,8 @@ impl Element for Ramp {
                 color: label_color,
             },
             self.preset_dropdown.widget_font(),
-            None,
         ));
-        
+
         labels.push((
             TextLabel {
                 text: "Line Type".to_string(),
@@ -1033,9 +1098,8 @@ impl Element for Ramp {
                 color: label_color,
             },
             self.line_type_dropdown.widget_font(),
-            None,
         ));
-        
+
         if self.selected_key_idx.is_some() {
             labels.push((
                 TextLabel {
@@ -1046,28 +1110,10 @@ impl Element for Ramp {
                     color: label_color,
                 },
                 self.val_slider.widget_font(),
-                None,
             ));
         }
-        
-        labels.extend(self.preset_dropdown.text_labels_with_font_and_bounds(ctx));
-        labels.extend(self.line_type_dropdown.text_labels_with_font_and_bounds(ctx));
-        if self.selected_key_idx.is_some() {
-            labels.extend(self.val_slider.text_labels_with_font_and_bounds(ctx));
-            labels.extend(self.del_button.text_labels_with_font_and_bounds(ctx));
-        }
+
         labels
-    }
-    
-    fn get_text_items(&self) -> Vec<(&glyphon::Buffer, f32, f32, glyphon::Color)> {
-        let mut items = Vec::new();
-        items.extend(self.preset_dropdown.get_text_items());
-        items.extend(self.line_type_dropdown.get_text_items());
-        if self.selected_key_idx.is_some() {
-            items.extend(self.val_slider.get_text_items());
-            items.extend(self.del_button.get_text_items());
-        }
-        items
     }
 }
 
