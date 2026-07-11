@@ -1419,14 +1419,38 @@ Constraint respected: **each crate still builds standalone** — the new core is
     curved-ring branch is unreachable today (menubars are skipped before its
     condition) — preserved verbatim, flagged for a future dead-code decision.
     **ALL app-side getter consumers are now gone.**
-  - **Still to do (getter deletion preconditions, all internal now):**
-    (1) the walk's own legacy branches — default `paint_self` drains
-    `text_labels()` for leaves; `renders_own_subtree` (TreeList) uses the
-    recursive bounded getter; (2) app-local legacy widgets that implement
-    `text_labels` as their text source and rely on that default —
-    display-manager's LoginCard/StatusLabel/SessionList, designer's
-    NodePalette — each needs a small `paint_self` override; THEN delete the
-    getters, then `Element` + `Adapted` (TreeList → narrow traits).
+  - **6aq — walk getter-use consolidated to ONE fonted default; the three
+    missed app consumers cleared. DONE (176 tests; settings audio AE=0;
+    test-interface AE=5 cursor-level; data-editor loaded-tree AE=0; cloud
+    fuzzel+json standalone AE=0; designer unchanged).** CORRECTION to 6ap's
+    "all app-side consumers gone": three call sites had escaped the audit —
+    settings' `renderer.rs` `collect_window_child` (outside render_widget),
+    test-interface's gallery loop, and cce-cloud's `jl`/`fuzzel` labels (cloud
+    drives WgpuAdapter directly, like pre-6ap designer, and json_layout was
+    live only through it). All three now use walk-derived text. Engine side:
+    the `renders_own_subtree` walk branch is just `paint_self` (TreeList +
+    newly-flagged JsonLayout carry subtree-emitting overrides; descending
+    JsonLayout would draw inactive pages and miss its checkbox side-labels);
+    the default `paint_self` leaf drain moved from `text_labels()` to the
+    FONTED getter — same labels every legacy tuple consumer served. Ramp got
+    the own-labels `paint_self` (the Plate/LoginCard class: container own
+    text vs the walk's aggregate rule). Traps recorded: a widget with a
+    ui-tree parent must NOT also be walked as a top-level root (test-
+    interface's page selector under the status bar double-drew ~10%
+    brighter); cce-cloud launches reach the user's DAEMON via
+    /run/user/UID/cce-cloud.socket — hold the socket aside to A/B a local
+    standalone build.
+  - **Getter deletion now blocks on exactly one internal consumer** — the
+    default `paint_self` fonted-drain line — plus the impl-internal
+    aggregation inside the legacy widgets' own getter overrides and the
+    concrete `context_menu::text_labels()` global (survives as an inherent
+    method). The deletion phase: give each live legacy widget with own text a
+    `paint_self` override (inline its label logic as inherent methods —
+    Trackpad, KeybindRecorder, ButtonStrip, FontSelector, ColorSelector,
+    SectionHeader, List, ColorRamp, ControlPanel if needed, the app-local
+    leaves in display-manager/designer/colors/cloud), drop the default drain,
+    delete the trait getters, then `Element` + `Adapted` (TreeList → narrow
+    traits).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
