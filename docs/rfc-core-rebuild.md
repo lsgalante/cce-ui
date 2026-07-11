@@ -1440,17 +1440,28 @@ Constraint respected: **each crate still builds standalone** — the new core is
     brighter); cce-cloud launches reach the user's DAEMON via
     /run/user/UID/cce-cloud.socket — hold the socket aside to A/B a local
     standalone build.
-  - **Getter deletion now blocks on exactly one internal consumer** — the
-    default `paint_self` fonted-drain line — plus the impl-internal
-    aggregation inside the legacy widgets' own getter overrides and the
-    concrete `context_menu::text_labels()` global (survives as an inherent
-    method). The deletion phase: give each live legacy widget with own text a
-    `paint_self` override (inline its label logic as inherent methods —
-    Trackpad, KeybindRecorder, ButtonStrip, FontSelector, ColorSelector,
-    SectionHeader, List, ColorRamp, ControlPanel if needed, the app-local
-    leaves in display-manager/designer/colors/cloud), drop the default drain,
-    delete the trait getters, then `Element` + `Adapted` (TreeList → narrow
-    traits).
+  - **6ar — the per-widget text getters are DELETED from `Element`. DONE
+    (176 tests; full workspace builds; nine apps A/B-verified — AE=0 or
+    cursor/translucency/status-race noise only).** `text_labels` /
+    `text_labels_with_bounds` / `text_labels_with_font_and_bounds` /
+    `get_text_items` are gone from the trait, with Adapted's impls, the
+    `Paint::text_items` hook, and every container aggregate (Backplate,
+    Layer, Page, Plate, SectionContainer, ColorRamp, ControlPanel,
+    JsonLayout, ButtonStrip). Every widget reaches the frame through
+    `paint_self`. The deleted defaults survive as painter helpers with the
+    labels passed in (`paint_legacy_leaf`, `fonted_leaf_labels`,
+    `scroll_ancestor_text_bounds`, `base_control_label`); legacy leaves keep
+    their label logic as inherent `own_labels()`; TreeList reads its concrete
+    Adapted children via the now-pub(crate) `own_labels_with_font_and_bounds`;
+    ControlPanel/ParametersBg/JsonLayout source dyn-children labels off the
+    paint walk (ControlPanel re-applies its scroll shift + viewport clamp;
+    List and ControlPanel are `renders_own_subtree` — walking into a legacy
+    scroll frame desyncs text from geometry at scroll ≠ 0). The concrete
+    `context_menu::text_labels()` global stays (inherent method, not the
+    trait). ~125-method god-trait is now 4 methods lighter and text has ONE
+    path: prims.
+  - **Still to do:** `Element` + `Adapted` teardown (TreeList → narrow
+    traits) — the Phase 6 endgame's final item.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
