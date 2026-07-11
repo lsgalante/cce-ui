@@ -1369,18 +1369,47 @@ Constraint respected: **each crate still builds standalone** — the new core is
       the getters are gone from here. Settings A/B AE=0 on Accounts + (stash-based)
       the spinbox-heavy Audio page. The last difference vs the getter is
       widget_font→text_font, which coincides except for a custom-font TextBox.
-    - `.text_labels()` / `.text_labels_with_bounds()` → **four hand-aggregate
+    - ~~`.text_labels()` / `.text_labels_with_bounds()` → **four hand-aggregate
       apps** (email, authenticator, display-manager, layout-interface) whose
-      `display_list()` emits widget text by calling the getter per widget.
+      `display_list()` emits widget text by calling the getter per widget.~~
+      **DONE (6ao)** — see below.
     - Note: the "orphaned" containers Layer / Page are NOT deletable — Layer is
       the embedded base of the live Plate/Page; Page is embedded by the live
       Paginator (transitive liveness through inheritance, not direct app use).
   - **6an — render_widget off the getters (see above). DONE (all 18 apps
     compile; 176 tests; settings A/B AE=0 on Accounts + Audio).** One of the
     three getter-consumer classes cleared.
-  - **Still to do:** the two remaining getter-consumer classes — cce-designer's
-    custom render loop and the four hand-aggregate apps' `.text_labels()` — THEN
-    delete the getters, then `Element` + `Adapted` (TreeList → narrow traits).
+  - **6ao — the four hand-aggregate apps off the getters. DONE (176 tests;
+    all four A/B-verified live).** New `scene::painter::append_widget_text(ui,
+    &dyn Element, &mut PaintCtx)`: walks the subtree and appends only its
+    `Prim::Text` items — per-widget content font, walk clip composed into prim
+    bounds (the 6an recipe as a reusable helper). Every per-widget
+    `.text_labels()`/`.text_labels_with_bounds()` call in email, authenticator,
+    display-manager and layout-interface replaced with it. A/B results:
+    email + layout-interface byte-identical; authenticator + display-manager
+    identical except widget-owned labels now render in the widgets' configured
+    control font (legacy aggregates dropped the font to `None` — the same
+    widget_font→text_font delta as 6an, here visible because these apps
+    configure a monospace control font).
+    - **Display-manager UAF found + fixed:** its `new()` linked the ui_context
+      tree and captured `focused_widget` while the State was a stack local, so
+      every registered pointer dangled after the move — the walk's child
+      descent was the first render-path consumer to dereference them (abort on
+      a garbage-length alloc); `propagate_event` and the `all_*` child
+      aggregation read the same stale pointers all along. Fix: per-frame
+      idempotent `relink_tree()` (register/link are id-keyed) + initial focus
+      re-derived from the boxes' own focus flags. Also: its flat `widgets_iter`
+      lists the card AND the card's children, so text moved to walking the TRUE
+      roots (bg + root_container) — flat would double-emit — and `LoginCard`
+      (a container with own, non-aggregating labels) got the Plate-style
+      `paint_self` override for its two header labels.
+    - Lesson for the getter deletion: an app whose tree is linked from `new()`
+      by value is a dangling-registry candidate — audit any remaining
+      `link_parent_child` calls made before the owning struct reaches its
+      final address.
+  - **Still to do:** the last getter-consumer class — cce-designer's custom
+    render loop (`get_text_items`) — THEN delete the getters, then `Element` +
+    `Adapted` (TreeList → narrow traits).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
