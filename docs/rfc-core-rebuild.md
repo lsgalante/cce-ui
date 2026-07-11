@@ -1469,8 +1469,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `expand_all_nodes`/`collapse_all_nodes`) are now transitional `Input`
     capability hooks with `Adapted` forwards (the 5k pattern), so the global
     context menu's `dyn Element` dispatch survives the TreeList conversion.
-  - **Staged next — TreeList → `Adapted<TreeList>`** (surface fully mapped;
-    sole consumer is cce-data-editor):
+  - **TreeList → `Adapted<TreeList>` — DONE (the staged plan below executed
+    verbatim; 176 tests; data-editor loaded-tree A/B AE=0 byte-identical incl.
+    the focus wash; row select / context-menu Copy-Key-to-clipboard / search
+    click-to-focus verified live).** Two new transitional hooks landed with
+    it: `Input::tick_ctx` (EventCtx-carrying tick — the rename-commit focus
+    re-target needs the routing ctx) and `Paint::paints_own_subtree` →
+    `Element::renders_own_subtree` (the field widgets stay ctx-linked for
+    event propagation, but the walk must not also descend — descending
+    double-painted them and drew the CLOSED add-key popover box). The 5q
+    `legacy_focus_highlight` trap struck again (the focused tree's teal wash).
+    KNOWN-LATENT (pre-existing since 6ac, verified identical in the
+    pre-conversion baseline): wheel-over-tree doesn't scroll and the Add-Key
+    button doesn't open its popover — children-first propagation
+    short-circuits on the hit child before the tree's own toggle/scroll
+    logic runs. Fix belongs to the event-routing follow-up, not the widget.
+    Original staged plan (executed):
     - `Layout`: `rect_assigned` caches the rect; the `set_rect` body
       (search box / add-key button / popover box / scroll box arrangement +
       `update_bounds`) moves to the assignment hook. No container children —
