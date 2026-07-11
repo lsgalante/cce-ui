@@ -1512,11 +1512,18 @@ Constraint respected: **each crate still builds standalone** — the new core is
       raw `*mut TreeList` cast → `as_ptr_mut()`. A/B: loaded tree, row
       click + inline rename (double-click), context menu Copy Key via
       wl-paste, search focus, add-key popover, wheel.
-  - **Then:** retire the `as_*_controller` pairs (production callers:
-    test-interface's three `as_page_selector().sidebar_w()` sites +
-    `serialize.rs`'s `as_menu_controller`; the rest are cce-ui tests) —
-    callers hold concrete types; the `Input` capability hooks die with
-    them. Then the remaining raw-`Element` containers (List, ControlPanel,
+  - **Then: retire the `as_*_controller` pairs — SCOPE CORRECTED.** The
+    earlier four-site estimate came from an over-filtered grep; the real
+    surface is ~45 sites: cce-designer's HTTP-action/menu plumbing holds
+    ~16 (including generic roster queries like "does ANY widget have an
+    open menu" via `as_menu_controller()` over `Box<dyn Element>`), and
+    `Switcher` implements MenuController by forwarding to its ACTIVE PANE
+    through `as_menu_controller_mut()` on `dyn Element` — a live
+    capability-dispatch system, not vestigial casts. Retirement needs a
+    design decision first: either a standalone capability registry
+    (`&dyn XController` handles registered beside the tree) or deferral to
+    the Element deletion itself, where the designer's roster becomes
+    concretely typed. Do NOT sweep it mechanically. Then the remaining raw-`Element` containers (List, ControlPanel,
     JsonLayout, Plate, Backplate, Layer, Page, SectionContainer, Ramp
     family, gallery leaves) are constructed only by test-interface /
     designer / layout-interface / email / fonts remnants — each either
