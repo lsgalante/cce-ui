@@ -1460,8 +1460,53 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `context_menu::text_labels()` global stays (inherent method, not the
     trait). ~125-method god-trait is now 4 methods lighter and text has ONE
     path: prims.
-  - **Still to do:** `Element` + `Adapted` teardown (TreeList → narrow
-    traits) — the Phase 6 endgame's final item.
+  - **6as (teardown, in progress).** Landed: (1) census of all 117 `Element`
+    methods vs workspace-wide call sites — five were call-less and are
+    DELETED (`Element::paint` — the hover-registration default nothing
+    invoked — `as_geom_controller`/`as_spreadsheet_controller` & variants,
+    `color_u8`, `is_layer`); (2) the seven tree context-menu actions
+    (`copy_key`/`copy_value`/`delete_key`/`expand_node`/`collapse_node`/
+    `expand_all_nodes`/`collapse_all_nodes`) are now transitional `Input`
+    capability hooks with `Adapted` forwards (the 5k pattern), so the global
+    context menu's `dyn Element` dispatch survives the TreeList conversion.
+  - **Staged next — TreeList → `Adapted<TreeList>`** (surface fully mapped;
+    sole consumer is cce-data-editor):
+    - `Layout`: `rect_assigned` caches the rect; the `set_rect` body
+      (search box / add-key button / popover box / scroll box arrangement +
+      `update_bounds`) moves to the assignment hook. No container children —
+      the walk treats the adapter as a leaf, so `renders_own_subtree`
+      becomes unnecessary.
+    - `Paint`: `color`/`rounded_corners`/`corner_radius`/`solid_border`/
+      `widget_font` port straight; geometry aggregates become ctx-less
+      (TreeList's children are FIELDS — its `children(_ctx)` ignores the
+      ctx already); subtree text rides the `serves_legacy_labels` hatch
+      (`legacy_labels_with_font_and_bounds(rect, ctx)` = today's
+      `subtree_fonted_labels`); `prepare_text`; popover via
+      `Paint::popover`/`draw_popover`.
+    - `Input`: the mouse/cursor/wheel/keyboard/tick bodies move into
+      `on_event` arms with `ectx.ui` (the 5s ParametersBg pattern);
+      drag via the Input drag hooks; `blocks_backplate_drag`; the seven
+      tree hooks return their inherent bodies; focus semantics —
+      `ctx.set_focused(self)` sites become `ectx.request_focus()` (the
+      ADAPTER's pointer, not the inner). CAUTION: `mouse_input` registers
+      the inline `edit_box` into the ctx TREE (`register_widget` +
+      `link_ids(self_id, …)` + `set_parent`) — under the adapter, `self_id`
+      must be the adapter's base id (`EventCtx::widget_addr` precedent).
+    - Sweep: data-editor field → `Adapted<TreeList>` (Deref covers the
+      concrete calls: `scroll_box.scroll_y`, `set_flat_keys`, `take_*`
+      drains, `get_row_rect`, `select_and_show_key`, `focus_search`), one
+      raw `*mut TreeList` cast → `as_ptr_mut()`. A/B: loaded tree, row
+      click + inline rename (double-click), context menu Copy Key via
+      wl-paste, search focus, add-key popover, wheel.
+  - **Then:** retire the `as_*_controller` pairs (production callers:
+    test-interface's three `as_page_selector().sidebar_w()` sites +
+    `serialize.rs`'s `as_menu_controller`; the rest are cce-ui tests) —
+    callers hold concrete types; the `Input` capability hooks die with
+    them. Then the remaining raw-`Element` containers (List, ControlPanel,
+    JsonLayout, Plate, Backplate, Layer, Page, SectionContainer, Ramp
+    family, gallery leaves) are constructed only by test-interface /
+    designer / layout-interface / email / fonts remnants — each either
+    dissolves app-side or converts, and `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
