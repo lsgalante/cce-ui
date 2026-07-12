@@ -1662,10 +1662,11 @@ Constraint respected: **each crate still builds standalone** — the new core is
     production type: ButtonStrip, the ctx-registered embed of
     MenuBar/Paginator — load-bearing in the tree, pinned to the
     machinery retype.
-  - **App-local impls onto the narrow traits (6az, in progress).** The
-    finale's first motion: each remaining raw `impl Element` converts to
+  - **App-local impls onto the narrow traits (6az) — COMPLETE:
+    `Element` has exactly ONE production implementor (`Adapted<W>`).**
+    Each remaining raw `impl Element` converted to
     `Layout`/`Paint`/`Input` + `Adapted<W>` ahead of the machinery
-    retype, shrinking `Element`'s implementor set toward exactly one.
+    retype; only test mocks still implement the trait directly.
     Done: cce-colors' ColorSlider (constructor returns the wrapper, so
     construction and direct-dispatch sites are untouched; A/B AE=0,
     click/wheel live-verified); settings' ScrollBar (now plain data —
@@ -1693,11 +1694,20 @@ Constraint respected: **each crate still builds standalone** — the new core is
     as_any downcasts; inline_label keeps the adapter's label machinery
     out of all four. Gallery + child-window A/Bs pixel-parity, cross-
     build sequences identical — cce-test-interface is raw-impl-free.
-    Remaining: dm ×3 (LoginCard/StatusLabel/SessionList) and cce-ui's
-    ButtonStrip (ctx-registered embed — may need the container hooks).
+    The greeter's three followed (part 7: labels fold into paint off the
+    laid-out rect; the display list's card-skip moves from base-pointer
+    equality to id comparison; cursor-only diffs, 3/3 click rounds alive
+    on both builds, after-state byte-identical). ButtonStrip closed the
+    sweep (part 8): embedders hold `Adapted<ButtonStrip>`; two wrapper-
+    shadowing collisions (`set_selected`, `take_click` — Element's bool
+    signatures vs the model's `Option<usize>` ones) route through
+    `inner_mut()`; presses stay ungated so a tab press lands under an
+    open dropdown popover; LI's Paginator strip and email's MenuBar
+    strip both cross-build byte-identical after identical clicks.
   - Then: the `*mut dyn Element` tree/context machinery gets retyped
     (context.rs propagation/spatial-grid/focus, the app rosters and
-    dispatch loops, window_runner's render plumbing), and `Element` +
+    dispatch loops, window_runner's render plumbing) — with one
+    implementor the pointer type can collapse — and `Element` +
     `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
