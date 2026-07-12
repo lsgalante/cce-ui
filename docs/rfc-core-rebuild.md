@@ -1540,6 +1540,19 @@ Constraint respected: **each crate still builds standalone** — the new core is
     (`&dyn XController` handles registered beside the tree) or deferral to
     the Element deletion itself, where the designer's roster becomes
     concretely typed. Do NOT sweep it mechanically.
+  - **Controller-capability decision RESOLVED (6aw): option 2 — defer to
+    concrete typing; no registry.** A registry would be permanent
+    infrastructure preserving the anonymous-widget pattern the rebuild
+    exists to kill. Instead the queries die when their callers get
+    retyped. First payoff immediately: `Switcher` — the largest holder
+    (17 sites) — turned out to have ZERO constructors workspace-wide
+    (settings dissolved its switcher in 6u) and is DELETED. Remaining
+    map: cce-designer's roster retype (~16 sites, the bulk), the
+    test-interface roster (3), one production site in
+    `display/serialize.rs` (`serialize_widgets`' menu-state dump), and
+    in-file tests that assert capabilities ride the adapter (die with
+    `Element`). The designer retype is therefore the finale's next
+    structural step, folded into the tree-machinery retype.
   - **Gallery containers went app-local (6as).** cce-test-interface's
     widget gallery was the last constructor of ControlPanel / Plate /
     SectionContainer / Backplate: it now owns `ti_widgets.rs` — a verbatim
