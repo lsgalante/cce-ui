@@ -1734,8 +1734,18 @@ Constraint respected: **each crate still builds standalone** — the new core is
     per-slot `dyn_refs` view (`serialize_widgets` now takes
     `&[&dyn Element]`). Static A/B byte-identical; cross-build final
     after an identical menu/toggle/wheel/click sequence within 6 px.
-  - Remaining retype order: (1) TI's roster the same way, (2) the
-    containers' heterogeneous child Vecs, (3) the cce-ui machinery core
+    TI's two-mode gallery followed (part 2): 53 named concrete slots
+    for the gallery, typed enums for the child window's runtime-variant
+    slots, a `Roster` enum carrying whichever mode runs; the numeric
+    indexes keep addressing slots through `get_dyn`. **No app stores
+    widgets behind `Box<dyn Element>` anywhere — the roster phase is
+    complete.** Cross-build A/Bs: gallery empty masks static and after
+    an identical interaction sequence; Ramp child at noise level;
+    non-Ramp child arms hit the pre-existing unconditional
+    Ramp-downcast panic identically on both builds.
+  - Remaining retype order: (1) the containers' heterogeneous child
+    Vecs (`Vec<*mut dyn Element>` in menu/paginator/treelist in-tree,
+    ControlPanel/JsonLayout app-side), (2) the cce-ui machinery core
     (context.rs/window_runner), and `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
