@@ -1679,9 +1679,15 @@ Constraint respected: **each crate still builds standalone** — the new core is
     inherent methods paint composes with a dummy ctx; render sites'
     all_quads/all_rounded_quads calls now resolve to the adapter's
     reverse bridges, same tuples; checkbox toggle live-verified) —
-    cce-cloud is raw-impl-free. Remaining: dm ×3, designer PassivePlate/
-    Canvas/NodePalette/Viewport3D, TI's four lookalikes, and cce-ui's
-    ButtonStrip (ctx-registered embed — may need the container hooks).
+    cce-cloud is raw-impl-free. Designer's four (PassivePlate, Canvas,
+    NodePalette, Viewport3D) followed — constructors return the wrapper
+    so the roster's Box pushes and as_any downcasts stand; PassivePlate's
+    full getter surface rides Paint, Viewport3D's wheel inertia moves to
+    on_event/tick; static A/B = the status sliver only, cross-build
+    captures after an identical HTTP circular-toggle + viewport wheel
+    structurally identical — cce-designer is raw-impl-free. Remaining:
+    dm ×3, TI's four lookalikes, and cce-ui's ButtonStrip
+    (ctx-registered embed — may need the container hooks).
   - Then: the `*mut dyn Element` tree/context machinery gets retyped
     (context.rs propagation/spatial-grid/focus, the app rosters and
     dispatch loops, window_runner's render plumbing), and `Element` +
