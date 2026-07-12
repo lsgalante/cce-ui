@@ -1886,8 +1886,26 @@ Constraint respected: **each crate still builds standalone** — the new core is
     4. **The flip**: define `WidgetHost`, blanket-impl for
        `Adapted<W>`, retype the registry/context/painter/
        window_runner from `dyn Element` to `dyn WidgetHost`, delete
-       `Element`. The MenuBar/StatusBar/Dropdown parent-pointer
-       snapshot change rides this phase. **Measured blueprint (~55
+       `Element`. ~~The MenuBar/StatusBar/Dropdown parent-pointer
+       snapshot change rides this phase.~~ **Landed early
+       (2026-07-12): the census showed all five stored widget-side
+       parent pointers production-DEAD** (nothing ever set_parent's
+       a MenuBar/StatusBar; ramp's per-tick re-parents fed a
+       write-only field through a dummy ctx — legacy behaved the
+       same). TextBox.parent deleted outright; Dropdown.parent
+       became `parent_snapshot` read-DATA (rect/is_ramp/color, same
+       direct-write activation, Ramp-clamp test adapted) and its
+       write-only `tracked_parent` died; MenuBar/StatusBar lost the
+       fields, their `parent_changed`/`tracked_parent` overrides,
+       MenuBar's never-firing `adjust_rect` clamp, and now report
+       the 0.0 corner radius production always read; the
+       `Layout::parent_changed`/`tracked_parent` hooks are deleted
+       (implementor-less), `Adapted::parent` is tree-only, and the
+       Ramp/ColorRamp tick_ctx re-parent rituals are gone. Stored
+       `*mut dyn Element` survives ONLY in the WidgetTree registry
+       payload, EventCtx's transient host ptr, and TI's
+       ControlPanel. A/B: text-editor + TI Ramp-child static AND
+       preset-popover-open frames all empty 8% masks; 163 tests. **Measured blueprint (~55
        methods, from the machinery's actual call sites):**
        identity/tree — id (guaranteed, no more `Option<&Widget>`),
        type_name, label, as_any/as_any_mut, as_ptr/as_ptr_mut
