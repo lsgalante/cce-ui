@@ -1633,10 +1633,18 @@ Constraint respected: **each crate still builds standalone** — the new core is
     churn; TI sub-threshold. Census round 4: only `corner_radii` +
     `mark_dirty` remain zero-override (real derived logic — they die
     with the retype, not by folding).
-  - Then the remaining raw-`Element` surface (JsonLayout, Menu/MenuBar
-    internals, Ramp-family embeds, app-local impls) either dissolves
-    app-side or converts, the `*mut dyn Element` tree/context machinery
-    gets retyped, and `Element` + `Adapted` die last.
+  - **Dead raw-widget sweep (6ax).** The raw-`Element` census after the
+    capability deletion found four more zero-constructor widgets:
+    Header, VBox, HBox (export-only) and Svg — which also rode Button
+    as an `Option<Svg>` payload no caller ever set, so Button's icon
+    branches were statically dead and went too. All deleted.
+  - Then the remaining raw-`Element` surface — JsonLayoutWidget (cloud's
+    host), Canvas (designer + preview), ButtonStrip (ctx-registered
+    embed of MenuBar/Paginator, load-bearing in the tree), Container
+    (dm root + settings system-info actions row), Viewport3D (designer),
+    and the app-local impls — either dissolves app-side or converts,
+    the `*mut dyn Element` tree/context machinery gets retyped, and
+    `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
