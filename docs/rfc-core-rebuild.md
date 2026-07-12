@@ -1685,9 +1685,16 @@ Constraint respected: **each crate still builds standalone** — the new core is
     full getter surface rides Paint, Viewport3D's wheel inertia moves to
     on_event/tick; static A/B = the status sliver only, cross-build
     captures after an identical HTTP circular-toggle + viewport wheel
-    structurally identical — cce-designer is raw-impl-free. Remaining:
-    dm ×3, TI's four lookalikes, and cce-ui's ButtonStrip
-    (ctx-registered embed — may need the container hooks).
+    structurally identical — cce-designer is raw-impl-free. TI's four
+    followed (part 6): ControlPanel keeps its aggregate overrides as
+    inherent methods composed by a paints_own_subtree paint, its child
+    arrangement in Layout::arrange_children (adapter as parent), and its
+    routing in on_event; the raw `as *mut ControlPanel` casts became
+    as_any downcasts; inline_label keeps the adapter's label machinery
+    out of all four. Gallery + child-window A/Bs pixel-parity, cross-
+    build sequences identical — cce-test-interface is raw-impl-free.
+    Remaining: dm ×3 (LoginCard/StatusLabel/SessionList) and cce-ui's
+    ButtonStrip (ctx-registered embed — may need the container hooks).
   - Then: the `*mut dyn Element` tree/context machinery gets retyped
     (context.rs propagation/spatial-grid/focus, the app rosters and
     dispatch loops, window_runner's render plumbing), and `Element` +
