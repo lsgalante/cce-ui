@@ -1589,11 +1589,28 @@ Constraint respected: **each crate still builds standalone** — the new core is
     more zero-override methods — `check_out_of_bounds` and
     `transform_event_for_child` (Page was the only override of each) —
     folded and deleted in the follow-up. Element: 104 methods.
-  - Then the remaining raw-`Element` containers (JsonLayout, ScrollBox,
-    ScrollBar, Menu/MenuBar internals, Ramp-family embeds) are
-    constructed only by cce-ui itself and a few app remnants — each either
-    dissolves app-side or converts, the `*mut dyn Element` tree/context
-    machinery gets retyped, and `Element` + `Adapted` die last.
+  - **ScrollBar DELETED, ScrollBox demoted off `Element` (6av).**
+    ScrollBar's only consumer was cce-system-settings' page scrollbar
+    (the dissolved Page subtree's survivor, evented through
+    `propagate_event` and painted through `collect_window_child`) — the
+    file moved there verbatim and the cce-ui type is gone. ScrollBox is
+    never ctx-registered by either consumer (TreeList + the
+    test-interface panel copy call it concretely), so its `Element`
+    impl was dyn-dispatch ballast: now a plain struct whose former
+    Element entry points survive as inherent methods with
+    default-derived parity (the scrollbar-click focus claim became
+    `focus::clear_focus()` — unfocusing the previous holder was its
+    only observable effect). The painter/model scroll-ancestor text
+    clamps folded to `None` (no tree parent can be a ScrollBox; none
+    ever was at runtime). A/B: data-editor AE=0 plus live wheel +
+    track-jump-scroll on a 100-key tree; settings diff = process-row
+    churn; TI sub-threshold. Census round 4: only `corner_radii` +
+    `mark_dirty` remain zero-override (real derived logic — they die
+    with the retype, not by folding).
+  - Then the remaining raw-`Element` surface (JsonLayout, Menu/MenuBar
+    internals, Ramp-family embeds, app-local impls) either dissolves
+    app-side or converts, the `*mut dyn Element` tree/context machinery
+    gets retyped, and `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
