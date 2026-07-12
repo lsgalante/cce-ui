@@ -1743,10 +1743,16 @@ Constraint respected: **each crate still builds standalone** — the new core is
     an identical interaction sequence; Ramp child at noise level;
     non-Ramp child arms hit the pre-existing unconditional
     Ramp-downcast panic identically on both builds.
-  - Remaining retype order: (1) the containers' heterogeneous child
-    Vecs (`Vec<*mut dyn Element>` in menu/paginator/treelist in-tree,
-    ControlPanel/JsonLayout app-side), (2) the cce-ui machinery core
-    (context.rs/window_runner), and `Element` + `Adapted` die last.
+    Cloud's `JsonControl` closed the owned-storage class (part 3): the
+    JSON-config controls become a typed enum over `Adapted<T>` replacing
+    `JsonWidget`'s `Box<dyn Element>`; the label walk dropped its
+    `as_ptr` round-trip unsafe for a plain reborrow. **No owned
+    type-erased widget storage remains anywhere in the workspace.**
+  - Remaining retype order: (1) the containers' borrowed child ptr Vecs
+    (`Vec<*mut dyn Element>` — pointers into app-owned concrete
+    storage; likely retyped together with (2) the cce-ui machinery core
+    (context.rs registry/focus/propagate, window_runner render
+    plumbing), and `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
