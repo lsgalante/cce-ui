@@ -574,40 +574,14 @@ pub trait Element {
     }
 
 
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        if let Some(base) = self.base() {
-            let id = base.id();
-            if let Some(p_ptr) = parent {
-                if let Some(p_base) = unsafe { (*p_ptr).base() } {
-                    let p_id = p_base.id();
-                    ctx.register_widget(p_id, p_ptr);
-                    let self_ptr = self.as_ptr();
-                    ctx.register_widget(id, self_ptr);
-                    // Symmetric link (Phase 1b): unlike the legacy `parents.insert` this also
-                    // records the child under the parent, keeping `children()` consistent.
-                    ctx.tree.set_parent(id, Some(p_id));
-                }
-            } else {
-                ctx.tree.set_parent(id, None);
-            }
-        }
-    }
+    // `set_parent`/`add_child` are GONE from the trait (6bd batch 4): linking is a tree
+    // operation — concrete callers ride the inherent `Adapted` methods, dyn callers go
+    // through `focus::link_parent_child` or `ctx.tree` directly.
 
     fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
         match self.base() {
             Some(base) => ctx.tree.children_ptrs(base.id()),
             None => vec![],
-        }
-    }
-
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
-        if let (Some(p_base), Some(c_base)) = (self.base(), unsafe { (*child).base() }) {
-            let p_id = p_base.id();
-            let c_id = c_base.id();
-            let self_ptr = self.as_ptr();
-            ctx.register_widget(p_id, self_ptr);
-            ctx.register_widget(c_id, child);
-            ctx.tree.link(p_id, c_id);
         }
     }
 

@@ -689,6 +689,48 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         ctx.clear_children_ids(self.base.id());
     }
 
+    /// Register + link a child under this widget (off `Element` in 6bd batch 4; dyn callers
+    /// went to `focus::link_parent_child`/tree ops).
+    pub fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
+        // The old Element default's tree link…
+        if let Some(c_base) = unsafe { (*child).base() } {
+            let c_id = c_base.id();
+            let p_id = self.base.id();
+            let self_ptr = self.as_ptr();
+            ctx.register_widget(p_id, self_ptr);
+            ctx.register_widget(c_id, child);
+            ctx.tree.link(p_id, c_id);
+        }
+        // …plus, for containers, the legacy container extra: parent the child back (Layer,
+        // Switcher) — the symmetric tree link the child's own set_parent used to make.
+        if Layout::has_container_children(&self.inner) {
+            let self_ptr = self.as_ptr_mut();
+            if let Some(c_base) = unsafe { (*child).base() } {
+                let c_id = c_base.id();
+                ctx.register_widget(self.base.id(), self_ptr);
+                ctx.register_widget(c_id, child);
+                ctx.tree.set_parent(c_id, Some(self.base.id()));
+            }
+        }
+    }
+
+    /// Register + (un)link this widget under a parent (off `Element` in 6bd batch 4).
+    pub fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
+        // Replica of the old Element default: symmetric tree link.
+        let id = self.base.id();
+        if let Some(p_ptr) = parent {
+            if let Some(p_base) = unsafe { (*p_ptr).base() } {
+                let p_id = p_base.id();
+                ctx.register_widget(p_id, p_ptr);
+                let self_ptr = self.as_ptr();
+                ctx.register_widget(id, self_ptr);
+                ctx.tree.set_parent(id, Some(p_id));
+            }
+        } else {
+            ctx.tree.set_parent(id, None);
+        }
+    }
+
     /// The model's intrinsic content size (off the `Element` trait since 6bd — the concrete
     /// callers are fonts'/graph's hand-laid button/dropdown sizing).
     pub fn intrinsic_size(&self) -> Option<Size> {
@@ -874,40 +916,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             return Layout::container_children(&self.inner);
         }
         ctx.tree.children_ptrs(self.base.id())
-    }
-
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
-        // The Element default's tree link…
-        if let Some(c_base) = unsafe { (*child).base() } {
-            let c_id = c_base.id();
-            let p_id = self.base.id();
-            let self_ptr = self.as_ptr();
-            ctx.register_widget(p_id, self_ptr);
-            ctx.register_widget(c_id, child);
-            ctx.tree.link(p_id, c_id);
-        }
-        // …plus, for containers, the legacy container extra: parent the child back (Layer,
-        // Switcher). (The model-Vec record died with ParametersBg.children — zero overrides.)
-        if Layout::has_container_children(&self.inner) {
-            let self_ptr = self.as_ptr_mut();
-            unsafe { (*child).set_parent(Some(self_ptr), ctx) };
-        }
-    }
-
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        // Replica of the Element default: symmetric tree link.
-        let id = self.base.id();
-        if let Some(p_ptr) = parent {
-            if let Some(p_base) = unsafe { (*p_ptr).base() } {
-                let p_id = p_base.id();
-                ctx.register_widget(p_id, p_ptr);
-                let self_ptr = self.as_ptr();
-                ctx.register_widget(id, self_ptr);
-                ctx.tree.set_parent(id, Some(p_id));
-            }
-        } else {
-            ctx.tree.set_parent(id, None);
-        }
     }
 
     fn is_child_visible(&self, child_id: WidgetId) -> bool {

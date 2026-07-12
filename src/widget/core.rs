@@ -83,11 +83,13 @@ pub mod focus {
             std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(child as *mut dyn Element)
         };
         if let (Some(p_base), Some(c_base)) = (parent.base(), child.base()) {
-            ctx.register_widget(p_base.id(), parent_ptr);
-            ctx.register_widget(c_base.id(), child_ptr);
+            let (p_id, c_id) = (p_base.id(), c_base.id());
+            ctx.register_widget(p_id, parent_ptr);
+            ctx.register_widget(c_id, child_ptr);
+            // The old add_child + set_parent pair, as the tree ops they always were.
+            ctx.tree.link(p_id, c_id);
+            ctx.tree.set_parent(c_id, Some(p_id));
         }
-        parent.add_child(child_ptr, ctx);
-        child.set_parent(Some(parent_ptr), ctx);
     }
 
     /// Keyboard tree navigation from the focused widget. `ctx` resolves the focused id to a
