@@ -9,7 +9,7 @@ use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
     Adapted, Control, Element, ElementState, Event, EventCtx, Input, Justification, Layout,
-    MouseButton, Paint, Svg,
+    MouseButton, Paint,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +31,6 @@ pub struct Button {
     pub hover_bg: Option<[f32; 4]>,
     pub label_color: Option<[f32; 4]>,
     pub justify: Justification,
-    pub svg: Option<Svg>,
     label: Option<String>,
     hovered: bool,
 }
@@ -62,7 +61,6 @@ impl Button {
             hover_bg: None,
             label_color: None,
             justify: Justification::Center,
-            svg: None,
             label: None,
             hovered: false,
         }
@@ -122,10 +120,6 @@ impl Button {
 /// The by-value builder chain, mirrored on the wrapped type (`with_label` comes from the generic
 /// `Adapted::with_label`, which syncs the model's copy via `Paint::sync_label`).
 impl Adapted<Button> {
-    pub fn with_svg(mut self, svg: Svg) -> Self {
-        self.svg = Some(svg);
-        self
-    }
 
     pub fn with_selected(mut self, selected: bool) -> Self {
         self.selected = selected;
@@ -178,9 +172,6 @@ impl Layout for Button {
     /// square at that height.
     fn intrinsic_size(&self) -> Option<Size> {
         let height = crate::layout::button_height();
-        if self.svg.is_some() {
-            return Some(Size::new(height, height));
-        }
         let label = self.label.as_deref().unwrap_or("");
         Some(Size::new(self.label_width(label) + 16.0, height))
     }
@@ -286,16 +277,6 @@ impl Paint for Button {
             } else {
                 ctx.quad(rect, color);
             }
-        }
-
-        // Centered SVG icon (legacy `extra_quads` tail).
-        if let Some(ref svg) = self.svg {
-            let dx = x + (w - svg.w) / 2.0 - svg.x;
-            let dy = y + (h - svg.h) / 2.0 - svg.y;
-            for q in &svg.quads {
-                ctx.quad(Rect { x: q.0 + dx, y: q.1 + dy, width: q.2, height: q.3 }, q.4);
-            }
-            return; // legacy: an SVG button draws no label text
         }
 
         // Label, with per-kind justification/color (legacy `text_labels`).
