@@ -1824,6 +1824,54 @@ Constraint respected: **each crate still builds standalone** — the new core is
     radius, is-Ramp flag) at re-parent time instead of the pointer —
     same refresh cadence, no deref of potentially-dead memory; watch
     the one-frame rect lag on resize if reads move to snapshots.
+  - **The `Element` endgame design (6bd, decided 2026-07-12).** The
+    endgame is a **trait replacement, not an app rewrite**. Grounding
+    facts (consumer survey): direct per-method dispatch
+    (`mouse_input`/`cursor_moved`/`keyboard_input`/wheel on concrete
+    `Adapted` fields) exists in nearly every app — making routed
+    events a prerequisite would gate the endgame on ~12 app
+    migrations, so the direct-dispatch surface *stays on the new
+    trait* and shrinks later as apps move to routed events at their
+    own pace. Designer's index-driven roster broadcast needs only a
+    small dyn set (unfocus, drag hooks, set_modifiers, z_index,
+    hit_test, visibility, tick, prepare_text, focused, as_any). The
+    legacy tuple getters' consumers are the `T: Element` generics in
+    layout.rs (render_widget/Column/Section — settings, LI, files,
+    colors render paths) and window_runner's tessellators
+    (widget_vertices — designer/TI): generic, not dyn, so they can
+    re-bound onto a narrower bound without touching the dyn surface.
+    Target shape: a **`WidgetHost` trait of ~40 methods** implemented
+    once by `Adapted<W>` (blanket over the narrow traits). `Adapted`
+    does NOT die — it survives as the single host wrapper owning base
+    state; what dies is the 92-method god-trait and its Option-base
+    escape hatches (`base()` becomes a guaranteed `id()`/state
+    access, killing the `WidgetId(0)` sentinel class). Phases, each
+    shippable:
+    1. **Capability actions → one enum method**: the 13 context-menu
+       action methods (`cut_selection`…`copy_path`) become
+       `context_action(ContextAction) -> bool`; core.rs dispatch
+       matches the enum; implementors (TextBox/TreeList/Breadcrumb)
+       narrow to one hook.
+    2. **Tuple getters off the future dyn surface**: re-bound
+       layout.rs's `T: Element` generics and window_runner's
+       tessellators onto a `LegacyTuples`-style bound (or inherent
+       `Adapted<W>` methods); settings' `collect_window_child(&dyn)`
+       goes generic. No behavior change — these are already
+       statically dispatched.
+    3. **Tree-link methods off the trait**: `children`/`parent`/
+       `add_child`/`set_parent`/`clear_children` callers go to
+       `ctx.tree`/`link_ids` by id (the trait impls are thin forwards
+       already); Paginator's back-parent extra rides
+       `register_embedded_children`.
+    4. **The flip**: define `WidgetHost`, blanket-impl for
+       `Adapted<W>`, retype the registry/context/painter/
+       window_runner from `dyn Element` to `dyn WidgetHost`, delete
+       `Element`. The MenuBar/StatusBar/Dropdown parent-pointer
+       snapshot change rides this phase.
+    Former slices 4/5 fold in: the app `as_ptr_mut` dispatch sites
+    are rewritten by whichever of routed-events (per app) or the
+    phase-4 flip reaches them first; no standalone pointer-to-id
+    signature sweep.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
