@@ -1265,8 +1265,16 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn paint_self(&self, ui: &UiContext, ctx: &mut PaintCtx) {
         let mut tmp = PaintCtx::new();
         Paint::paint(&self.inner, self.content_rect(), &mut tmp);
+        // Subtree painters (paints_own_subtree) author their COMPLETE text in paint() —
+        // per-child fonts and clip bounds included — so their Text prims pass through
+        // verbatim and the single-font own-labels re-derivation below is skipped
+        // (re-deriving would flatten a composite's mixed child fonts to widget_font).
+        let subtree = Paint::paints_own_subtree(&self.inner);
         for item in tmp.finish().items {
             match item.prim {
+                Prim::Text { text, x, y, font_size, color, font, bounds, .. } if subtree => {
+                    ctx.text_with(text, x, y, font_size, color, font, bounds)
+                }
                 Prim::Text { .. } => {}
                 Prim::Quad { rect, color } => ctx.quad(rect, color),
                 Prim::RoundedRect { rect, radius, corners, color } => ctx.rounded_rect(rect, radius, corners, color),
@@ -1291,6 +1299,9 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         // (caveat: its contract includes raw container children — those few widgets keep the
         // hatch until their hosts adopt the walk), else the standard own-labels bridge (prim
         // text + the detached base label, one font, text_bounds or the scroll-ancestor clip).
+        if subtree {
+            return;
+        }
         let labels = if Paint::serves_legacy_labels(&self.inner) {
             Paint::legacy_labels_with_font_and_bounds(&self.inner, self.content_rect(), ui)
         } else {

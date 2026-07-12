@@ -959,7 +959,7 @@ mod tests {
         dd.set_rect(30.0, 125.0, 110.0, 20.0);
 
         // Link the dropdown parent pointer to the Ramp (the legacy direct-write path)
-        dd.parent = Some(&mut ramp as *mut crate::widget::Ramp as *mut (dyn crate::widget::Element + 'static));
+        dd.parent = Some(crate::widget::Element::as_ptr_mut(&mut ramp));
 
         // Compute geometry
         let (rx, ry, rw, rh) = dd.get_popover_geom();
