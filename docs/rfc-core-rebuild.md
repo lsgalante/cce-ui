@@ -1704,11 +1704,32 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `inner_mut()`; presses stay ungated so a tab press lands under an
     open dropdown popover; LI's Paginator strip and email's MenuBar
     strip both cross-build byte-identical after identical clicks.
-  - Then: the `*mut dyn Element` tree/context machinery gets retyped
-    (context.rs propagation/spatial-grid/focus, the app rosters and
-    dispatch loops, window_runner's render plumbing) — with one
-    implementor the pointer type can collapse — and `Element` +
-    `Adapted` die last.
+  - **Compiler census of the dyn surface (6ba, experiment reverted —
+    the finding is the deliverable).** Hypothesis: with one implementor,
+    many `Element` methods are only ever called on concrete
+    `Adapted<W>` receivers and could move off the trait before the
+    retype. Method: delete a method from the trait, keep it inherent on
+    the wrapper (same signature — concrete sites resolve unchanged),
+    `cargo check --workspace`; every error is a true dynamic-dispatch
+    site. Verdict: **~91 of 92 methods fail — the trait IS the
+    machinery surface; there is nothing to slim first.** Three consumer
+    classes pin it: (1) cce-ui machinery (context.rs routing/focus/
+    drag, the paint walk, layout.rs render paths — `T: Element`
+    generics count: measure/preferred_height/set_row_rect live there —
+    and core.rs context-menu actions on `dyn` targets); (2) container
+    child aggregation over raw child pointers (menu/paginator/treelist
+    in-tree, ControlPanel/JsonLayout app-side) touching the full
+    paint+input getter surface; (3) the designer/test-interface roster
+    broadcast loops (`Vec<Box<dyn Element>>`) calling nearly everything.
+    NOTE: a `--workspace` check that fails in cce-ui never reaches the
+    app crates — the first pass under-reported; the app rosters were
+    where 4 of 5 "clean" candidates actually failed.
+  - Then, the retype — order dictated by the census: (1) the app
+    rosters first (designer's and TI's indexed `Vec<Box<dyn Element>>`
+    hold statically-known types per slot; retyping them to concrete
+    fields collapses the widest dyn consumer), (2) the containers'
+    heterogeneous child Vecs, (3) the cce-ui machinery core
+    (context.rs/window_runner), and `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
