@@ -1858,22 +1858,62 @@ Constraint respected: **each crate still builds standalone** — the new core is
        to enum values. Element is down to 79 methods. Live-verified:
        tree Copy Key/Copy Value/Collapse and TextBox Paste through
        the enum dispatch.
-    2. **Tuple getters off the future dyn surface**: re-bound
-       layout.rs's `T: Element` generics and window_runner's
-       tessellators onto a `LegacyTuples`-style bound (or inherent
-       `Adapted<W>` methods); settings' `collect_window_child(&dyn)`
-       goes generic. No behavior change — these are already
-       statically dispatched.
-    3. **Tree-link methods off the trait**: `children`/`parent`/
-       `add_child`/`set_parent`/`clear_children` callers go to
-       `ctx.tree`/`link_ids` by id (the trait impls are thin forwards
-       already); Paginator's back-parent extra rides
-       `register_embedded_children`.
+    2. **Tuple getters — DISSOLVED into the flip (measured
+       2026-07-12).** The premise was wrong on two counts. (a) The
+       dyn consumers are real: designer's render loop reads
+       `extra_quads`/`extra_circles`/`extra_arcs`/`color` directly
+       off its `&dyn` handle AND feeds it to the tessellators, and
+       the paint walk's legacy-leaf branch reads
+       `all_quads`/`all_rounded_quads`/`extra_*`/`widget_font` via
+       dyn — the visual surface must ride the host trait object.
+       (b) A separate `LegacyVisual` trait can't be reached from the
+       existing trait object (no cross-trait-object casts; a
+       supertrait split trips over `rect`/`color` defaults needing
+       `base()`). The genuinely generic consumers (layout.rs
+       render_widget/Column/Section, settings'
+       `collect_window_child`, dm/cloud's local tessellator copies
+       with concrete receivers) simply re-bind at the flip.
+    3. **Tree-link methods — DISSOLVED into the flip.** `children`/
+       `parent` are core machinery walk methods (propagate, painter,
+       navigate) — host-trait material, not removable beforehand.
+       `add_child`/`set_parent`/`clear_children` have dyn callers
+       (TI's roster `add_child`, dm's `link_parent_child`) worth ~5
+       methods at most — not worth a standalone pass; they convert
+       with the flip. Note Paginator both serves `container_children`
+       AND `link_ids`-registers its strip — the ctx-less walks
+       (popover_rect/prepare_text/render_popover) are why the
+       field-derived form must stay.
     4. **The flip**: define `WidgetHost`, blanket-impl for
        `Adapted<W>`, retype the registry/context/painter/
        window_runner from `dyn Element` to `dyn WidgetHost`, delete
        `Element`. The MenuBar/StatusBar/Dropdown parent-pointer
-       snapshot change rides this phase.
+       snapshot change rides this phase. **Measured blueprint (~55
+       methods, from the machinery's actual call sites):**
+       identity/tree — id (guaranteed, no more `Option<&Widget>`),
+       type_name, label, as_any/as_any_mut, as_ptr/as_ptr_mut
+       (transitional), visible/set_visible, z_index,
+       is_child_visible, children(ctx), parent(ctx), add_child
+       (transitional, TI);
+       layout — rect, set_rect, measure, layout, label_x_offset,
+       set_row_rect;
+       events — handle_event, hit_test, mark_dirty, tick/wants_tick,
+       set_modifiers, focus/unfocus/focused, context_action,
+       blocks_backplate_drag, is_scrollable, plus the
+       direct-dispatch block (mouse_input, cursor_moved, mouse_wheel,
+       keyboard_input, drag_begin/drag_update/drag_end/is_dragging/
+       draggable, take_click, take_change) — shrinks per app as they
+       move to routed events;
+       value — get_value_string/set_value_string, set_text,
+       set_selected — shrinks as app loops go concrete-slot;
+       paint — paint_self, clips_children, renders_own_subtree,
+       prepare_text, popover_rect, render_popover, dirty-flag access;
+       visual tuples (walk legacy branch + designer loop) — color,
+       all_quads, all_rounded_quads, extra_quads, extra_circles,
+       extra_arcs, corner_radii, plate_bevel, solid_border,
+       widget_font, highlight_quad.
+       Everything else on today's Element (79 methods plus the
+       generic-only surface) either moves to inherent `Adapted<W>`
+       methods for the generic render machinery or dies.
     Former slices 4/5 fold in: the app `as_ptr_mut` dispatch sites
     are rewritten by whichever of routed-events (per app) or the
     phase-4 flip reaches them first; no standalone pointer-to-id
