@@ -159,9 +159,6 @@ impl Layout for Spinbox {
         false
     }
 
-    fn layout_ignore(&self) -> bool {
-        true
-    }
 
     fn detached_label_inset(&self) -> f32 {
         4.0 // legacy Control::control_label x offset

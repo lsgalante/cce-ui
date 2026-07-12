@@ -107,7 +107,7 @@ mod tests {
         Element::set_text(&mut l, "CPU: 99%");
         assert_eq!(l.own_text_labels()[0].text, "CPU: 99%", "set_text reaches the paint source");
 
-        let size = Element::intrinsic_size(&l).unwrap();
+        let size = l.intrinsic_size().unwrap();
         assert!(size.width > 0.0);
         assert!(!Element::blocks_backplate_drag(&l));
     }

@@ -26,31 +26,18 @@
 //! [`crate::scene::bridge`] and [`Paint`] drives [`crate::scene::painter`]. The input/event
 //! concern follows in its own commit.
 
-use crate::scene::layout::{Rect, Size, Style};
+use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::{PaintCtx, Prim};
 use crate::widget::{
     Element, Event, TextLabel, UiContext, Widget, WidgetId,
 };
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
-/// avoid the existing [`Widget`] base struct. Mirrors the opt-in `Element::layout_style` /
-/// `intrinsic_size` / `layout_children` hooks consumed by [`crate::scene::bridge`].
+/// avoid the existing [`Widget`] base struct.
 pub trait Layout {
-    /// Opt-in layout style for the engine. `None` (default) ⇒ this widget does not drive
-    /// engine-computed layout. See [`Element::layout_style`].
-    fn layout_style(&self) -> Option<Style> {
-        None
-    }
-
-    /// Intrinsic content size of a leaf (e.g. measured text) for the measure pass. See
-    /// [`Element::intrinsic_size`].
+    /// Intrinsic content size of a leaf (e.g. measured text), consumed by the adapter's
+    /// `measure` (gated on [`Layout::intrinsic_measure_width`]).
     fn intrinsic_size(&self) -> Option<Size> {
-        None
-    }
-
-    /// Per-child styles for containers that size their children from the parent (e.g. `SplitBox`
-    /// proportions), in `children()` order. See [`Element::layout_children`].
-    fn layout_children(&self) -> Option<Vec<Style>> {
         None
     }
 
@@ -59,13 +46,6 @@ pub trait Layout {
     /// Inline-label widgets get no `set_rect` height inflation and no content-rect inset —
     /// mirroring the legacy `label_offset` free function's type-name special cases.
     fn inline_label(&self) -> bool {
-        false
-    }
-
-    /// Whether legacy container layout passes should skip this widget (the app positions it
-    /// itself — legacy `Element::layout_ignore`, read by `Plate` and the page layout). Default:
-    /// participate.
-    fn layout_ignore(&self) -> bool {
         false
     }
 
@@ -553,7 +533,7 @@ pub trait Input {
         None
     }
     fn drag_end(&mut self) {}
-    /// Movement bounds pushed in by hosts (legacy `Element::set_drag_bounds`).
+    /// Movement bounds pushed in by hosts (reached via the inherent `Adapted::set_drag_bounds`).
     fn set_drag_bounds(&mut self, _bx: f32, _by: f32, _bw: f32, _bh: f32) {}
 
     // --- Tick surface: hosts broadcast `Element::tick(dt)` every frame (the designer's render
@@ -710,6 +690,18 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
 }
 
 impl<W: Layout + Paint + Input + 'static> Adapted<W> {
+    /// Movement bounds pushed in by hosts (off the `Element` trait since 6bd — the one
+    /// production caller is concrete: designer's network panel).
+    pub fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
+        Input::set_drag_bounds(&mut self.inner, bx, by, bw, bh)
+    }
+
+    /// The model's intrinsic content size (off the `Element` trait since 6bd — the concrete
+    /// callers are fonts'/graph's hand-laid button/dropdown sizing).
+    pub fn intrinsic_size(&self) -> Option<Size> {
+        Layout::intrinsic_size(&self.inner)
+    }
+
     /// Run the wrapped widget's [`Paint::paint`] against its content rect and return the emitted
     /// prims — the shared source for the reverse bridges (`extra_quads`, `all_rounded_quads`,
     /// `extra_circles`, `extra_arcs`, prim-derived `text_labels`) that legacy render loops read.
@@ -1000,20 +992,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         for child in self.visible_children() {
             unsafe { &*child }.render_popover(pc);
         }
-    }
-
-    // --- Layout concern -> `Layout` ---
-    fn layout_style(&self) -> Option<Style> {
-        Layout::layout_style(&self.inner)
-    }
-    fn intrinsic_size(&self) -> Option<Size> {
-        Layout::intrinsic_size(&self.inner)
-    }
-    fn layout_children(&self) -> Option<Vec<Style>> {
-        Layout::layout_children(&self.inner)
-    }
-    fn layout_ignore(&self) -> bool {
-        Layout::layout_ignore(&self.inner)
     }
 
     // --- Legacy structural conventions the adapter owns on the widget's behalf ---
@@ -1396,10 +1374,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn drag_end(&mut self) {
         Input::drag_end(&mut self.inner)
     }
-    fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
-        Input::set_drag_bounds(&mut self.inner, bx, by, bw, bh)
-    }
-
     // --- Legacy direct-dispatch entry points. Hosts (treelist's add-key button, parameters_bg's
     // checkboxes, app pages) call these ON the widget instead of routing an Event through
     // `propagate_event`; without these overrides they'd hit the inert Element defaults and the
@@ -1585,8 +1559,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
 mod tests {
     use super::*;
     use crate::widget::PathController;
-    use crate::scene::bridge::layout_subtree;
-    use crate::scene::layout::{CrossAlign, Size, Style};
+    use crate::scene::layout::{Rect, Size};
     use crate::scene::paint::Prim;
     use crate::scene::painter::paint_tree;
     use crate::widget::UiContext;
@@ -1611,11 +1584,7 @@ mod tests {
 
     /// A narrow container: it drives a column layout ([`Layout`]) and paints nothing.
     struct Col;
-    impl Layout for Col {
-        fn layout_style(&self) -> Option<Style> {
-            Some(Style::column().gap(4.0).cross_align(CrossAlign::Start))
-        }
-    }
+    impl Layout for Col {}
     impl Paint for Col {
         fn color(&self) -> [f32; 4] {
             [0.0, 0.0, 0.0, 0.0]
@@ -1647,8 +1616,13 @@ mod tests {
         ctx.link_ids(root_id, a_id);
         ctx.link_ids(root_id, b_id);
 
-        // Layout: column of a 10x10 then a 10x20, gap 4, in a 100x100 area.
-        layout_subtree(&ctx, root_ptr, Rect { x: 0.0, y: 0.0, width: 100.0, height: 100.0 });
+        // Layout by hand (the Phase-2b bridge is gone; apps drive the solver directly) —
+        // the same column-of-two placement the bridge used to compute.
+        unsafe {
+            (*root_ptr).set_rect(0.0, 0.0, 100.0, 100.0);
+            (*a_ptr).set_rect(0.0, 0.0, 10.0, 10.0);
+            (*b_ptr).set_rect(0.0, 14.0, 10.0, 20.0);
+        }
         assert_eq!(rect_of(a_ptr), Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 });
         assert_eq!(rect_of(b_ptr), Rect { x: 0.0, y: 14.0, width: 10.0, height: 20.0 });
 

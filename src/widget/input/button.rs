@@ -162,11 +162,6 @@ impl Layout for Button {
         true
     }
 
-    /// The app positions buttons itself in legacy page layout (legacy `layout_ignore`).
-    fn layout_ignore(&self) -> bool {
-        true
-    }
-
     /// Content size for the scene layout engine (ported from Phase 2b): the label's measured
     /// width plus an 8px inset each side, at the configured button height; an icon button is a
     /// square at that height.
@@ -386,8 +381,8 @@ mod tests {
         let short = Button::new(0.0, 0.0, 0.0, 0.0).with_label("Hi");
         let long = Button::new(0.0, 0.0, 0.0, 0.0).with_label("A much longer button label");
 
-        let s = Element::intrinsic_size(&short).unwrap();
-        let l = Element::intrinsic_size(&long).unwrap();
+        let s = short.intrinsic_size().unwrap();
+        let l = long.intrinsic_size().unwrap();
         assert!(s.width > 16.0, "includes the horizontal insets");
         assert!(l.width > s.width, "longer label measures wider");
         assert_eq!(s.height, crate::layout::button_height());

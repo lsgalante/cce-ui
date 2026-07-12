@@ -192,21 +192,6 @@ pub trait Element {
     fn base_mut(&mut self) -> Option<&mut Widget> { None }
     fn preferred_height(&self) -> Option<f32> { None }
 
-    /// Opt-in layout style for the scene layout engine (Phase 2b). `None` (the default) means this
-    /// widget does not participate in engine-driven layout yet and keeps its legacy `set_rect`
-    /// path; return `Some(..)` to have the engine size/position it and its children. See
-    /// `scene::bridge`.
-    fn layout_style(&self) -> Option<crate::scene::layout::Style> { None }
-
-    /// Intrinsic content size of a leaf widget (e.g. measured text/icon) for the engine's measure
-    /// pass. Ignored for widgets that have children.
-    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> { None }
-
-    /// Per-child layout styles, for containers whose child sizing lives on the parent rather than
-    /// the children (e.g. `SplitBox` proportions). Returned in `children()` order; entry `i`
-    /// overrides child `i`'s own `layout_style`. `None` (default) means children use their own.
-    fn layout_children(&self) -> Option<Vec<crate::scene::layout::Style>> { None }
-
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
         let mut parent_id = None;
         if let Some(b) = self.base_mut() {
@@ -400,19 +385,16 @@ pub trait Element {
         }
     }
 
-    fn highlight_color(&self, ctx: &UiContext) -> Option<[f32; 4]> {
-        let is_focused = self.base().map(|b| ctx.is_focused_id(b.id())).unwrap_or(false);
-        if is_focused {
-            Some(colors::highlight_primary_color())
-        } else if self.hovered() {
-            Some(colors::HIGHLIGHT_SECONDARY)
-        } else {
-            None
-        }
-    }
-
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
-        let hc = self.highlight_color(ctx)?;
+        // Focus/hover highlight color, folded from the zero-override `highlight_color` (6bd).
+        let is_focused = self.base().map(|b| ctx.is_focused_id(b.id())).unwrap_or(false);
+        let hc = if is_focused {
+            colors::highlight_primary_color()
+        } else if self.hovered() {
+            colors::HIGHLIGHT_SECONDARY
+        } else {
+            return None;
+        };
         let label_x = self.label_x_offset();
         if let Some(b) = self.base() {
             let hx = if b.row_w > 0.0 { b.row_x } else { b.x } + label_x;
@@ -569,8 +551,6 @@ pub trait Element {
         }
     }
 
-    fn set_drag_bounds(&mut self, _bx: f32, _by: f32, _bw: f32, _bh: f32) {}
-
     fn focus(&mut self) {
         if let Some(b) = self.base_mut() {
             b.focused = true;
@@ -662,7 +642,6 @@ pub trait Element {
             if bl { r } else { 0.0 },
         )
     }
-    fn layout_ignore(&self) -> bool { false }
 }
 
 pub trait Control: Element {

@@ -7,7 +7,6 @@
 
 pub mod anim;
 pub mod arena;
-pub mod bridge;
 pub mod layout;
 pub mod paint;
 pub mod painter;

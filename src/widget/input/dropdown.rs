@@ -526,9 +526,6 @@ impl Adapted<Dropdown> {
 }
 
 impl Layout for Dropdown {
-    fn layout_ignore(&self) -> bool {
-        true
-    }
 
     fn z_order(&self) -> i32 {
         if self.open {

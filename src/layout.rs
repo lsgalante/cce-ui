@@ -3960,34 +3960,6 @@ impl Radial {
         }
     }
 
-    pub fn layout_widgets<T: Element + 'static>(&self, widgets: &mut [&mut T], ctx: &mut UiContext) {
-        let mut active_idx = 0;
-        for w in widgets.iter_mut() {
-            if !w.layout_ignore() {
-                let (_, _, ww, wh) = w.rect();
-                let use_w = if ww > 0.0 { ww } else { 100.0 };
-                let use_h = if wh > 0.0 { wh } else { 50.0 };
-                let (x, y, rw, rh) = self.widget_rect(active_idx, use_w, use_h);
-                w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(rw, rw, rh, rh), ctx);
-                active_idx += 1;
-            }
-        }
-    }
-
-    pub fn layout_widget_ptors(&self, widgets: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) {
-        let mut active_idx = 0;
-        for &w_ptr in widgets {
-            let w = unsafe { &mut *w_ptr };
-            if !w.layout_ignore() {
-                let (_, _, ww, wh) = w.rect();
-                let use_w = if ww > 0.0 { ww } else { 100.0 };
-                let use_h = if wh > 0.0 { wh } else { 50.0 };
-                let (x, y, rw, rh) = self.widget_rect(active_idx, use_w, use_h);
-                w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(rw, rw, rh, rh), ctx);
-                active_idx += 1;
-            }
-        }
-    }
 }
 
 

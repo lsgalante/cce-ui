@@ -98,9 +98,6 @@ Modules:
   `layout_tree` twin stores, keyed `WidgetId → NodeId` so the public `WidgetId` API is preserved.
 - `layout.rs` — the hand-rolled measure→arrange solver (`Style`/`Size`/`Rect`/`LayoutBox`).
   Deliberately **not** taffy: a compact row/column + flex + align + gap/padding box model.
-- `bridge.rs` — connects live `dyn Element` widgets to the pure layout solver. A widget opts in by
-  returning `Some` from `Element::layout_style`; leaves report `Element::intrinsic_size`. Widgets
-  returning `None` keep their legacy `set_rect` path — migration is one widget at a time.
 - `paint.rs` / `painter.rs` — `DisplayList` + `PaintCtx` (clip/transform stack) and the single
   paint walk. Each widget emits its own geometry via `Element::paint_self`; the walk owns recursion
   and clipping (`Element::clips_children`), instead of every container re-deriving intersections.

@@ -420,9 +420,6 @@ impl Adapted<MenuBar> {
 }
 
 impl Layout for MenuBar {
-    fn layout_ignore(&self) -> bool {
-        true
-    }
 
     fn z_order(&self) -> i32 {
         self.z_level

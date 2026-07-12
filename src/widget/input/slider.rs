@@ -183,9 +183,6 @@ impl Layout for Slider {
         false // legacy Slider::set_rect stored the assigned rect verbatim
     }
 
-    fn layout_ignore(&self) -> bool {
-        true
-    }
 
     fn intrinsic_size(&self) -> Option<Size> {
         Some(Size::new(0.0, crate::layout::slider_height()))
