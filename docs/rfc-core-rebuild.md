@@ -1638,13 +1638,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
     Header, VBox, HBox (export-only) and Svg — which also rode Button
     as an `Option<Svg>` payload no caller ever set, so Button's icon
     branches were statically dead and went too. All deleted.
+  - **Container DELETED (6ax part 2).** Settings' system-info
+    `actions_row` was a dead field; dm's `root_container` was a
+    transparent origin-anchored fan-out — dissolved into direct
+    dispatch/walk roots (session list first for events, matching the
+    reversed child order; card first for text, matching `children()`
+    order). dm A/B: background-animation phase only (B-vs-B control
+    differs full-frame), click behavior identical to baseline, 3/3
+    interaction rounds alive on both builds. One UNREPRODUCED
+    bogus-alloc seen once on the new build — dm's known latent
+    stale-pointer signature, 0/3 repro on either binary; watch it.
   - Then the remaining raw-`Element` surface — JsonLayoutWidget (cloud's
     host), Canvas (designer + preview), ButtonStrip (ctx-registered
-    embed of MenuBar/Paginator, load-bearing in the tree), Container
-    (dm root + settings system-info actions row), Viewport3D (designer),
-    and the app-local impls — either dissolves app-side or converts,
-    the `*mut dyn Element` tree/context machinery gets retyped, and
-    `Element` + `Adapted` die last.
+    embed of MenuBar/Paginator, load-bearing in the tree), Viewport3D
+    (designer), and the app-local impls — either dissolves app-side or
+    converts, the `*mut dyn Element` tree/context machinery gets
+    retyped, and `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
