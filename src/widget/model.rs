@@ -491,28 +491,34 @@ pub trait Input {
     // before these hooks existed keep their exact behavior; TextBox overrides with real
     // selection-aware implementations.
 
-    fn cut_selection(&mut self) -> bool {
-        if let Some(val) = self.value_string() {
-            crate::widget::clipboard::copy_to_clipboard(&val);
-            self.set_value_string("")
-        } else {
-            false
+    fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
+        match action {
+            crate::widget::ContextAction::Cut => {
+                if let Some(val) = self.value_string() {
+                    crate::widget::clipboard::copy_to_clipboard(&val);
+                    self.set_value_string("")
+                } else {
+                    false
+                }
+            }
+            crate::widget::ContextAction::Copy => {
+                if let Some(val) = self.value_string() {
+                    crate::widget::clipboard::copy_to_clipboard(&val);
+                    true
+                } else {
+                    false
+                }
+            }
+            crate::widget::ContextAction::Paste => {
+                if let Some(text) = crate::widget::clipboard::read_from_clipboard() {
+                    self.set_value_string(&text)
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
     }
-    fn copy_selection(&self) {
-        if let Some(val) = self.value_string() {
-            crate::widget::clipboard::copy_to_clipboard(&val);
-        }
-    }
-    fn paste_from_clipboard(&mut self) -> bool {
-        if let Some(text) = crate::widget::clipboard::read_from_clipboard() {
-            self.set_value_string(&text)
-        } else {
-            false
-        }
-    }
-    fn select_all(&mut self) {}
-    fn clear_text(&mut self) {}
 
     /// Whether direct `focus()`/`unfocus()` calls flip the base `focused` flag. Legacy widgets
     /// differ: most set it in their `focus` overrides, but TextBox never did — its detached
@@ -587,22 +593,6 @@ pub trait Input {
     // implements the trait. Dies with `Element`: the end state reaches a controller through the
     // concrete `Adapted<W>` (or a `&dyn XController` held directly), per RFC §3.5.
 
-
-    /// Copy this widget's path/content to the clipboard — the context menu's "Copy Path" action
-    /// calls `Element::copy_path` on its target (Breadcrumb is the only implementor).
-    fn copy_path(&self) {}
-
-    /// The tree context-menu actions ("Copy Key" / "Copy Value" / "Delete" / "Expand" /
-    /// "Collapse" / "Expand All" / "Collapse All") — the global context menu dispatches them
-    /// on its `dyn Element` target; `Adapted` forwards here. TreeList is the only implementor
-    /// (transitional, dies with the `Element` deletion like the controller hooks above).
-    fn copy_key(&self) {}
-    fn copy_value(&self) {}
-    fn delete_key(&mut self) {}
-    fn expand_node(&mut self) {}
-    fn collapse_node(&mut self) {}
-    fn expand_all_nodes(&mut self) {}
-    fn collapse_all_nodes(&mut self) {}
 
     /// Keyboard modifier state pushed in by hosts before dispatch (legacy
     /// `Element::set_modifiers`).
@@ -1348,20 +1338,8 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn set_selected(&mut self, selected: bool) {
         Input::set_selected(&mut self.inner, selected)
     }
-    fn cut_selection(&mut self) -> bool {
-        Input::cut_selection(&mut self.inner)
-    }
-    fn copy_selection(&self) {
-        Input::copy_selection(&self.inner)
-    }
-    fn paste_from_clipboard(&mut self) -> bool {
-        Input::paste_from_clipboard(&mut self.inner)
-    }
-    fn select_all(&mut self) {
-        Input::select_all(&mut self.inner)
-    }
-    fn clear_text(&mut self) {
-        Input::clear_text(&mut self.inner)
+    fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
+        Input::context_action(&mut self.inner, action)
     }
     /// Row-rect assignment (row-layout hosts): apply the widget's clamp
     /// ([`Layout::adjust_row_rect`] — TextBox's `width`/`max_width`), then the base write the
@@ -1420,33 +1398,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
         Input::set_drag_bounds(&mut self.inner, bx, by, bw, bh)
-    }
-
-    // --- Controller downcasts -> the `Input` capability hooks ---
-    fn copy_path(&self) {
-        Input::copy_path(&self.inner)
-    }
-
-    fn copy_key(&self) {
-        Input::copy_key(&self.inner)
-    }
-    fn copy_value(&self) {
-        Input::copy_value(&self.inner)
-    }
-    fn delete_key(&mut self) {
-        Input::delete_key(&mut self.inner)
-    }
-    fn expand_node(&mut self) {
-        Input::expand_node(&mut self.inner)
-    }
-    fn collapse_node(&mut self) {
-        Input::collapse_node(&mut self.inner)
-    }
-    fn expand_all_nodes(&mut self) {
-        Input::expand_all_nodes(&mut self.inner)
-    }
-    fn collapse_all_nodes(&mut self) {
-        Input::collapse_all_nodes(&mut self.inner)
     }
 
     // --- Legacy direct-dispatch entry points. Hosts (treelist's add-key button, parameters_bg's

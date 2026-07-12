@@ -1406,32 +1406,37 @@ impl Input for TextBox {
         self.set_value(val)
     }
 
-    fn cut_selection(&mut self) -> bool {
-        let res = self.cut_selection();
-        if res {
-            self.just_changed = true;
+    fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
+        use crate::widget::ContextAction as CA;
+        match action {
+            CA::Cut => {
+                let res = self.cut_selection();
+                if res {
+                    self.just_changed = true;
+                }
+                res
+            }
+            CA::Copy => {
+                self.copy_selection();
+                true
+            }
+            CA::Paste => {
+                let res = self.paste_from_clipboard();
+                if res {
+                    self.just_changed = true;
+                }
+                res
+            }
+            CA::SelectAll => {
+                self.select_all();
+                true
+            }
+            CA::ClearText => {
+                self.set_value("");
+                true
+            }
+            _ => false,
         }
-        res
-    }
-
-    fn copy_selection(&self) {
-        self.copy_selection();
-    }
-
-    fn paste_from_clipboard(&mut self) -> bool {
-        let res = self.paste_from_clipboard();
-        if res {
-            self.just_changed = true;
-        }
-        res
-    }
-
-    fn select_all(&mut self) {
-        self.select_all();
-    }
-
-    fn clear_text(&mut self) {
-        self.set_value("");
     }
 
     fn draggable(&self, _rect: Rect) -> bool {
@@ -1691,7 +1696,7 @@ mod tests {
         assert!(opts.contains(&"Cear".to_string()));
 
         // Simulate choosing the "Cear" option
-        Element::clear_text(&mut tb);
+        Element::context_action(&mut tb, crate::widget::ContextAction::ClearText);
         assert_eq!(tb.text, "");
         assert_eq!(tb.edit_buffer, "");
     }

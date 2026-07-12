@@ -185,10 +185,14 @@ impl Input for Breadcrumb {
     }
 
 
-    fn copy_path(&self) {
+    fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
+        if action != crate::widget::ContextAction::CopyPath {
+            return false;
+        }
         let idx = self.right_clicked_seg.unwrap_or(self.path.len());
         let path_str = self.path_to_seg(idx);
         crate::widget::clipboard::copy_to_clipboard(&path_str);
+        true
     }
 }
 

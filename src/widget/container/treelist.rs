@@ -1117,8 +1117,25 @@ impl Input for TreeList {
         }
     }
 
-    // The tree context-menu actions, dispatched by the global context menu through the
-    // adapter's Element forwards.
+    fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
+        use crate::widget::ContextAction as CA;
+        match action {
+            CA::CopyKey => self.copy_key(),
+            CA::CopyValue => self.copy_value(),
+            CA::DeleteKey => self.delete_key(),
+            CA::ExpandNode => self.expand_node(),
+            CA::CollapseNode => self.collapse_node(),
+            CA::ExpandAll => self.expand_all_nodes(),
+            CA::CollapseAll => self.collapse_all_nodes(),
+            _ => return false,
+        }
+        true
+    }
+}
+
+impl TreeList {
+    // The tree context-menu actions, dispatched by the global context menu through
+    // `Input::context_action`.
     fn copy_key(&self) {
         if let Some(idx) = self.selected_key_idx {
             if idx < self.flat_keys.len() {

@@ -492,47 +492,25 @@ pub mod context_menu {
                             if let Some(target_ptr) = ctx.tree.get_ptr(target_id) {
                                 unsafe {
                                     let target = &mut *target_ptr;
-                                    match opt.as_str() {
-                                        "Cut" => {
-                                            let _ = target.cut_selection();
-                                        }
-                                        "Copy" => {
-                                            target.copy_selection();
-                                        }
-                                        "Paste" => {
-                                            let _ = target.paste_from_clipboard();
-                                        }
-                                        "Select All" => {
-                                            target.select_all();
-                                        }
-                                        "Cear" => {
-                                            target.clear_text();
-                                        }
-                                        "Copy Key" => {
-                                            target.copy_key();
-                                        }
-                                        "Copy Value" => {
-                                            target.copy_value();
-                                        }
-                                        "Delete" => {
-                                            target.delete_key();
-                                        }
-                                        "Expand" => {
-                                            target.expand_node();
-                                        }
-                                        "Collapse" => {
-                                            target.collapse_node();
-                                        }
-                                        "Expand All" => {
-                                            target.expand_all_nodes();
-                                        }
-                                        "Collapse All" => {
-                                            target.collapse_all_nodes();
-                                        }
-                                        "Copy Path" => {
-                                            target.copy_path();
-                                        }
-                                        _ => {}
+                                    use crate::widget::ContextAction as CA;
+                                    let action = match opt.as_str() {
+                                        "Cut" => Some(CA::Cut),
+                                        "Copy" => Some(CA::Copy),
+                                        "Paste" => Some(CA::Paste),
+                                        "Select All" => Some(CA::SelectAll),
+                                        "Cear" => Some(CA::ClearText),
+                                        "Copy Key" => Some(CA::CopyKey),
+                                        "Copy Value" => Some(CA::CopyValue),
+                                        "Delete" => Some(CA::DeleteKey),
+                                        "Expand" => Some(CA::ExpandNode),
+                                        "Collapse" => Some(CA::CollapseNode),
+                                        "Expand All" => Some(CA::ExpandAll),
+                                        "Collapse All" => Some(CA::CollapseAll),
+                                        "Copy Path" => Some(CA::CopyPath),
+                                        _ => None,
+                                    };
+                                    if let Some(action) = action {
+                                        let _ = target.context_action(action);
                                     }
                                 }
                             }

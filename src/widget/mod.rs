@@ -75,6 +75,25 @@ pub enum Justification {
     Right,
 }
 
+/// A context-menu action dispatched on the menu's target widget (6bd phase 1: one enum
+/// replaces the 13 per-action `Element` methods). `ClearText` is the search-box "Cear" item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ContextAction {
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+    ClearText,
+    CopyKey,
+    CopyValue,
+    CopyPath,
+    DeleteKey,
+    ExpandNode,
+    CollapseNode,
+    ExpandAll,
+    CollapseAll,
+}
+
 use crate::colors;
 use std::sync::atomic::AtomicUsize;
 use std::collections::HashMap;
@@ -285,36 +304,12 @@ pub trait Element {
     fn set_value_string(&mut self, _val: &str) -> bool { false }
     fn take_change(&mut self) -> bool { false }
 
-    fn cut_selection(&mut self) -> bool {
-        if let Some(val) = self.get_value_string() {
-            clipboard::copy_to_clipboard(&val);
-            self.set_value_string("")
-        } else {
-            false
-        }
+    /// Dispatch a context-menu action on this widget. Returns whether it was applied.
+    /// Default inert; the adapter forwards to `Input::context_action` (whose default gives
+    /// every widget whole-value Cut/Copy/Paste through the value-string pair).
+    fn context_action(&mut self, _action: ContextAction) -> bool {
+        false
     }
-    fn copy_selection(&self) {
-        if let Some(val) = self.get_value_string() {
-            clipboard::copy_to_clipboard(&val);
-        }
-    }
-    fn paste_from_clipboard(&mut self) -> bool {
-        if let Some(text) = clipboard::read_from_clipboard() {
-            self.set_value_string(&text)
-        } else {
-            false
-        }
-    }
-    fn select_all(&mut self) {}
-    fn clear_text(&mut self) {}
-    fn copy_key(&self) {}
-    fn copy_value(&self) {}
-    fn copy_path(&self) {}
-    fn delete_key(&mut self) {}
-    fn expand_node(&mut self) {}
-    fn collapse_node(&mut self) {}
-    fn expand_all_nodes(&mut self) {}
-    fn collapse_all_nodes(&mut self) {}
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         if let Some(b) = self.base_mut() {
