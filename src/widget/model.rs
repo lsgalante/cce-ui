@@ -1,26 +1,26 @@
-//! Narrow, single-concern widget traits + an adapter into the legacy `Element` tree — Phase 5 of
+//! Narrow, single-concern widget traits + an adapter into the legacy `WidgetHost` tree — Phase 5 of
 //! the core rebuild (see `docs/rfc-core-rebuild.md` §3.5 and §5).
 //!
-//! Phase 5 replaces the ~123-method [`Element`] god-trait with small traits, one per concern. A
-//! *non-breaking supertrait carve-out* of `Element` is not possible in Rust, for two reasons found
+//! Phase 5 replaces the ~123-method [`WidgetHost`] god-trait with small traits, one per concern. A
+//! *non-breaking supertrait carve-out* of `WidgetHost` is not possible in Rust, for two reasons found
 //! by experiment:
 //!
 //! 1. The structural methods the layout/paint passes need (`rect`, `children`, `set_rect`, …) are
 //!    overridden in dozens of widgets across cce-ui **and** the app crates. Moving them off
-//!    `Element` breaks every override; merely *declaring* them on a supertrait breaks every call
+//!    `WidgetHost` breaks every override; merely *declaring* them on a supertrait breaks every call
 //!    site too, because a supertrait method is always in scope on the subtrait — `elem.children()`
-//!    on a `&dyn Element` becomes ambiguous.
+//!    on a `&dyn WidgetHost` becomes ambiguous.
 //! 2. Trait-object coercion does not offer a way around it: a blanket "view" impl
-//!    `impl<T: Element> Paint for T` does **not** let `&dyn Element` coerce to `&dyn Paint`
+//!    `impl<T: WidgetHost> Paint for T` does **not** let `&dyn WidgetHost` coerce to `&dyn Paint`
 //!    (that coercion only exists for real supertraits).
 //!
 //! So we take the RFC's recommended **adapter** path. The traits here — [`Layout`] and [`Paint`] —
-//! are *independent* of `Element` (no super/sub relationship). A widget written against them is
-//! placed into the existing `*mut dyn Element` tree by wrapping it in [`Adapted`], whose `Element`
+//! are *independent* of `WidgetHost` (no super/sub relationship). A widget written against them is
+//! placed into the existing `*mut dyn WidgetHost` tree by wrapping it in [`Adapted`], whose `WidgetHost`
 //! impl forwards each legacy method to the matching narrow-trait method and supplies the
-//! [`Widget`] base that `Element`'s rect/id/dirty machinery reads. Existing `impl Element` widgets
+//! [`Widget`] base that `WidgetHost`'s rect/id/dirty machinery reads. Existing `impl WidgetHost` widgets
 //! are untouched; new or migrated widgets implement only the concern traits they need; both kinds
-//! coexist in one tree. When the last widget is migrated, `Element` and this adapter are deleted.
+//! coexist in one tree. When the last widget is migrated, `WidgetHost` and this adapter are deleted.
 //!
 //! This commit lands the two concerns the scene passes already consume: [`Layout`] drives
 //! [`crate::scene::bridge`] and [`Paint`] drives [`crate::scene::painter`]. The input/event
@@ -29,7 +29,7 @@
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::{PaintCtx, Prim};
 use crate::widget::{
-    Element, Event, TextLabel, UiContext, Widget, WidgetId,
+    WidgetHost, Event, TextLabel, UiContext, Widget, WidgetId,
 };
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
@@ -63,24 +63,24 @@ pub trait Layout {
         0.0
     }
 
-    /// Whether `Element::measure` should prefer [`intrinsic_size`](Layout::intrinsic_size)'s
+    /// Whether `WidgetHost::measure` should prefer [`intrinsic_size`](Layout::intrinsic_size)'s
     /// width over the current rect width (Dropdown's `auto_width` measure override — hosts size
     /// it from `measure`, e.g. cce-system-settings' page dropdown). Default: keep the legacy
-    /// `Element::measure` width (the current rect's).
+    /// `WidgetHost::measure` width (the current rect's).
     fn intrinsic_measure_width(&self) -> bool {
         false
     }
 
     /// Whether the adapter's hit test substitutes the base row rect (`row_x`/`row_w`, pushed in
     /// by row-layout hosts via `set_row_rect`) plus the side-label inset — the legacy
-    /// `Element::hit_test` default geometry. Migrated controls so far dropped it (accepted
+    /// `WidgetHost::hit_test` default geometry. Migrated controls so far dropped it (accepted
     /// drift); TextBox restores it (cce-files' save-name box relies on row hits). Default: off,
     /// keeping the other migrated widgets exactly as they shipped.
     fn hit_row_rect(&self) -> bool {
         false
     }
 
-    /// Adjust a row-rect assignment before it lands on the base (`Element::set_row_rect` —
+    /// Adjust a row-rect assignment before it lands on the base (`WidgetHost::set_row_rect` —
     /// TextBox clamps the row width to its `width`/`max_width`). Default: identity.
     fn adjust_row_rect(&self, x: f32, w: f32) -> (f32, f32) {
         (x, w)
@@ -92,14 +92,14 @@ pub trait Layout {
     /// re-clamps its scroll, the legacy `set_rect` side effect. Default: ignore.
     fn rect_assigned(&mut self, _rect: Rect) {}
 
-    // --- Container concern (transitional). Legacy containers own `Vec<*mut dyn Element>`
+    // --- Container concern (transitional). Legacy containers own `Vec<*mut dyn WidgetHost>`
     // children (child-arranging `set_rect` has no ctx to reach the tree) and every one
     // hand-copies the same subtree plumbing: geometry/text aggregation, tick/popover/text-item
     // recursion, hit-through-children. A migrated container keeps the pointer Vec in its model
     // (exposed through these hooks) and the ADAPTER does the shared plumbing once, filtered by
     // `child_visible`. What stays per-widget: child arrangement (`arrange_children` /
     // `layout_children_ctx`) and any event proxying (in `on_event`, via `EventCtx::ui`).
-    // Dies with `Element`: the arena owns the tree and the scene walk owns recursion.
+    // Dies with `WidgetHost`: the arena owns the tree and the scene walk owns recursion.
 
     /// Whether this widget is a container serving
     /// [`container_children`](Layout::container_children). Cheap gate, checked per getter.
@@ -108,7 +108,7 @@ pub trait Layout {
     }
 
     /// The container's child pointers, in stacking order.
-    fn container_children(&self) -> Vec<*mut (dyn Element + 'static)> {
+    fn container_children(&self) -> Vec<*mut (dyn WidgetHost + 'static)> {
         Vec::new()
     }
 
@@ -120,17 +120,17 @@ pub trait Layout {
 
     /// Position children after a `set_rect` (no ctx available — use the owned pointers).
     /// Called only while the widget is visible, matching the legacy overrides. `host` is the
-    /// adapter's `*mut dyn Element` — widgets that embed a legacy child (MenuBar's
+    /// adapter's `*mut dyn WidgetHost` — widgets that embed a legacy child (MenuBar's
     /// ButtonStrip) parent it back to the host so legacy parent-chain styling walks work.
-    fn arrange_children(&mut self, _rect: Rect, _host: *mut (dyn Element + 'static)) {}
+    fn arrange_children(&mut self, _rect: Rect, _host: *mut (dyn WidgetHost + 'static)) {}
 
     /// Per-child visibility policy for the adapter's subtree plumbing (Switcher exposes only
     /// the active child). Default: every child.
-    fn child_visible(&self, _child: *mut (dyn Element + 'static)) -> bool {
+    fn child_visible(&self, _child: *mut (dyn WidgetHost + 'static)) -> bool {
         true
     }
 
-    /// Legacy `Element::z_index` (host render ordering; MenuBar's dropdowns layer at 100+).
+    /// Legacy `WidgetHost::z_index` (host render ordering; MenuBar's dropdowns layer at 100+).
     fn z_order(&self) -> i32 {
         0
     }
@@ -141,13 +141,13 @@ pub trait Layout {
     /// `Vec` reallocation) — and the registration is load-bearing: the spatial grid is rebuilt
     /// from registered widgets, and it is the registered ButtonStrip (whose
     /// `blocks_backplate_drag` is true) that makes the sidebar block backplate drags. The
-    /// adapter calls this from `Element::tick` and `Element::layout`, mirroring the legacy
+    /// adapter calls this from `WidgetHost::tick` and `WidgetHost::layout`, mirroring the legacy
     /// cadence. `host_id` is the adapter's id, for `link_ids`. Default: nothing embedded.
     fn register_embedded_children(&mut self, _host_id: WidgetId, _ctx: &mut UiContext) {}
 }
 
 /// The paint concern — a widget's fill color, its own (non-recursive) geometry emission, and
-/// whether it clips its children. Mirrors `Element::color` / `paint_self` / `clips_children`, but
+/// whether it clips its children. Mirrors `WidgetHost::color` / `paint_self` / `clips_children`, but
 /// [`paint`](Paint::paint) receives the laid-out `rect` as a parameter (the RFC shape) rather than
 /// reading a stored rect, so a narrow widget carries no base of its own.
 pub trait Paint {
@@ -175,7 +175,7 @@ pub trait Paint {
     /// laid-out rect (MenuBar's corners depend on where it sits against its parent's edges).
     /// **Transitional:** this exists only for legacy render paths that draw widget backgrounds
     /// themselves from style properties (`widget_vertices` / `push_widget_vertices` readers of
-    /// `Element::corner_radius` + `rounded_corners`) — the widget's real geometry is whatever
+    /// `WidgetHost::corner_radius` + `rounded_corners`) — the widget's real geometry is whatever
     /// [`paint`](Paint::paint) emits. Dies with those paths. Default: sharp corners.
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
         None
@@ -188,7 +188,7 @@ pub trait Paint {
         None
     }
 
-    /// Draw this widget's own popover (legacy `Element::render_popover`).
+    /// Draw this widget's own popover (legacy `WidgetHost::render_popover`).
     fn draw_popover(&self, _rect: Rect, _pc: &mut dyn crate::layout::RenderTarget) {}
 
     /// Solid border `(color, thickness)` of the widget's background quad. **Transitional**, like
@@ -199,7 +199,7 @@ pub trait Paint {
     }
 
     /// Font for this widget's text on legacy text paths (`render_widget` reads
-    /// `Element::widget_font`). **Transitional.**
+    /// `WidgetHost::widget_font`). **Transitional.**
     fn widget_font(&self) -> Option<String> {
         None
     }
@@ -228,7 +228,7 @@ pub trait Paint {
     // getters. A migrated widget emits the rounded view from `paint`; when it also serves a
     // plain view, the adapter returns it verbatim from `extra_quads` and empties `all_quads`
     // (mirroring legacy Graph's highlight-only override) so render_widget-style hosts that
-    // read BOTH getters never draw the geometry twice. Dies with `Element`.
+    // read BOTH getters never draw the geometry twice. Dies with `WidgetHost`.
 
     /// Whether this widget serves [`legacy_plain_quads`](Paint::legacy_plain_quads).
     fn serves_legacy_plain_quads(&self) -> bool {
@@ -248,7 +248,7 @@ pub trait Paint {
         None
     }
 
-    /// Per-frame text shaping against the app's `FontSystem` (legacy `Element::prepare_text`
+    /// Per-frame text shaping against the app's `FontSystem` (legacy `WidgetHost::prepare_text`
     /// overrides). TextBox measures its glyph advances here — load-bearing for cursor↔pixel
     /// mapping, not just a render cache. Receives the laid-out content rect. Default: nothing
     /// to shape.
@@ -256,7 +256,7 @@ pub trait Paint {
 
     /// Whether [`paint`](Paint::paint) emits the widget's ENTIRE subtree, so the paint walk
     /// must not also descend into its (ctx-linked) children — the legacy
-    /// `Element::renders_own_subtree` contract. TreeList: its field widgets stay ctx-linked
+    /// `WidgetHost::renders_own_subtree` contract. TreeList: its field widgets stay ctx-linked
     /// for event propagation, but their pixels come from `paint`'s own child pass (which
     /// gates the add-key popover box on the popover actually being open).
     fn paints_own_subtree(&self) -> bool {
@@ -265,7 +265,7 @@ pub trait Paint {
 
 
     /// Whether the adapter re-enables the legacy shared focus/hover highlight overlay
-    /// (`Element::highlight_quad`'s default) for this widget. The adapter suppresses it for
+    /// (`WidgetHost::highlight_quad`'s default) for this widget. The adapter suppresses it for
     /// migrated widgets — matching the `None` overrides most legacy controls carried — but
     /// legacy TextBox kept the default: the focused editor gets the primary-highlight tint
     /// over its background (data-editor's teal editing wash). Default: suppressed.
@@ -284,7 +284,7 @@ pub trait Paint {
         false
     }
 
-    /// Forward the legacy `Element::highlight_quad` to somewhere else entirely — Paginator
+    /// Forward the legacy `WidgetHost::highlight_quad` to somewhere else entirely — Paginator
     /// served its ButtonStrip's highlight (the hovered-tab tint cce-layout-interface draws by
     /// calling `highlight_quad` directly). Outer `Some` replaces the adapter's highlight logic
     /// with the inner value; `None` (default) keeps the standard behavior
@@ -332,7 +332,7 @@ pub struct EventCtx<'a> {
     /// The routing context, when routed. **Transitional** — narrow widgets should only touch the
     /// legacy shared fields (scroll gesture state) until those get typed helpers here.
     pub ui: Option<&'a mut UiContext>,
-    self_ptr: Option<*mut (dyn Element + 'static)>,
+    self_ptr: Option<*mut (dyn WidgetHost + 'static)>,
 }
 
 impl EventCtx<'_> {
@@ -365,14 +365,14 @@ impl EventCtx<'_> {
     /// The adapter's pointer, for legacy sites that must hand it onward — TreeList makes
     /// itself the focus target (`set_focused_ptr`) and the context-menu target
     /// (`show_context_menu`) with the pointer hosts registered. Transitional; dies with
-    /// `Element`. None outside a routed path.
-    pub(crate) fn host_ptr(&self) -> Option<*mut (dyn Element + 'static)> {
+    /// `WidgetHost`. None outside a routed path.
+    pub(crate) fn host_ptr(&self) -> Option<*mut (dyn WidgetHost + 'static)> {
         self.self_ptr
     }
 }
 
 /// The input concern — hit-testing and event handling against the laid-out rect. Mirrors the
-/// legacy `Element::hit_test` / `handle_event` pair, but with the RFC's centralizations: the
+/// legacy `WidgetHost::hit_test` / `handle_event` pair, but with the RFC's centralizations: the
 /// default hit is plain rect containment (no per-widget address hacks), and pointer-positioned
 /// events are hit-gated by the adapter *before* they reach [`on_event`](Input::on_event), so a
 /// narrow widget never re-implements the "am I actually under the cursor?" boilerplate that every
@@ -396,7 +396,7 @@ pub trait Input {
 
     /// Whether pressing on this widget blocks dragging the movable backplate under it. Passive
     /// display widgets (separators, status dots) return `false` so drags pass through them.
-    /// Default: `true`, matching the legacy `Element` default.
+    /// Default: `true`, matching the legacy `WidgetHost` default.
     fn blocks_backplate_drag(&self) -> bool {
         true
     }
@@ -447,13 +447,13 @@ pub trait Input {
         false
     }
 
-    /// The widget's value as an integer (legacy `Element::value`).
+    /// The widget's value as an integer (legacy `WidgetHost::value`).
     fn value(&self) -> i32 {
         0
     }
 
     // --- Clipboard/selection surface (the context menu's Cut/Copy/Paste/Select-All actions
-    // call these on their target Element). The defaults replicate the `Element` defaults
+    // call these on their target WidgetHost). The defaults replicate the `WidgetHost` defaults
     // byte-for-byte (whole-value copy through the value-string pair), so widgets migrated
     // before these hooks existed keep their exact behavior; TextBox overrides with real
     // selection-aware implementations.
@@ -495,7 +495,7 @@ pub trait Input {
         true
     }
 
-    /// Selection state pushed in by list/row hosts (legacy `Element::set_selected`).
+    /// Selection state pushed in by list/row hosts (legacy `WidgetHost::set_selected`).
     fn set_selected(&mut self, _selected: bool) {}
 
     // --- Drag surface: legacy hosts (designer, control_panel, parameters_bg, graph, audio…)
@@ -523,7 +523,7 @@ pub trait Input {
     /// Movement bounds pushed in by hosts (reached via the inherent `Adapted::set_drag_bounds`).
     fn set_drag_bounds(&mut self, _bx: f32, _by: f32, _bw: f32, _bh: f32) {}
 
-    // --- Tick surface: hosts broadcast `Element::tick(dt)` every frame (the designer's render
+    // --- Tick surface: hosts broadcast `WidgetHost::tick(dt)` every frame (the designer's render
     // loop) to advance time-based widget state — inertial scroll velocity, here. Transitional:
     // §3.6 `Animated<T>` + arena-driven frame requests replace hand-ticked state.
 
@@ -542,35 +542,35 @@ pub trait Input {
     }
 
     /// Whether this widget wants `tick` calls from tick-gating hosts (legacy
-    /// `Element::wants_tick`; the designer ticks unconditionally and ignores this).
+    /// `WidgetHost::wants_tick`; the designer ticks unconditionally and ignores this).
     fn wants_tick(&self) -> bool {
         false
     }
 
-    /// Whether this widget consumes scroll gestures (legacy `Element::is_scrollable`, read by
+    /// Whether this widget consumes scroll gestures (legacy `WidgetHost::is_scrollable`, read by
     /// the router's scroll-gesture gating).
     fn scrollable(&self) -> bool {
         false
     }
 
     // --- Controller capabilities (transitional, like the polling surface above). The legacy
-    // tree reaches a widget's typed API through the `Element::as_*_controller` downcast pairs;
-    // `Element` is implemented exactly once (for `Adapted<W>`), so a migrated controller widget
+    // tree reaches a widget's typed API through the `WidgetHost::as_*_controller` downcast pairs;
+    // `WidgetHost` is implemented exactly once (for `Adapted<W>`), so a migrated controller widget
     // re-exposes its controller impl through these hooks instead — `Some(self)` when `W`
-    // implements the trait. Dies with `Element`: the end state reaches a controller through the
+    // implements the trait. Dies with `WidgetHost`: the end state reaches a controller through the
     // concrete `Adapted<W>` (or a `&dyn XController` held directly), per RFC §3.5.
 
 
     /// Keyboard modifier state pushed in by hosts before dispatch (legacy
-    /// `Element::set_modifiers`).
+    /// `WidgetHost::set_modifiers`).
     fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
 
-    /// The widget's visibility flag changed through `Element::set_visible` (the adapter owns
+    /// The widget's visibility flag changed through `WidgetHost::set_visible` (the adapter owns
     /// the flag) — legacy hideable widgets used the setter for side effects (MenuBar closes
     /// its dropdowns and invalidates layout).
     fn visibility_changed(&mut self, _visible: bool) {}
 
-    /// The widget's `Element::focused` answer, given the base flag — MenuBar reports focused
+    /// The widget's `WidgetHost::focused` answer, given the base flag — MenuBar reports focused
     /// while any of its dropdowns is open, beyond the flag itself. Default: the flag.
     fn is_focused(&self, base_focused: bool) -> bool {
         base_focused
@@ -578,20 +578,20 @@ pub trait Input {
 
 }
 
-/// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
-/// [`Widget`] base that `Element`'s rect / id / dirty machinery needs, and forwards the concern
+/// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn WidgetHost` tree. Carries the
+/// [`Widget`] base that `WidgetHost`'s rect / id / dirty machinery needs, and forwards the concern
 /// methods to `W`. See the module docs for why this bridge exists rather than a supertrait split.
 ///
-/// The bounds live on the struct (not just the `Element` impl) so `Drop` can clear the global
-/// focus / context-menu references through `&dyn Element` — the same guard legacy widgets with
+/// The bounds live on the struct (not just the `WidgetHost` impl) so `Drop` can clear the global
+/// focus / context-menu references through `&dyn WidgetHost` — the same guard legacy widgets with
 /// `Drop` impls (e.g. the old `Checkbox`) carried.
 #[derive(Debug, Clone)]
 pub struct Adapted<W: Layout + Paint + Input + 'static> {
     base: Widget,
-    /// The [`Widget`] base carries no visibility, and the legacy `Element` defaults are a no-op
+    /// The [`Widget`] base carries no visibility, and the legacy `WidgetHost` defaults are a no-op
     /// `set_visible` + always-true `visible()` — every hideable legacy widget stores its own
     /// flag. The adapter owns it once for all migrated widgets: hosts toggle panes through
-    /// `Element::set_visible` (the designer), and the hit-test/render bridges gate on it.
+    /// `WidgetHost::set_visible` (the designer), and the hit-test/render bridges gate on it.
     visible: bool,
     inner: W,
 }
@@ -677,22 +677,22 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
 }
 
 impl<W: Layout + Paint + Input + 'static> Adapted<W> {
-    /// Movement bounds pushed in by hosts (off the `Element` trait since 6bd — the one
+    /// Movement bounds pushed in by hosts (off the `WidgetHost` trait since 6bd — the one
     /// production caller is concrete: designer's network panel).
     pub fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
         Input::set_drag_bounds(&mut self.inner, bx, by, bw, bh)
     }
 
-    /// Unlink all tree children (off `Element` in 6bd batch 2 — every caller is a concrete
+    /// Unlink all tree children (off `WidgetHost` in 6bd batch 2 — every caller is a concrete
     /// `Adapted` field).
     pub fn clear_children(&mut self, ctx: &mut UiContext) {
         ctx.clear_children_ids(self.base.id());
     }
 
-    /// Register + link a child under this widget (off `Element` in 6bd batch 4; dyn callers
+    /// Register + link a child under this widget (off `WidgetHost` in 6bd batch 4; dyn callers
     /// went to `focus::link_parent_child`/tree ops).
-    pub fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
-        // The old Element default's tree link…
+    pub fn add_child(&mut self, child: *mut (dyn WidgetHost + 'static), ctx: &mut UiContext) {
+        // The old WidgetHost default's tree link…
         let c_id = unsafe { (*child).base().id() };
         let p_id = self.base.id();
         let self_ptr = self.as_ptr();
@@ -709,9 +709,9 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         }
     }
 
-    /// Register + (un)link this widget under a parent (off `Element` in 6bd batch 4).
-    pub fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        // Replica of the old Element default: symmetric tree link.
+    /// Register + (un)link this widget under a parent (off `WidgetHost` in 6bd batch 4).
+    pub fn set_parent(&mut self, parent: Option<*mut (dyn WidgetHost + 'static)>, ctx: &mut UiContext) {
+        // Replica of the old WidgetHost default: symmetric tree link.
         let id = self.base.id();
         if let Some(p_ptr) = parent {
             let p_id = unsafe { (*p_ptr).base().id() };
@@ -724,7 +724,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         }
     }
 
-    /// The model's intrinsic content size (off the `Element` trait since 6bd — the concrete
+    /// The model's intrinsic content size (off the `WidgetHost` trait since 6bd — the concrete
     /// callers are fonts'/graph's hand-laid button/dropdown sizing).
     pub fn intrinsic_size(&self) -> Option<Size> {
         Layout::intrinsic_size(&self.inner)
@@ -756,7 +756,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// The container's children that pass the [`Layout::child_visible`] policy — the set the
     /// adapter's subtree plumbing (aggregation, recursion, hit-through) operates on. Empty for
     /// non-containers.
-    fn visible_children(&self) -> Vec<*mut (dyn Element + 'static)> {
+    fn visible_children(&self) -> Vec<*mut (dyn WidgetHost + 'static)> {
         if !Layout::has_container_children(&self.inner) {
             return Vec::new();
         }
@@ -830,14 +830,14 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     }
 
     /// The base-label text of a *detached*-label widget — a replica of the legacy default
-    /// `Element::text_labels` body (which an overriding impl can no longer call).
+    /// `WidgetHost::text_labels` body (which an overriding impl can no longer call).
     fn base_label_fallback(&self) -> Vec<TextLabel> {
         let b = &self.base;
         if let Some(ref label) = b.label {
             let (_, font_size) = crate::layout::control_label_font_detached_parsed();
             let color = crate::colors::control_label_color_detached_for_state(b.hovered, b.focused);
             if crate::layout::control_label_layout() == "side" {
-                let label_x = Element::label_x_offset(self);
+                let label_x = WidgetHost::label_x_offset(self);
                 if label_x > 0.0 {
                     let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
                     return vec![TextLabel { text: label.clone(), x: b.x + 4.0, y: y_pos, font_size, color }];
@@ -867,7 +867,7 @@ impl<W: Layout + Paint + Input + 'static> std::ops::DerefMut for Adapted<W> {
     }
 }
 
-impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
+impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     fn base(&self) -> &Widget {
         &self.base
     }
@@ -882,11 +882,11 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         &mut self.inner
     }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        self as *const Self as *mut Self as *mut (dyn Element + 'static)
+    fn as_ptr(&self) -> *mut (dyn WidgetHost + 'static) {
+        self as *const Self as *mut Self as *mut (dyn WidgetHost + 'static)
     }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        self as *mut Self as *mut (dyn Element + 'static)
+    fn as_ptr_mut(&mut self) -> *mut (dyn WidgetHost + 'static) {
+        self as *mut Self as *mut (dyn WidgetHost + 'static)
     }
 
     fn set_visible(&mut self, visible: bool) {
@@ -900,11 +900,11 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     // --- Container concern: tree lifecycle, child layout, and subtree recursion. The tree
-    // itself stays in `ctx.tree` (the Element defaults' store); a container model additionally
+    // itself stays in `ctx.tree` (the WidgetHost defaults' store); a container model additionally
     // keeps its own pointer Vec via the `Layout` hooks, because `set_rect`-time arrangement
     // has no ctx to reach the tree.
 
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn WidgetHost + 'static)> {
         if Layout::has_container_children(&self.inner) {
             return Layout::container_children(&self.inner);
         }
@@ -927,7 +927,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Layout::z_order(&self.inner)
     }
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
+    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn WidgetHost + 'static)> {
         ctx.tree.parent_ptr(self.base.id())
     }
 
@@ -941,7 +941,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
 
 
     fn layout(&mut self, origin: crate::widget::Point, constraints: crate::widget::LayoutConstraints, ctx: &mut UiContext) {
-        // The Element default (measure + set_rect), plus recursive child layout for visible
+        // The WidgetHost default (measure + set_rect), plus recursive child layout for visible
         // containers — the ctx-carrying half of the arrangement the model can't do in
         // `arrange_children`.
         let size = self.measure(constraints, ctx);
@@ -1012,7 +1012,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Layout::intrinsic_size(&self.inner).map(|s| s.height)
     }
 
-    /// The `Element::measure` default, except the width consults the intrinsic size when the
+    /// The `WidgetHost::measure` default, except the width consults the intrinsic size when the
     /// widget opts in ([`Layout::intrinsic_measure_width`] — Dropdown's `auto_width`).
     fn measure(&self, constraints: crate::widget::LayoutConstraints, _ctx: &UiContext) -> crate::widget::Size {
         let (_, _, w, h) = self.rect();
@@ -1032,7 +1032,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// hover-highlight overlay is suppressed (matching what most control widgets' `None`
     /// overrides do today) — unless the widget opts back in
     /// ([`Paint::legacy_focus_highlight`], TextBox), in which case this replicates the
-    /// `Element` default byte-for-byte: primary tint when ctx-focused (or active), secondary
+    /// `WidgetHost` default byte-for-byte: primary tint when ctx-focused (or active), secondary
     /// when hovered, over the row-substituted, side-label-inset span.
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         // A forwarding widget (Paginator → its ButtonStrip) serves the forwarded value here —
@@ -1052,7 +1052,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         } else {
             return None;
         };
-        let label_x = Element::label_x_offset(self);
+        let label_x = WidgetHost::label_x_offset(self);
         let hx = if self.base.row_w > 0.0 { self.base.row_x } else { self.base.x } + label_x;
         let hw = if self.base.row_w > 0.0 { self.base.row_w } else { self.base.w } - label_x;
         Some((hx, self.base.y, hw, self.base.h, hc))
@@ -1064,7 +1064,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         std::any::type_name::<W>().split("::").last().unwrap_or("Widget")
     }
 
-    /// Text-content mutation (legacy `Element::set_text` wrote only `base.label`): keep the base
+    /// Text-content mutation (legacy `WidgetHost::set_text` wrote only `base.label`): keep the base
     /// copy and the widget's own copy ([`Paint::sync_label`]) in step, like `set_label`.
     fn set_text(&mut self, text: &str) {
         self.base.label = Some(text.to_string());
@@ -1079,7 +1079,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Paint::clips_children(&self.inner)
     }
     fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
-        // 12.0 / all-off mirrors the `Element` default for widgets without a corner style.
+        // 12.0 / all-off mirrors the `WidgetHost` default for widgets without a corner style.
         Paint::corner_style(&self.inner, self.content_rect())
             .unwrap_or((12.0, (false, false, false, false)))
     }
@@ -1125,7 +1125,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         // highlight — replicate for opt-in widgets, over the background (same draw order).
         // Forwarded highlights stay out: the paint walk reaches the owning child itself.
         if Paint::legacy_focus_highlight(&self.inner) {
-            if let Some((hx, hy, hw, hh, hc)) = Element::highlight_quad(self, ui) {
+            if let Some((hx, hy, hw, hh, hc)) = WidgetHost::highlight_quad(self, ui) {
                 if hc != crate::colors::HIGHLIGHT_SECONDARY {
                     ctx.quad(Rect { x: hx, y: hy, width: hw, height: hh }, hc);
                 }
@@ -1148,7 +1148,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
     }
 
-    // The legacy per-widget text getters are deleted from `Element`: this adapter's text
+    // The legacy per-widget text getters are deleted from `WidgetHost`: this adapter's text
     // reaches the frame through `paint_self` above (prim-derived own labels + the
     // detached base label), and composites that need a concrete Adapted child's labels
     // call `own_labels_with_font_and_bounds` directly (pub(crate)).
@@ -1175,7 +1175,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
                 _ => None,
             })
             .collect();
-        // Containers recurse, matching the `Element` default this override replaces.
+        // Containers recurse, matching the `WidgetHost` default this override replaces.
         for child in self.visible_children() {
             out.extend(unsafe { &*child }.all_rounded_quads(ctx));
         }
@@ -1204,7 +1204,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     /// When the widget serves a legacy plain-quad view, its geometry reaches
     /// `render_widget`-style hosts (which read BOTH quad getters) through `all_rounded_quads`
     /// only — `all_quads` must stay empty or they draw it twice. Mirrors legacy Graph's
-    /// highlight-only `all_quads` override. Otherwise: the `Element` default minus the shared
+    /// highlight-only `all_quads` override. Otherwise: the `WidgetHost` default minus the shared
     /// highlight (suppressed for all adapted widgets via `highlight_quad -> None`).
     fn all_quads(&self, ctx: &UiContext) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         if Paint::serves_legacy_plain_quads(&self.inner) {
@@ -1213,12 +1213,12 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         // Own prims directly (NOT `extra_quads`, which may serve the child aggregation — those
         // children arrive once, through the recursion below).
         let mut quads = if self.visible() { self.own_plain_quads() } else { Vec::new() };
-        // The `Element` default's highlight inclusion (secondary/hover tint excluded), live
+        // The `WidgetHost` default's highlight inclusion (secondary/hover tint excluded), live
         // only for widgets that opt into the legacy overlay. A forwarded highlight
         // ([`Paint::forwarded_highlight`]) is deliberately excluded: its owner's aggregation
         // already carries it, matching the legacy container `all_quads` overrides.
         if Paint::legacy_focus_highlight(&self.inner) {
-            if let Some(hq) = Element::highlight_quad(self, ctx) {
+            if let Some(hq) = WidgetHost::highlight_quad(self, ctx) {
                 if hq.4 != crate::colors::HIGHLIGHT_SECONDARY {
                     quads.push(hq);
                 }
@@ -1303,7 +1303,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     /// Row-rect assignment (row-layout hosts): apply the widget's clamp
     /// ([`Layout::adjust_row_rect`] — TextBox's `width`/`max_width`), then the base write the
-    /// `Element` default does.
+    /// `WidgetHost` default does.
     fn set_row_rect(&mut self, x: f32, w: f32) {
         let (rx, rw) = Layout::adjust_row_rect(&self.inner, x, w);
         self.base.row_x = rx;
@@ -1358,7 +1358,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
     // --- Legacy direct-dispatch entry points. Hosts (treelist's add-key button, parameters_bg's
     // checkboxes, app pages) call these ON the widget instead of routing an Event through
-    // `propagate_event`; without these overrides they'd hit the inert Element defaults and the
+    // `propagate_event`; without these overrides they'd hit the inert WidgetHost defaults and the
     // widget would go deaf on those paths. Route them into `handle_event` so the hit-gating /
     // context-menu / on_event pipeline applies identically on both paths.
 
@@ -1400,7 +1400,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         if Input::on_event(&mut self.inner, &event, &mut ectx) {
             return true;
         }
-        // The legacy default `Element::on_cursor_moved` body: base hover flag + synthesized
+        // The legacy default `WidgetHost::on_cursor_moved` body: base hover flag + synthesized
         // MouseEnter/MouseLeave (which re-enter `handle_event` and reach `on_event`).
         let was = self.base.hovered;
         let is_hit = self.hit_test(px, py, ctx);
@@ -1465,7 +1465,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
                 return false;
             }
             let (mut hx, mut hw) = if self.base.row_w > 0.0 { (self.base.row_x, self.base.row_w) } else { (x, w) };
-            let label_x = Element::label_x_offset(self);
+            let label_x = WidgetHost::label_x_offset(self);
             hx += label_x;
             hw -= label_x;
             return Input::hit(&self.inner, Rect { x: hx, y, width: hw, height: h }, px, py);
@@ -1484,7 +1484,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
         match event {
             // A hit right-press on a context-menu widget routes to the shared config menu —
-            // `on_event` can't (that policy needs the target's Element pointer), so the adapter
+            // `on_event` can't (that policy needs the target's WidgetHost pointer), so the adapter
             // owns it.
             Event::MouseButton {
                 button: crate::widget::MouseButton::Right,
@@ -1546,7 +1546,7 @@ mod tests {
     use crate::scene::painter::paint_tree;
     use crate::widget::UiContext;
 
-    /// A leaf that only knows the two narrow concerns — no `Element` in sight: it reports an
+    /// A leaf that only knows the two narrow concerns — no `WidgetHost` in sight: it reports an
     /// intrinsic size ([`Layout`]) and a color ([`Paint`]).
     struct Dot {
         color: [f32; 4],
@@ -1574,7 +1574,7 @@ mod tests {
     }
     impl Input for Col {}
 
-    fn rect_of(ptr: *mut (dyn Element + 'static)) -> Rect {
+    fn rect_of(ptr: *mut (dyn WidgetHost + 'static)) -> Rect {
         let (x, y, w, h) = unsafe { (*ptr).rect() };
         Rect { x, y, width: w, height: h }
     }
@@ -1583,7 +1583,7 @@ mod tests {
     fn narrow_widget_lays_out_and_paints_through_the_adapter() {
         // A pure narrow-trait widget tree (Col + two Dots), wrapped in `Adapted`, is laid out by
         // the existing bridge and painted by the existing painter — proving a widget that never
-        // touches `Element` participates in both live passes.
+        // touches `WidgetHost` participates in both live passes.
         let mut ctx = UiContext::new();
         let mut root = Box::new(Adapted::new(Col));
         let mut a = Box::new(Adapted::new(Dot { color: [1.0, 0.0, 0.0, 1.0], size: Size::new(10.0, 10.0) }));
@@ -1629,7 +1629,7 @@ mod tests {
     }
 
     /// A narrow interactive widget: counts left-clicks and records hover transitions — all
-    /// through [`Input::on_event`], never touching `Element`.
+    /// through [`Input::on_event`], never touching `WidgetHost`.
     struct Clicker {
         clicks: u32,
         entered: u32,
@@ -1697,7 +1697,7 @@ mod tests {
     }
 
     /// A narrow widget that is also a controller: the controller trait is reached through the
-    /// concrete `Adapted<W>` by deref (Phase 6aw -- the `Element::as_*_controller` discovery
+    /// concrete `Adapted<W>` by deref (Phase 6aw -- the `WidgetHost::as_*_controller` discovery
     /// hooks are deleted).
     struct Crumbs {
         segs: Vec<String>,

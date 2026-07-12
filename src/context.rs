@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::widget::{Element, WidgetId, Key, NamedKey, MouseButton, ElementState, Event};
+use crate::widget::{WidgetHost, WidgetId, Key, NamedKey, MouseButton, ElementState, Event};
 use crate::widget::core::hover_animation::HoverState;
 use crate::widget::core::context_menu::ContextMenuState;
 
@@ -104,15 +104,15 @@ impl UiContext {
         }
     }
 
-    pub fn get_widget(&self, id: WidgetId) -> Option<&(dyn Element + 'static)> {
+    pub fn get_widget(&self, id: WidgetId) -> Option<&(dyn WidgetHost + 'static)> {
         self.tree.get_ptr(id).map(|ptr| unsafe { &*ptr })
     }
 
-    pub fn get_widget_mut(&mut self, id: WidgetId) -> Option<&mut (dyn Element + 'static)> {
+    pub fn get_widget_mut(&mut self, id: WidgetId) -> Option<&mut (dyn WidgetHost + 'static)> {
         self.tree.get_ptr(id).map(|ptr| unsafe { &mut *ptr })
     }
 
-    pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
+    pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn WidgetHost + 'static)) -> bool {
         if let Event::MouseWheel { .. } = event {
             let now = std::time::Instant::now();
             let elapsed_ms = match self.last_scroll_time {
@@ -167,7 +167,7 @@ impl UiContext {
         self.propagate_event_impl(event, root)
     }
 
-    fn propagate_event_impl(&mut self, event: &Event, root: *mut (dyn Element + 'static)) -> bool {
+    fn propagate_event_impl(&mut self, event: &Event, root: *mut (dyn WidgetHost + 'static)) -> bool {
         if root.is_null() {
             return false;
         }
@@ -332,7 +332,7 @@ impl UiContext {
 
     pub fn clear_dirty(&mut self) {
         self.any_dirty = false;
-        let ptrs: Vec<*mut (dyn Element + 'static)> =
+        let ptrs: Vec<*mut (dyn WidgetHost + 'static)> =
             self.tree.iter_registered().map(|(_, ptr)| ptr).collect();
         for ptr in ptrs {
             unsafe {
@@ -344,7 +344,7 @@ impl UiContext {
 
     pub fn rebuild_spatial_grid(&mut self) {
         self.spatial_grid.clear();
-        let entries: Vec<(WidgetId, *mut (dyn Element + 'static))> =
+        let entries: Vec<(WidgetId, *mut (dyn WidgetHost + 'static))> =
             self.tree.iter_registered().collect();
         for (id, ptr) in entries {
             unsafe {
@@ -411,13 +411,13 @@ impl UiContext {
     }
 
     // --- Focus management (id-keyed; Phase 6bc) ---
-    pub fn set_focused(&mut self, w: &mut dyn Element) {
+    pub fn set_focused(&mut self, w: &mut dyn WidgetHost) {
         let id = w.base().id();
         // Refresh the registry with the pointer we were just handed, so focus on a
         // not-yet-registered widget keeps working (the legacy code stored this pointer
         // directly; the id must resolve for FocusOut/KeyInput dispatch to reach it).
         let new_ptr = unsafe {
-            std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(w as *mut dyn Element)
+            std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(w as *mut dyn WidgetHost)
         };
         self.tree.register(id, new_ptr);
         self.set_focused_id(id);
@@ -426,7 +426,7 @@ impl UiContext {
     /// Transitional pointer form (TreeList focuses its adapter via `EventCtx::host_ptr`). The
     /// pointer must be live at the call — it is only used to derive the id and refresh the
     /// registry, never stored.
-    pub fn set_focused_ptr(&mut self, new_ptr: *mut (dyn Element + 'static)) {
+    pub fn set_focused_ptr(&mut self, new_ptr: *mut (dyn WidgetHost + 'static)) {
         if new_ptr.is_null() {
             return;
         }
@@ -461,7 +461,7 @@ impl UiContext {
         }
     }
 
-    pub fn is_focused(&self, w: &dyn Element) -> bool {
+    pub fn is_focused(&self, w: &dyn WidgetHost) -> bool {
         self.is_focused_id(w.base().id())
     }
 
@@ -480,7 +480,7 @@ impl UiContext {
         }
     }
 
-    pub fn clear_if_matches(&mut self, w: &dyn Element) {
+    pub fn clear_if_matches(&mut self, w: &dyn WidgetHost) {
         if self.focused_widget == Some(w.base().id()) {
             self.focused_widget = None;
         }
@@ -556,7 +556,7 @@ impl UiContext {
     }
 
     // --- Registry (backed by the generational WidgetTree; see scene/tree.rs) ---
-    pub fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn Element + 'static)) {
+    pub fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
         self.tree.register(id, ptr);
         unsafe {
             if !ptr.is_null() && (*ptr).wants_tick() {
@@ -588,15 +588,15 @@ impl UiContext {
 
     /// Register an open popover. Takes `&mut` so the registry can be refreshed with the
     /// pointer we are handed (the occlusion walks resolve the stored id through the tree).
-    pub fn register_popover(&mut self, w: &mut (dyn Element + 'static)) {
+    pub fn register_popover(&mut self, w: &mut (dyn WidgetHost + 'static)) {
         let id = w.base().id();
-        self.tree.register(id, w as *mut (dyn Element + 'static));
+        self.tree.register(id, w as *mut (dyn WidgetHost + 'static));
         if !self.active_popovers.contains(&id) {
             self.active_popovers.push(id);
         }
     }
 
-    pub fn register_popover_ptr(&mut self, ptr: *mut (dyn Element + 'static)) {
+    pub fn register_popover_ptr(&mut self, ptr: *mut (dyn WidgetHost + 'static)) {
         if ptr.is_null() {
             return;
         }
@@ -692,7 +692,7 @@ impl UiContext {
         crate::widget::context_menu::is_visible()
     }
 
-    pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn Element + 'static)) {
+    pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn WidgetHost + 'static)) {
         if target.is_null() {
             return;
         }
@@ -701,7 +701,7 @@ impl UiContext {
         crate::widget::context_menu::show(x, y, options, header_count, id);
     }
 
-    pub fn handle_right_click(&mut self, target: *mut (dyn Element + 'static), px: f32, py: f32) {
+    pub fn handle_right_click(&mut self, target: *mut (dyn WidgetHost + 'static), px: f32, py: f32) {
         if target.is_null() {
             return;
         }
@@ -863,7 +863,7 @@ impl UiContext {
         false
     }
 
-    fn find_hovered_scrollable(&self, root: *mut (dyn Element + 'static), cx: f32, cy: f32) -> Option<*mut (dyn Element + 'static)> {
+    fn find_hovered_scrollable(&self, root: *mut (dyn WidgetHost + 'static), cx: f32, cy: f32) -> Option<*mut (dyn WidgetHost + 'static)> {
         unsafe {
             if root.is_null() {
                 return None;
@@ -890,13 +890,13 @@ impl UiContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Element, Widget};
+    use crate::widget::{WidgetHost, Widget};
 
-    /// A plain drag-blocking widget (the `Element` default) at a fixed rect.
+    /// A plain drag-blocking widget (the `WidgetHost` default) at a fixed rect.
     struct Block {
         base: Widget,
     }
-    impl Element for Block {
+    impl WidgetHost for Block {
         crate::impl_widget_base!(Block);
         fn color(&self) -> [f32; 4] {
             [0.0, 0.0, 0.0, 1.0]

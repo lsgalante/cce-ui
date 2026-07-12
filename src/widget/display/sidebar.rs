@@ -2,14 +2,14 @@
 //! x/y/w/h fields now live on the `Adapted` base.
 
 use crate::colors;
-use crate::widget::{Adapted, Element, Input, Layout, Paint};
+use crate::widget::{Adapted, WidgetHost, Input, Layout, Paint};
 
 pub struct Sidebar;
 
 impl Sidebar {
     pub fn new(w: f32) -> Adapted<Sidebar> {
         let mut s = Adapted::new(Sidebar);
-        Element::set_rect(&mut s, 0.0, 0.0, w, 0.0);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, w, 0.0);
         s
     }
 }

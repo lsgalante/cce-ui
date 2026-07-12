@@ -87,7 +87,7 @@ appended as a final unclipped batch drawn on top.
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 
 `src/scene/` is a **retained scene graph being grown additively** to replace three overlaid legacy
-subsystems (tripled tree ownership via raw `*mut dyn Element`; three uncoordinated render paths;
+subsystems (tripled tree ownership via raw widget pointers; three uncoordinated render paths;
 layout smeared across five mechanisms). The RFC (`docs/rfc-core-rebuild.md`) is the authoritative
 design and phase tracker — its inline "DONE" notes are the source of truth for what has landed.
 Modules:
@@ -99,20 +99,21 @@ Modules:
 - `layout.rs` — the hand-rolled measure→arrange solver (`Style`/`Size`/`Rect`/`LayoutBox`).
   Deliberately **not** taffy: a compact row/column + flex + align + gap/padding box model.
 - `paint.rs` / `painter.rs` — `DisplayList` + `PaintCtx` (clip/transform stack) and the single
-  paint walk. Each widget emits its own geometry via `Element::paint_self`; the walk owns recursion
-  and clipping (`Element::clips_children`), instead of every container re-deriving intersections.
-  `renders_own_subtree` is an escape hatch for legacy subtree painters.
+  paint walk. Each widget emits its own geometry via `WidgetHost::paint_self`; the walk owns
+  recursion and clipping (`WidgetHost::clips_children`), instead of every container re-deriving
+  intersections. `renders_own_subtree` is an escape hatch for legacy subtree painters.
 - `anim.rs` — `Animated<T>` (tween + spring + easing), the Phase 4 animation primitive replacing
   ad-hoc bool flips.
 
-### `Element` scene hooks (migration surface)
+### `WidgetHost` (formerly the `Element` god-trait)
 
-The legacy `Element` trait (`src/widget/mod.rs`, ~125 methods — the god-trait the RFC is
-dismantling) carries the opt-in hooks that move a widget onto the new core, all defaulting to the
-legacy path: `layout_style()` / `intrinsic_size()` (→ layout engine), `paint_self()` /
-`clips_children()` / `renders_own_subtree()` (→ single paint path), `children()`. Migrate a widget
-by implementing these; leave them defaulted to keep it on the legacy path. This is what lets a
-single container be moved and verified in a running app without disturbing the rest.
+`WidgetHost` (`src/widget/mod.rs`) is the single ~65-method host surface the machinery
+(context routing, paint walk, render loop, app dyn broadcasts) sees, produced by the RFC's 6bd
+shrink-then-rename of the old ~125-method `Element` god-trait. Its ONE production implementor
+is `Adapted<W>`; concrete widget behavior lives on the narrow `Layout`/`Paint`/`Input` traits
+(`src/widget/model.rs`). `base()` is guaranteed (`&Widget`, no Option). The direct-dispatch
+block (mouse/key/drag) and value block shrink further as apps adopt routed events and
+concrete slots — see the RFC's blueprint notes before adding anything to this trait.
 
 **Runtime verification matters here.** Several scene changes are "compiles + tests pass; runtime
 verification pending" per the RFC — the headless tests can't catch paint/event regressions. When

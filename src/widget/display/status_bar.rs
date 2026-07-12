@@ -83,7 +83,7 @@ impl Adapted<StatusBar> {
 
 impl Layout for StatusBar {
     /// The status text draws inside the bar; the base label must never inflate the rect or
-    /// emit a detached label (`Element::set_text` writes both the base copy and
+    /// emit a detached label (`WidgetHost::set_text` writes both the base copy and
     /// [`Paint::sync_label`]).
     fn inline_label(&self) -> bool {
         true
@@ -107,7 +107,7 @@ impl Paint for StatusBar {
         Some((0.0, (false, false, false, false)))
     }
 
-    /// `Element::set_text` lands here: swap the text and drop the shaped buffer so
+    /// `WidgetHost::set_text` lands here: swap the text and drop the shaped buffer so
     /// `prepare_text` rebuilds it.
     fn sync_label(&mut self, label: &str) {
         if self.text != label {
@@ -159,7 +159,7 @@ impl Input for StatusBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::Element;
+    use crate::widget::WidgetHost;
 
     /// The shaped-buffer lifecycle behind the old manual-host path: `set_text` drops the
     /// buffer, `prepare_text` rebuilds it. (The `get_text_items` getter that served it is
@@ -168,23 +168,23 @@ mod tests {
     fn manual_host_text_pipeline() {
         let mut fs = glyphon::FontSystem::new();
         let mut bar = StatusBar::new().with_text("hello").with_text_offset_x(15.0);
-        Element::set_rect(&mut bar, 0.0, 570.0, 800.0, 30.0);
+        WidgetHost::set_rect(&mut bar, 0.0, 570.0, 800.0, 30.0);
 
         assert!(bar.text_buf.is_none(), "no buffer before prepare_text");
-        Element::prepare_text(&mut bar, &mut fs);
+        WidgetHost::prepare_text(&mut bar, &mut fs);
         assert!(bar.text_buf.is_some(), "one shaped buffer");
 
         // set_text drops the stale buffer; prepare_text reshapes.
-        Element::set_text(&mut bar, "world");
+        WidgetHost::set_text(&mut bar, "world");
         assert!(bar.text_buf.is_none(), "buffer dropped on text change");
-        Element::prepare_text(&mut bar, &mut fs);
+        WidgetHost::prepare_text(&mut bar, &mut fs);
         assert!(bar.text_buf.is_some());
         assert_eq!(bar.text, "world");
 
         // Parentless: cornerless plain bg through the plain-quad bridge, at STATUS_BG.
-        let extra = Element::extra_quads(&bar);
+        let extra = WidgetHost::extra_quads(&bar);
         assert_eq!(extra.len(), 1, "cornerless bg quad");
-        assert_eq!(Element::corner_style(&bar).1, (false, false, false, false));
-        assert!(!Element::blocks_backplate_drag(&bar));
+        assert_eq!(WidgetHost::corner_style(&bar).1, (false, false, false, false));
+        assert!(!WidgetHost::blocks_backplate_drag(&bar));
     }
 }

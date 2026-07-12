@@ -5,7 +5,7 @@
 //!
 //! Parity notes (all legacy-faithful, verified against the pre-migration impl):
 //! - `parent_snapshot` is the data form of the legacy public, direct-write-only `parent`
-//!   pointer: legacy `set_parent` never wrote it (the Element default only touched the tree —
+//!   pointer: legacy `set_parent` never wrote it (the WidgetHost default only touched the tree —
 //!   Ramp's dummy-ctx `set_parent` calls were silently discarded), so the Ramp popover clamp
 //!   and the fade-blend parent color activate only for callers that assign the field, exactly
 //!   as before — no production writer exists. The backplate-concentric corner walk it once
@@ -13,14 +13,14 @@
 //! - The row-rect hit expansion (`base.row_x/row_w`) is dropped, consistent with every other
 //!   migrated control: `Input::hit` tests the widget rect plus the open popover.
 //! - `Layout::intrinsic_measure_width` (new hook) preserves the `auto_width` measure behavior
-//!   (cce-system-settings sizes its page dropdown from `Element::measure`).
+//!   (cce-system-settings sizes its page dropdown from `WidgetHost::measure`).
 
 use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
 use crate::widget::{
-    Control, Element, ElementState, Event, Key, MouseButton, NamedKey,
+    Control, WidgetHost, ElementState, Event, Key, MouseButton, NamedKey,
 };
 
 /// Read-data stand-in for the legacy direct-write `parent` pointer (6bd — no stored widget
@@ -34,7 +34,7 @@ pub struct ParentSnapshot {
     pub color: [f32; 4],
 }
 
-/// Side-layout label inset — the legacy `Element::label_x_offset` default for non-exempt
+/// Side-layout label inset — the legacy `WidgetHost::label_x_offset` default for non-exempt
 /// widgets (Dropdown was never in the exempt list).
 fn side_offset(label: &Option<String>) -> f32 {
     if crate::layout::control_label_layout() == "side" && label.is_some() {
@@ -519,7 +519,7 @@ impl Adapted<Dropdown> {
     /// Popover geometry from the widget's laid-out rect — the legacy inherent
     /// `get_popover_geom` shape, for callers that hold the wrapper.
     pub fn get_popover_geom(&self) -> (f32, f32, f32, f32) {
-        let (x, y, w, h) = Element::rect(self);
+        let (x, y, w, h) = WidgetHost::rect(self);
         let top = self.inner().label_top();
         self.inner().popover_geom(Rect { x, y: y + top, width: w, height: h - top })
     }
@@ -936,9 +936,9 @@ mod tests {
 
         // Link the dropdown to the Ramp's read-data (the legacy direct-write path)
         dd.parent_snapshot = Some(ParentSnapshot {
-            rect: crate::widget::Element::rect(&ramp),
+            rect: crate::widget::WidgetHost::rect(&ramp),
             is_ramp: true,
-            color: crate::widget::Element::color(&ramp),
+            color: crate::widget::WidgetHost::color(&ramp),
         });
 
         // Compute geometry
@@ -1008,7 +1008,7 @@ mod tests {
         );
     }
 
-    /// Migration additions: popover routing through the adapter (`Element::popover_rect` /
+    /// Migration additions: popover routing through the adapter (`WidgetHost::popover_rect` /
     /// `render_popover`), outside-press close, and Escape via routed key events.
     #[test]
     fn popover_reaches_hosts_through_the_adapter() {
@@ -1017,11 +1017,11 @@ mod tests {
         let mut dd = Dropdown::new(options, 0);
         dd.set_rect(10.0, 10.0, 100.0, 24.0);
 
-        assert!(Element::popover_rect(&dd).is_none(), "closed dropdown registers no popover");
+        assert!(WidgetHost::popover_rect(&dd).is_none(), "closed dropdown registers no popover");
 
         dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0, &mut dummy);
         assert!(dd.open);
-        let (rx, ry, rw, rh) = Element::popover_rect(&dd).expect("open dropdown registers its popover");
+        let (rx, ry, rw, rh) = WidgetHost::popover_rect(&dd).expect("open dropdown registers its popover");
         assert_eq!((rx, ry), (10.0, 34.0), "popover opens under the trigger");
         assert!(rw >= 100.0 && rh == 48.0);
 

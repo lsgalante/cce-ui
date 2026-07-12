@@ -1,6 +1,6 @@
 //! Narrow-trait `Float3` (Phase 5t) — three labeled slider rows (X/Y/Z) with click-to-edit
 //! numeric readouts, embedded by value inside `ParametersBg` (its only consumer), which drives
-//! it through direct `Element` calls and reads the pub value/edit fields through `Deref`. The
+//! it through direct `WidgetHost` calls and reads the pub value/edit fields through `Deref`. The
 //! model caches its laid-out rect ([`Layout::rect_assigned`] — `get_row_rects` is pub API with
 //! no rect parameter), draws everything in [`Paint::paint`], and keeps the legacy drag surface
 //! on the `Input` drag hooks. The readout click's legacy `focus::set_focused(self)` rides
@@ -325,7 +325,7 @@ impl Input for Float3 {
 mod tests {
     use super::*;
     use crate::context::UiContext;
-    use crate::widget::Element;
+    use crate::widget::WidgetHost;
 
     /// The ParametersBg drive pattern: readout click opens the edit, Enter/unfocus commits
     /// back into the normalized value, track press starts a drag.
@@ -333,7 +333,7 @@ mod tests {
     fn readout_edit_commits_on_unfocus() {
         let mut ctx = UiContext::new();
         let mut f = Float3::new().with_values([0.5, 0.5, 0.5]).with_range(0.0, 10.0);
-        Element::set_rect(&mut f, 0.0, 0.0, 300.0, 108.0);
+        WidgetHost::set_rect(&mut f, 0.0, 0.0, 300.0, 108.0);
 
         let rows = f.get_row_rects();
         assert_eq!(rows.len(), 3);
@@ -345,17 +345,17 @@ mod tests {
         assert_eq!(f.edit_buffer, "5.00");
 
         f.edit_buffer = "7.5".to_string();
-        Element::unfocus(&mut f);
+        WidgetHost::unfocus(&mut f);
         assert_eq!(f.editing_idx, None);
         assert!((f.values[1] - 0.75).abs() < 1e-4, "7.5 of 0..10 normalizes to 0.75");
 
         // Track press starts a drag; drag_update moves the value; release ends it.
         let track_y = rows[0].1 + 8.0;
         assert!(f.mouse_input(MouseButton::Left, ElementState::Pressed, 150.0, track_y, &mut ctx));
-        assert!(Element::is_dragging(&f));
-        Element::drag_update(&mut f, 260.0, track_y);
+        assert!(WidgetHost::is_dragging(&f));
+        WidgetHost::drag_update(&mut f, 260.0, track_y);
         assert!(f.values[0] > 0.5, "drag right raises the value");
-        Element::drag_end(&mut f);
-        assert!(!Element::is_dragging(&f));
+        WidgetHost::drag_end(&mut f);
+        assert!(!WidgetHost::is_dragging(&f));
     }
 }

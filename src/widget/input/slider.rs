@@ -688,50 +688,50 @@ impl Control for Adapted<RangeSlider> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Element, UiContext};
+    use crate::widget::{WidgetHost, UiContext};
 
-    /// The legacy rangeslider interaction test, driven through the Element drag forwards
+    /// The legacy rangeslider interaction test, driven through the WidgetHost drag forwards
     /// (hosts call these directly): thumb selection by proximity, constrained updates.
     #[test]
     fn rangeslider_interaction() {
         let mut rs = RangeSlider::new();
-        Element::set_rect(&mut rs, 10.0, 10.0, 200.0, 20.0);
+        WidgetHost::set_rect(&mut rs, 10.0, 10.0, 200.0, 20.0);
         assert_eq!(rs.values(), (0.2, 0.8));
 
         // Thumb size 18, range 182; low center = 55.4.
-        Element::drag_begin(&mut rs, 55.4, 20.0);
+        WidgetHost::drag_begin(&mut rs, 55.4, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::Low));
-        assert!(Element::drag_update(&mut rs, 100.9, 20.0));
+        assert!(WidgetHost::drag_update(&mut rs, 100.9, 20.0));
         assert!((rs.values().0 - 0.45).abs() < 0.01);
         assert_eq!(rs.values().1, 0.8);
-        Element::drag_end(&mut rs);
+        WidgetHost::drag_end(&mut rs);
         assert_eq!(rs.active_thumb, None);
 
         // High thumb 0.8 -> 0.6.
-        Element::drag_begin(&mut rs, 164.6, 20.0);
+        WidgetHost::drag_begin(&mut rs, 164.6, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::High));
-        assert!(Element::drag_update(&mut rs, 128.2, 20.0));
+        assert!(WidgetHost::drag_update(&mut rs, 128.2, 20.0));
         assert!((rs.values().1 - 0.6).abs() < 0.01);
-        Element::drag_end(&mut rs);
+        WidgetHost::drag_end(&mut rs);
     }
 
     #[test]
     fn rangeslider_overlap_and_constraint() {
         let mut rs = RangeSlider::new().with_values(0.5, 0.5);
-        Element::set_rect(&mut rs, 10.0, 10.0, 200.0, 20.0);
+        WidgetHost::set_rect(&mut rs, 10.0, 10.0, 200.0, 20.0);
 
-        Element::drag_begin(&mut rs, 109.0, 20.0);
+        WidgetHost::drag_begin(&mut rs, 109.0, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::Low));
-        Element::drag_end(&mut rs);
+        WidgetHost::drag_end(&mut rs);
 
-        Element::drag_begin(&mut rs, 111.0, 20.0);
+        WidgetHost::drag_begin(&mut rs, 111.0, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::High));
-        Element::drag_end(&mut rs);
+        WidgetHost::drag_end(&mut rs);
 
-        Element::drag_begin(&mut rs, 110.0, 20.0);
-        Element::drag_update(&mut rs, 150.0, 20.0);
+        WidgetHost::drag_begin(&mut rs, 110.0, 20.0);
+        WidgetHost::drag_update(&mut rs, 150.0, 20.0);
         assert_eq!(rs.values().0, 0.5, "low constrained to high");
-        Element::drag_end(&mut rs);
+        WidgetHost::drag_end(&mut rs);
     }
 
 #[test]
@@ -740,10 +740,10 @@ fn probe_slider_bridge() {
     
     let ctx = UiContext::new();
     let mut sl = Slider::new().with_label("Slider");
-    Element::set_rect(&mut sl, 20.0, 220.0, 200.0, 40.0);
-    eprintln!("rect         = {:?}", Element::rect(&sl));
-    eprintln!("extra_quads  = {:?}", Element::extra_quads(&sl));
-    eprintln!("rounded      = {:?}", Element::all_rounded_quads(&sl, &ctx));
+    WidgetHost::set_rect(&mut sl, 20.0, 220.0, 200.0, 40.0);
+    eprintln!("rect         = {:?}", WidgetHost::rect(&sl));
+    eprintln!("extra_quads  = {:?}", WidgetHost::extra_quads(&sl));
+    eprintln!("rounded      = {:?}", WidgetHost::all_rounded_quads(&sl, &ctx));
     eprintln!("labels       = {:?}", sl.own_text_labels().iter().map(|l| l.text.clone()).collect::<Vec<_>>());
 }
 
@@ -755,22 +755,22 @@ fn probe_slider_bridge() {
         let mut sl = Slider::new().with_value(0.5);
         let (id, ptr) = (sl.id(), sl.as_ptr_mut());
         ctx.register_widget(id, ptr);
-        Element::set_rect(&mut sl, 0.0, 0.0, 100.0, 20.0);
+        WidgetHost::set_rect(&mut sl, 0.0, 0.0, 100.0, 20.0);
 
         // Press on the track grabs the thumb.
         assert!(ctx.propagate_event(
             &Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x: 50.0, y: 10.0, local_x: 50.0, local_y: 10.0 },
             ptr,
         ));
-        assert!(Element::is_dragging(&sl));
-        assert!(Element::drag_update(&mut sl, 80.0, 10.0));
+        assert!(WidgetHost::is_dragging(&sl));
+        assert!(WidgetHost::drag_update(&mut sl, 80.0, 10.0));
         assert!(sl.inner().value() > 0.5);
-        Element::drag_end(&mut sl);
+        WidgetHost::drag_end(&mut sl);
 
         // Wheel adjusts value when the gesture starts fresh.
         ctx.scroll_gesture_new = true;
         let before = sl.inner().value();
-        assert!(Element::mouse_wheel(
+        assert!(WidgetHost::mouse_wheel(
             &mut sl,
             &MouseScrollDelta::LineDelta(0.0, 1.0),
             50.0,
@@ -778,6 +778,6 @@ fn probe_slider_bridge() {
             &mut ctx,
         ));
         assert!(sl.inner().value() < before, "scroll up decreases value");
-        assert!(Element::take_change(&mut sl));
+        assert!(WidgetHost::take_change(&mut sl));
     }
 }

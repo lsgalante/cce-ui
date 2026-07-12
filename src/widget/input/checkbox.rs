@@ -1,4 +1,4 @@
-//! Narrow-trait `Checkbox` and `Toggle` (Phase 5e — first interactive widgets off `Element`).
+//! Narrow-trait `Checkbox` and `Toggle` (Phase 5e — first interactive widgets off `WidgetHost`).
 //!
 //! Both are inline-label widgets: they paint their own label (with hover/focus-dependent color)
 //! inside their rect, so they track `hovered`/`focused` themselves from the `MouseEnter`/
@@ -456,7 +456,7 @@ impl Control for Adapted<Toggle> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Element, UiContext};
+    use crate::widget::{WidgetHost, UiContext};
 
     fn click_at(x: f32, y: f32) -> Event {
         Event::MouseButton {
@@ -475,13 +475,13 @@ mod tests {
         let mut cb = Checkbox::new();
         let (id, ptr) = (cb.id(), cb.as_ptr_mut());
         ctx.register_widget(id, ptr);
-        Element::set_rect(&mut cb, 0.0, 0.0, 20.0, 20.0);
+        WidgetHost::set_rect(&mut cb, 0.0, 0.0, 20.0, 20.0);
 
         assert!(ctx.propagate_event(&click_at(10.0, 10.0), ptr), "in-rect click consumed");
         assert!(cb.checked(), "click checked it");
-        assert!(Element::take_click(&mut cb), "take_click reads once");
-        assert!(!Element::take_click(&mut cb), "...then clears");
-        assert!(Element::take_change(&mut cb));
+        assert!(WidgetHost::take_click(&mut cb), "take_click reads once");
+        assert!(!WidgetHost::take_click(&mut cb), "...then clears");
+        assert!(WidgetHost::take_change(&mut cb));
 
         assert!(!ctx.propagate_event(&click_at(100.0, 100.0), ptr), "miss is not consumed");
         assert!(cb.checked(), "miss does not toggle");
@@ -490,13 +490,13 @@ mod tests {
     #[test]
     fn checkbox_value_string_round_trip() {
         let mut cb = Checkbox::new();
-        assert_eq!(Element::get_value_string(&cb), Some("false".to_string()));
-        assert!(Element::set_value_string(&mut cb, "on"));
+        assert_eq!(WidgetHost::get_value_string(&cb), Some("false".to_string()));
+        assert!(WidgetHost::set_value_string(&mut cb, "on"));
         assert!(cb.checked());
-        assert_eq!(Element::value(&cb), 1);
-        assert!(!Element::set_value_string(&mut cb, "on"), "unchanged value reports false");
-        assert!(!Element::set_value_string(&mut cb, "junk"), "unparsable reports false");
-        assert!(Element::take_change(&mut cb), "set_value_string marked the change");
+        assert_eq!(WidgetHost::value(&cb), 1);
+        assert!(!WidgetHost::set_value_string(&mut cb, "on"), "unchanged value reports false");
+        assert!(!WidgetHost::set_value_string(&mut cb, "junk"), "unparsable reports false");
+        assert!(WidgetHost::take_change(&mut cb), "set_value_string marked the change");
     }
 
     /// Wide (labeled) mode reproduces the legacy `extra_quads` geometry through the bridge:
@@ -506,9 +506,9 @@ mod tests {
     fn checkbox_wide_mode_bridge_parity() {
         let ctx = UiContext::new();
         let mut cb = Checkbox::new().with_label("Enable");
-        Element::set_rect(&mut cb, 0.0, 0.0, 200.0, 24.0);
+        WidgetHost::set_rect(&mut cb, 0.0, 0.0, 200.0, 24.0);
 
-        let quads = Element::extra_quads(&cb);
+        let quads = WidgetHost::extra_quads(&cb);
         // Unchecked: box bg + 4 border edges = 5 quads, at the legacy box position.
         assert_eq!(quads.len(), 5);
         let (box_x, box_y, box_size) = (200.0 - 18.0 - 8.0, (24.0 - 18.0) / 2.0, 18.0);
@@ -516,7 +516,7 @@ mod tests {
 
         // Hover flips the box + border colors (tracked from MouseEnter, not base state).
         cb.inner_mut().hovered = true;
-        let quads = Element::extra_quads(&cb);
+        let quads = WidgetHost::extra_quads(&cb);
         assert_eq!(quads[0].4, colors::checkbox_hover());
 
         // Label text comes through the prim-derived text bridge at the legacy position.
@@ -526,7 +526,7 @@ mod tests {
         assert_eq!(labels[0].x, 8.0);
 
         // Inline label => no set_rect inflation.
-        assert_eq!(Element::rect(&cb), (0.0, 0.0, 200.0, 24.0));
+        assert_eq!(WidgetHost::rect(&cb), (0.0, 0.0, 200.0, 24.0));
         let _ = &ctx;
     }
 
@@ -536,32 +536,32 @@ mod tests {
         let mut t = Toggle::new();
         let (id, ptr) = (t.id(), t.as_ptr_mut());
         ctx.register_widget(id, ptr);
-        Element::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
+        WidgetHost::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
 
         // Geometry parity is config-dependent (rounded vs square toggle); assert the invariant
         // that holds in both: the bordered half flips with the state.
-        let before: Vec<_> = Element::all_rounded_quads(&t, &ctx);
-        let before_quads = Element::extra_quads(&t);
+        let before: Vec<_> = WidgetHost::all_rounded_quads(&t, &ctx);
+        let before_quads = WidgetHost::extra_quads(&t);
 
         assert!(ctx.propagate_event(&click_at(30.0, 15.0), ptr), "toggle consumed the click");
         assert!(t.toggled());
-        assert!(Element::take_click(&mut t));
+        assert!(WidgetHost::take_click(&mut t));
 
-        let after: Vec<_> = Element::all_rounded_quads(&t, &ctx);
-        let after_quads = Element::extra_quads(&t);
+        let after: Vec<_> = WidgetHost::all_rounded_quads(&t, &ctx);
+        let after_quads = WidgetHost::extra_quads(&t);
         assert!(
             before != after || before_quads != after_quads,
             "toggling changes the emitted geometry (border switches halves)",
         );
 
         // preferred_height forwards the legacy toggle height.
-        assert_eq!(Element::preferred_height(&t), Some(crate::layout::toggle_height()));
+        assert_eq!(WidgetHost::preferred_height(&t), Some(crate::layout::toggle_height()));
     }
 
     #[test]
     fn toggle_set_label_via_deref_reaches_paint() {
         let mut t = Toggle::new();
-        Element::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
+        WidgetHost::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
         t.set_label("ON"); // the network.rs pattern: live label updates through Deref
         let labels = t.own_text_labels();
         assert_eq!(labels.len(), 1);

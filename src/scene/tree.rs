@@ -2,7 +2,7 @@
 //!
 //! Today `UiContext` keeps the widget tree in two parallel `HashMap`s that must be maintained in
 //! lockstep by hand:
-//!   * `widget_registry: HashMap<WidgetId, *mut dyn Element>` — id → live pointer, and
+//!   * `widget_registry: HashMap<WidgetId, *mut dyn WidgetHost>` — id → live pointer, and
 //!   * `layout_tree: { parents: HashMap<WidgetId, WidgetId>, children: HashMap<WidgetId, Vec<WidgetId>> }`.
 //!
 //! This type folds both into a single generational [`Arena`], keyed through a `WidgetId → NodeId`
@@ -13,7 +13,7 @@
 //!
 //! ## One deliberate semantic change vs. the legacy maps
 //!
-//! The legacy maps are sometimes left **asymmetric**: `Element::set_parent(Some(p))` writes
+//! The legacy maps are sometimes left **asymmetric**: `WidgetHost::set_parent(Some(p))` writes
 //! `parents[child] = p` but does *not* add `child` to `children[p]`; `plate`/`parameters_bg`
 //! detach by doing `parents.remove(child)` while leaving `child` in `children[p]`. The arena keeps
 //! parent and child links **symmetric** by construction, so here `set_parent`/`detach` update both
@@ -27,23 +27,23 @@
 use std::collections::HashMap;
 
 use crate::scene::arena::{Arena, NodeId};
-use crate::widget::{Element, WidgetId};
+use crate::widget::{WidgetHost, WidgetId};
 
 /// One arena node's payload: the widget's stable id plus its live pointer. The pointer is `None`
 /// for a node that has been *linked* into the tree (as a parent/child) but not yet *registered*
 /// with a real widget — mirroring the legacy maps, where a `layout_tree` link can precede the
-/// `widget_registry` entry. (`*mut dyn Element` is a fat pointer, so `Option` is the natural
+/// `widget_registry` entry. (`*mut dyn WidgetHost` is a fat pointer, so `Option` is the natural
 /// "absent" representation — there is no thin null to use as a sentinel.)
 #[derive(Clone, Copy)]
 struct Entry {
     id: WidgetId,
-    ptr: Option<*mut (dyn Element + 'static)>,
+    ptr: Option<*mut (dyn WidgetHost + 'static)>,
 }
 
 /// Resolve an entry's pointer to a usable, non-null pointer (skipping link-only and null-data
 /// pointers exactly as the legacy `filter_map` over the registry did).
 #[inline]
-fn live_ptr(entry: &Entry) -> Option<*mut (dyn Element + 'static)> {
+fn live_ptr(entry: &Entry) -> Option<*mut (dyn WidgetHost + 'static)> {
     match entry.ptr {
         Some(p) if !p.is_null() => Some(p),
         _ => None,
@@ -93,7 +93,7 @@ impl WidgetTree {
     /// Register (or overwrite) the live pointer for `id`. Mirrors `register_widget`'s
     /// insert-overwrite semantics. Registering a `null` pointer is allowed (the node exists but
     /// resolves to `None`), matching the legacy behavior where a link can precede registration.
-    pub fn register(&mut self, id: WidgetId, ptr: *mut (dyn Element + 'static)) {
+    pub fn register(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
         let node = self.ensure_node(id);
         // `ensure_node` guarantees the node exists.
         self.arena.value_mut(node).unwrap().ptr = Some(ptr);
@@ -113,7 +113,7 @@ impl WidgetTree {
 
     /// Set or clear `child`'s parent. `Some(p)` links symmetrically (as [`link`](WidgetTree::link));
     /// `None` detaches `child` from its current parent. Replaces the legacy asymmetric
-    /// `Element::set_parent`.
+    /// `WidgetHost::set_parent`.
     pub fn set_parent(&mut self, child: WidgetId, parent: Option<WidgetId>) {
         match parent {
             Some(p) => self.link(p, child),
@@ -172,7 +172,7 @@ impl WidgetTree {
     }
 
     /// The live pointer for `id`, or `None` if unknown, link-only (null), or stale.
-    pub fn get_ptr(&self, id: WidgetId) -> Option<*mut (dyn Element + 'static)> {
+    pub fn get_ptr(&self, id: WidgetId) -> Option<*mut (dyn WidgetHost + 'static)> {
         let node = *self.by_id.get(&id)?;
         live_ptr(self.arena.value(node)?)
     }
@@ -185,7 +185,7 @@ impl WidgetTree {
     }
 
     /// `id`'s parent pointer, if the parent is registered (non-null).
-    pub fn parent_ptr(&self, id: WidgetId) -> Option<*mut (dyn Element + 'static)> {
+    pub fn parent_ptr(&self, id: WidgetId) -> Option<*mut (dyn WidgetHost + 'static)> {
         self.parent_id(id).and_then(|p| self.get_ptr(p))
     }
 
@@ -196,8 +196,8 @@ impl WidgetTree {
     }
 
     /// `id`'s child pointers in order, skipping any child that is link-only (null pointer) —
-    /// exactly matching the legacy `Element::children` `filter_map` over the registry.
-    pub fn children_ptrs(&self, id: WidgetId) -> Vec<*mut (dyn Element + 'static)> {
+    /// exactly matching the legacy `WidgetHost::children` `filter_map` over the registry.
+    pub fn children_ptrs(&self, id: WidgetId) -> Vec<*mut (dyn WidgetHost + 'static)> {
         let Some(&node) = self.by_id.get(&id) else { return Vec::new() };
         self.arena
             .children(node)
@@ -208,7 +208,7 @@ impl WidgetTree {
 
     /// Iterate every registered `(id, ptr)` with a non-null pointer, for the passes that sweep the
     /// whole registry (`clear_dirty`, `rebuild_spatial_grid`, coverage tests).
-    pub fn iter_registered(&self) -> impl Iterator<Item = (WidgetId, *mut (dyn Element + 'static))> + '_ {
+    pub fn iter_registered(&self) -> impl Iterator<Item = (WidgetId, *mut (dyn WidgetHost + 'static))> + '_ {
         self.by_id.values().filter_map(move |&node| {
             let entry = self.arena.value(node)?;
             live_ptr(entry).map(|p| (entry.id, p))
@@ -220,7 +220,7 @@ impl WidgetTree {
 mod tests {
     use super::*;
 
-    // A minimal real `Element` so tests exercise genuine `*mut dyn Element` payloads. The boxes
+    // A minimal real `WidgetHost` so tests exercise genuine `*mut dyn WidgetHost` payloads. The boxes
     // are kept alive in a local `Vec` for the duration of each test; we hand the tree raw
     // pointers into them, mirroring how widgets (owned by the app) are referenced by the tree.
     struct Marker {
@@ -228,7 +228,7 @@ mod tests {
         #[allow(dead_code)]
         tag: u32,
     }
-    impl Element for Marker {
+    impl WidgetHost for Marker {
         crate::impl_widget_base!(Marker);
         fn color(&self) -> [f32; 4] {
             [0.0, 0.0, 0.0, 0.0]
@@ -243,10 +243,10 @@ mod tests {
         fn new() -> Self {
             Widgets { boxes: Vec::new() }
         }
-        /// Create a widget, returning `(WidgetId, *mut dyn Element)`.
-        fn make(&mut self, tag: u32) -> (WidgetId, *mut (dyn Element + 'static)) {
+        /// Create a widget, returning `(WidgetId, *mut dyn WidgetHost)`.
+        fn make(&mut self, tag: u32) -> (WidgetId, *mut (dyn WidgetHost + 'static)) {
             let mut b = Box::new(Marker { base: crate::widget::Widget::new(), tag: tag });
-            let ptr: *mut (dyn Element + 'static) = &mut *b;
+            let ptr: *mut (dyn WidgetHost + 'static) = &mut *b;
             self.boxes.push(b);
             (WidgetId(tag as usize), ptr)
         }

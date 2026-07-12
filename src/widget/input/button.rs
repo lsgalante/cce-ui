@@ -8,7 +8,7 @@ use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
-    Adapted, Control, Element, ElementState, Event, EventCtx, Input, Justification, Layout,
+    Adapted, Control, WidgetHost, ElementState, Event, EventCtx, Input, Justification, Layout,
     MouseButton, Paint,
 };
 
@@ -68,7 +68,7 @@ impl Button {
 
     fn adapted(kind: ButtonKind, x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
         let mut b = Adapted::new(Button::model(kind));
-        Element::set_rect(&mut b, x, y, w, h);
+        WidgetHost::set_rect(&mut b, x, y, w, h);
         b
     }
 
@@ -404,13 +404,13 @@ mod tests {
         // Press in, release in -> click.
         assert!(ctx.propagate_event(&press(20.0, 20.0), ptr));
         assert!(ctx.propagate_event(&release(25.0, 20.0), ptr), "release consumed (was pressed)");
-        assert!(Element::take_click(&mut b));
+        assert!(WidgetHost::take_click(&mut b));
         assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "callback fired");
 
         // Press in, release OUT -> cancelled, no click, but release still consumed.
         assert!(ctx.propagate_event(&press(20.0, 20.0), ptr));
         assert!(ctx.propagate_event(&release(500.0, 500.0), ptr), "cancelling release consumed");
-        assert!(!Element::take_click(&mut b), "no click on out-of-rect release");
+        assert!(!WidgetHost::take_click(&mut b), "no click on out-of-rect release");
         assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "callback not re-fired");
 
         // Release without a press is not consumed.
@@ -425,8 +425,8 @@ mod tests {
         let b = Button::new(0.0, 0.0, 100.0, 24.0).with_label("Go");
 
         let radius = crate::layout::button_corner_radius();
-        let rounded = Element::all_rounded_quads(&b, &ctx);
-        let plain = Element::extra_quads(&b);
+        let rounded = WidgetHost::all_rounded_quads(&b, &ctx);
+        let plain = WidgetHost::extra_quads(&b);
         if radius > 0.0 {
             assert!(!rounded.is_empty() && plain.is_empty(), "rounded config -> rounded path only");
             assert_eq!(rounded[0].4, radius);
@@ -440,9 +440,9 @@ mod tests {
         let est = b.label_width("Go");
         assert_eq!(labels[0].x, (100.0 - est) / 2.0, "center-justified");
 
-        // Selection state flows through the Element forward (list hosts push it).
+        // Selection state flows through the WidgetHost forward (list hosts push it).
         let mut b = b;
-        Element::set_selected(&mut b, true);
+        WidgetHost::set_selected(&mut b, true);
         assert!(b.selected);
     }
 }

@@ -1,7 +1,7 @@
-//! Embedded scroll-math + scrollbar-chrome helper (Phase 6av: DEMOTED from `Element` to a
+//! Embedded scroll-math + scrollbar-chrome helper (Phase 6av: DEMOTED from `WidgetHost` to a
 //! plain struct). Never registered into the ctx tree by either consumer — TreeList and
 //! cce-test-interface's panel copy drive it entirely through concrete calls — so the
-//! `Element` impl was pure dyn-dispatch ballast. The former Element-default entry points the
+//! `WidgetHost` impl was pure dyn-dispatch ballast. The former WidgetHost-default entry points the
 //! consumers forward (`cursor_moved`, `tick`, drag hooks, `is_dragging`) are kept as
 //! inherent methods with the exact default-derived behavior.
 
@@ -82,7 +82,7 @@ impl ScrollBox {
         self.viewport_h = h + self.viewport_offset_h;
     }
 
-    /// The legacy `Element` default hit test over the base rect (ScrollBox never carried a
+    /// The legacy `WidgetHost` default hit test over the base rect (ScrollBox never carried a
     /// label or row expansion, so those branches are folded away).
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
         if ctx.is_coordinate_covered(self.base.id(), px, py) {
@@ -98,7 +98,7 @@ impl ScrollBox {
     /// The legacy focus claim on scrollbar/list clicks: its only observable effect was
     /// unfocusing the previously focused widget (nothing ever queried focus ON the scroll
     /// box through the thread-local, and its own `unfocus` was a no-op) — so just release
-    /// the current holder instead of storing a pointer to a non-Element.
+    /// the current holder instead of storing a pointer to a non-WidgetHost.
     fn claim_focus(&self, ctx: &mut UiContext) {
         focus::clear_focus(Some(ctx));
     }
@@ -154,7 +154,7 @@ impl ScrollBox {
         self.scrollbar_dragging
     }
 
-    /// Legacy `Element` default parity: ScrollBox never overrode `is_dragging` — TreeList
+    /// Legacy `WidgetHost` default parity: ScrollBox never overrode `is_dragging` — TreeList
     /// forwards it and always got `false`.
     pub fn is_dragging(&self) -> bool {
         false
@@ -192,7 +192,7 @@ impl ScrollBox {
         self.scrollbar_dragging = false;
     }
 
-    /// The legacy `Element` default `cursor_moved` entry (cce-test-interface's panel copy
+    /// The legacy `WidgetHost` default `cursor_moved` entry (cce-test-interface's panel copy
     /// calls it): cover-check clears hover, otherwise falls into `on_cursor_moved`. The
     /// MouseLeave dispatch the default performed was a no-op for ScrollBox.
     pub fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
@@ -242,7 +242,7 @@ impl ScrollBox {
         changed
     }
 
-    /// Legacy `Element` default parity (cce-test-interface's panel copy ticks it).
+    /// Legacy `WidgetHost` default parity (cce-test-interface's panel copy ticks it).
     pub fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool {
         false
     }
@@ -301,7 +301,7 @@ impl ScrollBox {
     }
 
     pub fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
-        // Focus never lands on the box itself (post-6av it is not an `Element`), and its id is
+        // Focus never lands on the box itself (post-6av it is not an `WidgetHost`), and its id is
         // never a tree ancestor of the focused widget — like the legacy address walk, this
         // gate only ever passes via the hover check below.
         let self_id = self.base.id();
@@ -431,7 +431,7 @@ mod tests {
         sb.update_bounds(300.0, 20.0, 100.0); // max_scroll = 200.0
 
         let mut ctx = UiContext::new();
-        // Hover the scroll box (the focus path took a ctx-registered Element; as a plain
+        // Hover the scroll box (the focus path took a ctx-registered WidgetHost; as a plain
         // struct the hovered branch is the live gate).
         ctx.set_cursor_pos(50.0, 50.0);
 

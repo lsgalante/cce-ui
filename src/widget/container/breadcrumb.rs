@@ -209,7 +209,7 @@ impl PathController for Breadcrumb {
 mod tests {
     use super::*;
     use crate::context::UiContext;
-    use crate::widget::Element;
+    use crate::widget::WidgetHost;
 
     #[test]
     fn test_breadcrumb_clicks() {

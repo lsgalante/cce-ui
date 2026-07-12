@@ -1,6 +1,6 @@
 //! Narrow-trait status dot (Phase 5c leaf sweep).
 //!
-//! **Deliberate behavior fix:** the legacy `Element` impl only set `color()` and never emitted
+//! **Deliberate behavior fix:** the legacy `WidgetHost` impl only set `color()` and never emitted
 //! geometry on any render path (`all_quads` and `all_rounded_quads` were both empty for it, and
 //! `render_widget` never reads `color()` directly), so the dot was **invisible** — a probe test
 //! against the legacy widget confirmed zero rects emitted through `render_widget`. The narrow
@@ -56,18 +56,18 @@ impl Input for StatusDot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Element, UiContext};
+    use crate::widget::{WidgetHost, UiContext};
 
     #[test]
     fn emits_its_color_quad_through_the_bridge() {
         let mut dot = StatusDot::new(DotStatus::Warning);
-        Element::set_rect(&mut dot, 5.0, 6.0, 10.0, 10.0);
+        WidgetHost::set_rect(&mut dot, 5.0, 6.0, 10.0, 10.0);
         assert_eq!(
-            Element::extra_quads(&dot),
+            WidgetHost::extra_quads(&dot),
             vec![(5.0, 6.0, 10.0, 10.0, [0.90, 0.60, 0.10, 1.0])],
         );
         // Drags pass through, as legacy declared.
-        assert!(!Element::blocks_backplate_drag(&dot));
+        assert!(!WidgetHost::blocks_backplate_drag(&dot));
         // State mutation through Deref, as call sites write it.
         dot.set_status(DotStatus::Error);
         assert_eq!(dot.status, DotStatus::Error);

@@ -3,7 +3,7 @@
 //! buttons, section borders, and an inline emacs-flavored code editor), each row's widget owned
 //! by value in parallel `Vec<Option<..>>` fields (most already `Adapted<W>` from earlier
 //! phases), plus a raw-pointer `children` container list. The designer stores it as
-//! `Box<dyn Element>` and drives it through direct `dyn Element` calls; `window_runner`'s
+//! `Box<dyn WidgetHost>` and drives it through direct `dyn WidgetHost` calls; `window_runner`'s
 //! `get_child_widget_for_quad` downcasts to the concrete type through `as_any` (which the
 //! adapter forwards to the inner widget) and reads the pub sub-widget fields — both keep
 //! working unchanged.
@@ -27,7 +27,7 @@ use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};
 use crate::widget::input::{Button, Checkbox, ColorSelector, Dropdown, Slider, Spinbox, TextBox};
 use crate::widget::{
-    Adapted, Element, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
+    Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
     MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext,
 };
 
@@ -1747,7 +1747,7 @@ mod tests {
             .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
             .collect();
         ParamController::set_display_params(&mut *p, &params);
-        Element::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
         p
     }
 
@@ -1784,7 +1784,7 @@ mod tests {
         assert_eq!(p.focused_param, Some(0), "code row focused");
         assert!(p.code_editor.is_some());
         p.code_editor.as_mut().unwrap().insert_text("y");
-        Element::unfocus(&mut p);
+        WidgetHost::unfocus(&mut p);
         assert_eq!(p.focused_param, None);
         assert!(p.code_editor.is_none());
         assert!(ParamController::node_params(&*p)[0].1.contains('y'), "editor buffer committed on unfocus");
@@ -1796,16 +1796,16 @@ mod tests {
         let p = panel_with(&[("Size", "1.00", "slider:0:2")]);
         // The designer's plain path: extra_quads carries the row chrome (clipped), including
         // the slider background it reads via rect()+color()...
-        let extra = Element::extra_quads(&p);
+        let extra = WidgetHost::extra_quads(&p);
         assert!(!extra.is_empty(), "row chrome served through extra_quads");
         // ...but NOT the panel's own PARAM_BG plate (the host draws that from color()).
-        let (x, y, w, h) = Element::rect(&p);
+        let (x, y, w, h) = WidgetHost::rect(&p);
         assert!(
             !extra.iter().any(|q| (q.0, q.1, q.2, q.3) == (x, y, w, h)),
             "panel bg plate is the host's, not extra_quads'"
         );
         // The no-double-draw contract of the plain-quad hatch.
-        assert!(Element::all_quads(&p, &ctx).is_empty());
+        assert!(WidgetHost::all_quads(&p, &ctx).is_empty());
         // Per-label hatch: the walk's text prims carry the widget font and viewport bounds.
         let mut scratch = crate::scene::paint::PaintCtx::new();
         crate::scene::painter::append_widget_text(&ctx, &p, &mut scratch);
@@ -1830,9 +1830,9 @@ mod tests {
             .collect();
         let mut p = ParametersBg::new();
         ParamController::set_display_params(&mut *p, &rows);
-        Element::set_rect(&mut p, 0.0, 0.0, 300.0, 200.0);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 200.0);
         assert!(p.content_h > 200.0);
-        assert!(Element::is_scrollable(&p));
+        assert!(WidgetHost::is_scrollable(&p));
         // Wheel over the panel body but off every slider row's x-span is impossible (rows are
         // full-width), so scroll via the region below the last visible row: use a y between
         // rows (the 2px slack above a row) — simplest is the bottom padding strip.

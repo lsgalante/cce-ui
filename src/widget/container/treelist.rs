@@ -357,7 +357,7 @@ impl TreeList {
         }
     }
 
-    fn mouse_body(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, host: Option<*mut (dyn Element + 'static)>, host_id: WidgetId) -> bool {
+    fn mouse_body(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ui: &mut UiContext, host: Option<*mut (dyn WidgetHost + 'static)>, host_id: WidgetId) -> bool {
         let _ = host_id;
         if self.editing_key_idx.is_some() {
             if button == MouseButton::Left && state == ElementState::Pressed {
@@ -690,7 +690,7 @@ impl Paint for TreeList {
         true
     }
 
-    // Legacy TreeList kept the default Element focus/hover highlight overlay (the teal
+    // Legacy TreeList kept the default WidgetHost focus/hover highlight overlay (the teal
     // wash over the focused tree, drawn by the old all_quads default) — opt back in
     // (the 5q TextBox trap).
     fn legacy_focus_highlight(&self) -> bool {

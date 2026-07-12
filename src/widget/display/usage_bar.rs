@@ -55,23 +55,23 @@ impl Input for UsageBar {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::Element;
+    use crate::widget::WidgetHost;
 
     /// Byte-identical to the legacy `extra_quads` override: full-width bg quad, then a fill quad
     /// scaled by the clamped value.
     #[test]
     fn bridge_matches_legacy_extra_quads() {
         let mut bar = UsageBar::new(0.5).with_colors([0.1, 0.2, 0.3, 1.0], [0.4, 0.5, 0.6, 1.0]);
-        Element::set_rect(&mut bar, 12.0, 30.0, 200.0, 8.0);
+        WidgetHost::set_rect(&mut bar, 12.0, 30.0, 200.0, 8.0);
         assert_eq!(
-            Element::extra_quads(&bar),
+            WidgetHost::extra_quads(&bar),
             vec![
                 (12.0, 30.0, 200.0, 8.0, [0.4, 0.5, 0.6, 1.0]),
                 (12.0, 30.0, 100.0, 8.0, [0.1, 0.2, 0.3, 1.0]),
             ],
         );
         // Nothing leaks onto the rounded path (apps read both getters).
-        assert!(Element::all_rounded_quads(&bar, &crate::widget::UiContext::new()).is_empty());
+        assert!(WidgetHost::all_rounded_quads(&bar, &crate::widget::UiContext::new()).is_empty());
     }
 
     #[test]

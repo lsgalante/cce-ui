@@ -4,7 +4,7 @@
 
 use crate::colors;
 use crate::scene::layout::Rect;
-use crate::widget::{Adapted, Element, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
+use crate::widget::{Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
 pub struct Splitter {
     hovered: bool,
@@ -15,7 +15,7 @@ pub struct Splitter {
 impl Splitter {
     pub fn new(w: f32) -> Adapted<Splitter> {
         let mut s = Adapted::new(Splitter { hovered: false, dragging: false, drag_ox: 0.0 });
-        Element::set_rect(&mut s, 0.0, 0.0, w, 0.0);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, w, 0.0);
         s
     }
 }

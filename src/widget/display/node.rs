@@ -1,7 +1,7 @@
 //! Narrow-trait `Node` (Phase 5k) — a network-editor node box: draggable with grid snap
 //! (self-moving, via [`Input::drag_reposition`]), a geometry-visibility toggle sub-zone, and
 //! two controller capabilities ([`ParamController`] + [`GeomController`]) re-exposed through
-//! the `Input` hooks for the legacy `Element::as_*_controller` downcasts.
+//! the `Input` hooks for the legacy `WidgetHost::as_*_controller` downcasts.
 
 use crate::colors;
 use crate::scene::layout::Rect;
@@ -49,7 +49,7 @@ impl Node {
             geom_toggled: false,
             toggle_hovered: false,
         });
-        crate::widget::Element::set_rect(&mut node, x, y, w, h);
+        crate::widget::WidgetHost::set_rect(&mut node, x, y, w, h);
         node
     }
 
@@ -249,7 +249,7 @@ impl GeomController for Node {
 mod tests {
     use super::*;
     use crate::context::UiContext;
-    use crate::widget::Element;
+    use crate::widget::WidgetHost;
 
     #[test]
     fn toggle_click_flips_geom_and_press_starts_drag() {
@@ -267,11 +267,11 @@ mod tests {
 
         // A press outside the toggle starts a drag; reposition snaps to the drag origin.
         assert!(node.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 110.0, &mut ctx));
-        assert!(Element::is_dragging(&node));
-        assert!(Element::drag_update(&mut node, 150.0, 130.0));
-        assert_eq!(Element::rect(&node), (140.0, 120.0, 120.0, 40.0), "moved by the pointer delta");
+        assert!(WidgetHost::is_dragging(&node));
+        assert!(WidgetHost::drag_update(&mut node, 150.0, 130.0));
+        assert_eq!(WidgetHost::rect(&node), (140.0, 120.0, 120.0, 40.0), "moved by the pointer delta");
         assert!(node.mouse_input(MouseButton::Left, ElementState::Released, 150.0, 130.0, &mut ctx));
-        assert!(!Element::is_dragging(&node));
+        assert!(!WidgetHost::is_dragging(&node));
     }
 
     #[test]

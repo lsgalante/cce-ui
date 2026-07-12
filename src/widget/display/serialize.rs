@@ -1,6 +1,6 @@
 use crate::widget::*;
 
-fn serialize_single_widget(w: &dyn Element, json: &mut String) {
+fn serialize_single_widget(w: &dyn WidgetHost, json: &mut String) {
     let (x, y, width, height) = w.rect();
     let label = w.label().or_else(|| w.base().label.clone()).unwrap_or_default();
     let focused = w.base().focused;
@@ -24,7 +24,7 @@ fn serialize_single_widget(w: &dyn Element, json: &mut String) {
     let mut is_vertical = false;
     let mut checked_states = Vec::new();
     // Concrete capability lookup (Phase 6aw): the MenuController implementors a serialized
-    // roster can hold are Adapted<MenuBar> and Adapted<Paginator> — Element's discovery
+    // roster can hold are Adapted<MenuBar> and Adapted<Paginator> — WidgetHost's discovery
     // hooks are gone.
     let mc: Option<&dyn MenuController> = w
         .as_any()
@@ -84,7 +84,7 @@ fn serialize_single_widget(w: &dyn Element, json: &mut String) {
 
 /// Serialize the visible widgets' menu state. Takes dyn refs (not boxes): the designer's
 /// roster is concretely typed since the Phase 6bb retype and lends a per-slot dyn view.
-pub fn serialize_widgets(widgets: &[&dyn Element]) -> String {
+pub fn serialize_widgets(widgets: &[&dyn WidgetHost]) -> String {
     let mut json = String::new();
     json.push('[');
     let mut first = true;

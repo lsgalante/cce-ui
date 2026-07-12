@@ -5,7 +5,7 @@
 use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
-use crate::widget::{Adapted, Element, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
+use crate::widget::{Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
 pub struct Panel {
     dragging: bool,
@@ -17,7 +17,7 @@ pub struct Panel {
 impl Panel {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Adapted<Panel> {
         let mut p = Adapted::new(Panel { dragging: false, drag_ox: 0.0, drag_oy: 0.0, bounds: None });
-        Element::set_rect(&mut p, x, y, w, h);
+        WidgetHost::set_rect(&mut p, x, y, w, h);
         p
     }
 

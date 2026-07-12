@@ -76,7 +76,7 @@ pub enum Justification {
 }
 
 /// A context-menu action dispatched on the menu's target widget (6bd phase 1: one enum
-/// replaces the 13 per-action `Element` methods). `ClearText` is the search-box "Cear" item.
+/// replaces the 13 per-action `WidgetHost` methods). `ClearText` is the search-box "Cear" item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContextAction {
     Cut,
@@ -112,19 +112,19 @@ pub struct LayoutTree {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct WidgetPtr(pub *mut (dyn Element + 'static));
+pub struct WidgetPtr(pub *mut (dyn WidgetHost + 'static));
 
 impl WidgetPtr {
     pub fn is_null(&self) -> bool {
         self.0.is_null()
     }
-    pub fn as_ptr(&self) -> *mut (dyn Element + 'static) {
+    pub fn as_ptr(&self) -> *mut (dyn WidgetHost + 'static) {
         self.0
     }
 }
 
 impl std::ops::Deref for WidgetPtr {
-    type Target = dyn Element + 'static;
+    type Target = dyn WidgetHost + 'static;
     fn deref(&self) -> &Self::Target {
         assert!(!self.0.is_null(), "Attempted to dereference a null WidgetPtr!");
         unsafe { &*self.0 }
@@ -187,7 +187,13 @@ pub struct Size {
     pub height: f32,
 }
 
-pub trait Element {
+/// The single host surface every widget presents to the machinery (context routing, the
+/// paint walk, the render loop, app dyn broadcasts). **Formerly `Element`**, the ~125-method
+/// god-trait — renamed at the 6bd flip once census-driven shrink batches brought it down to
+/// the measured blueprint. `Adapted<W>` is the one production implementor; concrete behavior
+/// lives on the narrow `Layout`/`Paint`/`Input` traits it wraps. The direct-dispatch and
+/// value blocks shrink further as apps move to routed events / concrete slots.
+pub trait WidgetHost {
     /// The widget's shared base state — GUARANTEED (the flip): the `Option` escape hatch
     /// and its `WidgetId(0)` sentinel class are gone. `Adapted` (the one production
     /// implementor) always owns a base; test shims carry one via `impl_widget_base!`.
@@ -214,8 +220,8 @@ pub trait Element {
     // stand-ins nothing could legitimately use. `impl_widget_base!` provides all four.
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-    fn as_ptr(&self) -> *mut (dyn Element + 'static);
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static);
+    fn as_ptr(&self) -> *mut (dyn WidgetHost + 'static);
+    fn as_ptr_mut(&mut self) -> *mut (dyn WidgetHost + 'static);
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         match event {
@@ -518,7 +524,7 @@ pub trait Element {
     fn is_child_visible(&self, _child_id: WidgetId) -> bool { true }
     fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
+    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn WidgetHost + 'static)> {
         ctx.tree.parent_ptr(self.base().id())
     }
 
@@ -527,7 +533,7 @@ pub trait Element {
     // operation — concrete callers ride the inherent `Adapted` methods, dyn callers go
     // through `focus::link_parent_child` or `ctx.tree` directly.
 
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
+    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn WidgetHost + 'static)> {
         ctx.tree.children_ptrs(self.base().id())
     }
 
@@ -554,7 +560,7 @@ pub trait Element {
     }
 }
 
-pub trait Control: Element {
+pub trait Control: WidgetHost {
     fn set_label(&mut self, label: &str) {
         self.base_mut().label = Some(label.to_string());
     }
@@ -690,7 +696,7 @@ pub trait GeomController {
     fn take_geom_toggle(&mut self) -> bool;
 }
 
-pub fn label_offset(w: &dyn Element) -> f32 {
+pub fn label_offset(w: &dyn WidgetHost) -> f32 {
     let name = w.type_name();
     if name == "Label" || name == "Button" || name == "Checkbox" || name == "Toggle" {
         return 0.0;

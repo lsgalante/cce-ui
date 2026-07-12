@@ -26,7 +26,7 @@ use cce_ui::scene::layout::{
 };
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::widget::{
-    Adapted, Button, Dropdown, Element, ElementState, Event, KeyEvent, MouseButton,
+    Adapted, Button, Dropdown, WidgetHost, ElementState, Event, KeyEvent, MouseButton,
     MouseScrollDelta, Slider, TextBox, Toggle,
 };
 use wayland_client::QueueHandle;
@@ -64,7 +64,7 @@ struct DemoApp {
 
 impl DemoApp {
     /// The widget roots, in paint order (events route over the same list).
-    fn roots(&mut self) -> [*mut (dyn Element + 'static); 5] {
+    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 5] {
         [
             self.button.as_ptr_mut(),
             self.toggle.as_ptr_mut(),

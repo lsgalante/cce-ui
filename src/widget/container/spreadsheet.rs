@@ -63,7 +63,7 @@ impl Spreadsheet {
             scrollbar_thumb_hovered: false,
         });
         // The spreadsheet pane starts hidden (the designer toggles it in later).
-        crate::widget::Element::set_visible(&mut s, false);
+        crate::widget::WidgetHost::set_visible(&mut s, false);
         s
     }
 
@@ -109,7 +109,7 @@ impl Paint for Spreadsheet {
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        // Legacy: rounded_corners override (all corners) with the Element-default 12.0 radius.
+        // Legacy: rounded_corners override (all corners) with the WidgetHost-default 12.0 radius.
         Some((12.0, (true, true, true, true)))
     }
 
@@ -365,12 +365,12 @@ impl SpreadsheetController for Spreadsheet {
 mod tests {
     use super::*;
     use crate::context::UiContext;
-    use crate::widget::Element;
+    use crate::widget::WidgetHost;
 
     fn filled(rows: usize) -> Adapted<Spreadsheet> {
         let mut s = Spreadsheet::new();
         s.set_visible(true);
-        Element::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0); // viewport: 100 = ~4 rows of 24
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0); // viewport: 100 = ~4 rows of 24
         let data: Vec<Vec<String>> =
             (0..rows).map(|i| vec![format!("r{i}"), format!("v{i}")]).collect();
         SpreadsheetController::set_spreadsheet_data(&mut *s, vec!["a".into(), "b".into()], data);
@@ -396,9 +396,9 @@ mod tests {
         assert!(s.handle_event(&wheel, &mut ctx), "in-rect wheel consumed");
 
         // …which tick integrates into scroll movement and decays to a stop.
-        assert!(Element::tick(&mut s, 0.016, &mut ctx), "first tick moves the scroll");
+        assert!(WidgetHost::tick(&mut s, 0.016, &mut ctx), "first tick moves the scroll");
         let mut guard = 0;
-        while Element::tick(&mut s, 0.016, &mut ctx) {
+        while WidgetHost::tick(&mut s, 0.016, &mut ctx) {
             guard += 1;
             assert!(guard < 1000, "inertia must decay to a stop");
         }
@@ -417,20 +417,20 @@ mod tests {
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
 
         // content 1200, viewport 100 -> overflowing, so the host may drag it.
-        assert!(Element::draggable(&s));
+        assert!(WidgetHost::draggable(&s));
 
         // Press on the scrollbar track (x >= 200-6-2-4): thumb jumps, drag engages.
-        Element::drag_begin(&mut s, 195.0, 80.0);
-        assert!(Element::is_dragging(&s));
-        assert!(Element::drag_update(&mut s, 195.0, 110.0), "thumb drag scrolls");
+        WidgetHost::drag_begin(&mut s, 195.0, 80.0);
+        assert!(WidgetHost::is_dragging(&s));
+        assert!(WidgetHost::drag_update(&mut s, 195.0, 110.0), "thumb drag scrolls");
         let dragged_to = s.inner().geom(rect).unwrap().scroll;
         assert!(dragged_to > 0.0);
-        Element::drag_end(&mut s);
-        assert!(!Element::is_dragging(&s));
+        WidgetHost::drag_end(&mut s);
+        assert!(!WidgetHost::is_dragging(&s));
 
         // A body press (left of the scrollbar) engages no drag.
-        Element::drag_begin(&mut s, 50.0, 60.0);
-        assert!(!Element::is_dragging(&s), "body press is not a scrollbar drag");
+        WidgetHost::drag_begin(&mut s, 50.0, 60.0);
+        assert!(!WidgetHost::is_dragging(&s), "body press is not a scrollbar drag");
 
         // End key jumps to max; Home returns to zero. (Keys route via keyboard_input.)
         let end = crate::widget::KeyEvent {
@@ -441,12 +441,12 @@ mod tests {
             ctrl: false,
             shift: false,
         };
-        assert!(Element::keyboard_input(&mut s, &end, &mut ctx));
+        assert!(WidgetHost::keyboard_input(&mut s, &end, &mut ctx));
         let g = s.inner().geom(rect).unwrap();
         assert_eq!(g.scroll, g.max_scroll);
 
         // Hidden: the focused-widget keyboard path must not consume keys.
         s.set_visible(false);
-        assert!(!Element::keyboard_input(&mut s, &end, &mut ctx), "hidden widget ignores keys");
+        assert!(!WidgetHost::keyboard_input(&mut s, &end, &mut ctx), "hidden widget ignores keys");
     }
 }

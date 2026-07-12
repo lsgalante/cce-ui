@@ -19,7 +19,7 @@ use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::input::ButtonStrip;
 use crate::widget::{
-    Adapted, Element, Event, EventCtx, Input, Layout, MenuController, PageSelector, Paint,
+    Adapted, WidgetHost, Event, EventCtx, Input, Layout, MenuController, PageSelector, Paint,
     UiContext, WidgetId,
 };
 
@@ -150,12 +150,12 @@ impl Layout for Paginator {
         true
     }
 
-    fn container_children(&self) -> Vec<*mut (dyn Element + 'static)> {
-        vec![&self.sidebar_menu as &dyn Element as *const (dyn Element + 'static) as *mut (dyn Element + 'static)]
+    fn container_children(&self) -> Vec<*mut (dyn WidgetHost + 'static)> {
+        vec![&self.sidebar_menu as &dyn WidgetHost as *const (dyn WidgetHost + 'static) as *mut (dyn WidgetHost + 'static)]
     }
 
     /// The legacy `set_rect` body: strip on the left at its measured width.
-    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn Element + 'static)) {
+    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn WidgetHost + 'static)) {
         let (x, y, h) = (rect.x, rect.y, rect.height);
         let sidebar_w = self.sidebar_w();
         self.sidebar_menu.set_rect(x, y, sidebar_w, h);
@@ -282,7 +282,7 @@ mod tests {
 
     fn paginator() -> Adapted<Paginator> {
         let mut p = Paginator::new(vec!["One".to_string(), "Two".to_string()]);
-        Element::set_rect(&mut p, 0.0, 0.0, 400.0, 300.0);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 400.0, 300.0);
         p
     }
 
@@ -319,19 +319,19 @@ mod tests {
         // Legacy split: `extra_quads` is the children's chrome only; the sidebar background
         // quad lives in `all_quads` alone (email/layout-interface draw their own backgrounds
         // under `extra_quads`).
-        let extra = Element::extra_quads(&p);
+        let extra = WidgetHost::extra_quads(&p);
         let strip_extra = p.sidebar_menu.extra_quads();
         assert_eq!(extra.len(), strip_extra.len(), "children-only plain view (pages emit none)");
         let bg = colors::sidebar_bg_color();
         if bg[3] > 0.0 {
             let bg_quad = (0.0, 0.0, 400.0, 300.0, bg);
             assert!(!extra.contains(&bg_quad), "no own bg in extra_quads");
-            assert!(Element::all_quads(&p, &ctx).contains(&bg_quad), "own bg in all_quads");
+            assert!(WidgetHost::all_quads(&p, &ctx).contains(&bg_quad), "own bg in all_quads");
         }
 
         // The embedded strip + pages land in the registry on tick (the spatial grid feeds off
         // it — the registered strip is what blocks backplate drags over the sidebar).
-        Element::tick(&mut p, 0.016, &mut ctx);
+        WidgetHost::tick(&mut p, 0.016, &mut ctx);
         let strip_id = p.sidebar_menu.id();
         assert!(
             ctx.tree.iter_registered().any(|(w_id, _)| w_id == strip_id),

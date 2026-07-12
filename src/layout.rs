@@ -1,4 +1,4 @@
-use crate::widget::Element;
+use crate::widget::WidgetHost;
 use crate::context::UiContext;
 use std::sync::RwLock;
 use std::collections::HashMap;
@@ -3141,7 +3141,7 @@ impl RenderTarget for PopoverCollector {
 }
 
 
-pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
+pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
     let id = Some(w.base().id());
     if let Some(w_id) = id {
         ctx.register_widget(w_id, w.as_ptr_mut());
@@ -3373,7 +3373,7 @@ impl Column {
         pc.text(text, x, y, font_size, color);
     }
 
-    pub fn widget<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, mut wh: f32, ctx: &mut UiContext) {
+    pub fn widget<T: WidgetHost + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, mut wh: f32, ctx: &mut UiContext) {
         if let Some(pref) = w.preferred_height() {
             wh = pref;
         }
@@ -3424,7 +3424,7 @@ impl<'a> Row<'a> {
         self.cursor_x += width + self.spacing;
     }
 
-    pub fn widget<T: Element + 'static>(&mut self, w: &mut T, ww: f32, mut wh: f32, ctx: &mut UiContext) {
+    pub fn widget<T: WidgetHost + 'static>(&mut self, w: &mut T, ww: f32, mut wh: f32, ctx: &mut UiContext) {
         if let Some(pref) = w.preferred_height() {
             wh = pref;
         }
@@ -3553,7 +3553,7 @@ impl Section {
         pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
     }
 
-    pub fn widget<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
+    pub fn widget<T: WidgetHost + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
         if let Some(pref) = w.preferred_height() {
             wh = pref;
         }
@@ -3605,7 +3605,7 @@ impl Section {
         }
     }
 
-    pub fn widget_full<T: Element + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, wh: f32, ctx: &mut UiContext) {
+    pub fn widget_full<T: WidgetHost + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, wh: f32, ctx: &mut UiContext) {
         let x_off = 12.0;
         let ww = self.cw - 2.0 * (self.padding() + x_off);
         self.widget(pc, w, x_off, ww, wh, ctx);
@@ -3744,7 +3744,7 @@ pub struct SectionVStack<'a> {
 }
 
 impl<'a> SectionVStack<'a> {
-    pub fn add_widget<T: Element + 'static>(&mut self, w: &mut T, ww: f32, wh: f32, ctx: &mut UiContext) {
+    pub fn add_widget<T: WidgetHost + 'static>(&mut self, w: &mut T, ww: f32, wh: f32, ctx: &mut UiContext) {
         self.section.widget(self.pc, w, Section::DEFAULT_MARGIN_X, ww, wh, ctx);
         self.section.spacing(self.spacing);
     }
@@ -3967,8 +3967,8 @@ pub trait LayoutStrategy: std::fmt::Debug {
     fn get_column_width(&self) -> Option<f32> { None }
     fn get_gap(&self) -> f32 { 20.0 }
 
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &mut crate::context::UiContext) -> f32;
-    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size;
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &mut crate::context::UiContext) -> f32;
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size;
     fn box_clone(&self) -> Box<dyn LayoutStrategy>;
 }
 
@@ -4042,7 +4042,7 @@ impl LayoutStrategy for FlexLayout {
         self.spacing
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
         let mut cur_x = x;
         let mut cur_y = y;
         match self.direction {
@@ -4074,7 +4074,7 @@ impl LayoutStrategy for FlexLayout {
         }
     }
 
-    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
         match self.direction {
             FlexDirection::Row => {
                 let mut total_w = 0.0f32;
@@ -4164,7 +4164,7 @@ impl LayoutStrategy for ColumnLayout {
         self.gap
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
         let mut cur_y = y;
         for &child_ptr in children {
             unsafe {
@@ -4178,7 +4178,7 @@ impl LayoutStrategy for ColumnLayout {
         (cur_y - y).max(0.0)
     }
 
-    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
         let mut total_h = 0.0f32;
         let mut max_w = 0.0f32;
         for (i, &child_ptr) in children.iter().enumerate() {
@@ -4298,7 +4298,7 @@ impl LayoutStrategy for AdaptiveGrid {
         crate::layout::grid_gap()
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
         let usable_w = w.max(1.0);
         let min_col_width = crate::layout::grid_min_col_width();
         let gap = crate::layout::grid_gap();
@@ -4341,7 +4341,7 @@ impl LayoutStrategy for AdaptiveGrid {
         (max_h - y).max(0.0)
     }
 
-    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
         let usable_w = constraints.max_width.max(1.0);
         let min_col_width = crate::layout::grid_min_col_width();
         let gap = crate::layout::grid_gap();
@@ -4429,7 +4429,7 @@ impl LayoutStrategy for RadialLayout {
         }
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::Element + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
         let cx = x + w / 2.0;
         let cy = y + h / 2.0;
         let aspect = if self.aspect_ratio > 0.0 {
@@ -4452,7 +4452,7 @@ impl LayoutStrategy for RadialLayout {
         h
     }
 
-    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::Element + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
+    fn measure(&self, constraints: crate::widget::LayoutConstraints, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &crate::context::UiContext) -> crate::widget::Size {
         let cx = constraints.max_width / 2.0;
         let cy = constraints.max_height / 2.0;
         let aspect = if self.aspect_ratio > 0.0 {
@@ -4692,7 +4692,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         }
     }
 
-    pub fn widget<T: Element + 'static>(&mut self, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
+    pub fn widget<T: WidgetHost + 'static>(&mut self, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
         if let Some(pref) = w.preferred_height() {
             wh = pref;
         }
@@ -4753,7 +4753,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         }
     }
 
-    pub fn widget_full<T: Element + 'static>(&mut self, w: &mut T, wh: f32, ctx: &mut UiContext) {
+    pub fn widget_full<T: WidgetHost + 'static>(&mut self, w: &mut T, wh: f32, ctx: &mut UiContext) {
         let x_off = 12.0;
         let ww = self.cw - 2.0 * (self.padding() + x_off); // cw - 40.0
         self.widget(w, x_off, ww, wh, ctx);
@@ -4928,7 +4928,7 @@ pub struct VStack<'b, 'a, P> {
 }
 
 impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
-    pub fn add_widget<T: Element + 'static>(&mut self, w: &mut T, _ww: f32, wh: f32, ctx: &mut UiContext) {
+    pub fn add_widget<T: WidgetHost + 'static>(&mut self, w: &mut T, _ww: f32, wh: f32, ctx: &mut UiContext) {
         let pad = self.context.padding();
         let margin_x = 2.0 * pad + 12.0;
         let x = self.context.left + margin_x;
@@ -5103,7 +5103,7 @@ mod tests {
         h: f32,
     }
 
-    impl Element for MockWidget {
+    impl WidgetHost for MockWidget {
         crate::impl_widget_base!(MockWidget);
         fn rect(&self) -> (f32, f32, f32, f32) {
             (self.x, self.y, self.w, self.h)
@@ -5123,7 +5123,7 @@ mod tests {
         base: crate::widget::Widget,
     }
 
-    impl Element for MockWidgetWithLabel {
+    impl WidgetHost for MockWidgetWithLabel {
         crate::impl_widget_base!(MockWidgetWithLabel);
         fn rect(&self) -> (f32, f32, f32, f32) {
             let offset = crate::widget::label_offset(self);
@@ -5462,9 +5462,9 @@ mod tests {
         let mut w3 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
         
         let children = vec![
-            &mut w1 as *mut MockWidget as *mut (dyn Element + 'static),
-            &mut w2 as *mut MockWidget as *mut (dyn Element + 'static),
-            &mut w3 as *mut MockWidget as *mut (dyn Element + 'static),
+            &mut w1 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
+            &mut w2 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
+            &mut w3 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
         ];
 
         let _ = layout.layout(10.0, 20.0, 250.0, 500.0, &children, &mut dummy);
@@ -5494,9 +5494,9 @@ mod tests {
         let mut w3 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
         
         let children = vec![
-            &mut w1 as *mut MockWidget as *mut (dyn Element + 'static),
-            &mut w2 as *mut MockWidget as *mut (dyn Element + 'static),
-            &mut w3 as *mut MockWidget as *mut (dyn Element + 'static),
+            &mut w1 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
+            &mut w2 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
+            &mut w3 as *mut MockWidget as *mut (dyn WidgetHost + 'static),
         ];
 
         let _ = layout.layout(10.0, 20.0, 250.0, 300.0, &children, &mut dummy);

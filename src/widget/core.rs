@@ -1,7 +1,7 @@
-use crate::widget::{Element, Key};
+use crate::widget::{WidgetHost, Key};
 
 pub mod focus {
-    use super::Element;
+    use super::WidgetHost;
     use crate::widget::WidgetId;
     use std::cell::Cell;
 
@@ -23,7 +23,7 @@ pub mod focus {
         }
     }
 
-    pub fn set_focused(w: &mut dyn Element, ctx: Option<&mut crate::context::UiContext>) {
+    pub fn set_focused(w: &mut dyn WidgetHost, ctx: Option<&mut crate::context::UiContext>) {
         set_focused_id(w.base().id(), ctx);
     }
 
@@ -39,7 +39,7 @@ pub mod focus {
         }
     }
 
-    pub fn is_focused(w: &dyn Element) -> bool {
+    pub fn is_focused(w: &dyn WidgetHost) -> bool {
         is_focused_id(w.base().id())
     }
 
@@ -53,7 +53,7 @@ pub mod focus {
         }
     }
 
-    pub fn clear_if_matches(w: &dyn Element) {
+    pub fn clear_if_matches(w: &dyn WidgetHost) {
         clear_if_matches_id(w.base().id());
     }
 
@@ -69,12 +69,12 @@ pub mod focus {
         FOCUSED_WIDGET.with(|cell| cell.get().is_some())
     }
 
-    pub fn link_parent_child(parent: &mut dyn Element, child: &mut dyn Element, ctx: &mut crate::context::UiContext) {
+    pub fn link_parent_child(parent: &mut dyn WidgetHost, child: &mut dyn WidgetHost, ctx: &mut crate::context::UiContext) {
         let parent_ptr = unsafe {
-            std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(parent as *mut dyn Element)
+            std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(parent as *mut dyn WidgetHost)
         };
         let child_ptr = unsafe {
-            std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(child as *mut dyn Element)
+            std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(child as *mut dyn WidgetHost)
         };
         let (p_id, c_id) = (parent.base().id(), child.base().id());
         ctx.register_widget(p_id, parent_ptr);
@@ -578,7 +578,7 @@ pub mod context_menu {
         CONTEXT_MENU.with(|m| m.borrow_mut().hide());
     }
 
-    pub fn clear_if_matches(w: &dyn Element) {
+    pub fn clear_if_matches(w: &dyn WidgetHost) {
         let id = w.base().id();
         CONTEXT_MENU.with(|m| {
             let mut menu = m.borrow_mut();
@@ -697,7 +697,7 @@ impl Widget {
 }
 
 
-pub fn clear_widget_references(w: &dyn Element) {
+pub fn clear_widget_references(w: &dyn WidgetHost) {
     focus::clear_if_matches(w);
     context_menu::clear_if_matches(w);
 }
@@ -709,11 +709,11 @@ macro_rules! impl_widget_base {
         fn base_mut(&mut self) -> &mut $crate::widget::Widget { &mut self.base }
         fn as_any(&self) -> &dyn std::any::Any { self }
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-        fn as_ptr(&self) -> *mut (dyn $crate::widget::Element + 'static) {
-            self as *const Self as *mut Self as *mut (dyn $crate::widget::Element + 'static)
+        fn as_ptr(&self) -> *mut (dyn $crate::widget::WidgetHost + 'static) {
+            self as *const Self as *mut Self as *mut (dyn $crate::widget::WidgetHost + 'static)
         }
-        fn as_ptr_mut(&mut self) -> *mut (dyn $crate::widget::Element + 'static) {
-            self as *mut Self as *mut (dyn $crate::widget::Element + 'static)
+        fn as_ptr_mut(&mut self) -> *mut (dyn $crate::widget::WidgetHost + 'static) {
+            self as *mut Self as *mut (dyn $crate::widget::WidgetHost + 'static)
         }
     };
 }

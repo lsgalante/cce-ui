@@ -1,4 +1,4 @@
-use crate::widget::Element;
+use crate::widget::WidgetHost;
 
 pub struct ColumnLayout {
     pub x: f32,
@@ -21,14 +21,14 @@ impl ColumnLayout {
         }
     }
 
-    pub fn add_widget(&mut self, widget: &mut dyn Element, height: f32) {
+    pub fn add_widget(&mut self, widget: &mut dyn WidgetHost, height: f32) {
         let label_off = widget.base().label_offset();
         let total_h = height + label_off;
         widget.set_rect(self.x + self.margin, self.current_y, self.width - 2.0 * self.margin, height);
         self.current_y += total_h + self.gap;
     }
 
-    pub fn add_row(&mut self, widgets: &[*mut dyn Element], height: f32, gap: f32) {
+    pub fn add_row(&mut self, widgets: &[*mut dyn WidgetHost], height: f32, gap: f32) {
         let count = widgets.len();
         if count == 0 {
             return;
@@ -81,7 +81,7 @@ impl RowLayout {
         }
     }
 
-    pub fn add_widget(&mut self, widget: &mut dyn Element, width: f32) {
+    pub fn add_widget(&mut self, widget: &mut dyn WidgetHost, width: f32) {
         widget.set_rect(self.current_x, self.y + self.margin, width, self.height - 2.0 * self.margin);
         self.current_x += width + self.gap;
     }

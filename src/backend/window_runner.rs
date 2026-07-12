@@ -37,7 +37,7 @@ use glyphon::{
     FontSystem, Resolution, TextArea,
     TextBounds, Buffer, Attrs, Metrics,
 };
-use crate::widget::{Element, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey, Position};
+use crate::widget::{WidgetHost, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey, Position};
 use crate::wayland::detect_scale_factor;
 use crate::backend::WgpuAdapter;
 
@@ -986,13 +986,13 @@ pub fn push_plate_solid_border_vertices_legacy(
     push_plate_solid_border_vertices(x, y, ww, h, radii, t, sw, sh, color, clip_circle, out);
 }
 
-pub fn widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
+pub fn widget_vertices(w: &dyn crate::widget::WidgetHost, sw: f32, sh: f32, clip_circle: [f32; 3]) -> Vec<Vertex> {
     let mut verts = Vec::new();
     push_widget_vertices(w, sw, sh, clip_circle, &mut verts);
     verts
 }
 
-pub fn push_widget_vertices(w: &dyn crate::widget::Element, sw: f32, sh: f32, clip_circle: [f32; 3], out: &mut Vec<Vertex>) {
+pub fn push_widget_vertices(w: &dyn crate::widget::WidgetHost, sw: f32, sh: f32, clip_circle: [f32; 3], out: &mut Vec<Vertex>) {
     let (x, y, ww, h) = w.rect();
     let radii = w.corner_radii();
     if let Some(thickness) = w.plate_bevel() {
@@ -1106,7 +1106,7 @@ pub fn tessellate_display_list(
 }
 
 pub fn extra_quad_vertices(
-    w: &dyn crate::widget::Element,
+    w: &dyn crate::widget::WidgetHost,
     qx: f32, qy: f32, qw: f32, qh: f32,
     sw: f32, sh: f32,
     qc: [f32; 4],
@@ -1118,9 +1118,9 @@ pub fn extra_quad_vertices(
 }
 
 fn get_child_widget_for_quad<'a>(
-    w: &'a dyn crate::widget::Element,
+    w: &'a dyn crate::widget::WidgetHost,
     qx: f32, qy: f32, qw: f32, qh: f32,
-) -> &'a dyn crate::widget::Element {
+) -> &'a dyn crate::widget::WidgetHost {
     if let Some(pbg) = w.as_any().downcast_ref::<crate::widget::ParametersBg>() {
         for s_opt in &pbg.sliders {
             if let Some(s) = s_opt {
@@ -1191,7 +1191,7 @@ fn get_child_widget_for_quad<'a>(
 }
 
 pub fn push_extra_quad_vertices(
-    w: &dyn crate::widget::Element,
+    w: &dyn crate::widget::WidgetHost,
     qx: f32, qy: f32, qw: f32, qh: f32,
     sw: f32, sh: f32,
     qc: [f32; 4],
@@ -1245,7 +1245,7 @@ pub fn push_extra_quad_vertices(
 }
 
 pub fn extra_quad_vertices_clipped(
-    w: &dyn crate::widget::Element,
+    w: &dyn crate::widget::WidgetHost,
     qx: f32, qy: f32, qw: f32, qh: f32,
     sw: f32, sh: f32,
     qc: [f32; 4],
@@ -1258,7 +1258,7 @@ pub fn extra_quad_vertices_clipped(
 }
 
 pub fn push_extra_quad_vertices_clipped(
-    w: &dyn crate::widget::Element,
+    w: &dyn crate::widget::WidgetHost,
     qx: f32, qy: f32, qw: f32, qh: f32,
     sw: f32, sh: f32,
     qc: [f32; 4],

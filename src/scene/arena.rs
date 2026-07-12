@@ -2,8 +2,8 @@
 //!
 //! This is Phase 1 of the core rebuild (see `docs/rfc-core-rebuild.md`). It replaces the old
 //! model where the widget tree was smeared across three parallel stores kept in sync by hand
-//! (`Backplate.children: Vec<*mut dyn Element>`, `UiContext.layout_tree`, and
-//! `UiContext.widget_registry`) and traversed through raw `*mut dyn Element` pointers that
+//! (`Backplate.children: Vec<*mut dyn WidgetHost>`, `UiContext.layout_tree`, and
+//! `UiContext.widget_registry`) and traversed through raw `*mut dyn WidgetHost` pointers that
 //! `Drop` did not fully clear.
 //!
 //! Here there is exactly **one** store. Every node lives in the [`Arena`], addressed by a
@@ -562,12 +562,12 @@ mod tests {
     }
 
     // Validation against a real trait object: the arena must be able to *own* and tree actual
-    // `dyn Element` widgets (the payload type Phase 3 will use), not just Copy scalars.
+    // `dyn WidgetHost` widgets (the payload type Phase 3 will use), not just Copy scalars.
     #[test]
     fn holds_and_trees_real_dyn_element_payloads() {
-        use crate::widget::Element;
+        use crate::widget::WidgetHost;
 
-        // A minimal real `Element` — `color` is the trait's only required method, everything
+        // A minimal real `WidgetHost` — `color` is the trait's only required method, everything
         // else is defaulted, so this exercises the actual trait object without dragging in a
         // heavyweight widget constructor.
         struct Marker {
@@ -575,7 +575,7 @@ mod tests {
             tint: [f32; 4],
             painted: std::cell::Cell<bool>,
         }
-        impl Element for Marker {
+        impl WidgetHost for Marker {
             crate::impl_widget_base!(Marker);
             fn color(&self) -> [f32; 4] {
                 self.painted.set(true);
@@ -583,7 +583,7 @@ mod tests {
             }
         }
 
-        let mut arena: Arena<Box<dyn Element>> = Arena::new();
+        let mut arena: Arena<Box<dyn WidgetHost>> = Arena::new();
         let root = arena.insert(Box::new(Marker { base: crate::widget::Widget::new(), tint: [1.0, 0.0, 0.0, 1.0], painted: false.into() }));
         let child = arena.insert(Box::new(Marker { base: crate::widget::Widget::new(), tint: [0.0, 1.0, 0.0, 1.0], painted: false.into() }));
         arena.append_child(root, child);

@@ -3,8 +3,8 @@
 //! One traversal of the widget tree that emits every widget's own primitives into a single
 //! [`DisplayList`], in draw order, through a [`PaintCtx`]. Recursion and clipping live *here*
 //! (not smeared across each container's `all_*` methods): a widget contributes its own geometry
-//! via [`Element::paint_self`], then the walk descends into its children — pushing the widget's
-//! rect as a clip first when [`Element::clips_children`] is set, so the clip stack composes
+//! via [`WidgetHost::paint_self`], then the walk descends into its children — pushing the widget's
+//! rect as a clip first when [`WidgetHost::clips_children`] is set, so the clip stack composes
 //! automatically instead of every container re-deriving intersections by hand.
 //!
 //! This replaces, once wired into the backend, the three uncoordinated render paths (top-level
@@ -14,15 +14,15 @@
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::{DisplayList, PaintCtx, Prim};
-use crate::widget::{Element, TextLabel, UiContext};
+use crate::widget::{WidgetHost, TextLabel, UiContext};
 
-type ElemPtr = *mut (dyn Element + 'static);
+type ElemPtr = *mut (dyn WidgetHost + 'static);
 
 /// Walk the widget subtree rooted at `root` and produce its ordered, clipped [`DisplayList`].
 ///
 /// # Safety
-/// `root` and every widget reachable through `Element::children` must be live — the same
-/// invariant the rest of the toolkit relies on for its `*mut dyn Element` tree.
+/// `root` and every widget reachable through `WidgetHost::children` must be live — the same
+/// invariant the rest of the toolkit relies on for its `*mut dyn WidgetHost` tree.
 pub fn paint_tree(ui: &UiContext, root: ElemPtr) -> DisplayList {
     let mut pc = PaintCtx::new();
     paint_root_into(ui, root, &mut pc);
@@ -43,13 +43,13 @@ pub fn paint_root_into(ui: &UiContext, root: ElemPtr, pc: &mut PaintCtx) {
 /// bounds). For hosts that build their frame as a [`PaintCtx`] and already emit a widget's
 /// geometry another way, but want its text without re-deriving it through the legacy
 /// `text_labels*` getters (the four hand-aggregate clients). The walk only reads through the
-/// widget, so a shared `&dyn Element` is enough.
-pub fn append_widget_text(ui: &UiContext, root: &dyn Element, pc: &mut PaintCtx) {
+/// widget, so a shared `&dyn WidgetHost` is enough.
+pub fn append_widget_text(ui: &UiContext, root: &dyn WidgetHost, pc: &mut PaintCtx) {
     // SAFETY: the walk only reads through `root` (paint_self/children/visible are all `&self`),
     // and widgets are concrete `'static` types — the invariant the toolkit's whole
-    // `*mut dyn Element` tree already relies on. Erase the borrowed trait-object lifetime bound
+    // `*mut dyn WidgetHost` tree already relies on. Erase the borrowed trait-object lifetime bound
     // to the `'static` `ElemPtr` the walk takes.
-    let ptr: ElemPtr = unsafe { std::mem::transmute::<*const dyn Element, ElemPtr>(root as *const dyn Element) };
+    let ptr: ElemPtr = unsafe { std::mem::transmute::<*const dyn WidgetHost, ElemPtr>(root as *const dyn WidgetHost) };
     let mut scratch = PaintCtx::new();
     paint_node(ui, ptr, &mut scratch);
     for item in scratch.finish().items {
@@ -65,7 +65,7 @@ pub fn append_widget_text(ui: &UiContext, root: &dyn Element, pc: &mut PaintCtx)
     }
 }
 
-/// The `Element` default `paint_self`'s LEAF branch as a reusable body: leaf geometry
+/// The `WidgetHost` default `paint_self`'s LEAF branch as a reusable body: leaf geometry
 /// (rounded quads, plain quads, arcs, circles) followed by the widget's fonted labels.
 /// Legacy leaf widgets' `paint_self` overrides call this with their own labels — the
 /// labels are PASSED IN rather than fetched through the per-widget text getters, so this
@@ -73,7 +73,7 @@ pub fn append_widget_text(ui: &UiContext, root: &dyn Element, pc: &mut PaintCtx)
 /// app-local legacy widgets (display-manager's status/session widgets, cloud's fuzzel)
 /// can use it too.
 pub fn paint_legacy_leaf(
-    w: &dyn Element,
+    w: &dyn WidgetHost,
     ui: &UiContext,
     pc: &mut PaintCtx,
     labels: Vec<(TextLabel, Option<String>, Option<[f32; 4]>)>,
@@ -98,14 +98,14 @@ pub fn paint_legacy_leaf(
 /// The scroll-ancestor text clamp the deleted default fonted getter applied. Always `None`
 /// since Phase 6av: ScrollBox (the last scroll ancestor type) was demoted to a plain
 /// embedded struct — it never appeared as a tree parent, so the walk never matched.
-pub fn scroll_ancestor_text_bounds(_w: &dyn Element, _ui: &UiContext) -> Option<[f32; 4]> {
+pub fn scroll_ancestor_text_bounds(_w: &dyn WidgetHost, _ui: &UiContext) -> Option<[f32; 4]> {
     None
 }
 
-/// The deleted `Element::text_labels` default's base-label synthesis: the control label
+/// The deleted `WidgetHost::text_labels` default's base-label synthesis: the control label
 /// stored on the widget base, positioned by the configured control-label layout. For
 /// legacy widgets whose only text was that label (List's columns=None frame).
-pub fn base_control_label(w: &dyn Element) -> Vec<TextLabel> {
+pub fn base_control_label(w: &dyn WidgetHost) -> Vec<TextLabel> {
     {
         let b = w.base();
         if let Some(ref label) = b.label {
@@ -128,7 +128,7 @@ pub fn base_control_label(w: &dyn Element) -> Vec<TextLabel> {
 /// default fonted getter produced: the widget's control font on every label plus the
 /// scroll-ancestor clamp.
 pub fn fonted_leaf_labels(
-    w: &dyn Element,
+    w: &dyn WidgetHost,
     ui: &UiContext,
     labels: Vec<TextLabel>,
 ) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
@@ -191,7 +191,7 @@ mod tests {
             Box::new(P { base: Widget::new(), tag, clips: false, vis: true })
         }
     }
-    impl Element for P {
+    impl WidgetHost for P {
         crate::impl_widget_base!(P);
         fn color(&self) -> [f32; 4] {
             [self.tag, 0.0, 0.0, 1.0]
@@ -333,7 +333,7 @@ mod tests {
         struct Rounded {
             base: Widget,
         }
-        impl Element for Rounded {
+        impl WidgetHost for Rounded {
             crate::impl_widget_base!(Rounded);
             fn color(&self) -> [f32; 4] {
                 [0.2, 0.4, 0.6, 1.0]

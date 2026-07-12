@@ -1,6 +1,6 @@
 //! Narrow-trait `TextBox` (Phase 5q). The widest-surface leaf so far: real selection-aware
 //! clipboard (the new `Input` cut/copy/paste/select-all/clear hooks — their defaults replicate
-//! the whole-value `Element` defaults for everyone else), load-bearing glyph shaping through
+//! the whole-value `WidgetHost` defaults for everyone else), load-bearing glyph shaping through
 //! `Paint::prepare_text` (cursor↔pixel mapping reads the measured advances), the row-hit
 //! restoration (`Layout::hit_row_rect` — cce-files' save-name box relies on row hits), a
 //! width/max-width clamp on both rect paths (`Layout::adjust_rect` + `adjust_row_rect`), the
@@ -35,7 +35,7 @@ pub fn get_font_db() -> &'static resvg::usvg::fontdb::Database {
     })
 }
 
-/// Side-layout label inset — the legacy `Element::label_x_offset` default for non-exempt
+/// Side-layout label inset — the legacy `WidgetHost::label_x_offset` default for non-exempt
 /// widgets (TextBox was never in the exempt list).
 fn side_offset(label: &Option<String>) -> f32 {
     if crate::layout::control_label_layout() == "side" && label.is_some() {
@@ -1644,7 +1644,7 @@ mod tests {
         tb.select_anchor = Some(7); // starts at "Line 2"
         tb.cursor_idx = 13;        // ends at end of "Line 2"
 
-        let has_rounded = Element::corner_style(&tb).1 != (false, false, false, false);
+        let has_rounded = WidgetHost::corner_style(&tb).1 != (false, false, false, false);
         let has_highlight = if has_rounded {
             let rounded = tb.all_rounded_quads(&dummy);
             println!("Rounded quads: {:?}", rounded);
@@ -1694,7 +1694,7 @@ mod tests {
         assert!(opts.contains(&"Cear".to_string()));
 
         // Simulate choosing the "Cear" option
-        Element::context_action(&mut tb, crate::widget::ContextAction::ClearText);
+        WidgetHost::context_action(&mut tb, crate::widget::ContextAction::ClearText);
         assert_eq!(tb.text, "");
         assert_eq!(tb.edit_buffer, "");
     }

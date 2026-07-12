@@ -43,7 +43,7 @@ pub struct GraphNode {
     pub outputs: usize,
 }
 
-/// The widget's own corner style: the legacy `Element` defaults it inherited
+/// The widget's own corner style: the legacy `WidgetHost` defaults it inherited
 /// (`corner_radius` 12.0, bottom corners rounded).
 const WIDGET_RADIUS: f32 = 12.0;
 const WIDGET_CORNERS: (bool, bool, bool, bool) = (false, false, true, true);
@@ -1019,11 +1019,11 @@ impl GraphController for Graph {
 mod tests {
     use super::*;
     use crate::context::UiContext;
-    use crate::widget::Element;
+    use crate::widget::WidgetHost;
 
     fn two_nodes() -> Adapted<Graph> {
         let mut g = Graph::new();
-        Element::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
+        WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
         g.set_grid_sizes(80.0, 40.0);
         g.set_skipped_sizes(20.0, 20.0);
         g.set_grid_origin(100.0, 100.0);
@@ -1052,14 +1052,14 @@ mod tests {
         // Node a occupies (100, 100, 80, 40). Press its body (away from ports/toggle).
         assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
         assert_eq!(g.selected_node(), Some(0));
-        assert!(Element::is_dragging(&g) && Element::draggable(&g));
+        assert!(WidgetHost::is_dragging(&g) && WidgetHost::draggable(&g));
 
         // Drag one grid step right (step_x = 100): snap puts the node at column 1, but cell
         // (1, 0) is free so it lands there.
-        Element::drag_begin(&mut g, 110.0, 120.0);
-        assert!(Element::drag_update(&mut g, 210.0, 120.0));
+        WidgetHost::drag_begin(&mut g, 110.0, 120.0);
+        assert!(WidgetHost::drag_update(&mut g, 210.0, 120.0));
         assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 120.0, &mut ctx));
-        assert!(!Element::is_dragging(&g));
+        assert!(!WidgetHost::is_dragging(&g));
         assert_eq!(g.get_nodes()[0].position, (1.0, 0.0));
 
         // An empty-space press clears the selection and is NOT consumed (legacy contract).
@@ -1090,8 +1090,8 @@ mod tests {
 
         // The plain view (designer path) and the rounded view (render_widget path) describe
         // the same quads: the rounded view adds only the widget background entry up front.
-        let plain = Element::extra_quads(&g);
-        let rounded = Element::all_rounded_quads(&g, &ctx);
+        let plain = WidgetHost::extra_quads(&g);
+        let rounded = WidgetHost::all_rounded_quads(&g, &ctx);
         assert!(!plain.is_empty());
         assert_eq!(rounded.len(), plain.len() + 1);
         for ((px, py, pw, ph, pc), (rx, ry, rw, rh, _, rc, _)) in plain.iter().zip(rounded.iter().skip(1)) {
@@ -1112,6 +1112,6 @@ mod tests {
 
         // And `all_quads` stays empty so render_widget hosts (reading BOTH getters) never
         // draw the geometry twice — the legacy Graph override's contract.
-        assert!(Element::all_quads(&g, &ctx).is_empty());
+        assert!(WidgetHost::all_quads(&g, &ctx).is_empty());
     }
 }

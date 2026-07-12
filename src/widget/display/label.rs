@@ -5,7 +5,7 @@ use crate::scene::paint::PaintCtx;
 
 /// Narrow-trait text label (Phase 5f leaf sweep). The text lives on the model and is emitted by
 /// `paint` as a `Text` prim, which the adapter's prim-derived `text_labels` bridge serves to
-/// every legacy text path; `set_text` sync comes from the adapter's generic `Element::set_text`
+/// every legacy text path; `set_text` sync comes from the adapter's generic `WidgetHost::set_text`
 /// override via [`Paint::sync_label`].
 #[derive(Debug, Clone)]
 pub struct Label {
@@ -23,7 +23,7 @@ impl Label {
             color: colors::control_label_color_u8(),
         });
         // Keep the base copy in step too (context menus, fallback machinery).
-        Element::set_text(&mut l, text);
+        WidgetHost::set_text(&mut l, text);
         l
     }
 
@@ -91,11 +91,11 @@ mod tests {
     use super::*;
 
     /// Legacy `text_labels` parity through the prim bridge, and `set_text` staying in sync
-    /// through the adapter's `Element::set_text` override (the trait method apps actually hit).
+    /// through the adapter's `WidgetHost::set_text` override (the trait method apps actually hit).
     #[test]
     fn text_flows_and_set_text_syncs() {
         let mut l = Label::new("CPU: 3%").with_font_size(13.0).with_color([1, 2, 3]);
-        Element::set_rect(&mut l, 10.0, 20.0, 100.0, 16.0);
+        WidgetHost::set_rect(&mut l, 10.0, 20.0, 100.0, 16.0);
 
         let labels = l.own_text_labels();
         assert_eq!(labels.len(), 1);
@@ -104,12 +104,12 @@ mod tests {
         assert_eq!(labels[0].font_size, 13.0);
         assert_eq!(labels[0].color, [1, 2, 3]);
 
-        Element::set_text(&mut l, "CPU: 99%");
+        WidgetHost::set_text(&mut l, "CPU: 99%");
         assert_eq!(l.own_text_labels()[0].text, "CPU: 99%", "set_text reaches the paint source");
 
         let size = l.intrinsic_size().unwrap();
         assert!(size.width > 0.0);
-        assert!(!Element::blocks_backplate_drag(&l));
+        assert!(!WidgetHost::blocks_backplate_drag(&l));
     }
 }
 

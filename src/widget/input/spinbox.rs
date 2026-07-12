@@ -440,7 +440,7 @@ impl Control for Adapted<Spinbox> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Element, UiContext};
+    use crate::widget::{WidgetHost, UiContext};
 
     #[test]
     fn spinbox_button_zones_step_the_value() {
@@ -448,24 +448,24 @@ mod tests {
         let mut sb = Spinbox::new(0, -100, 100, 1);
         let (id, ptr) = (sb.id(), sb.as_ptr_mut());
         ctx.register_widget(id, ptr);
-        Element::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
+        WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
 
         // Legacy test: click at (75, 33) lands in the decrement zone.
-        assert!(Element::mouse_input(&mut sb, MouseButton::Left, ElementState::Pressed, 75.0, 33.0, &mut ctx));
+        assert!(WidgetHost::mouse_input(&mut sb, MouseButton::Left, ElementState::Pressed, 75.0, 33.0, &mut ctx));
         assert_eq!(sb.value, -1);
-        assert!(Element::take_change(&mut sb));
+        assert!(WidgetHost::take_change(&mut sb));
 
         // Increment zone (past 77.5% of the width).
-        assert!(Element::mouse_input(&mut sb, MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
+        assert!(WidgetHost::mouse_input(&mut sb, MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
         assert_eq!(sb.value, 0);
     }
 
     #[test]
     fn spinbox_value_string_decimals_round_trip() {
         let mut sb = Spinbox::new(150, 0, 1000, 5).with_decimals(2);
-        assert_eq!(Element::get_value_string(&sb), Some("1.50".to_string()));
-        assert!(Element::set_value_string(&mut sb, "2.75"));
+        assert_eq!(WidgetHost::get_value_string(&sb), Some("1.50".to_string()));
+        assert!(WidgetHost::set_value_string(&mut sb, "2.75"));
         assert_eq!(sb.value, 275);
-        assert_eq!(Element::value(&sb), 275);
+        assert_eq!(WidgetHost::value(&sb), 275);
     }
 }

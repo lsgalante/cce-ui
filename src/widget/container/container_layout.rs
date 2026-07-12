@@ -31,7 +31,7 @@ impl crate::layout::LayoutStrategy for OverlayLayout {
         (self.left, self.top, self.width, self.height)
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], _ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn WidgetHost + 'static)], _ctx: &mut UiContext) -> f32 {
         for &child_ptr in children {
             unsafe {
                 (*child_ptr).set_rect(x, y, w, h);
@@ -40,7 +40,7 @@ impl crate::layout::LayoutStrategy for OverlayLayout {
         h
     }
 
-    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size {
+    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn WidgetHost + 'static)], ctx: &UiContext) -> Size {
         let mut max_w = 0.0f32;
         let mut max_h = 0.0f32;
         for &child_ptr in children {
@@ -87,11 +87,11 @@ impl crate::layout::LayoutStrategy for ManualLayout {
         (self.left, self.top, self.width, self.height)
     }
 
-    fn layout(&self, _x: f32, _y: f32, _w: f32, _h: f32, _children: &[*mut (dyn Element + 'static)], _ctx: &mut UiContext) -> f32 {
+    fn layout(&self, _x: f32, _y: f32, _w: f32, _h: f32, _children: &[*mut (dyn WidgetHost + 'static)], _ctx: &mut UiContext) -> f32 {
         self.height
     }
 
-    fn measure(&self, constraints: LayoutConstraints, _children: &[*mut (dyn Element + 'static)], _ctx: &UiContext) -> Size {
+    fn measure(&self, constraints: LayoutConstraints, _children: &[*mut (dyn WidgetHost + 'static)], _ctx: &UiContext) -> Size {
         Size {
             width: self.width.clamp(constraints.min_width, constraints.max_width),
             height: self.height.clamp(constraints.min_height, constraints.max_height),
@@ -148,7 +148,7 @@ impl crate::layout::LayoutStrategy for VerticalLayout {
         self.spacing
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn WidgetHost + 'static)], ctx: &mut UiContext) -> f32 {
         let left_x = x + self.padding_x;
         let available_w = (w - 2.0 * self.padding_x).max(1.0);
         let mut current_y = y + self.padding_y;
@@ -169,7 +169,7 @@ impl crate::layout::LayoutStrategy for VerticalLayout {
         (current_y - y).max(0.0)
     }
 
-    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size {
+    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn WidgetHost + 'static)], ctx: &UiContext) -> Size {
         let mut total_h = self.padding_y * 2.0;
         let mut max_w = 0.0f32;
         let spacing = self.spacing;
@@ -246,7 +246,7 @@ impl crate::layout::LayoutStrategy for GridLayout {
         self.gap
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn WidgetHost + 'static)], ctx: &mut UiContext) -> f32 {
         let count = children.len();
         if count == 0 {
             return 0.0;
@@ -288,7 +288,7 @@ impl crate::layout::LayoutStrategy for GridLayout {
         (max_h - y).max(0.0)
     }
 
-    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size {
+    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn WidgetHost + 'static)], ctx: &UiContext) -> Size {
         let cols = self.columns.max(1);
         let mut col_heights = vec![self.padding_y; cols];
         let total_gap = self.gap * (cols - 1) as f32;
@@ -374,7 +374,7 @@ impl crate::layout::LayoutStrategy for AdaptiveGridLayout {
         self.gap
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn WidgetHost + 'static)], ctx: &mut UiContext) -> f32 {
         let usable_w = (w - 2.0 * self.padding_x).max(1.0);
         let cols = (((usable_w + self.gap) / (self.min_col_width + self.gap)).floor().max(1.0)) as usize;
         let grid = GridLayout {
@@ -387,7 +387,7 @@ impl crate::layout::LayoutStrategy for AdaptiveGridLayout {
         grid.layout(x, y, w, h, children, ctx)
     }
 
-    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size {
+    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn WidgetHost + 'static)], ctx: &UiContext) -> Size {
         let usable_w = (constraints.max_width - 2.0 * self.padding_x).max(1.0);
         let cols = (((usable_w + self.gap) / (self.min_col_width + self.gap)).floor().max(1.0)) as usize;
         let grid = GridLayout {
@@ -433,7 +433,7 @@ impl crate::layout::LayoutStrategy for ColumnsLayout {
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) { (0.0, 0.0, ww, wh) }
     fn get_gap(&self) -> f32 { self.spacing }
 
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn WidgetHost + 'static)], ctx: &mut UiContext) -> f32 {
         let count = children.len();
         if count == 0 {
             return 0.0;
@@ -460,7 +460,7 @@ impl crate::layout::LayoutStrategy for ColumnsLayout {
         use_h + 2.0 * self.padding_y
     }
 
-    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size {
+    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn WidgetHost + 'static)], ctx: &UiContext) -> Size {
         let count = children.len();
         if count == 0 {
             return Size { width: constraints.min_width, height: constraints.min_height };
@@ -577,7 +577,7 @@ impl crate::layout::LayoutStrategy for MosaicLayout {
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) { (0.0, 0.0, ww, wh) }
     fn get_gap(&self) -> f32 { self.gap }
 
-    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn WidgetHost + 'static)], ctx: &mut UiContext) -> f32 {
         let count = children.len();
         if count == 0 {
             return 0.0;
@@ -607,7 +607,7 @@ impl crate::layout::LayoutStrategy for MosaicLayout {
         (packer.max_h - y).max(0.0)
     }
 
-    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn Element + 'static)], ctx: &UiContext) -> Size {
+    fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn WidgetHost + 'static)], ctx: &UiContext) -> Size {
         let count = children.len();
         if count == 0 {
             return Size { width: constraints.min_width, height: constraints.min_height };
@@ -663,7 +663,7 @@ impl crate::layout::LayoutStrategy for ReverseMosaicLayout {
     fn allocate(&mut self, ww: f32, wh: f32) -> (f32, f32, f32, f32) { (0.0, 0.0, ww, wh) }
     fn get_gap(&self) -> f32 { self.gap }
 
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn Element + 'static)], ctx: &mut UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn WidgetHost + 'static)], ctx: &mut UiContext) -> f32 {
         let count = children.len();
         if count == 0 {
             return 0.0;
@@ -729,7 +729,7 @@ impl crate::layout::LayoutStrategy for ReverseMosaicLayout {
         h
     }
 
-    fn measure(&self, constraints: LayoutConstraints, _children: &[*mut (dyn Element + 'static)], _ctx: &UiContext) -> Size {
+    fn measure(&self, constraints: LayoutConstraints, _children: &[*mut (dyn WidgetHost + 'static)], _ctx: &UiContext) -> Size {
         Size {
             width: constraints.max_width,
             height: constraints.max_height,

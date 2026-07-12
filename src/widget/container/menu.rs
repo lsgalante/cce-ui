@@ -1,6 +1,6 @@
 //! Narrow-trait `MenuBar` (Phase 5o) — a titled bar of dropdown menus with an optional
 //! context selector on the title. The menu buttons live in an EMBEDDED legacy [`ButtonStrip`]
-//! (owned by value in the model, driven through `Element` calls — events reach it via
+//! (owned by value in the model, driven through `WidgetHost` calls — events reach it via
 //! `EventCtx::ui`, and [`Layout::arrange_children`] parents it back to the adapter so its
 //! parent-chain styling walks keep working). Dropdowns are painted through the popover hooks
 //! ([`Paint::popover`] / [`Paint::draw_popover`]) and layered by [`Layout::z_order`]. The
@@ -23,7 +23,7 @@ use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::TextLabel;
 use crate::widget::{
-    Adapted, ButtonStrip, Element, ElementState, Event, EventCtx, Input, Key, Layout,
+    Adapted, ButtonStrip, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout,
     MenuController, MouseButton, NamedKey, PageSelector, Paint, DROPDOWN_ITEM_H,
 };
 
@@ -94,7 +94,7 @@ impl MenuBar {
             clicked_dropdown_item: None,
             last_arranged: None,
         });
-        Element::set_rect(&mut bar, x, y, w, h);
+        WidgetHost::set_rect(&mut bar, x, y, w, h);
         bar
     }
 
@@ -423,7 +423,7 @@ impl Layout for MenuBar {
         self.z_level
     }
 
-    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn Element + 'static)) {
+    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn WidgetHost + 'static)) {
         self.layout_strip(rect);
     }
 }
@@ -1068,7 +1068,7 @@ mod tests {
         let mut mb = bar();
         let (id, ptr) = (mb.id(), mb.as_ptr_mut());
         ctx.register_widget(id, ptr);
-        Element::set_rect(&mut mb, 0.0, 0.0, 400.0, 24.0);
+        WidgetHost::set_rect(&mut mb, 0.0, 0.0, 400.0, 24.0);
 
         // Click the "File" strip button (the strip commits selection on release): the dropdown
         // opens, the bar reports focused (conditional focus), and a popover rect exists.
@@ -1077,14 +1077,14 @@ mod tests {
         assert!(mb.mouse_input(MouseButton::Left, ElementState::Pressed, bx + bw / 2.0, by + bh / 2.0, &mut ctx));
         assert!(mb.mouse_input(MouseButton::Left, ElementState::Released, bx + bw / 2.0, by + bh / 2.0, &mut ctx));
         assert!(MenuController::is_menu_open(&*mb), "dropdown open");
-        assert!(Element::focused(&mb, &ctx), "bar holds focus while open");
-        let (dx, dy, _, _) = Element::popover_rect(&mb).expect("dropdown popover");
+        assert!(WidgetHost::focused(&mb, &ctx), "bar holds focus while open");
+        let (dx, dy, _, _) = WidgetHost::popover_rect(&mb).expect("dropdown popover");
 
         // Click the second item ("Save"): menu_click reports (0, 1) and everything closes.
         assert!(mb.mouse_input(MouseButton::Left, ElementState::Pressed, dx + 10.0, dy + DROPDOWN_ITEM_H * 1.5, &mut ctx));
         assert_eq!(MenuController::menu_click(&mut *mb), Some((0, 1)));
         assert!(!MenuController::is_menu_open(&*mb));
-        assert!(!Element::focused(&mb, &ctx), "focus released after the click");
+        assert!(!WidgetHost::focused(&mb, &ctx), "focus released after the click");
 
         // The PageSelector capability is reached through the concrete adapter too.
         assert!(PageSelector::sidebar_w(&*mb) > 0.0);
@@ -1096,11 +1096,11 @@ mod tests {
         let mut mb = bar();
         let (id, ptr) = (mb.id(), mb.as_ptr_mut());
         ctx.register_widget(id, ptr);
-        Element::set_rect(&mut mb, 0.0, 0.0, 400.0, 24.0);
+        WidgetHost::set_rect(&mut mb, 0.0, 0.0, 400.0, 24.0);
 
-        Element::set_visible(&mut mb, false);
+        WidgetHost::set_visible(&mut mb, false);
         assert!(!MenuController::is_menu_bar(&*mb), "hidden bar is not a menu bar");
-        assert!(!Element::hit_test(&mb, 10.0, 10.0, &ctx));
+        assert!(!WidgetHost::hit_test(&mb, 10.0, 10.0, &ctx));
         assert!(MenuController::get_menu_items_at(&*mb, 10.0, 10.0).is_none());
     }
 }
