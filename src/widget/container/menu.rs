@@ -52,7 +52,6 @@ pub struct MenuBar {
     pub context_hovered_item: Option<usize>,
     pub context_title_hovered: bool,
     pub right_align_title: bool,
-    pub parent: Option<*mut (dyn Element + 'static)>,
     pub layout_dirty: bool,
     pub on_context_change_cb: Option<Box<dyn Fn(usize) + Send + Sync>>,
     pub on_menu_click_cb: Option<Box<dyn Fn(usize, usize) + Send + Sync>>,
@@ -88,7 +87,6 @@ impl MenuBar {
             context_hovered_item: None,
             context_title_hovered: false,
             right_align_title: false,
-            parent: None,
             layout_dirty: true,
             on_context_change_cb: None,
             on_menu_click_cb: None,
@@ -425,33 +423,8 @@ impl Layout for MenuBar {
         self.z_level
     }
 
-    fn tracked_parent(&self) -> Option<Option<*mut (dyn Element + 'static)>> {
-        Some(self.parent)
-    }
-
-    fn parent_changed(&mut self, parent: Option<*mut (dyn Element + 'static)>) {
-        self.parent = parent;
-    }
-
-    /// Legacy `set_rect` clamped into the parent rect (no zero floor, unlike Switcher).
-    fn adjust_rect(&self, requested: Rect) -> Rect {
-        let Some(parent_ptr) = self.parent else {
-            return requested;
-        };
-        let (px, py, pw, ph) = unsafe { (*parent_ptr).rect() };
-        let cx = requested.x.clamp(px, px + pw);
-        let cy = requested.y.clamp(py, py + ph);
-        let cw = requested.width.min(px + pw - cx);
-        let ch = requested.height.min(py + ph - cy);
-        Rect { x: cx, y: cy, width: cw, height: ch }
-    }
-
-    fn arrange_children(&mut self, rect: Rect, host: *mut (dyn Element + 'static)) {
+    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn Element + 'static)) {
         self.layout_strip(rect);
-        // The strip walks its parent chain for backplate-aware styling; through the adapter
-        // the chain is host -> tracked parent (a dummy-ctx-safe walk, as legacy relied on).
-        let mut dummy = crate::context::UiContext::new();
-        self.menus.set_parent(Some(host), &mut dummy);
     }
 }
 
@@ -461,13 +434,10 @@ impl Paint for MenuBar {
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        // Corners never round (the backplate-adjacency source is gone); the radius is still
-        // reported for children that read it through the parent pointer.
-        let radius = match self.parent {
-            Some(p_ptr) => unsafe { (*p_ptr).corner_style().0 },
-            None => 0.0,
-        };
-        Some((radius, (false, false, false, false)))
+        // Corners never round (the backplate-adjacency source is gone). The radius was the
+        // parent's, read through a stored pointer — but nothing ever set_parent's a MenuBar,
+        // so 0.0 is what production always read (6bd: the dead pointer field is gone).
+        Some((0.0, (false, false, false, false)))
     }
 
     fn widget_font(&self) -> Option<String> {

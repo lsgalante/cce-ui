@@ -112,10 +112,6 @@ pub trait Layout {
         Vec::new()
     }
 
-    /// The parent pointer changed through `Element::set_parent` (containers that clamp their
-    /// rect to the parent's keep a copy — the tree default needs a ctx that `set_rect` lacks).
-    fn parent_changed(&mut self, _parent: Option<*mut (dyn Element + 'static)>) {}
-
     /// Adjust a rect assignment before it lands on the base (Switcher clamps to its parent).
     /// Default: identity.
     fn adjust_rect(&self, requested: Rect) -> Rect {
@@ -137,15 +133,6 @@ pub trait Layout {
     /// Legacy `Element::z_index` (host render ordering; MenuBar's dropdowns layer at 100+).
     fn z_order(&self) -> i32 {
         0
-    }
-
-    /// `Some(parent)` when the model tracks its parent pointer itself (via
-    /// [`parent_changed`](Layout::parent_changed)) — the adapter then serves `Element::parent`
-    /// from it instead of the tree. Legacy widgets with parent-dependent styling walk the
-    /// chain with a DUMMY ctx (MenuBar/ButtonStrip backplate checks), which a tree lookup
-    /// cannot answer. `None` (default): use the tree.
-    fn tracked_parent(&self) -> Option<Option<*mut (dyn Element + 'static)>> {
-        None
     }
 
     /// Republish value-embedded legacy children into the ctx registry (Paginator's ButtonStrip
@@ -908,7 +895,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
-        Layout::parent_changed(&mut self.inner, parent);
         // Replica of the Element default: symmetric tree link.
         let id = self.base.id();
         if let Some(p_ptr) = parent {
@@ -943,9 +929,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        if let Some(tracked) = Layout::tracked_parent(&self.inner) {
-            return tracked;
-        }
         ctx.tree.parent_ptr(self.base.id())
     }
 

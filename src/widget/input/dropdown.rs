@@ -4,13 +4,12 @@
 //! `Layout::detached_label_inset`, side-label inset computed from the synced label.
 //!
 //! Parity notes (all legacy-faithful, verified against the pre-migration impl):
-//! - `parent` stays a public, direct-write-only field: legacy `set_parent` never wrote it (the
-//!   Element default only touched the tree — Ramp's dummy-ctx `set_parent` calls were silently
-//!   discarded), so the Ramp popover clamp and the fade-blend parent color activate only for
-//!   callers that assign the field, exactly as before. The backplate-concentric corner walk
-//!   (which legacy ran over the ctx tree) instead starts from a separate pointer captured by
-//!   `Layout::parent_changed` and hops legacy field-based `parent(&dummy)` impls — exact for
-//!   the real consumer (cce-graph: Dropdown → Plate → Backplate, both field-based).
+//! - `parent_snapshot` is the data form of the legacy public, direct-write-only `parent`
+//!   pointer: legacy `set_parent` never wrote it (the Element default only touched the tree —
+//!   Ramp's dummy-ctx `set_parent` calls were silently discarded), so the Ramp popover clamp
+//!   and the fade-blend parent color activate only for callers that assign the field, exactly
+//!   as before — no production writer exists. The backplate-concentric corner walk it once
+//!   anchored is gone outright (replaced by the app-owned `corner_frame`, Phase 6s).
 //! - The row-rect hit expansion (`base.row_x/row_w`) is dropped, consistent with every other
 //!   migrated control: `Input::hit` tests the widget rect plus the open popover.
 //! - `Layout::intrinsic_measure_width` (new hook) preserves the `auto_width` measure behavior
@@ -23,6 +22,17 @@ use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
 use crate::widget::{
     Control, Element, ElementState, Event, Key, MouseButton, NamedKey,
 };
+
+/// Read-data stand-in for the legacy direct-write `parent` pointer (6bd — no stored widget
+/// pointers): the popover clamp and bg fade-blend read the host's rect/kind/color ctx-less at
+/// paint time. Callers that want the Ramp clamp assign it directly, same activation model as
+/// the old field.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ParentSnapshot {
+    pub rect: (f32, f32, f32, f32),
+    pub is_ramp: bool,
+    pub color: [f32; 4],
+}
 
 /// Side-layout label inset — the legacy `Element::label_x_offset` default for non-exempt
 /// widgets (Dropdown was never in the exempt list).
@@ -41,14 +51,10 @@ pub struct Dropdown {
     pub open: bool,
     pub(crate) hovered_item: Option<usize>,
     just_changed: bool,
-    /// Legacy-faithful parent pointer: written ONLY by direct assignment (the Ramp-clamp unit
-    /// test; no production writer). Read by the Ramp popover clamp and the fade-blend parent
-    /// color, like legacy. NOT the corner-walk pointer — see `tracked_parent`.
-    pub parent: Option<*mut (dyn Element + 'static)>,
-    /// Captured by [`Layout::parent_changed`] whenever a container `set_parent`s this widget —
-    /// the model-side stand-in for the ctx-tree head the legacy backplate corner walk started
-    /// from (`paint` has no ctx to reach the real tree).
-    tracked_parent: Option<*mut (dyn Element + 'static)>,
+    /// Host read-data, written ONLY by direct assignment (the Ramp-clamp unit test; no
+    /// production writer). Read by the Ramp popover clamp and the fade-blend parent color,
+    /// like the legacy `parent` pointer it replaces.
+    pub parent_snapshot: Option<ParentSnapshot>,
     pub font_family: String,
     pub custom_display_text: Option<String>,
     pub open_upward: Option<bool>,
@@ -75,8 +81,7 @@ impl Dropdown {
             open: false,
             hovered_item: None,
             just_changed: false,
-            parent: None,
-            tracked_parent: None,
+            parent_snapshot: None,
             font_family: "sans-serif".to_string(),
             custom_display_text: None,
             open_upward: None,
@@ -148,14 +153,11 @@ impl Dropdown {
             content.y + content.height
         };
 
-        let mut is_ramp = false;
-        if let Some(parent_ptr) = self.parent {
-            is_ramp = unsafe { (*parent_ptr).as_any().is::<crate::widget::Ramp>() };
-        }
+        let is_ramp = self.parent_snapshot.map_or(false, |s| s.is_ramp);
 
         if is_ramp {
-            if let Some(parent_ptr) = self.parent {
-                let (px, py, pw_parent, ph_parent) = unsafe { (*parent_ptr).rect() };
+            if let Some(snap) = self.parent_snapshot {
+                let (px, py, pw_parent, ph_parent) = snap.rect;
                 if pw_parent > 0.0 && ph_parent > 0.0 {
                     let dy_down = content.y + content.height;
                     let dy_up = content.y - rh;
@@ -310,10 +312,8 @@ impl Dropdown {
         ];
         let bg_color = colors::dropdown_background_color();
         let mut parent_color = colors::page_color();
-        if let Some(parent_ptr) = self.parent {
-            unsafe {
-                parent_color = (*parent_ptr).color();
-            }
+        if let Some(snap) = self.parent_snapshot {
+            parent_color = snap.color;
         }
         let alpha = 1.0; // The dropdown background is drawn fully opaque
         let bg_rgb = [
@@ -552,10 +552,6 @@ impl Layout for Dropdown {
 
     fn intrinsic_measure_width(&self) -> bool {
         self.auto_width
-    }
-
-    fn parent_changed(&mut self, parent: Option<*mut (dyn Element + 'static)>) {
-        self.tracked_parent = parent;
     }
 }
 
@@ -938,8 +934,12 @@ mod tests {
         let mut dd = Dropdown::new(options, 0).with_label("Preset");
         dd.set_rect(30.0, 125.0, 110.0, 20.0);
 
-        // Link the dropdown parent pointer to the Ramp (the legacy direct-write path)
-        dd.parent = Some(crate::widget::Element::as_ptr_mut(&mut ramp));
+        // Link the dropdown to the Ramp's read-data (the legacy direct-write path)
+        dd.parent_snapshot = Some(ParentSnapshot {
+            rect: crate::widget::Element::rect(&ramp),
+            is_ramp: true,
+            color: crate::widget::Element::color(&ramp),
+        });
 
         // Compute geometry
         let (rx, ry, rw, rh) = dd.get_popover_geom();

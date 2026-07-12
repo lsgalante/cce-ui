@@ -11,7 +11,7 @@ use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::make_widget_text_buffer;
-use crate::widget::{Adapted, Element, Input, Layout, Paint};
+use crate::widget::{Adapted, Input, Layout, Paint};
 
 pub struct StatusBar {
     rect: Rect,
@@ -20,7 +20,6 @@ pub struct StatusBar {
     pub text_offset_x: Option<f32>,
     pub text_color: Option<[f32; 4]>,
     pub bg_color: Option<[f32; 4]>,
-    pub parent: Option<*mut (dyn Element + 'static)>,
 }
 
 impl StatusBar {
@@ -32,7 +31,6 @@ impl StatusBar {
             text_offset_x: None,
             text_color: None,
             bg_color: None,
-            parent: None,
         })
     }
 
@@ -95,13 +93,6 @@ impl Layout for StatusBar {
         self.rect = rect;
     }
 
-    fn parent_changed(&mut self, parent: Option<*mut (dyn Element + 'static)>) {
-        self.parent = parent;
-    }
-
-    fn tracked_parent(&self) -> Option<Option<*mut (dyn Element + 'static)>> {
-        Some(self.parent)
-    }
 }
 
 impl Paint for StatusBar {
@@ -110,13 +101,10 @@ impl Paint for StatusBar {
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        // Corners never round (the backplate-adjacency source is gone); the radius is still
-        // reported for children that read it through the parent pointer.
-        let radius = match self.parent {
-            Some(p_ptr) => unsafe { (*p_ptr).corner_style().0 },
-            None => 0.0,
-        };
-        Some((radius, (false, false, false, false)))
+        // Corners never round (the backplate-adjacency source is gone). The radius was the
+        // parent's, read through a stored pointer — but nothing ever set_parent's a StatusBar,
+        // so 0.0 is what production always read (6bd: the dead pointer field is gone).
+        Some((0.0, (false, false, false, false)))
     }
 
     /// `Element::set_text` lands here: swap the text and drop the shaped buffer so

@@ -489,15 +489,8 @@ impl Input for ColorRamp {
     }
 
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
-        // Keep the field widgets' tracked parent pointing at the adapter (their label
-        // fade blends against the parent's color; legacy set_rect re-parented them).
-        if let Some(host) = ectx.host_ptr() {
-            let mut dummy = crate::context::UiContext::new();
-            self.r_slider.set_parent(Some(host), &mut dummy);
-            self.g_slider.set_parent(Some(host), &mut dummy);
-            self.b_slider.set_parent(Some(host), &mut dummy);
-            self.del_button.set_parent(Some(host), &mut dummy);
-        }
+        // (The per-tick field-widget re-parenting is gone, 6bd: it was a dummy-ctx
+        // `set_parent` whose every effect was discarded — legacy behaved the same.)
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
@@ -919,15 +912,8 @@ impl Input for Ramp {
     }
 
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
-        // Keep the field widgets' tracked parent pointing at the adapter (the dropdowns'
-        // label fade blends against the parent's color; legacy set_rect re-parented them).
-        if let Some(host) = ectx.host_ptr() {
-            let mut dummy = crate::context::UiContext::new();
-            self.preset_dropdown.set_parent(Some(host), &mut dummy);
-            self.line_type_dropdown.set_parent(Some(host), &mut dummy);
-            self.val_slider.set_parent(Some(host), &mut dummy);
-            self.del_button.set_parent(Some(host), &mut dummy);
-        }
+        // (The per-tick field-widget re-parenting is gone, 6bd: it was a dummy-ctx
+        // `set_parent` whose every effect was discarded — legacy behaved the same.)
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
