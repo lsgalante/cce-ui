@@ -1656,12 +1656,17 @@ Constraint respected: **each crate still builds standalone** — the new core is
     share it), same path. A/B: content-identical renders (raw diff =
     the overlay's run-to-run spawn position + wallpaper bleed through
     the translucent plate); live checkbox click toggles.
-  - Then the remaining raw-`Element` surface — Canvas (designer +
-    preview), ButtonStrip (ctx-registered embed of MenuBar/Paginator,
-    load-bearing in the tree), Viewport3D (designer), and the app-local
-    impls — either dissolves app-side or converts, the `*mut dyn
-    Element` tree/context machinery gets retyped, and `Element` +
-    `Adapted` die last.
+  - **Canvas + Viewport3D moved into cce-designer (6ay part 2).** Both
+    designer-only (preview.rs's "canvas" is its own internal type).
+    A/B: AE=0. cce-ui's raw `impl Element` surface is now exactly ONE
+    production type: ButtonStrip, the ctx-registered embed of
+    MenuBar/Paginator — load-bearing in the tree, pinned to the
+    machinery retype.
+  - Then: the `*mut dyn Element` tree/context machinery gets retyped
+    (context.rs propagation/spatial-grid/focus, the app rosters and
+    dispatch loops, window_runner's render plumbing), the app-local
+    impls and ButtonStrip convert with it, and `Element` + `Adapted`
+    die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
