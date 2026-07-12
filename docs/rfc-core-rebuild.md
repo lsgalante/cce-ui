@@ -1724,11 +1724,18 @@ Constraint respected: **each crate still builds standalone** — the new core is
     NOTE: a `--workspace` check that fails in cce-ui never reaches the
     app crates — the first pass under-reported; the app rosters were
     where 4 of 5 "clean" candidates actually failed.
-  - Then, the retype — order dictated by the census: (1) the app
-    rosters first (designer's and TI's indexed `Vec<Box<dyn Element>>`
-    hold statically-known types per slot; retyping them to concrete
-    fields collapses the widest dyn consumer), (2) the containers'
-    heterogeneous child Vecs, (3) the cce-ui machinery core
+  - **The designer roster is concretely typed (6bb).** First retype
+    slice, in census order: `Vec<Box<dyn Element>>` → one
+    `Box<WidgetSlots>` of 17 named concrete fields (boxed whole so
+    registered pointers stay stable while `State` moves). Const-indexed
+    sites reach fields directly; the genuinely index-driven paths
+    (draw order, focus cycling, broadcast dispatch, the `*_IDX`-keyed
+    HTTP API) go through `get_dyn`/`get_dyn_mut`; serialize takes a
+    per-slot `dyn_refs` view (`serialize_widgets` now takes
+    `&[&dyn Element]`). Static A/B byte-identical; cross-build final
+    after an identical menu/toggle/wheel/click sequence within 6 px.
+  - Remaining retype order: (1) TI's roster the same way, (2) the
+    containers' heterogeneous child Vecs, (3) the cce-ui machinery core
     (context.rs/window_runner), and `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
