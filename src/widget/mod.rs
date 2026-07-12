@@ -65,8 +65,15 @@ pub struct KeyEvent {
     pub shift: bool,
 }
 
-pub mod json_layout;
-pub use json_layout::{JsonLayoutWidget, JsonLayoutConfig, JsonWidgetConfig, JsonPageConfig, JsonWidget, Justification};
+/// Text justification for widget labels/content (shared by Button, cce-files' row
+/// list, and settings; formerly defined by the dissolved json_layout host).
+#[derive(serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum Justification {
+    Left,
+    Center,
+    Right,
+}
 
 use crate::colors;
 use std::sync::atomic::AtomicUsize;
