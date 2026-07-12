@@ -723,7 +723,7 @@ pub use self::input::{
     ButtonStrip, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey
 };
 pub use self::container::{
-    Container, ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
+    ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     ContentBg, ParametersBg,
     ScrollBox, MenuBar, Spreadsheet, Breadcrumb,

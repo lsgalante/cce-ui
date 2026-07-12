@@ -1,4 +1,3 @@
-pub mod container;
 pub mod container_layout;
 pub mod content_bg;
 pub mod parameters_bg;
@@ -9,7 +8,6 @@ pub mod scroll_box;
 pub mod paginator;
 pub mod treelist;
 
-pub use container::Container;
 pub use container_layout::{ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout, ColumnsLayout, MosaicLayout, ReverseMosaicLayout};
 pub use content_bg::ContentBg;
 pub use parameters_bg::ParametersBg;
