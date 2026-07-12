@@ -82,7 +82,9 @@ fn serialize_single_widget(w: &dyn Element, json: &mut String) {
     }
 }
 
-pub fn serialize_widgets(widgets: &[Box<dyn Element>]) -> String {
+/// Serialize the visible widgets' menu state. Takes dyn refs (not boxes): the designer's
+/// roster is concretely typed since the Phase 6bb retype and lends a per-slot dyn view.
+pub fn serialize_widgets(widgets: &[&dyn Element]) -> String {
     let mut json = String::new();
     json.push('[');
     let mut first = true;
