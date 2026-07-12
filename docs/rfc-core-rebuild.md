@@ -1585,7 +1585,10 @@ Constraint respected: **each crate still builds standalone** — the new core is
     dead 8/11 of `PageSelector` (now just selected_page /
     set_selected_page / sidebar_w; MenuBar's impls + `page_hidden` field
     went with it). A/B: email/LI/files AE=0; live LI tab click switches
-    pages correctly.
+    pages correctly. Census round 3 then found the deletion stranded two
+    more zero-override methods — `check_out_of_bounds` and
+    `transform_event_for_child` (Page was the only override of each) —
+    folded and deleted in the follow-up. Element: 104 methods.
   - Then the remaining raw-`Element` containers (JsonLayout, ScrollBox,
     ScrollBar, Menu/MenuBar internals, Ramp-family embeds) are
     constructed only by cce-ui itself and a few app remnants — each either
