@@ -181,14 +181,6 @@ pub trait Element {
     /// overrides child `i`'s own `layout_style`. `None` (default) means children use their own.
     fn layout_children(&self) -> Option<Vec<crate::scene::layout::Style>> { None }
 
-    fn check_out_of_bounds(&self, _event: &Event, _ctx: &UiContext) -> bool {
-        false
-    }
-
-    fn transform_event_for_child(&self, _child: *mut (dyn Element + 'static), event: Event, _ctx: &UiContext) -> Event {
-        event
-    }
-
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
         let mut parent_id = None;
         if let Some(b) = self.base_mut() {

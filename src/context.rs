@@ -203,8 +203,7 @@ impl UiContext {
                                 if let Some(target_ptr) = self.tree.get_ptr(target_id) {
                                     let (cx, cy, _, _) = (*target_ptr).rect();
                                     let drag_evt = Event::DragUpdate { dx, dy, x: *x, y: *y, local_x: *x - cx, local_y: *y - cy };
-                                    let adjusted = (*root).transform_event_for_child(target_ptr, drag_evt, self);
-                                    (*target_ptr).handle_event(&adjusted, self);
+                                    (*target_ptr).handle_event(&drag_evt, self);
                                     (*target_ptr).mark_dirty(self);
                                 }
                             } else {
@@ -244,10 +243,6 @@ impl UiContext {
                 }
             }
 
-            if (*root).check_out_of_bounds(event, self) {
-                return false;
-            }
-
             // For KeyInput, send directly to focused widget if it exists
             if let Event::KeyInput(_) = event {
                 if let Some(focused) = self.focused_widget {
@@ -285,8 +280,7 @@ impl UiContext {
                             }
                             _ => {}
                         }
-                        let adjusted_event = (*root).transform_event_for_child(child, local_adjusted, self);
-                        if self.propagate_event_impl(&adjusted_event, child) {
+                        if self.propagate_event_impl(&local_adjusted, child) {
                             handled = true;
                         }
                     }
@@ -309,8 +303,7 @@ impl UiContext {
                             }
                             _ => {}
                         }
-                        let adjusted_event = (*root).transform_event_for_child(child, local_adjusted, self);
-                        if self.propagate_event_impl(&adjusted_event, child) {
+                        if self.propagate_event_impl(&local_adjusted, child) {
                             if check_drag_target {
                                 if let Some(b) = (*child).base() {
                                     self.drag_target = Some(b.id());
