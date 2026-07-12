@@ -1574,8 +1574,20 @@ Constraint respected: **each crate still builds standalone** — the new core is
     the retype, not by folding. Element: 112 → 107 methods. A/B: files
     AE=0, settings audio AE=0, designer diff = terminal behind the
     translucent window.
-  - Then the remaining raw-`Element` containers (JsonLayout, Layer, Page,
-    ScrollBox, ScrollBar, Menu/MenuBar internals, Ramp-family embeds) are
+  - **Layer + Page DELETED (6au).** Per the 5r survey, no app ever put
+    content in Paginator's pages — every consumer keys its own content
+    on `selected_page()` — so the `Vec<Page>` was empty containers being
+    arranged/registered/toggled/event-proxied for nothing. Their one
+    visual (the page-area bg quad, page_color × page_opacity) moved into
+    `Paint::paint`. With the stack gone Page had no constructor and
+    Layer's only constructor was Page's base: both files deleted, plus
+    `Element::is_page`, ScrollBar's Page-downcast write-back, and the
+    dead 8/11 of `PageSelector` (now just selected_page /
+    set_selected_page / sidebar_w; MenuBar's impls + `page_hidden` field
+    went with it). A/B: email/LI/files AE=0; live LI tab click switches
+    pages correctly.
+  - Then the remaining raw-`Element` containers (JsonLayout, ScrollBox,
+    ScrollBar, Menu/MenuBar internals, Ramp-family embeds) are
     constructed only by cce-ui itself and a few app remnants — each either
     dissolves app-side or converts, the `*mut dyn Element` tree/context
     machinery gets retyped, and `Element` + `Adapted` die last.
