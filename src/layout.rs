@@ -3142,7 +3142,7 @@ impl RenderTarget for PopoverCollector {
 
 
 pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
-    let id = w.base().map(|b| b.id());
+    let id = Some(w.base().id());
     if let Some(w_id) = id {
         ctx.register_widget(w_id, w.as_ptr_mut());
     }
@@ -5096,6 +5096,7 @@ mod tests {
     }
 
     struct MockWidget {
+        base: crate::widget::Widget,
         x: f32,
         y: f32,
         w: f32,
@@ -5103,6 +5104,7 @@ mod tests {
     }
 
     impl Element for MockWidget {
+        crate::impl_widget_base!(MockWidget);
         fn rect(&self) -> (f32, f32, f32, f32) {
             (self.x, self.y, self.w, self.h)
         }
@@ -5122,12 +5124,7 @@ mod tests {
     }
 
     impl Element for MockWidgetWithLabel {
-        fn base(&self) -> Option<&crate::widget::Widget> {
-            Some(&self.base)
-        }
-        fn base_mut(&mut self) -> Option<&mut crate::widget::Widget> {
-            Some(&mut self.base)
-        }
+        crate::impl_widget_base!(MockWidgetWithLabel);
         fn rect(&self) -> (f32, f32, f32, f32) {
             let offset = crate::widget::label_offset(self);
             (self.base.x, self.base.y - offset, self.base.w, self.base.h + offset)
@@ -5161,14 +5158,14 @@ mod tests {
         let mut stack = sec.vstack(&mut mock_pc, 10.0);
 
         let mut dummy = crate::context::UiContext::new();
-        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         stack.add_widget(&mut w1, 50.0, 30.0, &mut dummy);
 
         // Standard margin should be applied
         assert_eq!(w1.x, 38.0);
         assert_eq!(w1.y, start_y);
 
-        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         stack.add_widget(&mut w2, 60.0, 40.0, &mut dummy);
 
         // Second widget should start after first widget height + vstack spacing
@@ -5227,7 +5224,7 @@ mod tests {
         assert!(subsec.is_child);
         
         let mut dummy = crate::context::UiContext::new();
-        let mut w = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        let mut w = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         subsec.widget(&mut pc, &mut w, 12.0, 100.0, 40.0, &mut dummy);
         
         let bottom = subsec.finish(&mut pc);
@@ -5312,10 +5309,10 @@ mod tests {
         assert_eq!(ctx.cw, 500.0);
 
         let mut ui_ctx = crate::context::UiContext::new();
-        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx);
 
-        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         ctx.widget(&mut w2, 12.0, 100.0, 30.0, &mut ui_ctx);
 
         // Since cw=500, we should have multiple columns!
@@ -5333,10 +5330,10 @@ mod tests {
         assert_eq!(ctx.grid.col_heights.len(), 1);
         
         let mut ui_ctx = crate::context::UiContext::new();
-        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx);
 
-        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         ctx.widget(&mut w2, 12.0, 100.0, 30.0, &mut ui_ctx);
 
         // Since it's a child section, we should have a single column only, so w1.x == w2.x.
@@ -5371,7 +5368,7 @@ mod tests {
         assert_eq!(ctx.grid.col_heights.len(), 2);
 
         let mut ui_ctx = crate::context::UiContext::new();
-        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
         ctx.widget(&mut w1, 12.0, 100.0, 40.0, &mut ui_ctx); // placed in col 0
 
         let height_col_0_before = ctx.grid.col_heights[0];
@@ -5460,9 +5457,9 @@ mod tests {
         };
 
         let mut dummy = crate::context::UiContext::new();
-        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
-        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 100.0, h: 80.0 };
-        let mut w3 = MockWidget { x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
+        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
+        let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 100.0, h: 80.0 };
+        let mut w3 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
         
         let children = vec![
             &mut w1 as *mut MockWidget as *mut (dyn Element + 'static),
@@ -5492,9 +5489,9 @@ mod tests {
         };
 
         let mut dummy = crate::context::UiContext::new();
-        let mut w1 = MockWidget { x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
-        let mut w2 = MockWidget { x: 0.0, y: 0.0, w: 100.0, h: 80.0 };
-        let mut w3 = MockWidget { x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
+        let mut w1 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 100.0, h: 50.0 };
+        let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 100.0, h: 80.0 };
+        let mut w3 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 80.0, h: 40.0 };
         
         let children = vec![
             &mut w1 as *mut MockWidget as *mut (dyn Element + 'static),

@@ -188,20 +188,20 @@ pub struct Size {
 }
 
 pub trait Element {
-    fn base(&self) -> Option<&Widget> { None }
-    fn base_mut(&mut self) -> Option<&mut Widget> { None }
+    /// The widget's shared base state — GUARANTEED (the flip): the `Option` escape hatch
+    /// and its `WidgetId(0)` sentinel class are gone. `Adapted` (the one production
+    /// implementor) always owns a base; test shims carry one via `impl_widget_base!`.
+    fn base(&self) -> &Widget;
+    fn base_mut(&mut self) -> &mut Widget;
     fn preferred_height(&self) -> Option<f32> { None }
 
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
-        let mut parent_id = None;
-        if let Some(b) = self.base_mut() {
-            if b.dirty {
-                return;
-            }
-            b.dirty = true;
-            parent_id = b.id.get();
+        let b = self.base_mut();
+        if b.dirty {
+            return;
         }
-        if let Some(id) = parent_id {
+        b.dirty = true;
+        if let Some(id) = b.id.get() {
             if let Some(parent_ptr) = ctx.tree.parent_ptr(id) {
                 unsafe {
                     (*parent_ptr).mark_dirty(ctx);
@@ -210,32 +210,12 @@ pub trait Element {
         }
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        struct DummyAny;
-        static DUMMY: DummyAny = DummyAny;
-        &DUMMY
-    }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-        struct DummyAny;
-        thread_local! {
-            static DUMMY_MUT: std::cell::UnsafeCell<DummyAny> = std::cell::UnsafeCell::new(DummyAny);
-        }
-        DUMMY_MUT.with(|d| unsafe { &mut *d.get() })
-    }
-    fn as_ptr(&self) -> *mut (dyn Element + 'static) {
-        struct DummyElement;
-        impl Element for DummyElement {
-            fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
-        }
-        std::ptr::null_mut::<DummyElement>() as *mut (dyn Element + 'static)
-    }
-    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static) {
-        struct DummyElement;
-        impl Element for DummyElement {
-            fn color(&self) -> [f32; 4] { [0.0, 0.0, 0.0, 0.0] }
-        }
-        std::ptr::null_mut::<DummyElement>() as *mut (dyn Element + 'static)
-    }
+    // Required (the flip): the old defaults manufactured DummyAny/null-DummyElement
+    // stand-ins nothing could legitimately use. `impl_widget_base!` provides all four.
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+    fn as_ptr(&self) -> *mut (dyn Element + 'static);
+    fn as_ptr_mut(&mut self) -> *mut (dyn Element + 'static);
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         match event {
@@ -274,15 +254,12 @@ pub trait Element {
     }
 
     fn rect(&self) -> (f32, f32, f32, f32) {
-        if let Some(b) = self.base() {
-            (b.x, b.y, b.w, b.h)
-        } else {
-            (0.0, 0.0, 0.0, 0.0)
-        }
+        let b = self.base();
+        (b.x, b.y, b.w, b.h)
     }
 
     fn label(&self) -> Option<String> {
-        self.base().and_then(|b| b.label.clone())
+        self.base().label.clone()
     }
 
     fn get_value_string(&self) -> Option<String> { None }
@@ -297,38 +274,29 @@ pub trait Element {
     }
 
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        if let Some(b) = self.base_mut() {
-            b.x = x;
-            b.y = y;
-            b.w = w;
-            b.h = h;
-        }
+        let b = self.base_mut();
+        b.x = x;
+        b.y = y;
+        b.w = w;
+        b.h = h;
     }
 
     fn set_row_rect(&mut self, x: f32, w: f32) {
-        if let Some(b) = self.base_mut() {
-            b.row_x = x;
-            b.row_w = w;
-        }
+        let b = self.base_mut();
+        b.row_x = x;
+        b.row_w = w;
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if ctx.is_coordinate_covered(self.base().map(|b| b.id()).unwrap_or(WidgetId(0)), px, py) {
+        if ctx.is_coordinate_covered(self.base().id(), px, py) {
             return false;
         }
         let (x, y, w, h) = self.rect();
         if w <= 0.0 || h <= 0.0 {
             return false;
         }
-        let (mut hx, mut hw) = if let Some(b) = self.base() {
-            if b.row_w > 0.0 {
-                (b.row_x, b.row_w)
-            } else {
-                (x, w)
-            }
-        } else {
-            (x, w)
-        };
+        let b = self.base();
+        let (mut hx, mut hw) = if b.row_w > 0.0 { (b.row_x, b.row_w) } else { (x, w) };
         let label_x = self.label_x_offset();
         hx += label_x;
         hw -= label_x;
@@ -337,12 +305,10 @@ pub trait Element {
 
     fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         ctx.set_cursor_pos(px, py);
-        if ctx.is_coordinate_covered(self.base().map(|b| b.id()).unwrap_or(WidgetId(0)), px, py) {
-            let was = self.base().map_or(false, |b| b.hovered);
+        if ctx.is_coordinate_covered(self.base().id(), px, py) {
+            let was = self.base().hovered;
             if was {
-                if let Some(b) = self.base_mut() {
-                    b.hovered = false;
-                }
+                self.base_mut().hovered = false;
                 self.handle_event(&Event::MouseLeave, ctx);
             }
             return was;
@@ -351,22 +317,16 @@ pub trait Element {
     }
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        if self.base().is_some() {
-            let was = self.base().map_or(false, |b| b.hovered);
-            let is_hit = self.hit_test(px, py, ctx);
-            if let Some(b) = self.base_mut() {
-                b.hovered = is_hit;
-            }
-            if was != is_hit {
-                if is_hit {
-                    self.handle_event(&Event::MouseEnter, ctx);
-                } else {
-                    self.handle_event(&Event::MouseLeave, ctx);
-                }
-                was != is_hit
+        let was = self.base().hovered;
+        let is_hit = self.hit_test(px, py, ctx);
+        self.base_mut().hovered = is_hit;
+        if was != is_hit {
+            if is_hit {
+                self.handle_event(&Event::MouseEnter, ctx);
             } else {
-                false
+                self.handle_event(&Event::MouseLeave, ctx);
             }
+            true
         } else {
             false
         }
@@ -381,23 +341,19 @@ pub trait Element {
 
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         // Focus/hover highlight color, folded from the zero-override `highlight_color` (6bd).
-        let is_focused = self.base().map(|b| ctx.is_focused_id(b.id())).unwrap_or(false);
+        let is_focused = ctx.is_focused_id(self.base().id());
         let hc = if is_focused {
             colors::highlight_primary_color()
-        } else if self.base().map_or(false, |b| b.hovered) {
+        } else if self.base().hovered {
             colors::HIGHLIGHT_SECONDARY
         } else {
             return None;
         };
         let label_x = self.label_x_offset();
-        if let Some(b) = self.base() {
-            let hx = if b.row_w > 0.0 { b.row_x } else { b.x } + label_x;
-            let hw = if b.row_w > 0.0 { b.row_w } else { b.w } - label_x;
-            Some((hx, b.y, hw, b.h, hc))
-        } else {
-            let (x, y, w, h) = self.rect();
-            Some((x + label_x, y, w - label_x, h, hc))
-        }
+        let b = self.base();
+        let hx = if b.row_w > 0.0 { b.row_x } else { b.x } + label_x;
+        let hw = if b.row_w > 0.0 { b.row_w } else { b.w } - label_x;
+        Some((hx, b.y, hw, b.h, hc))
     }
 
     fn color(&self) -> [f32; 4];
@@ -416,7 +372,7 @@ pub trait Element {
         if name == "Label" || name == "Button" || name == "Checkbox" || name == "Toggle" || name == "Ramp" {
             return 0.0;
         }
-        if crate::layout::control_label_layout() == "side" && self.base().map_or(false, |b| b.label.is_some()) {
+        if crate::layout::control_label_layout() == "side" && self.base().label.is_some() {
             90.0
         } else {
             0.0
@@ -539,23 +495,17 @@ pub trait Element {
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> { None }
     fn render_popover(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
     fn set_text(&mut self, text: &str) {
-        if let Some(b) = self.base_mut() {
-            b.label = Some(text.to_string());
-        }
+        self.base_mut().label = Some(text.to_string());
     }
 
     fn focus(&mut self) {
-        if let Some(b) = self.base_mut() {
-            b.focused = true;
-        }
+        self.base_mut().focused = true;
     }
     fn unfocus(&mut self) {
-        if let Some(b) = self.base_mut() {
-            b.focused = false;
-        }
+        self.base_mut().focused = false;
     }
     fn focused(&self, ctx: &UiContext) -> bool {
-        self.base().map(|b| ctx.is_focused_id(b.id())).unwrap_or(false)
+        ctx.is_focused_id(self.base().id())
     }
     fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem) {}
     fn set_selected(&mut self, _selected: bool) {}
@@ -569,8 +519,7 @@ pub trait Element {
     fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
 
     fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
-        let base = self.base()?;
-        ctx.tree.parent_ptr(base.id())
+        ctx.tree.parent_ptr(self.base().id())
     }
 
 
@@ -579,10 +528,7 @@ pub trait Element {
     // through `focus::link_parent_child` or `ctx.tree` directly.
 
     fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> {
-        match self.base() {
-            Some(base) => ctx.tree.children_ptrs(base.id()),
-            None => vec![],
-        }
+        ctx.tree.children_ptrs(self.base().id())
     }
 
     fn z_index(&self) -> i32 { 0 }
@@ -610,13 +556,11 @@ pub trait Element {
 
 pub trait Control: Element {
     fn set_label(&mut self, label: &str) {
-        if let Some(b) = self.base_mut() {
-            b.label = Some(label.to_string());
-        }
+        self.base_mut().label = Some(label.to_string());
     }
 
     fn control_label(&self) -> Option<TextLabel> {
-        let b = self.base()?;
+        let b = self.base();
         let label = b.label.as_ref()?;
         let name = self.type_name();
         
@@ -751,7 +695,7 @@ pub fn label_offset(w: &dyn Element) -> f32 {
     if name == "Label" || name == "Button" || name == "Checkbox" || name == "Toggle" {
         return 0.0;
     }
-    w.base().map_or(0.0, |b| b.label_offset())
+    w.base().label_offset()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

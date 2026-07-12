@@ -693,24 +693,19 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// went to `focus::link_parent_child`/tree ops).
     pub fn add_child(&mut self, child: *mut (dyn Element + 'static), ctx: &mut UiContext) {
         // The old Element default's tree link…
-        if let Some(c_base) = unsafe { (*child).base() } {
-            let c_id = c_base.id();
-            let p_id = self.base.id();
-            let self_ptr = self.as_ptr();
-            ctx.register_widget(p_id, self_ptr);
-            ctx.register_widget(c_id, child);
-            ctx.tree.link(p_id, c_id);
-        }
+        let c_id = unsafe { (*child).base().id() };
+        let p_id = self.base.id();
+        let self_ptr = self.as_ptr();
+        ctx.register_widget(p_id, self_ptr);
+        ctx.register_widget(c_id, child);
+        ctx.tree.link(p_id, c_id);
         // …plus, for containers, the legacy container extra: parent the child back (Layer,
         // Switcher) — the symmetric tree link the child's own set_parent used to make.
         if Layout::has_container_children(&self.inner) {
             let self_ptr = self.as_ptr_mut();
-            if let Some(c_base) = unsafe { (*child).base() } {
-                let c_id = c_base.id();
-                ctx.register_widget(self.base.id(), self_ptr);
-                ctx.register_widget(c_id, child);
-                ctx.tree.set_parent(c_id, Some(self.base.id()));
-            }
+            ctx.register_widget(self.base.id(), self_ptr);
+            ctx.register_widget(c_id, child);
+            ctx.tree.set_parent(c_id, Some(self.base.id()));
         }
     }
 
@@ -719,13 +714,11 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         // Replica of the old Element default: symmetric tree link.
         let id = self.base.id();
         if let Some(p_ptr) = parent {
-            if let Some(p_base) = unsafe { (*p_ptr).base() } {
-                let p_id = p_base.id();
-                ctx.register_widget(p_id, p_ptr);
-                let self_ptr = self.as_ptr();
-                ctx.register_widget(id, self_ptr);
-                ctx.tree.set_parent(id, Some(p_id));
-            }
+            let p_id = unsafe { (*p_ptr).base().id() };
+            ctx.register_widget(p_id, p_ptr);
+            let self_ptr = self.as_ptr();
+            ctx.register_widget(id, self_ptr);
+            ctx.tree.set_parent(id, Some(p_id));
         } else {
             ctx.tree.set_parent(id, None);
         }
@@ -875,11 +868,11 @@ impl<W: Layout + Paint + Input + 'static> std::ops::DerefMut for Adapted<W> {
 }
 
 impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
-    fn base(&self) -> Option<&Widget> {
-        Some(&self.base)
+    fn base(&self) -> &Widget {
+        &self.base
     }
-    fn base_mut(&mut self) -> Option<&mut Widget> {
-        Some(&mut self.base)
+    fn base_mut(&mut self) -> &mut Widget {
+        &mut self.base
     }
     // `as_any` exposes the *inner* widget: legacy code downcasts by concrete widget type
     // (`json_layout`'s `downcast_mut::<Checkbox>()`), and the adapter must be transparent to it.
@@ -923,10 +916,8 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             return true;
         }
         for child in Layout::container_children(&self.inner) {
-            if let Some(b) = unsafe { (*child).base() } {
-                if b.id() == child_id {
-                    return Layout::child_visible(&self.inner, child);
-                }
+            if unsafe { (*child).base().id() } == child_id {
+                return Layout::child_visible(&self.inner, child);
             }
         }
         false
@@ -1699,10 +1690,10 @@ mod tests {
         // preserves) and sets the base hover flag; moving away synthesizes MouseLeave.
         ctx.propagate_event(&Event::PointerMove { x: 20.0, y: 15.0, local_x: 20.0, local_y: 15.0 }, ptr);
         assert_eq!(w.inner().entered, 1, "MouseEnter reached on_event");
-        assert!(unsafe { (*ptr).base().map_or(false, |b| b.hovered) }, "base hover flag set through the adapter");
+        assert!(unsafe { (*ptr).base().hovered }, "base hover flag set through the adapter");
         ctx.propagate_event(&Event::PointerMove { x: 200.0, y: 200.0, local_x: 200.0, local_y: 200.0 }, ptr);
         assert_eq!(w.inner().left, 1, "MouseLeave reached on_event");
-        assert!(!unsafe { (*ptr).base().map_or(false, |b| b.hovered) }, "base hover flag cleared");
+        assert!(!unsafe { (*ptr).base().hovered }, "base hover flag cleared");
     }
 
     /// A narrow widget that is also a controller: the controller trait is reached through the

@@ -308,9 +308,7 @@ impl UiContext {
                         }
                         if self.propagate_event_impl(&local_adjusted, child) {
                             if check_drag_target {
-                                if let Some(b) = (*child).base() {
-                                    self.drag_target = Some(b.id());
-                                }
+                                self.drag_target = Some((*child).base().id());
                             }
                             return true;
                         }
@@ -318,9 +316,7 @@ impl UiContext {
                     if (*root).handle_event(event, self) {
                         (*root).mark_dirty(self);
                         if check_drag_target {
-                            if let Some(b) = (*root).base() {
-                                self.drag_target = Some(b.id());
-                            }
+                            self.drag_target = Some((*root).base().id());
                         }
                         return true;
                     }
@@ -340,9 +336,7 @@ impl UiContext {
             self.tree.iter_registered().map(|(_, ptr)| ptr).collect();
         for ptr in ptrs {
             unsafe {
-                if let Some(b) = (*ptr).base_mut() {
-                    b.dirty = false;
-                }
+                (*ptr).base_mut().dirty = false;
             }
         }
         self.rebuild_spatial_grid();
@@ -418,7 +412,7 @@ impl UiContext {
 
     // --- Focus management (id-keyed; Phase 6bc) ---
     pub fn set_focused(&mut self, w: &mut dyn Element) {
-        let Some(id) = w.base().map(|b| b.id()) else { return };
+        let id = w.base().id();
         // Refresh the registry with the pointer we were just handed, so focus on a
         // not-yet-registered widget keeps working (the legacy code stored this pointer
         // directly; the id must resolve for FocusOut/KeyInput dispatch to reach it).
@@ -436,7 +430,7 @@ impl UiContext {
         if new_ptr.is_null() {
             return;
         }
-        let Some(id) = (unsafe { (*new_ptr).base().map(|b| b.id()) }) else { return };
+        let id = unsafe { (*new_ptr).base().id() };
         self.tree.register(id, new_ptr);
         self.set_focused_id(id);
     }
@@ -468,10 +462,7 @@ impl UiContext {
     }
 
     pub fn is_focused(&self, w: &dyn Element) -> bool {
-        match w.base() {
-            Some(b) => self.is_focused_id(b.id()),
-            None => false,
-        }
+        self.is_focused_id(w.base().id())
     }
 
     pub fn is_focused_id(&self, id: WidgetId) -> bool {
@@ -490,10 +481,8 @@ impl UiContext {
     }
 
     pub fn clear_if_matches(&mut self, w: &dyn Element) {
-        if let Some(b) = w.base() {
-            if self.focused_widget == Some(b.id()) {
-                self.focused_widget = None;
-            }
+        if self.focused_widget == Some(w.base().id()) {
+            self.focused_widget = None;
         }
     }
 
@@ -600,7 +589,7 @@ impl UiContext {
     /// Register an open popover. Takes `&mut` so the registry can be refreshed with the
     /// pointer we are handed (the occlusion walks resolve the stored id through the tree).
     pub fn register_popover(&mut self, w: &mut (dyn Element + 'static)) {
-        let Some(id) = w.base().map(|b| b.id()) else { return };
+        let id = w.base().id();
         self.tree.register(id, w as *mut (dyn Element + 'static));
         if !self.active_popovers.contains(&id) {
             self.active_popovers.push(id);
@@ -611,7 +600,7 @@ impl UiContext {
         if ptr.is_null() {
             return;
         }
-        let Some(id) = (unsafe { (*ptr).base().map(|b| b.id()) }) else { return };
+        let id = unsafe { (*ptr).base().id() };
         self.tree.register(id, ptr);
         if !self.active_popovers.contains(&id) {
             self.active_popovers.push(id);
@@ -619,9 +608,8 @@ impl UiContext {
     }
 
     /// Whether `(px, py)` is covered by an open popover or a popover-carrying widget other
-    /// than `query_id` (the querying widget excludes itself). Pass `WidgetId(0)` for a widget
-    /// with no base — ids start at 1, so it matches nothing, like the legacy address of a
-    /// widget that could never be registered.
+    /// than `query_id` (the querying widget excludes itself). Every widget has a base id
+    /// now (the flip) — the old `WidgetId(0)` no-base sentinel is gone.
     pub fn is_coordinate_covered(&self, query_id: WidgetId, px: f32, py: f32) -> bool {
         for &pop_id in self.active_popovers.iter() {
             if pop_id == query_id {
@@ -708,7 +696,7 @@ impl UiContext {
         if target.is_null() {
             return;
         }
-        let Some(id) = (unsafe { (*target).base().map(|b| b.id()) }) else { return };
+        let id = unsafe { (*target).base().id() };
         self.tree.register(id, target);
         crate::widget::context_menu::show(x, y, options, header_count, id);
     }
@@ -737,7 +725,8 @@ impl UiContext {
         };
 
         let mut config_info = None;
-        if let Some(b) = unsafe { (*target).base() } {
+        {
+            let b = unsafe { (*target).base() };
             if let (Some(ref file), Some(ref key)) = (&b.config_file, &b.config_key) {
                 config_info = Some((file.clone(), key.clone()));
             }

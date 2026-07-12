@@ -22,7 +22,7 @@ impl ColumnLayout {
     }
 
     pub fn add_widget(&mut self, widget: &mut dyn Element, height: f32) {
-        let label_off = widget.base().map_or(0.0, |b| b.label_offset());
+        let label_off = widget.base().label_offset();
         let total_h = height + label_off;
         widget.set_rect(self.x + self.margin, self.current_y, self.width - 2.0 * self.margin, height);
         self.current_y += total_h + self.gap;
@@ -36,7 +36,7 @@ impl ColumnLayout {
         let mut max_label_off = 0.0;
         for &widget_ptr in widgets {
             unsafe {
-                let off = (*widget_ptr).base().map_or(0.0, |b| b.label_offset());
+                let off = (*widget_ptr).base().label_offset();
                 if off > max_label_off {
                     max_label_off = off;
                 }

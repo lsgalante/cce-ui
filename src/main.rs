@@ -175,7 +175,7 @@ impl Application for DemoApp {
             let self_ptr = self as *mut Self;
             unsafe {
                 for w in (*self_ptr).roots() {
-                    let id = (*w).base().unwrap().id();
+                    let id = (*w).base().id();
                     self.ui_context.register_widget(id, w);
                 }
             }

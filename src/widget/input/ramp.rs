@@ -375,19 +375,19 @@ impl Layout for ColorRamp {
 
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
         let p = self.r_slider.as_ptr_mut();
-        let id = self.r_slider.base().unwrap().id();
+        let id = self.r_slider.base().id();
         ctx.register_widget(id, p);
         ctx.link_ids(host_id, id);
         let p = self.g_slider.as_ptr_mut();
-        let id = self.g_slider.base().unwrap().id();
+        let id = self.g_slider.base().id();
         ctx.register_widget(id, p);
         ctx.link_ids(host_id, id);
         let p = self.b_slider.as_ptr_mut();
-        let id = self.b_slider.base().unwrap().id();
+        let id = self.b_slider.base().id();
         ctx.register_widget(id, p);
         ctx.link_ids(host_id, id);
         let p = self.del_button.as_ptr_mut();
-        let id = self.del_button.base().unwrap().id();
+        let id = self.del_button.base().id();
         ctx.register_widget(id, p);
         ctx.link_ids(host_id, id);
     }
@@ -758,19 +758,19 @@ impl Layout for Ramp {
 
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
         let p = self.preset_dropdown.as_ptr_mut();
-        let id = self.preset_dropdown.base().unwrap().id();
+        let id = self.preset_dropdown.base().id();
         ctx.register_widget(id, p);
         ctx.link_ids(host_id, id);
         let p = self.line_type_dropdown.as_ptr_mut();
-        let id = self.line_type_dropdown.base().unwrap().id();
+        let id = self.line_type_dropdown.base().id();
         ctx.register_widget(id, p);
         ctx.link_ids(host_id, id);
         let p = self.val_slider.as_ptr_mut();
-        let id = self.val_slider.base().unwrap().id();
+        let id = self.val_slider.base().id();
         ctx.register_widget(id, p);
         ctx.link_ids(host_id, id);
         let p = self.del_button.as_ptr_mut();
-        let id = self.del_button.base().unwrap().id();
+        let id = self.del_button.base().id();
         ctx.register_widget(id, p);
         ctx.link_ids(host_id, id);
     }

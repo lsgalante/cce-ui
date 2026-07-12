@@ -571,10 +571,12 @@ mod tests {
         // else is defaulted, so this exercises the actual trait object without dragging in a
         // heavyweight widget constructor.
         struct Marker {
+            base: crate::widget::Widget,
             tint: [f32; 4],
             painted: std::cell::Cell<bool>,
         }
         impl Element for Marker {
+            crate::impl_widget_base!(Marker);
             fn color(&self) -> [f32; 4] {
                 self.painted.set(true);
                 self.tint
@@ -582,8 +584,8 @@ mod tests {
         }
 
         let mut arena: Arena<Box<dyn Element>> = Arena::new();
-        let root = arena.insert(Box::new(Marker { tint: [1.0, 0.0, 0.0, 1.0], painted: false.into() }));
-        let child = arena.insert(Box::new(Marker { tint: [0.0, 1.0, 0.0, 1.0], painted: false.into() }));
+        let root = arena.insert(Box::new(Marker { base: crate::widget::Widget::new(), tint: [1.0, 0.0, 0.0, 1.0], painted: false.into() }));
+        let child = arena.insert(Box::new(Marker { base: crate::widget::Widget::new(), tint: [0.0, 1.0, 0.0, 1.0], painted: false.into() }));
         arena.append_child(root, child);
 
         // Walk the subtree the way a paint pass will, calling a real trait method on each node.
@@ -593,8 +595,8 @@ mod tests {
             .collect();
         assert_eq!(tints, vec![[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]]);
 
-        // The trait object is genuinely stored (its interior mutation is observable).
-        assert!(arena.value(root).unwrap().base().is_none()); // default impl still reachable
+        // The trait object is genuinely stored (its base is reachable through the box).
+        let _ = arena.value(root).unwrap().base();
 
         // Removing the root frees the child too, proving ownership lives in the arena.
         arena.remove_subtree(root);

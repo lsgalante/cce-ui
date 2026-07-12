@@ -2,9 +2,9 @@ use crate::widget::*;
 
 fn serialize_single_widget(w: &dyn Element, json: &mut String) {
     let (x, y, width, height) = w.rect();
-    let label = w.label().or_else(|| w.base().and_then(|b| b.label.clone())).unwrap_or_default();
-    let focused = w.base().map_or(false, |b| b.focused);
-    let hovered = w.base().map_or(false, |b| b.hovered);
+    let label = w.label().or_else(|| w.base().label.clone()).unwrap_or_default();
+    let focused = w.base().focused;
+    let hovered = w.base().hovered;
     let value = w.value();
     let type_name = w.type_name();
 

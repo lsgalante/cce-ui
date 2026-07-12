@@ -24,8 +24,7 @@ pub mod focus {
     }
 
     pub fn set_focused(w: &mut dyn Element, ctx: Option<&mut crate::context::UiContext>) {
-        let Some(id) = w.base().map(|b| b.id()) else { return };
-        set_focused_id(id, ctx);
+        set_focused_id(w.base().id(), ctx);
     }
 
     pub fn set_focused_id(id: WidgetId, ctx: Option<&mut crate::context::UiContext>) {
@@ -41,10 +40,7 @@ pub mod focus {
     }
 
     pub fn is_focused(w: &dyn Element) -> bool {
-        match w.base() {
-            Some(b) => is_focused_id(b.id()),
-            None => false,
-        }
+        is_focused_id(w.base().id())
     }
 
     pub fn is_focused_id(id: WidgetId) -> bool {
@@ -58,9 +54,7 @@ pub mod focus {
     }
 
     pub fn clear_if_matches(w: &dyn Element) {
-        if let Some(b) = w.base() {
-            clear_if_matches_id(b.id());
-        }
+        clear_if_matches_id(w.base().id());
     }
 
     pub fn clear_if_matches_id(id: WidgetId) {
@@ -82,14 +76,12 @@ pub mod focus {
         let child_ptr = unsafe {
             std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(child as *mut dyn Element)
         };
-        if let (Some(p_base), Some(c_base)) = (parent.base(), child.base()) {
-            let (p_id, c_id) = (p_base.id(), c_base.id());
-            ctx.register_widget(p_id, parent_ptr);
-            ctx.register_widget(c_id, child_ptr);
-            // The old add_child + set_parent pair, as the tree ops they always were.
-            ctx.tree.link(p_id, c_id);
-            ctx.tree.set_parent(c_id, Some(p_id));
-        }
+        let (p_id, c_id) = (parent.base().id(), child.base().id());
+        ctx.register_widget(p_id, parent_ptr);
+        ctx.register_widget(c_id, child_ptr);
+        // The old add_child + set_parent pair, as the tree ops they always were.
+        ctx.tree.link(p_id, c_id);
+        ctx.tree.set_parent(c_id, Some(p_id));
     }
 
     /// Keyboard tree navigation from the focused widget. `ctx` resolves the focused id to a
@@ -587,7 +579,7 @@ pub mod context_menu {
     }
 
     pub fn clear_if_matches(w: &dyn Element) {
-        let Some(id) = w.base().map(|b| b.id()) else { return };
+        let id = w.base().id();
         CONTEXT_MENU.with(|m| {
             let mut menu = m.borrow_mut();
             if menu.target == Some(id) {
@@ -713,8 +705,8 @@ pub fn clear_widget_references(w: &dyn Element) {
 #[macro_export]
 macro_rules! impl_widget_base {
     ($name:ident) => {
-        fn base(&self) -> Option<&$crate::widget::Widget> { Some(&self.base) }
-        fn base_mut(&mut self) -> Option<&mut $crate::widget::Widget> { Some(&mut self.base) }
+        fn base(&self) -> &$crate::widget::Widget { &self.base }
+        fn base_mut(&mut self) -> &mut $crate::widget::Widget { &mut self.base }
         fn as_any(&self) -> &dyn std::any::Any { self }
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
         fn as_ptr(&self) -> *mut (dyn $crate::widget::Element + 'static) {

@@ -223,8 +223,13 @@ mod tests {
     // A minimal real `Element` so tests exercise genuine `*mut dyn Element` payloads. The boxes
     // are kept alive in a local `Vec` for the duration of each test; we hand the tree raw
     // pointers into them, mirroring how widgets (owned by the app) are referenced by the tree.
-    struct Marker(#[allow(dead_code)] u32);
+    struct Marker {
+        base: crate::widget::Widget,
+        #[allow(dead_code)]
+        tag: u32,
+    }
     impl Element for Marker {
+        crate::impl_widget_base!(Marker);
         fn color(&self) -> [f32; 4] {
             [0.0, 0.0, 0.0, 0.0]
         }
@@ -240,7 +245,7 @@ mod tests {
         }
         /// Create a widget, returning `(WidgetId, *mut dyn Element)`.
         fn make(&mut self, tag: u32) -> (WidgetId, *mut (dyn Element + 'static)) {
-            let mut b = Box::new(Marker(tag));
+            let mut b = Box::new(Marker { base: crate::widget::Widget::new(), tag: tag });
             let ptr: *mut (dyn Element + 'static) = &mut *b;
             self.boxes.push(b);
             (WidgetId(tag as usize), ptr)

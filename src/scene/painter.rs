@@ -106,7 +106,8 @@ pub fn scroll_ancestor_text_bounds(_w: &dyn Element, _ui: &UiContext) -> Option<
 /// stored on the widget base, positioned by the configured control-label layout. For
 /// legacy widgets whose only text was that label (List's columns=None frame).
 pub fn base_control_label(w: &dyn Element) -> Vec<TextLabel> {
-    if let Some(b) = w.base() {
+    {
+        let b = w.base();
         if let Some(ref label) = b.label {
             let (_, font_size) = crate::layout::control_label_font_detached_parsed();
             let color = crate::colors::control_label_color_detached_for_state(b.hovered, b.focused);
