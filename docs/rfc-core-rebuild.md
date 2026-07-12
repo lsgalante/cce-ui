@@ -1668,12 +1668,19 @@ Constraint respected: **each crate still builds standalone** — the new core is
     retype, shrinking `Element`'s implementor set toward exactly one.
     Done: cce-colors' ColorSlider (constructor returns the wrapper, so
     construction and direct-dispatch sites are untouched; A/B AE=0,
-    click/wheel live-verified) and settings' ScrollBar (now plain data —
+    click/wheel live-verified); settings' ScrollBar (now plain data —
     its raw-pointer parent/children fields, Drop, and unsafe Send/Sync
     had zero consumers; strip A/B AE=0 and cross-build byte-identical
-    after an identical wheel + track-click sequence). Remaining: dm ×3,
-    cloud Fuzzel + JsonLayoutWidget, designer PassivePlate/Canvas/
-    NodePalette/Viewport3D, TI's four lookalikes, and cce-ui's
+    after an identical wheel + track-click sequence); cloud's Fuzzel
+    (set_rect side effects → rect_assigned; overlay A/B identical, row
+    click moves the selection live) and JsonLayoutWidget (the TreeList
+    shape — paints_own_subtree + whole-subtree routing in on_event with
+    gates_presses off + tick_ctx; the old overrides survive verbatim as
+    inherent methods paint composes with a dummy ctx; render sites'
+    all_quads/all_rounded_quads calls now resolve to the adapter's
+    reverse bridges, same tuples; checkbox toggle live-verified) —
+    cce-cloud is raw-impl-free. Remaining: dm ×3, designer PassivePlate/
+    Canvas/NodePalette/Viewport3D, TI's four lookalikes, and cce-ui's
     ButtonStrip (ctx-registered embed — may need the container hooks).
   - Then: the `*mut dyn Element` tree/context machinery gets retyped
     (context.rs propagation/spatial-grid/focus, the app rosters and
