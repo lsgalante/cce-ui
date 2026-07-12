@@ -106,11 +106,6 @@ pub fn scroll_ancestor_text_bounds(w: &dyn Element, ui: &UiContext) -> Option<[f
             let view_min = scroll_box.viewport_y + 4.0;
             let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
             return Some([sb_x, view_min, sb_x + sb_w, view_max]);
-        } else if let Some(list) = parent.as_any().downcast_ref::<crate::widget::List>() {
-            let (sb_x, _, sb_w, _) = list.rect();
-            let view_min = list.scroll_box.viewport_y + 4.0;
-            let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
-            return Some([sb_x, view_min, sb_x + sb_w, view_max]);
         }
         curr = parent.parent(ui);
     }

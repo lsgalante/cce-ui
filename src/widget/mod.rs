@@ -755,12 +755,12 @@ pub use self::input::{
 pub use self::container::{
     Container, ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
-    SectionContainer, Header, ContentBg, ParametersBg, List, ListColumn, ListRow, ColumnWidth,
-    ScrollBox, MenuBar, Spreadsheet, Breadcrumb, Plate,
-    Switcher, Layer, Page, Backplate, Paginator, ScrollBar, TreeList, TreeElement, ControlPanel
+    Header, ContentBg, ParametersBg,
+    ScrollBox, MenuBar, Spreadsheet, Breadcrumb,
+    Switcher, Layer, Page, Paginator, ScrollBar, TreeList, TreeElement
 };
 pub use self::display::{
-    TextLabel, Label, SectionHeader, StyledLabel, LabelPrim, TextItem, Svg, UsageBar,
+    TextLabel, Label, StyledLabel, LabelPrim, TextItem, Svg, UsageBar,
     LayoutPreview, FontPreview, InfoBox, StatusDot, InteractiveListItem,
     GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
     DotStatus, PreviewLayoutMode, Sidebar, Panel, PreviewState, ImagePreviewData, serialize_widgets,

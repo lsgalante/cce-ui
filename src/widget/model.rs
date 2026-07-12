@@ -841,15 +841,6 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         out
     }
 
-    /// Own text with font + bounds: [`Paint::text_bounds`] when the widget provides it, else a
-    /// replica of the deleted `Element` default's scroll-ancestor viewport clipping, with
-    /// `widget_font` on every label (the legacy tuple convention). pub(crate) so legacy
-    /// composites (TreeList, List) can read their concrete Adapted fields' labels now that
-    /// the trait getters are gone.
-    pub(crate) fn own_labels_with_font_and_bounds(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        self.own_labels_with_prim_font(ctx, Paint::widget_font(&self.inner))
-    }
-
     /// The paint-walk view of `own_labels_with_font_and_bounds`: prim-derived text carries the
     /// widget's content font ([`Paint::text_font`]); the detached base label keeps
     /// `widget_font` either way (via `own_labels_with_prim_font`).
@@ -895,12 +886,6 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
                 let (sb_x, _, sb_w, _) = parent.rect();
                 let view_min = scroll_box.viewport_y + 4.0;
                 let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
-                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
-                break;
-            } else if let Some(list) = parent.as_any().downcast_ref::<crate::widget::List>() {
-                let (sb_x, _, sb_w, _) = parent.rect();
-                let view_min = list.scroll_box.viewport_y + 4.0;
-                let view_max = list.scroll_box.viewport_y + list.scroll_box.viewport_h - 4.0;
                 scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
                 break;
             }
