@@ -1512,6 +1512,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
       raw `*mut TreeList` cast → `as_ptr_mut()`. A/B: loaded tree, row
       click + inline rename (double-click), context menu Copy Key via
       wl-paste, search focus, add-key popover, wheel.
+  - **Leaf sweep COMPLETE — every widget is on the narrow traits (6as).**
+    Trackpad, KeybindRecorder, FontSelector, ColorSelector, Ramp, ColorRamp
+    all converted (each A/B'd: gallery/DE/LI diffs = cursors, launch-phase
+    animation, or AE=0). Notables: ParametersBg's typed color rows re-typed
+    to `Adapted<ColorSelector>`; ColorSelector's in-file keyboard tests pass
+    THROUGH the adapter; Ramp/ColorRamp take the TreeList shape
+    (paints_own_subtree + tick_ctx + per-tick re-parenting of field widgets
+    so their label fade blends against the adapter's color); and
+    `Adapted::paint_self` gained a subtree TEXT PASS-THROUGH — a
+    paints_own_subtree widget's Text prims forward verbatim with per-child
+    fonts/bounds instead of being flattened to widget_font by the
+    own-labels re-derivation (composites with mixed child fonts rendered in
+    the default serif without it). `impl Element` now remains ONLY on: the
+    containers (Layer/Container/Page/Plate/Backplate/ScrollBox/ScrollBar/
+    List/ControlPanel/SectionContainer/JsonLayout/Menu/MenuBar-internals),
+    app-local widgets, ContextMenu, and `Adapted` itself.
   - **Then: retire the `as_*_controller` pairs — SCOPE CORRECTED.** The
     earlier four-site estimate came from an over-filtered grep; the real
     surface is ~45 sites: cce-designer's HTTP-action/menu plumbing holds
