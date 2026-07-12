@@ -101,15 +101,15 @@ impl ScrollBox {
     /// unfocusing the previously focused widget (nothing ever queried focus ON the scroll
     /// box through the thread-local, and its own `unfocus` was a no-op) — so just release
     /// the current holder instead of storing a pointer to a non-Element.
-    fn claim_focus(&self) {
-        focus::clear_focus();
+    fn claim_focus(&self, ctx: &mut UiContext) {
+        focus::clear_focus(Some(ctx));
     }
 
     pub fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if button == MouseButton::Left {
             if state == ElementState::Pressed {
                 if self.hit_test_scrollbar(px, py) {
-                    self.claim_focus();
+                    self.claim_focus(ctx);
                     self.scrollbar_dragging = true;
                     
                     let sb_track_h = self.viewport_h - 8.0;
@@ -143,7 +143,7 @@ impl ScrollBox {
                     self.scrollbar_dragging = false;
                 }
                 if self.hit_test(px, py, ctx) {
-                    self.claim_focus();
+                    self.claim_focus(ctx);
                 }
             } else if state == ElementState::Released {
                 self.scrollbar_dragging = false;
@@ -303,17 +303,19 @@ impl ScrollBox {
     }
 
     pub fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
-        let self_addr = self as *const Self as *const () as usize;
-        let has_focus = ctx.is_focused_addr(self_addr) || {
+        // Focus never lands on the box itself (post-6av it is not an `Element`), and its id is
+        // never a tree ancestor of the focused widget — like the legacy address walk, this
+        // gate only ever passes via the hover check below.
+        let self_id = self.base.id();
+        let has_focus = ctx.is_focused_id(self_id) || {
             let mut current = ctx.focused_widget;
             let mut found = false;
-            while let Some(ptr) = current {
-                let ptr_addr = ptr as *const () as usize;
-                if ptr_addr == self_addr {
+            while let Some(id) = current {
+                if id == self_id {
                     found = true;
                     break;
                 }
-                current = unsafe { (*ptr).parent(ctx) };
+                current = ctx.tree.parent_id(id);
             }
             found
         };

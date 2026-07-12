@@ -406,7 +406,7 @@ pub trait Element {
     }
 
     fn highlight_color(&self, ctx: &UiContext) -> Option<[f32; 4]> {
-        let is_focused = ctx.is_focused_addr(self as *const Self as *const () as usize);
+        let is_focused = self.base().map(|b| ctx.is_focused_id(b.id())).unwrap_or(false);
         if is_focused {
             Some(colors::highlight_primary_color())
         } else if self.hovered() {
@@ -587,7 +587,7 @@ pub trait Element {
         }
     }
     fn focused(&self, ctx: &UiContext) -> bool {
-        ctx.is_focused_addr(self as *const Self as *const () as usize)
+        self.base().map(|b| ctx.is_focused_id(b.id())).unwrap_or(false)
     }
     fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem) {}
     fn set_selected(&mut self, _selected: bool) {}

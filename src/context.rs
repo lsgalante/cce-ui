@@ -54,7 +54,9 @@ pub struct UiContext {
     /// core rebuild). Replaces the former `layout_tree` + `widget_registry` maps; see
     /// `scene/tree.rs`.
     pub tree: crate::scene::WidgetTree,
-    pub focused_widget: Option<*mut (dyn Element + 'static)>,
+    /// The focused widget's id (Phase 6bc: stored ids, not pointers — a stale id resolves to
+    /// `None` through the generational tree instead of dereferencing freed memory).
+    pub focused_widget: Option<WidgetId>,
     pub active_popovers: Vec<*const (dyn Element + 'static)>,
     pub hover_state: HoverState,
     pub cursor_pos: (f32, f32),
@@ -139,7 +141,7 @@ impl UiContext {
             };
             if is_scroll_key {
                 let mut handled = false;
-                if let Some(focused) = self.focused_widget {
+                if let Some(focused) = self.focused_widget.and_then(|id| self.tree.get_ptr(id)) {
                     unsafe {
                         if (*focused).handle_event(event, self) {
                             (*focused).mark_dirty(self);
@@ -245,7 +247,7 @@ impl UiContext {
 
             // For KeyInput, send directly to focused widget if it exists
             if let Event::KeyInput(_) = event {
-                if let Some(focused) = self.focused_widget {
+                if let Some(focused) = self.focused_widget.and_then(|id| self.tree.get_ptr(id)) {
                     if (*focused).handle_event(event, self) {
                         (*focused).mark_dirty(self);
                         return true;
@@ -413,64 +415,82 @@ impl UiContext {
         changed
     }
 
-    // --- Focus management ---
+    // --- Focus management (id-keyed; Phase 6bc) ---
     pub fn set_focused(&mut self, w: &mut dyn Element) {
+        let Some(id) = w.base().map(|b| b.id()) else { return };
+        // Refresh the registry with the pointer we were just handed, so focus on a
+        // not-yet-registered widget keeps working (the legacy code stored this pointer
+        // directly; the id must resolve for FocusOut/KeyInput dispatch to reach it).
         let new_ptr = unsafe {
             std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(w as *mut dyn Element)
         };
-        self.set_focused_ptr(new_ptr);
+        self.tree.register(id, new_ptr);
+        self.set_focused_id(id);
     }
 
+    /// Transitional pointer form (TreeList focuses its adapter via `EventCtx::host_ptr`). The
+    /// pointer must be live at the call — it is only used to derive the id and refresh the
+    /// registry, never stored.
     pub fn set_focused_ptr(&mut self, new_ptr: *mut (dyn Element + 'static)) {
-        if let Some(old_ptr) = self.focused_widget {
-            let old_data = old_ptr as *mut () as usize;
-            let new_data = new_ptr as *mut () as usize;
-            if old_data != new_data {
-                unsafe {
-                    (*old_ptr).unfocus();
-                    (*old_ptr).handle_event(&Event::FocusOut, self);
+        if new_ptr.is_null() {
+            return;
+        }
+        let Some(id) = (unsafe { (*new_ptr).base().map(|b| b.id()) }) else { return };
+        self.tree.register(id, new_ptr);
+        self.set_focused_id(id);
+    }
+
+    pub fn set_focused_id(&mut self, id: WidgetId) {
+        if let Some(old_id) = self.focused_widget {
+            if old_id != id {
+                if let Some(old_ptr) = self.tree.get_ptr(old_id) {
+                    unsafe {
+                        (*old_ptr).unfocus();
+                        (*old_ptr).handle_event(&Event::FocusOut, self);
+                    }
                 }
-                self.focused_widget = Some(new_ptr);
-                unsafe {
-                    (*new_ptr).handle_event(&Event::FocusIn, self);
+                self.focused_widget = Some(id);
+                if let Some(new_ptr) = self.tree.get_ptr(id) {
+                    unsafe {
+                        (*new_ptr).handle_event(&Event::FocusIn, self);
+                    }
                 }
             }
         } else {
-            self.focused_widget = Some(new_ptr);
-            unsafe {
-                (*new_ptr).handle_event(&Event::FocusIn, self);
+            self.focused_widget = Some(id);
+            if let Some(new_ptr) = self.tree.get_ptr(id) {
+                unsafe {
+                    (*new_ptr).handle_event(&Event::FocusIn, self);
+                }
             }
         }
     }
 
     pub fn is_focused(&self, w: &dyn Element) -> bool {
-        let addr = w as *const dyn Element as *const () as usize;
-        self.is_focused_addr(addr)
-    }
-
-    pub fn is_focused_addr(&self, addr: usize) -> bool {
-        if let Some(ptr) = self.focused_widget {
-            let current_data = ptr as *const () as usize;
-            current_data == addr
-        } else {
-            false
+        match w.base() {
+            Some(b) => self.is_focused_id(b.id()),
+            None => false,
         }
     }
 
+    pub fn is_focused_id(&self, id: WidgetId) -> bool {
+        self.focused_widget == Some(id)
+    }
+
     pub fn clear_focus(&mut self) {
-        if let Some(ptr) = self.focused_widget.take() {
-            unsafe {
-                (*ptr).unfocus();
-                (*ptr).handle_event(&Event::FocusOut, self);
+        if let Some(id) = self.focused_widget.take() {
+            if let Some(ptr) = self.tree.get_ptr(id) {
+                unsafe {
+                    (*ptr).unfocus();
+                    (*ptr).handle_event(&Event::FocusOut, self);
+                }
             }
         }
     }
 
     pub fn clear_if_matches(&mut self, w: &dyn Element) {
-        let query_data = w as *const dyn Element as *const () as usize;
-        if let Some(ptr) = self.focused_widget {
-            let current_data = ptr as *const () as usize;
-            if current_data == query_data {
+        if let Some(b) = w.base() {
+            if self.focused_widget == Some(b.id()) {
                 self.focused_widget = None;
             }
         }
@@ -481,7 +501,7 @@ impl UiContext {
     }
 
     pub fn navigate_focus(&mut self, key: &Key, ctrl: bool) -> bool {
-        let ptr = match self.focused_widget {
+        let ptr = match self.focused_widget.and_then(|id| self.tree.get_ptr(id)) {
             Some(p) => p,
             None => return false,
         };

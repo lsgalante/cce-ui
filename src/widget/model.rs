@@ -383,7 +383,7 @@ impl EventCtx<'_> {
     /// Make this widget the global focus target (legacy `focus::set_focused(self)`).
     pub fn request_focus(&mut self) {
         if let Some(ptr) = self.self_ptr {
-            unsafe { crate::widget::focus::set_focused(&mut *ptr) };
+            unsafe { crate::widget::focus::set_focused(&mut *ptr, self.ui.as_deref_mut()) };
         }
     }
 
@@ -1117,7 +1117,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         if !Paint::legacy_focus_highlight(&self.inner) {
             return None;
         }
-        let is_focused = ctx.is_focused_addr(self as *const Self as *const () as usize);
+        let is_focused = ctx.is_focused_id(self.base.id());
         let hc = if is_focused {
             crate::colors::highlight_primary_color()
         } else if self.base.hovered {

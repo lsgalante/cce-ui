@@ -1,63 +1,72 @@
 use crate::widget::{Element, Key};
 
 pub mod focus {
-    use super:: Element;
+    use super::Element;
+    use crate::widget::WidgetId;
     use std::cell::Cell;
 
+    // Phase 6bc: the thread-local focus store keys by id, not pointer. Dispatching to the
+    // previous holder (`unfocus`) resolves through the caller's generational tree, so a
+    // stale id is skipped instead of dereferencing freed memory (the 6w settings UAF class).
     thread_local! {
-        static FOCUSED_WIDGET: Cell<Option<*mut (dyn Element + 'static)>> = Cell::new(None);
+        static FOCUSED_WIDGET: Cell<Option<WidgetId>> = Cell::new(None);
     }
 
-    pub fn set_focused(w: &mut dyn Element) {
-        FOCUSED_WIDGET.with(|cell| {
-            let new_ptr = unsafe {
-                std::mem::transmute::<*mut dyn Element, *mut (dyn Element + 'static)>(w as *mut dyn Element)
-            };
-            if let Some(old_ptr) = cell.get() {
-                let old_data = old_ptr as *mut () as usize;
-                let new_data = new_ptr as *mut () as usize;
-                if old_data != new_data {
-                    unsafe {
-                        (*old_ptr).unfocus();
-                    }
-                    cell.set(Some(new_ptr));
-                }
-            } else {
-                cell.set(Some(new_ptr));
-            }
-        });
-    }
-
-    pub fn is_focused(w: &dyn Element) -> bool {
-        FOCUSED_WIDGET.with(|cell| {
-            if let Some(ptr) = cell.get() {
-                let current_data = ptr as *const () as usize;
-                let query_data = w as *const dyn Element as *const () as usize;
-                current_data == query_data
-            } else {
-                false
-            }
-        })
-    }
-
-    pub fn clear_focus() {
-        FOCUSED_WIDGET.with(|cell| {
-            if let Some(ptr) = cell.take() {
+    /// Resolve `id` in `ctx`'s tree (when a ctx is in reach) and call `unfocus()` on it.
+    fn unfocus_via(ctx: Option<&mut crate::context::UiContext>, id: WidgetId) {
+        if let Some(ctx) = ctx {
+            if let Some(ptr) = ctx.tree.get_ptr(id) {
                 unsafe {
                     (*ptr).unfocus();
                 }
             }
-        });
+        }
+    }
+
+    pub fn set_focused(w: &mut dyn Element, ctx: Option<&mut crate::context::UiContext>) {
+        let Some(id) = w.base().map(|b| b.id()) else { return };
+        set_focused_id(id, ctx);
+    }
+
+    pub fn set_focused_id(id: WidgetId, ctx: Option<&mut crate::context::UiContext>) {
+        let old = FOCUSED_WIDGET.with(|cell| cell.get());
+        if let Some(old_id) = old {
+            if old_id != id {
+                unfocus_via(ctx, old_id);
+                FOCUSED_WIDGET.with(|cell| cell.set(Some(id)));
+            }
+        } else {
+            FOCUSED_WIDGET.with(|cell| cell.set(Some(id)));
+        }
+    }
+
+    pub fn is_focused(w: &dyn Element) -> bool {
+        match w.base() {
+            Some(b) => is_focused_id(b.id()),
+            None => false,
+        }
+    }
+
+    pub fn is_focused_id(id: WidgetId) -> bool {
+        FOCUSED_WIDGET.with(|cell| cell.get() == Some(id))
+    }
+
+    pub fn clear_focus(ctx: Option<&mut crate::context::UiContext>) {
+        if let Some(id) = FOCUSED_WIDGET.with(|cell| cell.take()) {
+            unfocus_via(ctx, id);
+        }
     }
 
     pub fn clear_if_matches(w: &dyn Element) {
+        if let Some(b) = w.base() {
+            clear_if_matches_id(b.id());
+        }
+    }
+
+    pub fn clear_if_matches_id(id: WidgetId) {
         FOCUSED_WIDGET.with(|cell| {
-            if let Some(ptr) = cell.get() {
-                let current_data = ptr as *const () as usize;
-                let query_data = w as *const dyn Element as *const () as usize;
-                if current_data == query_data {
-                    cell.set(None);
-                }
+            if cell.get() == Some(id) {
+                cell.set(None);
             }
         });
     }
@@ -81,9 +90,13 @@ pub mod focus {
         child.set_parent(Some(parent_ptr), ctx);
     }
 
-    pub fn navigate_focus(key: &super::Key, ctrl: bool) -> bool {
+    /// Keyboard tree navigation from the focused widget. `ctx` resolves the focused id to a
+    /// live widget; the parent/children walk itself deliberately keeps the legacy dummy-ctx
+    /// semantics (only `container_children`-style overrides that ignore the ctx ever yielded
+    /// anything here).
+    pub fn navigate_focus(key: &super::Key, ctrl: bool, ctx: &mut crate::context::UiContext) -> bool {
         FOCUSED_WIDGET.with(|cell| {
-            let ptr = match cell.get() {
+            let ptr = match cell.get().and_then(|id| ctx.tree.get_ptr(id)) {
                 Some(p) => p,
                 None => return false,
             };
@@ -94,7 +107,7 @@ pub mod focus {
                         let dummy = crate::context::UiContext::new();
                         if let Some(parent_ptr) = (*ptr).parent(&dummy) {
                             let parent_ref = &mut *parent_ptr;
-                            set_focused(parent_ref);
+                            set_focused(parent_ref, Some(&mut *ctx));
                             parent_ref.focus();
                             return true;
                         }
@@ -104,7 +117,7 @@ pub mod focus {
                         let mut children = (*ptr).children(&dummy);
                         if !children.is_empty() {
                             let child_ref = &mut *children[0];
-                            set_focused(child_ref);
+                            set_focused(child_ref, Some(&mut *ctx));
                             child_ref.focus();
                             return true;
                         }
@@ -121,7 +134,7 @@ pub mod focus {
                             if let Some(idx) = current_idx {
                                 let next_idx = (idx + 1) % siblings.len();
                                 let sibling_ref = &mut *siblings[next_idx];
-                                set_focused(sibling_ref);
+                                set_focused(sibling_ref, Some(&mut *ctx));
                                 sibling_ref.focus();
                                 return true;
                             }
@@ -139,7 +152,7 @@ pub mod focus {
                             if let Some(idx) = current_idx {
                                 let prev_idx = if idx == 0 { siblings.len() - 1 } else { idx - 1 };
                                 let sibling_ref = &mut *siblings[prev_idx];
-                                set_focused(sibling_ref);
+                                set_focused(sibling_ref, Some(&mut *ctx));
                                 sibling_ref.focus();
                                 return true;
                             }
