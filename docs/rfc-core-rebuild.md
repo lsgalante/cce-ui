@@ -1553,6 +1553,19 @@ Constraint respected: **each crate still builds standalone** — the new core is
     in-file tests that assert capabilities ride the adapter (die with
     `Element`). The designer retype is therefore the finale's next
     structural step, folded into the tree-machinery retype.
+  - **Capability system DELETED (6aw, same session).** The designer's
+    accessor block reaches each controller trait by `as_any` downcast to
+    the roster index's known concrete type (note: `Adapted::as_any`
+    exposes the INNER widget, so the downcast targets `MenuBar`/`Graph`/
+    `ParametersBg`/`Spreadsheet`/`Breadcrumb` directly — the first build
+    against `Adapted<W>` panicked at launch, caught by the live A/B);
+    test-interface downcasts its Paginator; `serialize_widgets` tries
+    the two MenuController implementors a roster can hold. With no
+    callers left, Element's 12 `as_*` hooks, Adapted's forwards, and the
+    14 `Input` capability hooks + their per-widget impls are all
+    deleted. Element: 92 methods. A/B: designer/TI static diffs are the
+    known noise shapes; designer HTTP `menu_click` (the dynamic-index
+    path) verified live.
   - **Gallery containers went app-local (6as).** cce-test-interface's
     widget gallery was the last constructor of ControlPanel / Plate /
     SectionContainer / Backplate: it now owns `ti_widgets.rs` — a verbatim
