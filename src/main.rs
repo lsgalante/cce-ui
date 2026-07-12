@@ -253,7 +253,7 @@ impl Application for DemoApp {
         // itself is drawn into this frame below — there is no popup surface.
         self.ui_context.clear_popovers();
         if self.theme_dropdown.popover_rect().is_some() {
-            self.ui_context.register_popover(&self.theme_dropdown);
+            self.ui_context.register_popover(&mut self.theme_dropdown);
         }
 
         let mut pc = PaintCtx::new();

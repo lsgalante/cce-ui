@@ -333,7 +333,7 @@ pub trait Element {
     }
 
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self.base().map(|b| b.id()).unwrap_or(WidgetId(0)), px, py) {
             return false;
         }
         let (x, y, w, h) = self.rect();
@@ -357,7 +357,7 @@ pub trait Element {
 
     fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         ctx.set_cursor_pos(px, py);
-        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self.base().map(|b| b.id()).unwrap_or(WidgetId(0)), px, py) {
             let was = self.hovered();
             if was {
                 self.set_hovered(false);

@@ -416,7 +416,9 @@ pub mod context_menu {
         pub visible: bool,
         pub options: Vec<String>,
         pub hovered_item: Option<usize>,
-        pub target: Option<*mut (dyn Element + 'static)>,
+        /// The action target, id-keyed (Phase 6bc slice 2): dispatch resolves it through the
+        /// caller's generational tree, so a stale target is a no-op, not a UAF.
+        pub target: Option<WidgetId>,
         pub header_count: usize,
     }
 
@@ -435,10 +437,7 @@ pub mod context_menu {
             }
         }
 
-        pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn Element + 'static)) {
-            if target.is_null() {
-                return;
-            }
+        pub fn show(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: WidgetId) {
             self.x = x;
             self.y = y;
             self.options = options;
@@ -474,7 +473,7 @@ pub mod context_menu {
             self.hovered_item != was_hovered
         }
 
-        pub fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
+        pub fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: Option<&mut crate::context::UiContext>) -> bool {
             if !self.visible { return false; }
             if button != MouseButton::Left || state != ElementState::Pressed {
                 if state == ElementState::Pressed {
@@ -489,8 +488,8 @@ pub mod context_menu {
                 if idx < self.options.len() {
                     if idx >= self.header_count {
                         let opt = self.options[idx].clone();
-                        if let Some(target_ptr) = self.target {
-                            if !target_ptr.is_null() {
+                        if let (Some(target_id), Some(ctx)) = (self.target, ctx) {
+                            if let Some(target_ptr) = ctx.tree.get_ptr(target_id) {
                                 unsafe {
                                     let target = &mut *target_ptr;
                                     match opt.as_str() {
@@ -599,7 +598,7 @@ pub mod context_menu {
         CONTEXT_MENU.with(|m| m.borrow().visible)
     }
 
-    pub fn show(x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn Element + 'static)) {
+    pub fn show(x: f32, y: f32, options: Vec<String>, header_count: usize, target: WidgetId) {
         CONTEXT_MENU.with(|m| m.borrow_mut().show(x, y, options, header_count, target));
     }
 
@@ -608,15 +607,12 @@ pub mod context_menu {
     }
 
     pub fn clear_if_matches(w: &dyn Element) {
+        let Some(id) = w.base().map(|b| b.id()) else { return };
         CONTEXT_MENU.with(|m| {
             let mut menu = m.borrow_mut();
-            if let Some(ptr) = menu.target {
-                let current_data = ptr as *const () as usize;
-                let query_data = w as *const dyn Element as *const () as usize;
-                if current_data == query_data {
-                    menu.target = None;
-                    menu.visible = false;
-                }
+            if menu.target == Some(id) {
+                menu.target = None;
+                menu.visible = false;
             }
         });
     }
@@ -636,8 +632,8 @@ pub mod context_menu {
         CONTEXT_MENU.with(|m| m.borrow_mut().cursor_moved(px, py))
     }
 
-    pub fn mouse_input(button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        CONTEXT_MENU.with(|m| m.borrow_mut().mouse_input(button, state, px, py))
+    pub fn mouse_input(button: MouseButton, state: ElementState, px: f32, py: f32, ctx: Option<&mut crate::context::UiContext>) -> bool {
+        CONTEXT_MENU.with(|m| m.borrow_mut().mouse_input(button, state, px, py, ctx))
     }
 
     pub fn extra_quads() -> Vec<(f32, f32, f32, f32, [f32; 4])> {

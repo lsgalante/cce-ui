@@ -910,7 +910,7 @@ impl Input for ParametersBg {
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         // Copied before `ectx.ui` is borrowed: the wheel arm's occlusion check keys on the
         // adapter's address (the pointer hosts register/popover-track).
-        let self_addr = ectx.widget_addr();
+        let self_id = ectx.id;
         match event {
             // Hosts call `unfocus()` directly (the designer's pane switches): commit the
             // focused row and unfocus the children. Needs no ctx, so the direct path's
@@ -1562,7 +1562,7 @@ impl Input for ParametersBg {
 
                 // The legacy tail's `self.hit_test(px, py, ctx)`: occlusion via the adapter's
                 // address, then rect-or-popover containment.
-                if !changed && !ui.is_coordinate_covered(self_addr, px, py) {
+                if !changed && !ui.is_coordinate_covered(self_id, px, py) {
                     let in_rect = px >= self.rect.x
                         && px <= self.rect.x + self.rect.width
                         && py >= self.rect.y

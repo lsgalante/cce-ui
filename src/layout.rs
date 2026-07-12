@@ -3238,9 +3238,11 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
 }
 
 pub fn render_popovers(pc: &mut dyn RenderTarget, ctx: &UiContext) {
-    for popover_ptr in &ctx.active_popovers {
-        unsafe {
-            (**popover_ptr).render_popover(pc);
+    for &pop_id in &ctx.active_popovers {
+        if let Some(ptr) = ctx.tree.get_ptr(pop_id) {
+            unsafe {
+                (*ptr).render_popover(pc);
+            }
         }
     }
 }

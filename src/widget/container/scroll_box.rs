@@ -87,7 +87,7 @@ impl ScrollBox {
     /// The legacy `Element` default hit test over the base rect (ScrollBox never carried a
     /// label or row expansion, so those branches are folded away).
     fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
-        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self.base.id(), px, py) {
             return false;
         }
         let (x, y, w, h) = (self.base.x, self.base.y, self.base.w, self.base.h);
@@ -199,7 +199,7 @@ impl ScrollBox {
     /// MouseLeave dispatch the default performed was a no-op for ScrollBox.
     pub fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         ctx.set_cursor_pos(px, py);
-        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self.base.id(), px, py) {
             let was = self.base.hovered;
             if was {
                 self.base.hovered = false;

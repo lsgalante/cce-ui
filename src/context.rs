@@ -57,7 +57,8 @@ pub struct UiContext {
     /// The focused widget's id (Phase 6bc: stored ids, not pointers — a stale id resolves to
     /// `None` through the generational tree instead of dereferencing freed memory).
     pub focused_widget: Option<WidgetId>,
-    pub active_popovers: Vec<*const (dyn Element + 'static)>,
+    /// Open-popover registrations, id-keyed like focus (Phase 6bc slice 2).
+    pub active_popovers: Vec<WidgetId>,
     pub hover_state: HoverState,
     pub cursor_pos: (f32, f32),
     pub context_menu: ContextMenuState,
@@ -596,29 +597,39 @@ impl UiContext {
         self.active_popovers.clear();
     }
 
-    pub fn register_popover(&mut self, w: &(dyn Element + 'static)) {
-        let ptr = w as *const (dyn Element + 'static);
-        if !self.active_popovers.contains(&ptr) {
-            self.active_popovers.push(ptr);
+    /// Register an open popover. Takes `&mut` so the registry can be refreshed with the
+    /// pointer we are handed (the occlusion walks resolve the stored id through the tree).
+    pub fn register_popover(&mut self, w: &mut (dyn Element + 'static)) {
+        let Some(id) = w.base().map(|b| b.id()) else { return };
+        self.tree.register(id, w as *mut (dyn Element + 'static));
+        if !self.active_popovers.contains(&id) {
+            self.active_popovers.push(id);
         }
     }
 
     pub fn register_popover_ptr(&mut self, ptr: *mut (dyn Element + 'static)) {
-        let const_ptr = ptr as *const (dyn Element + 'static);
-        if !self.active_popovers.contains(&const_ptr) {
-            self.active_popovers.push(const_ptr);
+        if ptr.is_null() {
+            return;
+        }
+        let Some(id) = (unsafe { (*ptr).base().map(|b| b.id()) }) else { return };
+        self.tree.register(id, ptr);
+        if !self.active_popovers.contains(&id) {
+            self.active_popovers.push(id);
         }
     }
 
-    pub fn is_coordinate_covered(&self, query_address: usize, px: f32, py: f32) -> bool {
-        for popover_ptr in self.active_popovers.iter() {
-            let current_data = *popover_ptr as *const () as usize;
-            if query_address == current_data {
+    /// Whether `(px, py)` is covered by an open popover or a popover-carrying widget other
+    /// than `query_id` (the querying widget excludes itself). Pass `WidgetId(0)` for a widget
+    /// with no base — ids start at 1, so it matches nothing, like the legacy address of a
+    /// widget that could never be registered.
+    pub fn is_coordinate_covered(&self, query_id: WidgetId, px: f32, py: f32) -> bool {
+        for &pop_id in self.active_popovers.iter() {
+            if pop_id == query_id {
                 continue;
             }
-            unsafe {
-                if let Some(popover) = popover_ptr.as_ref() {
-                    if let Some((x, y, width, height)) = popover.popover_rect() {
+            if let Some(ptr) = self.tree.get_ptr(pop_id) {
+                unsafe {
+                    if let Some((x, y, width, height)) = (*ptr).popover_rect() {
                         if px >= x && px <= x + width && py >= y && py <= y + height {
                             return true;
                         }
@@ -626,9 +637,8 @@ impl UiContext {
                 }
             }
         }
-        for (_, ptr) in self.tree.iter_registered() {
-            let current_data = ptr as *const () as usize;
-            if query_address == current_data {
+        for (id, ptr) in self.tree.iter_registered() {
+            if id == query_id {
                 continue;
             }
             unsafe {
@@ -695,7 +705,12 @@ impl UiContext {
     }
 
     pub fn show_context_menu(&mut self, x: f32, y: f32, options: Vec<String>, header_count: usize, target: *mut (dyn Element + 'static)) {
-        crate::widget::context_menu::show(x, y, options, header_count, target);
+        if target.is_null() {
+            return;
+        }
+        let Some(id) = (unsafe { (*target).base().map(|b| b.id()) }) else { return };
+        self.tree.register(id, target);
+        crate::widget::context_menu::show(x, y, options, header_count, id);
     }
 
     pub fn handle_right_click(&mut self, target: *mut (dyn Element + 'static), px: f32, py: f32) {
@@ -758,7 +773,7 @@ impl UiContext {
 
         let scroll_y = crate::widget::hover_animation::get_scroll_offset();
         let adjusted_py = py - scroll_y;
-        crate::widget::context_menu::show(px, adjusted_py, options, header_count, target);
+        self.show_context_menu(px, adjusted_py, options, header_count, target);
     }
 
     pub fn hide_context_menu(&mut self) {
@@ -774,7 +789,7 @@ impl UiContext {
     }
 
     pub fn mouse_input_context_menu(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32) -> bool {
-        crate::widget::context_menu::mouse_input(button, state, px, py)
+        crate::widget::context_menu::mouse_input(button, state, px, py, Some(self))
     }
 
     pub fn context_menu_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -790,10 +805,10 @@ impl UiContext {
     /// there must never start a window move (the widgets beneath may not block dragging,
     /// e.g. Graph's edge-exclusive canvas hit test).
     fn point_in_active_popover(&self, px: f32, py: f32) -> bool {
-        for popover_ptr in &self.active_popovers {
-            unsafe {
-                if let Some(p) = popover_ptr.as_ref() {
-                    if let Some((x, y, w, h)) = p.popover_rect() {
+        for &pop_id in &self.active_popovers {
+            if let Some(ptr) = self.tree.get_ptr(pop_id) {
+                unsafe {
+                    if let Some((x, y, w, h)) = (*ptr).popover_rect() {
                         if px >= x && px <= x + w && py >= y && py <= y + h {
                             return true;
                         }

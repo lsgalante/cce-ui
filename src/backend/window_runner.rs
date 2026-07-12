@@ -1887,10 +1887,10 @@ impl<A: Application> EngineState<A> {
         let mut areas: Vec<TextArea<'_>> = Vec::new();
         let mut dl_overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
         if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
-            for popover_ptr in &ctx.active_popovers {
-                unsafe {
-                    if let Some(popover) = popover_ptr.as_ref() {
-                        if let Some((x, y, w, h)) = popover.popover_rect() {
+            for &pop_id in &ctx.active_popovers {
+                if let Some(ptr) = ctx.tree.get_ptr(pop_id) {
+                    unsafe {
+                        if let Some((x, y, w, h)) = (*ptr).popover_rect() {
                             dl_overlay_rects.push((x, y, w, h));
                         }
                     }

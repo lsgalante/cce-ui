@@ -406,14 +406,6 @@ impl EventCtx<'_> {
         }
     }
 
-    /// This widget's identity address for the legacy address-keyed walks
-    /// (`UiContext::is_coordinate_covered` excludes the querying widget by pointer — the
-    /// adapter's, which is also what hosts register/popover-track). Zero outside a routed
-    /// path; the coverage walk then simply excludes nothing.
-    pub fn widget_addr(&self) -> usize {
-        self.self_ptr.map(|p| p as *const () as usize).unwrap_or(0)
-    }
-
     /// The adapter's pointer, for legacy sites that must hand it onward — TreeList makes
     /// itself the focus target (`set_focused_ptr`) and the context-menu target
     /// (`show_context_menu`) with the pointer hosts registered. Transitional; dies with
@@ -1571,7 +1563,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
         // Preserve the legacy occlusion check (a covering layer swallows the hit), then delegate
         // the geometric test to the narrow trait instead of the row/label-offset machinery.
-        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+        if ctx.is_coordinate_covered(self.base.id(), px, py) {
             return false;
         }
         let (x, y, w, h) = self.rect();
