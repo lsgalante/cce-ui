@@ -1914,6 +1914,29 @@ Constraint respected: **each crate still builds standalone** — the new core is
        Everything else on today's Element (79 methods plus the
        generic-only surface) either moves to inherent `Adapted<W>`
        methods for the generic render machinery or dies.
+       **Execution mode: shrink Element IN PLACE toward the blueprint,
+       then rename it to `WidgetHost` when it matches** — a parallel
+       trait can't be reached from the existing trait object, but
+       removing non-blueprint methods one census-driven commit at a
+       time keeps every state shippable. **First shrink batch (DONE
+       2026-07-12, 79→73):** `highlight_color` folded into the
+       `highlight_quad` default (zero overrides); `set_drag_bounds` +
+       `intrinsic_size` moved to inherent `Adapted<W>` methods (their
+       concrete callers — designer's network panel, fonts'/graph's
+       hand-laid sizing — resolve unchanged); `layout_style`/
+       `layout_children` deleted with **scene/bridge.rs itself** (its
+       last production user was retired in 6aa; the narrow
+       `Layout::intrinsic_size` hook stays — `Adapted::measure` reads
+       it); `layout_ignore` deleted with its only consumers, the
+       uncalled `layout_widgets`/`layout_widget_ptors`. Census
+       lesson: grep BOTH `.method(` and UFCS `::method(` forms — the
+       fonts/graph `Element::intrinsic_size(&x)` callers only
+       surfaced at compile. Remaining non-blueprint candidates:
+       `clear_children`, `corner_radius`/`rounded_corners`
+       (consolidate into `corner_radii`), `hovered`/`set_hovered`,
+       `on_cursor_moved` (belongs in the direct-dispatch block —
+       blueprint addition, not a deletion), `preferred_height`
+       (generic render machinery), `set_parent`, `value`.
     Former slices 4/5 fold in: the app `as_ptr_mut` dispatch sites
     are rewritten by whichever of routed-events (per app) or the
     phase-4 flip reaches them first; no standalone pointer-to-id
