@@ -1847,11 +1847,17 @@ Constraint respected: **each crate still builds standalone** — the new core is
     escape hatches (`base()` becomes a guaranteed `id()`/state
     access, killing the `WidgetId(0)` sentinel class). Phases, each
     shippable:
-    1. **Capability actions → one enum method**: the 13 context-menu
-       action methods (`cut_selection`…`copy_path`) become
-       `context_action(ContextAction) -> bool`; core.rs dispatch
-       matches the enum; implementors (TextBox/TreeList/Breadcrumb)
-       narrow to one hook.
+    1. **Capability actions → one enum method (DONE 2026-07-12)**:
+       the 13 context-menu action methods (`cut_selection`…
+       `copy_path`) became `context_action(ContextAction) -> bool`
+       across Element, the Input hooks, and the Adapted forwards; the
+       Input default keeps whole-value Cut/Copy/Paste through the
+       value-string pair; TreeList's seven action bodies moved to
+       inherent methods via an impl split (zero code movement);
+       core.rs maps the menu strings (incl. the load-bearing "Cear")
+       to enum values. Element is down to 79 methods. Live-verified:
+       tree Copy Key/Copy Value/Collapse and TextBox Paste through
+       the enum dispatch.
     2. **Tuple getters off the future dyn surface**: re-bound
        layout.rs's `T: Element` generics and window_runner's
        tessellators onto a `LegacyTuples`-style bound (or inherent
