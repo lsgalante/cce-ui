@@ -117,16 +117,6 @@ impl Element for ScrollBar {
                     if (self.scroll_y - new_scroll_y).abs() > 0.01 {
                         self.scroll_y = new_scroll_y;
                         changed = true;
-
-                        if let Some(parent_ptr) = self.parent {
-                            unsafe {
-                                if let Some(page) = (*parent_ptr).as_any_mut().downcast_mut::<Page>() {
-                                    page.scroll_y = new_scroll_y;
-                                    let (px, py, pw, ph) = page.rect();
-                                    page.set_rect(px, py, pw, ph);
-                                }
-                            }
-                        }
                     }
                 }
             }

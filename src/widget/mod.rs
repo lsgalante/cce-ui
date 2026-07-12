@@ -664,7 +664,6 @@ pub trait Element {
     }
 
     fn z_index(&self) -> i32 { 0 }
-    fn is_page(&self) -> bool { false }
     fn is_scrollable(&self) -> bool { false }
     fn blocks_backplate_drag(&self) -> bool { true }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
@@ -748,7 +747,7 @@ pub use self::container::{
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     Header, ContentBg, ParametersBg,
     ScrollBox, MenuBar, Spreadsheet, Breadcrumb,
-    Switcher, Layer, Page, Paginator, ScrollBar, TreeList, TreeElement
+    Switcher, Paginator, ScrollBar, TreeList, TreeElement
 };
 pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, Svg, UsageBar,
@@ -761,15 +760,7 @@ pub use self::display::{
 pub trait PageSelector {
     fn selected_page(&self) -> usize;
     fn set_selected_page(&mut self, page: usize);
-    fn is_page_hidden(&self) -> bool;
-    fn set_page_hidden(&mut self, hidden: bool);
-    fn set_pages(&mut self, pages: Vec<String>);
-    fn set_pages_with_items(&mut self, pages: Vec<String>, items: Vec<Vec<String>>);
     fn sidebar_w(&self) -> f32;
-    fn set_sidebar_mode(&mut self, enabled: bool);
-    fn set_sidebar_label(&mut self, label: Option<String>);
-    fn add_widget_to_page(&mut self, page_idx: usize, widget: *mut (dyn Element + 'static), ctx: &mut UiContext);
-    fn clear_page_widgets(&mut self, page_idx: usize, ctx: &mut UiContext);
 }
 
 pub trait MenuController {

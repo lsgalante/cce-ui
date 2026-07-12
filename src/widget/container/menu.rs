@@ -24,7 +24,7 @@ use crate::scene::paint::PaintCtx;
 use crate::widget::display::TextLabel;
 use crate::widget::{
     Adapted, ButtonStrip, Element, ElementState, Event, EventCtx, Input, Key, Layout,
-    MenuController, MouseButton, NamedKey, PageSelector, Paint, UiContext, DROPDOWN_ITEM_H,
+    MenuController, MouseButton, NamedKey, PageSelector, Paint, DROPDOWN_ITEM_H,
 };
 
 pub struct MenuBar {
@@ -53,7 +53,6 @@ pub struct MenuBar {
     pub context_title_hovered: bool,
     pub right_align_title: bool,
     pub parent: Option<*mut (dyn Element + 'static)>,
-    pub page_hidden: bool,
     pub layout_dirty: bool,
     pub on_context_change_cb: Option<Box<dyn Fn(usize) + Send + Sync>>,
     pub on_menu_click_cb: Option<Box<dyn Fn(usize, usize) + Send + Sync>>,
@@ -90,7 +89,6 @@ impl MenuBar {
             context_title_hovered: false,
             right_align_title: false,
             parent: None,
-            page_hidden: false,
             layout_dirty: true,
             on_context_change_cb: None,
             on_menu_click_cb: None,
@@ -1078,30 +1076,6 @@ impl PageSelector for MenuBar {
         self.menus.set_selected(Some(page));
     }
 
-    fn is_page_hidden(&self) -> bool {
-        self.page_hidden
-    }
-
-    fn set_page_hidden(&mut self, hidden: bool) {
-        self.page_hidden = hidden;
-    }
-
-    fn set_pages(&mut self, pages: Vec<String>) {
-        self.menu_items = pages.clone();
-        self.vertical_items = pages.clone();
-        self.menus.buttons = pages;
-        self.menus.generate_rotated_labels();
-    }
-
-    fn set_pages_with_items(&mut self, pages: Vec<String>, items: Vec<Vec<String>>) {
-        self.menu_items = pages.clone();
-        self.vertical_items = pages.clone();
-        self.menu_dropdowns = items;
-        self.menu_dropdown_checked = vec![vec![None; 0]; self.menu_dropdowns.len()];
-        self.menus.buttons = pages;
-        self.menus.generate_rotated_labels();
-    }
-
     fn sidebar_w(&self) -> f32 {
         let padding_x = crate::layout::paginator_tab_padding_x();
         let margin_x = 5.0;
@@ -1116,19 +1090,6 @@ impl PageSelector for MenuBar {
             max_req_w.max(24.0) + 2.0 * margin_x
         }
     }
-
-    fn set_sidebar_mode(&mut self, _enabled: bool) {}
-
-    fn set_sidebar_label(&mut self, label: Option<String>) {
-        self.label = label.clone();
-        if self.vertical {
-            self.title = label.unwrap_or_default();
-            self.label = None;
-        }
-    }
-
-    fn add_widget_to_page(&mut self, _page_idx: usize, _widget: *mut (dyn Element + 'static), _ctx: &mut UiContext) {}
-    fn clear_page_widgets(&mut self, _page_idx: usize, _ctx: &mut UiContext) {}
 }
 
 unsafe impl Send for MenuBar {}

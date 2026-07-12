@@ -1,26 +1,18 @@
-//! Narrow-trait `Paginator` (Phase 5r) — a vertical sidebar tab strip plus a stack of pages, of
-//! which only the selected one shows. Both halves are EMBEDDED legacy widgets owned by value:
-//! the tabs live in a [`ButtonStrip`], the content in a `Vec<Page>` (Page is an embedded-base
-//! container that dissolves in Phase 6 — it does not go through `Adapted` itself). The adapter's
-//! container concern does the subtree plumbing, filtered to the strip + selected page by
-//! [`Layout::child_visible`]; the model keeps the legacy specifics: strip/pages arrangement in
-//! [`Layout::arrange_children`], event proxying in [`Input::on_event`] (via `EventCtx::ui`), and
-//! the [`PageSelector`] / [`MenuController`] capabilities.
+//! Narrow-trait `Paginator` (Phase 5r; pages folded away in Phase 6au) — a vertical sidebar tab
+//! strip. The tabs live in an EMBEDDED [`ButtonStrip`] owned by value; every app manages its own
+//! page content keyed on `selected_page()`, so the former `Vec<Page>` stack (empty `Page`
+//! containers toggled visible/hidden) is gone — its only observable output, the page-area
+//! background quad, is painted directly here.
 //!
-//! Two legacy behaviors ride hooks new with this migration:
-//! - [`Layout::register_embedded_children`]: legacy `tick`/`layout` re-registered the strip and
-//!   pages into the ctx registry every frame — load-bearing for the spatial grid (the registered
-//!   strip is what makes the sidebar block backplate drags; see
-//!   `backplate::tests::test_paginator_blocks_backplate_drag`).
+//! Two legacy behaviors ride hooks from the 5r migration:
+//! - [`Layout::register_embedded_children`]: legacy `tick`/`layout` re-registered the strip into
+//!   the ctx registry every frame — load-bearing for the spatial grid (the registered strip is
+//!   what makes the sidebar block backplate drags).
 //! - [`Paint::aggregates_child_extra_quads`] + [`Paint::forwarded_highlight`]: legacy
-//!   `extra_quads` served the children's chrome only (cce-email and cce-layout-interface render
-//!   the tab column through that getter — the paginator's own background quad lives in
+//!   `extra_quads` served the strip's chrome only (cce-email and cce-layout-interface render
+//!   the tab column through that getter — the paginator's own background quads live in
 //!   `all_quads` alone), and legacy `highlight_quad` forwarded to the strip's (the hovered-tab
 //!   tint cce-layout-interface draws directly).
-//!
-//! In practice every app uses only the tab-strip half (`selected_page`/`set_selected_page`/
-//! `sidebar_w`/`menu_click`) and manages page content itself; the `pages` container surface
-//! (`add_widget_to_page` & co.) is ported bug-for-bug but has no callers workspace-wide.
 
 use crate::colors;
 use crate::scene::layout::Rect;
@@ -30,13 +22,10 @@ use crate::widget::{
     Adapted, Element, Event, EventCtx, Input, Layout, MenuController, PageSelector, Paint,
     UiContext, WidgetId,
 };
-use super::page::Page;
 
 pub struct Paginator {
     pub sidebar_menu: ButtonStrip,
-    pub pages: Vec<Page>,
     pub selected_page: usize,
-    pub page_hidden: bool,
     pub sidebar_w: f32,
     pub page_labels: Vec<String>,
     pub on_page_changed_cb: Option<Box<dyn Fn(usize) + Send + Sync>>,
@@ -49,9 +38,7 @@ impl Paginator {
 
         let temp_paginator = Paginator {
             sidebar_menu: ButtonStrip::new(0.0, 0.0, 0.0, 0.0),
-            pages: Vec::new(),
             selected_page: 0,
-            page_hidden: false,
             sidebar_w: 0.0,
             page_labels: pages.clone(),
             on_page_changed_cb: None,
@@ -66,21 +53,9 @@ impl Paginator {
             sidebar_menu.set_selected(Some(0));
         }
 
-        let mut pages_containers = Vec::new();
-        for _ in 0..num_pages {
-            let mut page = Page::new(0.0, 0.0, 0.0, 0.0);
-            page.visible = false;
-            pages_containers.push(page);
-        }
-        if num_pages > 0 {
-            pages_containers[0].visible = true;
-        }
-
         Adapted::new(Paginator {
             sidebar_menu,
-            pages: pages_containers,
             selected_page: 0,
-            page_hidden: false,
             sidebar_w,
             page_labels: pages,
             on_page_changed_cb: None,
@@ -126,45 +101,13 @@ impl PageSelector for Paginator {
     }
 
     fn set_selected_page(&mut self, page: usize) {
-        if page < self.pages.len() {
+        if page < self.page_labels.len() {
             self.selected_page = page;
             self.sidebar_menu.set_selected(Some(page));
-            for (i, page_item) in self.pages.iter_mut().enumerate() {
-                page_item.visible = i == page;
-            }
             if let Some(ref cb) = self.on_page_changed_cb {
                 cb(page);
             }
         }
-    }
-
-    fn is_page_hidden(&self) -> bool {
-        self.page_hidden
-    }
-
-    fn set_page_hidden(&mut self, hidden: bool) {
-        self.page_hidden = hidden;
-    }
-
-    fn set_pages(&mut self, pages: Vec<String>) {
-        self.page_labels = pages.clone();
-        self.sidebar_menu.buttons = pages.clone();
-        self.sidebar_menu.generate_rotated_labels();
-
-        self.pages.clear();
-        for _ in 0..pages.len() {
-            let mut page = Page::new(0.0, 0.0, 0.0, 0.0);
-            page.visible = false;
-            self.pages.push(page);
-        }
-        if !self.pages.is_empty() {
-            let idx = self.selected_page.min(self.pages.len() - 1);
-            self.pages[idx].visible = true;
-        }
-    }
-
-    fn set_pages_with_items(&mut self, pages: Vec<String>, _items: Vec<Vec<String>>) {
-        self.set_pages(pages);
     }
 
     fn sidebar_w(&self) -> f32 {
@@ -198,22 +141,6 @@ impl PageSelector for Paginator {
         }
         max_w.max(1.0)
     }
-
-    fn set_sidebar_mode(&mut self, _enabled: bool) {}
-
-    fn set_sidebar_label(&mut self, _label: Option<String>) {}
-
-    fn add_widget_to_page(&mut self, page_idx: usize, widget: *mut (dyn Element + 'static), ctx: &mut UiContext) {
-        if page_idx < self.pages.len() {
-            self.pages[page_idx].add_child(widget, ctx);
-        }
-    }
-
-    fn clear_page_widgets(&mut self, page_idx: usize, ctx: &mut UiContext) {
-        if page_idx < self.pages.len() {
-            self.pages[page_idx].clear_children(ctx);
-        }
-    }
 }
 
 impl Layout for Paginator {
@@ -222,59 +149,20 @@ impl Layout for Paginator {
     }
 
     fn container_children(&self) -> Vec<*mut (dyn Element + 'static)> {
-        let mut childs: Vec<*mut (dyn Element + 'static)> = Vec::new();
-        childs.push(&self.sidebar_menu as &dyn Element as *const (dyn Element + 'static) as *mut (dyn Element + 'static));
-        for plate in &self.pages {
-            childs.push(plate as &dyn Element as *const (dyn Element + 'static) as *mut (dyn Element + 'static));
-        }
-        childs
+        vec![&self.sidebar_menu as &dyn Element as *const (dyn Element + 'static) as *mut (dyn Element + 'static)]
     }
 
-    /// The strip always shows; a page only while selected and not hidden (legacy
-    /// `is_child_visible`).
-    fn child_visible(&self, child: *mut (dyn Element + 'static)) -> bool {
-        let strip_ptr = &self.sidebar_menu as &dyn Element as *const (dyn Element + 'static);
-        if std::ptr::addr_eq(child, strip_ptr) {
-            return true;
-        }
-        if let Some(plate) = self.pages.get(self.selected_page) {
-            if !self.page_hidden {
-                let plate_ptr = plate as &dyn Element as *const (dyn Element + 'static);
-                if std::ptr::addr_eq(child, plate_ptr) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    /// The legacy `set_rect` body: strip on the left at its measured width, every page filling
-    /// the remainder, page visibility synced to the selection.
+    /// The legacy `set_rect` body: strip on the left at its measured width.
     fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn Element + 'static)) {
-        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
+        let (x, y, h) = (rect.x, rect.y, rect.height);
         let sidebar_w = self.sidebar_w();
         self.sidebar_menu.set_rect(x, y, sidebar_w, h);
-
-        let page_x = x + sidebar_w;
-        let page_w = (w - sidebar_w).max(0.0);
-        let selected = self.selected_page;
-        let hidden = self.page_hidden;
-        for (i, plate) in self.pages.iter_mut().enumerate() {
-            plate.set_rect(page_x, y, page_w, h);
-            plate.visible = (i == selected) && !hidden;
-        }
     }
 
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
         let menu_ptr = &mut self.sidebar_menu as *mut ButtonStrip;
         ctx.register_widget(self.sidebar_menu.base.id(), menu_ptr);
         ctx.link_ids(host_id, self.sidebar_menu.base.id());
-
-        for plate in &mut self.pages {
-            let plate_ptr = plate as *mut Page;
-            ctx.register_widget(plate.base.base.id(), plate_ptr);
-            ctx.link_ids(host_id, plate.base.base.id());
-        }
     }
 }
 
@@ -283,13 +171,27 @@ impl Paint for Paginator {
         colors::sidebar_bg_color()
     }
 
-    /// Own geometry is just the sidebar background (the legacy `all_quads` head; the strip's
-    /// and selected page's pixels arrive through the adapter's child aggregation / the paint
-    /// walk's recursion).
+    /// Own geometry: the sidebar background plus the page-area background — the latter is the
+    /// one visual the former empty `Page` stack contributed (its bg quad over the content
+    /// area), painted directly since the pages folded away (Phase 6au).
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let c = self.color();
         if c[3] > 0.0 {
             ctx.quad(rect, c);
+        }
+        if !self.page_labels.is_empty() {
+            let mut pc = colors::page_color();
+            pc[3] *= crate::layout::page_opacity();
+            if pc[3] > 0.0 {
+                let sidebar_w = self.sidebar_w();
+                let page_rect = Rect {
+                    x: rect.x + sidebar_w,
+                    y: rect.y,
+                    width: (rect.width - sidebar_w).max(0.0),
+                    height: rect.height,
+                };
+                ctx.quad(page_rect, pc);
+            }
         }
     }
 
@@ -320,26 +222,15 @@ impl Input for Paginator {
         true
     }
 
-    /// Event proxying, the legacy forwarding bodies: strip first (draining its click into the
-    /// page selection), then the selected page while not hidden.
+    /// Event proxying, the legacy forwarding body: the strip, draining its click into the page
+    /// selection. (The former empty pages also received every event, but had nothing to do with
+    /// them — no children, never scrollable.)
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
-        let selected = self.selected_page;
-        let hidden = self.page_hidden;
         match event {
-            Event::PointerMove { x: px, y: py, .. } => {
-                let mut changed = self.sidebar_menu.cursor_moved(*px, *py, ui);
-                for (i, plate) in self.pages.iter_mut().enumerate() {
-                    if i == selected && !hidden {
-                        if plate.cursor_moved(*px, *py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                changed
-            }
+            Event::PointerMove { x: px, y: py, .. } => self.sidebar_menu.cursor_moved(*px, *py, ui),
             Event::MouseButton { button, state, x: px, y: py, .. } => {
                 let mut changed = false;
                 if self.sidebar_menu.mouse_input(*button, *state, *px, *py, ui) {
@@ -349,37 +240,10 @@ impl Input for Paginator {
                         self.just_clicked = Some(idx);
                     }
                 }
-                for (i, plate) in self.pages.iter_mut().enumerate() {
-                    if i == selected && !hidden {
-                        if plate.mouse_input(*button, *state, *px, *py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
                 changed
             }
-            Event::MouseWheel { delta, x: px, y: py, .. } => {
-                let mut changed = self.sidebar_menu.mouse_wheel(delta, *px, *py, ui);
-                for (i, plate) in self.pages.iter_mut().enumerate() {
-                    if i == selected && !hidden {
-                        if plate.mouse_wheel(delta, *px, *py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                changed
-            }
-            Event::KeyInput(key_event) => {
-                let mut changed = self.sidebar_menu.keyboard_input(key_event, ui);
-                for (i, plate) in self.pages.iter_mut().enumerate() {
-                    if i == selected && !hidden {
-                        if plate.keyboard_input(key_event, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                changed
-            }
+            Event::MouseWheel { delta, x: px, y: py, .. } => self.sidebar_menu.mouse_wheel(delta, *px, *py, ui),
+            Event::KeyInput(key_event) => self.sidebar_menu.keyboard_input(key_event, ui),
             _ => false,
         }
     }
@@ -439,14 +303,13 @@ mod tests {
         let (id, ptr) = (p.id(), p.as_ptr_mut());
         ctx.register_widget(id, ptr);
 
-        // Click the second tab (the strip commits selection on release): the selection moves,
-        // the pages' visibility flips, and menu_click reports (1, 0) once.
+        // Click the second tab (the strip commits selection on release): the selection moves
+        // and menu_click reports (1, 0) once.
         let (bx, by, bw, bh) = p.sidebar_menu.item_rect(1);
         assert!(bw > 0.0, "strip laid out by arrange_children");
         p.mouse_input(MouseButton::Left, ElementState::Pressed, bx + bw / 2.0, by + bh / 2.0, &mut ctx);
         p.mouse_input(MouseButton::Left, ElementState::Released, bx + bw / 2.0, by + bh / 2.0, &mut ctx);
         assert_eq!(p.selected_page, 1);
-        assert!(p.pages[1].visible && !p.pages[0].visible);
         {
             let elem: &mut dyn Element = &mut p;
             assert_eq!(elem.as_menu_controller_mut().unwrap().menu_click(), Some((1, 0)));
