@@ -1539,11 +1539,46 @@ Constraint respected: **each crate still builds standalone** — the new core is
     design decision first: either a standalone capability registry
     (`&dyn XController` handles registered beside the tree) or deferral to
     the Element deletion itself, where the designer's roster becomes
-    concretely typed. Do NOT sweep it mechanically. Then the remaining raw-`Element` containers (List, ControlPanel,
-    JsonLayout, Plate, Backplate, Layer, Page, SectionContainer, Ramp
-    family, gallery leaves) are constructed only by test-interface /
-    designer / layout-interface / email / fonts remnants — each either
-    dissolves app-side or converts, and `Element` + `Adapted` die last.
+    concretely typed. Do NOT sweep it mechanically.
+  - **Gallery containers went app-local (6as).** cce-test-interface's
+    widget gallery was the last constructor of ControlPanel / Plate /
+    SectionContainer / Backplate: it now owns `ti_widgets.rs` — a verbatim
+    ControlPanel copy plus passive Plate/SectionContainer/Backplate
+    lookalikes (each reproducing EVERY Element getter the render/event
+    paths read: plate color/opacity/blur alpha-negation/corner radius/
+    border/label_offset bg shift, the childless section-header row, the
+    backplate bevel). A/B: launch-phase progress-bar animation only.
+  - **CONTAINER TYPES DELETED (6as).** `Backplate`, `Plate`, `List`,
+    `ControlPanel`, `SectionContainer` (+`SectionHeader`) removed from
+    cce-ui outright — five files, the re-exports, the `List` branches in
+    the scroll-ancestor text-bounds walks, and the then-dead
+    `own_labels_with_font_and_bounds`. `ColumnWidth`/`ListColumn` moved to
+    their only consumer (cce-files `row_list.rs`). TreeList's drag tests
+    re-anchored on `drag_allowed_at`. 171 tests (5 died with their files);
+    settings/DE A/Bs cursor-only / AE=0.
+  - **Finale opened: dead-flag constant-fold sweep (6at).** With the
+    plates gone, census round 2 found no zero-CALL methods but seven
+    zero-OVERRIDE ones (only the trait default exists ⇒ they are
+    constants). Folded and deleted: `capture_event` (the capture-phase
+    branch in `propagate_event_impl` was unreachable), `is_active` (folded
+    into the `highlight_color` default), `is_plate` (designer render.rs's
+    whole `parent_plate_rect` text-clamp machinery was dead),
+    `is_backplate` + `is_movable_backplate` (folded the drag walks —
+    `UiContext::is_movable_backplate_at` had become constant-false and is
+    DELETED; the `Application` default now just returns false — plus the
+    backplate-parent theming/corner branches in MenuBar, StatusBar, and
+    Dropdown's `backplate_ancestor` walk; MenuBar/StatusBar `corner_style`
+    still reports the parent radius for children that read it through the
+    parent pointer, but corners never round). `corner_radii`/`mark_dirty`
+    also have zero overrides but carry real derived logic — they die with
+    the retype, not by folding. Element: 112 → 107 methods. A/B: files
+    AE=0, settings audio AE=0, designer diff = terminal behind the
+    translucent window.
+  - Then the remaining raw-`Element` containers (JsonLayout, Layer, Page,
+    ScrollBox, ScrollBar, Menu/MenuBar internals, Ramp-family embeds) are
+    constructed only by cce-ui itself and a few app remnants — each either
+    dissolves app-side or converts, the `*mut dyn Element` tree/context
+    machinery gets retyped, and `Element` + `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
