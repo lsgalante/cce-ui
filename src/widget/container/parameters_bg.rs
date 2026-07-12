@@ -47,8 +47,6 @@ pub struct ParametersBg {
     pub checkboxes: Vec<Option<Adapted<Checkbox>>>,
     pub colors: Vec<Option<crate::widget::Adapted<ColorSelector>>>,
     visible: bool,
-    pub children: Vec<*mut (dyn Element + 'static)>,
-    pub parent: Option<*mut (dyn Element + 'static)>,
     pub scroll_y: f32,
     pub content_h: f32,
     scrollbar_dragging: bool,
@@ -73,8 +71,6 @@ impl ParametersBg {
             checkboxes: Vec::new(),
             colors: Vec::new(),
             visible: true,
-            children: Vec::new(),
-            parent: None,
             scroll_y: 0.0,
             content_h: 0.0,
             scrollbar_dragging: false,
@@ -330,12 +326,6 @@ impl ParametersBg {
         if let Some(r) = self.choices_popover_rect() {
             return Some(r);
         }
-        for &widget_ptr in self.children.iter().rev() {
-            let widget = unsafe { &*widget_ptr };
-            if let Some(r) = widget.popover_rect() {
-                return Some(r);
-            }
-        }
         None
     }
 
@@ -394,11 +384,6 @@ impl ParametersBg {
             }
         }
         self.focused_param = None;
-
-        for &child_ptr in &self.children {
-            let child = unsafe { &mut *child_ptr };
-            child.unfocus();
-        }
     }
 
     /// The legacy `extra_quads` body: section border boxes, every row's chrome (slider/spinbox
@@ -540,13 +525,6 @@ impl ParametersBg {
             }
         }
 
-        for &child_ptr in &self.children {
-            let child = unsafe { &*child_ptr };
-            if child.visible() {
-                param_quads.extend(collect_child_quads(child));
-            }
-        }
-
         // Clip all parameter quads vertically
         for q in param_quads {
             if let Some(clipped) = clip_quad(q) {
@@ -582,30 +560,6 @@ impl ParametersBg {
 }
 
 impl Layout for ParametersBg {
-    fn has_container_children(&self) -> bool {
-        true
-    }
-
-    fn container_children(&self) -> Vec<*mut (dyn Element + 'static)> {
-        self.children.clone()
-    }
-
-    fn child_added(&mut self, child: *mut (dyn Element + 'static)) {
-        self.children.push(child);
-    }
-
-    fn children_cleared(&mut self) {
-        self.children.clear();
-    }
-
-    fn parent_changed(&mut self, parent: Option<*mut (dyn Element + 'static)>) {
-        self.parent = parent;
-    }
-
-    fn tracked_parent(&self) -> Option<Option<*mut (dyn Element + 'static)>> {
-        Some(self.parent)
-    }
-
     /// Ungated rect landing (the legacy `set_rect` head, before its visibility gate): cache the
     /// rect all row geometry derives from, then re-derive content height/scroll/row rects.
     fn rect_assigned(&mut self, rect: Rect) {
@@ -613,24 +567,6 @@ impl Layout for ParametersBg {
         self.refresh_scroll_metrics();
     }
 
-    /// The legacy `set_rect` tail (visible-gated there and by the adapter here): stack the raw
-    /// container children vertically.
-    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn Element + 'static)) {
-        let padding_x = 8.0;
-        let padding_y = 10.0;
-        let left_x = rect.x + padding_x;
-        let available_w = (rect.width - 2.0 * padding_x).max(1.0);
-        let mut current_y = rect.y + padding_y;
-        let spacing = 8.0;
-
-        for &child_ptr in &self.children {
-            let child = unsafe { &mut *child_ptr };
-            let (_, _, _, ch) = child.rect();
-            let use_h = if ch > 0.0 { ch } else { 42.0 };
-            child.set_rect(left_x, current_y, available_w, use_h);
-            current_y += use_h + spacing;
-        }
-    }
 }
 
 impl Paint for ParametersBg {
@@ -684,7 +620,7 @@ impl Paint for ParametersBg {
     /// The legacy `text_labels_with_font_and_bounds` body: every label clipped to the panel
     /// viewport in the control-label font, except labels inside a code row — those clip to the
     /// code box (or hide when it's scrolled out) and render monospace.
-    fn legacy_labels_with_font_and_bounds(&self, _rect: Rect, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    fn legacy_labels_with_font_and_bounds(&self, _rect: Rect, _ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let view_min = self.rect.y + 4.0;
         let view_max = self.rect.y + self.rect.height - 4.0;
         let mut result = Vec::new();
@@ -713,17 +649,6 @@ impl Paint for ParametersBg {
                 }
             }
             result.push((l, label_font, bounds));
-        }
-        for &child_ptr in &self.children {
-            // The trait text getters are gone: the raw children's labels come off the
-            // paint walk (fonts + clip bounds composed into the prims).
-            let mut scratch = crate::scene::paint::PaintCtx::new();
-            crate::scene::painter::append_widget_text(ctx, unsafe { &*child_ptr }, &mut scratch);
-            for item in scratch.finish().items {
-                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, .. } = item.prim {
-                    result.push((TextLabel { text, x, y, font_size, color }, font, bounds));
-                }
-            }
         }
         result
     }
@@ -1003,16 +928,6 @@ impl Input for ParametersBg {
                     }
                 }
 
-                for &widget_ptr in &self.children {
-                    let widget = unsafe { &mut *widget_ptr };
-                    if widget.is_dragging() {
-                        if widget.drag_update(px, py) {
-                            changed = true;
-                        }
-                    } else if widget.cursor_moved(px, py, ui) {
-                        changed = true;
-                    }
-                }
                 changed
             }
             Event::MouseButton { button, state, x: px, y: py, .. } => {
@@ -1080,15 +995,6 @@ impl Input for ParametersBg {
                                 }
                                 return true;
                             }
-                        }
-                    }
-                }
-
-                for &widget_ptr in self.children.iter().rev() {
-                    let widget = unsafe { &mut *widget_ptr };
-                    if widget.popover_rect().is_some() {
-                        if widget.mouse_input(button, state, px, py, ui) {
-                            return true;
                         }
                     }
                 }
@@ -1177,16 +1083,6 @@ impl Input for ParametersBg {
                     }
                 }
 
-                for &widget_ptr in self.children.iter().rev() {
-                    let widget = unsafe { &mut *widget_ptr };
-                    if widget.mouse_input(button, state, px, py, ui) {
-                        return true;
-                    }
-                    if state == ElementState::Pressed && !widget.hit_test(px, py, ui) {
-                        widget.unfocus();
-                    }
-                }
-
                 if button == MouseButton::Left && state == ElementState::Pressed {
                     let rects = self.get_param_rects();
                     let mut clicked_any_focusable = false;
@@ -1247,13 +1143,6 @@ impl Input for ParametersBg {
                 let Some(ui) = ectx.ui.as_deref_mut() else {
                     return false;
                 };
-                for &widget_ptr in &self.children {
-                    let widget = unsafe { &mut *widget_ptr };
-                    if widget.keyboard_input(event, ui) {
-                        return true;
-                    }
-                }
-
                 if let Some(idx) = self.focused_param {
                     if event.state == ElementState::Pressed {
                         let p = &mut self.display_params[idx];
@@ -1472,13 +1361,6 @@ impl Input for ParametersBg {
                 let Some(ui) = ectx.ui.as_deref_mut() else {
                     return false;
                 };
-                for &widget_ptr in self.children.iter().rev() {
-                    let widget = unsafe { &mut *widget_ptr };
-                    if widget.mouse_wheel(delta, px, py, ui) {
-                        return true;
-                    }
-                }
-
                 let mut changed = false;
                 let rects = self.get_param_rects();
                 for (i, p) in self.display_params.iter_mut().enumerate() {
@@ -1644,29 +1526,6 @@ fn parse_float3_value(val_str: &str, min: f32, max: f32) -> [f32; 3] {
         }
     }
     out
-}
-
-fn collect_child_quads(widget: &dyn Element) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-    let mut quads = Vec::new();
-    let c = widget.color();
-    let (wx, wy, ww, wh) = widget.rect();
-    let has_bg = c[3].abs() > 0.001;
-    let extra = widget.extra_quads();
-    let already_has_bg = extra.iter().any(|q| {
-        (q.0 - wx).abs() < 0.1 && (q.1 - wy).abs() < 0.1 && (q.2 - ww).abs() < 0.1 && (q.3 - wh).abs() < 0.1
-    });
-    if has_bg && !already_has_bg {
-        quads.push((wx, wy, ww, wh, c));
-    }
-    quads.extend(extra);
-    let dummy_ctx = UiContext::new();
-    for &child_ptr in &widget.children(&dummy_ctx) {
-        let child = unsafe { &*child_ptr };
-        if child.visible() {
-            quads.extend(collect_child_quads(child));
-        }
-    }
-    quads
 }
 
 impl ParamController for ParametersBg {

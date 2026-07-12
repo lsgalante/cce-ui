@@ -1186,13 +1186,6 @@ fn get_child_widget_for_quad<'a>(
                 }
             }
         }
-        for &child_ptr in &pbg.children {
-            let child = unsafe { &*child_ptr };
-            let (cx, cy, cww, chh) = child.rect();
-            if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
-                return child;
-            }
-        }
     }
     w
 }

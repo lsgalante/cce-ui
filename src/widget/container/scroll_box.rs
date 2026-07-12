@@ -18,7 +18,6 @@ pub struct ScrollBox {
     viewport_offset_h: f32,
     pub show_border: bool,
     pub show_background: bool,
-    pub children: Vec<*mut (dyn Element + 'static)>,
     pub scrollbar_dragging: bool,
     pub drag_offset_y: f32,
 }
@@ -35,7 +34,6 @@ impl ScrollBox {
             viewport_offset_h: 0.0,
             show_border: true,
             show_background: true,
-            children: Vec::new(),
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
         }
