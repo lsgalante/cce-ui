@@ -464,7 +464,7 @@ impl Paint for MenuBar {
         // Corners never round (the backplate-adjacency source is gone); the radius is still
         // reported for children that read it through the parent pointer.
         let radius = match self.parent {
-            Some(p_ptr) => unsafe { (*p_ptr).corner_radius() },
+            Some(p_ptr) => unsafe { (*p_ptr).corner_style().0 },
             None => 0.0,
         };
         Some((radius, (false, false, false, false)))

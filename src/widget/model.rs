@@ -696,6 +696,12 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         Input::set_drag_bounds(&mut self.inner, bx, by, bw, bh)
     }
 
+    /// Unlink all tree children (off `Element` in 6bd batch 2 — every caller is a concrete
+    /// `Adapted` field).
+    pub fn clear_children(&mut self, ctx: &mut UiContext) {
+        ctx.clear_children_ids(self.base.id());
+    }
+
     /// The model's intrinsic content size (off the `Element` trait since 6bd — the concrete
     /// callers are fonts'/graph's hand-laid button/dropdown sizing).
     pub fn intrinsic_size(&self) -> Option<Size> {
@@ -901,10 +907,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         }
     }
 
-    fn clear_children(&mut self, ctx: &mut UiContext) {
-        ctx.clear_children_ids(self.base.id());
-    }
-
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
         Layout::parent_changed(&mut self.inner, parent);
         // Replica of the Element default: symmetric tree link.
@@ -1094,12 +1096,10 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     fn clips_children(&self) -> bool {
         Paint::clips_children(&self.inner)
     }
-    fn corner_radius(&self) -> f32 {
-        // 12.0 mirrors the `Element` default for widgets without a corner style.
-        Paint::corner_style(&self.inner, self.content_rect()).map_or(12.0, |(r, _)| r)
-    }
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-        Paint::corner_style(&self.inner, self.content_rect()).map_or((false, false, false, false), |(_, c)| c)
+    fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
+        // 12.0 / all-off mirrors the `Element` default for widgets without a corner style.
+        Paint::corner_style(&self.inner, self.content_rect())
+            .unwrap_or((12.0, (false, false, false, false)))
     }
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         Paint::solid_border(&self.inner)
@@ -1249,7 +1249,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             for child in self.visible_children() {
                 let widget = unsafe { &*child };
                 let (wx, wy, ww, wh) = widget.rect();
-                let has_rounded = widget.rounded_corners() != (false, false, false, false);
+                let has_rounded = widget.corner_style().1 != (false, false, false, false);
                 for (qx, qy, qw, qh, qc) in widget.all_quads(ctx) {
                     if has_rounded
                         && (qx - wx).abs() < 0.1
@@ -1708,10 +1708,10 @@ mod tests {
         // preserves) and sets the base hover flag; moving away synthesizes MouseLeave.
         ctx.propagate_event(&Event::PointerMove { x: 20.0, y: 15.0, local_x: 20.0, local_y: 15.0 }, ptr);
         assert_eq!(w.inner().entered, 1, "MouseEnter reached on_event");
-        assert!(unsafe { (*ptr).hovered() }, "base hover flag set through the adapter");
+        assert!(unsafe { (*ptr).base().map_or(false, |b| b.hovered) }, "base hover flag set through the adapter");
         ctx.propagate_event(&Event::PointerMove { x: 200.0, y: 200.0, local_x: 200.0, local_y: 200.0 }, ptr);
         assert_eq!(w.inner().left, 1, "MouseLeave reached on_event");
-        assert!(!unsafe { (*ptr).hovered() }, "base hover flag cleared");
+        assert!(!unsafe { (*ptr).base().map_or(false, |b| b.hovered) }, "base hover flag cleared");
     }
 
     /// A narrow widget that is also a controller: the controller trait is reached through the

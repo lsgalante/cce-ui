@@ -337,11 +337,8 @@ mod tests {
             fn color(&self) -> [f32; 4] {
                 [0.2, 0.4, 0.6, 1.0]
             }
-            fn rounded_corners(&self) -> (bool, bool, bool, bool) {
-                (true, true, true, true)
-            }
-            fn corner_radius(&self) -> f32 {
-                4.0
+            fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
+                (4.0, (true, true, true, true))
             }
         }
         let mut ctx = UiContext::new();

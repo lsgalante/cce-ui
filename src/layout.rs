@@ -3147,12 +3147,8 @@ pub fn render_widget<T: Element + 'static>(pc: &mut dyn RenderTarget, w: &mut T,
         ctx.register_widget(w_id, w.as_ptr_mut());
     }
     w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
-    let corners = w.rounded_corners();
-    let r = if corners != (false, false, false, false) {
-        w.corner_radius()
-    } else {
-        0.0
-    };
+    let (style_r, corners) = w.corner_style();
+    let r = if corners != (false, false, false, false) { style_r } else { 0.0 };
     let (wx, mut wy, www, mut whh) = w.rect();
     let top_room = crate::widget::label_offset(w);
     wy += top_room;

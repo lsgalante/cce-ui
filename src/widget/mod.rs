@@ -338,9 +338,11 @@ pub trait Element {
     fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         ctx.set_cursor_pos(px, py);
         if ctx.is_coordinate_covered(self.base().map(|b| b.id()).unwrap_or(WidgetId(0)), px, py) {
-            let was = self.hovered();
+            let was = self.base().map_or(false, |b| b.hovered);
             if was {
-                self.set_hovered(false);
+                if let Some(b) = self.base_mut() {
+                    b.hovered = false;
+                }
                 self.handle_event(&Event::MouseLeave, ctx);
             }
             return was;
@@ -350,9 +352,11 @@ pub trait Element {
 
     fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if self.base().is_some() {
-            let was = self.hovered();
+            let was = self.base().map_or(false, |b| b.hovered);
             let is_hit = self.hit_test(px, py, ctx);
-            self.set_hovered(is_hit);
+            if let Some(b) = self.base_mut() {
+                b.hovered = is_hit;
+            }
             if was != is_hit {
                 if is_hit {
                     self.handle_event(&Event::MouseEnter, ctx);
@@ -371,26 +375,16 @@ pub trait Element {
     fn mouse_input(&mut self, _button: MouseButton, _state: ElementState, _px: f32, _py: f32, _ctx: &mut UiContext) -> bool { false }
     fn mouse_wheel(&mut self, _delta: &MouseScrollDelta, _px: f32, _py: f32, _ctx: &mut UiContext) -> bool { false }
 
-    fn set_hovered(&mut self, hovered: bool) {
-        if let Some(b) = self.base_mut() {
-            b.hovered = hovered;
-        }
-    }
-
-    fn hovered(&self) -> bool {
-        if let Some(b) = self.base() {
-            b.hovered
-        } else {
-            false
-        }
-    }
+    // `hovered`/`set_hovered` are GONE from the trait (6bd batch 2): the state is the base
+    // `Widget::hovered` flag, read/written directly by the defaults above; Button/Checkbox
+    // keep inherent accessors for immediate-mode hosts.
 
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         // Focus/hover highlight color, folded from the zero-override `highlight_color` (6bd).
         let is_focused = self.base().map(|b| ctx.is_focused_id(b.id())).unwrap_or(false);
         let hc = if is_focused {
             colors::highlight_primary_color()
-        } else if self.hovered() {
+        } else if self.base().map_or(false, |b| b.hovered) {
             colors::HIGHLIGHT_SECONDARY
         } else {
             return None;
@@ -473,9 +467,9 @@ pub trait Element {
             } else if let Some((border_color, thickness)) = self.solid_border() {
                 ctx.border(rect, radii, color, border_color, thickness);
             } else if color[3].abs() > 0.001 {
-                let (r1, r2, r3, r4) = self.rounded_corners();
+                let (radius, (r1, r2, r3, r4)) = self.corner_style();
                 if r1 || r2 || r3 || r4 {
-                    ctx.rounded_rect(rect, self.corner_radius(), (r1, r2, r3, r4), color);
+                    ctx.rounded_rect(rect, radius, (r1, r2, r3, r4), color);
                 }
             }
         }
@@ -513,10 +507,9 @@ pub trait Element {
             return Vec::new();
         }
         let mut quads = Vec::new();
-        let (r1, r2, r3, r4) = self.rounded_corners();
+        let (radius, (r1, r2, r3, r4)) = self.corner_style();
         if r1 || r2 || r3 || r4 {
             let (x, y, w, h) = self.rect();
-            let radius = self.corner_radius();
             let c = self.color();
             if c[3].abs() > 0.001 {
                 quads.push((x, y, w, h, radius, c, (r1, r2, r3, r4)));
@@ -618,23 +611,20 @@ pub trait Element {
         }
     }
 
-    fn clear_children(&mut self, ctx: &mut UiContext) {
-        if let Some(base) = self.base() {
-            let id = base.id();
-            ctx.clear_children_ids(id);
-        }
-    }
-
     fn z_index(&self) -> i32 { 0 }
     fn is_scrollable(&self) -> bool { false }
     fn blocks_backplate_drag(&self) -> bool { true }
-    fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }
 
-    fn corner_radius(&self) -> f32 { 12.0 }
+    /// Uniform corner radius + per-corner on-flags, in one read (6bd batch 2 — replaced the
+    /// separate `corner_radius`/`rounded_corners` getters). The radius is meaningful even with
+    /// every corner off: Menu/StatusBar report their parent's radius to children this way, so
+    /// the flags-off channel can't be folded into `corner_radii`.
+    fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
+        (12.0, (false, false, false, false))
+    }
 
     fn corner_radii(&self) -> CornerRadii {
-        let r = self.corner_radius();
-        let (tl, tr, br, bl) = self.rounded_corners();
+        let (r, (tl, tr, br, bl)) = self.corner_style();
         CornerRadii::new(
             if tl { r } else { 0.0 },
             if tr { r } else { 0.0 },

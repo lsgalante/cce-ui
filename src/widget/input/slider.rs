@@ -216,7 +216,7 @@ impl Paint for Slider {
         let radius = crate::layout::slider_corner_radius();
         let rounded = radius > 0.0;
         let rc = (rounded, rounded, rounded, rounded);
-        let mut rrect = |r: Rect, rad: f32, corners: (bool, bool, bool, bool), c: [f32; 4], ctx: &mut PaintCtx| {
+        let rrect = |r: Rect, rad: f32, corners: (bool, bool, bool, bool), c: [f32; 4], ctx: &mut PaintCtx| {
             if rounded {
                 ctx.rounded_rect(r, rad, corners, c);
             } else {
@@ -534,7 +534,7 @@ impl Paint for RangeSlider {
             colors::rangeslider_thumb()
         };
 
-        let mut rrect = |r: Rect, rad: f32, corners: (bool, bool, bool, bool), c: [f32; 4], ctx: &mut PaintCtx| {
+        let rrect = |r: Rect, rad: f32, corners: (bool, bool, bool, bool), c: [f32; 4], ctx: &mut PaintCtx| {
             if rounded {
                 ctx.rounded_rect(r, rad, corners, c);
             } else {
