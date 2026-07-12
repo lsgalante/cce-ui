@@ -1891,10 +1891,31 @@ Constraint respected: **each crate still builds standalone** — the new core is
        `container_children` AND `link_ids`-registers its strip — the
        ctx-less walks (popover_rect/prepare_text/render_popover) are
        why the field-derived form must stay.
-    4. **The flip**: define `WidgetHost`, blanket-impl for
-       `Adapted<W>`, retype the registry/context/painter/
-       window_runner from `dyn Element` to `dyn WidgetHost`, delete
-       `Element`. ~~The MenuBar/StatusBar/Dropdown parent-pointer
+    4. **The flip — DONE (2026-07-12): `Element` is deleted; the
+       trait is `WidgetHost`.** Landed in two shippable halves:
+       **(a) the base() guarantee** — `base`/`base_mut` return
+       `&Widget`/`&mut Widget` (no Option), killing the escape hatch
+       and the `WidgetId(0)` no-base sentinel class;
+       `as_any`/`as_any_mut`/`as_ptr`/`as_ptr_mut` became required
+       (their defaults manufactured DummyAny/null-DummyElement
+       stand-ins nothing could use); every Option-handling call
+       site collapsed 1:1 to direct reads (12 repos); the
+       layout/arena/tree test mocks grew a base field via
+       `impl_widget_base!`. **(b) the rename** — 634 word-boundary
+       occurrences across 18 crates; the workspace compiled on the
+       first pass. `ElementState` (input enum) keeps its name;
+       cce-layout-interface's local `Element` document enum was
+       already alias-insulated (`Element as UiElement`). Since the
+       shrink batches had removed every non-blueprint method first,
+       the rename IS the retype — the registry/context/painter/
+       window_runner signatures all read `dyn WidgetHost` now.
+       Verified: 163 tests; settings audio render stream
+       byte-identical across BOTH halves; files + data-editor A/B
+       AE=0; live settings page-dropdown popover → Fonts page
+       switch. The trait sits at ~65 methods; the remaining
+       shrink-later blocks (direct-dispatch, value, as_ptr
+       transitional, `preferred_height`/`value` dyn consumers)
+       thin out per-app as routed events / concrete slots spread. ~~The MenuBar/StatusBar/Dropdown parent-pointer
        snapshot change rides this phase.~~ **Landed early
        (2026-07-12): the census showed all five stored widget-side
        parent pointers production-DEAD** (nothing ever set_parent's
