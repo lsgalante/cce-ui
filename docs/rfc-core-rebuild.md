@@ -1931,12 +1931,36 @@ Constraint respected: **each crate still builds standalone** — the new core is
        uncalled `layout_widgets`/`layout_widget_ptors`. Census
        lesson: grep BOTH `.method(` and UFCS `::method(` forms — the
        fonts/graph `Element::intrinsic_size(&x)` callers only
-       surfaced at compile. Remaining non-blueprint candidates:
-       `clear_children`, `corner_radius`/`rounded_corners`
-       (consolidate into `corner_radii`), `hovered`/`set_hovered`,
+       surfaced at compile. **Second shrink batch (DONE 2026-07-12,
+       73→69):** `hovered`/`set_hovered` deleted — the state is the
+       base `Widget::hovered` flag, read/written directly by the
+       `cursor_moved`/`on_cursor_moved`/`highlight_quad` defaults and
+       `serialize.rs`; Button/Checkbox keep inherent accessors for
+       immediate-mode hosts (cloud's json_layout downcasts to
+       concrete `Checkbox`, so it already resolved to those).
+       `corner_radius` + `rounded_corners` replaced by ONE
+       `corner_style() -> (f32, (bool,bool,bool,bool))` mirroring the
+       narrow `Paint::corner_style` — NOT folded into `corner_radii`,
+       which is lossy: the radius is meaningful with every corner off
+       (Menu/StatusBar report their parent's radius to children
+       through the flags-off channel; breadcrumb can be
+       flags-true/radius-0, whose legacy radius-0 rounded bg quad
+       would vanish). `clear_children` moved to an inherent
+       `Adapted<W>` method (every caller is a concrete Adapted field
+       in cce-files). Consumer commits: settings renderer,
+       TI ControlPanel aggregates, cloud json_layout. Verified:
+       settings audio render stream byte-identical, files A/B AE=0,
+       TI gallery empty 8% amplitude mask, 163 tests.
+       Census facts for the leftovers: `preferred_height` has DYN
+       consumers (container_layout.rs child-ptr walks + layout.rs
+       machinery on `&dyn` children) — blueprint-adjacent, rides the
+       flip, not inherent-movable; `value` has a live dyn consumer
+       (`serialize.rs` over designer's `dyn_refs()`) — rides the
+       flip. Remaining non-blueprint candidates:
        `on_cursor_moved` (belongs in the direct-dispatch block —
-       blueprint addition, not a deletion), `preferred_height`
-       (generic render machinery), `set_parent`, `value`.
+       blueprint addition, not a deletion), `set_parent` (flip
+       material, with the parent-ptr snapshot change), `value`,
+       `preferred_height`.
     Former slices 4/5 fold in: the app `as_ptr_mut` dispatch sites
     are rewritten by whichever of routed-events (per app) or the
     phase-4 flip reaches them first; no standalone pointer-to-id
