@@ -726,7 +726,7 @@ pub use self::core::{Widget, focus, hover_animation, clipboard, context_menu, cl
 pub use self::core::focus::link_parent_child;
 pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
-    ColorSelector, Finger, Trackpad, Canvas, get_font_db, ActiveThumb, FontSelector,
+    ColorSelector, Finger, Trackpad, get_font_db, ActiveThumb, FontSelector,
     ButtonStrip, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey
 };
 pub use self::container::{
@@ -740,8 +740,7 @@ pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
     LayoutPreview, FontPreview, InfoBox, StatusDot, InteractiveListItem,
     GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
-    DotStatus, PreviewLayoutMode, Sidebar, Panel, PreviewState, ImagePreviewData, serialize_widgets,
-    Viewport3D
+    DotStatus, PreviewLayoutMode, Sidebar, Panel, PreviewState, ImagePreviewData, serialize_widgets
 };
 
 pub trait PageSelector {

@@ -1,4 +1,3 @@
-pub mod canvas;
 pub mod button;
 pub mod checkbox;
 pub mod slider;
@@ -12,7 +11,6 @@ pub mod button_strip;
 pub mod keybind_recorder;
 pub mod ramp;
 
-pub use canvas::Canvas;
 pub use button::{Button, ButtonKind, PageButton};
 pub use checkbox::{Checkbox, Toggle};
 pub use slider::{Slider, RangeSlider, ActiveThumb};

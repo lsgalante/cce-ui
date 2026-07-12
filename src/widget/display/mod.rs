@@ -40,6 +40,4 @@ pub use self::info_box::InfoBox;
 pub use self::status_dot::{DotStatus, StatusDot};
 pub use self::preview::{PreviewState, ImagePreviewData};
 pub use self::text_sizer::{measure_text_width, measure_text};
-pub mod viewport_3d;
-pub use self::viewport_3d::Viewport3D;
 
