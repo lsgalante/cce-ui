@@ -1539,12 +1539,11 @@ pub trait Application: Sized + 'static {
         None
     }
 
-    fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
-        if let Some(ctx) = self.ui_context() {
-            ctx.is_movable_backplate_at(px, py)
-        } else {
-            false
-        }
+    /// Whether a left-press at (px, py) should start a compositor window drag. Every root
+    /// `Backplate` is dissolved (Phase 6), so the default is "no" — apps that want
+    /// drag-anywhere override this with `ctx.drag_allowed_at(px, py)`.
+    fn is_movable_backplate_at(&self, _px: f32, _py: f32) -> bool {
+        false
     }
     
     fn clear_color(&self) -> [f32; 4] {

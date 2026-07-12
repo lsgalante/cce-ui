@@ -189,10 +189,6 @@ pub trait Element {
         event
     }
 
-    fn capture_event(&mut self, _event: &Event, _ctx: &mut UiContext) -> bool {
-        false
-    }
-
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
         let mut parent_id = None;
         if let Some(b) = self.base_mut() {
@@ -410,11 +406,9 @@ pub trait Element {
         }
     }
 
-    fn is_active(&self) -> bool { false }
-
     fn highlight_color(&self, ctx: &UiContext) -> Option<[f32; 4]> {
         let is_focused = ctx.is_focused_addr(self as *const Self as *const () as usize);
-        if is_focused || self.is_active() {
+        if is_focused {
             Some(colors::highlight_primary_color())
         } else if self.hovered() {
             Some(colors::HIGHLIGHT_SECONDARY)
@@ -449,7 +443,7 @@ pub trait Element {
 
     fn label_x_offset(&self) -> f32 {
         let name = self.type_name();
-        if name == "Label" || name == "Button" || name == "Checkbox" || name == "Toggle" || name == "Plate" || name == "Ramp" {
+        if name == "Label" || name == "Button" || name == "Checkbox" || name == "Toggle" || name == "Ramp" {
             return 0.0;
         }
         if crate::layout::control_label_layout() == "side" && self.base().map_or(false, |b| b.label.is_some()) {
@@ -670,10 +664,7 @@ pub trait Element {
     }
 
     fn z_index(&self) -> i32 { 0 }
-    fn is_plate(&self) -> bool { false }
     fn is_page(&self) -> bool { false }
-    fn is_backplate(&self) -> bool { false }
-    fn is_movable_backplate(&self) -> bool { false }
     fn is_scrollable(&self) -> bool { false }
     fn blocks_backplate_drag(&self) -> bool { true }
     fn rounded_corners(&self) -> (bool, bool, bool, bool) { (false, false, false, false) }

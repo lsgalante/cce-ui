@@ -21,7 +21,7 @@ use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
 use crate::widget::{
-    Control, Element, ElementState, Event, Key, MouseButton, NamedKey, UiContext,
+    Control, Element, ElementState, Event, Key, MouseButton, NamedKey,
 };
 
 /// Side-layout label inset — the legacy `Element::label_x_offset` default for non-exempt
@@ -201,21 +201,6 @@ impl Dropdown {
         }
     }
 
-    /// The legacy backplate-ancestor lookup for concentric corners, walked from the tracked
-    /// parent with a dummy ctx (field-based legacy `parent` impls answer; tree-only ones end
-    /// the walk, so deep tree-linked chains lose the adjustment — flagged in the module docs).
-    fn backplate_ancestor(&self) -> Option<*mut (dyn Element + 'static)> {
-        let dummy = crate::context::UiContext::new();
-        let mut curr = self.tracked_parent;
-        while let Some(ptr) = curr {
-            if unsafe { (*ptr).is_backplate() } {
-                return Some(ptr);
-            }
-            curr = unsafe { (*ptr).parent(&dummy) };
-        }
-        None
-    }
-
     /// Emit the border + background geometry — the legacy `all_rounded_quads` body (rounded,
     /// with the backplate-concentric corner adjustment) or `extra_quads` (plain) depending on
     /// the configured radius, byte-for-byte on the same content rect.
@@ -245,11 +230,9 @@ impl Dropdown {
         let mut outer_radii = [radius; 4];
         let mut inner_radii = [inner_radius; 4];
 
-        let frame = self.corner_frame.or_else(|| {
-            self.backplate_ancestor().map(|bp| unsafe {
-                ((*bp).rect(), (*bp).corner_radius(), (*bp).rounded_corners())
-            })
-        });
+        // Only an explicit corner_frame adjusts concentric corners now — the legacy fallback
+        // walked ancestors for a backplate, which no longer exists.
+        let frame = self.corner_frame;
         if let Some(((px, py, pw, ph), pr, (pr1, pr2, pr3, pr4))) = frame {
             let g_left = x - px;
             let g_top = y - py;

@@ -248,12 +248,6 @@ impl UiContext {
                 return false;
             }
 
-            // 1. Capture Phase: parent intercepts
-            if (*root).capture_event(event, self) {
-                (*root).mark_dirty(self);
-                return true;
-            }
-
             // For KeyInput, send directly to focused widget if it exists
             if let Event::KeyInput(_) = event {
                 if let Some(focused) = self.focused_widget {
@@ -797,49 +791,9 @@ impl UiContext {
         false
     }
 
-    pub fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
-        if self.point_in_active_popover(px, py) {
-            return false;
-        }
-        let mut hit_backplate = false;
-        let scroll_y = crate::widget::hover_animation::get_scroll_offset();
-        let mut candidate_ids = self.spatial_grid.query(px, py).to_vec();
-        if scroll_y != 0.0 {
-            candidate_ids.extend_from_slice(self.spatial_grid.query(px, py + scroll_y));
-            candidate_ids.sort_unstable();
-            candidate_ids.dedup();
-        }
-        for &id in &candidate_ids {
-            if let Some(ptr) = self.tree.get_ptr(id) {
-                unsafe {
-                    if !ptr.is_null() {
-                        let w = &*ptr;
-                        let is_hit = if w.is_backplate() {
-                            w.hit_test(px, py, self)
-                        } else {
-                            w.hit_test(px, py, self) || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self))
-                        };
-                        if is_hit {
-                            if w.is_backplate() {
-                                if w.is_movable_backplate() {
-                                    hit_backplate = true;
-                                }
-                            } else if w.blocks_backplate_drag() {
-                                return false;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        hit_backplate
-    }
-
-    /// The drag question for windows whose root `Backplate` has been DISSOLVED (Phase 6): the
-    /// surface itself is the movable plate, so all that matters is whether a drag-blocking
-    /// widget sits under the cursor — the same walk as
-    /// [`is_movable_backplate_at`](UiContext::is_movable_backplate_at) minus the requirement
-    /// that a registered movable `Backplate` is hit.
+    /// The window-drag question (Phase 6: every root `Backplate` is dissolved, so the surface
+    /// itself is the movable plate): a drag may start anywhere no drag-blocking widget sits
+    /// under the cursor.
     pub fn drag_allowed_at(&self, px: f32, py: f32) -> bool {
         if self.point_in_active_popover(px, py) {
             return false;
@@ -858,7 +812,7 @@ impl UiContext {
                         let w = &*ptr;
                         let is_hit = w.hit_test(px, py, self)
                             || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self));
-                        if is_hit && !w.is_backplate() && w.blocks_backplate_drag() {
+                        if is_hit && w.blocks_backplate_drag() {
                             return false;
                         }
                     }
@@ -881,11 +835,9 @@ impl UiContext {
                 unsafe {
                     if !ptr.is_null() {
                         let w = &*ptr;
-                        if !w.is_backplate() {
-                            let is_hit = w.hit_test(px, py, self) || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self));
-                            if is_hit && w.blocks_backplate_drag() {
-                                return true;
-                            }
+                        let is_hit = w.hit_test(px, py, self) || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self));
+                        if is_hit && w.blocks_backplate_drag() {
+                            return true;
                         }
                     }
                 }
@@ -934,9 +886,8 @@ mod tests {
         }
     }
 
-    /// `drag_allowed_at` — the dissolved-root-Backplate drag question: allowed on empty
-    /// surface, denied over a drag-blocking widget (same walk as `is_movable_backplate_at`
-    /// minus the registered-Backplate requirement, which a dissolved window can't meet).
+    /// `drag_allowed_at` — the window-drag question: allowed on empty surface, denied over a
+    /// drag-blocking widget.
     #[test]
     fn drag_allowed_everywhere_except_blocking_widgets() {
         let mut ctx = UiContext::new();
@@ -947,8 +898,5 @@ mod tests {
 
         assert!(ctx.drag_allowed_at(200.0, 200.0), "empty surface is draggable");
         assert!(!ctx.drag_allowed_at(20.0, 20.0), "a drag-blocking widget denies the drag");
-        // The Backplate-rooted question stays false here — no movable Backplate exists,
-        // which is exactly why dissolved windows need drag_allowed_at.
-        assert!(!ctx.is_movable_backplate_at(200.0, 200.0));
     }
 }

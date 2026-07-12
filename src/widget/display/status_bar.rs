@@ -47,56 +47,15 @@ impl StatusBar {
     }
 
     pub fn get_actual_text_color(&self) -> [f32; 4] {
-        if let Some(p_ptr) = self.parent {
-            if unsafe { (*p_ptr).is_backplate() } {
-                return crate::colors::backplate_statusbar_text_color();
-            }
-        }
         self.text_color.unwrap_or([0.6666, 0.6666, 0.7333, 1.0])
     }
 
     pub fn is_blur_enabled(&self) -> bool {
-        if let Some(p_ptr) = self.parent {
-            if unsafe { (*p_ptr).is_backplate() } {
-                return crate::colors::backplate_statusbar_blur();
-            }
-        }
         false
     }
 
     fn bg(&self) -> [f32; 4] {
-        if let Some(p_ptr) = self.parent {
-            if unsafe { (*p_ptr).is_backplate() } {
-                let theme_color = crate::colors::backplate_statusbar_color();
-                if theme_color[3] > 0.001 {
-                    return theme_color;
-                }
-            }
-        }
         self.bg_color.unwrap_or(colors::STATUS_BG)
-    }
-
-    fn corners_against_parent(&self, rect: Rect) -> (bool, bool, bool, bool) {
-        if let Some(p_ptr) = self.parent {
-            let is_bp = unsafe { (*p_ptr).is_backplate() };
-            if is_bp {
-                let (px, py, pw, ph) = unsafe { (*p_ptr).rect() };
-                let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-                let is_at_top = (y - py).abs() < 0.1;
-                let is_at_bottom = (y + h - (py + ph)).abs() < 0.1;
-
-                if is_at_top && is_at_bottom {
-                    let is_at_left = (x - px).abs() < 0.1;
-                    let is_at_right = (x + w - (px + pw)).abs() < 0.1;
-                    return (is_at_left, is_at_right, is_at_right, is_at_left);
-                } else if is_at_top {
-                    return (true, true, false, false);
-                } else if is_at_bottom {
-                    return (false, false, true, true);
-                }
-            }
-        }
-        (false, false, false, false)
     }
 
     fn statusbar_font_size(&self) -> f32 {
@@ -150,12 +109,14 @@ impl Paint for StatusBar {
         self.bg()
     }
 
-    fn corner_style(&self, rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+        // Corners never round (the backplate-adjacency source is gone); the radius is still
+        // reported for children that read it through the parent pointer.
         let radius = match self.parent {
             Some(p_ptr) => unsafe { (*p_ptr).corner_radius() },
             None => 0.0,
         };
-        Some((radius, self.corners_against_parent(rect)))
+        Some((radius, (false, false, false, false)))
     }
 
     /// `Element::set_text` lands here: swap the text and drop the shaped buffer so
@@ -172,17 +133,9 @@ impl Paint for StatusBar {
     /// default `all_rounded_quads` path) — plus the text label (the legacy `text_labels`
     /// body; deliberately no `widget_font`, see module docs).
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        let corners = self.corners_against_parent(rect);
-        let bg = self.bg();
-        if corners == (false, false, false, false) {
-            ctx.quad(rect, bg);
-        } else if bg[3].abs() > 0.001 {
-            let radius = match self.parent {
-                Some(p_ptr) => unsafe { (*p_ptr).corner_radius() },
-                None => 0.0,
-            };
-            ctx.rounded_rect(rect, radius, corners, bg);
-        }
+        // Always the plain background quad — the rounded-against-parent variant required a
+        // backplate parent, which no longer exists.
+        ctx.quad(rect, self.bg());
 
         if !self.text.is_empty() {
             let offset_x = self.text_offset_x.unwrap_or(12.0);

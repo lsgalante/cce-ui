@@ -225,20 +225,10 @@ impl MenuBar {
     }
 
     pub fn text_color(&self) -> [f32; 4] {
-        if let Some(p_ptr) = self.parent {
-            if unsafe { (*p_ptr).is_backplate() } {
-                return crate::colors::backplate_menubar_text_color();
-            }
-        }
         crate::colors::menubar_tab_label_color()
     }
 
     pub fn is_blur_enabled(&self) -> bool {
-        if let Some(p_ptr) = self.parent {
-            if unsafe { (*p_ptr).is_backplate() } {
-                return crate::colors::backplate_menubar_blur();
-            }
-        }
         self.blur
     }
 
@@ -249,35 +239,7 @@ impl MenuBar {
     }
 
     fn bg_color(&self) -> [f32; 4] {
-        if let Some(p_ptr) = self.parent {
-            if unsafe { (*p_ptr).is_backplate() } {
-                return crate::colors::backplate_menubar_color();
-            }
-        }
         self.color.unwrap_or_else(|| colors::sidebar_bg_color())
-    }
-
-    fn corners_against_parent(&self, rect: Rect) -> (bool, bool, bool, bool) {
-        if let Some(p_ptr) = self.parent {
-            let is_bp = unsafe { (*p_ptr).is_backplate() };
-            if is_bp {
-                let (px, py, pw, ph) = unsafe { (*p_ptr).rect() };
-                let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-                let is_at_top = (y - py).abs() < 0.1;
-                let is_at_bottom = (y + h - (py + ph)).abs() < 0.1;
-
-                if is_at_top && is_at_bottom {
-                    let is_at_left = (x - px).abs() < 0.1;
-                    let is_at_right = (x + w - (px + pw)).abs() < 0.1;
-                    return (is_at_left, is_at_right, is_at_right, is_at_left);
-                } else if is_at_top {
-                    return (true, true, false, false);
-                } else if is_at_bottom {
-                    return (false, false, true, true);
-                }
-            }
-        }
-        (false, false, false, false)
     }
 
     /// Position the embedded strip inside `rect` — the legacy `set_rect` body, minus the
@@ -503,12 +465,14 @@ impl Paint for MenuBar {
         self.bg_color()
     }
 
-    fn corner_style(&self, rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
+        // Corners never round (the backplate-adjacency source is gone); the radius is still
+        // reported for children that read it through the parent pointer.
         let radius = match self.parent {
             Some(p_ptr) => unsafe { (*p_ptr).corner_radius() },
             None => 0.0,
         };
-        Some((radius, self.corners_against_parent(rect)))
+        Some((radius, (false, false, false, false)))
     }
 
     fn widget_font(&self) -> Option<String> {
@@ -521,19 +485,9 @@ impl Paint for MenuBar {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // Background: plain when cornerless (the legacy extra_quads bg), rounded against the
-        // parent's corners otherwise (the legacy Element-default all_rounded_quads bg).
-        let corners = self.corners_against_parent(rect);
-        let bg = self.bg_color();
-        if corners == (false, false, false, false) {
-            ctx.quad(rect, bg);
-        } else if bg[3].abs() > 0.001 {
-            let radius = match self.parent {
-                Some(p_ptr) => unsafe { (*p_ptr).corner_radius() },
-                None => 0.0,
-            };
-            ctx.rounded_rect(rect, radius, corners, bg);
-        }
+        // Background: always the plain quad — the rounded-against-parent variant required a
+        // backplate parent, which no longer exists.
+        ctx.quad(rect, self.bg_color());
 
         // Title highlight while the context dropdown is open / hovered.
         if !self.context_options.is_empty() {
