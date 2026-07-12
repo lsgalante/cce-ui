@@ -1790,10 +1790,23 @@ Constraint respected: **each crate still builds standalone** — the new core is
        `ectx.id`). Verified: A/B vs slice-1 captures byte-equivalent
        (incl. the TE File-menu popover); DE leaf context menu Copy
        Key → wl-paste; settings page-dropdown popover switches pages.
-    3. **Container child storage** (`ScrollBox.children`,
-       `ParametersBg.children`, Paginator) + the
-       `Element::children`/`parent`/`add_child`/`set_parent` surface →
-       ids; the propagate/paint walks resolve per step.
+    3. **Container child storage (DONE 2026-07-12 — by deletion, not
+       retype).** The stored-field census found the slated vecs were
+       ballast: `ParametersBg.children` was never populated anywhere
+       (deleted with its parent-tracking twin, the container hooks,
+       eleven dead iteration blocks, `collect_child_quads`, and
+       window_runner's quad-attribution loop); `ScrollBox.children`
+       was write-only (deleted with TI's one push). What still stores
+       raw pointers after this slice: the `WidgetTree` registry (by
+       design) and TI's app-side `ControlPanel.children` — live,
+       pointing into boxed slots, consumed in ctx-less paint/arrange
+       paths, so it retypes when those paths gain ctx (the endgame).
+       Paginator's `container_children` is a transient field ref, not
+       storage. The `Element::children`/`parent`/`add_child`/
+       `set_parent` *signatures* still traffic in pointers, but every
+       value is transient and tree-resolved at call time — they die
+       with the `Element` endgame rather than warranting a standalone
+       signature sweep.
     4. **`propagate_event(event, root: WidgetId)`** + the app dispatch
        loops off `as_ptr_mut` (the big app sweep).
     5. window_runner render plumbing + remaining `as_ptr` sites; then
