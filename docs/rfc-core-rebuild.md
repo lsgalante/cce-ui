@@ -1662,11 +1662,20 @@ Constraint respected: **each crate still builds standalone** — the new core is
     production type: ButtonStrip, the ctx-registered embed of
     MenuBar/Paginator — load-bearing in the tree, pinned to the
     machinery retype.
+  - **App-local impls onto the narrow traits (6az, in progress).** The
+    finale's first motion: each remaining raw `impl Element` converts to
+    `Layout`/`Paint`/`Input` + `Adapted<W>` ahead of the machinery
+    retype, shrinking `Element`'s implementor set toward exactly one.
+    Done: cce-colors' ColorSlider (constructor returns the wrapper, so
+    construction and direct-dispatch sites are untouched; A/B AE=0,
+    click/wheel live-verified). Remaining: settings ScrollBar, dm ×3,
+    cloud Fuzzel + JsonLayoutWidget, designer PassivePlate/Canvas/
+    NodePalette/Viewport3D, TI's four lookalikes, and cce-ui's
+    ButtonStrip (ctx-registered embed — may need the container hooks).
   - Then: the `*mut dyn Element` tree/context machinery gets retyped
     (context.rs propagation/spatial-grid/focus, the app rosters and
-    dispatch loops, window_runner's render plumbing), the app-local
-    impls and ButtonStrip convert with it, and `Element` + `Adapted`
-    die last.
+    dispatch loops, window_runner's render plumbing), and `Element` +
+    `Adapted` die last.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
