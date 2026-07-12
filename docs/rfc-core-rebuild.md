@@ -1873,16 +1873,24 @@ Constraint respected: **each crate still builds standalone** — the new core is
        render_widget/Column/Section, settings'
        `collect_window_child`, dm/cloud's local tessellator copies
        with concrete receivers) simply re-bind at the flip.
-    3. **Tree-link methods — DISSOLVED into the flip.** `children`/
-       `parent` are core machinery walk methods (propagate, painter,
-       navigate) — host-trait material, not removable beforehand.
-       `add_child`/`set_parent`/`clear_children` have dyn callers
-       (TI's roster `add_child`, dm's `link_parent_child`) worth ~5
-       methods at most — not worth a standalone pass; they convert
-       with the flip. Note Paginator both serves `container_children`
-       AND `link_ids`-registers its strip — the ctx-less walks
-       (popover_rect/prepare_text/render_popover) are why the
-       field-derived form must stay.
+    3. **Tree-link methods — landed pre-flip after all (2026-07-12).**
+       `children`/`parent` are core machinery walk methods (propagate,
+       painter, navigate) — host-trait material, they stay.
+       `clear_children` left in batch 2; **`set_parent`/`add_child`
+       left in batch 4**: both are inherent `Adapted<W>` methods now
+       (files' concrete sites resolve unchanged); the dyn callers
+       were only three — `focus::link_parent_child`'s body (rewritten
+       as the register + `tree.link` + `tree.set_parent` ops the pair
+       always was), TI's page-selector/StatusBar roster pair (now one
+       `link_parent_child` call), and TI ControlPanel's per-arrange
+       dummy-ctx child re-parent (deleted — every effect was
+       discarded with the dummy ctx, the same inert-ritual class as
+       Ramp's tick re-parents). A/B: TI gallery (flat-walk `parent()`
+       skip intact — no page-selector double-draw) + dm greeter, both
+       empty 8% masks. Note Paginator both serves
+       `container_children` AND `link_ids`-registers its strip — the
+       ctx-less walks (popover_rect/prepare_text/render_popover) are
+       why the field-derived form must stay.
     4. **The flip**: define `WidgetHost`, blanket-impl for
        `Adapted<W>`, retype the registry/context/painter/
        window_runner from `dyn Element` to `dyn WidgetHost`, delete
