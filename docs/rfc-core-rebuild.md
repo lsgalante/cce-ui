@@ -1748,11 +1748,44 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `JsonWidget`'s `Box<dyn Element>`; the label walk dropped its
     `as_ptr` round-trip unsafe for a plain reborrow. **No owned
     type-erased widget storage remains anywhere in the workspace.**
-  - Remaining retype order: (1) the containers' borrowed child ptr Vecs
-    (`Vec<*mut dyn Element>` — pointers into app-owned concrete
-    storage; likely retyped together with (2) the cce-ui machinery core
-    (context.rs registry/focus/propagate, window_runner render
-    plumbing), and `Element` + `Adapted` die last.
+  - **The borrowed-pointer retype design (6bc, decided 2026-07-12).**
+    The replacement handle is **`WidgetId`, resolved through the
+    generational `WidgetTree` at every use**. Rationale: apps own
+    widgets concretely (the 6bb rosters) and re-register pointers
+    idempotently per frame from boxed storage, so the registry is the
+    one place a raw pointer is refreshed before use; every *other*
+    stored `*mut dyn Element` bypasses that guard and is exactly where
+    the real UAFs happened (display-manager 6ao — dangling registry
+    from a by-value `new()`; settings 6w — `FOCUSED_WIDGET` surviving a
+    rebuild via same-size alloc reuse). Under the retype, raw pointers
+    remain only (a) as the `WidgetTree` registry payload and (b) as
+    transient same-frame values inside resolution helpers; every stored
+    reference becomes a `WidgetId`, and a stale id resolves to `None`
+    and is skipped — the UAF class becomes unrepresentable outside the
+    registry itself. Public signatures taking `&dyn Element` stay
+    (deriving the id from `base()` internally) so most call sites
+    survive verbatim; direct field readers convert compiler-driven.
+    Slices, each independently shippable and A/B-verifiable:
+    1. **Focus** — both stores (`UiContext.focused_widget` AND the
+       `core.rs` thread-local `FOCUSED_WIDGET`) → `Option<WidgetId>`,
+       kept as two stores with their existing reader sets (merging
+       them changes observable focus behavior — not this phase's job).
+       Thread-local fns that must dispatch `unfocus`/`FocusOut` gain a
+       ctx/tree param (every dispatching call site has one in reach).
+       `set_focused` self-registers its target if unregistered, so
+       focus on a not-yet-linked widget keeps working.
+    2. **Popovers + context-menu target** — `active_popovers:
+       Vec<WidgetId>`, `ContextMenuState.target: Option<WidgetId>`;
+       the address-keyed coverage walk (`is_coordinate_covered`,
+       `EventCtx::widget_addr`) becomes id-keyed.
+    3. **Container child storage** (`ScrollBox.children`,
+       `ParametersBg.children`, Paginator) + the
+       `Element::children`/`parent`/`add_child`/`set_parent` surface →
+       ids; the propagate/paint walks resolve per step.
+    4. **`propagate_event(event, root: WidgetId)`** + the app dispatch
+       loops off `as_ptr_mut` (the big app sweep).
+    5. window_runner render plumbing + remaining `as_ptr` sites; then
+       the `Element` + `Adapted` endgame (own design pass).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
