@@ -4,7 +4,10 @@ use crate::widget::input::get_font_db;
 
 #[derive(Debug, Clone)]
 pub struct ButtonStrip {
-    pub base: Widget,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
     pub buttons: Vec<String>,
     pub selected: Option<usize>,
     pub vertical: bool,
@@ -22,7 +25,10 @@ pub struct ButtonStrip {
 impl ButtonStrip {
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
-            base: Widget::new_rect(x, y, w, h),
+            x,
+            y,
+            w,
+            h,
             buttons: Vec::new(),
             selected: None,
             vertical: false,
@@ -42,6 +48,12 @@ impl ButtonStrip {
         self.inherit_menubar_font = inherit;
         self.generate_rotated_labels();
         self
+    }
+
+    /// The laid-out rect, mirrored from the adapter by `Layout::rect_assigned` (or the
+    /// constructor arguments until the first layout).
+    fn rect(&self) -> (f32, f32, f32, f32) {
+        (self.x, self.y, self.w, self.h)
     }
 
     fn current_font(&self) -> String {
@@ -272,20 +284,94 @@ impl ButtonStrip {
     }
 }
 
-impl Element for ButtonStrip {
-    crate::impl_widget_base!(ButtonStrip);
-
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        if self.base.x != x || self.base.y != y || self.base.w != w || self.base.h != h {
-            self.base.x = x;
-            self.base.y = y;
-            self.base.w = w;
-            self.base.h = h;
+impl crate::widget::Layout for ButtonStrip {
+    // The legacy set_rect override: regenerate the rotated tab labels only when the rect
+    // actually changed.
+    fn rect_assigned(&mut self, rect: crate::scene::layout::Rect) {
+        if self.x != rect.x || self.y != rect.y || self.w != rect.width || self.h != rect.height {
+            self.x = rect.x;
+            self.y = rect.y;
+            self.w = rect.width;
+            self.h = rect.height;
             self.generate_rotated_labels();
         }
     }
+}
 
-    fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool {
+impl crate::widget::Paint for ButtonStrip {
+    fn color(&self) -> [f32; 4] {
+        [0.0, 0.0, 0.0, 0.0]
+    }
+
+    fn widget_font(&self) -> Option<String> {
+        Some(self.current_font())
+    }
+
+    fn paint(&self, _rect: crate::scene::layout::Rect, pc: &mut crate::scene::paint::PaintCtx) {
+        use crate::scene::layout::Rect;
+        // The legacy extra_quads body: per-item state backgrounds, plus the rotated
+        // (SVG-rasterized) vertical tab text clamped to the strip.
+        for i in 0..self.buttons.len() {
+            let r = self.item_rect(i);
+            let mut bg_color = [0.0, 0.0, 0.0, 0.0];
+            if Some(i) == self.selected {
+                bg_color = colors::PANEL_MENU_FOCUSED;
+            } else if Some(i) == self.pressed_idx {
+                bg_color = colors::BUTTON_PRESS;
+            } else if Some(i) == self.hovered_idx {
+                bg_color = colors::PANEL_MENU_HOVER;
+            }
+            if bg_color != [0.0, 0.0, 0.0, 0.0] {
+                pc.quad(Rect { x: r.0, y: r.1, width: r.2, height: r.3 }, bg_color);
+            }
+
+            if self.vertical {
+                if i < self.tab_text_quads.len() {
+                    let min_y = self.y;
+                    let max_y = self.y + self.h;
+                    let page_name = &self.buttons[i];
+                    let trimmed = page_name.trim();
+                    let space_idx = trimmed.find(' ');
+                    let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
+                    let padding_y = crate::layout::button_padding();
+                    let y_offset = if has_icon { padding_y + 12.0 } else { 0.0 };
+
+                    for &(qx, qy, qw, qh, qc) in &self.tab_text_quads[i] {
+                        let absolute_x = r.0 + qx;
+                        let absolute_y = r.1 + y_offset + qy - 15.0;
+
+                        let ry1 = absolute_y.max(min_y);
+                        let ry2 = (absolute_y + qh).min(max_y);
+                        let rh = ry2 - ry1;
+                        if rh > 0.0 {
+                            pc.quad(Rect { x: absolute_x, y: ry1, width: qw, height: rh }, qc);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Own labels (horizontal button text / vertical icon glyphs).
+        for tl in self.own_labels() {
+            pc.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+        }
+    }
+}
+
+impl crate::widget::Input for ButtonStrip {
+    // The legacy dispatch reached mouse_input ungated (the hosts call it directly, and a
+    // press on another tab must land while a dropdown popover covers the strip); the item
+    // scan below is the real gate.
+    fn gates_presses(&self) -> bool {
+        false
+    }
+
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
+    // Config watch: regenerate the rotated labels when padding/font/scale change.
+    fn tick(&mut self, _dt: f32, _rect: crate::scene::layout::Rect) -> bool {
         let mut changed = false;
         let current_padding = crate::layout::button_padding();
         let current_font = self.current_font();
@@ -300,162 +386,98 @@ impl Element for ButtonStrip {
         changed
     }
 
-    fn wants_tick(&self) -> bool {
-        true
-    }
-
-    fn highlight_quad(&self, _ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
-        None
-    }
-
-    fn color(&self) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
-    }
-
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
-        if button != MouseButton::Left {
-            return false;
-        }
-        let mut changed = false;
-        match state {
-            ElementState::Pressed => {
+    fn on_event(&mut self, event: &Event, _ectx: &mut crate::widget::EventCtx) -> bool {
+        match event {
+            Event::MouseButton { button, state, x: px, y: py, .. } => {
+                if *button != MouseButton::Left {
+                    return false;
+                }
+                let mut changed = false;
+                match state {
+                    ElementState::Pressed => {
+                        for i in 0..self.buttons.len() {
+                            let r = self.item_rect(i);
+                            if *px >= r.0 && *px < r.0 + r.2 && *py >= r.1 && *py < r.1 + r.3 {
+                                self.pressed_idx = Some(i);
+                                changed = true;
+                                break;
+                            }
+                        }
+                    }
+                    ElementState::Released => {
+                        if let Some(pressed) = self.pressed_idx {
+                            let r = self.item_rect(pressed);
+                            if *px >= r.0 && *px < r.0 + r.2 && *py >= r.1 && *py < r.1 + r.3 {
+                                if self.selected != Some(pressed) {
+                                    self.selected = Some(pressed);
+                                    self.just_clicked = Some(pressed);
+                                    self.generate_rotated_labels();
+                                } else {
+                                    self.selected = None;
+                                    self.just_clicked = Some(pressed);
+                                    self.generate_rotated_labels();
+                                }
+                            }
+                            changed = true;
+                        }
+                        self.pressed_idx = None;
+                    }
+                }
+                changed
+            }
+            Event::PointerMove { x: px, y: py, .. } => {
+                let old_hovered = self.hovered_idx;
+                self.hovered_idx = None;
                 for i in 0..self.buttons.len() {
                     let r = self.item_rect(i);
-                    if px >= r.0 && px < r.0 + r.2 && py >= r.1 && py < r.1 + r.3 {
-                        self.pressed_idx = Some(i);
-                        changed = true;
+                    if *px >= r.0 && *px < r.0 + r.2 && *py >= r.1 && *py < r.1 + r.3 {
+                        self.hovered_idx = Some(i);
                         break;
                     }
                 }
+                old_hovered != self.hovered_idx
             }
-            ElementState::Released => {
-                if let Some(pressed) = self.pressed_idx {
-                    let r = self.item_rect(pressed);
-                    if px >= r.0 && px < r.0 + r.2 && py >= r.1 && py < r.1 + r.3 {
-                        if self.selected != Some(pressed) {
-                            self.selected = Some(pressed);
-                            self.just_clicked = Some(pressed);
-                            self.generate_rotated_labels();
+            Event::KeyInput(event) => {
+                if event.state != ElementState::Pressed {
+                    return false;
+                }
+                if self.buttons.is_empty() {
+                    return false;
+                }
+
+                let current = self.selected.unwrap_or(0);
+                let next;
+
+                match event.logical_key {
+                    Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowUp) => {
+                        if current > 0 {
+                            next = current - 1;
                         } else {
-                            self.selected = None;
-                            self.just_clicked = Some(pressed);
-                            self.generate_rotated_labels();
+                            next = self.buttons.len() - 1;
                         }
                     }
-                    changed = true;
-                }
-                self.pressed_idx = None;
-            }
-        }
-        changed
-    }
-
-    fn cursor_moved(&mut self, px: f32, py: f32, _ctx: &mut UiContext) -> bool {
-        let old_hovered = self.hovered_idx;
-        self.hovered_idx = None;
-        for i in 0..self.buttons.len() {
-            let r = self.item_rect(i);
-            if px >= r.0 && px < r.0 + r.2 && py >= r.1 && py < r.1 + r.3 {
-                self.hovered_idx = Some(i);
-                break;
-            }
-        }
-        old_hovered != self.hovered_idx
-    }
-
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut quads = Vec::new();
-        for i in 0..self.buttons.len() {
-            let r = self.item_rect(i);
-            let mut bg_color = [0.0, 0.0, 0.0, 0.0];
-            if Some(i) == self.selected {
-                bg_color = colors::PANEL_MENU_FOCUSED;
-            } else if Some(i) == self.pressed_idx {
-                bg_color = colors::BUTTON_PRESS;
-            } else if Some(i) == self.hovered_idx {
-                bg_color = colors::PANEL_MENU_HOVER;
-            }
-            if bg_color != [0.0, 0.0, 0.0, 0.0] {
-                quads.push((r.0, r.1, r.2, r.3, bg_color));
-            }
-
-            if self.vertical {
-                if i < self.tab_text_quads.len() {
-                    let min_y = self.base.y;
-                    let max_y = self.base.y + self.base.h;
-                    let page_name = &self.buttons[i];
-                    let trimmed = page_name.trim();
-                    let space_idx = trimmed.find(' ');
-                    let has_icon = space_idx.map(|idx| trimmed.split_at(idx).0.trim().chars().count() == 1).unwrap_or(false);
-                    let padding_y = crate::layout::button_padding();
-                    let y_offset = if has_icon { padding_y + 12.0 } else { 0.0 };
-
-                    for &(qx, qy, qw, qh, qc) in &self.tab_text_quads[i] {
-                        let absolute_x = r.0 + qx;
-                        let absolute_y = r.1 + y_offset + qy - 15.0;
-                        
-                        let ry1 = absolute_y.max(min_y);
-                        let ry2 = (absolute_y + qh).min(max_y);
-                        let rh = ry2 - ry1;
-                        if rh > 0.0 {
-                            quads.push((absolute_x, ry1, qw, rh, qc));
+                    Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowDown) => {
+                        if current + 1 < self.buttons.len() {
+                            next = current + 1;
+                        } else {
+                            next = 0;
                         }
                     }
+                    _ => return false,
                 }
-            }
-        }
-        quads
-    }
 
-    // Leaf legacy widget: own fonted labels via paint_self (the trait text getters
-    // are deleted).
-    fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
-        crate::scene::painter::paint_legacy_leaf(
-            self, ui, ctx,
-            crate::scene::painter::fonted_leaf_labels(self, ui, self.own_labels()),
-        );
-    }
-
-    fn keyboard_input(&mut self, event: &KeyEvent, _ctx: &mut UiContext) -> bool {
-        if event.state != ElementState::Pressed { return false; }
-        if self.buttons.is_empty() { return false; }
-
-        let current = self.selected.unwrap_or(0);
-        let next;
-
-        match event.logical_key {
-            Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowUp) => {
-                if current > 0 {
-                    next = current - 1;
-                } else {
-                    next = self.buttons.len() - 1;
+                if Some(next) != self.selected {
+                    self.selected = Some(next);
+                    self.just_clicked = Some(next);
+                    self.generate_rotated_labels();
+                    return true;
                 }
+                false
             }
-            Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowDown) => {
-                if current + 1 < self.buttons.len() {
-                    next = current + 1;
-                } else {
-                    next = 0;
-                }
-            }
-            _ => return false,
+            _ => false,
         }
-
-        if Some(next) != self.selected {
-            self.selected = Some(next);
-            self.just_clicked = Some(next);
-            self.generate_rotated_labels();
-            return true;
-        }
-        false
-    }
-
-    fn widget_font(&self) -> Option<String> {
-        Some(self.current_font())
     }
 }
-
-impl Control for ButtonStrip {}
 
 impl ButtonStrip {
     pub(crate) fn own_labels(&self) -> Vec<TextLabel> {

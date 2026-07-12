@@ -24,7 +24,7 @@ use crate::widget::{
 };
 
 pub struct Paginator {
-    pub sidebar_menu: ButtonStrip,
+    pub sidebar_menu: Adapted<ButtonStrip>,
     pub selected_page: usize,
     pub sidebar_w: f32,
     pub page_labels: Vec<String>,
@@ -37,7 +37,7 @@ impl Paginator {
         let num_pages = pages.len();
 
         let temp_paginator = Paginator {
-            sidebar_menu: ButtonStrip::new(0.0, 0.0, 0.0, 0.0),
+            sidebar_menu: Adapted::new(ButtonStrip::new(0.0, 0.0, 0.0, 0.0)),
             selected_page: 0,
             sidebar_w: 0.0,
             page_labels: pages.clone(),
@@ -46,11 +46,13 @@ impl Paginator {
         };
         let sidebar_w = temp_paginator.sidebar_w();
 
-        let mut sidebar_menu = ButtonStrip::new(0.0, 0.0, sidebar_w, 0.0)
-            .with_vertical(true)
-            .with_buttons(pages.clone());
+        let mut sidebar_menu = Adapted::new(
+            ButtonStrip::new(0.0, 0.0, sidebar_w, 0.0)
+                .with_vertical(true)
+                .with_buttons(pages.clone()),
+        );
         if num_pages > 0 {
-            sidebar_menu.set_selected(Some(0));
+            sidebar_menu.inner_mut().set_selected(Some(0));
         }
 
         Adapted::new(Paginator {
@@ -103,7 +105,7 @@ impl PageSelector for Paginator {
     fn set_selected_page(&mut self, page: usize) {
         if page < self.page_labels.len() {
             self.selected_page = page;
-            self.sidebar_menu.set_selected(Some(page));
+            self.sidebar_menu.inner_mut().set_selected(Some(page));
             if let Some(ref cb) = self.on_page_changed_cb {
                 cb(page);
             }
@@ -160,9 +162,9 @@ impl Layout for Paginator {
     }
 
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
-        let menu_ptr = &mut self.sidebar_menu as *mut ButtonStrip;
-        ctx.register_widget(self.sidebar_menu.base.id(), menu_ptr);
-        ctx.link_ids(host_id, self.sidebar_menu.base.id());
+        let menu_ptr = self.sidebar_menu.as_ptr_mut();
+        ctx.register_widget(self.sidebar_menu.id(), menu_ptr);
+        ctx.link_ids(host_id, self.sidebar_menu.id());
     }
 }
 
@@ -235,7 +237,7 @@ impl Input for Paginator {
                 let mut changed = false;
                 if self.sidebar_menu.mouse_input(*button, *state, *px, *py, ui) {
                     changed = true;
-                    if let Some(idx) = self.sidebar_menu.take_click() {
+                    if let Some(idx) = self.sidebar_menu.inner_mut().take_click() {
                         self.set_selected_page(idx);
                         self.just_clicked = Some(idx);
                     }
@@ -330,7 +332,7 @@ mod tests {
         // The embedded strip + pages land in the registry on tick (the spatial grid feeds off
         // it — the registered strip is what blocks backplate drags over the sidebar).
         Element::tick(&mut p, 0.016, &mut ctx);
-        let strip_id = p.sidebar_menu.base.id();
+        let strip_id = p.sidebar_menu.id();
         assert!(
             ctx.tree.iter_registered().any(|(w_id, _)| w_id == strip_id),
             "strip registered by the tick-path healing"

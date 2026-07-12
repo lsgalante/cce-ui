@@ -34,7 +34,7 @@ pub struct MenuBar {
     pub blur: bool,
     pub color: Option<[f32; 4]>,
     pub title: String,
-    pub menus: ButtonStrip,
+    pub menus: Adapted<ButtonStrip>,
     pub menu_items: Vec<String>,
     pub vertical_items: Vec<String>,
     pub menu_dropdowns: Vec<Vec<String>>,
@@ -70,7 +70,7 @@ impl MenuBar {
             blur: false,
             color: None,
             title: String::new(),
-            menus: ButtonStrip::new(x, y, w, h).with_inherit_menubar_font(true),
+            menus: Adapted::new(ButtonStrip::new(x, y, w, h).with_inherit_menubar_font(true)),
             menu_items: Vec::new(),
             vertical_items: Vec::new(),
             menu_dropdowns: Vec::new(),
@@ -329,7 +329,7 @@ impl MenuBar {
         self.context_dropdown_open = false;
         self.context_hovered_item = None;
         self.hovered_dropdown_item = None;
-        self.menus.set_selected(None);
+        self.menus.inner_mut().set_selected(None);
     }
 
     /// The conditional focus claim of the legacy `focus()`: hold the global focus only while
@@ -735,7 +735,7 @@ impl Input for MenuBar {
     fn set_selected(&mut self, selected: bool) {
         self.focused = selected;
         if !selected {
-            self.menus.set_selected(None);
+            self.menus.inner_mut().set_selected(None);
         }
     }
 
@@ -1061,7 +1061,7 @@ impl PageSelector for MenuBar {
     }
 
     fn set_selected_page(&mut self, page: usize) {
-        self.menus.set_selected(Some(page));
+        self.menus.inner_mut().set_selected(Some(page));
     }
 
     fn sidebar_w(&self) -> f32 {
