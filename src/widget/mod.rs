@@ -739,7 +739,7 @@ pub use self::container::{
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     Header, ContentBg, ParametersBg,
     ScrollBox, MenuBar, Spreadsheet, Breadcrumb,
-    Switcher, Paginator, ScrollBar, TreeList, TreeElement
+    Switcher, Paginator, TreeList, TreeElement
 };
 pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, Svg, UsageBar,

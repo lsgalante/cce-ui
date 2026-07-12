@@ -703,7 +703,6 @@ impl Paint for TreeList {
         if self.add_key_popover_open {
             self.add_key_popover_box.prepare_text(fs);
         }
-        self.scroll_box.prepare_text(fs);
         if self.editing_key_idx.is_some() {
             self.edit_box.prepare_text(fs);
         }

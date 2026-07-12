@@ -848,7 +848,7 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         self.own_labels_with_prim_font(ctx, Paint::text_font(&self.inner))
     }
 
-    fn own_labels_with_prim_font(&self, ctx: &UiContext, prim_font: Option<String>) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
+    fn own_labels_with_prim_font(&self, _ctx: &UiContext, prim_font: Option<String>) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         let base_font = Paint::widget_font(&self.inner);
         let mut fonted: Vec<(TextLabel, Option<String>)> = Vec::new();
         if self.visible() {
@@ -874,36 +874,12 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
                 .collect();
         }
 
-        let mut labels = fonted
+        // The legacy scroll-ancestor clamp ended here: always a no-op since Phase 6av —
+        // ScrollBox (the last scroll ancestor type) never appeared as a tree parent.
+        fonted
             .into_iter()
             .map(|(l, font)| (l, font, None::<[f32; 4]>))
-            .collect::<Vec<_>>();
-        let mut curr = Element::parent(self, ctx);
-        let mut scroll_box_bounds = None;
-        while let Some(parent_ptr) = curr {
-            let parent = unsafe { &*parent_ptr };
-            if let Some(scroll_box) = parent.as_any().downcast_ref::<crate::widget::ScrollBox>() {
-                let (sb_x, _, sb_w, _) = parent.rect();
-                let view_min = scroll_box.viewport_y + 4.0;
-                let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
-                scroll_box_bounds = Some([sb_x, view_min, sb_x + sb_w, view_max]);
-                break;
-            }
-            curr = parent.parent(ctx);
-        }
-        if let Some(sb_bounds) = scroll_box_bounds {
-            for item in &mut labels {
-                if let Some(ref mut b) = item.2 {
-                    b[0] = b[0].max(sb_bounds[0]);
-                    b[1] = b[1].max(sb_bounds[1]);
-                    b[2] = b[2].min(sb_bounds[2]);
-                    b[3] = b[3].min(sb_bounds[3]);
-                } else {
-                    item.2 = Some(sb_bounds);
-                }
-            }
-        }
-        labels
+            .collect::<Vec<_>>()
     }
 
     /// The base-label text of a *detached*-label widget — a replica of the legacy default

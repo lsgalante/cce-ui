@@ -1,3 +1,10 @@
+//! Embedded scroll-math + scrollbar-chrome helper (Phase 6av: DEMOTED from `Element` to a
+//! plain struct). Never registered into the ctx tree by either consumer — TreeList and
+//! cce-test-interface's panel copy drive it entirely through concrete calls — so the
+//! `Element` impl was pure dyn-dispatch ballast. The former Element-default entry points the
+//! consumers forward (`cursor_moved`, `tick`, drag hooks, `is_dragging`) are kept as
+//! inherent methods with the exact default-derived behavior.
+
 use crate::widget::*;
 
 #[derive(Debug, Clone)]
@@ -11,7 +18,6 @@ pub struct ScrollBox {
     viewport_offset_h: f32,
     pub show_border: bool,
     pub show_background: bool,
-    pub parent: Option<*mut (dyn Element + 'static)>,
     pub children: Vec<*mut (dyn Element + 'static)>,
     pub scrollbar_dragging: bool,
     pub drag_offset_y: f32,
@@ -29,7 +35,6 @@ impl ScrollBox {
             viewport_offset_h: 0.0,
             show_border: true,
             show_background: true,
-            parent: None,
             children: Vec::new(),
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
@@ -69,12 +74,8 @@ impl ScrollBox {
     }
 }
 
-impl Element for ScrollBox {
-    crate::impl_widget_base!(ScrollBox);
-    fn is_scrollable(&self) -> bool { true }
-    fn blocks_backplate_drag(&self) -> bool { true }
-
-    fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+impl ScrollBox {
+    pub fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.base.x = x;
         self.base.y = y;
         self.base.w = w;
@@ -82,22 +83,33 @@ impl Element for ScrollBox {
         self.viewport_y = y + self.viewport_offset_y;
         self.viewport_h = h + self.viewport_offset_h;
     }
-    fn color(&self) -> [f32; 4] { crate::color::list_bg_color() }
 
-    fn corner_radius(&self) -> f32 {
-        crate::layout::list_corner_radius()
+    /// The legacy `Element` default hit test over the base rect (ScrollBox never carried a
+    /// label or row expansion, so those branches are folded away).
+    fn hit_test(&self, px: f32, py: f32, ctx: &UiContext) -> bool {
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            return false;
+        }
+        let (x, y, w, h) = (self.base.x, self.base.y, self.base.w, self.base.h);
+        if w <= 0.0 || h <= 0.0 {
+            return false;
+        }
+        px >= x && px <= x + w && py >= y && py <= y + h
     }
 
-    fn focus(&mut self) {
-        focus::set_focused(self);
+    /// The legacy focus claim on scrollbar/list clicks: its only observable effect was
+    /// unfocusing the previously focused widget (nothing ever queried focus ON the scroll
+    /// box through the thread-local, and its own `unfocus` was a no-op) — so just release
+    /// the current holder instead of storing a pointer to a non-Element.
+    fn claim_focus(&self) {
+        focus::clear_focus();
     }
-    fn unfocus(&mut self) {}
 
-    fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    pub fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if button == MouseButton::Left {
             if state == ElementState::Pressed {
                 if self.hit_test_scrollbar(px, py) {
-                    self.focus();
+                    self.claim_focus();
                     self.scrollbar_dragging = true;
                     
                     let sb_track_h = self.viewport_h - 8.0;
@@ -131,7 +143,7 @@ impl Element for ScrollBox {
                     self.scrollbar_dragging = false;
                 }
                 if self.hit_test(px, py, ctx) {
-                    self.focus();
+                    self.claim_focus();
                 }
             } else if state == ElementState::Released {
                 self.scrollbar_dragging = false;
@@ -140,13 +152,19 @@ impl Element for ScrollBox {
         false
     }
 
-    fn draggable(&self) -> bool {
+    pub fn draggable(&self) -> bool {
         self.scrollbar_dragging
     }
 
-    fn drag_begin(&mut self, _px: f32, _py: f32) {}
+    /// Legacy `Element` default parity: ScrollBox never overrode `is_dragging` — TreeList
+    /// forwards it and always got `false`.
+    pub fn is_dragging(&self) -> bool {
+        false
+    }
 
-    fn drag_update(&mut self, _px: f32, py: f32) -> bool {
+    pub fn drag_begin(&mut self, _px: f32, _py: f32) {}
+
+    pub fn drag_update(&mut self, _px: f32, py: f32) -> bool {
         if !self.scrollbar_dragging {
             return false;
         }
@@ -172,11 +190,26 @@ impl Element for ScrollBox {
         (self.scroll_y - old_scroll).abs() > 0.01
     }
 
-    fn drag_end(&mut self) {
+    pub fn drag_end(&mut self) {
         self.scrollbar_dragging = false;
     }
 
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    /// The legacy `Element` default `cursor_moved` entry (cce-test-interface's panel copy
+    /// calls it): cover-check clears hover, otherwise falls into `on_cursor_moved`. The
+    /// MouseLeave dispatch the default performed was a no-op for ScrollBox.
+    pub fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        ctx.set_cursor_pos(px, py);
+        if ctx.is_coordinate_covered(self as *const Self as *const () as usize, px, py) {
+            let was = self.base.hovered;
+            if was {
+                self.base.hovered = false;
+            }
+            return was;
+        }
+        self.on_cursor_moved(px, py, ctx)
+    }
+
+    pub fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         let mut changed = false;
         if self.scrollbar_dragging {
             let sb_track_h = self.viewport_h - 8.0;
@@ -211,7 +244,12 @@ impl Element for ScrollBox {
         changed
     }
 
-    fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+    /// Legacy `Element` default parity (cce-test-interface's panel copy ticks it).
+    pub fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool {
+        false
+    }
+
+    pub fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if self.hit_test(px, py, ctx) {
             let scroll_speed = 24.0;
             let dy = match delta {
@@ -227,9 +265,9 @@ impl Element for ScrollBox {
         }
     }
 
-    fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+    pub fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut quads = Vec::new();
-        
+
         // Background
         if self.show_background {
             quads.push((self.base.x, self.base.y, self.base.w, self.base.h, crate::color::list_bg_color()));
@@ -264,7 +302,7 @@ impl Element for ScrollBox {
         quads
     }
 
-    fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
+    pub fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
         let self_addr = self as *const Self as *const () as usize;
         let has_focus = ctx.is_focused_addr(self_addr) || {
             let mut current = ctx.focused_widget;
@@ -339,21 +377,6 @@ impl Element for ScrollBox {
         }
     }
 
-    fn parent(&self, _ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> { self.parent }
-    fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, _ctx: &mut UiContext) { self.parent = parent; }
-    fn children(&self, _ctx: &UiContext) -> Vec<*mut (dyn Element + 'static)> { self.children.clone() }
-    fn add_child(&mut self, child: *mut (dyn Element + 'static), _ctx: &mut UiContext) { self.children.push(child); }
-    fn clear_children(&mut self, _ctx: &mut UiContext) { self.children.clear(); }
-
-    fn layout_ignore(&self) -> bool {
-        true
-    }
-}
-
-impl Drop for ScrollBox {
-    fn drop(&mut self) {
-        clear_widget_references(self);
-    }
 }
 
 unsafe impl Send for ScrollBox {}
@@ -406,11 +429,12 @@ mod tests {
         let mut sb = ScrollBox::new();
         sb.set_rect(10.0, 20.0, 100.0, 100.0);
         sb.update_bounds(300.0, 20.0, 100.0); // max_scroll = 200.0
-        
+
         let mut ctx = UiContext::new();
-        // Focus the scroll box
-        ctx.set_focused(&mut sb);
-        
+        // Hover the scroll box (the focus path took a ctx-registered Element; as a plain
+        // struct the hovered branch is the live gate).
+        ctx.set_cursor_pos(50.0, 50.0);
+
         // 1. ArrowDown key
         let event_down = KeyEvent {
             state: ElementState::Pressed,
@@ -473,16 +497,12 @@ mod tests {
     }
 
     #[test]
-    fn test_scroll_box_non_focused_hovered_scrolling() {
+    fn test_scroll_box_keys_gated_on_hover() {
         let mut sb = ScrollBox::new();
         sb.set_rect(10.0, 20.0, 100.0, 100.0);
         sb.update_bounds(300.0, 20.0, 100.0); // max_scroll = 200.0
 
         let mut ctx = UiContext::new();
-        ctx.register_widget(sb.base.id(), &mut sb);
-        
-        // Set cursor position over the scroll box
-        ctx.set_cursor_pos(50.0, 50.0);
 
         let event_down = KeyEvent {
             state: ElementState::Pressed,
@@ -493,8 +513,14 @@ mod tests {
             shift: false,
         };
 
-        let root_ptr = &mut sb as *mut ScrollBox as *mut (dyn Element + 'static);
-        assert!(ctx.propagate_event(&Event::KeyInput(event_down), root_ptr));
+        // Cursor away from the box, nothing focused: keys are ignored.
+        ctx.set_cursor_pos(500.0, 500.0);
+        assert!(!sb.keyboard_input(&event_down, &mut ctx));
+        assert_eq!(sb.scroll_y, 0.0);
+
+        // Hovered: keys scroll.
+        ctx.set_cursor_pos(50.0, 50.0);
+        assert!(sb.keyboard_input(&event_down, &mut ctx));
         assert_eq!(sb.scroll_y, 24.0);
     }
 }

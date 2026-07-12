@@ -95,20 +95,10 @@ pub fn paint_legacy_leaf(
     }
 }
 
-/// The scroll-ancestor text clamp the deleted default fonted getter applied: the nearest
-/// ScrollBox/List ancestor's viewport, if any.
-pub fn scroll_ancestor_text_bounds(w: &dyn Element, ui: &UiContext) -> Option<[f32; 4]> {
-    let mut curr = w.parent(ui);
-    while let Some(parent_ptr) = curr {
-        let parent = unsafe { &*parent_ptr };
-        if let Some(scroll_box) = parent.as_any().downcast_ref::<crate::widget::ScrollBox>() {
-            let (sb_x, _, sb_w, _) = scroll_box.rect();
-            let view_min = scroll_box.viewport_y + 4.0;
-            let view_max = scroll_box.viewport_y + scroll_box.viewport_h - 4.0;
-            return Some([sb_x, view_min, sb_x + sb_w, view_max]);
-        }
-        curr = parent.parent(ui);
-    }
+/// The scroll-ancestor text clamp the deleted default fonted getter applied. Always `None`
+/// since Phase 6av: ScrollBox (the last scroll ancestor type) was demoted to a plain
+/// embedded struct — it never appeared as a tree parent, so the walk never matched.
+pub fn scroll_ancestor_text_bounds(_w: &dyn Element, _ui: &UiContext) -> Option<[f32; 4]> {
     None
 }
 
