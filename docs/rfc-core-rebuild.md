@@ -1668,7 +1668,10 @@ Constraint respected: **each crate still builds standalone** — the new core is
     retype, shrinking `Element`'s implementor set toward exactly one.
     Done: cce-colors' ColorSlider (constructor returns the wrapper, so
     construction and direct-dispatch sites are untouched; A/B AE=0,
-    click/wheel live-verified). Remaining: settings ScrollBar, dm ×3,
+    click/wheel live-verified) and settings' ScrollBar (now plain data —
+    its raw-pointer parent/children fields, Drop, and unsafe Send/Sync
+    had zero consumers; strip A/B AE=0 and cross-build byte-identical
+    after an identical wheel + track-click sequence). Remaining: dm ×3,
     cloud Fuzzel + JsonLayoutWidget, designer PassivePlate/Canvas/
     NodePalette/Viewport3D, TI's four lookalikes, and cce-ui's
     ButtonStrip (ctx-registered embed — may need the container hooks).
