@@ -1808,9 +1808,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
        with the `Element` endgame rather than warranting a standalone
        signature sweep.
     4. **`propagate_event(event, root: WidgetId)`** + the app dispatch
-       loops off `as_ptr_mut` (the big app sweep).
+       loops off `as_ptr_mut` (the big app sweep). NOTE from the
+       slice-3 census: propagate roots are live borrows at call time —
+       this slice is API honesty, not a UAF fix; weigh folding it into
+       the endgame instead of touching ~200 app sites twice.
     5. window_runner render plumbing + remaining `as_ptr` sites; then
        the `Element` + `Adapted` endgame (own design pass).
+    Stored-pointer state remaining after slices 1–3, all deliberate:
+    the `WidgetTree` registry; TI's `ControlPanel.children`; and the
+    tick-refreshed parent copies in MenuBar/StatusBar/Dropdown models
+    (`parent_changed`/`tracked_parent` — written each tick by the
+    re-parenting pattern with the live host pointer, read in ctx-less
+    popover-direction/corner-radius math). Endgame option for the
+    parent copies: snapshot the *data* read through them (parent rect,
+    radius, is-Ramp flag) at re-parent time instead of the pointer —
+    same refresh cadence, no deref of potentially-dead memory; watch
+    the one-frame rect lag on resize if reads move to snapshots.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.

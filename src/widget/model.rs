@@ -132,13 +132,6 @@ pub trait Layout {
         Vec::new()
     }
 
-    /// A child was attached through `Element::add_child` (the adapter has already tree-linked
-    /// it and set its parent).
-    fn child_added(&mut self, _child: *mut (dyn Element + 'static)) {}
-
-    /// All children were detached through `Element::clear_children`.
-    fn children_cleared(&mut self) {}
-
     /// The parent pointer changed through `Element::set_parent` (containers that clamp their
     /// rect to the parent's keep a copy — the tree default needs a ctx that `set_rect` lacks).
     fn parent_changed(&mut self, _parent: Option<*mut (dyn Element + 'static)>) {}
@@ -154,10 +147,6 @@ pub trait Layout {
     /// adapter's `*mut dyn Element` — widgets that embed a legacy child (MenuBar's
     /// ButtonStrip) parent it back to the host so legacy parent-chain styling walks work.
     fn arrange_children(&mut self, _rect: Rect, _host: *mut (dyn Element + 'static)) {}
-
-    /// Recursive child layout for the `Element::layout` pass (this one has ctx). Called after
-    /// the adapter has measured and placed the container itself, only while visible.
-    fn layout_children_ctx(&mut self, _rect: Rect, _ctx: &mut UiContext) {}
 
     /// Per-child visibility policy for the adapter's subtree plumbing (Switcher exposes only
     /// the active child). Default: every child.
@@ -922,18 +911,16 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
             ctx.register_widget(c_id, child);
             ctx.tree.link(p_id, c_id);
         }
-        // …plus, for containers, the legacy container extras: parent the child back (Layer,
-        // Switcher) and record it in the model's own Vec.
+        // …plus, for containers, the legacy container extra: parent the child back (Layer,
+        // Switcher). (The model-Vec record died with ParametersBg.children — zero overrides.)
         if Layout::has_container_children(&self.inner) {
             let self_ptr = self.as_ptr_mut();
             unsafe { (*child).set_parent(Some(self_ptr), ctx) };
-            Layout::child_added(&mut self.inner, child);
         }
     }
 
     fn clear_children(&mut self, ctx: &mut UiContext) {
         ctx.clear_children_ids(self.base.id());
-        Layout::children_cleared(&mut self.inner);
     }
 
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
@@ -995,10 +982,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         self.set_rect(origin.x, origin.y, size.width, size.height);
         let host_id = self.base.id();
         Layout::register_embedded_children(&mut self.inner, host_id, ctx);
-        if Layout::has_container_children(&self.inner) && self.visible {
-            let rect = self.content_rect();
-            Layout::layout_children_ctx(&mut self.inner, rect, ctx);
-        }
     }
 
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
