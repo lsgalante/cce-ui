@@ -1766,18 +1766,30 @@ Constraint respected: **each crate still builds standalone** — the new core is
     (deriving the id from `base()` internally) so most call sites
     survive verbatim; direct field readers convert compiler-driven.
     Slices, each independently shippable and A/B-verifiable:
-    1. **Focus** — both stores (`UiContext.focused_widget` AND the
-       `core.rs` thread-local `FOCUSED_WIDGET`) → `Option<WidgetId>`,
-       kept as two stores with their existing reader sets (merging
-       them changes observable focus behavior — not this phase's job).
-       Thread-local fns that must dispatch `unfocus`/`FocusOut` gain a
-       ctx/tree param (every dispatching call site has one in reach).
-       `set_focused` self-registers its target if unregistered, so
-       focus on a not-yet-linked widget keeps working.
-    2. **Popovers + context-menu target** — `active_popovers:
-       Vec<WidgetId>`, `ContextMenuState.target: Option<WidgetId>`;
-       the address-keyed coverage walk (`is_coordinate_covered`,
-       `EventCtx::widget_addr`) becomes id-keyed.
+    1. **Focus (DONE 2026-07-12)** — both stores
+       (`UiContext.focused_widget` AND the `core.rs` thread-local
+       `FOCUSED_WIDGET`) → `Option<WidgetId>`, kept as two stores with
+       their existing reader sets (merging them changes observable
+       focus behavior — not this phase's job). Thread-local fns that
+       must dispatch `unfocus`/`FocusOut` gained a ctx param (every
+       dispatching call site had one in reach). `set_focused` /
+       `set_focused_ptr` refresh the registry with the pointer they
+       are handed, so focus on a not-yet-registered widget keeps
+       working; `is_focused_addr` → `is_focused_id` (base-id
+       comparison). Verified: 168 tests; identical click sequences on
+       text-editor (AE≤6, empty 8% masks) and data-editor (focus
+       click AE=0); settings spinbox click-to-focus live.
+    2. **Popovers + context-menu target (DONE 2026-07-12)** —
+       `active_popovers: Vec<WidgetId>`, `ContextMenuState.target:
+       Option<WidgetId>`; every occlusion/render walk resolves through
+       the tree; `register_popover` takes `&mut` and self-registers;
+       `show_context_menu` derives + registers the target id;
+       `context_menu::mouse_input` takes the resolving ctx;
+       `is_coordinate_covered` id-keyed with `WidgetId(0)` as the
+       no-base sentinel; `EventCtx::widget_addr` deleted (use
+       `ectx.id`). Verified: A/B vs slice-1 captures byte-equivalent
+       (incl. the TE File-menu popover); DE leaf context menu Copy
+       Key → wl-paste; settings page-dropdown popover switches pages.
     3. **Container child storage** (`ScrollBox.children`,
        `ParametersBg.children`, Paginator) + the
        `Element::children`/`parent`/`add_child`/`set_parent` surface →
