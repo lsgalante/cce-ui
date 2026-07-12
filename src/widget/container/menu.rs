@@ -947,18 +947,6 @@ impl Input for MenuBar {
         }
     }
 
-    fn menu_controller(&self) -> Option<&dyn MenuController> {
-        Some(self)
-    }
-    fn menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> {
-        Some(self)
-    }
-    fn page_selector(&self) -> Option<&dyn PageSelector> {
-        Some(self)
-    }
-    fn page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> {
-        Some(self)
-    }
 }
 
 impl MenuController for MenuBar {
@@ -1121,23 +1109,18 @@ mod tests {
         assert!(bw > 0.0, "strip laid out");
         assert!(mb.mouse_input(MouseButton::Left, ElementState::Pressed, bx + bw / 2.0, by + bh / 2.0, &mut ctx));
         assert!(mb.mouse_input(MouseButton::Left, ElementState::Released, bx + bw / 2.0, by + bh / 2.0, &mut ctx));
-        let elem: &dyn Element = &mb;
-        assert!(elem.as_menu_controller().unwrap().is_menu_open(), "dropdown open");
+        assert!(MenuController::is_menu_open(&*mb), "dropdown open");
         assert!(Element::focused(&mb, &ctx), "bar holds focus while open");
         let (dx, dy, _, _) = Element::popover_rect(&mb).expect("dropdown popover");
 
         // Click the second item ("Save"): menu_click reports (0, 1) and everything closes.
         assert!(mb.mouse_input(MouseButton::Left, ElementState::Pressed, dx + 10.0, dy + DROPDOWN_ITEM_H * 1.5, &mut ctx));
-        {
-            let elem: &mut dyn Element = &mut mb;
-            assert_eq!(elem.as_menu_controller_mut().unwrap().menu_click(), Some((0, 1)));
-            assert!(!elem.as_menu_controller().unwrap().is_menu_open());
-        }
+        assert_eq!(MenuController::menu_click(&mut *mb), Some((0, 1)));
+        assert!(!MenuController::is_menu_open(&*mb));
         assert!(!Element::focused(&mb, &ctx), "focus released after the click");
 
-        // The PageSelector capability rides the same hooks.
-        let elem: &dyn Element = &mb;
-        assert!(elem.as_page_selector().unwrap().sidebar_w() > 0.0);
+        // The PageSelector capability is reached through the concrete adapter too.
+        assert!(PageSelector::sidebar_w(&*mb) > 0.0);
     }
 
     #[test]
@@ -1149,9 +1132,8 @@ mod tests {
         Element::set_rect(&mut mb, 0.0, 0.0, 400.0, 24.0);
 
         Element::set_visible(&mut mb, false);
-        let elem: &dyn Element = &mb;
-        assert!(!elem.as_menu_controller().unwrap().is_menu_bar(), "hidden bar is not a menu bar");
+        assert!(!MenuController::is_menu_bar(&*mb), "hidden bar is not a menu bar");
         assert!(!Element::hit_test(&mb, 10.0, 10.0, &ctx));
-        assert!(elem.as_menu_controller().unwrap().get_menu_items_at(10.0, 10.0).is_none());
+        assert!(MenuController::get_menu_items_at(&*mb, 10.0, 10.0).is_none());
     }
 }

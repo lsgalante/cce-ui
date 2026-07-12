@@ -812,12 +812,6 @@ impl Input for Graph {
         self.commit_drag();
     }
 
-    fn graph_controller(&self) -> Option<&dyn GraphController> {
-        Some(self)
-    }
-    fn graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> {
-        Some(self)
-    }
 }
 
 impl Graph {
@@ -1085,11 +1079,7 @@ mod tests {
         // Node b's input port: node b at (200, 160, 80, 40) => top-center (240, 160).
         assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 240.0, 160.0, &mut ctx));
 
-        let elem: &mut dyn Element = &mut g;
-        let pending = elem
-            .as_graph_controller_mut()
-            .expect("Graph exposes GraphController")
-            .take_pending_connection();
+        let pending = GraphController::take_pending_connection(&mut *g);
         assert_eq!(pending, Some(("b".to_string(), "alpha".to_string())));
     }
 

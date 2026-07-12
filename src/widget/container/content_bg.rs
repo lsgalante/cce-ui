@@ -33,12 +33,6 @@ impl Input for ContentBg {
         false
     }
 
-    fn graph_controller(&self) -> Option<&dyn GraphController> {
-        Some(self)
-    }
-    fn graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> {
-        Some(self)
-    }
 }
 
 impl Paint for ContentBg {

@@ -222,18 +222,6 @@ impl Input for Node {
         self.bounds = Some((bx, by, bw, bh));
     }
 
-    fn param_controller(&self) -> Option<&dyn ParamController> {
-        Some(self)
-    }
-    fn param_controller_mut(&mut self) -> Option<&mut dyn ParamController> {
-        Some(self)
-    }
-    fn geom_controller(&self) -> Option<&dyn GeomController> {
-        Some(self)
-    }
-    fn geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> {
-        Some(self)
-    }
 }
 
 impl ParamController for Node {
@@ -272,8 +260,7 @@ mod tests {
 
         // Toggle zone: (100+120-30, 100+11) => 18x18 at (190, 111).
         assert!(node.mouse_input(MouseButton::Left, ElementState::Pressed, 195.0, 115.0, &mut ctx));
-        let elem: &mut dyn Element = &mut node;
-        let geom = elem.as_geom_controller_mut().expect("Node exposes GeomController");
+        let geom: &mut dyn GeomController = &mut *node;
         assert!(!geom.geom_visible(), "toggle click hides geometry");
         assert!(geom.take_geom_toggle(), "toggle flag set once");
         assert!(!geom.take_geom_toggle(), "…and drained");
@@ -290,12 +277,9 @@ mod tests {
     #[test]
     fn param_controller_roundtrips_through_element() {
         let mut node = Node::new(0.0, 0.0, 10.0, 10.0, "n").with_params(&[("k", "v")]);
-        let elem: &mut dyn Element = &mut node;
-        let params = elem.as_param_controller().expect("Node exposes ParamController").node_params();
+        let params = ParamController::node_params(&*node);
         assert_eq!(params, vec![("k".to_string(), "v".to_string(), "string".to_string())]);
-        elem.as_param_controller_mut()
-            .unwrap()
-            .set_display_params(&[("a".to_string(), "b".to_string(), "int".to_string())]);
+        ParamController::set_display_params(&mut *node, &[("a".to_string(), "b".to_string(), "int".to_string())]);
         assert_eq!(node.parameters.len(), 1);
         assert_eq!(node.parameters[0].2, "int");
     }

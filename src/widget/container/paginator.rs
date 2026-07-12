@@ -248,18 +248,6 @@ impl Input for Paginator {
         }
     }
 
-    fn menu_controller(&self) -> Option<&dyn MenuController> {
-        Some(self)
-    }
-    fn menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> {
-        Some(self)
-    }
-    fn page_selector(&self) -> Option<&dyn PageSelector> {
-        Some(self)
-    }
-    fn page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> {
-        Some(self)
-    }
 }
 
 impl MenuController for Paginator {
@@ -310,17 +298,13 @@ mod tests {
         p.mouse_input(MouseButton::Left, ElementState::Pressed, bx + bw / 2.0, by + bh / 2.0, &mut ctx);
         p.mouse_input(MouseButton::Left, ElementState::Released, bx + bw / 2.0, by + bh / 2.0, &mut ctx);
         assert_eq!(p.selected_page, 1);
-        {
-            let elem: &mut dyn Element = &mut p;
-            assert_eq!(elem.as_menu_controller_mut().unwrap().menu_click(), Some((1, 0)));
-            assert_eq!(elem.as_menu_controller_mut().unwrap().menu_click(), None, "click drained");
-        }
+        assert_eq!(MenuController::menu_click(&mut *p), Some((1, 0)));
+        assert_eq!(MenuController::menu_click(&mut *p), None, "click drained");
 
-        // The PageSelector capability rides the wrapper (cce-test-interface's downcast).
-        let elem: &dyn Element = &p;
-        let ps = elem.as_page_selector().unwrap();
-        assert_eq!(ps.selected_page(), 1);
-        assert!(ps.sidebar_w() > 0.0);
+        // The PageSelector capability is reached through the concrete adapter (the
+        // cce-test-interface downcast shape).
+        assert_eq!(PageSelector::selected_page(&*p), 1);
+        assert!(PageSelector::sidebar_w(&*p) > 0.0);
     }
 
     #[test]

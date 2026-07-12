@@ -1,6 +1,6 @@
-//! Narrow-trait `Breadcrumb` (Phase 5k) — the first controller widget across: it re-exposes its
-//! [`PathController`] impl through the `Input` capability hooks, so the legacy
-//! `Element::as_path_controller` downcasts (cce-designer's `path_mut`) keep working. Segment
+//! Narrow-trait `Breadcrumb` (Phase 5k) — the first controller widget across: its
+//! [`PathController`] impl is reached through the concrete `Adapted<Breadcrumb>` by deref
+//! (cce-designer's `path_mut` downcasts the roster entry; Phase 6aw). Segment
 //! geometry (hit zones, hover overlay, per-segment text) is derived from the paint rect in one
 //! place; the right-press records the clicked segment *before* opening the shared context menu
 //! via [`EventCtx::open_context_menu`], so the menu header shows that segment's path.
@@ -184,12 +184,6 @@ impl Input for Breadcrumb {
         }
     }
 
-    fn path_controller(&self) -> Option<&dyn PathController> {
-        Some(self)
-    }
-    fn path_controller_mut(&mut self) -> Option<&mut dyn PathController> {
-        Some(self)
-    }
 
     fn copy_path(&self) {
         let idx = self.right_clicked_seg.unwrap_or(self.path.len());
@@ -270,10 +264,7 @@ mod tests {
     #[test]
     fn path_controller_reachable_through_element() {
         let mut breadcrumb = Breadcrumb::new();
-        let elem: &mut dyn Element = &mut breadcrumb;
-        elem.as_path_controller_mut()
-            .expect("Breadcrumb exposes PathController through the adapter")
-            .set_path(&["a".to_string()]);
+        PathController::set_path(&mut *breadcrumb, &["a".to_string()]);
         assert_eq!(breadcrumb.path, vec!["a".to_string()]);
     }
 }

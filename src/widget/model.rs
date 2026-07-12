@@ -29,9 +29,7 @@
 use crate::scene::layout::{Rect, Size, Style};
 use crate::scene::paint::{PaintCtx, Prim};
 use crate::widget::{
-    Element, Event, GeomController, GraphController, MenuController, PageSelector,
-    ParamController, PathController, SpreadsheetController, TextLabel, UiContext, Widget,
-    WidgetId,
+    Element, Event, TextLabel, UiContext, Widget, WidgetId,
 };
 
 /// Layout inputs for the scene layout engine — the RFC's `Widget` concern, named `Layout` here to
@@ -608,42 +606,6 @@ pub trait Input {
     // implements the trait. Dies with `Element`: the end state reaches a controller through the
     // concrete `Adapted<W>` (or a `&dyn XController` held directly), per RFC §3.5.
 
-    fn menu_controller(&self) -> Option<&dyn MenuController> {
-        None
-    }
-    fn menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> {
-        None
-    }
-    fn graph_controller(&self) -> Option<&dyn GraphController> {
-        None
-    }
-    fn graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> {
-        None
-    }
-    fn spreadsheet_controller(&self) -> Option<&dyn SpreadsheetController> {
-        None
-    }
-    fn spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> {
-        None
-    }
-    fn path_controller(&self) -> Option<&dyn PathController> {
-        None
-    }
-    fn path_controller_mut(&mut self) -> Option<&mut dyn PathController> {
-        None
-    }
-    fn param_controller(&self) -> Option<&dyn ParamController> {
-        None
-    }
-    fn param_controller_mut(&mut self) -> Option<&mut dyn ParamController> {
-        None
-    }
-    fn geom_controller(&self) -> Option<&dyn GeomController> {
-        None
-    }
-    fn geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> {
-        None
-    }
 
     /// Copy this widget's path/content to the clipboard — the context menu's "Copy Path" action
     /// calls `Element::copy_path` on its target (Breadcrumb is the only implementor).
@@ -676,12 +638,6 @@ pub trait Input {
         base_focused
     }
 
-    fn page_selector(&self) -> Option<&dyn PageSelector> {
-        None
-    }
-    fn page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> {
-        None
-    }
 }
 
 /// Wraps a narrow-trait widget `W` so it lives in the legacy `*mut dyn Element` tree. Carries the
@@ -1038,12 +994,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
         Input::is_focused(&self.inner, self.base.focused)
     }
 
-    fn as_page_selector(&self) -> Option<&dyn PageSelector> {
-        Input::page_selector(&self.inner)
-    }
-    fn as_page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> {
-        Input::page_selector_mut(&mut self.inner)
-    }
 
     fn layout(&mut self, origin: crate::widget::Point, constraints: crate::widget::LayoutConstraints, ctx: &mut UiContext) {
         // The Element default (measure + set_rect), plus recursive child layout for visible
@@ -1498,36 +1448,6 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
     }
 
     // --- Controller downcasts -> the `Input` capability hooks ---
-    fn as_menu_controller(&self) -> Option<&dyn MenuController> {
-        Input::menu_controller(&self.inner)
-    }
-    fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> {
-        Input::menu_controller_mut(&mut self.inner)
-    }
-    fn as_graph_controller(&self) -> Option<&dyn GraphController> {
-        Input::graph_controller(&self.inner)
-    }
-    fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> {
-        Input::graph_controller_mut(&mut self.inner)
-    }
-    fn as_spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> {
-        Input::spreadsheet_controller_mut(&mut self.inner)
-    }
-    fn as_path_controller(&self) -> Option<&dyn PathController> {
-        Input::path_controller(&self.inner)
-    }
-    fn as_path_controller_mut(&mut self) -> Option<&mut dyn PathController> {
-        Input::path_controller_mut(&mut self.inner)
-    }
-    fn as_param_controller(&self) -> Option<&dyn ParamController> {
-        Input::param_controller(&self.inner)
-    }
-    fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> {
-        Input::param_controller_mut(&mut self.inner)
-    }
-    fn as_geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> {
-        Input::geom_controller_mut(&mut self.inner)
-    }
     fn copy_path(&self) {
         Input::copy_path(&self.inner)
     }
@@ -1738,6 +1658,7 @@ impl<W: Layout + Paint + Input + 'static> Element for Adapted<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widget::PathController;
     use crate::scene::bridge::layout_subtree;
     use crate::scene::layout::{CrossAlign, Size, Style};
     use crate::scene::paint::Prim;
@@ -1893,9 +1814,9 @@ mod tests {
         assert!(!unsafe { (*ptr).hovered() }, "base hover flag cleared");
     }
 
-    /// A narrow widget that is also a controller: it re-exposes its [`PathController`] impl
-    /// through the `Input` capability hooks, and the adapter forwards the legacy
-    /// `Element::as_path_controller` downcasts to them.
+    /// A narrow widget that is also a controller: the controller trait is reached through the
+    /// concrete `Adapted<W>` by deref (Phase 6aw -- the `Element::as_*_controller` discovery
+    /// hooks are deleted).
     struct Crumbs {
         segs: Vec<String>,
         clicked: Option<usize>,
@@ -1907,12 +1828,6 @@ mod tests {
         }
     }
     impl Input for Crumbs {
-        fn path_controller(&self) -> Option<&dyn PathController> {
-            Some(self)
-        }
-        fn path_controller_mut(&mut self) -> Option<&mut dyn PathController> {
-            Some(self)
-        }
     }
     impl PathController for Crumbs {
         fn set_path(&mut self, segments: &[String]) {
@@ -1924,25 +1839,16 @@ mod tests {
     }
 
     #[test]
-    fn controller_capability_forwards_through_the_element_downcast() {
+    fn controller_capability_reached_through_the_concrete_adapter() {
         let mut w = Box::new(Adapted::new(Crumbs { segs: Vec::new(), clicked: Some(2) }));
-        let elem: &mut dyn Element = w.as_mut();
 
-        // The legacy downcast pair reaches the narrow widget's controller impl…
-        elem.as_path_controller_mut()
-            .expect("Adapted forwards as_path_controller_mut")
-            .set_path(&["home".to_string(), "user".to_string()]);
-        assert!(elem.as_path_controller().is_some(), "shared-ref downcast forwards too");
-        assert_eq!(elem.as_path_controller_mut().unwrap().path_click(), Some(2));
+        // The controller trait is reached by deref through the concrete Adapted<W>...
+        PathController::set_path(&mut **w, &["home".to_string(), "user".to_string()]);
+        assert_eq!(PathController::path_click(&mut **w), Some(2));
 
-        // …and lands on the same state the concrete widget sees.
+        // ...and lands on the same state the concrete widget sees.
         assert_eq!(w.inner().segs, vec!["home".to_string(), "user".to_string()]);
-        assert_eq!(w.inner().clicked, None, "path_click drained through the forward");
-
-        // Capabilities the widget does not expose stay None (the Element defaults).
-        let elem: &dyn Element = w.as_ref();
-        assert!(elem.as_menu_controller().is_none());
-        assert!(elem.as_graph_controller().is_none());
+        assert_eq!(w.inner().clicked, None, "path_click drained through the deref");
     }
     /// Phase 6: the paint walk's text prims carry the widget's font and clip rect (what the
     /// display-list text path renders), not the bare `Paint::paint` text.

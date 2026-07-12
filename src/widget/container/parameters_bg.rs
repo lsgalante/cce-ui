@@ -767,12 +767,6 @@ impl Input for ParametersBg {
         false
     }
 
-    fn param_controller(&self) -> Option<&dyn ParamController> {
-        Some(self)
-    }
-    fn param_controller_mut(&mut self) -> Option<&mut dyn ParamController> {
-        Some(self)
-    }
 
     // --- The host-driven drag surface (the designer routes pointer drags here directly). ---
 
@@ -1893,10 +1887,7 @@ mod tests {
             .iter()
             .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
             .collect();
-        {
-            let elem: &mut dyn Element = &mut p;
-            elem.as_param_controller_mut().unwrap().set_display_params(&params);
-        }
+        ParamController::set_display_params(&mut *p, &params);
         Element::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
         p
     }
@@ -1908,9 +1899,7 @@ mod tests {
             ("Mode", "b", "choice:a,b,c"),
             ("On", "true", "checkbox"),
         ]);
-        let elem: &dyn Element = &p;
-        let pc = elem.as_param_controller().unwrap();
-        assert_eq!(pc.node_params().len(), 3);
+        assert_eq!(ParamController::node_params(&*p).len(), 3);
         assert!(p.sliders[0].is_some() && p.choices[1].is_some() && p.checkboxes[2].is_some());
         // Rows were laid out from the cached rect.
         let (sx, _, sw, _) = p.sliders[0].as_ref().unwrap().rect();
@@ -1926,8 +1915,7 @@ mod tests {
         // every left press, so the return is true either way — assert the value flip).
         p.mouse_input(MouseButton::Left, ElementState::Pressed, cx + 6.0, cy + ch / 2.0, &mut ctx);
         p.mouse_input(MouseButton::Left, ElementState::Released, cx + 6.0, cy + ch / 2.0, &mut ctx);
-        let elem: &dyn Element = &p;
-        assert_eq!(elem.as_param_controller().unwrap().node_params()[0].1, "true");
+        assert_eq!(ParamController::node_params(&*p)[0].1, "true");
 
         // Code editor: focus it via a click, type, then unfocus commits the buffer.
         let mut p = panel_with(&[("Src", "let x = 1;", "code")]);
@@ -1940,8 +1928,7 @@ mod tests {
         Element::unfocus(&mut p);
         assert_eq!(p.focused_param, None);
         assert!(p.code_editor.is_none());
-        let elem: &dyn Element = &p;
-        assert!(elem.as_param_controller().unwrap().node_params()[0].1.contains('y'), "editor buffer committed on unfocus");
+        assert!(ParamController::node_params(&*p)[0].1.contains('y'), "editor buffer committed on unfocus");
     }
 
     #[test]
@@ -1983,10 +1970,7 @@ mod tests {
             .map(|i| (format!("P{i}"), "1.00".to_string(), "slider:0:2".to_string()))
             .collect();
         let mut p = ParametersBg::new();
-        {
-            let elem: &mut dyn Element = &mut p;
-            elem.as_param_controller_mut().unwrap().set_display_params(&rows);
-        }
+        ParamController::set_display_params(&mut *p, &rows);
         Element::set_rect(&mut p, 0.0, 0.0, 300.0, 200.0);
         assert!(p.content_h > 200.0);
         assert!(Element::is_scrollable(&p));

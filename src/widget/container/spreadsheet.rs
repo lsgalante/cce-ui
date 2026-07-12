@@ -350,12 +350,6 @@ impl Input for Spreadsheet {
         true
     }
 
-    fn spreadsheet_controller(&self) -> Option<&dyn SpreadsheetController> {
-        Some(self)
-    }
-    fn spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> {
-        Some(self)
-    }
 }
 
 impl SpreadsheetController for Spreadsheet {
@@ -379,10 +373,7 @@ mod tests {
         Element::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0); // viewport: 100 = ~4 rows of 24
         let data: Vec<Vec<String>> =
             (0..rows).map(|i| vec![format!("r{i}"), format!("v{i}")]).collect();
-        let elem: &mut dyn Element = &mut s;
-        elem.as_spreadsheet_controller_mut()
-            .expect("Spreadsheet exposes SpreadsheetController")
-            .set_spreadsheet_data(vec!["a".into(), "b".into()], data);
+        SpreadsheetController::set_spreadsheet_data(&mut *s, vec!["a".into(), "b".into()], data);
         s
     }
 

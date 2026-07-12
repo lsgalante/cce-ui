@@ -593,23 +593,11 @@ pub trait Element {
     fn is_child_visible(&self, _child_id: WidgetId) -> bool { true }
     fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
 
-    fn as_page_selector(&self) -> Option<&dyn PageSelector> { None }
-    fn as_page_selector_mut(&mut self) -> Option<&mut dyn PageSelector> { None }
-    fn as_menu_controller(&self) -> Option<&dyn MenuController> { None }
-    fn as_menu_controller_mut(&mut self) -> Option<&mut dyn MenuController> { None }
-    fn as_graph_controller(&self) -> Option<&dyn GraphController> { None }
-    fn as_graph_controller_mut(&mut self) -> Option<&mut dyn GraphController> { None }
-    fn as_spreadsheet_controller_mut(&mut self) -> Option<&mut dyn SpreadsheetController> { None }
-    fn as_path_controller(&self) -> Option<&dyn PathController> { None }
-    fn as_path_controller_mut(&mut self) -> Option<&mut dyn PathController> { None }
-    fn as_param_controller(&self) -> Option<&dyn ParamController> { None }
-    fn as_param_controller_mut(&mut self) -> Option<&mut dyn ParamController> { None }
-    fn as_geom_controller_mut(&mut self) -> Option<&mut dyn GeomController> { None }
-
     fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn Element + 'static)> {
         let base = self.base()?;
         ctx.tree.parent_ptr(base.id())
     }
+
 
     fn set_parent(&mut self, parent: Option<*mut (dyn Element + 'static)>, ctx: &mut UiContext) {
         if let Some(base) = self.base() {

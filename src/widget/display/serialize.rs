@@ -23,7 +23,15 @@ fn serialize_single_widget(w: &dyn Element, json: &mut String) {
     let mut is_menu_open = false;
     let mut is_vertical = false;
     let mut checked_states = Vec::new();
-    if let Some(mc) = w.as_menu_controller() {
+    // Concrete capability lookup (Phase 6aw): the MenuController implementors a serialized
+    // roster can hold are Adapted<MenuBar> and Adapted<Paginator> — Element's discovery
+    // hooks are gone.
+    let mc: Option<&dyn MenuController> = w
+        .as_any()
+        .downcast_ref::<MenuBar>()
+        .map(|m| m as &dyn MenuController)
+        .or_else(|| w.as_any().downcast_ref::<Paginator>().map(|p| p as &dyn MenuController));
+    if let Some(mc) = mc {
         menu_items = mc.menu_items();
         is_menu_open = mc.is_menu_open();
         is_vertical = mc.is_vertical();
