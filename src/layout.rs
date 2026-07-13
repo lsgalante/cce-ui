@@ -3144,7 +3144,7 @@ impl RenderTarget for PopoverCollector {
 pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut T, x: f32, y: f32, ww: f32, wh: f32, ctx: &mut UiContext) {
     let id = Some(w.base().id());
     if let Some(w_id) = id {
-        ctx.register_widget(w_id, w.as_ptr_mut());
+        ctx.register_widget(w_id, w as *mut T as *mut (dyn WidgetHost + 'static));
     }
     w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
     let (style_r, corners) = w.corner_style();
@@ -3203,7 +3203,7 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     // drew the geometry via `all_quads`/`all_rounded_quads` above, so we take only the Text prims
     // from the walk. This drops the legacy `widget_font` + `text_labels_with_font_and_bounds`
     // getters from render_widget — the prim already carries the per-widget font+bounds.
-    let w_ptr = w.as_ptr_mut();
+    let w_ptr = w as *mut T as *mut (dyn WidgetHost + 'static);
     let mut text_scratch = crate::scene::paint::PaintCtx::new();
     crate::scene::painter::paint_root_into(&*ctx, w_ptr, &mut text_scratch);
     for item in text_scratch.finish().items {

@@ -719,6 +719,17 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
 }
 
 impl<W: Layout + Paint + Input + 'static> Adapted<W> {
+    /// This widget as a type-erased host pointer (off the `WidgetHost` trait — the
+    /// plumbing retype). Registration-bridge material: derived from a live borrow at the
+    /// call, stored only in the `WidgetTree` registry.
+    pub fn as_ptr(&self) -> *mut (dyn WidgetHost + 'static) {
+        self as *const Self as *mut Self as *mut (dyn WidgetHost + 'static)
+    }
+
+    pub fn as_ptr_mut(&mut self) -> *mut (dyn WidgetHost + 'static) {
+        self as *mut Self as *mut (dyn WidgetHost + 'static)
+    }
+
     /// Movement bounds pushed in by hosts (off the `WidgetHost` trait since 6bd — the one
     /// production caller is concrete: designer's network panel).
     pub fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
@@ -1004,13 +1015,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         &mut self.inner
     }
-    fn as_ptr(&self) -> *mut (dyn WidgetHost + 'static) {
-        self as *const Self as *mut Self as *mut (dyn WidgetHost + 'static)
-    }
-    fn as_ptr_mut(&mut self) -> *mut (dyn WidgetHost + 'static) {
-        self as *mut Self as *mut (dyn WidgetHost + 'static)
-    }
-
     fn set_visible(&mut self, visible: bool) {
         if self.visible != visible {
             self.visible = visible;

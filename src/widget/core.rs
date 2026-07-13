@@ -639,11 +639,5 @@ macro_rules! impl_widget_base {
         fn base_mut(&mut self) -> &mut $crate::widget::Widget { &mut self.base }
         fn as_any(&self) -> &dyn std::any::Any { self }
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
-        fn as_ptr(&self) -> *mut (dyn $crate::widget::WidgetHost + 'static) {
-            self as *const Self as *mut Self as *mut (dyn $crate::widget::WidgetHost + 'static)
-        }
-        fn as_ptr_mut(&mut self) -> *mut (dyn $crate::widget::WidgetHost + 'static) {
-            self as *mut Self as *mut (dyn $crate::widget::WidgetHost + 'static)
-        }
     };
 }

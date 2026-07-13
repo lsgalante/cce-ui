@@ -1877,6 +1877,17 @@ Constraint respected: **each crate still builds standalone** — the new core is
        click lands through the tree link; TI page-selector crop
        byte-identical (no double-draw); designer /state + full panel
        text intact; settings/files/demo canary-silent.
+       FOLLOW-UP: **`as_ptr`/`as_ptr_mut` left the trait (50→48).**
+       They live on as inherent `Adapted<W>` methods (the
+       registration-bridge class) — every concrete call site resolved
+       unchanged; dyn/generic receivers became the plain casts the
+       impl always was (`w as *mut (dyn WidgetHost + 'static)`;
+       `impl_widget_base!` no longer generates them). Designer's
+       `find_widget_index` now honestly takes the thin `*const ()`
+       address its body always compared. Verified: 165 tests +
+       workspace suite; designer capture pixel-identical to the
+       prior slice's (empty 8% mask) + /state live; TI click probe
+       canary-silent.
     5. window_runner render plumbing + remaining `as_ptr` sites; then
        the `Element` + `Adapted` endgame (own design pass).
     Stored-pointer state remaining after slices 1–3, all deliberate:

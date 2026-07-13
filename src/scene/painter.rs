@@ -209,7 +209,7 @@ mod tests {
     }
 
     fn reg(ctx: &mut UiContext, w: &mut P) -> (crate::widget::WidgetId, ElemPtr) {
-        let ptr = w.as_ptr_mut();
+        let ptr = &mut *w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
         let id = w.base.id();
         ctx.register_widget(id, ptr);
         (id, ptr)
@@ -346,7 +346,7 @@ mod tests {
         let mut w = Rounded { base: Widget::new() };
         w.base.w = 20.0;
         w.base.h = 10.0;
-        let ptr = w.as_ptr_mut();
+        let ptr = &mut w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
         ctx.register_widget(w.base.id(), ptr);
 
         let list = paint_tree(&ctx, ptr);

@@ -189,12 +189,14 @@ pub trait WidgetHost {
         }
     }
 
-    // Required (the flip): the old defaults manufactured DummyAny/null-DummyElement
-    // stand-ins nothing could legitimately use. `impl_widget_base!` provides all four.
+    // Required (the flip): the old defaults manufactured DummyAny stand-ins nothing
+    // could legitimately use. `impl_widget_base!` provides both. `as_ptr`/`as_ptr_mut`
+    // are GONE from the trait (the plumbing retype): a pointer to a widget you already
+    // hold is a plain cast (`w as *mut (dyn WidgetHost + 'static)`); concrete
+    // registration sites ride the inherent `Adapted<W>` methods (the registration
+    // bridge — derived from a live borrow, never stored beyond the registry).
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
-    fn as_ptr(&self) -> *mut (dyn WidgetHost + 'static);
-    fn as_ptr_mut(&mut self) -> *mut (dyn WidgetHost + 'static);
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
         // The default serves test shims only (Adapted overrides this): base hover

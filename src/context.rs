@@ -898,7 +898,7 @@ mod tests {
     fn drag_allowed_everywhere_except_blocking_widgets() {
         let mut ctx = UiContext::new();
         let mut w = Block { base: Widget::new_rect(10.0, 10.0, 50.0, 50.0) };
-        let ptr = w.as_ptr_mut();
+        let ptr = &mut w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
         ctx.register_widget(w.base.id(), ptr);
         ctx.rebuild_spatial_grid();
 
