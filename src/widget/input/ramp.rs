@@ -373,24 +373,6 @@ impl Layout for ColorRamp {
     
     }
 
-    fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
-        // Registered but NOT tree-linked (6bd self-routing, the TreeList rule): on_event
-        // forwards every event class internally — descent double-delivered and starved
-        // the composite-level sync/drains.
-        let _ = host_id;
-        let p = self.r_slider.as_ptr_mut();
-        let id = self.r_slider.base().id();
-        ctx.register_widget(id, p);
-        let p = self.g_slider.as_ptr_mut();
-        let id = self.g_slider.base().id();
-        ctx.register_widget(id, p);
-        let p = self.b_slider.as_ptr_mut();
-        let id = self.b_slider.base().id();
-        ctx.register_widget(id, p);
-        let p = self.del_button.as_ptr_mut();
-        let id = self.del_button.base().id();
-        ctx.register_widget(id, p);
-    }
 }
 
 impl Paint for ColorRamp {
@@ -837,22 +819,11 @@ impl Layout for Ramp {
     
     }
 
-    fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
-        // Registered but NOT tree-linked (6bd self-routing, the TreeList rule).
-        let _ = host_id;
-        let p = self.preset_dropdown.as_ptr_mut();
-        let id = self.preset_dropdown.base().id();
-        ctx.register_widget(id, p);
-        let p = self.line_type_dropdown.as_ptr_mut();
-        let id = self.line_type_dropdown.base().id();
-        ctx.register_widget(id, p);
-        let p = self.val_slider.as_ptr_mut();
-        let id = self.val_slider.base().id();
-        ctx.register_widget(id, p);
-        let p = self.del_button.as_ptr_mut();
-        let id = self.del_button.base().id();
-        ctx.register_widget(id, p);
-    }
+    // register_embedded_children: gone entirely (6bd self-routing): the fields need no
+    // eager registry presence — focus setters self-register on demand (6bc), the composite
+    // itself covers the spatial grid, and an eagerly-registered child DROPDOWN's open
+    // popover made `is_coordinate_covered` occlude the composite's own hit gate (the
+    // exclusion is exact-id only), which is why preset-item clicks never landed.
 }
 
 impl Paint for Ramp {
