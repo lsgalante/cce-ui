@@ -752,7 +752,7 @@ fn probe_slider_bridge() {
             &Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x: 50.0, y: 10.0, local_x: 50.0, local_y: 10.0 },
             id,
         ));
-        assert!(WidgetHost::is_dragging(&sl));
+        assert!(sl.is_dragging());
         assert!(sl.drag_update(80.0, 10.0));
         assert!(sl.inner().value() > 0.5);
         sl.drag_end();

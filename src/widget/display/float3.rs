@@ -352,10 +352,10 @@ mod tests {
         // Track press starts a drag; drag_update moves the value; release ends it.
         let track_y = rows[0].1 + 8.0;
         assert!(f.mouse_input(MouseButton::Left, ElementState::Pressed, 150.0, track_y, &mut ctx));
-        assert!(WidgetHost::is_dragging(&f));
+        assert!(f.is_dragging());
         f.drag_update(260.0, track_y);
         assert!(f.values[0] > 0.5, "drag right raises the value");
         f.drag_end();
-        assert!(!WidgetHost::is_dragging(&f));
+        assert!(!f.is_dragging());
     }
 }

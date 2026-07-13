@@ -853,7 +853,7 @@ mod tests {
             local_y: 15.0,
         };
         assert!(ctx.propagate_event(&press, id), "press in the track arms the drag");
-        assert!(WidgetHost::is_dragging(&slider));
+        assert!(slider.is_dragging());
         let v0 = slider.value;
 
         // First move past the 3px threshold starts the drag; the next one updates it.
@@ -877,7 +877,7 @@ mod tests {
             local_y: 15.0,
         };
         ctx.propagate_event(&release, id);
-        assert!(!WidgetHost::is_dragging(&slider), "DragEnd reached Input::drag_end");
+        assert!(!slider.is_dragging(), "DragEnd reached Input::drag_end");
         assert!(!ctx.is_dragging);
     }
 

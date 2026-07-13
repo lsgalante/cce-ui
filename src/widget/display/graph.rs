@@ -1052,14 +1052,14 @@ mod tests {
         // Node a occupies (100, 100, 80, 40). Press its body (away from ports/toggle).
         assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
         assert_eq!(g.selected_node(), Some(0));
-        assert!(WidgetHost::is_dragging(&g) && WidgetHost::draggable(&g));
+        assert!(g.is_dragging() && g.draggable());
 
         // Drag one grid step right (step_x = 100): snap puts the node at column 1, but cell
         // (1, 0) is free so it lands there.
         g.drag_begin(110.0, 120.0);
         assert!(g.drag_update(210.0, 120.0));
         assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 120.0, &mut ctx));
-        assert!(!WidgetHost::is_dragging(&g));
+        assert!(!g.is_dragging());
         assert_eq!(g.get_nodes()[0].position, (1.0, 0.0));
 
         // An empty-space press clears the selection and is NOT consumed (legacy contract).

@@ -417,20 +417,20 @@ mod tests {
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
 
         // content 1200, viewport 100 -> overflowing, so the host may drag it.
-        assert!(WidgetHost::draggable(&s));
+        assert!(s.draggable());
 
         // Press on the scrollbar track (x >= 200-6-2-4): thumb jumps, drag engages.
         s.drag_begin(195.0, 80.0);
-        assert!(WidgetHost::is_dragging(&s));
+        assert!(s.is_dragging());
         assert!(s.drag_update(195.0, 110.0), "thumb drag scrolls");
         let dragged_to = s.inner().geom(rect).unwrap().scroll;
         assert!(dragged_to > 0.0);
         s.drag_end();
-        assert!(!WidgetHost::is_dragging(&s));
+        assert!(!s.is_dragging());
 
         // A body press (left of the scrollbar) engages no drag.
         s.drag_begin(50.0, 60.0);
-        assert!(!WidgetHost::is_dragging(&s), "body press is not a scrollbar drag");
+        assert!(!s.is_dragging(), "body press is not a scrollbar drag");
 
         // End key jumps to max; Home returns to zero. (Keys route via keyboard_input.)
         let end = crate::widget::KeyEvent {

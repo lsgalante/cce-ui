@@ -315,8 +315,10 @@ pub trait WidgetHost {
     fn solid_border(&self) -> Option<([f32; 4], f32)> { None }
     fn plate_bevel(&self) -> Option<f32> { None }
 
-    fn is_dragging(&self) -> bool { false }
-    fn draggable(&self) -> bool { false }
+    // `draggable`/`is_dragging` are GONE from the trait (the ControlPanel endgame
+    // removed their last stored-child-pointer consumer): the drag queries are concrete
+    // inherent `Adapted<W>` reads; index-driven rosters (TI, designer) route them
+    // through per-slot matches like the other value drains.
 
     fn label_x_offset(&self) -> f32 {
         let name = self.type_name();

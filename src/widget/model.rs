@@ -730,6 +730,17 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         self as *mut Self as *mut (dyn WidgetHost + 'static)
     }
 
+    /// Whether a press here may start a drag (off `WidgetHost` — the ControlPanel
+    /// endgame; forwards to the narrow `Input` hook with the laid-out content rect).
+    pub fn draggable(&self) -> bool {
+        Input::draggable(&self.inner, self.content_rect())
+    }
+
+    /// Whether the widget's own drag is live (off `WidgetHost` with `draggable`).
+    pub fn is_dragging(&self) -> bool {
+        Input::is_dragging(&self.inner)
+    }
+
     /// Movement bounds pushed in by hosts (off the `WidgetHost` trait since 6bd — the one
     /// production caller is concrete: designer's network panel).
     pub fn set_drag_bounds(&mut self, bx: f32, by: f32, bw: f32, bh: f32) {
@@ -1398,12 +1409,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         let (rx, rw) = Layout::adjust_row_rect(&self.inner, x, w);
         self.base.row_x = rx;
         self.base.row_w = rw;
-    }
-    fn draggable(&self) -> bool {
-        Input::draggable(&self.inner, self.content_rect())
-    }
-    fn is_dragging(&self) -> bool {
-        Input::is_dragging(&self.inner)
     }
     fn tick(&mut self, dt: f32, ctx: &mut UiContext) -> bool {
         // Legacy value-owning containers healed their children's registry entries every tick

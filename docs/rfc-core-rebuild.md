@@ -1917,6 +1917,42 @@ Constraint respected: **each crate still builds standalone** — the new core is
        `draggable`/`is_dragging` trait methods still have this
        cascade + TI's ControlPanel as dyn consumers — they leave the
        trait with the CP endgame.
+       **THE CONTROLPANEL ENDGAME — DONE (2026-07-13). The last
+       stored child-pointer surface is gone, and `draggable`/
+       `is_dragging` left the trait (49→47).** TI's ControlPanel is
+       DISSOLVED to scroll chrome (~120 lines: ScrollBox + bg/border
+       paint + drag hooks): its `Vec<*mut dyn>` children, label-
+       matched arrangement, aggregate views, dummy-ctx event/tick/
+       drag forwarding, and scroll-translated coordinates are all
+       deleted. The app owns the panel now: `arrange_control_panel`
+       lays the child slots at SCREEN coordinates (scroll offset
+       applied at layout time, re-run every frame — the wheel moves
+       content on the frame it repaints); `display_list` emits child
+       geometry/text clamped to the panel viewport with the legacy
+       partial-clip radius-zeroing and border-inset rules; children
+       dispatch as ordinary routed roots. THE GATE THE DISSOLUTION
+       REQUIRES: children at real rects are hit-testable even when
+       clipped below the fold — `cp_gate` (panel rect ∪ open child
+       popovers, the legacy `ControlPanel::hit`) gates the press
+       pre-scan, release broadcast, and wheel; keys stay
+       focused-path-only; the panel takes the wheel before its
+       children (legacy scroll-frame order). BUG THE GATE FIXED
+       LIVE: a fold-hidden StatusBar toggle stole the page-selector
+       press. FOUND: the legacy panel double-drew its scrollbar
+       (rounded AND plain aggregate views — the 6p/6v class);
+       single-drawn now, thumb correctly dimmer. `draggable`/
+       `is_dragging` became inherent `Adapted` reads; the two
+       index-driven rosters (TI 53+5 slots incl. child-mode enum
+       variants, designer 17) route them through generated per-slot
+       matches; 14 UFCS test forms became dot calls. Verified live:
+       Windows page A/B vs pre-dissolution baseline (static +
+       scrolled + popover states — masks empty except the scrollbar
+       single-draw strip), dropdown item select updates the Surface
+       Info description end-to-end, spinbox +/- increments, wheel
+       scrolls with content following, page switching intact both
+       ways, Controls page unchanged, child mode alive; 28-target
+       suite. Scrollbar thumb drag: user spot-check (held drags not
+       headless-drivable).
     5. window_runner render plumbing + remaining `as_ptr` sites; then
        the `Element` + `Adapted` endgame (own design pass).
     Stored-pointer state remaining after slices 1–3, all deliberate:
