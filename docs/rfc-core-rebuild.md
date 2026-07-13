@@ -1103,6 +1103,11 @@ Constraint respected: **each crate still builds standalone** — the new core is
     ctrl+j/k cycle the section highlight and ctrl+i/u descend/ascend
     (audio-page border diffs). NB accounts/storage take `_sec_focused` and
     render no highlight — ctrl-nav is invisible on those two pages.
+    Re-verified on the LIVE session (2026-07-13, after the compositor restarted
+    onto the 114ef89 binary — the restart was the only reason this had been
+    nested-rig-only): ctrl+j → j → k and ctrl+i → u on the audio page, both
+    round-trips returning pixel-identical frames (0 AE diff), highlight
+    visually confirmed cycling Output→Input. Nothing pending on ctrl-nav.
   - **6x — data-editor + text-editor off the engine popup path; the render-only xdg
     popup machinery is DELETED. DONE (live-verified: text-editor File menu open +
     item click; data-editor recent-files menu → config.kdl load, tree context menu
