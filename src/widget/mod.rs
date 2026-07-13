@@ -594,9 +594,9 @@ pub use self::container::{
 };
 pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
-    LayoutPreview, FontPreview, InfoBox, StatusDot, InteractiveListItem,
+    InfoBox, StatusDot, InteractiveListItem,
     GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
-    DotStatus, PreviewLayoutMode, Sidebar, Panel, PreviewState, ImagePreviewData, serialize_widgets
+    DotStatus, Panel, PreviewState, ImagePreviewData, serialize_widgets
 };
 
 pub trait PageSelector {
