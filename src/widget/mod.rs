@@ -111,33 +111,6 @@ pub struct LayoutTree {
     pub children: HashMap<WidgetId, Vec<WidgetId>>,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct WidgetPtr(pub *mut (dyn WidgetHost + 'static));
-
-impl WidgetPtr {
-    pub fn is_null(&self) -> bool {
-        self.0.is_null()
-    }
-    pub fn as_ptr(&self) -> *mut (dyn WidgetHost + 'static) {
-        self.0
-    }
-}
-
-impl std::ops::Deref for WidgetPtr {
-    type Target = dyn WidgetHost + 'static;
-    fn deref(&self) -> &Self::Target {
-        assert!(!self.0.is_null(), "Attempted to dereference a null WidgetPtr!");
-        unsafe { &*self.0 }
-    }
-}
-
-impl std::ops::DerefMut for WidgetPtr {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        assert!(!self.0.is_null(), "Attempted to dereference a null WidgetPtr!");
-        unsafe { &mut *self.0 }
-    }
-}
-
 pub use crate::context::UiContext;
 
 #[derive(Debug, Clone, PartialEq)]

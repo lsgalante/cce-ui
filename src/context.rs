@@ -112,7 +112,16 @@ impl UiContext {
         self.tree.get_ptr(id).map(|ptr| unsafe { &mut *ptr })
     }
 
-    pub fn propagate_event(&mut self, event: &Event, root: *mut (dyn WidgetHost + 'static)) -> bool {
+    /// Dispatch an event into the tree rooted at `root` — a `WidgetId` resolved through the
+    /// registry (the plumbing retype: the router's last raw-pointer API boundary is gone; apps
+    /// name roots by id and the registry is the one place a pointer lives). The root must be
+    /// registered — apps already register every widget for focus/coverage — and an
+    /// unresolvable root is a loud no-op, never a deref.
+    pub fn propagate_event(&mut self, event: &Event, root: WidgetId) -> bool {
+        let Some(root_ptr) = self.tree.get_ptr(root) else {
+            eprintln!("propagate_event: unregistered/stale root {root:?} — event dropped");
+            return false;
+        };
         if let Event::MouseWheel { .. } = event {
             let now = std::time::Instant::now();
             let elapsed_ms = match self.last_scroll_time {
@@ -154,7 +163,7 @@ impl UiContext {
                     return true;
                 }
                 let (cx, cy) = self.cursor_pos;
-                if let Some(scrollable) = self.find_hovered_scrollable(root, cx, cy) {
+                if let Some(scrollable) = self.find_hovered_scrollable(root_ptr, cx, cy) {
                     unsafe {
                         if (*scrollable).handle_event(event, self) {
                             (*scrollable).mark_dirty(self);
@@ -164,13 +173,12 @@ impl UiContext {
                 }
             }
         }
-        self.propagate_event_impl(event, root)
+        self.propagate_event_impl(event, root_ptr)
     }
 
+    /// The dispatch body. Private — `root` is the registry-resolved pointer from
+    /// `propagate_event`, live for the duration of this call.
     fn propagate_event_impl(&mut self, event: &Event, root: *mut (dyn WidgetHost + 'static)) -> bool {
-        if root.is_null() {
-            return false;
-        }
         if let Event::Tick(_) = event {
             return false;
         }
@@ -596,17 +604,6 @@ impl UiContext {
         }
     }
 
-    pub fn register_popover_ptr(&mut self, ptr: *mut (dyn WidgetHost + 'static)) {
-        if ptr.is_null() {
-            return;
-        }
-        let id = unsafe { (*ptr).base().id() };
-        self.tree.register(id, ptr);
-        if !self.active_popovers.contains(&id) {
-            self.active_popovers.push(id);
-        }
-    }
-
     /// Whether `(px, py)` is covered by an open popover or a popover-carrying widget other
     /// than `query_id` (the querying widget excludes itself). Every widget has a base id
     /// now (the flip) — the old `WidgetId(0)` no-base sentinel is gone.
@@ -905,7 +902,8 @@ mod tests {
         let mut slider = Slider::new();
         WidgetHost::set_rect(&mut slider, 0.0, 0.0, 200.0, 30.0);
         let ptr = slider.as_ptr_mut();
-        ctx.register_widget(slider.base().id(), ptr);
+        let id = slider.base().id();
+        ctx.register_widget(id, ptr);
 
         let press = Event::MouseButton {
             button: MouseButton::Left,
@@ -915,15 +913,15 @@ mod tests {
             local_x: 100.0,
             local_y: 15.0,
         };
-        assert!(ctx.propagate_event(&press, ptr), "press in the track arms the drag");
+        assert!(ctx.propagate_event(&press, id), "press in the track arms the drag");
         assert!(WidgetHost::is_dragging(&slider));
         let v0 = slider.value;
 
         // First move past the 3px threshold starts the drag; the next one updates it.
         let mv = |x: f32| Event::PointerMove { x, y: 15.0, local_x: x, local_y: 15.0 };
-        ctx.propagate_event(&mv(110.0), ptr);
+        ctx.propagate_event(&mv(110.0), id);
         assert!(ctx.is_dragging, "router crossed the drag threshold");
-        ctx.propagate_event(&mv(140.0), ptr);
+        ctx.propagate_event(&mv(140.0), id);
         assert!(
             slider.value > v0 + 0.05,
             "DragUpdate reached Input::drag_update (value {} -> {})",
@@ -939,7 +937,7 @@ mod tests {
             local_x: 140.0,
             local_y: 15.0,
         };
-        ctx.propagate_event(&release, ptr);
+        ctx.propagate_event(&release, id);
         assert!(!WidgetHost::is_dragging(&slider), "DragEnd reached Input::drag_end");
         assert!(!ctx.is_dragging);
     }

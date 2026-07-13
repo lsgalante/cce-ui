@@ -1807,11 +1807,50 @@ Constraint respected: **each crate still builds standalone** — the new core is
        value is transient and tree-resolved at call time — they die
        with the `Element` endgame rather than warranting a standalone
        signature sweep.
-    4. **`propagate_event(event, root: WidgetId)`** + the app dispatch
-       loops off `as_ptr_mut` (the big app sweep). NOTE from the
-       slice-3 census: propagate roots are live borrows at call time —
-       this slice is API honesty, not a UAF fix; weigh folding it into
-       the endgame instead of touching ~200 app sites twice.
+    4. **`propagate_event(event, root: WidgetId)` — DONE (2026-07-13,
+       the plumbing retype).** The handle rule it establishes: raw
+       `*mut dyn WidgetHost` may appear ONLY as (a) the `WidgetTree`
+       registry payload — the one ownership bridge, written at
+       registration; (b) a registration argument derived from a live
+       `&mut` (`register_widget`, `set_focused_ptr`-class
+       self-registration — never stored); (c) machinery-internal
+       transients resolved from the registry inside one call.
+       Everything else crossing an API boundary carries `WidgetId` and
+       resolves through the generational tree at use — a stale id is a
+       loud no-op (`eprintln` canary), never a deref. Executed: the
+       router resolves the root at the top of `propagate_event`
+       (`propagate_event_impl` keeps its private resolved-ptr param);
+       ~470 app dispatch sites across 14 apps went `.as_ptr_mut()` →
+       `.id()` (field paths regex-converted; `let ptr = …` pairs,
+       ptr-Vec collections, and dyn-roster receivers hand-converted);
+       settings' `section_widgets`/`extra_dispatch_roots`/
+       `page_dispatch_roots` retyped to `Vec<WidgetId>` with the
+       keyboard section-focus block on `focus::is_focused_id`/
+       `set_focused_id`; dead `WidgetPtr` + caller-less
+       `register_popover_ptr` deleted. THE CONTRACT THE RETYPE
+       SURFACES: a dispatch root must be REGISTERED. Most apps get
+       registration as a `render_widget`/`paint_root_into` side
+       effect; the canary caught every gap live: TI (roster never
+       registered — per-frame `register_roster()`), settings chrome
+       (wiped by `rebuild_layout`'s `clear_hierarchy` — re-registered
+       after the view pass) + per-page rows rebuilt on data refresh
+       (`AppPage::register_extra_dispatch_roots(ctx)` runs before
+       each dispatch — the same liveness cadence the ptr router had)
+       + custom-drawn menus (fonts/system pages), email (hand
+       aggregate, per-frame block), authenticator (same), dm's bg
+       root, LI's word-processor box, cloud (registers at its five
+       dispatch sites), designer (frame re-registration skipped
+       INVISIBLE slots while the wheel loop dispatches the whole
+       roster). BUG FOUND: cce-graph registered its graph under a
+       hand-minted `NEXT_WIDGET_ID` instead of the widget's own base
+       id — `graph.id()` was unresolvable all along (focus/drag
+       lookups on it silently failed); registration now uses the
+       real id and the synthetic field is gone. Verified: 165 cce-ui
+       tests + full workspace suite; canary-silent pointer/click/
+       wheel probes over 13 apps and all 10 settings pages; TI
+       dropdown→Grid relayout lands end-to-end through the id
+       router; designer /state serves; demo's four event loops shed
+       their unsafe self-alias entirely.
     5. window_runner render plumbing + remaining `as_ptr` sites; then
        the `Element` + `Adapted` endgame (own design pass).
     Stored-pointer state remaining after slices 1–3, all deliberate:

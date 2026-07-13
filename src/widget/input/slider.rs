@@ -750,7 +750,7 @@ fn probe_slider_bridge() {
         // Press on the track grabs the thumb.
         assert!(ctx.propagate_event(
             &Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x: 50.0, y: 10.0, local_x: 50.0, local_y: 10.0 },
-            ptr,
+            id,
         ));
         assert!(WidgetHost::is_dragging(&sl));
         assert!(sl.drag_update(80.0, 10.0));

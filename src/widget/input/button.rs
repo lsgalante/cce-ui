@@ -397,19 +397,19 @@ mod tests {
         ctx.register_widget(id, ptr);
 
         // Press in, release in -> click.
-        assert!(ctx.propagate_event(&press(20.0, 20.0), ptr));
-        assert!(ctx.propagate_event(&release(25.0, 20.0), ptr), "release consumed (was pressed)");
+        assert!(ctx.propagate_event(&press(20.0, 20.0), id));
+        assert!(ctx.propagate_event(&release(25.0, 20.0), id), "release consumed (was pressed)");
         assert!(b.take_click());
         assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "callback fired");
 
         // Press in, release OUT -> cancelled, no click, but release still consumed.
-        assert!(ctx.propagate_event(&press(20.0, 20.0), ptr));
-        assert!(ctx.propagate_event(&release(500.0, 500.0), ptr), "cancelling release consumed");
+        assert!(ctx.propagate_event(&press(20.0, 20.0), id));
+        assert!(ctx.propagate_event(&release(500.0, 500.0), id), "cancelling release consumed");
         assert!(!b.take_click(), "no click on out-of-rect release");
         assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "callback not re-fired");
 
         // Release without a press is not consumed.
-        assert!(!ctx.propagate_event(&release(20.0, 20.0), ptr));
+        assert!(!ctx.propagate_event(&release(20.0, 20.0), id));
     }
 
     /// Bridge parity for the default config: bg on the rounded or plain path per the configured

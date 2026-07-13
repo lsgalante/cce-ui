@@ -463,13 +463,13 @@ mod tests {
         ctx.register_widget(id, ptr);
         WidgetHost::set_rect(&mut cb, 0.0, 0.0, 20.0, 20.0);
 
-        assert!(ctx.propagate_event(&click_at(10.0, 10.0), ptr), "in-rect click consumed");
+        assert!(ctx.propagate_event(&click_at(10.0, 10.0), id), "in-rect click consumed");
         assert!(cb.checked(), "click checked it");
         assert!(cb.take_click(), "take_click reads once");
         assert!(!cb.take_click(), "...then clears");
         assert!(cb.take_change());
 
-        assert!(!ctx.propagate_event(&click_at(100.0, 100.0), ptr), "miss is not consumed");
+        assert!(!ctx.propagate_event(&click_at(100.0, 100.0), id), "miss is not consumed");
         assert!(cb.checked(), "miss does not toggle");
     }
 
@@ -529,7 +529,7 @@ mod tests {
         let before: Vec<_> = WidgetHost::all_rounded_quads(&t, &ctx);
         let before_quads = WidgetHost::extra_quads(&t);
 
-        assert!(ctx.propagate_event(&click_at(30.0, 15.0), ptr), "toggle consumed the click");
+        assert!(ctx.propagate_event(&click_at(30.0, 15.0), id), "toggle consumed the click");
         assert!(t.toggled());
         assert!(t.take_click());
 

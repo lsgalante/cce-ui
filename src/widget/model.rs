@@ -1740,17 +1740,17 @@ mod tests {
         };
 
         // A click inside the rect is hit-gated in, consumed, and counted.
-        assert!(ctx.propagate_event(&click_at(20.0, 15.0), ptr), "in-rect click is consumed");
+        assert!(ctx.propagate_event(&click_at(20.0, 15.0), id), "in-rect click is consumed");
         // A click outside never reaches on_event (the adapter's hit gate rejects it).
-        assert!(!ctx.propagate_event(&click_at(200.0, 200.0), ptr), "out-of-rect click passes through");
+        assert!(!ctx.propagate_event(&click_at(200.0, 200.0), id), "out-of-rect click passes through");
         assert_eq!(w.inner().clicks, 1, "only the in-rect click was counted");
 
         // Hover: moving inside synthesizes MouseEnter (via the legacy bookkeeping the adapter
         // preserves) and sets the base hover flag; moving away synthesizes MouseLeave.
-        ctx.propagate_event(&Event::PointerMove { x: 20.0, y: 15.0, local_x: 20.0, local_y: 15.0 }, ptr);
+        ctx.propagate_event(&Event::PointerMove { x: 20.0, y: 15.0, local_x: 20.0, local_y: 15.0 }, id);
         assert_eq!(w.inner().entered, 1, "MouseEnter reached on_event");
         assert!(unsafe { (*ptr).base().hovered }, "base hover flag set through the adapter");
-        ctx.propagate_event(&Event::PointerMove { x: 200.0, y: 200.0, local_x: 200.0, local_y: 200.0 }, ptr);
+        ctx.propagate_event(&Event::PointerMove { x: 200.0, y: 200.0, local_x: 200.0, local_y: 200.0 }, id);
         assert_eq!(w.inner().left, 1, "MouseLeave reached on_event");
         assert!(!unsafe { (*ptr).base().hovered }, "base hover flag cleared");
     }

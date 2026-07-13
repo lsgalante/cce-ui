@@ -26,7 +26,7 @@ use cce_ui::scene::layout::{
 };
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::widget::{
-    Adapted, Button, Dropdown, WidgetHost, ElementState, Event, KeyEvent, MouseButton,
+    Adapted, Button, Dropdown, WidgetHost, WidgetId, ElementState, Event, KeyEvent, MouseButton,
     MouseScrollDelta, Slider, TextBox, Toggle,
 };
 use wayland_client::QueueHandle;
@@ -63,7 +63,21 @@ struct DemoApp {
 }
 
 impl DemoApp {
-    /// The widget roots, in paint order (events route over the same list).
+    /// The widget root ids, in paint order — what the router dispatches over.
+    /// `propagate_event` takes a `WidgetId` and resolves it through the registry, so the
+    /// event paths need no raw pointers and no unsafe self-alias.
+    fn root_ids(&self) -> [WidgetId; 5] {
+        [
+            self.button.id(),
+            self.toggle.id(),
+            self.slider.id(),
+            self.name_box.id(),
+            self.theme_dropdown.id(),
+        ]
+    }
+
+    /// The widget roots as pointers, for the two genuinely pointer-consuming paths:
+    /// registration (the registry stores them) and the paint walk (it derefs them).
     fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 5] {
         [
             self.button.as_ptr_mut(),
@@ -354,15 +368,12 @@ impl Application for DemoApp {
         let (px, py) = (pos.x, pos.y);
         let ev = Event::PointerMove { x: px, y: py, local_x: px, local_y: py };
         let mut changed = false;
-        let self_ptr = self as *mut Self;
-        unsafe {
-            // PointerMove visits every root: hover bookkeeping everywhere, and the
-            // router forwards DragUpdate to the recorded drag target (slider thumb,
-            // text selection) once its 3px threshold trips.
-            for root in (*self_ptr).roots() {
-                if self.ui_context.propagate_event(&ev, root) {
-                    changed = true;
-                }
+        // PointerMove visits every root: hover bookkeeping everywhere, and the
+        // router forwards DragUpdate to the recorded drag target (slider thumb,
+        // text selection) once its 3px threshold trips.
+        for root in self.root_ids() {
+            if self.ui_context.propagate_event(&ev, root) {
+                changed = true;
             }
         }
         self.drain_widget_changes();
@@ -382,15 +393,12 @@ impl Application for DemoApp {
         let (px, py) = (pos.x, pos.y);
         let ev = Event::MouseButton { button, state, x: px, y: py, local_x: px, local_y: py };
         let mut changed = false;
-        let self_ptr = self as *mut Self;
-        unsafe {
-            // Presses are hit-gated per widget by the adapter and releases delivered
-            // everywhere (press-tracking widgets commit or cancel on them) — a straight
-            // loop is correct for pointer-positioned events.
-            for root in (*self_ptr).roots() {
-                if self.ui_context.propagate_event(&ev, root) {
-                    changed = true;
-                }
+        // Presses are hit-gated per widget by the adapter and releases delivered
+        // everywhere (press-tracking widgets commit or cancel on them) — a straight
+        // loop is correct for pointer-positioned events.
+        for root in self.root_ids() {
+            if self.ui_context.propagate_event(&ev, root) {
+                changed = true;
             }
         }
         self.drain_widget_changes();
@@ -410,14 +418,11 @@ impl Application for DemoApp {
         let (px, py) = (pos.x, pos.y);
         let ev = Event::MouseWheel { delta: delta.clone(), x: px, y: py, local_x: px, local_y: py };
         let mut changed = false;
-        let self_ptr = self as *mut Self;
-        unsafe {
-            // Wheel is hit-scoped per widget (the slider nudges its value under the
-            // cursor); roots that miss return false.
-            for root in (*self_ptr).roots() {
-                if self.ui_context.propagate_event(&ev, root) {
-                    changed = true;
-                }
+        // Wheel is hit-scoped per widget (the slider nudges its value under the
+        // cursor); roots that miss return false.
+        for root in self.root_ids() {
+            if self.ui_context.propagate_event(&ev, root) {
+                changed = true;
             }
         }
         self.drain_widget_changes();
@@ -448,13 +453,10 @@ impl Application for DemoApp {
         // the state-gated `drain_widget_changes` instead.
         let ev = Event::KeyInput(event.clone());
         let mut handled = false;
-        let self_ptr = self as *mut Self;
-        unsafe {
-            for root in (*self_ptr).roots() {
-                if self.ui_context.propagate_event(&ev, root) {
-                    handled = true;
-                    break;
-                }
+        for root in self.root_ids() {
+            if self.ui_context.propagate_event(&ev, root) {
+                handled = true;
+                break;
             }
         }
         self.drain_widget_changes();
