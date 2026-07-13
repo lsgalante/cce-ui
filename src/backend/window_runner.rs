@@ -1562,7 +1562,7 @@ pub trait Application: Sized + 'static {
     /// and [`custom_vertices`](Application::custom_vertices) still go through their own paths;
     /// text renders from the list when [`display_list_text`](Application::display_list_text)
     /// opts in. Receives the frame's logical size and HiDPI scale. Typically implemented as
-    /// `Some(cce_ui::scene::painter::paint_tree(&self.ui_context, root_ptr))`.
+    /// `Some(cce_ui::scene::painter::paint_tree(&self.ui_context, &self.root))`.
     fn display_list(&mut self, _size: LogicalSize, _scale: f64) -> Option<crate::scene::paint::DisplayList> {
         None
     }

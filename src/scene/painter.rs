@@ -16,14 +16,10 @@ use crate::scene::layout::Rect;
 use crate::scene::paint::{DisplayList, PaintCtx, Prim};
 use crate::widget::{WidgetHost, TextLabel, UiContext};
 
-type ElemPtr = *mut (dyn WidgetHost + 'static);
-
 /// Walk the widget subtree rooted at `root` and produce its ordered, clipped [`DisplayList`].
-///
-/// # Safety
-/// `root` and every widget reachable through `WidgetHost::children` must be live — the same
-/// invariant the rest of the toolkit relies on for its `*mut dyn WidgetHost` tree.
-pub fn paint_tree(ui: &UiContext, root: ElemPtr) -> DisplayList {
+/// The walk only reads through the widgets; descent resolves children through the registry
+/// (`ui.tree`), whose entries must be live — the toolkit-wide registration contract.
+pub fn paint_tree(ui: &UiContext, root: &dyn WidgetHost) -> DisplayList {
     let mut pc = PaintCtx::new();
     paint_root_into(ui, root, &mut pc);
     pc.finish()
@@ -31,10 +27,7 @@ pub fn paint_tree(ui: &UiContext, root: ElemPtr) -> DisplayList {
 
 /// Walk one root subtree into an existing [`PaintCtx`], for apps that compose several top-level
 /// widgets (and their own chrome) into a single display list rather than one `root_window` tree.
-///
-/// # Safety
-/// Same as [`paint_tree`]: `root` and its reachable subtree must be live widgets.
-pub fn paint_root_into(ui: &UiContext, root: ElemPtr, pc: &mut PaintCtx) {
+pub fn paint_root_into(ui: &UiContext, root: &dyn WidgetHost, pc: &mut PaintCtx) {
     paint_node(ui, root, pc);
 }
 
@@ -45,13 +38,8 @@ pub fn paint_root_into(ui: &UiContext, root: ElemPtr, pc: &mut PaintCtx) {
 /// `text_labels*` getters (the four hand-aggregate clients). The walk only reads through the
 /// widget, so a shared `&dyn WidgetHost` is enough.
 pub fn append_widget_text(ui: &UiContext, root: &dyn WidgetHost, pc: &mut PaintCtx) {
-    // SAFETY: the walk only reads through `root` (paint_self/children/visible are all `&self`),
-    // and widgets are concrete `'static` types — the invariant the toolkit's whole
-    // `*mut dyn WidgetHost` tree already relies on. Erase the borrowed trait-object lifetime bound
-    // to the `'static` `ElemPtr` the walk takes.
-    let ptr: ElemPtr = unsafe { std::mem::transmute::<*const dyn WidgetHost, ElemPtr>(root as *const dyn WidgetHost) };
     let mut scratch = PaintCtx::new();
-    paint_node(ui, ptr, &mut scratch);
+    paint_node(ui, root, &mut scratch);
     for item in scratch.finish().items {
         if let Prim::Text { text, x, y, font_size, color, font, bounds, .. } = item.prim {
             let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
@@ -137,37 +125,37 @@ pub fn fonted_leaf_labels(
     labels.into_iter().map(|l| (l, font.clone(), bounds)).collect()
 }
 
-fn paint_node(ui: &UiContext, ptr: ElemPtr, pc: &mut PaintCtx) {
-    unsafe {
-        if !(*ptr).visible() {
-            return;
-        }
+fn paint_node(ui: &UiContext, w: &dyn WidgetHost, pc: &mut PaintCtx) {
+    if !w.visible() {
+        return;
+    }
 
-        // Legacy subtree painters (e.g. TreeList) render their own geometry AND their children
-        // through their own recursive aggregates, exposed via a paint_self override (see
-        // TreeList::paint_self) — emit that and stop; the walk must not also descend.
-        if (*ptr).renders_own_subtree() {
-            (*ptr).paint_self(ui, pc);
-            return;
-        }
+    // Legacy subtree painters (e.g. TreeList) render their own geometry AND their children
+    // through their own recursive aggregates, exposed via a paint_self override (see
+    // TreeList::paint_self) — emit that and stop; the walk must not also descend.
+    if w.renders_own_subtree() {
+        w.paint_self(ui, pc);
+        return;
+    }
 
-        (*ptr).paint_self(ui, pc);
+    w.paint_self(ui, pc);
 
-        let children = ui.tree.children_ptrs((*ptr).base().id());
-        if children.is_empty() {
-            return;
-        }
-        if (*ptr).clips_children() {
-            let (x, y, w, h) = (*ptr).rect();
-            pc.clip(Rect { x, y, width: w, height: h }, |pc| {
-                for &child in &children {
-                    paint_node(ui, child, pc);
-                }
-            });
-        } else {
+    let children = ui.tree.children_ptrs(w.base().id());
+    if children.is_empty() {
+        return;
+    }
+    // SAFETY: registry-resolved transients — the entries are live by the toolkit-wide
+    // registration contract, and the walk only reads through them.
+    if w.clips_children() {
+        let (x, y, cw, ch) = w.rect();
+        pc.clip(Rect { x, y, width: cw, height: ch }, |pc| {
             for &child in &children {
-                paint_node(ui, child, pc);
+                paint_node(ui, unsafe { &*child }, pc);
             }
+        });
+    } else {
+        for &child in &children {
+            paint_node(ui, unsafe { &*child }, pc);
         }
     }
 }
@@ -208,6 +196,8 @@ mod tests {
         }
     }
 
+    type ElemPtr = *mut (dyn WidgetHost + 'static);
+
     fn reg(ctx: &mut UiContext, w: &mut P) -> (crate::widget::WidgetId, ElemPtr) {
         let ptr = &mut *w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
         let id = w.base.id();
@@ -241,7 +231,7 @@ mod tests {
         ctx.link_ids(root_id, a_id);
         ctx.link_ids(root_id, b_id);
 
-        let list = paint_tree(&ctx, root_ptr);
+        let list = paint_tree(&ctx, unsafe { &*root_ptr });
         assert_eq!(tags(&list), vec![1.0, 2.0, 3.0], "parent, then children left-to-right");
         assert!(list.items.iter().all(|it| it.clip.is_none()), "no clipping widget => no clips");
     }
@@ -265,7 +255,7 @@ mod tests {
         let (child_id, _) = reg(&mut ctx, &mut child);
         ctx.link_ids(root_id, child_id);
 
-        let list = paint_tree(&ctx, root_ptr);
+        let list = paint_tree(&ctx, unsafe { &*root_ptr });
         // Root paints itself unclipped; the child is clipped to the root's rect.
         assert_eq!(list.items[0].clip, None, "root's own quad is not self-clipped");
         assert_eq!(
@@ -292,7 +282,7 @@ mod tests {
         ctx.link_ids(root_id, sib_id);
         ctx.link_ids(mid_id, leaf_id);
 
-        let list = paint_tree(&ctx, root_ptr);
+        let list = paint_tree(&ctx, unsafe { &*root_ptr });
         assert_eq!(tags(&list), vec![1.0, 4.0], "mid (invisible) and its leaf are skipped");
     }
 
@@ -319,7 +309,7 @@ mod tests {
         ctx.link_ids(root_id, inner_id);
         ctx.link_ids(inner_id, leaf_id);
 
-        let list = paint_tree(&ctx, root_ptr);
+        let list = paint_tree(&ctx, unsafe { &*root_ptr });
         // inner's OWN quad is clipped by its parent (root) only — its own rect clips its children,
         // not itself. The leaf, a child of inner, is clipped to inner∩root = (50,50,50,50).
         assert_eq!(list.items[1].clip, Some(Rect { x: 0.0, y: 0.0, width: 100.0, height: 100.0 }));
@@ -349,7 +339,7 @@ mod tests {
         let ptr = &mut w as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
         ctx.register_widget(w.base.id(), ptr);
 
-        let list = paint_tree(&ctx, ptr);
+        let list = paint_tree(&ctx, unsafe { &*ptr });
         assert!(
             list.items.iter().any(|it| matches!(it.prim, Prim::RoundedRect { radius, .. } if radius == 4.0)),
             "default paint_self emits the rounded background",

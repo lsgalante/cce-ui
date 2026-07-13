@@ -3203,9 +3203,8 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     // drew the geometry via `all_quads`/`all_rounded_quads` above, so we take only the Text prims
     // from the walk. This drops the legacy `widget_font` + `text_labels_with_font_and_bounds`
     // getters from render_widget — the prim already carries the per-widget font+bounds.
-    let w_ptr = w as *mut T as *mut (dyn WidgetHost + 'static);
     let mut text_scratch = crate::scene::paint::PaintCtx::new();
-    crate::scene::painter::paint_root_into(&*ctx, w_ptr, &mut text_scratch);
+    crate::scene::painter::paint_root_into(&*ctx, &*w, &mut text_scratch);
     for item in text_scratch.finish().items {
         if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, .. } = item.prim {
             let color_f32 = [

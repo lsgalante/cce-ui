@@ -1666,7 +1666,7 @@ mod tests {
         assert_eq!(rect_of(b_ptr), Rect { x: 0.0, y: 14.0, width: 10.0, height: 20.0 });
 
         // Paint: each Dot's `Paint::paint` default emits one quad at its laid-out rect, in colour.
-        let list = paint_tree(&ctx, root_ptr);
+        let list = paint_tree(&ctx, unsafe { &*root_ptr });
         let quads: Vec<_> = list
             .items
             .iter()
@@ -1817,7 +1817,7 @@ mod tests {
         ctx.register_widget(id, ptr);
         unsafe { (*ptr).set_rect(10.0, 20.0, 100.0, 30.0) };
 
-        let list = paint_tree(&ctx, ptr);
+        let list = paint_tree(&ctx, unsafe { &*ptr });
         let texts: Vec<_> = list
             .items
             .iter()

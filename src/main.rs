@@ -76,8 +76,8 @@ impl DemoApp {
         ]
     }
 
-    /// The widget roots as pointers, for the two genuinely pointer-consuming paths:
-    /// registration (the registry stores them) and the paint walk (it derefs them).
+    /// The widget roots as pointers, for the one genuinely pointer-consuming path left:
+    /// registration (the registry stores them). The paint walk takes shared borrows.
     fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 5] {
         [
             self.button.as_ptr_mut(),
@@ -312,14 +312,11 @@ impl Application for DemoApp {
         // Widgets: each root walked through the single paint pass. The walk recurses,
         // clips, and emits each widget's own geometry AND text (`Adapted::paint_self`
         // serves per-widget fonts and bounds).
-        {
-            let self_ptr = self as *mut Self;
-            unsafe {
-                for root in (*self_ptr).roots() {
-                    cce_ui::scene::painter::paint_root_into(&self.ui_context, root, &mut pc);
-                }
-            }
-        }
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.button, &mut pc);
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.toggle, &mut pc);
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.slider, &mut pc);
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.name_box, &mut pc);
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.theme_dropdown, &mut pc);
 
         // The dropdown popover — geometry and labels last, on top of everything, exactly
         // where it hit-tests. Labels carry bounds equal to the popover rect: that clips

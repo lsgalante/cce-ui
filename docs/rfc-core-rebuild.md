@@ -1953,8 +1953,31 @@ Constraint respected: **each crate still builds standalone** — the new core is
        ways, Controls page unchanged, child mode alive; 28-target
        suite. Scrollbar thumb drag: user spot-check (held drags not
        headless-drivable).
-    5. window_runner render plumbing + remaining `as_ptr` sites; then
-       the `Element` + `Adapted` endgame (own design pass).
+    5. **window_runner render plumbing + remaining `as_ptr` sites —
+       DONE (2026-07-13, the last slice).** The slice-3 census was
+       right: window_runner held no pointer state (its one mention
+       was a doc comment). The real residue was the paint walk's
+       entry signatures — `paint_tree`/`paint_root_into` now take
+       `&dyn WidgetHost` (the walk only reads; descent resolves
+       children through the registry and derefs those transients
+       internally), and `append_widget_text`'s lifetime-erasing
+       transmute died with the ptr param it bridged to. Every caller
+       simplified: the unsafe self-alias blocks that existed ONLY to
+       mint `*mut` arguments (text-editor, graph, data-editor, the
+       demo, fonts' walk calls) are plain shared borrows now;
+       `render_widget`'s internal cast is gone. What still carries
+       `*mut dyn WidgetHost`, all deliberate and documented: the
+       WidgetTree registry payload + registration arguments (the
+       ownership bridge), machinery-internal walk transients, the
+       `Layout::arrange_children`/`container_children` hook
+       signatures (narrow-trait, ctx-less by design), and
+       EventCtx's transient host ptr. Verified: 28-target suite;
+       text-editor/graph/data-editor/fonts live captures render
+       fully, canary-silent. THE POINTER-RETYPE PROGRAM IS
+       COMPLETE — no further slices are recorded.
+       ~~then the `Element` + `Adapted` endgame (own design pass)~~
+       — landed long since as the 6bd flip (`Element` deleted,
+       `Adapted` survives as the one host wrapper).
     Stored-pointer state remaining after slices 1–3, all deliberate:
     the `WidgetTree` registry; TI's `ControlPanel.children`; and the
     tick-refreshed parent copies in MenuBar/StatusBar/Dropdown models
