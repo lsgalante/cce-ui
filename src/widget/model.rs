@@ -1529,7 +1529,38 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 let (px, py) = (*px, *py);
                 self.cursor_moved(px, py, ctx)
             }
-            // Everything else (KeyInput, Tick, Enter/Leave, Drag*, Focus*) forwards directly —
+            // The router's drag lifecycle (recorded drag target → DragStart/DragUpdate/
+            // DragEnd) maps to the Input drag hooks, exactly like the direct
+            // `WidgetHost::drag_*` entry points below — `on_event` is offered first, but no
+            // widget consumes Drag* there today; without these arms the events fell into the
+            // on_event default and every ROUTED drag was silently dead (the reason each app
+            // historically kept its own held-drag index and called drag_update directly).
+            Event::DragStart { start_x, start_y } => {
+                if Input::on_event(&mut self.inner, event, &mut ectx!()) {
+                    return true;
+                }
+                Input::drag_begin(&mut self.inner, *start_x, *start_y, rect);
+                true
+            }
+            Event::DragUpdate { x, y, .. } => {
+                if Input::on_event(&mut self.inner, event, &mut ectx!()) {
+                    return true;
+                }
+                if let Some((nx, ny)) = Input::drag_reposition(&mut self.inner, *x, *y, rect) {
+                    self.base.x = nx;
+                    self.base.y = ny;
+                    return true;
+                }
+                Input::drag_update(&mut self.inner, *x, *y, rect)
+            }
+            Event::DragEnd => {
+                if Input::on_event(&mut self.inner, event, &mut ectx!()) {
+                    return true;
+                }
+                Input::drag_end(&mut self.inner);
+                true
+            }
+            // Everything else (KeyInput, Tick, Enter/Leave, Focus*) forwards directly —
             // the legacy default dispatch would route these to leaf handlers Adapted never
             // overrides, so there is no behavior to fall back to.
             _ => Input::on_event(&mut self.inner, event, &mut ectx!()),

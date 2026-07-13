@@ -892,6 +892,58 @@ mod tests {
     use super::*;
     use crate::widget::{WidgetHost, Widget};
 
+    /// The router's drag lifecycle drives the Input drag hooks end-to-end: a routed press
+    /// records the drag target, the first >3px move synthesizes DragStart, further moves
+    /// deliver DragUpdate (the slider value follows), and the release delivers DragEnd.
+    /// Regression test for the silent-drop gap: `Input::on_event` defaults ignore Drag*
+    /// events, so `Adapted::handle_event` must map them onto the hooks itself.
+    #[test]
+    fn routed_drag_reaches_input_drag_hooks() {
+        use crate::widget::{ElementState, Event, MouseButton, Slider};
+
+        let mut ctx = UiContext::new();
+        let mut slider = Slider::new();
+        WidgetHost::set_rect(&mut slider, 0.0, 0.0, 200.0, 30.0);
+        let ptr = slider.as_ptr_mut();
+        ctx.register_widget(slider.base().id(), ptr);
+
+        let press = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 100.0,
+            y: 15.0,
+            local_x: 100.0,
+            local_y: 15.0,
+        };
+        assert!(ctx.propagate_event(&press, ptr), "press in the track arms the drag");
+        assert!(WidgetHost::is_dragging(&slider));
+        let v0 = slider.value;
+
+        // First move past the 3px threshold starts the drag; the next one updates it.
+        let mv = |x: f32| Event::PointerMove { x, y: 15.0, local_x: x, local_y: 15.0 };
+        ctx.propagate_event(&mv(110.0), ptr);
+        assert!(ctx.is_dragging, "router crossed the drag threshold");
+        ctx.propagate_event(&mv(140.0), ptr);
+        assert!(
+            slider.value > v0 + 0.05,
+            "DragUpdate reached Input::drag_update (value {} -> {})",
+            v0,
+            slider.value
+        );
+
+        let release = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Released,
+            x: 140.0,
+            y: 15.0,
+            local_x: 140.0,
+            local_y: 15.0,
+        };
+        ctx.propagate_event(&release, ptr);
+        assert!(!WidgetHost::is_dragging(&slider), "DragEnd reached Input::drag_end");
+        assert!(!ctx.is_dragging);
+    }
+
     /// A plain drag-blocking widget (the `WidgetHost` default) at a fixed rect.
     struct Block {
         base: Widget,
