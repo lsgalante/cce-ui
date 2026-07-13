@@ -1982,9 +1982,11 @@ Constraint respected: **each crate still builds standalone** — the new core is
        Info description end-to-end, spinbox +/- increments, wheel
        scrolls with content following, page switching intact both
        ways, Controls page unchanged, child mode alive; 28-target
-       suite. Scrollbar thumb drag: user spot-check pending (held
-       drags ARE now drivable via ccectl pointer-press/release since
-       cce 881c2b1 — this one just hasn't been run).
+       suite. Scrollbar thumb drag: spot-check PASSED (2026-07-13,
+       ccectl pointer-press/release): the held thumb drag scrolls the
+       Windows-page ControlPanel with content tracking the drag —
+       Create Window/Width/Height/Window Type scroll off as the
+       Window Elements/Border/Bevel tier comes in, thumb following.
     5. **window_runner render plumbing + remaining `as_ptr` sites —
        DONE (2026-07-13, the last slice).** The slice-3 census was
        right: window_runner held no pointer state (its one mention
