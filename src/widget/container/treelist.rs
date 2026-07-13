@@ -651,26 +651,30 @@ impl Layout for TreeList {
     /// Keep the field widgets registered/linked under the adapter every tick (the legacy
     /// `set_parent` side effect; also heals the inline rename editor's registry entry).
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
+        // Registered but deliberately NOT tree-linked (6bd): the tree is a SELF-ROUTING
+        // composite — mouse_body/move_body/key_body forward to every field widget
+        // internally, so the router's children-first descent double-delivered AND starved
+        // the tree-level logic (the recorded 6as latents: the hit add-key button consumed
+        // the press before mouse_body's take_click toggle ran, so the popover never
+        // opened, and the wheel died the same way). Registration alone keeps the ids
+        // resolvable for focus, coverage, and the spatial grid.
+        let _ = host_id;
         let sb_ptr = self.search_box.as_ptr_mut();
         let sb_id = self.search_box.base().id();
         ctx.register_widget(sb_id, sb_ptr);
-        ctx.link_ids(host_id, sb_id);
 
         let btn_ptr = self.add_key_btn.as_ptr_mut();
         let btn_id = self.add_key_btn.base().id();
         ctx.register_widget(btn_id, btn_ptr);
-        ctx.link_ids(host_id, btn_id);
 
         let pop_ptr = self.add_key_popover_box.as_ptr_mut();
         let pop_id = self.add_key_popover_box.base().id();
         ctx.register_widget(pop_id, pop_ptr);
-        ctx.link_ids(host_id, pop_id);
 
         if self.editing_key_idx.is_some() {
             let eb_ptr = self.edit_box.as_ptr_mut();
             let eb_id = self.edit_box.base().id();
             ctx.register_widget(eb_id, eb_ptr);
-            ctx.link_ids(host_id, eb_id);
         }
     }
 }
@@ -684,8 +688,9 @@ impl Paint for TreeList {
         Some(crate::layout::tree_font())
     }
 
-    // The field widgets stay ctx-linked (event propagation descends them), but their
-    // pixels come from `paint`'s child pass — the walk must not also descend.
+    // The field widgets are registered but not tree-linked (self-routing, see
+    // register_embedded_children); their pixels come from `paint`'s child pass — the
+    // walk must not descend either.
     fn paints_own_subtree(&self) -> bool {
         true
     }
