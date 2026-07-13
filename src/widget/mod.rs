@@ -267,9 +267,11 @@ pub trait WidgetHost {
         self.base().label.clone()
     }
 
-    fn get_value_string(&self) -> Option<String> { None }
-    fn set_value_string(&mut self, _val: &str) -> bool { false }
-    fn take_change(&mut self) -> bool { false }
+    // The value/polling block (`get_value_string`/`set_value_string`/`take_change`/
+    // `take_click`/`value`/`set_text`/`set_selected`) is GONE from the trait (6bd value
+    // shrink): apps drain widget state through the concrete inherent `Adapted<W>` methods
+    // (which forward to the narrow `Input` hooks). The last dyn readers went concrete-slot
+    // (TI's roster drain, cloud's JsonControl, designer's pane-focus sync).
 
     /// Dispatch a context-menu action on this widget. Returns whether it was applied.
     /// Default inert; the adapter forwards to `Input::context_action` (whose default gives
@@ -339,7 +341,6 @@ pub trait WidgetHost {
     fn plate_bevel(&self) -> Option<f32> { None }
 
     fn is_dragging(&self) -> bool { false }
-    fn take_click(&mut self) -> bool { false }
     fn draggable(&self) -> bool { false }
 
     fn label_x_offset(&self) -> f32 {
@@ -462,16 +463,12 @@ pub trait WidgetHost {
     // and its scroll-ancestor clamp in scene::painter::scroll_ancestor_text_bounds.
 
     fn widget_font(&self) -> Option<String> { None }
-    fn value(&self) -> i32 { 0 }
     fn type_name(&self) -> &'static str {
         let full_name = std::any::type_name::<Self>();
         full_name.split("::").last().unwrap_or("Widget")
     }
     fn popover_rect(&self) -> Option<(f32, f32, f32, f32)> { None }
     fn render_popover(&self, _pc: &mut dyn crate::layout::RenderTarget) {}
-    fn set_text(&mut self, text: &str) {
-        self.base_mut().label = Some(text.to_string());
-    }
 
     fn focus(&mut self) {
         self.base_mut().focused = true;
@@ -483,7 +480,6 @@ pub trait WidgetHost {
         ctx.is_focused_id(self.base().id())
     }
     fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem) {}
-    fn set_selected(&mut self, _selected: bool) {}
 
     fn set_visible(&mut self, _visible: bool) {}
     fn visible(&self) -> bool { true }

@@ -23,7 +23,7 @@ impl Label {
             color: colors::control_label_color_u8(),
         });
         // Keep the base copy in step too (context menus, fallback machinery).
-        WidgetHost::set_text(&mut l, text);
+        l.set_text(text);
         l
     }
 
@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(labels[0].font_size, 13.0);
         assert_eq!(labels[0].color, [1, 2, 3]);
 
-        WidgetHost::set_text(&mut l, "CPU: 99%");
+        l.set_text("CPU: 99%");
         assert_eq!(l.own_text_labels()[0].text, "CPU: 99%", "set_text reaches the paint source");
 
         let size = l.intrinsic_size().unwrap();

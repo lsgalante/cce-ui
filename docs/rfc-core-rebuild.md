@@ -2064,6 +2064,39 @@ Constraint respected: **each crate still builds standalone** — the new core is
        blueprint addition, not a deletion), `set_parent` (flip
        material, with the parent-ptr snapshot change), `value`,
        `preferred_height`.
+    7. **The value/polling block — DONE (2026-07-13): WidgetHost
+       59→52.** This is the §3.5 "typed messages" resolution, and it
+       lands the way 5k's controller half did: no app-defined message
+       channel is needed — the polling drains stay concrete (inherent
+       `Adapted<W>` forwards to the narrow `Input` hooks), and what
+       dies is reaching them through the host trait. Seven methods
+       left: `take_click`, `take_change`, `get_value_string`,
+       `set_value_string`, `value`, `set_text`, `set_selected`.
+       Census: five had ZERO non-test dyn consumers (the old
+       designer-side serialize consumer of `value` is gone; the
+       in-crate `widget/display/serialize.rs` inspector feed was the
+       one live reader — now a concrete downcast chain over the five
+       `Input::value` implementors Checkbox/Dropdown/Slider/
+       RangeSlider/Spinbox, pinned by a unit test that fails if a new
+       implementor is missed). The dyn readers of the rest went
+       concrete-slot: TI's index-driven roster reads route through
+       app-local `Roster::take_click/value/get_value_string/set_text
+       (idx)` matches onto the concrete gallery slots (arms exist per
+       drained slot; an unwired slot panics loudly); cloud's
+       `JsonControl` grew an inherent variant-matched `take_click`
+       (both call sites already gate on the button type); designer's
+       pane-focus menubar loop writes `set_selected` on its five
+       concrete `Adapted<MenuBar>` fields. The UFCS test forms became
+       dot calls resolving to the inherent methods. STILL on the
+       trait, each with live dyn consumers: `draggable`/`is_dragging`
+       (designer's deferred press/move cascade + TI's ControlPanel
+       child pointers), `preferred_height` (layout.rs container
+       machinery) — these ride the designer event redesign / CP
+       dissolution. Verified: 165 tests (new serialize pin);
+       settings audio render stream byte-identical vs the stashed
+       baseline; TI live probe — Button/Toggle clicks, Layout
+       dropdown popover open, and a "Grid" selection re-laying out
+       the gallery through the new roster drains end-to-end.
     Former slices 4/5 fold in: the app `as_ptr_mut` dispatch sites
     are rewritten by whichever of routed-events (per app) or the
     phase-4 flip reaches them first; no standalone pointer-to-id

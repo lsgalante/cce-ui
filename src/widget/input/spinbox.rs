@@ -453,7 +453,7 @@ mod tests {
         // Legacy test: click at (75, 33) lands in the decrement zone.
         assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 75.0, 33.0, &mut ctx));
         assert_eq!(sb.value, -1);
-        assert!(WidgetHost::take_change(&mut sb));
+        assert!(sb.take_change());
 
         // Increment zone (past 77.5% of the width).
         assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
@@ -463,9 +463,9 @@ mod tests {
     #[test]
     fn spinbox_value_string_decimals_round_trip() {
         let mut sb = Spinbox::new(150, 0, 1000, 5).with_decimals(2);
-        assert_eq!(WidgetHost::get_value_string(&sb), Some("1.50".to_string()));
-        assert!(WidgetHost::set_value_string(&mut sb, "2.75"));
+        assert_eq!(sb.get_value_string(), Some("1.50".to_string()));
+        assert!(sb.set_value_string("2.75"));
         assert_eq!(sb.value, 275);
-        assert_eq!(WidgetHost::value(&sb), 275);
+        assert_eq!(sb.value(), 275);
     }
 }

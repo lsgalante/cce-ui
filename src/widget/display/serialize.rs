@@ -5,7 +5,18 @@ fn serialize_single_widget(w: &dyn WidgetHost, json: &mut String) {
     let label = w.label().or_else(|| w.base().label.clone()).unwrap_or_default();
     let focused = w.base().focused;
     let hovered = w.base().hovered;
-    let value = w.value();
+    // Concrete value lookup (6bd value shrink — `value` left `WidgetHost`): the
+    // `Input::value` implementors a serialized roster can hold are these five widgets;
+    // everything else always reported the default 0.
+    let a = w.as_any();
+    let value = a
+        .downcast_ref::<Checkbox>()
+        .map(|x| Input::value(x))
+        .or_else(|| a.downcast_ref::<Dropdown>().map(|x| Input::value(x)))
+        .or_else(|| a.downcast_ref::<Slider>().map(|x| Input::value(x)))
+        .or_else(|| a.downcast_ref::<RangeSlider>().map(|x| Input::value(x)))
+        .or_else(|| a.downcast_ref::<Spinbox>().map(|x| Input::value(x)))
+        .unwrap_or(0);
     let type_name = w.type_name();
 
     // Escape JSON label
@@ -100,4 +111,39 @@ pub fn serialize_widgets(widgets: &[&dyn WidgetHost]) -> String {
     }
     json.push(']');
     json
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The serialized `value` field must keep matching `Input::value` for every
+    /// value-bearing widget (the concrete lookup replaced the deleted
+    /// `WidgetHost::value` — a new `Input::value` implementor must be added to the
+    /// downcast chain in `serialize_single_widget`).
+    #[test]
+    fn serialized_value_matches_input_value() {
+        let mut cb = Checkbox::new();
+        assert!(cb.set_value_string("true"));
+        let dd = Dropdown::new(vec!["a".into(), "b".into(), "c".into()], 2);
+        let mut sl = Slider::new();
+        assert!(sl.set_value_string("0.7"));
+        let sb = Spinbox::new(7, 0, 10, 1);
+        let btn = Button::new(0.0, 0.0, 10.0, 10.0); // no Input::value — always 0
+
+        for (w, expect) in [
+            (&cb as &dyn WidgetHost, 1),
+            (&dd as &dyn WidgetHost, 2),
+            (&sl as &dyn WidgetHost, 70),
+            (&sb as &dyn WidgetHost, 7),
+            (&btn as &dyn WidgetHost, 0),
+        ] {
+            let json = serialize_widgets(&[w]);
+            assert!(
+                json.contains(&format!("\"value\":{expect}")),
+                "{} serialized without value {expect}: {json}",
+                w.type_name()
+            );
+        }
+    }
 }

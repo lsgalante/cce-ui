@@ -107,13 +107,15 @@ Modules:
 
 ### `WidgetHost` (formerly the `Element` god-trait)
 
-`WidgetHost` (`src/widget/mod.rs`) is the single ~65-method host surface the machinery
+`WidgetHost` (`src/widget/mod.rs`) is the single ~52-method host surface the machinery
 (context routing, paint walk, render loop, app dyn broadcasts) sees, produced by the RFC's 6bd
 shrink-then-rename of the old ~125-method `Element` god-trait. Its ONE production implementor
 is `Adapted<W>`; concrete widget behavior lives on the narrow `Layout`/`Paint`/`Input` traits
 (`src/widget/model.rs`). `base()` is guaranteed (`&Widget`, no Option). The direct-dispatch
-block (mouse/key/drag) and value block shrink further as apps adopt routed events and
-concrete slots — see the RFC's blueprint notes before adding anything to this trait.
+block (mouse/key/drag) and the value/polling block (`take_click`/`take_change`/value strings)
+are GONE from the trait — events route through `handle_event`, and apps drain widget state
+through the concrete inherent `Adapted<W>` methods. See the RFC's blueprint notes before
+adding anything to this trait.
 
 **Runtime verification matters here.** Several scene changes are "compiles + tests pass; runtime
 verification pending" per the RFC — the headless tests can't catch paint/event regressions. When

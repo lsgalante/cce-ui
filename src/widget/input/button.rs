@@ -404,13 +404,13 @@ mod tests {
         // Press in, release in -> click.
         assert!(ctx.propagate_event(&press(20.0, 20.0), ptr));
         assert!(ctx.propagate_event(&release(25.0, 20.0), ptr), "release consumed (was pressed)");
-        assert!(WidgetHost::take_click(&mut b));
+        assert!(b.take_click());
         assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "callback fired");
 
         // Press in, release OUT -> cancelled, no click, but release still consumed.
         assert!(ctx.propagate_event(&press(20.0, 20.0), ptr));
         assert!(ctx.propagate_event(&release(500.0, 500.0), ptr), "cancelling release consumed");
-        assert!(!WidgetHost::take_click(&mut b), "no click on out-of-rect release");
+        assert!(!b.take_click(), "no click on out-of-rect release");
         assert_eq!(fired.load(std::sync::atomic::Ordering::SeqCst), 1, "callback not re-fired");
 
         // Release without a press is not consumed.
@@ -442,7 +442,7 @@ mod tests {
 
         // Selection state flows through the WidgetHost forward (list hosts push it).
         let mut b = b;
-        WidgetHost::set_selected(&mut b, true);
+        b.set_selected(true);
         assert!(b.selected);
     }
 }

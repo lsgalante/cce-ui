@@ -479,9 +479,9 @@ mod tests {
 
         assert!(ctx.propagate_event(&click_at(10.0, 10.0), ptr), "in-rect click consumed");
         assert!(cb.checked(), "click checked it");
-        assert!(WidgetHost::take_click(&mut cb), "take_click reads once");
-        assert!(!WidgetHost::take_click(&mut cb), "...then clears");
-        assert!(WidgetHost::take_change(&mut cb));
+        assert!(cb.take_click(), "take_click reads once");
+        assert!(!cb.take_click(), "...then clears");
+        assert!(cb.take_change());
 
         assert!(!ctx.propagate_event(&click_at(100.0, 100.0), ptr), "miss is not consumed");
         assert!(cb.checked(), "miss does not toggle");
@@ -490,13 +490,13 @@ mod tests {
     #[test]
     fn checkbox_value_string_round_trip() {
         let mut cb = Checkbox::new();
-        assert_eq!(WidgetHost::get_value_string(&cb), Some("false".to_string()));
-        assert!(WidgetHost::set_value_string(&mut cb, "on"));
+        assert_eq!(cb.get_value_string(), Some("false".to_string()));
+        assert!(cb.set_value_string("on"));
         assert!(cb.checked());
-        assert_eq!(WidgetHost::value(&cb), 1);
-        assert!(!WidgetHost::set_value_string(&mut cb, "on"), "unchanged value reports false");
-        assert!(!WidgetHost::set_value_string(&mut cb, "junk"), "unparsable reports false");
-        assert!(WidgetHost::take_change(&mut cb), "set_value_string marked the change");
+        assert_eq!(cb.value(), 1);
+        assert!(!cb.set_value_string("on"), "unchanged value reports false");
+        assert!(!cb.set_value_string("junk"), "unparsable reports false");
+        assert!(cb.take_change(), "set_value_string marked the change");
     }
 
     /// Wide (labeled) mode reproduces the legacy `extra_quads` geometry through the bridge:
@@ -545,7 +545,7 @@ mod tests {
 
         assert!(ctx.propagate_event(&click_at(30.0, 15.0), ptr), "toggle consumed the click");
         assert!(t.toggled());
-        assert!(WidgetHost::take_click(&mut t));
+        assert!(t.take_click());
 
         let after: Vec<_> = WidgetHost::all_rounded_quads(&t, &ctx);
         let after_quads = WidgetHost::extra_quads(&t);

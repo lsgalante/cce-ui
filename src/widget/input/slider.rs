@@ -776,6 +776,6 @@ fn probe_slider_bridge() {
             &mut ctx,
         ));
         assert!(sl.inner().value() < before, "scroll up decreases value");
-        assert!(WidgetHost::take_change(&mut sl));
+        assert!(sl.take_change());
     }
 }

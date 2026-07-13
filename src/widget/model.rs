@@ -658,6 +658,48 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         self.inner.sync_label(label);
     }
 
+    // --- The value/polling drains (off `WidgetHost` in the 6bd value shrink): apps read
+    // widget state through these concrete methods; each forwards to the narrow `Input`
+    // hook. The last dyn readers went concrete-slot instead (TI roster, cloud JsonControl,
+    // designer pane-focus sync).
+
+    /// Drain the one-shot click flag (Button-class widgets).
+    pub fn take_click(&mut self) -> bool {
+        Input::take_click(&mut self.inner)
+    }
+
+    /// Drain the one-shot value-changed flag.
+    pub fn take_change(&mut self) -> bool {
+        Input::take_change(&mut self.inner)
+    }
+
+    /// The widget's value serialized to a string (config writes, context-menu Copy).
+    pub fn get_value_string(&self) -> Option<String> {
+        Input::value_string(&self.inner)
+    }
+
+    /// Parse and apply a value string; returns whether the value changed.
+    pub fn set_value_string(&mut self, val: &str) -> bool {
+        Input::set_value_string(&mut self.inner, val)
+    }
+
+    /// The widget's value as an integer.
+    pub fn value(&self) -> i32 {
+        Input::value(&self.inner)
+    }
+
+    /// Selection state pushed in by list/row hosts.
+    pub fn set_selected(&mut self, selected: bool) {
+        Input::set_selected(&mut self.inner, selected)
+    }
+
+    /// Text-content mutation: keep the base copy and the widget's own copy
+    /// ([`Paint::sync_label`]) in step, like `set_label`.
+    pub fn set_text(&mut self, text: &str) {
+        self.base.label = Some(text.to_string());
+        Paint::sync_label(&mut self.inner, text);
+    }
+
     /// The rect the wrapped widget paints into: the widget's rect minus the detached-label
     /// region at the top (zero inset when there is no label, or when the widget draws its label
     /// inline — `Widget::label_offset` / [`Layout::inline_label`]).
@@ -1144,13 +1186,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         std::any::type_name::<W>().split("::").last().unwrap_or("Widget")
     }
 
-    /// Text-content mutation (legacy `WidgetHost::set_text` wrote only `base.label`): keep the base
-    /// copy and the widget's own copy ([`Paint::sync_label`]) in step, like `set_label`.
-    fn set_text(&mut self, text: &str) {
-        self.base.label = Some(text.to_string());
-        Paint::sync_label(&mut self.inner, text);
-    }
-
     // --- Paint concern -> `Paint` ---
     fn color(&self) -> [f32; 4] {
         Paint::color(&self.inner)
@@ -1359,24 +1394,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     // --- Input concern -> `Input` ---
     fn blocks_backplate_drag(&self) -> bool {
         Input::blocks_backplate_drag(&self.inner)
-    }
-    fn take_click(&mut self) -> bool {
-        Input::take_click(&mut self.inner)
-    }
-    fn take_change(&mut self) -> bool {
-        Input::take_change(&mut self.inner)
-    }
-    fn get_value_string(&self) -> Option<String> {
-        Input::value_string(&self.inner)
-    }
-    fn set_value_string(&mut self, val: &str) -> bool {
-        Input::set_value_string(&mut self.inner, val)
-    }
-    fn value(&self) -> i32 {
-        Input::value(&self.inner)
-    }
-    fn set_selected(&mut self, selected: bool) {
-        Input::set_selected(&mut self.inner, selected)
     }
     fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
         Input::context_action(&mut self.inner, action)

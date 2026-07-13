@@ -175,7 +175,7 @@ mod tests {
         assert!(bar.text_buf.is_some(), "one shaped buffer");
 
         // set_text drops the stale buffer; prepare_text reshapes.
-        WidgetHost::set_text(&mut bar, "world");
+        bar.set_text("world");
         assert!(bar.text_buf.is_none(), "buffer dropped on text change");
         WidgetHost::prepare_text(&mut bar, &mut fs);
         assert!(bar.text_buf.is_some());
