@@ -1092,10 +1092,17 @@ Constraint respected: **each crate still builds standalone** — the new core is
     latent use-after-free of exactly the class this rebuild targets: the focused
     section clone was dropped and reallocated EVERY rebuild while the global
     focus pointer kept aiming at it — it survived only because same-size Vec
-    reallocation tends to reuse the freed block. Ctrl-nav is STILL not headlessly
-    drivable (ccectl key-down injects keys but no xkb modifier state, so Ctrl
-    never registers client-side — verified 2026-07-13, ctrl+j frame AE=0) — user
-    spot-check remains pending.
+    reallocation tends to reuse the freed block. Ctrl-nav spot-check PASSED
+    (2026-07-13, nested rig) — and it took two fixes to get there. (1) cce 114ef89:
+    injected key-down/key-up now updates an injected xkb mask and pushes a
+    modifiers event (OR'd over the device state), so ctrl/shift/alt/super combos
+    land like hardware. (2) The check then caught a REAL cce-ui bug (ec511f4):
+    handle_key preferred event.utf8, which xkb control-transforms while Ctrl is
+    held (ctrl+j arrived as Character("\n")) — settings' ctrl-nav could never
+    have fired from real hardware either. With the keysym preferred under Ctrl,
+    ctrl+j/k cycle the section highlight and ctrl+i/u descend/ascend
+    (audio-page border diffs). NB accounts/storage take `_sec_focused` and
+    render no highlight — ctrl-nav is invisible on those two pages.
   - **6x — data-editor + text-editor off the engine popup path; the render-only xdg
     popup machinery is DELETED. DONE (live-verified: text-editor File menu open +
     item click; data-editor recent-files menu → config.kdl load, tree context menu
