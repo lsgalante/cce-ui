@@ -1915,7 +1915,47 @@ Constraint respected: **each crate still builds standalone** — the new core is
        switch. The trait sits at ~65 methods; the remaining
        shrink-later blocks (direct-dispatch, value, as_ptr
        transitional, `preferred_height`/`value` dyn consumers)
-       thin out per-app as routed events / concrete slots spread. ~~The MenuBar/StatusBar/Dropdown parent-pointer
+       thin out per-app as routed events / concrete slots spread.
+    5. **The routed-events tail — DONE (2026-07-13).** All 12 apps
+       (+ TE/DE/demo from 6ab–6ad) dispatch through
+       `propagate_event`; self-routing composites (Paginator, whose
+       tree-registered strip would consume its presses under the
+       router's children-first descent) go through `handle_event`;
+       only designer's press/move cascade stays direct, by recorded
+       design (its `drag_widget` doubles as app-mode drag with
+       circular-pane hit shapes). En route, the ROUTED-DRAG GAP was
+       found and fixed: the router's DragStart/DragUpdate/DragEnd
+       fell into `Input::on_event`'s default and every routed drag
+       was silently dead — `Adapted::handle_event` now maps them
+       onto the Input drag hooks (regression test drives a full drag
+       through `propagate_event`).
+    6. **Direct-dispatch block census (2026-07-13) — the collapse
+       design.** With every app-side dispatch caller gone, the
+       block's remaining consumers are: (a) cce-ui widget-INTERNAL
+       forwards — composites driving embedded children (ramp,
+       parameters_bg, treelist, dropdown, menu, paginator,
+       breadcrumb, color_selector, scroll_box, TI's ControlPanel,
+       cloud's json_layout); (b) designer's deferred cascade (dyn
+       roster calls); (c) ~40 tests (UFCS `WidgetHost::` forms);
+       (d) `Adapted`'s own entry-point impls (die with the methods).
+       THE COLLAPSE: every remaining caller rewrites as
+       `handle_event(&Event::…)` — behavior-identical by
+       construction (the entry points literally forward there, and
+       the drag fix routes `Event::Drag*` to the hooks) — then
+       `mouse_input`, `cursor_moved`, `on_cursor_moved`,
+       `mouse_wheel`, `keyboard_input`, `drag_begin`, `drag_update`,
+       `drag_end` leave WidgetHost (8 methods, ~67→59). TWO
+       CAVEATS: (1) `Adapted::keyboard_input`'s `!visible()` gate
+       must MOVE INTO `handle_event`'s KeyInput arm (designer's
+       hidden-widget broadcast relies on it; the routed path
+       currently lacks it — moving it also fixes that latent
+       inconsistency); (2) `Adapted`'s PointerMove arm calls the
+       trait `cursor_moved` internally — inline the
+       coverage-gate + hover-recompute body as inherent before
+       deleting. The QUERY/POLLING surface (`draggable`,
+       `is_dragging`, `take_click`, `take_change`, value getters)
+       stays — no Event form; dies with typed messages (§3.5) or
+       container dissolutions. ~100 call sites, one session. ~~The MenuBar/StatusBar/Dropdown parent-pointer
        snapshot change rides this phase.~~ **Landed early
        (2026-07-12): the census showed all five stored widget-side
        parent pointers production-DEAD** (nothing ever set_parent's
