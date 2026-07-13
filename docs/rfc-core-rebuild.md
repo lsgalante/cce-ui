@@ -1851,6 +1851,32 @@ Constraint respected: **each crate still builds standalone** — the new core is
        dropdown→Grid relayout lands end-to-end through the id
        router; designer /state serves; demo's four event loops shed
        their unsafe self-alias entirely.
+       FOLLOW-UP (same day): **`children`/`parent` left the trait
+       (~52→50)** — tree structure is read off `ctx.tree`
+       (`parent_id`/`parent_ptr`/`child_ids`/`children_ptrs`); no
+       trait method returns a raw pointer anymore. `Adapted`'s
+       container branch was redundant: Paginator (the one
+       `Layout::container_children` implementor) tree-links its strip
+       every tick via `register_embedded_children`, so the tree
+       serves the walks identically (worst case a first-frame gap
+       before the first tick). Machinery consumers (propagate
+       descent, `find_hovered_scrollable`, the paint walk,
+       `all_quads`/`all_rounded_quads` defaults, designer's render
+       walks, TI's flat-walk parent skip) now read the tree directly
+       — sanctioned transient-pointer class. DEAD CODE FOUND: both
+       `navigate_focus` twins deleted — `UiContext::navigate_focus`
+       had zero callers, and `focus::navigate_focus` (settings'
+       ctrl-nav preamble) resolved parent/children through a
+       freshly-made EMPTY UiContext, so it always returned false
+       (parent has no field-derived form; ctrl+i needed a focused
+       Paginator, which is never focusable). Settings' real ctrl-nav
+       is its own section machinery, unchanged. serialize.rs's
+       dummy-ctx child lookup could only ever surface Paginator's
+       strip — kept via the 6aw concrete downcast. Verified: 165
+       tests + workspace suite; email tab strip paints and a Sent
+       click lands through the tree link; TI page-selector crop
+       byte-identical (no double-draw); designer /state + full panel
+       text intact; settings/files/demo canary-silent.
     5. window_runner render plumbing + remaining `as_ptr` sites; then
        the `Element` + `Adapted` endgame (own design pass).
     Stored-pointer state remaining after slices 1–3, all deliberate:

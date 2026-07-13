@@ -27,9 +27,15 @@ fn serialize_single_widget(w: &dyn WidgetHost, json: &mut String) {
         type_name, escaped_label, x, y, width, height, focused, hovered, value
     ));
 
-    // Handle children
-    let dummy = crate::context::UiContext::new();
-    let children = w.children(&dummy);
+    // Child handling: there is no ctx here, so tree children were never reachable
+    // (the old lookup ran against a fresh empty UiContext). The one child this path
+    // could ever surface is the field-derived one — Paginator's strip
+    // (`Layout::container_children`) — kept via the 6aw concrete downcast.
+    let children: Vec<&(dyn WidgetHost + 'static)> = w
+        .as_any()
+        .downcast_ref::<Paginator>()
+        .map(|p| vec![&p.sidebar_menu as &(dyn WidgetHost + 'static)])
+        .unwrap_or_default();
     let mut menu_items = Vec::new();
     let mut is_menu_open = false;
     let mut is_vertical = false;
@@ -75,17 +81,15 @@ fn serialize_single_widget(w: &dyn WidgetHost, json: &mut String) {
     } else if !children.is_empty() {
         json.push_str(",\"children\":[");
         let mut first = true;
-        for child_ptr in &children {
-            unsafe {
-                if !(**child_ptr).visible() {
-                    continue;
-                }
-                if !first {
-                    json.push(',');
-                }
-                first = false;
-                serialize_single_widget(&**child_ptr, json);
+        for child in &children {
+            if !child.visible() {
+                continue;
             }
+            if !first {
+                json.push(',');
+            }
+            first = false;
+            serialize_single_widget(*child, json);
         }
         json.push_str("]}");
     } else {

@@ -353,7 +353,7 @@ pub trait WidgetHost {
         let rect = Rect { x, y, width: w, height: h };
         let color = self.color();
 
-        if self.children(ui).is_empty() {
+        if ui.tree.children_ptrs(self.base().id()).is_empty() {
             // Leaf: emit its own rounded quads directly. For an ordinary widget this is just the
             // rounded background; for widgets that override `all_rounded_quads` with custom
             // geometry (e.g. Graph's nodes and edges) it captures that too. No recursion happens
@@ -420,7 +420,7 @@ pub trait WidgetHost {
                 quads.push((x, y, w, h, radius, c, (r1, r2, r3, r4)));
             }
         }
-        for &child_ptr in &self.children(ctx) {
+        for &child_ptr in &ctx.tree.children_ptrs(self.base().id()) {
             let widget = unsafe { &*child_ptr };
             quads.extend(widget.all_rounded_quads(ctx));
         }
@@ -461,18 +461,14 @@ pub trait WidgetHost {
     fn is_child_visible(&self, _child_id: WidgetId) -> bool { true }
     fn set_modifiers(&mut self, _ctrl: bool, _shift: bool, _alt: bool) {}
 
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn WidgetHost + 'static)> {
-        ctx.tree.parent_ptr(self.base().id())
-    }
-
-
     // `set_parent`/`add_child` are GONE from the trait (6bd batch 4): linking is a tree
     // operation — concrete callers ride the inherent `Adapted` methods, dyn callers go
-    // through `focus::link_parent_child` or `ctx.tree` directly.
-
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn WidgetHost + 'static)> {
-        ctx.tree.children_ptrs(self.base().id())
-    }
+    // through `focus::link_parent_child` or `ctx.tree` directly. `parent`/`children` are
+    // GONE too (the plumbing retype): tree structure is read off `ctx.tree`
+    // (`parent_id`/`parent_ptr`/`child_ids`/`children_ptrs`) — the trait no longer
+    // proxies it, and no trait method returns a raw pointer. Paginator's field-derived
+    // child (the one `Layout::container_children` implementor) reaches the walks through
+    // the tree link its per-tick `register_embedded_children` maintains.
 
     fn z_index(&self) -> i32 { 0 }
     fn is_scrollable(&self) -> bool { false }

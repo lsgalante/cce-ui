@@ -1026,13 +1026,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     // keeps its own pointer Vec via the `Layout` hooks, because `set_rect`-time arrangement
     // has no ctx to reach the tree.
 
-    fn children(&self, ctx: &UiContext) -> Vec<*mut (dyn WidgetHost + 'static)> {
-        if Layout::has_container_children(&self.inner) {
-            return Layout::container_children(&self.inner);
-        }
-        ctx.tree.children_ptrs(self.base.id())
-    }
-
     fn is_child_visible(&self, child_id: WidgetId) -> bool {
         if !Layout::has_container_children(&self.inner) {
             return true;
@@ -1047,10 +1040,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
 
     fn z_index(&self) -> i32 {
         Layout::z_order(&self.inner)
-    }
-
-    fn parent(&self, ctx: &UiContext) -> Option<*mut (dyn WidgetHost + 'static)> {
-        ctx.tree.parent_ptr(self.base.id())
     }
 
     fn set_modifiers(&mut self, ctrl: bool, shift: bool, alt: bool) {

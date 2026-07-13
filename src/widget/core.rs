@@ -1,4 +1,4 @@
-use crate::widget::{WidgetHost, Key};
+use crate::widget::WidgetHost;
 
 pub mod focus {
     use super::WidgetHost;
@@ -84,80 +84,10 @@ pub mod focus {
         ctx.tree.set_parent(c_id, Some(p_id));
     }
 
-    /// Keyboard tree navigation from the focused widget. `ctx` resolves the focused id to a
-    /// live widget; the parent/children walk itself deliberately keeps the legacy dummy-ctx
-    /// semantics (only `container_children`-style overrides that ignore the ctx ever yielded
-    /// anything here).
-    pub fn navigate_focus(key: &super::Key, ctrl: bool, ctx: &mut crate::context::UiContext) -> bool {
-        FOCUSED_WIDGET.with(|cell| {
-            let ptr = match cell.get().and_then(|id| ctx.tree.get_ptr(id)) {
-                Some(p) => p,
-                None => return false,
-            };
-
-            unsafe {
-                match (key, ctrl) {
-                    (super::Key::Character(c), true) if c == "u" || c == "U" => {
-                        let dummy = crate::context::UiContext::new();
-                        if let Some(parent_ptr) = (*ptr).parent(&dummy) {
-                            let parent_ref = &mut *parent_ptr;
-                            set_focused(parent_ref, Some(&mut *ctx));
-                            parent_ref.focus();
-                            return true;
-                        }
-                    }
-                    (super::Key::Character(c), true) if c == "i" || c == "I" => {
-                        let dummy = crate::context::UiContext::new();
-                        let mut children = (*ptr).children(&dummy);
-                        if !children.is_empty() {
-                            let child_ref = &mut *children[0];
-                            set_focused(child_ref, Some(&mut *ctx));
-                            child_ref.focus();
-                            return true;
-                        }
-                    }
-                    (super::Key::Character(c), true) if c == "j" || c == "J" => {
-                        let dummy = crate::context::UiContext::new();
-                        if let Some(parent_ptr) = (*ptr).parent(&dummy) {
-                            let mut siblings = (*parent_ptr).children(&dummy);
-                            let current_idx = siblings.iter().position(|&x| {
-                                let a = x as *mut () as usize;
-                                let b = ptr as *mut () as usize;
-                                a == b
-                            });
-                            if let Some(idx) = current_idx {
-                                let next_idx = (idx + 1) % siblings.len();
-                                let sibling_ref = &mut *siblings[next_idx];
-                                set_focused(sibling_ref, Some(&mut *ctx));
-                                sibling_ref.focus();
-                                return true;
-                            }
-                        }
-                    }
-                    (super::Key::Character(c), true) if c == "k" || c == "K" => {
-                        let dummy = crate::context::UiContext::new();
-                        if let Some(parent_ptr) = (*ptr).parent(&dummy) {
-                            let mut siblings = (*parent_ptr).children(&dummy);
-                            let current_idx = siblings.iter().position(|&x| {
-                                let a = x as *mut () as usize;
-                                let b = ptr as *mut () as usize;
-                                a == b
-                            });
-                            if let Some(idx) = current_idx {
-                                let prev_idx = if idx == 0 { siblings.len() - 1 } else { idx - 1 };
-                                let sibling_ref = &mut *siblings[prev_idx];
-                                set_focused(sibling_ref, Some(&mut *ctx));
-                                sibling_ref.focus();
-                                return true;
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            false
-        })
-    }
+    // `navigate_focus` is DELETED (the plumbing retype): it resolved parent/children
+    // through a freshly-made EMPTY UiContext, so the parent-based arms (ctrl+u/j/k) could
+    // never fire and ctrl+i only fired for a focused container-children widget (Paginator
+    // — never focusable). Its one caller (settings) already runs its own section nav.
 }
 
 pub mod hover_animation {

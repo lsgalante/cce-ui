@@ -153,7 +153,7 @@ fn paint_node(ui: &UiContext, ptr: ElemPtr, pc: &mut PaintCtx) {
 
         (*ptr).paint_self(ui, pc);
 
-        let children = (*ptr).children(ui);
+        let children = ui.tree.children_ptrs((*ptr).base().id());
         if children.is_empty() {
             return;
         }

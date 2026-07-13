@@ -265,7 +265,7 @@ impl UiContext {
             }
 
             let mut handled = false;
-            let mut children = (*root).children(self);
+            let mut children = self.tree.children_ptrs((*root).base().id());
             children.sort_by_key(|&child_ptr| (*child_ptr).z_index());
 
             // Determine if we should record a drag target candidate
@@ -498,72 +498,11 @@ impl UiContext {
         self.focused_widget.is_some()
     }
 
-    pub fn navigate_focus(&mut self, key: &Key, ctrl: bool) -> bool {
-        let ptr = match self.focused_widget.and_then(|id| self.tree.get_ptr(id)) {
-            Some(p) => p,
-            None => return false,
-        };
+    // `navigate_focus` (tree-walk ctrl-nav) is DELETED (the plumbing retype): it had
+    // zero callers — its `focus::navigate_focus` twin was the one wired up, and that one
+    // walked an empty dummy context (provably inert). Section-level keyboard nav lives
+    // app-side (settings' focused_section machinery).
 
-        unsafe {
-            match (key, ctrl) {
-                (Key::Character(c), true) if c == "u" || c == "U" => {
-                    if let Some(parent_ptr) = (*ptr).parent(self) {
-                        let parent_ref = &mut *parent_ptr;
-                        self.set_focused(parent_ref);
-                        parent_ref.focus();
-                        return true;
-                    }
-                }
-                (Key::Character(c), true) if c == "i" || c == "I" => {
-                    let mut children = (*ptr).children(self);
-                    if !children.is_empty() {
-                        let child_ref = &mut *children[0];
-                        self.set_focused(child_ref);
-                        child_ref.focus();
-                        return true;
-                    }
-                }
-                (Key::Character(c), true) if c == "j" || c == "J" => {
-                    if let Some(parent_ptr) = (*ptr).parent(self) {
-                        let mut siblings = (*parent_ptr).children(self);
-                        let current_idx = siblings.iter().position(|&x| {
-                            let a = x as *mut () as usize;
-                            let b = ptr as *mut () as usize;
-                            a == b
-                        });
-                        if let Some(idx) = current_idx {
-                            let next_idx = (idx + 1) % siblings.len();
-                            let sibling_ref = &mut *siblings[next_idx];
-                            self.set_focused(sibling_ref);
-                            sibling_ref.focus();
-                            return true;
-                        }
-                    }
-                }
-                (Key::Character(c), true) if c == "k" || c == "K" => {
-                    if let Some(parent_ptr) = (*ptr).parent(self) {
-                        let mut siblings = (*parent_ptr).children(self);
-                        let current_idx = siblings.iter().position(|&x| {
-                            let a = x as *mut () as usize;
-                            let b = ptr as *mut () as usize;
-                            a == b
-                        });
-                        if let Some(idx) = current_idx {
-                            let prev_idx = if idx == 0 { siblings.len() - 1 } else { idx - 1 };
-                            let sibling_ref = &mut *siblings[prev_idx];
-                            self.set_focused(sibling_ref);
-                            sibling_ref.focus();
-                            return true;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        false
-    }
-
-    // --- Registry (backed by the generational WidgetTree; see scene/tree.rs) ---
     pub fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
         self.tree.register(id, ptr);
         unsafe {
@@ -871,7 +810,7 @@ impl UiContext {
             if !(*root).hit_test(cx, cy, self) {
                 return None;
             }
-            for child in (*root).children(self).into_iter().rev() {
+            for child in self.tree.children_ptrs((*root).base().id()).into_iter().rev() {
                 if let Some(scrollable) = self.find_hovered_scrollable(child, cx, cy) {
                     return Some(scrollable);
                 }
