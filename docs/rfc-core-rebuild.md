@@ -1955,7 +1955,11 @@ Constraint respected: **each crate still builds standalone** — the new core is
        move" is CONFIRMED INERT: the press arms
        `drag_widget = NETWORK_PANEL_IDX` on `Adapted<PassivePlate>`
        ("no children and no events"), so DragUpdates land on a widget
-       with no drag hooks — dead scaffolding to delete or wire. And the
+       with no drag hooks — dead scaffolding, DELETED (cce-designer
+       00e148a: both press arms, the always-false hit_menubar block,
+       the NETWORK_PANEL_IDX drag-driver arms, and the two is_dragging
+       layout read-backs; border/strip presses keep their real focus+
+       consume behavior — regression-verified live). And the
        spot-check caught a real press-routing bug the A/B frames could
        not: VIEWPORT_IDX and PARAM_IDX shared the -4 z tier, and the
        stable sort's index tiebreak (3 < 6) sent EVERY press over the
