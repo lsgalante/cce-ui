@@ -374,22 +374,22 @@ impl Layout for ColorRamp {
     }
 
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
+        // Registered but NOT tree-linked (6bd self-routing, the TreeList rule): on_event
+        // forwards every event class internally — descent double-delivered and starved
+        // the composite-level sync/drains.
+        let _ = host_id;
         let p = self.r_slider.as_ptr_mut();
         let id = self.r_slider.base().id();
         ctx.register_widget(id, p);
-        ctx.link_ids(host_id, id);
         let p = self.g_slider.as_ptr_mut();
         let id = self.g_slider.base().id();
         ctx.register_widget(id, p);
-        ctx.link_ids(host_id, id);
         let p = self.b_slider.as_ptr_mut();
         let id = self.b_slider.base().id();
         ctx.register_widget(id, p);
-        ctx.link_ids(host_id, id);
         let p = self.del_button.as_ptr_mut();
         let id = self.del_button.base().id();
         ctx.register_widget(id, p);
-        ctx.link_ids(host_id, id);
     }
 }
 
@@ -657,6 +657,39 @@ impl Input for ColorRamp {
         changed
     
             }
+            Event::MouseWheel { delta, x, y, .. } => {
+                // Wheel forwarding (6bd self-routing): with the field widgets no longer
+                // tree-linked, the sliders' wheel rides this arm — and the key color syncs
+                // immediately (the old descent path left it stale until the next hover flip).
+                let (delta, px, py) = (delta.clone(), *x, *y);
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
+                if self.selected_key_idx.is_none() {
+                    return false;
+                }
+                let mut changed = false;
+                if self.r_slider.mouse_wheel(&delta, px, py, ui) {
+                    if let Some(idx) = self.selected_key_idx {
+                        self.keys[idx].color[0] = self.r_slider.inner().value();
+                    }
+                    changed = true;
+                }
+                if self.g_slider.mouse_wheel(&delta, px, py, ui) {
+                    if let Some(idx) = self.selected_key_idx {
+                        self.keys[idx].color[1] = self.g_slider.inner().value();
+                    }
+                    changed = true;
+                }
+                if self.b_slider.mouse_wheel(&delta, px, py, ui) {
+                    if let Some(idx) = self.selected_key_idx {
+                        self.keys[idx].color[2] = self.b_slider.inner().value();
+                    }
+                    changed = true;
+                }
+                if changed {
+                    self.just_changed = true;
+                }
+                changed
+            }
             Event::KeyInput(event) => {
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
         if ui.is_focused(&self.r_slider) {
@@ -676,6 +709,54 @@ impl Input for ColorRamp {
             }
             _ => false,
         }
+    }
+
+    // Field-slider drags forward through the composite (6bd self-routing): the router
+    // records THIS widget as the drag target once a press is handled here, so the hooks
+    // hand DragUpdate to whichever slider armed itself — and sync the key color, which
+    // the old descent path never did mid-drag.
+    fn draggable(&self, _rect: Rect) -> bool {
+        self.is_dragging_key
+            || self.r_slider.is_dragging()
+            || self.g_slider.is_dragging()
+            || self.b_slider.is_dragging()
+    }
+    fn is_dragging(&self) -> bool {
+        self.is_dragging_key
+            || self.r_slider.is_dragging()
+            || self.g_slider.is_dragging()
+            || self.b_slider.is_dragging()
+    }
+    fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
+        let mut changed = false;
+        if self.r_slider.is_dragging() && self.r_slider.drag_update(px, py) {
+            if let Some(idx) = self.selected_key_idx {
+                self.keys[idx].color[0] = self.r_slider.inner().value();
+            }
+            changed = true;
+        }
+        if self.g_slider.is_dragging() && self.g_slider.drag_update(px, py) {
+            if let Some(idx) = self.selected_key_idx {
+                self.keys[idx].color[1] = self.g_slider.inner().value();
+            }
+            changed = true;
+        }
+        if self.b_slider.is_dragging() && self.b_slider.drag_update(px, py) {
+            if let Some(idx) = self.selected_key_idx {
+                self.keys[idx].color[2] = self.b_slider.inner().value();
+            }
+            changed = true;
+        }
+        if changed {
+            self.just_changed = true;
+        }
+        changed
+    }
+    fn drag_end(&mut self) {
+        self.r_slider.drag_end();
+        self.g_slider.drag_end();
+        self.b_slider.drag_end();
+        self.is_dragging_key = false;
     }
 }
 
@@ -757,22 +838,20 @@ impl Layout for Ramp {
     }
 
     fn register_embedded_children(&mut self, host_id: WidgetId, ctx: &mut UiContext) {
+        // Registered but NOT tree-linked (6bd self-routing, the TreeList rule).
+        let _ = host_id;
         let p = self.preset_dropdown.as_ptr_mut();
         let id = self.preset_dropdown.base().id();
         ctx.register_widget(id, p);
-        ctx.link_ids(host_id, id);
         let p = self.line_type_dropdown.as_ptr_mut();
         let id = self.line_type_dropdown.base().id();
         ctx.register_widget(id, p);
-        ctx.link_ids(host_id, id);
         let p = self.val_slider.as_ptr_mut();
         let id = self.val_slider.base().id();
         ctx.register_widget(id, p);
-        ctx.link_ids(host_id, id);
         let p = self.del_button.as_ptr_mut();
         let id = self.del_button.base().id();
         ctx.register_widget(id, p);
-        ctx.link_ids(host_id, id);
     }
 }
 
@@ -1088,6 +1167,31 @@ impl Input for Ramp {
         changed
     
             }
+            Event::MouseWheel { delta, x, y, .. } => {
+                // Wheel forwarding (6bd self-routing): dropdowns first (mirroring the press
+                // order, incl. the preset drain), then the value slider with the key sync.
+                let (delta, px, py) = (delta.clone(), *x, *y);
+                let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
+                if self.preset_dropdown.mouse_wheel(&delta, px, py, ui) {
+                    if self.preset_dropdown.take_change() {
+                        let idx = self.preset_dropdown.selected;
+                        self.apply_preset(idx);
+                    }
+                    return true;
+                }
+                if self.line_type_dropdown.mouse_wheel(&delta, px, py, ui) {
+                    return true;
+                }
+                if self.selected_key_idx.is_some() && self.val_slider.mouse_wheel(&delta, px, py, ui) {
+                    if let Some(idx) = self.selected_key_idx {
+                        self.keys[idx].value = self.val_slider.inner().value();
+                        self.preset_dropdown.selected = 0; // Custom
+                    }
+                    self.just_changed = true;
+                    return true;
+                }
+                false
+            }
             Event::KeyInput(event) => {
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
         if event.state != ElementState::Pressed { return false; }
@@ -1164,5 +1268,32 @@ impl Input for Ramp {
             }
             _ => false,
         }
+    }
+
+    // Field-slider drags forward through the composite (6bd self-routing), with the key
+    // value sync the old descent path never ran mid-drag.
+    fn draggable(&self, _rect: Rect) -> bool {
+        self.is_dragging_key || self.val_slider.is_dragging()
+    }
+    fn is_dragging(&self) -> bool {
+        self.is_dragging_key || self.val_slider.is_dragging()
+    }
+    fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
+        let mut changed = false;
+        if self.val_slider.is_dragging() && self.val_slider.drag_update(px, py) {
+            if let Some(idx) = self.selected_key_idx {
+                self.keys[idx].value = self.val_slider.inner().value();
+                self.preset_dropdown.selected = 0; // Custom
+            }
+            changed = true;
+        }
+        if changed {
+            self.just_changed = true;
+        }
+        changed
+    }
+    fn drag_end(&mut self) {
+        self.val_slider.drag_end();
+        self.is_dragging_key = false;
     }
 }
