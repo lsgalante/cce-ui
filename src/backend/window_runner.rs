@@ -2275,6 +2275,16 @@ impl<A: Application> PointerHandler for EngineState<A> {
             self.cursor_pos = (lx, ly);
             match &event.kind {
                 PointerEventKind::Enter { .. } => {
+                    // Enter carries the pointer's position but no Motion follows until it
+                    // actually moves — without this the app's hover state is stale from
+                    // enter to first move, and a press in that window can misroute (e.g. a
+                    // divider press falling through to the movable-backplate window drag).
+                    let mut rebuild = false;
+                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(lx, ly), &mut rebuild);
+                    if rebuild {
+                        self.redraw = true;
+                    }
+
                     let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
                     let mut cursor_icon = CursorIcon::Default;
                     if !is_status_bar {
