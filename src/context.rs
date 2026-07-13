@@ -187,9 +187,17 @@ impl UiContext {
             match event {
                 Event::MouseButton { button, state, x, y, .. } if *button == MouseButton::Left => {
                     if *state == ElementState::Pressed {
-                        self.drag_start_pos = Some((*x, *y));
-                        self.is_dragging = false;
-                        self.drag_target = None;
+                        // Apps re-dispatch the SAME press to several roots (a plain loop
+                        // over their top-level widgets); only the first call for a given
+                        // press may reset the drag bookkeeping — a later call would wipe
+                        // the target an earlier root just armed, killing the drag before
+                        // its first move. drag_start_pos is cleared on release, so an
+                        // equal position here means "same press, next root".
+                        if self.drag_start_pos != Some((*x, *y)) {
+                            self.drag_start_pos = Some((*x, *y));
+                            self.is_dragging = false;
+                            self.drag_target = None;
+                        }
                     } else if *state == ElementState::Released {
                         if self.is_dragging {
                             if let Some(target_id) = self.drag_target {
@@ -878,6 +886,62 @@ mod tests {
         };
         ctx.propagate_event(&release, id);
         assert!(!slider.is_dragging(), "DragEnd reached Input::drag_end");
+        assert!(!ctx.is_dragging);
+    }
+
+    /// The multi-root press dispatch (how apps actually loop: one press propagated to
+    /// EVERY top-level root, no break): a later root's propagate call must not wipe the
+    /// drag target an earlier root just armed. This was live-broken in every plain-loop
+    /// app (the demo, colors) while the single-root test above passed — found the first
+    /// time a held drag could be driven headlessly (ccectl pointer-press).
+    #[test]
+    fn multi_root_press_dispatch_keeps_the_drag_target() {
+        let mut ctx = UiContext::new();
+        let mut slider = crate::widget::Slider::new().with_value(0.5);
+        let (id, ptr) = (slider.id(), slider.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        slider.set_rect(0.0, 0.0, 200.0, 30.0);
+        let mut other = Block { base: Widget::new_rect(300.0, 300.0, 50.0, 50.0) };
+        let other_ptr = &mut other as *mut _ as *mut (dyn crate::widget::WidgetHost + 'static);
+        let other_id = other.base.id();
+        ctx.register_widget(other_id, other_ptr);
+
+        let press = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 100.0,
+            y: 15.0,
+            local_x: 100.0,
+            local_y: 15.0,
+        };
+        // The app loop: same press to both roots, slider first.
+        assert!(ctx.propagate_event(&press, id));
+        ctx.propagate_event(&press, other_id);
+        assert_eq!(ctx.drag_target, Some(id), "the second root's call must not wipe the armed target");
+
+        let v0 = slider.value;
+        let mv = |x: f32| Event::PointerMove { x, y: 15.0, local_x: x, local_y: 15.0 };
+        for root in [id, other_id] {
+            ctx.propagate_event(&mv(110.0), root);
+        }
+        for root in [id, other_id] {
+            ctx.propagate_event(&mv(140.0), root);
+        }
+        assert!(ctx.is_dragging, "threshold crossed despite multi-root dispatch");
+        assert!(slider.value > v0 + 0.05, "DragUpdate drove the slider ({} -> {})", v0, slider.value);
+
+        let release = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Released,
+            x: 140.0,
+            y: 15.0,
+            local_x: 140.0,
+            local_y: 15.0,
+        };
+        for root in [id, other_id] {
+            ctx.propagate_event(&release, root);
+        }
+        assert!(!slider.is_dragging());
         assert!(!ctx.is_dragging);
     }
 
