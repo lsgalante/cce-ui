@@ -1888,6 +1888,35 @@ Constraint respected: **each crate still builds standalone** — the new core is
        workspace suite; designer capture pixel-identical to the
        prior slice's (empty 8% mask) + /state live; TI click probe
        canary-silent.
+       **THE DESIGNER EVENT REDESIGN — DONE (2026-07-13), closing the
+       6bd deferral.** The resolution is a design decision, not a
+       router conversion: the designer's event layer IS its own
+       z-ordered windowing system (custom hit shapes with
+       circular-pane overrides, hardcoded pane z, pane-focus
+       derivation, unfocus rituals) and deliberately delivers through
+       `handle_event` directly — the UiContext router's
+       hit-gating/descent/drag tracking cannot own that policy, and
+       mixing the two would double-run drag state machines. What the
+       redesign fixes is the CONFLATION the deferral named:
+       `drag_widget` no longer doubles as app-mode-drag marker. A new
+       `AppDrag` enum (NetworkResize/ParamResize/SpreadsheetResize,
+       each variant carrying its whole gesture state — dir, start
+       rect/width/height, start mouse) owns the floating-pane edge
+       resizes; the three `is_resizing_*` flags and four
+       `drag_start_*` scratch fields are deleted; `drag_widget` only
+       ever names a widget drag driven through the slot's Input drag
+       hooks; exactly one of the two is armed per press. Release
+       teardown, cursor hiding, path-change resets, and the
+       hover-loop gate all read the split state; the hot-path
+       MouseInput debug `println!` died as a rider. Verified: A/B vs
+       stashed baseline — canvas-click and menu-open frames
+       byte-identical (AE=0), id-stripped /state identical, launch
+       frame differs by cursor sprites only (same-binary control
+       AE=0). Held gestures (edge resizes, panel move, node drag) are
+       not headlessly drivable — user spot-check pending. The
+       `draggable`/`is_dragging` trait methods still have this
+       cascade + TI's ControlPanel as dyn consumers — they leave the
+       trait with the CP endgame.
     5. window_runner render plumbing + remaining `as_ptr` sites; then
        the `Element` + `Adapted` endgame (own design pass).
     Stored-pointer state remaining after slices 1–3, all deliberate:
