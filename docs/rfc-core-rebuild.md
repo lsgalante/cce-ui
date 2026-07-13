@@ -1928,11 +1928,23 @@ Constraint respected: **each crate still builds standalone** — the new core is
        frame differs by cursor sprites only (same-binary control
        AE=0). Held-gesture spot-check (2026-07-13, ccectl held-drag
        injection): node drag PASSED (Camera [1,1]→[3,3] via /state),
-       NetworkResize right-edge PASSED, ParamResize left-edge PASSED.
-       SpreadsheetResize is BLOCKED: the pane toggles on as a ~0-height
-       sliver at the window bottom (stored height collapsed), so the
-       top-edge margin has nothing real to grab — likely its own latent
-       bug, still pending. The network pane's breadcrumb-strip "panel
+       NetworkResize right-edge PASSED, ParamResize left-edge PASSED,
+       and SpreadsheetResize top-edge PASSED (the earlier "pane opens
+       collapsed" report was a misdiagnosis: the HTTP menu_click driving
+       the toggle was a SILENT NO-OP — see below — so the pane was never
+       open; a real click opens it at its correct 250px default and the
+       held top-edge drag grows it). Found instead: the HTTP `menu_click`
+       action only reaches the MenuBar widgets' index-matched dispatch in
+       window.rs (LEFT_MENUBAR's View menu has items 0-4), while the
+       pane-toggle items ("Show Spreadsheet Pane" etc.) live in the
+       OTHER menu system — the button-param menu pane drained by
+       `sync_parameters_to_project`'s label match — which the API cannot
+       reach; out-of-range item indices reply "success" and do nothing,
+       and the handler's synthesized cursor park (-9999) sheds stray
+       hover-diff pixels that can masquerade as the click's effect.
+       The menu dispatch existing TWICE (index-matched in window.rs vs
+       label-matched in app.rs, with diverging item sets) is the trap
+       that produced the misdiagnosis. The network pane's breadcrumb-strip "panel
        move" is CONFIRMED INERT: the press arms
        `drag_widget = NETWORK_PANEL_IDX` on `Adapted<PassivePlate>`
        ("no children and no events"), so DragUpdates land on a widget
