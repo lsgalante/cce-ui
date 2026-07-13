@@ -1955,7 +1955,23 @@ Constraint respected: **each crate still builds standalone** — the new core is
        deleting. The QUERY/POLLING surface (`draggable`,
        `is_dragging`, `take_click`, `take_change`, value getters)
        stays — no Event form; dies with typed messages (§3.5) or
-       container dissolutions. ~100 call sites, one session. ~~The MenuBar/StatusBar/Dropdown parent-pointer
+       container dissolutions. ~100 call sites, one session.
+       **DONE (2026-07-13): WidgetHost 67→59.** The eight left the
+       trait; in-crate composite forwards to concrete embedded
+       children resolve unchanged through the inherent `Adapted<W>`
+       entry points (the batch-1 recipe — far cheaper than the
+       feared 100 rewrites); dyn callers (designer's cascade, TI's
+       ControlPanel child forwards, cloud's json_layout slider
+       drag) build the equivalent `Event` and call `handle_event`.
+       Both caveats landed: the keyboard `!visible()` gate lives in
+       `handle_event`'s KeyInput arm (closing the routed path's
+       missing-gate hole), and the coverage-gated `cursor_moved`
+       default became the inherent `Adapted::cursor_moved`. The
+       trait's default `handle_event` serves test shims only.
+       Verified: 164 tests; settings render stream byte-identical;
+       TI interactive four-state A/B empty masks; designer /state
+       identical across a canvas click.
+       ~~The MenuBar/StatusBar/Dropdown parent-pointer
        snapshot change rides this phase.~~ **Landed early
        (2026-07-12): the census showed all five stored widget-side
        parent pointers production-DEAD** (nothing ever set_parent's
