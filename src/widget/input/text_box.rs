@@ -1471,11 +1471,6 @@ impl Default for Adapted<TextBox> {
 unsafe impl Send for TextBox {}
 unsafe impl Sync for TextBox {}
 
-impl Control for Adapted<TextBox> {
-    fn set_label(&mut self, label: &str) {
-        Adapted::set_label(self, label);
-    }
-}
 
 #[cfg(test)]
 mod tests {

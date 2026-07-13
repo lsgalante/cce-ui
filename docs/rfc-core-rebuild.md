@@ -2097,6 +2097,11 @@ Constraint respected: **each crate still builds standalone** — the new core is
        baseline; TI live probe — Button/Toggle clicks, Layout
        dropdown popover open, and a "Grid" selection re-laying out
        the gallery through the new roster drains end-to-end.
+       RIDER: the `Control` subtrait (set_label + control_label) is
+       DELETED — zero dyn consumers, zero `control_label()` callers;
+       every impl just routed `set_label` to the inherent shadow, so
+       the deletion is call-site-invisible (compile-verified across
+       the workspace).
     Former slices 4/5 fold in: the app `as_ptr_mut` dispatch sites
     are rewritten by whichever of routed-events (per app) or the
     phase-4 flip reaches them first; no standalone pointer-to-id

@@ -8,7 +8,7 @@ use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
-    Adapted, Control, WidgetHost, ElementState, Event, EventCtx, Input, Justification, Layout,
+    Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Justification, Layout,
     MouseButton, Paint,
 };
 
@@ -353,11 +353,6 @@ impl Input for Button {
     }
 }
 
-impl Control for Adapted<Button> {
-    fn set_label(&mut self, label: &str) {
-        Adapted::set_label(self, label);
-    }
-}
 
 pub enum PageButton {
     Active,

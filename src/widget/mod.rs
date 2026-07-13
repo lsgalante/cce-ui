@@ -524,43 +524,10 @@ pub trait WidgetHost {
     }
 }
 
-pub trait Control: WidgetHost {
-    fn set_label(&mut self, label: &str) {
-        self.base_mut().label = Some(label.to_string());
-    }
-
-    fn control_label(&self) -> Option<TextLabel> {
-        let b = self.base();
-        let label = b.label.as_ref()?;
-        let name = self.type_name();
-        
-        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-        let color = colors::control_label_color_detached_for_state(b.hovered, b.focused);
-        if crate::layout::control_label_layout() == "side" {
-            let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
-            Some(TextLabel {
-                text: label.clone(),
-                x: b.x + 4.0,
-                y: y_pos,
-                font_size,
-                color,
-            })
-        } else {
-            let x_offset = if name == "Slider" || name == "RangeSlider" {
-                0.0
-            } else {
-                4.0
-            };
-            Some(TextLabel {
-                text: label.clone(),
-                x: b.x + x_offset,
-                y: b.y,
-                font_size,
-                color,
-            })
-        }
-    }
-}
+// The `Control` subtrait (set_label + control_label) is DELETED (6bd value shrink):
+// zero dyn consumers and zero `control_label()` callers remained; `set_label` lives on as
+// the inherent `Adapted<W>` method every call site already resolved to (it shadowed the
+// trait), and detached-label paint moved to the adapter in the Phase 5 leaf sweeps.
 
 pub mod core;
 pub mod input;

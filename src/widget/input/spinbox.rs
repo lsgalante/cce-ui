@@ -7,7 +7,7 @@ use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
-    Adapted, Control, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton, NamedKey,
+    Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton, NamedKey,
     Paint, TextEditorState,
 };
 
@@ -431,11 +431,6 @@ impl Input for Spinbox {
     }
 }
 
-impl Control for Adapted<Spinbox> {
-    fn set_label(&mut self, label: &str) {
-        Adapted::set_label(self, label);
-    }
-}
 
 #[cfg(test)]
 mod tests {

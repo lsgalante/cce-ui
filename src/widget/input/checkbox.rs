@@ -12,7 +12,7 @@
 use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
-use crate::widget::{Adapted, Control, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
+use crate::widget::{Adapted, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
 fn parse_bool(val: &str) -> Option<bool> {
     match val.trim().to_lowercase().as_str() {
@@ -436,20 +436,6 @@ impl Input for Toggle {
         } else {
             false
         }
-    }
-}
-
-// The `set_label` overrides route the trait entry point (e.g. `dyn Control` callers) to the
-// synced inherent version — `Control`'s default writes only the base label, which would leave
-// these self-painting labels stale.
-impl Control for Adapted<Checkbox> {
-    fn set_label(&mut self, label: &str) {
-        Adapted::set_label(self, label);
-    }
-}
-impl Control for Adapted<Toggle> {
-    fn set_label(&mut self, label: &str) {
-        Adapted::set_label(self, label);
     }
 }
 

@@ -20,7 +20,7 @@ use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
 use crate::widget::{
-    Control, WidgetHost, ElementState, Event, Key, MouseButton, NamedKey,
+    WidgetHost, ElementState, Event, Key, MouseButton, NamedKey,
 };
 
 /// Read-data stand-in for the legacy direct-write `parent` pointer (6bd — no stored widget
@@ -810,11 +810,6 @@ impl Input for Dropdown {
 unsafe impl Send for Dropdown {}
 unsafe impl Sync for Dropdown {}
 
-impl Control for Adapted<Dropdown> {
-    fn set_label(&mut self, label: &str) {
-        Adapted::set_label(self, label);
-    }
-}
 
 #[cfg(test)]
 mod tests {

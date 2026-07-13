@@ -10,7 +10,7 @@ use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
-    Adapted, Control, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
+    Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
     MouseScrollDelta, NamedKey, Paint, TextEditorState,
 };
 
@@ -429,11 +429,6 @@ impl Input for Slider {
     }
 }
 
-impl Control for Adapted<Slider> {
-    fn set_label(&mut self, label: &str) {
-        Adapted::set_label(self, label);
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveThumb {
@@ -679,11 +674,6 @@ impl Input for RangeSlider {
     }
 }
 
-impl Control for Adapted<RangeSlider> {
-    fn set_label(&mut self, label: &str) {
-        Adapted::set_label(self, label);
-    }
-}
 
 #[cfg(test)]
 mod tests {
