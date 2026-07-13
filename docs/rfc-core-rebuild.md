@@ -1938,13 +1938,20 @@ Constraint respected: **each crate still builds standalone** — the new core is
        window.rs (LEFT_MENUBAR's View menu has items 0-4), while the
        pane-toggle items ("Show Spreadsheet Pane" etc.) live in the
        OTHER menu system — the button-param menu pane drained by
-       `sync_parameters_to_project`'s label match — which the API cannot
-       reach; out-of-range item indices reply "success" and do nothing,
-       and the handler's synthesized cursor park (-9999) sheds stray
-       hover-diff pixels that can masquerade as the click's effect.
-       The menu dispatch existing TWICE (index-matched in window.rs vs
-       label-matched in app.rs, with diverging item sets) is the trap
-       that produced the misdiagnosis. The network pane's breadcrumb-strip "panel
+       `sync_parameters_to_project`'s label match; out-of-range item
+       indices replied "success" while doing nothing, and the handler's
+       synthesized cursor park (-9999) sheds stray hover-diff pixels
+       that can masquerade as the click's effect. The menu dispatch
+       existing TWICE (index-matched in window.rs vs label-matched in
+       app.rs, with diverging item sets) is the trap that produced the
+       misdiagnosis. Both API holes are since FIXED (cce-designer
+       b4ac763 + afe0f78): `menu_click` validates its indices against
+       the target menubar's real dropdowns (a non-menubar widget_idx
+       used to PANIC the app) and echoes the clicked label; the label
+       match is extracted to `State::execute_menu_action`, and the new
+       `{"action":"menu_action","label":"Show Spreadsheet Pane"}` drives
+       the menu-pane items directly (verified: pane toggles on at its
+       exact rect via curl, toggles off byte-identical). The network pane's breadcrumb-strip "panel
        move" is CONFIRMED INERT: the press arms
        `drag_widget = NETWORK_PANEL_IDX` on `Adapted<PassivePlate>`
        ("no children and no events"), so DragUpdates land on a widget
