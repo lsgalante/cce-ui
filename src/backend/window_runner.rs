@@ -2615,7 +2615,19 @@ impl<A: Application> EngineState<A> {
             xkeysym::Keysym::Shift_L | xkeysym::Keysym::Shift_R => Key::Named(NamedKey::Shift),
             xkeysym::Keysym::F5 => Key::Named(NamedKey::F5),
             _ => {
-                if let Some(ref text) = event.utf8 {
+                // With Ctrl held, xkb's utf8 goes through the legacy control-character
+                // transformation (ctrl+j = "\n", ctrl+a = 0x01, ...); the keysym is
+                // untransformed, so prefer it there or ctrl+<letter> shortcuts can
+                // never match their letter.
+                if self.ctrl_pressed {
+                    if let Some(ch) = event.keysym.key_char() {
+                        Key::Character(ch.to_string())
+                    } else if let Some(ref text) = event.utf8 {
+                        Key::Character(text.clone())
+                    } else {
+                        return;
+                    }
+                } else if let Some(ref text) = event.utf8 {
                     Key::Character(text.clone())
                 } else if let Some(ch) = event.keysym.key_char() {
                     Key::Character(ch.to_string())
