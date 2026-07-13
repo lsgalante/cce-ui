@@ -451,12 +451,12 @@ mod tests {
         WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
 
         // Legacy test: click at (75, 33) lands in the decrement zone.
-        assert!(WidgetHost::mouse_input(&mut sb, MouseButton::Left, ElementState::Pressed, 75.0, 33.0, &mut ctx));
+        assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 75.0, 33.0, &mut ctx));
         assert_eq!(sb.value, -1);
         assert!(WidgetHost::take_change(&mut sb));
 
         // Increment zone (past 77.5% of the width).
-        assert!(WidgetHost::mouse_input(&mut sb, MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
+        assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
         assert_eq!(sb.value, 0);
     }
 

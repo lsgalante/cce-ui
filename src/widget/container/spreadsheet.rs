@@ -420,16 +420,16 @@ mod tests {
         assert!(WidgetHost::draggable(&s));
 
         // Press on the scrollbar track (x >= 200-6-2-4): thumb jumps, drag engages.
-        WidgetHost::drag_begin(&mut s, 195.0, 80.0);
+        s.drag_begin(195.0, 80.0);
         assert!(WidgetHost::is_dragging(&s));
-        assert!(WidgetHost::drag_update(&mut s, 195.0, 110.0), "thumb drag scrolls");
+        assert!(s.drag_update(195.0, 110.0), "thumb drag scrolls");
         let dragged_to = s.inner().geom(rect).unwrap().scroll;
         assert!(dragged_to > 0.0);
-        WidgetHost::drag_end(&mut s);
+        s.drag_end();
         assert!(!WidgetHost::is_dragging(&s));
 
         // A body press (left of the scrollbar) engages no drag.
-        WidgetHost::drag_begin(&mut s, 50.0, 60.0);
+        s.drag_begin(50.0, 60.0);
         assert!(!WidgetHost::is_dragging(&s), "body press is not a scrollbar drag");
 
         // End key jumps to max; Home returns to zero. (Keys route via keyboard_input.)
@@ -441,12 +441,12 @@ mod tests {
             ctrl: false,
             shift: false,
         };
-        assert!(WidgetHost::keyboard_input(&mut s, &end, &mut ctx));
+        assert!(s.keyboard_input(&end, &mut ctx));
         let g = s.inner().geom(rect).unwrap();
         assert_eq!(g.scroll, g.max_scroll);
 
         // Hidden: the focused-widget keyboard path must not consume keys.
         s.set_visible(false);
-        assert!(!WidgetHost::keyboard_input(&mut s, &end, &mut ctx), "hidden widget ignores keys");
+        assert!(!s.keyboard_input(&end, &mut ctx), "hidden widget ignores keys");
     }
 }

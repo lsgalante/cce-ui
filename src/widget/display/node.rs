@@ -268,7 +268,7 @@ mod tests {
         // A press outside the toggle starts a drag; reposition snaps to the drag origin.
         assert!(node.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 110.0, &mut ctx));
         assert!(WidgetHost::is_dragging(&node));
-        assert!(WidgetHost::drag_update(&mut node, 150.0, 130.0));
+        assert!(node.drag_update(150.0, 130.0));
         assert_eq!(WidgetHost::rect(&node), (140.0, 120.0, 120.0, 40.0), "moved by the pointer delta");
         assert!(node.mouse_input(MouseButton::Left, ElementState::Released, 150.0, 130.0, &mut ctx));
         assert!(!WidgetHost::is_dragging(&node));

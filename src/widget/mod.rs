@@ -224,18 +224,17 @@ pub trait WidgetHost {
     fn as_ptr_mut(&mut self) -> *mut (dyn WidgetHost + 'static);
 
     fn handle_event(&mut self, event: &Event, ctx: &mut UiContext) -> bool {
+        // The default serves test shims only (Adapted overrides this): base hover
+        // bookkeeping on moves, tick forwarding, everything else inert — the old
+        // per-method dispatch died with the direct-dispatch entry points (6bd collapse).
         match event {
             Event::PointerMove { x, y, .. } => {
-                self.cursor_moved(*x, *y, ctx)
-            }
-            Event::MouseButton { button, state, x, y, .. } => {
-                self.mouse_input(*button, *state, *x, *y, ctx)
-            }
-            Event::MouseWheel { delta, x, y, .. } => {
-                self.mouse_wheel(delta, *x, *y, ctx)
-            }
-            Event::KeyInput(key_event) => {
-                self.keyboard_input(key_event, ctx)
+                let (px, py) = (*x, *y);
+                ctx.set_cursor_pos(px, py);
+                let was = self.base().hovered;
+                let is_hit = self.hit_test(px, py, ctx);
+                self.base_mut().hovered = is_hit;
+                was != is_hit
             }
             Event::Tick(dt) => {
                 self.tick(*dt, ctx)
@@ -309,37 +308,10 @@ pub trait WidgetHost {
         px >= hx && px <= hx + hw && py >= y && py <= y + h
     }
 
-    fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        ctx.set_cursor_pos(px, py);
-        if ctx.is_coordinate_covered(self.base().id(), px, py) {
-            let was = self.base().hovered;
-            if was {
-                self.base_mut().hovered = false;
-                self.handle_event(&Event::MouseLeave, ctx);
-            }
-            return was;
-        }
-        self.on_cursor_moved(px, py, ctx)
-    }
-
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let was = self.base().hovered;
-        let is_hit = self.hit_test(px, py, ctx);
-        self.base_mut().hovered = is_hit;
-        if was != is_hit {
-            if is_hit {
-                self.handle_event(&Event::MouseEnter, ctx);
-            } else {
-                self.handle_event(&Event::MouseLeave, ctx);
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    fn mouse_input(&mut self, _button: MouseButton, _state: ElementState, _px: f32, _py: f32, _ctx: &mut UiContext) -> bool { false }
-    fn mouse_wheel(&mut self, _delta: &MouseScrollDelta, _px: f32, _py: f32, _ctx: &mut UiContext) -> bool { false }
+    // The direct-dispatch entry points (`cursor_moved`, `on_cursor_moved`, `mouse_input`,
+    // `mouse_wheel`, `keyboard_input`, `drag_begin`/`drag_update`/`drag_end`) are GONE from
+    // the trait (6bd collapse): every event delivery goes through `handle_event` — the entry
+    // points live on as inherent `Adapted<W>` methods for concrete in-crate forwards.
 
     // `hovered`/`set_hovered` are GONE from the trait (6bd batch 2): the state is the base
     // `Widget::hovered` flag, read/written directly by the defaults above; Button/Checkbox
@@ -367,9 +339,6 @@ pub trait WidgetHost {
     fn plate_bevel(&self) -> Option<f32> { None }
 
     fn is_dragging(&self) -> bool { false }
-    fn drag_update(&mut self, _px: f32, _py: f32) -> bool { false }
-    fn drag_begin(&mut self, _px: f32, _py: f32) {}
-    fn drag_end(&mut self) {}
     fn take_click(&mut self) -> bool { false }
     fn draggable(&self) -> bool { false }
 
@@ -515,7 +484,6 @@ pub trait WidgetHost {
     }
     fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem) {}
     fn set_selected(&mut self, _selected: bool) {}
-    fn keyboard_input(&mut self, _event: &KeyEvent, _ctx: &mut UiContext) -> bool { false }
 
     fn set_visible(&mut self, _visible: bool) {}
     fn visible(&self) -> bool { true }

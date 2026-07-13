@@ -699,20 +699,20 @@ mod tests {
         assert_eq!(rs.values(), (0.2, 0.8));
 
         // Thumb size 18, range 182; low center = 55.4.
-        WidgetHost::drag_begin(&mut rs, 55.4, 20.0);
+        rs.drag_begin(55.4, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::Low));
-        assert!(WidgetHost::drag_update(&mut rs, 100.9, 20.0));
+        assert!(rs.drag_update(100.9, 20.0));
         assert!((rs.values().0 - 0.45).abs() < 0.01);
         assert_eq!(rs.values().1, 0.8);
-        WidgetHost::drag_end(&mut rs);
+        rs.drag_end();
         assert_eq!(rs.active_thumb, None);
 
         // High thumb 0.8 -> 0.6.
-        WidgetHost::drag_begin(&mut rs, 164.6, 20.0);
+        rs.drag_begin(164.6, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::High));
-        assert!(WidgetHost::drag_update(&mut rs, 128.2, 20.0));
+        assert!(rs.drag_update(128.2, 20.0));
         assert!((rs.values().1 - 0.6).abs() < 0.01);
-        WidgetHost::drag_end(&mut rs);
+        rs.drag_end();
     }
 
     #[test]
@@ -720,18 +720,18 @@ mod tests {
         let mut rs = RangeSlider::new().with_values(0.5, 0.5);
         WidgetHost::set_rect(&mut rs, 10.0, 10.0, 200.0, 20.0);
 
-        WidgetHost::drag_begin(&mut rs, 109.0, 20.0);
+        rs.drag_begin(109.0, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::Low));
-        WidgetHost::drag_end(&mut rs);
+        rs.drag_end();
 
-        WidgetHost::drag_begin(&mut rs, 111.0, 20.0);
+        rs.drag_begin(111.0, 20.0);
         assert_eq!(rs.active_thumb, Some(ActiveThumb::High));
-        WidgetHost::drag_end(&mut rs);
+        rs.drag_end();
 
-        WidgetHost::drag_begin(&mut rs, 110.0, 20.0);
-        WidgetHost::drag_update(&mut rs, 150.0, 20.0);
+        rs.drag_begin(110.0, 20.0);
+        rs.drag_update(150.0, 20.0);
         assert_eq!(rs.values().0, 0.5, "low constrained to high");
-        WidgetHost::drag_end(&mut rs);
+        rs.drag_end();
     }
 
 #[test]
@@ -763,16 +763,14 @@ fn probe_slider_bridge() {
             ptr,
         ));
         assert!(WidgetHost::is_dragging(&sl));
-        assert!(WidgetHost::drag_update(&mut sl, 80.0, 10.0));
+        assert!(sl.drag_update(80.0, 10.0));
         assert!(sl.inner().value() > 0.5);
-        WidgetHost::drag_end(&mut sl);
+        sl.drag_end();
 
         // Wheel adjusts value when the gesture starts fresh.
         ctx.scroll_gesture_new = true;
         let before = sl.inner().value();
-        assert!(WidgetHost::mouse_wheel(
-            &mut sl,
-            &MouseScrollDelta::LineDelta(0.0, 1.0),
+        assert!(sl.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0),
             50.0,
             10.0,
             &mut ctx,

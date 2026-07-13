@@ -1056,8 +1056,8 @@ mod tests {
 
         // Drag one grid step right (step_x = 100): snap puts the node at column 1, but cell
         // (1, 0) is free so it lands there.
-        WidgetHost::drag_begin(&mut g, 110.0, 120.0);
-        assert!(WidgetHost::drag_update(&mut g, 210.0, 120.0));
+        g.drag_begin(110.0, 120.0);
+        assert!(g.drag_update(210.0, 120.0));
         assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 120.0, &mut ctx));
         assert!(!WidgetHost::is_dragging(&g));
         assert_eq!(g.get_nodes()[0].position, (1.0, 0.0));

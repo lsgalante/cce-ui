@@ -689,6 +689,86 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         ctx.clear_children_ids(self.base.id());
     }
 
+    // --- The direct-dispatch entry points, inherent since the 6bd collapse. In-crate
+    // composites forward to their CONCRETE embedded children through these; dyn callers
+    // and the router go through `handle_event`, which these forward to (the two paths
+    // are identical by construction — including Drag*, which handle_event maps onto the
+    // Input drag hooks).
+
+    pub fn mouse_input(&mut self, button: crate::widget::MouseButton, state: crate::widget::ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        self.handle_event(
+            &Event::MouseButton { button, state, x: px, y: py, local_x: px, local_y: py },
+            ctx,
+        )
+    }
+    pub fn mouse_wheel(&mut self, delta: &crate::widget::MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        self.handle_event(
+            &Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py },
+            ctx,
+        )
+    }
+    pub fn keyboard_input(&mut self, event: &crate::widget::KeyEvent, ctx: &mut UiContext) -> bool {
+        self.handle_event(&Event::KeyInput(event.clone()), ctx)
+    }
+    pub fn drag_begin(&mut self, px: f32, py: f32) {
+        let rect = self.content_rect();
+        Input::drag_begin(&mut self.inner, px, py, rect)
+    }
+    pub fn drag_update(&mut self, px: f32, py: f32) -> bool {
+        let rect = self.content_rect();
+        if let Some((nx, ny)) = Input::drag_reposition(&mut self.inner, px, py, rect) {
+            self.base.x = nx;
+            self.base.y = ny;
+            return true;
+        }
+        Input::drag_update(&mut self.inner, px, py, rect)
+    }
+    pub fn drag_end(&mut self) {
+        Input::drag_end(&mut self.inner)
+    }
+
+    /// The deleted trait default: coverage-gated hover dispatch (an open popover covering
+    /// the point clears the hover instead of recomputing it).
+    pub fn cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        ctx.set_cursor_pos(px, py);
+        if ctx.is_coordinate_covered(self.base.id(), px, py) {
+            let was = self.base.hovered;
+            if was {
+                self.base.hovered = false;
+                self.handle_event(&Event::MouseLeave, ctx);
+            }
+            return was;
+        }
+        self.on_cursor_moved(px, py, ctx)
+    }
+
+    /// Ungated pointer moves (no popover-coverage check): offer the raw move to the widget,
+    /// then fall back to the base hover bookkeeping, mirroring `handle_event`'s `PointerMove`
+    /// arm. Not routed *through* `handle_event`, because the routed path reaches this method
+    /// too (via `cursor_moved`) and would recurse; on that path `on_event` sees the same
+    /// unconsumed move twice, which is fine — a hover recompute is idempotent (anything
+    /// that changed on the first call consumed it there).
+    pub fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
+        let rect = self.content_rect();
+        let id = self.base.id();
+        let self_ptr = self.as_ptr_mut();
+        let mut ectx = EventCtx { rect, id, ui: Some(ctx), self_ptr: Some(self_ptr) };
+        let event = Event::PointerMove { x: px, y: py, local_x: px, local_y: py };
+        if Input::on_event(&mut self.inner, &event, &mut ectx) {
+            return true;
+        }
+        let was = self.base.hovered;
+        let is_hit = self.hit_test(px, py, ctx);
+        self.base.hovered = is_hit;
+        if was != is_hit {
+            let transition = if is_hit { Event::MouseEnter } else { Event::MouseLeave };
+            self.handle_event(&transition, ctx);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Register + link a child under this widget (off `WidgetHost` in 6bd batch 4; dyn callers
     /// went to `focus::link_parent_child`/tree ops).
     pub fn add_child(&mut self, child: *mut (dyn WidgetHost + 'static), ctx: &mut UiContext) {
@@ -1340,80 +1420,6 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     fn is_scrollable(&self) -> bool {
         Input::scrollable(&self.inner)
     }
-    fn drag_begin(&mut self, px: f32, py: f32) {
-        let rect = self.content_rect();
-        Input::drag_begin(&mut self.inner, px, py, rect)
-    }
-    fn drag_update(&mut self, px: f32, py: f32) -> bool {
-        let rect = self.content_rect();
-        if let Some((nx, ny)) = Input::drag_reposition(&mut self.inner, px, py, rect) {
-            self.base.x = nx;
-            self.base.y = ny;
-            return true;
-        }
-        Input::drag_update(&mut self.inner, px, py, rect)
-    }
-    fn drag_end(&mut self) {
-        Input::drag_end(&mut self.inner)
-    }
-    // --- Legacy direct-dispatch entry points. Hosts (treelist's add-key button, parameters_bg's
-    // checkboxes, app pages) call these ON the widget instead of routing an Event through
-    // `propagate_event`; without these overrides they'd hit the inert WidgetHost defaults and the
-    // widget would go deaf on those paths. Route them into `handle_event` so the hit-gating /
-    // context-menu / on_event pipeline applies identically on both paths.
-
-    fn mouse_input(&mut self, button: crate::widget::MouseButton, state: crate::widget::ElementState, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.handle_event(
-            &Event::MouseButton { button, state, x: px, y: py, local_x: px, local_y: py },
-            ctx,
-        )
-    }
-    fn mouse_wheel(&mut self, delta: &crate::widget::MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        self.handle_event(
-            &Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py },
-            ctx,
-        )
-    }
-    fn keyboard_input(&mut self, event: &crate::widget::KeyEvent, ctx: &mut UiContext) -> bool {
-        // A widget hidden while still holding focus (the designer keys into `focused_widget`;
-        // hiding a pane doesn't unfocus it) must not consume keys — the legacy visibility-toggled
-        // widgets gated their keyboard_input overrides on `visible` themselves.
-        if !self.visible() {
-            return false;
-        }
-        self.handle_event(&Event::KeyInput(event.clone()), ctx)
-    }
-
-    /// Direct-dispatch pointer moves (hosts call `w.on_cursor_moved(..)` instead of routing a
-    /// `PointerMove` — cce-files drives its breadcrumbs this way): offer the raw move to the
-    /// widget, then fall back to the base hover bookkeeping, mirroring `handle_event`'s
-    /// `PointerMove` arm. Not routed *through* `handle_event`, because the routed path reaches
-    /// this method too (via `cursor_moved`) and would recurse; on that path `on_event` sees the
-    /// same unconsumed move twice, which is fine — a hover recompute is idempotent (anything
-    /// that changed on the first call consumed it there).
-    fn on_cursor_moved(&mut self, px: f32, py: f32, ctx: &mut UiContext) -> bool {
-        let rect = self.content_rect();
-        let id = self.base.id();
-        let self_ptr = self.as_ptr_mut();
-        let mut ectx = EventCtx { rect, id, ui: Some(ctx), self_ptr: Some(self_ptr) };
-        let event = Event::PointerMove { x: px, y: py, local_x: px, local_y: py };
-        if Input::on_event(&mut self.inner, &event, &mut ectx) {
-            return true;
-        }
-        // The legacy default `WidgetHost::on_cursor_moved` body: base hover flag + synthesized
-        // MouseEnter/MouseLeave (which re-enter `handle_event` and reach `on_event`).
-        let was = self.base.hovered;
-        let is_hit = self.hit_test(px, py, ctx);
-        self.base.hovered = is_hit;
-        if was != is_hit {
-            let transition = if is_hit { Event::MouseEnter } else { Event::MouseLeave };
-            self.handle_event(&transition, ctx);
-            true
-        } else {
-            false
-        }
-    }
-
     /// Focus set/cleared directly (hosts call `w.focus()`/`w.unfocus()`): keep the base flag
     /// (unless the widget opts out — [`Input::tracks_base_focus`], TextBox's legacy `focus`
     /// never set it) and tell the widget via the same `FocusIn`/`FocusOut` events the router
@@ -1560,6 +1566,11 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 Input::drag_end(&mut self.inner);
                 true
             }
+            // A widget hidden while still holding focus (the designer keys into
+            // `focused_widget`; hiding a pane doesn't unfocus it) must not consume keys —
+            // formerly the `keyboard_input` entry point's gate, now on the one funnel
+            // (which also closes the routed path's missing-gate hole).
+            Event::KeyInput(_) if !self.visible() => false,
             // Everything else (KeyInput, Tick, Enter/Leave, Focus*) forwards directly —
             // the legacy default dispatch would route these to leaf handlers Adapted never
             // overrides, so there is no behavior to fall back to.

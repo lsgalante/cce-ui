@@ -353,9 +353,9 @@ mod tests {
         let track_y = rows[0].1 + 8.0;
         assert!(f.mouse_input(MouseButton::Left, ElementState::Pressed, 150.0, track_y, &mut ctx));
         assert!(WidgetHost::is_dragging(&f));
-        WidgetHost::drag_update(&mut f, 260.0, track_y);
+        f.drag_update(260.0, track_y);
         assert!(f.values[0] > 0.5, "drag right raises the value");
-        WidgetHost::drag_end(&mut f);
+        f.drag_end();
         assert!(!WidgetHost::is_dragging(&f));
     }
 }
