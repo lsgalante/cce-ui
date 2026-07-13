@@ -1069,8 +1069,10 @@ Constraint respected: **each crate still builds standalone** — the new core is
     (press-inside sets, press-miss clears) standing in for the global
     `focus::set_focused(scroll_box)` — ctrl-nav can no longer land on a list, and
     the focused border tint shows through the translucent bg as a green wash
-    (legacy did this too, darker under its doubled bg). Not headlessly drivable,
-    user spot-check pending: held thumb drag, arrow/PageUp/Down over a hovered list.
+    (legacy did this too, darker under its doubled bg). Spot-check PASSED
+    (2026-07-13, via ccectl held-drag injection, cce 881c2b1): held thumb drag
+    scrolls and tracks mid-drag; arrow scrolls one row; PageUp/PageDown page both
+    directions over a hovered list. The green focused wash appeared as documented.
   - **6w — settings' SectionContainer dissolved; cce-system-settings is
     embedded-base-FREE. DONE (A/B render dumps: all nine pages byte-identical
     modulo live data — the sections never painted; live-verified — notifications
@@ -1090,8 +1092,10 @@ Constraint respected: **each crate still builds standalone** — the new core is
     latent use-after-free of exactly the class this rebuild targets: the focused
     section clone was dropped and reallocated EVERY rebuild while the global
     focus pointer kept aiming at it — it survived only because same-size Vec
-    reallocation tends to reuse the freed block. Ctrl-nav is not headlessly
-    drivable (no virtual-keyboard protocol) — user spot-check pending.
+    reallocation tends to reuse the freed block. Ctrl-nav is STILL not headlessly
+    drivable (ccectl key-down injects keys but no xkb modifier state, so Ctrl
+    never registers client-side — verified 2026-07-13, ctrl+j frame AE=0) — user
+    spot-check remains pending.
   - **6x — data-editor + text-editor off the engine popup path; the render-only xdg
     popup machinery is DELETED. DONE (live-verified: text-editor File menu open +
     item click; data-editor recent-files menu → config.kdl load, tree context menu
@@ -1133,7 +1137,14 @@ Constraint respected: **each crate still builds standalone** — the new core is
     Verification trap for the log: `wlrctl` pointer warps land as Enter WITHOUT
     Motion — nudge (`move 2 2`) after warping or app hover state never updates
     (cost an hour chasing a "broken" divider tint that was fine). Held divider
-    drag is not headlessly drivable — user spot-check pending.
+    drag spot-check PASSED (2026-07-13, ccectl pointer-press/release): frac
+    tracks the held drag, panes re-lay out, window stays put. The Enter-without-
+    Motion trap turned out to be a REAL RUNNER GAP, not just an injection quirk:
+    the backend's Enter arm set the cursor icon but never fed the enter position
+    to `handle_pointer_move`, so a press straight after crossing into the window
+    hit the movable-backplate check with stale hover and moved the WINDOW instead
+    of grabbing the divider. Fixed in cce-ui 9e23229 (Enter now routes like
+    Motion); re-verified no-nudge cross+press drags the divider.
   - **6z — files' List dissolved; cce-files is embedded-base-FREE. DONE
     (live-verified: row click select with preview/details update, double-click
     navigation, breadcrumb navigation, wheel scroll with selection retained,
@@ -1168,7 +1179,10 @@ Constraint respected: **each crate still builds standalone** — the new core is
     expansion/inline-edit/annotation logic it is a self-contained walked widget
     (renders_own_subtree) whose internal ScrollBox never leaks — porting it
     app-side buys no hazard reduction; it converts to narrow traits with the
-    `Element` deletion instead. Held divider drag — user spot-check pending.
+    `Element` deletion instead. Held divider drag spot-check PASSED (2026-07-13,
+    ccectl injection): press at the divider grabbed it (app log: press 482 →
+    release 332), split tracked the full 150px, and the grab stole keyboard
+    focus from the raw editor exactly as designed.
   - **6ab — cce-text-editor on routed events + scene-solver layout: the FIRST app
     fully on the target architecture, end to end. DONE (live-verified: menu-open
     pixels match the pre-change capture at 0.13% = cursor sprite; menu item
@@ -1912,8 +1926,25 @@ Constraint respected: **each crate still builds standalone** — the new core is
        stashed baseline — canvas-click and menu-open frames
        byte-identical (AE=0), id-stripped /state identical, launch
        frame differs by cursor sprites only (same-binary control
-       AE=0). Held gestures (edge resizes, panel move, node drag) are
-       not headlessly drivable — user spot-check pending. The
+       AE=0). Held-gesture spot-check (2026-07-13, ccectl held-drag
+       injection): node drag PASSED (Camera [1,1]→[3,3] via /state),
+       NetworkResize right-edge PASSED, ParamResize left-edge PASSED.
+       SpreadsheetResize is BLOCKED: the pane toggles on as a ~0-height
+       sliver at the window bottom (stored height collapsed), so the
+       top-edge margin has nothing real to grab — likely its own latent
+       bug, still pending. The network pane's breadcrumb-strip "panel
+       move" is CONFIRMED INERT: the press arms
+       `drag_widget = NETWORK_PANEL_IDX` on `Adapted<PassivePlate>`
+       ("no children and no events"), so DragUpdates land on a widget
+       with no drag hooks — dead scaffolding to delete or wire. And the
+       spot-check caught a real press-routing bug the A/B frames could
+       not: VIEWPORT_IDX and PARAM_IDX shared the -4 z tier, and the
+       stable sort's index tiebreak (3 < 6) sent EVERY press over the
+       floating params pane to the viewport — slider/Float3 held drags
+       were dead end-to-end (only the scrollbar, armed via its own
+       press path, worked). Fixed in cce-designer 4b78aa5 (PARAM_IDX
+       gets its own -3 tier above the viewport it floats over);
+       live-verified Position X 2.50→10.00 via /state. The
        `draggable`/`is_dragging` trait methods still have this
        cascade + TI's ControlPanel as dyn consumers — they leave the
        trait with the CP endgame.
@@ -1951,8 +1982,9 @@ Constraint respected: **each crate still builds standalone** — the new core is
        Info description end-to-end, spinbox +/- increments, wheel
        scrolls with content following, page switching intact both
        ways, Controls page unchanged, child mode alive; 28-target
-       suite. Scrollbar thumb drag: user spot-check (held drags not
-       headless-drivable).
+       suite. Scrollbar thumb drag: user spot-check pending (held
+       drags ARE now drivable via ccectl pointer-press/release since
+       cce 881c2b1 — this one just hasn't been run).
     5. **window_runner render plumbing + remaining `as_ptr` sites —
        DONE (2026-07-13, the last slice).** The slice-3 census was
        right: window_runner held no pointer state (its one mention
