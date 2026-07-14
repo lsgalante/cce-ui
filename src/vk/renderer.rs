@@ -187,6 +187,25 @@ pub(crate) fn compile_wgsl(source: &str) -> Vec<u32> {
     naga::back::spv::write_vec(&module, &info, &options, None).expect("SPIR-V write failed")
 }
 
+/// Like [`compile_wgsl`], but with naga's RAY_QUERY capability and SPIR-V 1.4
+/// (required by SPV_KHR_ray_query). Only used on devices where the ray-query
+/// device stack was enabled — those are Vulkan 1.2+, which accepts 1.4.
+pub(crate) fn compile_wgsl_ray_query(source: &str) -> Vec<u32> {
+    let module = naga::front::wgsl::parse_str(source).expect("WGSL parse failed");
+    let info = naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::RAY_QUERY,
+    )
+    .validate(&module)
+    .expect("WGSL validation failed");
+    let options = naga::back::spv::Options {
+        lang_version: (1, 4),
+        flags: naga::back::spv::WriterFlags::LABEL_VARYINGS,
+        ..Default::default()
+    };
+    naga::back::spv::write_vec(&module, &info, &options, None).expect("SPIR-V write failed")
+}
+
 const COLOR_RANGE: vk::ImageSubresourceRange = vk::ImageSubresourceRange {
     aspect_mask: vk::ImageAspectFlags::COLOR,
     base_mip_level: 0,
@@ -897,11 +916,25 @@ impl VkRenderer {
         unsafe {
             let _ = self.core.device.device_wait_idle();
         }
-        let allocator = self.core.allocator.as_mut().unwrap();
-        let rt = self
-            .rt
-            .get_or_insert_with(|| RtStage::new(&self.core.device, allocator, FRAMES_IN_FLIGHT));
-        rt.set_scene(&self.core.device, allocator, triangles, materials);
+        let core = &mut self.core;
+        let allocator = core.allocator.as_mut().unwrap();
+        let rt = self.rt.get_or_insert_with(|| {
+            RtStage::new(
+                &core.device,
+                allocator,
+                FRAMES_IN_FLIGHT,
+                core.accel_loader.as_ref(),
+                core.as_scratch_align,
+            )
+        });
+        rt.set_scene(
+            &core.device,
+            allocator,
+            core.queue,
+            core.command_pool,
+            triangles,
+            materials,
+        );
     }
 
     /// Stage one progressive path-tracing pass into the viewport pane

@@ -50,6 +50,10 @@ pub struct VkCore {
     pub(crate) queue: vk::Queue,
     #[allow(dead_code)] // RT engine / future consumers select by family
     pub(crate) queue_family: u32,
+    /// The VK_KHR_acceleration_structure device loader — present exactly when
+    /// the ray-query stack (accel structs + ray_query + BDA) was enabled at
+    /// device creation. Its presence IS the tier-2 capability signal.
+    pub(crate) accel_loader: Option<ash::khr::acceleration_structure::Device>,
     pub(crate) device: ash::Device,
     pub(crate) physical_device: vk::PhysicalDevice,
     pub(crate) surface_loader: ash::khr::surface::Instance,
@@ -57,6 +61,8 @@ pub struct VkCore {
     pub(crate) instance: ash::Instance,
     pub(crate) _entry: ash::Entry,
     pub(crate) min_uniform_align: vk::DeviceSize,
+    /// minAccelerationStructureScratchOffsetAlignment; 1 when no ray-query stack.
+    pub(crate) as_scratch_align: vk::DeviceSize,
 }
 
 impl VkCore {
@@ -84,6 +90,20 @@ impl VkCore {
     unsafe fn new_inner(
         wayland: Option<(*mut c_void, *mut c_void)>,
     ) -> (Self, Option<vk::SurfaceKHR>) {
+        // CCE_VK_DEVICE: "integrated" (the default), "discrete", or a device
+        // name substring. An explicit request also lifts a session-wide ICD
+        // pin (VK_DRIVER_FILES / VK_ICD_FILENAMES) for THIS process — the
+        // common setup pins Vulkan to the iGPU to keep the dGPU asleep, which
+        // would otherwise make "discrete" unsatisfiable.
+        let device_pref = std::env::var("CCE_VK_DEVICE")
+            .ok()
+            .map(|v| v.to_lowercase())
+            .filter(|v| !v.is_empty());
+        if device_pref.is_some() {
+            std::env::remove_var("VK_DRIVER_FILES");
+            std::env::remove_var("VK_ICD_FILENAMES");
+        }
+
         let entry = ash::Entry::load().expect("Failed to load libvulkan");
 
         // Validation when available (debug builds or CCE_VK_VALIDATION=1).
@@ -180,7 +200,9 @@ impl VkCore {
         });
 
         // Physical device + queue family: graphics, plus present support when
-        // a surface exists. Prefer integrated (the toolkit's LowPower default).
+        // a surface exists. Prefer integrated (the toolkit's LowPower default)
+        // unless CCE_VK_DEVICE says otherwise; an unsatisfiable preference
+        // falls back to the default order rather than failing.
         let mut candidates: Vec<(vk::PhysicalDevice, u32, i32)> = Vec::new();
         for pd in instance
             .enumerate_physical_devices()
@@ -199,11 +221,34 @@ impl VkCore {
             });
             if let Some(family) = family {
                 let props = instance.get_physical_device_properties(pd);
-                let rank = match props.device_type {
+                let name = CStr::from_ptr(props.device_name.as_ptr())
+                    .to_string_lossy()
+                    .to_lowercase();
+                let type_rank = match props.device_type {
                     vk::PhysicalDeviceType::INTEGRATED_GPU => 0,
                     vk::PhysicalDeviceType::DISCRETE_GPU => 1,
                     vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
                     _ => 3,
+                };
+                let rank = match device_pref.as_deref() {
+                    Some("discrete") => match props.device_type {
+                        vk::PhysicalDeviceType::DISCRETE_GPU => 0,
+                        other => {
+                            1 + match other {
+                                vk::PhysicalDeviceType::INTEGRATED_GPU => 0,
+                                vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
+                                _ => 3,
+                            }
+                        }
+                    },
+                    Some("integrated") | None => type_rank,
+                    Some(substr) => {
+                        if name.contains(substr) {
+                            0
+                        } else {
+                            1 + type_rank
+                        }
+                    }
                 };
                 candidates.push((pd, family, rank));
             }
@@ -226,28 +271,87 @@ impl VkCore {
         let queue_infos = [vk::DeviceQueueCreateInfo::default()
             .queue_family_index(queue_family)
             .queue_priorities(&queue_priorities)];
-        let device_extensions: Vec<*const i8> = if wayland.is_some() {
+        let mut device_extensions: Vec<*const i8> = if wayland.is_some() {
             vec![ash::khr::swapchain::NAME.as_ptr()]
         } else {
             Vec::new()
         };
+
+        // The ray-query stack (the RT engine's tier 2): needs the three
+        // extensions plus the BDA / accel-structure / ray-query features and
+        // an API >= 1.2 device (SPIR-V 1.4 shaders). Enabled whenever the
+        // device offers it; consumers check `accel_loader`.
+        let ext_props = instance
+            .enumerate_device_extension_properties(physical_device)
+            .unwrap_or_default();
+        let has_ext = |name: &CStr| {
+            ext_props
+                .iter()
+                .any(|e| CStr::from_ptr(e.extension_name.as_ptr()) == name)
+        };
+        let device_api = instance
+            .get_physical_device_properties(physical_device)
+            .api_version
+            .min(api_version);
+        let mut ray_query = device_api >= vk::API_VERSION_1_2
+            && has_ext(ash::khr::acceleration_structure::NAME)
+            && has_ext(ash::khr::ray_query::NAME)
+            && has_ext(ash::khr::deferred_host_operations::NAME);
+        if ray_query {
+            let mut bda = vk::PhysicalDeviceBufferDeviceAddressFeatures::default();
+            let mut asf = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
+            let mut rqf = vk::PhysicalDeviceRayQueryFeaturesKHR::default();
+            let mut features2 = vk::PhysicalDeviceFeatures2::default()
+                .push_next(&mut bda)
+                .push_next(&mut asf)
+                .push_next(&mut rqf);
+            instance.get_physical_device_features2(physical_device, &mut features2);
+            ray_query = bda.buffer_device_address == vk::TRUE
+                && asf.acceleration_structure == vk::TRUE
+                && rqf.ray_query == vk::TRUE;
+        }
+
+        let mut bda_features =
+            vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
+        let mut as_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
+            .acceleration_structure(true);
+        let mut rq_features = vk::PhysicalDeviceRayQueryFeaturesKHR::default().ray_query(true);
+        let mut device_info = vk::DeviceCreateInfo::default().queue_create_infos(&queue_infos);
+        if ray_query {
+            device_extensions.push(ash::khr::acceleration_structure::NAME.as_ptr());
+            device_extensions.push(ash::khr::ray_query::NAME.as_ptr());
+            device_extensions.push(ash::khr::deferred_host_operations::NAME.as_ptr());
+            device_info = device_info
+                .push_next(&mut bda_features)
+                .push_next(&mut as_features)
+                .push_next(&mut rq_features);
+            log::info!("Vulkan ray-query stack enabled (RT tier 2 available)");
+        }
         let device = instance
             .create_device(
                 physical_device,
-                &vk::DeviceCreateInfo::default()
-                    .queue_create_infos(&queue_infos)
-                    .enabled_extension_names(&device_extensions),
+                &device_info.enabled_extension_names(&device_extensions),
                 None,
             )
             .expect("Failed to create Vulkan device");
         let queue = device.get_device_queue(queue_family, 0);
+        let accel_loader =
+            ray_query.then(|| ash::khr::acceleration_structure::Device::new(&instance, &device));
+        let as_scratch_align = if ray_query {
+            let mut as_props = vk::PhysicalDeviceAccelerationStructurePropertiesKHR::default();
+            let mut props2 = vk::PhysicalDeviceProperties2::default().push_next(&mut as_props);
+            instance.get_physical_device_properties2(physical_device, &mut props2);
+            (as_props.min_acceleration_structure_scratch_offset_alignment as vk::DeviceSize).max(1)
+        } else {
+            1
+        };
 
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: instance.clone(),
             device: device.clone(),
             physical_device,
             debug_settings: Default::default(),
-            buffer_device_address: false,
+            buffer_device_address: ray_query,
             allocation_sizes: Default::default(),
         })
         .expect("Failed to create GPU allocator");
@@ -267,6 +371,7 @@ impl VkCore {
                 command_pool,
                 queue,
                 queue_family,
+                accel_loader,
                 device,
                 physical_device,
                 surface_loader,
@@ -274,6 +379,7 @@ impl VkCore {
                 instance,
                 _entry: entry,
                 min_uniform_align,
+                as_scratch_align,
             },
             surface,
         )
