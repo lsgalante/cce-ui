@@ -54,6 +54,10 @@ struct Material {
 
 @group(0) @binding(5) var out_img: texture_storage_2d<rgba8unorm, write>;
 
+// Primary-hit features for the denoiser (rt_denoise.wgsl), two vec4s per
+// pixel: [2i] = (shading normal, hit t — 1e30 for sky), [2i+1] = (albedo, 0).
+@group(0) @binding(6) var<storage, read_write> features: array<vec4<f32>>;
+
 // PCG (O'Neill) — one u32 of state per path, advanced per draw.
 fn rand(state: ptr<function, u32>) -> f32 {
     var s = *state * 747796405u + 2891336453u;
@@ -119,6 +123,10 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         for (var bounce: u32 = 0u; bounce < params.max_bounces; bounce = bounce + 1u) {
             let hit = intersect_scene(ro, rd);
             if hit.t >= 1e30 {
+                if s == 0u && bounce == 0u {
+                    features[2u * idx] = vec4<f32>(0.0, 0.0, 0.0, 1e30);
+                    features[2u * idx + 1u] = vec4<f32>(1.0, 1.0, 1.0, 0.0);
+                }
                 radiance = radiance + throughput * sky(rd);
                 break;
             }
@@ -129,11 +137,19 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
             if dot(n, rd) > 0.0 {
                 n = -n;
             }
+            if s == 0u && bounce == 0u {
+                features[2u * idx] = vec4<f32>(n, hit.t);
+                features[2u * idx + 1u] = vec4<f32>(mat.albedo.rgb, 0.0);
+            }
             throughput = throughput * mat.albedo.rgb;
             ro = ro + rd * hit.t + n * 1e-4;
             rd = cosine_dir(n, rand(&rng), rand(&rng));
         }
-        total = total + radiance;
+        // Firefly clamp: rare sun-spike paths otherwise leave speckles the
+        // variance can't average out (and the denoiser's edge-stopping
+        // weights deliberately refuse to smear). Slight energy loss on
+        // extreme highlights, big variance win.
+        total = total + min(radiance, vec3<f32>(4.0));
     }
 
     var acc = accum[idx];

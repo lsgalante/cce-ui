@@ -300,6 +300,308 @@ struct RtFrame {
     descriptor_set: vk::DescriptorSet,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct DenoiseParams {
+    width: u32,
+    height: u32,
+    step: u32,
+    first: u32,
+    last: u32,
+    inv_sqrt_n: f32,
+    _pad: [u32; 2],
+}
+
+const DENOISE_ITERATIONS: usize = 3; // à-trous steps 1, 2, 4
+
+struct DenoiserFrame {
+    /// DENOISE_ITERATIONS dynamic-offset slices of [`DenoiseParams`].
+    uniforms: AllocatedBuffer,
+    /// src = ping, dst = pong.
+    set_a: vk::DescriptorSet,
+    /// src = pong, dst = ping.
+    set_b: vk::DescriptorSet,
+}
+
+/// The à-trous denoise pipeline (rt_denoise.wgsl). Owned by [`RtStage`];
+/// its buffers (features/ping/pong) live on the stage with the other
+/// pane-sized targets.
+struct Denoiser {
+    pipeline: vk::Pipeline,
+    pipeline_layout: vk::PipelineLayout,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_pool: vk::DescriptorPool,
+    shader_module: vk::ShaderModule,
+    uniform_stride: vk::DeviceSize,
+    frames: Vec<DenoiserFrame>,
+}
+
+impl Denoiser {
+    fn new(
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        frames_in_flight: usize,
+        min_uniform_align: vk::DeviceSize,
+    ) -> Self {
+        unsafe {
+            let bindings = [
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(2)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(3)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(4)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(5)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+            ];
+            let descriptor_set_layout = device
+                .create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
+                    None,
+                )
+                .expect("Failed to create denoise descriptor set layout");
+            let set_layouts_one = [descriptor_set_layout];
+            let pipeline_layout = device
+                .create_pipeline_layout(
+                    &vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts_one),
+                    None,
+                )
+                .expect("Failed to create denoise pipeline layout");
+            let spirv = compile_wgsl(include_str!("rt_denoise.wgsl"));
+            let shader_module = device
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+                .expect("Failed to create denoise shader module");
+            let pipeline = device
+                .create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    &[vk::ComputePipelineCreateInfo::default()
+                        .stage(
+                            vk::PipelineShaderStageCreateInfo::default()
+                                .stage(vk::ShaderStageFlags::COMPUTE)
+                                .module(shader_module)
+                                .name(c"cs_denoise"),
+                        )
+                        .layout(pipeline_layout)],
+                    None,
+                )
+                .expect("Failed to create denoise pipeline")[0];
+
+            let n = frames_in_flight as u32;
+            let pool_sizes = [
+                vk::DescriptorPoolSize::default()
+                    .ty(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                    .descriptor_count(2 * n),
+                vk::DescriptorPoolSize::default()
+                    .ty(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(8 * n),
+                vk::DescriptorPoolSize::default()
+                    .ty(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(2 * n),
+            ];
+            let descriptor_pool = device
+                .create_descriptor_pool(
+                    &vk::DescriptorPoolCreateInfo::default()
+                        .max_sets(2 * n)
+                        .pool_sizes(&pool_sizes),
+                    None,
+                )
+                .expect("Failed to create denoise descriptor pool");
+            let set_layouts: Vec<vk::DescriptorSetLayout> =
+                vec![descriptor_set_layout; frames_in_flight * 2];
+            let sets = device
+                .allocate_descriptor_sets(
+                    &vk::DescriptorSetAllocateInfo::default()
+                        .descriptor_pool(descriptor_pool)
+                        .set_layouts(&set_layouts),
+                )
+                .expect("Failed to allocate denoise descriptor sets");
+
+            let uniform_stride = (std::mem::size_of::<DenoiseParams>() as vk::DeviceSize)
+                .next_multiple_of(min_uniform_align.max(1));
+            let frames: Vec<DenoiserFrame> = (0..frames_in_flight)
+                .map(|i| {
+                    let uniforms = create_cpu_buffer(
+                        device,
+                        allocator,
+                        uniform_stride * DENOISE_ITERATIONS as vk::DeviceSize,
+                        vk::BufferUsageFlags::UNIFORM_BUFFER,
+                        "rt-denoise-uniforms",
+                    );
+                    let (set_a, set_b) = (sets[2 * i], sets[2 * i + 1]);
+                    for set in [set_a, set_b] {
+                        let infos = [vk::DescriptorBufferInfo::default()
+                            .buffer(uniforms.buffer)
+                            .range(std::mem::size_of::<DenoiseParams>() as vk::DeviceSize)];
+                        device.update_descriptor_sets(
+                            &[vk::WriteDescriptorSet::default()
+                                .dst_set(set)
+                                .dst_binding(0)
+                                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                                .buffer_info(&infos)],
+                            &[],
+                        );
+                    }
+                    DenoiserFrame { uniforms, set_a, set_b }
+                })
+                .collect();
+
+            Denoiser {
+                pipeline,
+                pipeline_layout,
+                descriptor_set_layout,
+                descriptor_pool,
+                shader_module,
+                uniform_stride,
+                frames,
+            }
+        }
+    }
+
+    /// Re-point the per-target bindings after the pane-sized buffers are
+    /// (re)created. Device is idle (target recreation contract).
+    fn write_target_descriptors(
+        &self,
+        device: &ash::Device,
+        accum: vk::Buffer,
+        features: vk::Buffer,
+        ping: vk::Buffer,
+        pong: vk::Buffer,
+        output_view: vk::ImageView,
+    ) {
+        for frame in &self.frames {
+            for (set, src, dst) in
+                [(frame.set_a, ping, pong), (frame.set_b, pong, ping)]
+            {
+                let buf_infos = [
+                    vk::DescriptorBufferInfo::default().buffer(accum).range(vk::WHOLE_SIZE),
+                    vk::DescriptorBufferInfo::default().buffer(features).range(vk::WHOLE_SIZE),
+                    vk::DescriptorBufferInfo::default().buffer(src).range(vk::WHOLE_SIZE),
+                    vk::DescriptorBufferInfo::default().buffer(dst).range(vk::WHOLE_SIZE),
+                ];
+                let image_infos = [vk::DescriptorImageInfo::default()
+                    .image_view(output_view)
+                    .image_layout(vk::ImageLayout::GENERAL)];
+                let writes: Vec<vk::WriteDescriptorSet> = buf_infos
+                    .iter()
+                    .enumerate()
+                    .map(|(i, info)| {
+                        vk::WriteDescriptorSet::default()
+                            .dst_set(set)
+                            .dst_binding(1 + i as u32)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .buffer_info(std::slice::from_ref(info))
+                    })
+                    .chain(std::iter::once(
+                        vk::WriteDescriptorSet::default()
+                            .dst_set(set)
+                            .dst_binding(5)
+                            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                            .image_info(&image_infos),
+                    ))
+                    .collect();
+                unsafe { device.update_descriptor_sets(&writes, &[]) };
+            }
+        }
+    }
+
+    /// After the frame fence: the per-iteration params. `n_after` is the
+    /// sample count the accumulation will hold once this frame's dispatch
+    /// lands — the color sigma tightens as it grows.
+    fn write_frame_uniforms(&mut self, frame_index: usize, width: u32, height: u32, n_after: u32) {
+        let inv_sqrt_n = 1.0 / (n_after.max(1) as f32).sqrt();
+        let frame = &mut self.frames[frame_index];
+        let mapped = frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap();
+        for i in 0..DENOISE_ITERATIONS {
+            let params = DenoiseParams {
+                width,
+                height,
+                step: 1 << i,
+                first: (i == 0) as u32,
+                last: (i == DENOISE_ITERATIONS - 1) as u32,
+                inv_sqrt_n,
+                _pad: [0; 2],
+            };
+            let offset = self.uniform_stride as usize * i;
+            mapped[offset..offset + std::mem::size_of::<DenoiseParams>()]
+                .copy_from_slice(bytemuck::bytes_of(&params));
+        }
+    }
+
+    /// Record the à-trous iterations. The tracer's dispatch has already run
+    /// in this command buffer; the last iteration rewrites `out_img` (still
+    /// in GENERAL). Iteration parity: 0 → set_b (writes ping), 1 → set_a,
+    /// 2 → set_b.
+    fn record(&self, device: &ash::Device, cmd: vk::CommandBuffer, frame_index: usize, w: u32, h: u32) {
+        let frame = &self.frames[frame_index];
+        unsafe {
+            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, self.pipeline);
+            for i in 0..DENOISE_ITERATIONS {
+                // Order this iteration's reads after the previous compute
+                // writes (tracer or prior iteration).
+                device.cmd_pipeline_barrier(
+                    cmd,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &[vk::MemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                        .dst_access_mask(
+                            vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE,
+                        )],
+                    &[],
+                    &[],
+                );
+                let set = if i % 2 == 0 { frame.set_b } else { frame.set_a };
+                device.cmd_bind_descriptor_sets(
+                    cmd,
+                    vk::PipelineBindPoint::COMPUTE,
+                    self.pipeline_layout,
+                    0,
+                    &[set],
+                    &[(self.uniform_stride as u32) * i as u32],
+                );
+                device.cmd_dispatch(cmd, w.div_ceil(WORKGROUP), h.div_ceil(WORKGROUP), 1);
+            }
+        }
+    }
+
+    fn destroy(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        unsafe {
+            for frame in &mut self.frames {
+                let mut uniforms = std::mem::replace(&mut frame.uniforms, AllocatedBuffer::null());
+                destroy_cpu_buffer(device, allocator, &mut uniforms);
+            }
+            device.destroy_descriptor_pool(self.descriptor_pool, None);
+            device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_layout(self.pipeline_layout, None);
+            device.destroy_shader_module(self.shader_module, None);
+        }
+    }
+}
+
 pub(crate) struct RtStage {
     tier: RtTier,
     accel_loader: Option<ash::khr::acceleration_structure::Device>,
@@ -319,6 +621,13 @@ pub(crate) struct RtStage {
     tri_count: u32,
 
     accum: AllocatedBuffer,
+    /// Primary-hit features (2 vec4 per pixel) written by the tracer, read
+    /// by the denoiser.
+    features: AllocatedBuffer,
+    /// À-trous ping-pong color buffers (1 vec4 per pixel each).
+    ping: AllocatedBuffer,
+    pong: AllocatedBuffer,
+    denoiser: Option<Denoiser>,
     output_image: vk::Image,
     output_view: vk::ImageView,
     output_allocation: Option<Allocation>,
@@ -343,8 +652,11 @@ impl RtStage {
         frames_in_flight: usize,
         accel_loader: Option<&ash::khr::acceleration_structure::Device>,
         as_scratch_align: vk::DeviceSize,
+        min_uniform_align: vk::DeviceSize,
     ) -> Self {
         let force_compute = std::env::var("CCE_VK_RT").is_ok_and(|v| v == "compute");
+        let denoise_on = !std::env::var("CCE_VK_RT_DENOISE")
+            .is_ok_and(|v| v == "off" || v == "0" || v == "false");
         let tier = if accel_loader.is_some() && !force_compute {
             RtTier::RayQuery
         } else {
@@ -391,6 +703,11 @@ impl RtStage {
                 vk::DescriptorSetLayoutBinding::default()
                     .binding(5)
                     .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(6)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE),
             ];
@@ -445,7 +762,7 @@ impl RtStage {
                     .descriptor_count(n),
                 vk::DescriptorPoolSize::default()
                     .ty(vk::DescriptorType::STORAGE_BUFFER)
-                    .descriptor_count(4 * n),
+                    .descriptor_count(5 * n),
                 vk::DescriptorPoolSize::default()
                     .ty(vk::DescriptorType::STORAGE_IMAGE)
                     .descriptor_count(n),
@@ -500,6 +817,9 @@ impl RtStage {
                 })
                 .collect();
 
+            let denoiser = denoise_on
+                .then(|| Denoiser::new(device, allocator, frames_in_flight, min_uniform_align));
+
             RtStage {
                 tier,
                 accel_loader: accel_loader.cloned(),
@@ -516,6 +836,10 @@ impl RtStage {
                 materials: AllocatedBuffer::null(),
                 tri_count: 0,
                 accum: AllocatedBuffer::null(),
+                features: AllocatedBuffer::null(),
+                ping: AllocatedBuffer::null(),
+                pong: AllocatedBuffer::null(),
+                denoiser,
                 output_image: vk::Image::null(),
                 output_view: vk::ImageView::null(),
                 output_allocation: None,
@@ -967,8 +1291,11 @@ impl RtStage {
         self.destroy_targets(device, allocator);
         self.output_size = (w, h);
         self.output_initialized = false;
-        self.accum = {
-            let size = (w as vk::DeviceSize) * (h as vk::DeviceSize) * 16;
+        let gpu_buffer = |allocator: &mut Allocator,
+                          bytes_per_px: vk::DeviceSize,
+                          name: &'static str|
+         -> AllocatedBuffer {
+            let size = (w as vk::DeviceSize) * (h as vk::DeviceSize) * bytes_per_px;
             unsafe {
                 let buffer = device
                     .create_buffer(
@@ -978,23 +1305,29 @@ impl RtStage {
                             .sharing_mode(vk::SharingMode::EXCLUSIVE),
                         None,
                     )
-                    .expect("Failed to create RT accumulation buffer");
+                    .expect("Failed to create RT target buffer");
                 let requirements = device.get_buffer_memory_requirements(buffer);
                 let allocation = allocator
                     .allocate(&AllocationCreateDesc {
-                        name: "rt-accum",
+                        name,
                         requirements,
                         location: MemoryLocation::GpuOnly,
                         linear: true,
                         allocation_scheme: AllocationScheme::GpuAllocatorManaged,
                     })
-                    .expect("Failed to allocate RT accumulation memory");
+                    .expect("Failed to allocate RT target memory");
                 device
                     .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
-                    .expect("Failed to bind RT accumulation memory");
+                    .expect("Failed to bind RT target memory");
                 AllocatedBuffer { buffer, allocation: Some(allocation), size }
             }
         };
+        self.accum = gpu_buffer(allocator, 16, "rt-accum");
+        self.features = gpu_buffer(allocator, 32, "rt-features");
+        if self.denoiser.is_some() {
+            self.ping = gpu_buffer(allocator, 16, "rt-denoise-ping");
+            self.pong = gpu_buffer(allocator, 16, "rt-denoise-pong");
+        }
         unsafe {
             let image = device
                 .create_image(
@@ -1047,6 +1380,9 @@ impl RtStage {
                 let accum_infos = [vk::DescriptorBufferInfo::default()
                     .buffer(self.accum.buffer)
                     .range(vk::WHOLE_SIZE)];
+                let feature_infos = [vk::DescriptorBufferInfo::default()
+                    .buffer(self.features.buffer)
+                    .range(vk::WHOLE_SIZE)];
                 let image_infos = [vk::DescriptorImageInfo::default()
                     .image_view(view)
                     .image_layout(vk::ImageLayout::GENERAL)];
@@ -1062,8 +1398,23 @@ impl RtStage {
                             .dst_binding(5)
                             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                             .image_info(&image_infos),
+                        vk::WriteDescriptorSet::default()
+                            .dst_set(frame.descriptor_set)
+                            .dst_binding(6)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .buffer_info(&feature_infos),
                     ],
                     &[],
+                );
+            }
+            if let Some(denoiser) = &self.denoiser {
+                denoiser.write_target_descriptors(
+                    device,
+                    self.accum.buffer,
+                    self.features.buffer,
+                    self.ping.buffer,
+                    self.pong.buffer,
+                    view,
                 );
             }
         }
@@ -1082,6 +1433,9 @@ impl RtStage {
             let _ = allocator.free(a);
         }
         destroy_cpu_buffer(device, allocator, &mut self.accum);
+        destroy_cpu_buffer(device, allocator, &mut self.features);
+        destroy_cpu_buffer(device, allocator, &mut self.ping);
+        destroy_cpu_buffer(device, allocator, &mut self.pong);
         self.output_size = (0, 0);
     }
 
@@ -1109,6 +1463,14 @@ impl RtStage {
         frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()
             [..std::mem::size_of::<RtParams>()]
             .copy_from_slice(bytemuck::bytes_of(&params));
+        if let Some(denoiser) = &mut self.denoiser {
+            denoiser.write_frame_uniforms(
+                frame_index,
+                self.output_size.0,
+                self.output_size.1,
+                self.sample_index + self.spp,
+            );
+        }
     }
 
     /// Record one accumulation dispatch + the blit into the backdrop's pane
@@ -1194,6 +1556,12 @@ impl RtStage {
                 &[],
             );
             device.cmd_dispatch(cmd, w.div_ceil(WORKGROUP), h.div_ceil(WORKGROUP), 1);
+
+            // À-trous denoise passes; the last one rewrites out_img (still
+            // GENERAL), so the transfer barrier below covers either writer.
+            if let Some(denoiser) = &self.denoiser {
+                denoiser.record(device, cmd, frame_index, w, h);
+            }
 
             // Output to TRANSFER_SRC, backdrop to TRANSFER_DST for the blit.
             let (bd_old, bd_access, bd_stage) = if backdrop_in_transfer_src {
@@ -1311,6 +1679,9 @@ impl RtStage {
     pub(crate) fn destroy(&mut self, device: &ash::Device, allocator: &mut Allocator) {
         self.destroy_targets(device, allocator);
         self.destroy_accel(device, allocator);
+        if let Some(mut denoiser) = self.denoiser.take() {
+            denoiser.destroy(device, allocator);
+        }
         for buf in [&mut self.nodes, &mut self.tris, &mut self.materials] {
             destroy_cpu_buffer(device, allocator, buf);
         }
@@ -1360,8 +1731,16 @@ impl RtOffscreen {
         let device = core.device.clone();
         let accel_loader = core.accel_loader.clone();
         let as_scratch_align = core.as_scratch_align;
+        let min_uniform_align = core.min_uniform_align;
         let allocator = core.allocator.as_mut().unwrap();
-        let stage = RtStage::new(&device, allocator, 1, accel_loader.as_ref(), as_scratch_align);
+        let stage = RtStage::new(
+            &device,
+            allocator,
+            1,
+            accel_loader.as_ref(),
+            as_scratch_align,
+            min_uniform_align,
+        );
         unsafe {
             let cmd = device
                 .allocate_command_buffers(
@@ -1855,6 +2234,8 @@ mod tests {
             include_str!("rt_query.wgsl")
         ));
         assert!(!tier2.is_empty());
+        let denoise = compile_wgsl(include_str!("rt_denoise.wgsl"));
+        assert!(!denoise.is_empty());
     }
 
     /// End-to-end GPU test — needs a Vulkan device, so ignored by default.

@@ -925,6 +925,7 @@ impl VkRenderer {
                 FRAMES_IN_FLIGHT,
                 core.accel_loader.as_ref(),
                 core.as_scratch_align,
+                core.min_uniform_align,
             )
         });
         rt.set_scene(
