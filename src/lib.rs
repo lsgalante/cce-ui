@@ -18,7 +18,6 @@ pub mod colors {
     pub use crate::color::*;
 }
 
-pub const SHADER: &str = include_str!("shader.wgsl");
 
 pub static IS_VERTICAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static BAR_THICKNESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(24);
