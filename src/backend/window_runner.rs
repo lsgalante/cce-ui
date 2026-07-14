@@ -34,12 +34,12 @@ use wayland_protocols::wp::pointer_gestures::zv1::client::{
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
 use glyphon::{
-    FontSystem, Resolution, TextArea,
+    FontSystem,
     TextBounds, Buffer, Attrs, Metrics,
 };
 use crate::widget::{WidgetHost, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey, Position};
 use crate::wayland::detect_scale_factor;
-use crate::backend::WgpuAdapter;
+use crate::vk::{Batch2D, Frame2D, TextSpan, VkRenderer};
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 struct BufferCacheKey {
@@ -1634,12 +1634,9 @@ pub struct EngineState<A: Application> {
     
     pub inner: Option<A>,
     
-    pub wgpu_adapter: Option<WgpuAdapter>,
-    pub render_pipeline: Option<wgpu::RenderPipeline>,
-    pub vertex_buffer: Option<wgpu::Buffer>,
-    pub vertex_count: u32,
-    pub overlay_vertex_buffer: Option<wgpu::Buffer>,
-    pub overlay_vertex_count: u32,
+    pub renderer: Option<VkRenderer>,
+    pub font_system: Option<FontSystem>,
+    pub swash_cache: glyphon::SwashCache,
     
     pub scale_factor: f64,
     pub logical_width: f32,
@@ -1669,93 +1666,37 @@ pub struct EngineState<A: Application> {
 }
 
 impl<A: Application> EngineState<A> {
-    pub async fn init_gpu(&mut self, conn: &Connection, width_logical: f32, height_logical: f32) {
+    pub fn init_gpu(&mut self, conn: &Connection, width_logical: f32, height_logical: f32) {
         let s = self.scale_factor as f32;
         let pw = (width_logical * s) as u32;
         let ph = (height_logical * s) as u32;
-        
+
         let surface = self.surface.as_ref().expect("surface missing");
-        
+
         let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
         let surface_ptr = surface.id().as_ptr() as *mut std::ffi::c_void;
-        
-        let load_system_fonts = self.inner.as_ref().map_or(false, |a| a.load_system_fonts());
-        let adapter = WgpuAdapter::new(display_ptr, surface_ptr, pw, ph, load_system_fonts).await;
-        
-        let shader = adapter.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(crate::SHADER.into()),
-        });
-        
-        let pipeline_layout = adapter.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Pipeline Layout"),
-            bind_group_layouts: &[],
-            push_constant_ranges: &[],
-        });
-        
-        let render_pipeline = adapter.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc()],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: adapter.config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-                strip_index_format: None,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-            multiview: None,
-            cache: None,
-        });
-        
-        let vertex_buffer = adapter.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Vertex Buffer"),
-            size: 1,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
 
-        let overlay_vertex_buffer = adapter.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Overlay Vertex Buffer"),
-            size: 1,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        let load_system_fonts = self.inner.as_ref().map_or(false, |a| a.load_system_fonts());
+        // Corner radius 0: runner apps tessellate their own rounded corners.
+        let renderer =
+            unsafe { VkRenderer::new(display_ptr, surface_ptr, pw, ph, 0.0) };
+        self.font_system = Some(if load_system_fonts {
+            crate::create_font_system_with_system_fonts()
+        } else {
+            crate::create_font_system()
         });
-        
-        self.wgpu_adapter = Some(adapter);
-        self.render_pipeline = Some(render_pipeline);
-        self.vertex_buffer = Some(vertex_buffer);
-        self.overlay_vertex_buffer = Some(overlay_vertex_buffer);
+        self.renderer = Some(renderer);
         self.logical_width = width_logical;
         self.logical_height = height_logical;
     }
-    
+
     pub fn resize(&mut self, w: f32, h: f32) {
         let (w, h) = self.inner.as_ref().unwrap().adjust_size(w, h);
         if w > 0.0 && h > 0.0 {
             self.logical_width = w;
             self.logical_height = h;
-            if let Some(ref mut adapter) = self.wgpu_adapter {
-                adapter.resize((w as f64 * self.scale_factor) as u32, (h as f64 * self.scale_factor) as u32);
+            if let Some(ref mut renderer) = self.renderer {
+                renderer.resize((w as f64 * self.scale_factor) as u32, (h as f64 * self.scale_factor) as u32);
             }
         }
     }
@@ -1789,7 +1730,7 @@ impl<A: Application> EngineState<A> {
         // Clip = the paint walk's item clip ∩ the prim's own bounds, in logical space.
         self.dl_text_items.clear();
         if self.inner.as_ref().unwrap().display_list_text() {
-            let fs = &mut self.wgpu_adapter.as_mut().unwrap().font_system;
+            let fs = self.font_system.as_mut().unwrap();
             for item in &dl.items {
                 if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, attrs, layout } = &item.prim {
                     let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
@@ -1815,8 +1756,6 @@ impl<A: Application> EngineState<A> {
             }
         }
 
-        let adapter = self.wgpu_adapter.as_mut().unwrap();
-        let render_pipeline = self.render_pipeline.as_ref().unwrap();
         let (mut verts, mut dl_batches) = tessellate_display_list(&dl, logical_w, logical_h);
         // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
         let pre_custom = verts.len() as u32;
@@ -1824,60 +1763,24 @@ impl<A: Application> EngineState<A> {
         if (verts.len() as u32) > pre_custom {
             dl_batches.push(DlBatch { scissor: None, start: pre_custom, end: verts.len() as u32 });
         }
-        self.vertex_count = verts.len() as u32;
-        if self.vertex_count > 0 {
-            let data = bytemuck::cast_slice(&verts);
-            let needed = data.len() as wgpu::BufferAddress;
-            let mut vbuf = self.vertex_buffer.as_ref().unwrap();
-            if needed > vbuf.size() {
-                let new_vbuf = adapter.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Vertex Buffer"),
-                    size: needed,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                self.vertex_buffer = Some(new_vbuf);
-                vbuf = self.vertex_buffer.as_ref().unwrap();
-            }
-            adapter.queue.write_buffer(vbuf, 0, data);
-        }
 
-        // 1b. Build and upload overlay vertex buffer
+        // 1b. Overlay quads (drawn after the text pass).
         let mut overlay_quads = Vec::new();
         self.inner.as_mut().unwrap().overlay_quads(&mut overlay_quads, LogicalSize::new(logical_w, logical_h), scale_factor);
         let mut overlay_verts = Vec::new();
         for &(qx, qy, qw, qh, qc) in &overlay_quads {
             overlay_verts.extend(quad_vertices(qx, qy, qw, qh, logical_w, logical_h, qc));
         }
-        self.overlay_vertex_count = overlay_verts.len() as u32;
-        if self.overlay_vertex_count > 0 {
-            let data = bytemuck::cast_slice(&overlay_verts);
-            let needed = data.len() as wgpu::BufferAddress;
-            let mut ovbuf = self.overlay_vertex_buffer.as_ref().unwrap();
-            if needed > ovbuf.size() {
-                let new_ovbuf = adapter.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("Overlay Vertex Buffer"),
-                    size: needed,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-                self.overlay_vertex_buffer = Some(new_ovbuf);
-                ovbuf = self.overlay_vertex_buffer.as_ref().unwrap();
-            }
-            adapter.queue.write_buffer(ovbuf, 0, data);
-        }
-        
+
         // 2. Prepare text
         let scale_f32 = scale_factor as f32;
         let pw = (logical_w * scale_f32) as u32;
         let ph = (logical_h * scale_f32) as u32;
-        adapter.text_viewport.update(&adapter.queue, Resolution { width: pw, height: ph });
-        
+
         let bounds = TextBounds { left: 0, top: 0, right: pw as i32, bottom: ph as i32 };
         // All text is display-list text now (the legacy text_items/text_areas path is gone):
         // map each dl Text prim with the default mapping (scale + surface clamp) plus the
         // popover-occlusion clamp against the app's registered popovers.
-        let mut areas: Vec<TextArea<'_>> = Vec::new();
         let mut dl_overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
         if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
             for &pop_id in &ctx.active_popovers {
@@ -1902,6 +1805,7 @@ impl<A: Application> EngineState<A> {
                 crate::widget::context_menu::h(),
             ));
         }
+        let mut spans: Vec<TextSpan> = Vec::new();
         for ti in &self.dl_text_items {
             let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
                 TextBounds {
@@ -1914,123 +1818,70 @@ impl<A: Application> EngineState<A> {
                 bounds
             };
             popover_occlusion_clamp(&dl_overlay_rects, ti, scale_f32, &mut item_bounds);
-            areas.push(TextArea {
+            spans.push(TextSpan {
                 buffer: &ti.buffer,
                 left: (ti.x * scale_f32).round(),
                 top: (ti.y * scale_f32).round(),
+                // Buffers are shaped at physical size (get_text_buffer_attrs).
                 scale: 1.0,
-                bounds: item_bounds,
-                default_color: ti.color,
-                custom_glyphs: &[],
+                bounds: Some([
+                    item_bounds.left,
+                    item_bounds.top,
+                    item_bounds.right,
+                    item_bounds.bottom,
+                ]),
+                default_color: [
+                    ti.color.r() as f32 / 255.0,
+                    ti.color.g() as f32 / 255.0,
+                    ti.color.b() as f32 / 255.0,
+                    ti.color.a() as f32 / 255.0,
+                ],
+                rotation: None,
+                clip_circle: [0.0; 3],
             });
         }
-        adapter.text_renderer.prepare(&adapter.device, &adapter.queue, &mut adapter.font_system, &mut adapter.text_atlas, &adapter.text_viewport, areas, &mut adapter.swash_cache).unwrap();
-        
-        // 3. Render Pass
-        let output = match adapter.surface.get_current_texture() {
-            Ok(t) => t,
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                adapter.surface.configure(&adapter.device, &adapter.config);
-                match adapter.surface.get_current_texture() {
-                    Ok(t) => t,
-                    Err(e) => {
-                        log::error!("Surface error after configure: {e:?}");
-                        return;
-                    }
-                }
-            }
-            Err(wgpu::SurfaceError::Timeout) => return,
-            Err(e) => {
-                log::error!("Surface error: {e:?}");
-                return;
-            }
-        };
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = adapter.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Encoder"),
-        });
-        
-        {
-            let cc = self.inner.as_ref().unwrap().clear_color();
-            let r_clear = (cc[0] as f64).powf(2.2);
-            let g_clear = (cc[1] as f64).powf(2.2);
-            let b_clear = (cc[2] as f64).powf(2.2);
-            let a_clear = cc[3] as f64;
-            
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: r_clear,
-                            g: g_clear,
-                            b: b_clear,
-                            a: a_clear,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            
-            if self.vertex_count > 0 {
-                pass.set_pipeline(render_pipeline);
-                pass.set_vertex_buffer(0, self.vertex_buffer.as_ref().unwrap().slice(..));
-                // Draw each clip batch under its own GPU scissor (logical clip -> physical px).
-                for batch in &dl_batches {
-                    match batch.scissor {
-                        Some(clip) => {
-                            let sx = (clip.x * scale_f32).max(0.0) as u32;
-                            let sy = (clip.y * scale_f32).max(0.0) as u32;
-                            if sx >= pw || sy >= ph {
-                                continue;
-                            }
-                            let sw_px = ((clip.width * scale_f32) as u32).min(pw - sx);
-                            let sh_px = ((clip.height * scale_f32) as u32).min(ph - sy);
-                            if sw_px == 0 || sh_px == 0 {
-                                continue;
-                            }
-                            pass.set_scissor_rect(sx, sy, sw_px, sh_px);
-                        }
-                        None => pass.set_scissor_rect(0, 0, pw, ph),
-                    }
-                    pass.draw(batch.start..batch.end, 0..1);
-                }
-                // Restore full scissor so text/overlay draws are not clipped.
-                pass.set_scissor_rect(0, 0, pw, ph);
-            }
 
-            adapter.text_renderer.render(&adapter.text_atlas, &adapter.text_viewport, &mut pass).unwrap();
- 
-            if self.overlay_vertex_count > 0 {
-                pass.set_pipeline(render_pipeline);
-                pass.set_vertex_buffer(0, self.overlay_vertex_buffer.as_ref().unwrap().slice(..));
-                pass.draw(0..self.overlay_vertex_count, 0..1);
-            }
-        }
-        
+        // 3. Frame: display-list batches under their physical scissors, then
+        // text, then overlays. The renderer owns swapchain rebuild/recovery.
+        let renderer = self.renderer.as_mut().unwrap();
+        renderer.prepare_text(self.font_system.as_mut().unwrap(), &mut self.swash_cache, &spans);
+
+        let batches: Vec<Batch2D> = dl_batches
+            .iter()
+            .map(|batch| Batch2D {
+                scissor: batch.scissor.map(|clip| {
+                    (
+                        (clip.x * scale_f32).max(0.0) as u32,
+                        (clip.y * scale_f32).max(0.0) as u32,
+                        (clip.width * scale_f32) as u32,
+                        (clip.height * scale_f32) as u32,
+                    )
+                }),
+                start: batch.start,
+                end: batch.end,
+            })
+            .collect();
+
+        let cc = self.inner.as_ref().unwrap().clear_color();
+        let clear_color = [cc[0].powf(2.2), cc[1].powf(2.2), cc[2].powf(2.2), cc[3]];
+
         if let Some(ref surface) = self.surface {
             let _callback = surface.frame(&self.qh, ());
             self.frame_callback_pending = true;
         }
 
-        adapter.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
-
-        adapter.text_atlas.trim();
+        renderer.draw_frame_2d(Frame2D {
+            verts: &verts,
+            batches: &batches,
+            overlay_verts: &overlay_verts,
+            clear_color,
+        });
     }
 }
 
 impl<A: Application> Drop for EngineState<A> {
     fn drop(&mut self) {
-        self.wgpu_adapter = None;
-        self.render_pipeline = None;
-        self.vertex_buffer = None;
-        self.overlay_vertex_buffer = None;
+        self.renderer = None;
     }
 }
 
@@ -2837,12 +2688,9 @@ pub fn run<A: Application>() {
         layer_surface: None,
         surface: None,
         inner: None,
-        wgpu_adapter: None,
-        render_pipeline: None,
-        vertex_buffer: None,
-        vertex_count: 0,
-        overlay_vertex_buffer: None,
-        overlay_vertex_count: 0,
+        renderer: None,
+        font_system: None,
+        swash_cache: glyphon::SwashCache::new(),
         scale_factor: 1.0,
         logical_width: 0.0,
         logical_height: 0.0,
@@ -2926,7 +2774,7 @@ pub fn run<A: Application>() {
     }
     engine_state.surface = Some(surface);
 
-    pollster::block_on(engine_state.init_gpu(&conn, settings.width as f32, settings.height as f32));
+    engine_state.init_gpu(&conn, settings.width as f32, settings.height as f32);
 
     let mut event_loop = EventLoop::try_new().unwrap();
     let loop_handle = event_loop.handle();

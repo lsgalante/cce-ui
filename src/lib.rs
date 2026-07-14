@@ -12,6 +12,7 @@ pub mod scene;
 pub mod process;
 pub mod file_dialog;
 pub mod ipc;
+pub mod vk;
 
 pub mod colors {
     pub use crate::color::*;
