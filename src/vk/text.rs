@@ -597,18 +597,21 @@ impl TextStage {
         true
     }
 
-    /// Called after this frame's fence has been waited: move pending vertices into
-    /// the frame's buffer and refresh its staging copy if the atlas changed.
+    /// Called after this frame's fence has been waited: copy the current text
+    /// vertices into the frame's buffer and refresh its staging copy if the
+    /// atlas changed. `pending_vertices` is RETAINED — it is the staged text
+    /// state, replaced only by the next `prepare` — so frames rendered without
+    /// a re-prepare (progressive RT refinement, animation ticks) keep their
+    /// text instead of alternating to an empty buffer.
     pub(crate) fn write_frame_buffers(
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
         frame_index: usize,
     ) {
-        let vertices = std::mem::take(&mut self.pending_vertices);
         let frame = &mut self.frames[frame_index];
 
-        let bytes: &[u8] = bytemuck::cast_slice(&vertices);
+        let bytes: &[u8] = bytemuck::cast_slice(&self.pending_vertices);
         let needed = bytes.len() as vk::DeviceSize;
         if needed > frame.vertex.size {
             let mut old = std::mem::replace(&mut frame.vertex, AllocatedBuffer::null());
@@ -626,9 +629,7 @@ impl TextStage {
                 [..bytes.len()]
                 .copy_from_slice(bytes);
         }
-        frame.vertex_count = vertices.len() as u32;
-        self.pending_vertices = vertices;
-        self.pending_vertices.clear();
+        frame.vertex_count = self.pending_vertices.len() as u32;
 
         let frame = &mut self.frames[frame_index];
         if frame.uploaded_generation != self.generation {
