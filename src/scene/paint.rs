@@ -56,6 +56,10 @@ pub enum Prim {
     /// within a box (the placed-text-box case, e.g. cce-layout-interface's canvas elements);
     /// `None` is the ordinary single-run label.
     Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3], font: Option<String>, bounds: Option<[f32; 4]>, attrs: TextAttrs, layout: Option<TextLayout> },
+    /// A user image (id from `cce_ui::vk::upload_rgba`) drawn as a quad, in
+    /// display-list order like any other primitive. The paint walk's clip
+    /// applies through the item's `clip` as usual.
+    Image { image: u32, rect: Rect, alpha: f32 },
 }
 
 /// Horizontal alignment of laid-out (boxed) text — the toolkit-plain mirror of
@@ -207,6 +211,12 @@ impl PaintCtx {
     pub fn quad(&mut self, rect: Rect, color: [f32; 4]) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Quad { rect, color });
+    }
+
+    /// A user image (id from `cce_ui::vk::upload_rgba`) drawn at `rect`.
+    pub fn image(&mut self, image: u32, rect: Rect, alpha: f32) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Image { image, rect, alpha });
     }
 
     pub fn rounded_rect(&mut self, rect: Rect, radius: f32, corners: (bool, bool, bool, bool), color: [f32; 4]) {

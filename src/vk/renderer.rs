@@ -5,16 +5,17 @@
 //! is a 1x1 placeholder until the blur-behind path is wired to a real framebuffer
 //! copy at cutover.
 
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::c_void;
 
 use ash::vk;
 use gpu_allocator::vulkan::{
-    Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,
+    Allocation, AllocationCreateDesc, AllocationScheme, Allocator,
 };
 use gpu_allocator::MemoryLocation;
 
 use crate::engine::Vertex;
 
+use super::image::{ImageQuad, ImageStage};
 use super::scene::{MeshId, SceneDraw, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
 
@@ -33,11 +34,12 @@ pub struct Frame2D<'a> {
     pub verts: &'a [Vertex],
     pub batches: &'a [Batch2D],
     pub overlay_verts: &'a [Vertex],
+    /// User images drawn interleaved with `verts` by each quad's `z_before`.
+    pub images: &'a [ImageQuad],
     pub clear_color: [f32; 4],
 }
 
 const FRAMES_IN_FLIGHT: usize = 2;
-const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
 pub(crate) struct AllocatedBuffer {
     pub(crate) buffer: vk::Buffer,
@@ -119,15 +121,7 @@ struct Frame {
 }
 
 pub struct VkRenderer {
-    _entry: ash::Entry,
-    instance: ash::Instance,
-    debug: Option<(ash::ext::debug_utils::Instance, vk::DebugUtilsMessengerEXT)>,
-    surface_loader: ash::khr::surface::Instance,
     surface: vk::SurfaceKHR,
-    physical_device: vk::PhysicalDevice,
-    device: ash::Device,
-    queue: vk::Queue,
-    allocator: Option<Allocator>,
 
     swapchain_loader: ash::khr::swapchain::Device,
     swapchain: vk::SwapchainKHR,
@@ -154,15 +148,19 @@ pub struct VkRenderer {
     backdrop_sampler: vk::Sampler,
     window_info: AllocatedBuffer,
 
-    command_pool: vk::CommandPool,
     frames: Vec<Frame>,
     frame_index: usize,
     text: TextStage,
     scene: SceneStage,
+    image: ImageStage,
 
     desired_extent: vk::Extent2D,
     corner_radius_px: f32,
     swapchain_dirty: bool,
+
+    // Declared last: everything above must be destroyed before the device/
+    // instance the core tears down in its own Drop.
+    core: super::core::VkCore,
 }
 
 /// Compile WGSL to SPIR-V. The Y-flip between wgpu NDC (Y-up) and Vulkan NDC
@@ -281,31 +279,6 @@ pub(crate) fn flipped_viewport(extent: vk::Extent2D) -> vk::Viewport {
     }
 }
 
-unsafe extern "system" fn debug_callback(
-    severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    _types: vk::DebugUtilsMessageTypeFlagsEXT,
-    data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
-    _user_data: *mut c_void,
-) -> vk::Bool32 {
-    if data.is_null() {
-        return vk::FALSE;
-    }
-    let message = unsafe {
-        let p = (*data).p_message;
-        if p.is_null() {
-            return vk::FALSE;
-        }
-        CStr::from_ptr(p).to_string_lossy()
-    };
-    if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR) {
-        log::error!("[vulkan] {message}");
-    } else if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::WARNING) {
-        log::warn!("[vulkan] {message}");
-    } else {
-        log::debug!("[vulkan] {message}");
-    }
-    vk::FALSE
-}
 
 impl VkRenderer {
     /// # Safety
@@ -318,157 +291,16 @@ impl VkRenderer {
         height: u32,
         corner_radius_px: f32,
     ) -> Self {
-        let entry = ash::Entry::load().expect("Failed to load libvulkan");
-
-        // Instance, with validation when available (debug builds or CCE_VK_VALIDATION=1).
-        let want_validation =
-            cfg!(debug_assertions) || std::env::var_os("CCE_VK_VALIDATION").is_some();
-        let validation_available = want_validation
-            && entry
-                .enumerate_instance_layer_properties()
-                .map(|layers| {
-                    layers.iter().any(|l| {
-                        CStr::from_ptr(l.layer_name.as_ptr()) == VALIDATION_LAYER
-                    })
-                })
-                .unwrap_or(false);
-        if want_validation && !validation_available {
-            log::warn!("Vulkan validation requested but VK_LAYER_KHRONOS_validation is not installed");
-        }
-
-        let api_version = match entry.try_enumerate_instance_version().ok().flatten() {
-            Some(v) if v >= vk::API_VERSION_1_2 => vk::API_VERSION_1_2,
-            Some(v) => v,
-            None => vk::API_VERSION_1_0,
-        };
-        let app_name = c"cce-ui";
-        let app_info = vk::ApplicationInfo::default()
-            .application_name(app_name)
-            .engine_name(app_name)
-            .api_version(api_version);
-
-        let mut extension_names = vec![
-            ash::khr::surface::NAME.as_ptr(),
-            ash::khr::wayland_surface::NAME.as_ptr(),
-        ];
-        if validation_available {
-            extension_names.push(ash::ext::debug_utils::NAME.as_ptr());
-        }
-        let layer_names_owned: Vec<CString> = if validation_available {
-            vec![VALIDATION_LAYER.to_owned()]
-        } else {
-            Vec::new()
-        };
-        let layer_names: Vec<*const i8> =
-            layer_names_owned.iter().map(|l| l.as_ptr()).collect();
-
-        let instance = entry
-            .create_instance(
-                &vk::InstanceCreateInfo::default()
-                    .application_info(&app_info)
-                    .enabled_extension_names(&extension_names)
-                    .enabled_layer_names(&layer_names),
-                None,
-            )
-            .expect("Failed to create Vulkan instance");
-
-        let debug = if validation_available {
-            let loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
-            let messenger = loader
-                .create_debug_utils_messenger(
-                    &vk::DebugUtilsMessengerCreateInfoEXT::default()
-                        .message_severity(
-                            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                                | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
-                        )
-                        .message_type(
-                            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                        )
-                        .pfn_user_callback(Some(debug_callback)),
-                    None,
-                )
-                .expect("Failed to create debug messenger");
-            log::info!("Vulkan validation layers enabled");
-            Some((loader, messenger))
-        } else {
-            None
-        };
-
-        // Wayland surface from the same raw pointers WgpuAdapter uses.
-        let wayland_loader = ash::khr::wayland_surface::Instance::new(&entry, &instance);
-        let surface = wayland_loader
-            .create_wayland_surface(
-                &vk::WaylandSurfaceCreateInfoKHR::default()
-                    .display(display_ptr)
-                    .surface(surface_ptr),
-                None,
-            )
-            .expect("Failed to create Wayland surface");
-        let surface_loader = ash::khr::surface::Instance::new(&entry, &instance);
-
-        // Physical device + queue family: graphics with present support on this
-        // surface. Prefer integrated (matches WgpuAdapter's LowPower preference).
-        let mut candidates: Vec<(vk::PhysicalDevice, u32, i32)> = Vec::new();
-        for pd in instance
-            .enumerate_physical_devices()
-            .expect("No Vulkan physical devices")
-        {
-            let families = instance.get_physical_device_queue_family_properties(pd);
-            let family = families.iter().enumerate().find_map(|(i, f)| {
-                let graphics = f.queue_flags.contains(vk::QueueFlags::GRAPHICS);
-                let present = surface_loader
-                    .get_physical_device_surface_support(pd, i as u32, surface)
-                    .unwrap_or(false);
-                (graphics && present).then_some(i as u32)
-            });
-            if let Some(family) = family {
-                let props = instance.get_physical_device_properties(pd);
-                let rank = match props.device_type {
-                    vk::PhysicalDeviceType::INTEGRATED_GPU => 0,
-                    vk::PhysicalDeviceType::DISCRETE_GPU => 1,
-                    vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
-                    _ => 3,
-                };
-                candidates.push((pd, family, rank));
-            }
-        }
-        candidates.sort_by_key(|&(_, _, rank)| rank);
-        let (physical_device, queue_family, _) = *candidates
-            .first()
-            .expect("No Vulkan device supports this Wayland surface");
-        {
-            let props = instance.get_physical_device_properties(physical_device);
-            let name = CStr::from_ptr(props.device_name.as_ptr()).to_string_lossy();
-            log::info!("Vulkan device: {name}");
-        }
-
-        let queue_priorities = [1.0f32];
-        let queue_infos = [vk::DeviceQueueCreateInfo::default()
-            .queue_family_index(queue_family)
-            .queue_priorities(&queue_priorities)];
-        let device_extensions = [ash::khr::swapchain::NAME.as_ptr()];
-        let device = instance
-            .create_device(
-                physical_device,
-                &vk::DeviceCreateInfo::default()
-                    .queue_create_infos(&queue_infos)
-                    .enabled_extension_names(&device_extensions),
-                None,
-            )
-            .expect("Failed to create Vulkan device");
-        let queue = device.get_device_queue(queue_family, 0);
-
-        let mut allocator = Allocator::new(&AllocatorCreateDesc {
-            instance: instance.clone(),
-            device: device.clone(),
-            physical_device,
-            debug_settings: Default::default(),
-            buffer_device_address: false,
-            allocation_sizes: Default::default(),
-        })
-        .expect("Failed to create GPU allocator");
+        let (mut core, surface) =
+            super::core::VkCore::new_for_wayland_surface(display_ptr, surface_ptr);
+        // Locals over the core for the setup below (methods use self.core.*).
+        let device = core.device.clone();
+        let queue = core.queue;
+        let command_pool = core.command_pool;
+        let physical_device = core.physical_device;
+        let min_uniform_align = core.min_uniform_align;
+        let surface_loader = core.surface_loader.clone();
+        let allocator = core.allocator.as_mut().unwrap();
 
         // Surface format: prefer sRGB (wgpu's get_default_config sorts sRGB first,
         // so this matches the colors the app renders today).
@@ -671,25 +503,12 @@ impl VkRenderer {
             )
             .expect("Failed to create graphics pipeline")[0];
 
-        let command_pool = device
-            .create_command_pool(
-                &vk::CommandPoolCreateInfo::default()
-                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                    .queue_family_index(queue_family),
-                None,
-            )
-            .expect("Failed to create command pool");
-
         // Full-size backdrop + depth live in the scene stage: the 3D pass renders
         // into the backdrop, and the UI pass samples it for blur-behind plates.
-        let min_uniform_align = instance
-            .get_physical_device_properties(physical_device)
-            .limits
-            .min_uniform_buffer_offset_alignment;
         let initial_extent = vk::Extent2D { width: width.max(1), height: height.max(1) };
         let scene = SceneStage::new(
             &device,
-            &mut allocator,
+            allocator,
             surface_format.format,
             initial_extent,
             FRAMES_IN_FLIGHT,
@@ -713,7 +532,7 @@ impl VkRenderer {
 
         let window_info = create_cpu_buffer(
             &device,
-            &mut allocator,
+            allocator,
             16,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             "window-info",
@@ -799,7 +618,7 @@ impl VkRenderer {
                     .unwrap(),
                 vertex: create_cpu_buffer(
                     &device,
-                    &mut allocator,
+                    allocator,
                     64 * 1024,
                     vk::BufferUsageFlags::VERTEX_BUFFER,
                     "vertices",
@@ -810,19 +629,12 @@ impl VkRenderer {
             })
             .collect();
 
-        let text = TextStage::new(&device, &mut allocator, render_pass, FRAMES_IN_FLIGHT);
+        let text = TextStage::new(&device, allocator, render_pass, FRAMES_IN_FLIGHT);
+        let image = ImageStage::new(&device, allocator, render_pass, FRAMES_IN_FLIGHT);
 
-        let swapchain_loader = ash::khr::swapchain::Device::new(&instance, &device);
+        let swapchain_loader = ash::khr::swapchain::Device::new(&core.instance, &device);
         let mut renderer = Self {
-            _entry: entry,
-            instance,
-            debug,
-            surface_loader,
             surface,
-            physical_device,
-            device,
-            queue,
-            allocator: Some(allocator),
             swapchain_loader,
             swapchain: vk::SwapchainKHR::null(),
             swapchain_images: Vec::new(),
@@ -841,14 +653,15 @@ impl VkRenderer {
             descriptor_set,
             backdrop_sampler,
             window_info,
-            command_pool,
             frames,
             frame_index: 0,
             text,
             scene,
+            image,
             desired_extent: vk::Extent2D { width: width.max(1), height: height.max(1) },
             corner_radius_px,
             swapchain_dirty: false,
+            core,
         };
         renderer.create_swapchain();
         renderer.write_window_info();
@@ -874,23 +687,23 @@ impl VkRenderer {
     fn destroy_swapchain_resources(&mut self) {
         unsafe {
             for fb in self.framebuffers.drain(..) {
-                self.device.destroy_framebuffer(fb, None);
+                self.core.device.destroy_framebuffer(fb, None);
             }
             for view in self.swapchain_views.drain(..) {
-                self.device.destroy_image_view(view, None);
+                self.core.device.destroy_image_view(view, None);
             }
             self.swapchain_images.clear();
             for sem in self.render_finished.drain(..) {
-                self.device.destroy_semaphore(sem, None);
+                self.core.device.destroy_semaphore(sem, None);
             }
         }
     }
 
     fn create_swapchain(&mut self) {
         unsafe {
-            let caps = self
+            let caps = self.core
                 .surface_loader
-                .get_physical_device_surface_capabilities(self.physical_device, self.surface)
+                .get_physical_device_surface_capabilities(self.core.physical_device, self.surface)
                 .expect("Failed to query surface capabilities");
 
             // Wayland reports "extent defined by the swapchain" (u32::MAX); use the
@@ -968,7 +781,7 @@ impl VkRenderer {
                 .base_array_layer(0)
                 .layer_count(1);
             for image in &images {
-                let view = self
+                let view = self.core
                     .device
                     .create_image_view(
                         &vk::ImageViewCreateInfo::default()
@@ -981,7 +794,7 @@ impl VkRenderer {
                     .expect("Failed to create swapchain view");
                 self.swapchain_views.push(view);
                 let attachments = [view];
-                let fb = self
+                let fb = self.core
                     .device
                     .create_framebuffer(
                         &vk::FramebufferCreateInfo::default()
@@ -995,7 +808,7 @@ impl VkRenderer {
                     .expect("Failed to create framebuffer");
                 self.framebuffers.push(fb);
                 self.render_finished.push(
-                    self.device
+                    self.core.device
                         .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
                         .unwrap(),
                 );
@@ -1005,7 +818,7 @@ impl VkRenderer {
 
     fn recreate_swapchain(&mut self) {
         unsafe {
-            let _ = self.device.device_wait_idle();
+            let _ = self.core.device.device_wait_idle();
         }
         self.destroy_swapchain_resources();
         self.create_swapchain();
@@ -1018,21 +831,21 @@ impl VkRenderer {
     /// legal to sample.
     fn sync_backdrop_targets(&mut self) {
         self.scene.resize(
-            &self.device,
-            self.allocator.as_mut().unwrap(),
+            &self.core.device,
+            self.core.allocator.as_mut().unwrap(),
             self.extent,
         );
         clear_image_to_shader_read(
-            &self.device,
-            self.queue,
-            self.command_pool,
+            &self.core.device,
+            self.core.queue,
+            self.core.command_pool,
             self.scene.backdrop_image,
         );
         let image_infos = [vk::DescriptorImageInfo::default()
             .image_view(self.scene.backdrop_view)
             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
         unsafe {
-            self.device.update_descriptor_sets(
+            self.core.device.update_descriptor_sets(
                 &[vk::WriteDescriptorSet::default()
                     .dst_set(self.descriptor_set)
                     .dst_binding(0)
@@ -1047,7 +860,7 @@ impl VkRenderer {
     /// renderer's lifetime.
     pub fn create_mesh(&mut self, verts: &[Vertex3D]) -> MeshId {
         self.scene
-            .create_mesh(&self.device, self.allocator.as_mut().unwrap(), verts)
+            .create_mesh(&self.core.device, self.core.allocator.as_mut().unwrap(), verts)
     }
 
     /// Replace a mesh's vertices. Waits for the GPU to go idle first — geometry
@@ -1055,10 +868,10 @@ impl VkRenderer {
     #[allow(dead_code)] // cutover API: the app's rebuild_scene_geometry path
     pub fn update_mesh(&mut self, id: MeshId, verts: &[Vertex3D]) {
         unsafe {
-            let _ = self.device.device_wait_idle();
+            let _ = self.core.device.device_wait_idle();
         }
         self.scene
-            .update_mesh(&self.device, self.allocator.as_mut().unwrap(), id, verts);
+            .update_mesh(&self.core.device, self.core.allocator.as_mut().unwrap(), id, verts);
     }
 
     /// Stage the 3D scene for the next `draw_frame`. Draws render into the
@@ -1108,6 +921,7 @@ impl VkRenderer {
             verts,
             batches: &[],
             overlay_verts: &[],
+            images: &[],
             clear_color: [0.0; 4],
         })
     }
@@ -1128,7 +942,7 @@ impl VkRenderer {
                 let f = &self.frames[frame_index];
                 (f.in_flight, f.image_available)
             };
-            self.device
+            self.core.device
                 .wait_for_fences(&[in_flight], true, u64::MAX)
                 .expect("Fence wait failed");
 
@@ -1154,7 +968,7 @@ impl VkRenderer {
                 }
             };
 
-            self.device.reset_fences(&[in_flight]).unwrap();
+            self.core.device.reset_fences(&[in_flight]).unwrap();
 
             // Upload display-list + overlay vertices into this frame's buffer
             // (its fence has signaled, so the GPU is done with it; growing swaps
@@ -1165,10 +979,10 @@ impl VkRenderer {
             if needed > self.frames[frame_index].vertex.size {
                 let mut old =
                     std::mem::replace(&mut self.frames[frame_index].vertex, AllocatedBuffer::null());
-                let allocator = self.allocator.as_mut().unwrap();
-                destroy_cpu_buffer(&self.device, allocator, &mut old);
+                let allocator = self.core.allocator.as_mut().unwrap();
+                destroy_cpu_buffer(&self.core.device, allocator, &mut old);
                 self.frames[frame_index].vertex = create_cpu_buffer(
-                    &self.device,
+                    &self.core.device,
                     allocator,
                     needed.next_power_of_two(),
                     vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -1191,27 +1005,40 @@ impl VkRenderer {
             self.frames[frame_index].overlay_start = frame2d.verts.len() as u32;
             self.frames[frame_index].overlay_count = frame2d.overlay_verts.len() as u32;
             self.text.write_frame_buffers(
-                &self.device,
-                self.allocator.as_mut().unwrap(),
+                &self.core.device,
+                self.core.allocator.as_mut().unwrap(),
                 frame_index,
             );
+            self.image.process_pending(
+                &self.core.device,
+                self.core.allocator.as_mut().unwrap(),
+                self.core.queue,
+                self.core.command_pool,
+            );
+            self.image.write_frame_buffer(
+                &self.core.device,
+                self.core.allocator.as_mut().unwrap(),
+                frame_index,
+                frame2d.images,
+                self.extent,
+            );
             self.scene.write_frame_uniforms(
-                &self.device,
-                self.allocator.as_mut().unwrap(),
+                &self.core.device,
+                self.core.allocator.as_mut().unwrap(),
                 frame_index,
                 self.corner_radius_px,
             );
 
             // Record.
             let cmd = self.frames[frame_index].cmd;
-            self.device
+            self.core.device
                 .begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default())
                 .unwrap();
-            self.text.record_upload(&self.device, cmd, frame_index);
+            self.text.record_upload(&self.core.device, cmd, frame_index);
 
             // Offscreen 3D pass (only when a scene was staged); leaves the
             // backdrop in TRANSFER_SRC.
-            let scene_recorded = self.scene.record(&self.device, cmd, frame_index);
+            let scene_recorded = self.scene.record(&self.core.device, cmd, frame_index);
 
             // With a valid backdrop, replay it under the UI: copy it into the
             // swapchain image and open the UI pass with LOAD instead of CLEAR.
@@ -1219,7 +1046,7 @@ impl VkRenderer {
             if use_backdrop {
                 if !scene_recorded {
                     // Reused backdrop is in SHADER_READ_ONLY from last frame.
-                    self.device.cmd_pipeline_barrier(
+                    self.core.device.cmd_pipeline_barrier(
                         cmd,
                         vk::PipelineStageFlags::FRAGMENT_SHADER,
                         vk::PipelineStageFlags::TRANSFER,
@@ -1238,7 +1065,7 @@ impl VkRenderer {
                     );
                 }
                 let swapchain_image = self.swapchain_images[image_index as usize];
-                self.device.cmd_pipeline_barrier(
+                self.core.device.cmd_pipeline_barrier(
                     cmd,
                     vk::PipelineStageFlags::TOP_OF_PIPE,
                     vk::PipelineStageFlags::TRANSFER,
@@ -1258,7 +1085,7 @@ impl VkRenderer {
                 let subresource = vk::ImageSubresourceLayers::default()
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .layer_count(1);
-                self.device.cmd_copy_image(
+                self.core.device.cmd_copy_image(
                     cmd,
                     self.scene.backdrop_image,
                     vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -1274,7 +1101,7 @@ impl VkRenderer {
                         })],
                 );
                 // Backdrop back to sampleable for the UI pass's blur plates.
-                self.device.cmd_pipeline_barrier(
+                self.core.device.cmd_pipeline_barrier(
                     cmd,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::FRAGMENT_SHADER,
@@ -1302,7 +1129,7 @@ impl VkRenderer {
             } else {
                 (self.render_pass, &clear_values)
             };
-            self.device.cmd_begin_render_pass(
+            self.core.device.cmd_begin_render_pass(
                 cmd,
                 &vk::RenderPassBeginInfo::default()
                     .render_pass(ui_pass)
@@ -1314,9 +1141,9 @@ impl VkRenderer {
                     .clear_values(ui_clear_values),
                 vk::SubpassContents::INLINE,
             );
-            self.device
+            self.core.device
                 .cmd_set_viewport(cmd, 0, &[flipped_viewport(self.extent)]);
-            self.device.cmd_set_scissor(
+            self.core.device.cmd_set_scissor(
                 cmd,
                 0,
                 &[vk::Rect2D {
@@ -1328,61 +1155,111 @@ impl VkRenderer {
                 offset: vk::Offset2D { x: 0, y: 0 },
                 extent: self.extent,
             };
-            if frame.vertex_count > 0 {
-                self.device
-                    .cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
-                self.device.cmd_bind_descriptor_sets(
-                    cmd,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    self.pipeline_layout,
-                    0,
-                    &[self.descriptor_set],
-                    &[],
-                );
-                self.device
-                    .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
-                if frame2d.batches.is_empty() {
-                    self.device.cmd_draw(cmd, frame.vertex_count, 1, 0, 0);
-                } else {
-                    // Each batch draws its range under its own scissor.
-                    for batch in frame2d.batches {
-                        if batch.end <= batch.start {
-                            continue;
-                        }
-                        match batch.scissor {
-                            Some((bx, by, bw, bh)) => {
-                                if bx >= self.extent.width || by >= self.extent.height {
-                                    continue;
-                                }
+            // Display-list geometry interleaved with user images: each image
+            // quad draws before the vertex its `z_before` names, so it sits
+            // above earlier geometry and below later geometry.
+            {
+                let images = frame2d.images;
+                let mut order: Vec<usize> = (0..images.len()).collect();
+                order.sort_by_key(|&k| images[k].z_before);
+                let mut img_i = 0usize;
+
+                let default_batch =
+                    [Batch2D { scissor: None, start: 0, end: frame.vertex_count }];
+                let batches: &[Batch2D] =
+                    if frame2d.batches.is_empty() { &default_batch } else { frame2d.batches };
+
+                for batch in batches {
+                    // Resolve the batch scissor; a degenerate one skips the
+                    // vertex draws (images still process on their own clips).
+                    let batch_scissor: Option<vk::Rect2D> = match batch.scissor {
+                        Some((bx, by, bw, bh)) => {
+                            if bx >= self.extent.width || by >= self.extent.height {
+                                None
+                            } else {
                                 let bw = bw.min(self.extent.width - bx);
                                 let bh = bh.min(self.extent.height - by);
                                 if bw == 0 || bh == 0 {
-                                    continue;
-                                }
-                                self.device.cmd_set_scissor(
-                                    cmd,
-                                    0,
-                                    &[vk::Rect2D {
+                                    None
+                                } else {
+                                    Some(vk::Rect2D {
                                         offset: vk::Offset2D { x: bx as i32, y: by as i32 },
                                         extent: vk::Extent2D { width: bw, height: bh },
-                                    }],
-                                );
+                                    })
+                                }
                             }
-                            None => self.device.cmd_set_scissor(cmd, 0, &[full_scissor]),
                         }
-                        self.device
-                            .cmd_draw(cmd, batch.end - batch.start, 1, batch.start, 0);
+                        None => Some(full_scissor),
+                    };
+
+                    let mut cursor = batch.start;
+                    while cursor < batch.end {
+                        let next_z =
+                            order.get(img_i).map(|&k| images[k].z_before).unwrap_or(u32::MAX);
+                        if next_z <= cursor {
+                            let k = order[img_i];
+                            img_i += 1;
+                            let q = &images[k];
+                            let img_scissor = match q.clip {
+                                Some((cx, cy, cw, ch)) => vk::Rect2D {
+                                    offset: vk::Offset2D { x: cx as i32, y: cy as i32 },
+                                    extent: vk::Extent2D {
+                                        width: cw.min(self.extent.width.saturating_sub(cx)),
+                                        height: ch.min(self.extent.height.saturating_sub(cy)),
+                                    },
+                                },
+                                None => full_scissor,
+                            };
+                            self.core.device.cmd_set_scissor(cmd, 0, &[img_scissor]);
+                            self.image.record_quad(&self.core.device, cmd, frame_index, k, q.image);
+                            continue;
+                        }
+                        let upto = next_z.min(batch.end);
+                        if let Some(scissor) = batch_scissor {
+                            self.core.device
+                                .cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+                            self.core.device.cmd_bind_descriptor_sets(
+                                cmd,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                self.pipeline_layout,
+                                0,
+                                &[self.descriptor_set],
+                                &[],
+                            );
+                            self.core.device
+                                .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
+                            self.core.device.cmd_set_scissor(cmd, 0, &[scissor]);
+                            self.core.device.cmd_draw(cmd, upto - cursor, 1, cursor, 0);
+                        }
+                        cursor = upto;
                     }
-                    // Restore for the text/overlay draws.
-                    self.device.cmd_set_scissor(cmd, 0, &[full_scissor]);
                 }
+                // Images sorting after all geometry.
+                while let Some(&k) = order.get(img_i) {
+                    img_i += 1;
+                    let q = &images[k];
+                    let img_scissor = match q.clip {
+                        Some((cx, cy, cw, ch)) => vk::Rect2D {
+                            offset: vk::Offset2D { x: cx as i32, y: cy as i32 },
+                            extent: vk::Extent2D {
+                                width: cw.min(self.extent.width.saturating_sub(cx)),
+                                height: ch.min(self.extent.height.saturating_sub(cy)),
+                            },
+                        },
+                        None => full_scissor,
+                    };
+                    self.core.device.cmd_set_scissor(cmd, 0, &[img_scissor]);
+                    self.image.record_quad(&self.core.device, cmd, frame_index, k, q.image);
+                }
+                // Restore for the text/overlay draws.
+                self.core.device.cmd_set_scissor(cmd, 0, &[full_scissor]);
             }
-            self.text.record_draw(&self.device, cmd, frame_index);
+            self.text.record_draw(&self.core.device, cmd, frame_index);
             if frame.overlay_count > 0 {
                 // The text pass bound its own pipeline; rebind for the overlay.
-                self.device
+                self.core.device
                     .cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
-                self.device.cmd_bind_descriptor_sets(
+                self.core.device.cmd_bind_descriptor_sets(
                     cmd,
                     vk::PipelineBindPoint::GRAPHICS,
                     self.pipeline_layout,
@@ -1390,13 +1267,13 @@ impl VkRenderer {
                     &[self.descriptor_set],
                     &[],
                 );
-                self.device
+                self.core.device
                     .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
-                self.device
+                self.core.device
                     .cmd_draw(cmd, frame.overlay_count, 1, frame.overlay_start, 0);
             }
-            self.device.cmd_end_render_pass(cmd);
-            self.device.end_command_buffer(cmd).unwrap();
+            self.core.device.cmd_end_render_pass(cmd);
+            self.core.device.end_command_buffer(cmd).unwrap();
 
             // Submit + present. The acquire semaphore gates the swapchain image's
             // first use: the backdrop copy (TRANSFER) or the UI pass (COLOR).
@@ -1410,8 +1287,8 @@ impl VkRenderer {
                 .wait_dst_stage_mask(&wait_stages)
                 .command_buffers(&cmds)
                 .signal_semaphores(&signal_semaphores);
-            self.device
-                .queue_submit(self.queue, &[submit], in_flight)
+            self.core.device
+                .queue_submit(self.core.queue, &[submit], in_flight)
                 .expect("Queue submit failed");
 
             let swapchains = [self.swapchain];
@@ -1420,7 +1297,7 @@ impl VkRenderer {
                 .wait_semaphores(&signal_semaphores)
                 .swapchains(&swapchains)
                 .image_indices(&image_indices);
-            match self.swapchain_loader.queue_present(self.queue, &present) {
+            match self.swapchain_loader.queue_present(self.core.queue, &present) {
                 Ok(suboptimal) => {
                     if suboptimal {
                         self.swapchain_dirty = true;
@@ -1441,15 +1318,15 @@ impl VkRenderer {
 impl Drop for VkRenderer {
     fn drop(&mut self) {
         unsafe {
-            let _ = self.device.device_wait_idle();
+            let _ = self.core.device.device_wait_idle();
 
             let mut frames = std::mem::take(&mut self.frames);
             for frame in &mut frames {
-                self.device.destroy_semaphore(frame.image_available, None);
-                self.device.destroy_fence(frame.in_flight, None);
+                self.core.device.destroy_semaphore(frame.image_available, None);
+                self.core.device.destroy_fence(frame.in_flight, None);
                 let mut vertex = std::mem::replace(&mut frame.vertex, AllocatedBuffer::null());
-                if let Some(allocator) = self.allocator.as_mut() {
-                    destroy_cpu_buffer(&self.device, allocator, &mut vertex);
+                if let Some(allocator) = self.core.allocator.as_mut() {
+                    destroy_cpu_buffer(&self.core.device, allocator, &mut vertex);
                 }
             }
 
@@ -1458,38 +1335,31 @@ impl Drop for VkRenderer {
                 self.swapchain_loader.destroy_swapchain(self.swapchain, None);
             }
 
-            if let Some(allocator) = self.allocator.as_mut() {
-                self.text.destroy(&self.device, allocator);
+            if let Some(allocator) = self.core.allocator.as_mut() {
+                self.text.destroy(&self.core.device, allocator);
             }
 
-            self.device.destroy_sampler(self.backdrop_sampler, None);
-            if let Some(allocator) = self.allocator.as_mut() {
-                self.scene.destroy(&self.device, allocator);
+            self.core.device.destroy_sampler(self.backdrop_sampler, None);
+            if let Some(allocator) = self.core.allocator.as_mut() {
+                self.scene.destroy(&self.core.device, allocator);
+                self.image.destroy(&self.core.device, allocator);
             }
             let mut window_info = std::mem::replace(&mut self.window_info, AllocatedBuffer::null());
-            if let Some(allocator) = self.allocator.as_mut() {
-                destroy_cpu_buffer(&self.device, allocator, &mut window_info);
+            if let Some(allocator) = self.core.allocator.as_mut() {
+                destroy_cpu_buffer(&self.core.device, allocator, &mut window_info);
             }
 
-            self.device.destroy_descriptor_pool(self.descriptor_pool, None);
-            self.device
+            self.core.device.destroy_descriptor_pool(self.descriptor_pool, None);
+            self.core.device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.device.destroy_pipeline(self.pipeline, None);
-            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
-            self.device.destroy_shader_module(self.shader_module, None);
-            self.device.destroy_render_pass(self.render_pass, None);
-            self.device.destroy_render_pass(self.render_pass_load, None);
-            self.device.destroy_command_pool(self.command_pool, None);
-
-            // The allocator must go before the device it allocates from.
-            drop(self.allocator.take());
-
-            self.device.destroy_device(None);
-            self.surface_loader.destroy_surface(self.surface, None);
-            if let Some((loader, messenger)) = self.debug.take() {
-                loader.destroy_debug_utils_messenger(messenger, None);
-            }
-            self.instance.destroy_instance(None);
+            self.core.device.destroy_pipeline(self.pipeline, None);
+            self.core.device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.core.device.destroy_shader_module(self.shader_module, None);
+            self.core.device.destroy_render_pass(self.render_pass, None);
+            self.core.device.destroy_render_pass(self.render_pass_load, None);
+            self.core.surface_loader.destroy_surface(self.surface, None);
+            // The rest (allocator, command pool, device, instance) is the
+            // core's Drop, which runs after this body.
         }
     }
 }

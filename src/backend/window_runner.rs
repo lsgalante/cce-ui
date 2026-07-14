@@ -1009,6 +1009,17 @@ pub struct DlBatch {
     pub end: u32,
 }
 
+/// An image draw from the display list: `at` is the vertex index it sorts
+/// before (its position in the tessellated stream); `clip` is the item's
+/// paint-walk clip. Logical coordinates throughout.
+pub struct DlImage {
+    pub image: u32,
+    pub rect: crate::scene::layout::Rect,
+    pub alpha: f32,
+    pub at: u32,
+    pub clip: Option<crate::scene::layout::Rect>,
+}
+
 /// Tessellate a `scene::paint::DisplayList`'s geometry into a flat vertex buffer plus per-clip draw
 /// batches, reusing the same tessellators as the legacy path so vertices are identical. `Text`
 /// prims are skipped here — text is still rendered via the app's `text_areas()` path. `sw`/`sh` are
@@ -1018,16 +1029,27 @@ pub fn tessellate_display_list(
     dl: &crate::scene::paint::DisplayList,
     sw: f32,
     sh: f32,
-) -> (Vec<Vertex>, Vec<DlBatch>) {
+) -> (Vec<Vertex>, Vec<DlBatch>, Vec<DlImage>) {
     use crate::scene::paint::{Cap, Prim};
     let no = [0.0f32, 0.0, 0.0];
     let mut verts: Vec<Vertex> = Vec::new();
     let mut batches: Vec<DlBatch> = Vec::new();
+    let mut images: Vec<DlImage> = Vec::new();
 
     for item in &dl.items {
         let start = verts.len() as u32;
         match &item.prim {
-            Prim::Text { .. } => continue, // text goes through the glyphon/text_areas path
+            Prim::Text { .. } => continue, // text goes through the glyph/text-span path
+            Prim::Image { image, rect, alpha } => {
+                images.push(DlImage {
+                    image: *image,
+                    rect: *rect,
+                    alpha: *alpha,
+                    at: verts.len() as u32,
+                    clip: item.clip,
+                });
+                continue;
+            }
             Prim::Quad { rect, color } => {
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
             }
@@ -1086,7 +1108,7 @@ pub fn tessellate_display_list(
         batches.push(DlBatch { scissor: item.clip, start, end });
     }
 
-    (verts, batches)
+    (verts, batches, images)
 }
 
 pub fn extra_quad_vertices(
@@ -1740,7 +1762,7 @@ impl<A: Application> EngineState<A> {
             }
         }
 
-        let (mut verts, mut dl_batches) = tessellate_display_list(&dl, logical_w, logical_h);
+        let (mut verts, mut dl_batches, dl_images) = tessellate_display_list(&dl, logical_w, logical_h);
         // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
         let pre_custom = verts.len() as u32;
         self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
@@ -1830,6 +1852,29 @@ impl<A: Application> EngineState<A> {
         let renderer = self.renderer.as_mut().unwrap();
         renderer.prepare_text(self.font_system.as_mut().unwrap(), &mut self.swash_cache, &spans);
 
+        let image_quads: Vec<crate::vk::ImageQuad> = dl_images
+            .iter()
+            .map(|di| crate::vk::ImageQuad {
+                image: di.image,
+                rect: (
+                    di.rect.x * scale_f32,
+                    di.rect.y * scale_f32,
+                    di.rect.width * scale_f32,
+                    di.rect.height * scale_f32,
+                ),
+                alpha: di.alpha,
+                z_before: di.at,
+                clip: di.clip.map(|c| {
+                    (
+                        (c.x * scale_f32).max(0.0) as u32,
+                        (c.y * scale_f32).max(0.0) as u32,
+                        (c.width * scale_f32) as u32,
+                        (c.height * scale_f32) as u32,
+                    )
+                }),
+            })
+            .collect();
+
         let batches: Vec<Batch2D> = dl_batches
             .iter()
             .map(|batch| Batch2D {
@@ -1858,6 +1903,7 @@ impl<A: Application> EngineState<A> {
             verts: &verts,
             batches: &batches,
             overlay_verts: &overlay_verts,
+            images: &image_quads,
             clear_color,
         });
     }

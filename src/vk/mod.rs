@@ -23,10 +23,14 @@
 //! naga's ADJUST_COORDINATE_SPACE — a shader-side flip would reverse winding
 //! and break the 3D pipeline's back-face culling.
 
+mod core;
+pub mod image;
 mod renderer;
 mod scene;
 mod text;
 
+pub use core::VkCore;
+pub use image::{free_image, upload_rgba, ImageQuad};
 pub use renderer::{Batch2D, Frame2D, VkRenderer};
 pub use scene::{MeshId, SceneDraw, Vertex3D};
 pub use text::TextSpan;
