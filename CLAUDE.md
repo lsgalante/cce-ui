@@ -135,7 +135,11 @@ cce-system-settings) to confirm behavior, not just the test suite.
   layouts), `core.rs`.
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`).
-- `process.rs`, `file_dialog.rs` (rfd), `scale.rs` (HiDPI), `wayland.rs` (surface/scale detection).
+- `process.rs` — detached/tracked child spawning, plus the `cce-cloud` popup pattern:
+  `CloudPopup` (one blocking `run_json`/`run_dmenu` invocation) and `CloudPopupTracker`
+  (an app's single-active-popup toggle state; see cce-status-interface for the
+  canonical usage).
+- `file_dialog.rs` (rfd), `scale.rs` (HiDPI), `wayland.rs` (surface/scale detection).
 
 ## Fonts & assets
 
