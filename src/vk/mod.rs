@@ -19,6 +19,14 @@
 //!   (scissored to a pane) and copied beneath the UI pass — the same image is
 //!   the blur-behind source.
 //!
+//! A fourth pipeline is built lazily on first use:
+//!
+//! - **RT** (`rt.wgsl` + [`RtTriangle`]/[`RtMaterial`]/[`RtCamera`]): the
+//!   tier-1 compute path tracer — CPU-built SAH BVH in storage buffers,
+//!   progressive accumulation, blitted into the backdrop's viewport-pane
+//!   region as a drop-in alternative to the raster 3D pass. Plain compute:
+//!   no `VK_KHR_ray_*` needed.
+//!
 //! The wgpu↔Vulkan Y-flip is a negative-height viewport (like wgpu-hal), NOT
 //! naga's ADJUST_COORDINATE_SPACE — a shader-side flip would reverse winding
 //! and break the 3D pipeline's back-face culling.
@@ -26,11 +34,13 @@
 mod core;
 pub mod image;
 mod renderer;
+mod rt;
 mod scene;
 mod text;
 
 pub use core::VkCore;
 pub use image::{free_image, upload_rgba, ImageQuad};
 pub use renderer::{Batch2D, Frame2D, VkRenderer};
+pub use rt::{RtCamera, RtMaterial, RtTriangle};
 pub use scene::{MeshId, SceneDraw, Vertex3D};
 pub use text::TextSpan;

@@ -1,0 +1,1146 @@
+//! The tier-1 RT engine (RT-renderer phase 2): an internal triangle+material
+//! scene, a CPU-built binned-SAH BVH uploaded as storage buffers, and the
+//! `rt.wgsl` compute path tracer with progressive accumulation.
+//!
+//! The stage renders into its own pane-sized storage image and blits it into
+//! the backdrop image's viewport-pane region — exactly the slot the raster
+//! `SceneStage` fills — so the swapchain copy, blur plates, and the 2D UI pass
+//! are untouched. Runs on plain Vulkan compute (no `VK_KHR_ray_*`), which is
+//! the point: it works on the integrated GPU; a tier-2 ray-query backend can
+//! later swap out just the traversal.
+//!
+//! Scene schema is internal by design — importers (OBJ/glTF) belong in a
+//! future loader that converts *into* [`RtTriangle`]/[`RtMaterial`].
+
+use ash::vk;
+use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator};
+use gpu_allocator::MemoryLocation;
+
+use super::renderer::{compile_wgsl, create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
+
+/// One triangle of an RT scene, in the same space as the camera's `inv_mvp`
+/// (for the designer: mesh space, the space `Vertex3D` positions live in).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RtTriangle {
+    pub p0: [f32; 3],
+    pub p1: [f32; 3],
+    pub p2: [f32; 3],
+    /// Index into the material slice passed alongside.
+    pub material: u32,
+}
+
+/// Lambertian surface + optional emission, linear color (matching the raster
+/// path, whose vertex colors land in the sRGB attachment as linear values).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RtMaterial {
+    pub albedo: [f32; 3],
+    pub emission: [f32; 3],
+}
+
+/// The full camera: the inverse of the raster path's `proj * view * model`.
+/// Rays are unprojected from NDC through it, so any matrix stack that renders
+/// the raster viewport drives the tracer unchanged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RtCamera {
+    pub inv_mvp: [[f32; 4]; 4],
+}
+
+// --- GPU layouts (must match rt.wgsl) ---
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuTriangle {
+    p0: [f32; 4], // w = material index (bitcast)
+    p1: [f32; 4],
+    p2: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuMaterial {
+    albedo: [f32; 4],
+    emission: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct GpuBvhNode {
+    pub(crate) min: [f32; 3],
+    /// Leaf (`count > 0`): first triangle. Internal: left child; right = +1.
+    pub(crate) left_first: u32,
+    pub(crate) max: [f32; 3],
+    pub(crate) count: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct RtParams {
+    inv_mvp: [[f32; 4]; 4],
+    width: u32,
+    height: u32,
+    sample_index: u32,
+    max_bounces: u32,
+}
+
+// --- BVH construction (binned SAH) ---
+
+const BVH_BINS: usize = 8;
+const BVH_LEAF_MAX: u32 = 4;
+
+#[derive(Clone, Copy)]
+struct Aabb {
+    min: [f32; 3],
+    max: [f32; 3],
+}
+
+impl Aabb {
+    const EMPTY: Aabb = Aabb { min: [f32::INFINITY; 3], max: [f32::NEG_INFINITY; 3] };
+
+    fn grow(&mut self, p: [f32; 3]) {
+        for a in 0..3 {
+            self.min[a] = self.min[a].min(p[a]);
+            self.max[a] = self.max[a].max(p[a]);
+        }
+    }
+
+    fn grow_aabb(&mut self, other: &Aabb) {
+        self.grow(other.min);
+        self.grow(other.max);
+    }
+
+    fn half_area(&self) -> f32 {
+        let dx = (self.max[0] - self.min[0]).max(0.0);
+        let dy = (self.max[1] - self.min[1]).max(0.0);
+        let dz = (self.max[2] - self.min[2]).max(0.0);
+        dx * dy + dy * dz + dz * dx
+    }
+}
+
+fn tri_aabb(t: &RtTriangle) -> Aabb {
+    let mut b = Aabb::EMPTY;
+    b.grow(t.p0);
+    b.grow(t.p1);
+    b.grow(t.p2);
+    b
+}
+
+fn tri_centroid(t: &RtTriangle) -> [f32; 3] {
+    let mut c = [0.0f32; 3];
+    for a in 0..3 {
+        c[a] = (t.p0[a] + t.p1[a] + t.p2[a]) / 3.0;
+    }
+    c
+}
+
+/// Build a BVH over `triangles`, reordering them so leaves reference
+/// contiguous ranges. Returns the flat node array (empty input → empty vec).
+pub(crate) fn build_bvh(triangles: &mut Vec<RtTriangle>) -> Vec<GpuBvhNode> {
+    if triangles.is_empty() {
+        return Vec::new();
+    }
+    let bounds: Vec<Aabb> = triangles.iter().map(tri_aabb).collect();
+    let centroids: Vec<[f32; 3]> = triangles.iter().map(tri_centroid).collect();
+    let mut order: Vec<u32> = (0..triangles.len() as u32).collect();
+
+    fn range_bounds(order: &[u32], bounds: &[Aabb]) -> Aabb {
+        let mut b = Aabb::EMPTY;
+        for &i in order {
+            b.grow_aabb(&bounds[i as usize]);
+        }
+        b
+    }
+
+    let mut nodes: Vec<GpuBvhNode> = Vec::with_capacity(triangles.len() * 2);
+    let root_bounds = range_bounds(&order, &bounds);
+    nodes.push(GpuBvhNode {
+        min: root_bounds.min,
+        left_first: 0,
+        max: root_bounds.max,
+        count: triangles.len() as u32,
+    });
+
+    // (node index, start, count) work list over `order`.
+    let mut work = vec![(0usize, 0usize, triangles.len())];
+    while let Some((node_idx, start, count)) = work.pop() {
+        if (count as u32) <= BVH_LEAF_MAX {
+            continue; // stays a leaf
+        }
+        let slice = &mut order[start..start + count];
+
+        // Centroid bounds pick the split axis.
+        let mut cb = Aabb::EMPTY;
+        for &i in slice.iter() {
+            cb.grow(centroids[i as usize]);
+        }
+        let mut axis = 0;
+        let mut extent = 0.0f32;
+        for a in 0..3 {
+            let e = cb.max[a] - cb.min[a];
+            if e > extent {
+                extent = e;
+                axis = a;
+            }
+        }
+
+        let mut split_at = None;
+        if extent > 1e-12 {
+            // Binned SAH along `axis`.
+            let scale = BVH_BINS as f32 / extent;
+            let bin_of = |i: u32| -> usize {
+                (((centroids[i as usize][axis] - cb.min[axis]) * scale) as usize)
+                    .min(BVH_BINS - 1)
+            };
+            let mut bin_bounds = [Aabb::EMPTY; BVH_BINS];
+            let mut bin_counts = [0usize; BVH_BINS];
+            for &i in slice.iter() {
+                let b = bin_of(i);
+                bin_counts[b] += 1;
+                bin_bounds[b].grow_aabb(&bounds[i as usize]);
+            }
+            // Cost of each of the BINS-1 split planes.
+            let mut best_cost = f32::INFINITY;
+            let mut best_plane = 0usize;
+            for plane in 1..BVH_BINS {
+                let (mut lb, mut rb) = (Aabb::EMPTY, Aabb::EMPTY);
+                let (mut lc, mut rc) = (0usize, 0usize);
+                for b in 0..plane {
+                    lb.grow_aabb(&bin_bounds[b]);
+                    lc += bin_counts[b];
+                }
+                for b in plane..BVH_BINS {
+                    rb.grow_aabb(&bin_bounds[b]);
+                    rc += bin_counts[b];
+                }
+                if lc == 0 || rc == 0 {
+                    continue;
+                }
+                let cost = lb.half_area() * lc as f32 + rb.half_area() * rc as f32;
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_plane = plane;
+                }
+            }
+            if best_plane > 0 {
+                let mut mid = 0usize;
+                for k in 0..count {
+                    if bin_of(slice[k]) < best_plane {
+                        slice.swap(k, mid);
+                        mid += 1;
+                    }
+                }
+                if mid > 0 && mid < count {
+                    split_at = Some(mid);
+                }
+            }
+        }
+        // Degenerate centroids or a one-sided SAH result: median split keeps
+        // the tree balanced instead of forcing a giant leaf.
+        let mid = split_at.unwrap_or(count / 2);
+
+        let left_bounds = range_bounds(&slice[..mid], &bounds);
+        let right_bounds = range_bounds(&slice[mid..], &bounds);
+        let left_idx = nodes.len();
+        nodes.push(GpuBvhNode {
+            min: left_bounds.min,
+            left_first: (start) as u32,
+            max: left_bounds.max,
+            count: mid as u32,
+        });
+        nodes.push(GpuBvhNode {
+            min: right_bounds.min,
+            left_first: (start + mid) as u32,
+            max: right_bounds.max,
+            count: (count - mid) as u32,
+        });
+        nodes[node_idx].left_first = left_idx as u32;
+        nodes[node_idx].count = 0;
+        work.push((left_idx, start, mid));
+        work.push((left_idx + 1, start + mid, count - mid));
+    }
+
+    // Apply the final order to the triangle array so leaf ranges are direct.
+    let reordered: Vec<RtTriangle> =
+        order.iter().map(|&i| triangles[i as usize]).collect();
+    *triangles = reordered;
+    nodes
+}
+
+// --- The Vulkan stage ---
+
+const MAX_SAMPLES: u32 = 1024;
+const MAX_BOUNCES: u32 = 4;
+const WORKGROUP: u32 = 8;
+
+struct RtFrame {
+    uniforms: AllocatedBuffer,
+    descriptor_set: vk::DescriptorSet,
+}
+
+pub(crate) struct RtStage {
+    pipeline: vk::Pipeline,
+    pipeline_layout: vk::PipelineLayout,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_pool: vk::DescriptorPool,
+    shader_module: vk::ShaderModule,
+    frames: Vec<RtFrame>,
+
+    nodes: AllocatedBuffer,
+    tris: AllocatedBuffer,
+    materials: AllocatedBuffer,
+    tri_count: u32,
+
+    accum: AllocatedBuffer,
+    output_image: vk::Image,
+    output_view: vk::ImageView,
+    output_allocation: Option<Allocation>,
+    output_size: (u32, u32),
+    output_initialized: bool,
+
+    pane: (u32, u32, u32, u32),
+    pane_moved: bool,
+    camera: Option<RtCamera>,
+    sample_index: u32,
+    staged: bool,
+}
+
+impl RtStage {
+    pub(crate) fn new(device: &ash::Device, allocator: &mut Allocator, frames_in_flight: usize) -> Self {
+        unsafe {
+            let bindings = [
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(0)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(1)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(2)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(3)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(4)
+                    .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(5)
+                    .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+            ];
+            let descriptor_set_layout = device
+                .create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
+                    None,
+                )
+                .expect("Failed to create RT descriptor set layout");
+            let set_layouts_one = [descriptor_set_layout];
+            let pipeline_layout = device
+                .create_pipeline_layout(
+                    &vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts_one),
+                    None,
+                )
+                .expect("Failed to create RT pipeline layout");
+
+            let spirv = compile_wgsl(include_str!("rt.wgsl"));
+            let shader_module = device
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+                .expect("Failed to create RT shader module");
+            let pipeline = device
+                .create_compute_pipelines(
+                    vk::PipelineCache::null(),
+                    &[vk::ComputePipelineCreateInfo::default()
+                        .stage(
+                            vk::PipelineShaderStageCreateInfo::default()
+                                .stage(vk::ShaderStageFlags::COMPUTE)
+                                .module(shader_module)
+                                .name(c"cs_main"),
+                        )
+                        .layout(pipeline_layout)],
+                    None,
+                )
+                .expect("Failed to create RT compute pipeline")[0];
+
+            let n = frames_in_flight as u32;
+            let pool_sizes = [
+                vk::DescriptorPoolSize::default()
+                    .ty(vk::DescriptorType::UNIFORM_BUFFER)
+                    .descriptor_count(n),
+                vk::DescriptorPoolSize::default()
+                    .ty(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(4 * n),
+                vk::DescriptorPoolSize::default()
+                    .ty(vk::DescriptorType::STORAGE_IMAGE)
+                    .descriptor_count(n),
+            ];
+            let descriptor_pool = device
+                .create_descriptor_pool(
+                    &vk::DescriptorPoolCreateInfo::default()
+                        .max_sets(n)
+                        .pool_sizes(&pool_sizes),
+                    None,
+                )
+                .expect("Failed to create RT descriptor pool");
+            let set_layouts: Vec<vk::DescriptorSetLayout> =
+                vec![descriptor_set_layout; frames_in_flight];
+            let sets = device
+                .allocate_descriptor_sets(
+                    &vk::DescriptorSetAllocateInfo::default()
+                        .descriptor_pool(descriptor_pool)
+                        .set_layouts(&set_layouts),
+                )
+                .expect("Failed to allocate RT descriptor sets");
+            let frames: Vec<RtFrame> = sets
+                .into_iter()
+                .map(|descriptor_set| {
+                    let uniforms = create_cpu_buffer(
+                        device,
+                        allocator,
+                        std::mem::size_of::<RtParams>() as vk::DeviceSize,
+                        vk::BufferUsageFlags::UNIFORM_BUFFER,
+                        "rt-uniforms",
+                    );
+                    let buffer_infos = [vk::DescriptorBufferInfo::default()
+                        .buffer(uniforms.buffer)
+                        .offset(0)
+                        .range(std::mem::size_of::<RtParams>() as vk::DeviceSize)];
+                    device.update_descriptor_sets(
+                        &[vk::WriteDescriptorSet::default()
+                            .dst_set(descriptor_set)
+                            .dst_binding(0)
+                            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                            .buffer_info(&buffer_infos)],
+                        &[],
+                    );
+                    RtFrame { uniforms, descriptor_set }
+                })
+                .collect();
+
+            RtStage {
+                pipeline,
+                pipeline_layout,
+                descriptor_set_layout,
+                descriptor_pool,
+                shader_module,
+                frames,
+                nodes: AllocatedBuffer::null(),
+                tris: AllocatedBuffer::null(),
+                materials: AllocatedBuffer::null(),
+                tri_count: 0,
+                accum: AllocatedBuffer::null(),
+                output_image: vk::Image::null(),
+                output_view: vk::ImageView::null(),
+                output_allocation: None,
+                output_size: (0, 0),
+                output_initialized: false,
+                pane: (0, 0, 0, 0),
+                pane_moved: false,
+                camera: None,
+                sample_index: 0,
+                staged: false,
+            }
+        }
+    }
+
+    /// Replace the scene: build the BVH (reorders a copy of the triangles) and
+    /// upload nodes/triangles/materials. Caller must have the device idle.
+    pub(crate) fn set_scene(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        triangles: &[RtTriangle],
+        materials: &[RtMaterial],
+    ) {
+        let mut tris: Vec<RtTriangle> = triangles.to_vec();
+        let nodes = build_bvh(&mut tris);
+        let gpu_tris: Vec<GpuTriangle> = tris
+            .iter()
+            .map(|t| GpuTriangle {
+                p0: [t.p0[0], t.p0[1], t.p0[2], f32::from_bits(t.material)],
+                p1: [t.p1[0], t.p1[1], t.p1[2], 0.0],
+                p2: [t.p2[0], t.p2[1], t.p2[2], 0.0],
+            })
+            .collect();
+        let gpu_mats: Vec<GpuMaterial> = if materials.is_empty() {
+            vec![GpuMaterial { albedo: [0.8, 0.8, 0.8, 0.0], emission: [0.0; 4] }]
+        } else {
+            materials
+                .iter()
+                .map(|m| GpuMaterial {
+                    albedo: [m.albedo[0], m.albedo[1], m.albedo[2], 0.0],
+                    emission: [m.emission[0], m.emission[1], m.emission[2], 0.0],
+                })
+                .collect()
+        };
+
+        for buf in [&mut self.nodes, &mut self.tris, &mut self.materials] {
+            destroy_cpu_buffer(device, allocator, buf);
+        }
+        let upload = |allocator: &mut Allocator, bytes: &[u8], name: &str| -> AllocatedBuffer {
+            let mut buf = create_cpu_buffer(
+                device,
+                allocator,
+                (bytes.len() as vk::DeviceSize).max(64),
+                vk::BufferUsageFlags::STORAGE_BUFFER,
+                name,
+            );
+            if !bytes.is_empty() {
+                buf.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()]
+                    .copy_from_slice(bytes);
+            }
+            buf
+        };
+        self.nodes = upload(allocator, bytemuck::cast_slice(&nodes), "rt-nodes");
+        self.tris = upload(allocator, bytemuck::cast_slice(&gpu_tris), "rt-tris");
+        self.materials = upload(allocator, bytemuck::cast_slice(&gpu_mats), "rt-materials");
+        self.tri_count = tris.len() as u32;
+        self.sample_index = 0;
+
+        for frame in &self.frames {
+            let infos = [
+                vk::DescriptorBufferInfo::default().buffer(self.nodes.buffer).range(vk::WHOLE_SIZE),
+                vk::DescriptorBufferInfo::default().buffer(self.tris.buffer).range(vk::WHOLE_SIZE),
+                vk::DescriptorBufferInfo::default()
+                    .buffer(self.materials.buffer)
+                    .range(vk::WHOLE_SIZE),
+            ];
+            let writes: Vec<vk::WriteDescriptorSet> = infos
+                .iter()
+                .enumerate()
+                .map(|(i, info)| {
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(frame.descriptor_set)
+                        .dst_binding(1 + i as u32)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(std::slice::from_ref(info))
+                })
+                .collect();
+            unsafe { device.update_descriptor_sets(&writes, &[]) };
+        }
+    }
+
+    /// Stage an RT frame for the viewport pane (physical pixels). Recreates the
+    /// pane-sized targets on size change (waits for device idle) and resets the
+    /// accumulation when the camera, size, or scene changed.
+    pub(crate) fn stage(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        pane: (u32, u32, u32, u32),
+        camera: RtCamera,
+    ) {
+        let (_, _, w, h) = pane;
+        if w == 0 || h == 0 {
+            self.staged = false;
+            return;
+        }
+        if (w, h) != self.output_size {
+            unsafe {
+                let _ = device.device_wait_idle();
+            }
+            self.recreate_targets(device, allocator, w, h);
+            self.sample_index = 0;
+        }
+        if pane != self.pane && self.pane != (0, 0, 0, 0) {
+            // Pane moved or shrank: stale RT pixels sit outside the new
+            // region; clear the backdrop once before the next blit.
+            self.pane_moved = true;
+        }
+        if self.camera != Some(camera) {
+            self.camera = Some(camera);
+            self.sample_index = 0;
+        }
+        self.pane = pane;
+        self.staged = true;
+    }
+
+    fn recreate_targets(&mut self, device: &ash::Device, allocator: &mut Allocator, w: u32, h: u32) {
+        self.destroy_targets(device, allocator);
+        self.output_size = (w, h);
+        self.output_initialized = false;
+        self.accum = {
+            let size = (w as vk::DeviceSize) * (h as vk::DeviceSize) * 16;
+            unsafe {
+                let buffer = device
+                    .create_buffer(
+                        &vk::BufferCreateInfo::default()
+                            .size(size)
+                            .usage(vk::BufferUsageFlags::STORAGE_BUFFER)
+                            .sharing_mode(vk::SharingMode::EXCLUSIVE),
+                        None,
+                    )
+                    .expect("Failed to create RT accumulation buffer");
+                let requirements = device.get_buffer_memory_requirements(buffer);
+                let allocation = allocator
+                    .allocate(&AllocationCreateDesc {
+                        name: "rt-accum",
+                        requirements,
+                        location: MemoryLocation::GpuOnly,
+                        linear: true,
+                        allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+                    })
+                    .expect("Failed to allocate RT accumulation memory");
+                device
+                    .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
+                    .expect("Failed to bind RT accumulation memory");
+                AllocatedBuffer { buffer, allocation: Some(allocation), size }
+            }
+        };
+        unsafe {
+            let image = device
+                .create_image(
+                    &vk::ImageCreateInfo::default()
+                        .image_type(vk::ImageType::TYPE_2D)
+                        .format(vk::Format::R8G8B8A8_UNORM)
+                        .extent(vk::Extent3D { width: w, height: h, depth: 1 })
+                        .mip_levels(1)
+                        .array_layers(1)
+                        .samples(vk::SampleCountFlags::TYPE_1)
+                        .tiling(vk::ImageTiling::OPTIMAL)
+                        .usage(vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC)
+                        .initial_layout(vk::ImageLayout::UNDEFINED),
+                    None,
+                )
+                .expect("Failed to create RT output image");
+            let requirements = device.get_image_memory_requirements(image);
+            let allocation = allocator
+                .allocate(&AllocationCreateDesc {
+                    name: "rt-output",
+                    requirements,
+                    location: MemoryLocation::GpuOnly,
+                    linear: false,
+                    allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+                })
+                .expect("Failed to allocate RT output memory");
+            device
+                .bind_image_memory(image, allocation.memory(), allocation.offset())
+                .expect("Failed to bind RT output memory");
+            let view = device
+                .create_image_view(
+                    &vk::ImageViewCreateInfo::default()
+                        .image(image)
+                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .format(vk::Format::R8G8B8A8_UNORM)
+                        .subresource_range(
+                            vk::ImageSubresourceRange::default()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .level_count(1)
+                                .layer_count(1),
+                        ),
+                    None,
+                )
+                .expect("Failed to create RT output view");
+            self.output_image = image;
+            self.output_view = view;
+            self.output_allocation = Some(allocation);
+
+            for frame in &self.frames {
+                let accum_infos = [vk::DescriptorBufferInfo::default()
+                    .buffer(self.accum.buffer)
+                    .range(vk::WHOLE_SIZE)];
+                let image_infos = [vk::DescriptorImageInfo::default()
+                    .image_view(view)
+                    .image_layout(vk::ImageLayout::GENERAL)];
+                device.update_descriptor_sets(
+                    &[
+                        vk::WriteDescriptorSet::default()
+                            .dst_set(frame.descriptor_set)
+                            .dst_binding(4)
+                            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                            .buffer_info(&accum_infos),
+                        vk::WriteDescriptorSet::default()
+                            .dst_set(frame.descriptor_set)
+                            .dst_binding(5)
+                            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                            .image_info(&image_infos),
+                    ],
+                    &[],
+                );
+            }
+        }
+    }
+
+    fn destroy_targets(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        unsafe {
+            if self.output_view != vk::ImageView::null() {
+                device.destroy_image_view(self.output_view, None);
+                device.destroy_image(self.output_image, None);
+                self.output_view = vk::ImageView::null();
+                self.output_image = vk::Image::null();
+            }
+        }
+        if let Some(a) = self.output_allocation.take() {
+            let _ = allocator.free(a);
+        }
+        destroy_cpu_buffer(device, allocator, &mut self.accum);
+        self.output_size = (0, 0);
+    }
+
+    /// True while another dispatch would still refine the image.
+    pub(crate) fn accumulating(&self) -> bool {
+        self.tri_count > 0 && self.sample_index < MAX_SAMPLES
+    }
+
+    /// After the frame fence: write this frame's params.
+    pub(crate) fn write_frame_uniforms(&mut self, frame_index: usize) {
+        if !self.staged || self.tri_count == 0 {
+            return;
+        }
+        let Some(camera) = self.camera else { return };
+        let params = RtParams {
+            inv_mvp: camera.inv_mvp,
+            width: self.output_size.0,
+            height: self.output_size.1,
+            sample_index: self.sample_index,
+            max_bounces: MAX_BOUNCES,
+        };
+        let frame = &mut self.frames[frame_index];
+        frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()
+            [..std::mem::size_of::<RtParams>()]
+            .copy_from_slice(bytemuck::bytes_of(&params));
+    }
+
+    /// Record one accumulation dispatch + the blit into the backdrop's pane
+    /// region. Returns false when there is nothing to do (not staged, empty
+    /// scene, or converged) — the backdrop then simply keeps its content.
+    /// On true, the backdrop ends in TRANSFER_SRC (like `SceneStage::record`).
+    ///
+    /// `backdrop_in_transfer_src` says the raster scene pass already ran this
+    /// frame (backdrop in TRANSFER_SRC); otherwise it is in SHADER_READ_ONLY.
+    pub(crate) fn record(
+        &mut self,
+        device: &ash::Device,
+        cmd: vk::CommandBuffer,
+        frame_index: usize,
+        backdrop_image: vk::Image,
+        backdrop_extent: vk::Extent2D,
+        backdrop_in_transfer_src: bool,
+    ) -> bool {
+        if !self.staged || self.tri_count == 0 || self.output_image == vk::Image::null() {
+            self.staged = false;
+            return false;
+        }
+        self.staged = false;
+        if self.sample_index >= MAX_SAMPLES {
+            return false;
+        }
+        let (w, h) = self.output_size;
+        let color_range = vk::ImageSubresourceRange::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .level_count(1)
+            .layer_count(1);
+        unsafe {
+            // Output image to GENERAL for the compute write; order this
+            // dispatch's accum access after the previous frame's. The src
+            // stage always includes COMPUTE_SHADER — the accum buffer
+            // barrier's access flags must be legal for it even on the first
+            // dispatch, when the image side is still UNDEFINED.
+            let (old_layout, src_access, src_stage) = if self.output_initialized {
+                (
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    vk::AccessFlags::TRANSFER_READ,
+                    vk::PipelineStageFlags::TRANSFER | vk::PipelineStageFlags::COMPUTE_SHADER,
+                )
+            } else {
+                (
+                    vk::ImageLayout::UNDEFINED,
+                    vk::AccessFlags::empty(),
+                    vk::PipelineStageFlags::COMPUTE_SHADER,
+                )
+            };
+            device.cmd_pipeline_barrier(
+                cmd,
+                src_stage,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[vk::BufferMemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .buffer(self.accum.buffer)
+                    .size(vk::WHOLE_SIZE)],
+                &[vk::ImageMemoryBarrier::default()
+                    .src_access_mask(src_access)
+                    .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
+                    .old_layout(old_layout)
+                    .new_layout(vk::ImageLayout::GENERAL)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .image(self.output_image)
+                    .subresource_range(color_range)],
+            );
+            self.output_initialized = true;
+
+            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, self.pipeline);
+            device.cmd_bind_descriptor_sets(
+                cmd,
+                vk::PipelineBindPoint::COMPUTE,
+                self.pipeline_layout,
+                0,
+                &[self.frames[frame_index].descriptor_set],
+                &[],
+            );
+            device.cmd_dispatch(cmd, w.div_ceil(WORKGROUP), h.div_ceil(WORKGROUP), 1);
+
+            // Output to TRANSFER_SRC, backdrop to TRANSFER_DST for the blit.
+            let (bd_old, bd_access, bd_stage) = if backdrop_in_transfer_src {
+                (
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    vk::AccessFlags::TRANSFER_READ,
+                    vk::PipelineStageFlags::TRANSFER,
+                )
+            } else {
+                (
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                    vk::AccessFlags::SHADER_READ,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                )
+            };
+            device.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::COMPUTE_SHADER | bd_stage,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[
+                    vk::ImageMemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                        .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+                        .old_layout(vk::ImageLayout::GENERAL)
+                        .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .image(self.output_image)
+                        .subresource_range(color_range),
+                    vk::ImageMemoryBarrier::default()
+                        .src_access_mask(bd_access)
+                        .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                        .old_layout(bd_old)
+                        .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .image(backdrop_image)
+                        .subresource_range(color_range),
+                ],
+            );
+
+            if self.pane_moved {
+                self.pane_moved = false;
+                device.cmd_clear_color_image(
+                    cmd,
+                    backdrop_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &vk::ClearColorValue { float32: [0.0; 4] },
+                    &[color_range],
+                );
+            }
+
+            // Blit (not copy): converts UNORM → the backdrop's sRGB format.
+            let (px, py, _, _) = self.pane;
+            let dst_x0 = px.min(backdrop_extent.width);
+            let dst_y0 = py.min(backdrop_extent.height);
+            let bw = w.min(backdrop_extent.width - dst_x0);
+            let bh = h.min(backdrop_extent.height - dst_y0);
+            if bw > 0 && bh > 0 {
+                let layers = vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1);
+                device.cmd_blit_image(
+                    cmd,
+                    self.output_image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    backdrop_image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[vk::ImageBlit::default()
+                        .src_subresource(layers)
+                        .src_offsets([
+                            vk::Offset3D { x: 0, y: 0, z: 0 },
+                            vk::Offset3D { x: bw as i32, y: bh as i32, z: 1 },
+                        ])
+                        .dst_subresource(layers)
+                        .dst_offsets([
+                            vk::Offset3D { x: dst_x0 as i32, y: dst_y0 as i32, z: 0 },
+                            vk::Offset3D {
+                                x: (dst_x0 + bw) as i32,
+                                y: (dst_y0 + bh) as i32,
+                                z: 1,
+                            },
+                        ])],
+                    vk::Filter::NEAREST,
+                );
+            }
+
+            // Backdrop to TRANSFER_SRC: the swapchain copy path expects it
+            // exactly as SceneStage::record leaves it.
+            device.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[vk::ImageMemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+                    .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                    .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .image(backdrop_image)
+                    .subresource_range(color_range)],
+            );
+        }
+        self.sample_index += 1;
+        true
+    }
+
+    pub(crate) fn destroy(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        self.destroy_targets(device, allocator);
+        for buf in [&mut self.nodes, &mut self.tris, &mut self.materials] {
+            destroy_cpu_buffer(device, allocator, buf);
+        }
+        unsafe {
+            for frame in &mut self.frames {
+                let mut uniforms = std::mem::replace(&mut frame.uniforms, AllocatedBuffer::null());
+                destroy_cpu_buffer(device, allocator, &mut uniforms);
+            }
+            device.destroy_descriptor_pool(self.descriptor_pool, None);
+            device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_layout(self.pipeline_layout, None);
+            device.destroy_shader_module(self.shader_module, None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // CPU mirror of the shader's traversal, for parity testing.
+    fn intersect_tri_cpu(ro: [f32; 3], rd: [f32; 3], t: &RtTriangle, t_limit: f32) -> f32 {
+        let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        let cross = |a: [f32; 3], b: [f32; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let e1 = sub(t.p1, t.p0);
+        let e2 = sub(t.p2, t.p0);
+        let h = cross(rd, e2);
+        let a = dot(e1, h);
+        if a.abs() < 1e-8 {
+            return 1e30;
+        }
+        let f = 1.0 / a;
+        let s = sub(ro, t.p0);
+        let u = f * dot(s, h);
+        if !(0.0..=1.0).contains(&u) {
+            return 1e30;
+        }
+        let q = cross(s, e1);
+        let v = f * dot(rd, q);
+        if v < 0.0 || u + v > 1.0 {
+            return 1e30;
+        }
+        let tt = f * dot(e2, q);
+        if tt > 1e-4 && tt < t_limit {
+            return tt;
+        }
+        1e30
+    }
+
+    fn traverse_bvh_cpu(
+        nodes: &[GpuBvhNode],
+        tris: &[RtTriangle],
+        ro: [f32; 3],
+        rd: [f32; 3],
+    ) -> (f32, Option<usize>) {
+        if nodes.is_empty() {
+            return (1e30, None);
+        }
+        let inv = [1.0 / rd[0], 1.0 / rd[1], 1.0 / rd[2]];
+        let hit_aabb = |min: [f32; 3], max: [f32; 3], t_limit: f32| -> bool {
+            let mut tn = f32::NEG_INFINITY;
+            let mut tf = f32::INFINITY;
+            for a in 0..3 {
+                let t1 = (min[a] - ro[a]) * inv[a];
+                let t2 = (max[a] - ro[a]) * inv[a];
+                tn = tn.max(t1.min(t2));
+                tf = tf.min(t1.max(t2));
+            }
+            tf >= tn.max(0.0) && tn < t_limit
+        };
+        let mut best = 1e30f32;
+        let mut best_tri = None;
+        let mut stack = vec![0u32];
+        while let Some(idx) = stack.pop() {
+            let node = &nodes[idx as usize];
+            if !hit_aabb(node.min, node.max, best) {
+                continue;
+            }
+            if node.count > 0 {
+                for i in node.left_first..node.left_first + node.count {
+                    let t = intersect_tri_cpu(ro, rd, &tris[i as usize], best);
+                    if t < best {
+                        best = t;
+                        best_tri = Some(i as usize);
+                    }
+                }
+            } else {
+                stack.push(node.left_first);
+                stack.push(node.left_first + 1);
+            }
+        }
+        (best, best_tri)
+    }
+
+    fn brute_force(tris: &[RtTriangle], ro: [f32; 3], rd: [f32; 3]) -> (f32, Option<usize>) {
+        let mut best = 1e30f32;
+        let mut best_tri = None;
+        for (i, t) in tris.iter().enumerate() {
+            let tt = intersect_tri_cpu(ro, rd, t, best);
+            if tt < best {
+                best = tt;
+                best_tri = Some(i);
+            }
+        }
+        (best, best_tri)
+    }
+
+    // Deterministic LCG so the test needs no rand dependency.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next_f32(&mut self) -> f32 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as f32) / (u32::MAX >> 1) as f32
+        }
+        fn point(&mut self, scale: f32) -> [f32; 3] {
+            [
+                (self.next_f32() - 0.5) * scale,
+                (self.next_f32() - 0.5) * scale,
+                (self.next_f32() - 0.5) * scale,
+            ]
+        }
+    }
+
+    fn random_scene(n: usize, seed: u64) -> Vec<RtTriangle> {
+        let mut rng = Lcg(seed);
+        (0..n)
+            .map(|i| {
+                let c = rng.point(20.0);
+                let jitter = |rng: &mut Lcg, c: [f32; 3]| {
+                    let d = rng.point(2.0);
+                    [c[0] + d[0], c[1] + d[1], c[2] + d[2]]
+                };
+                RtTriangle {
+                    p0: jitter(&mut rng, c),
+                    p1: jitter(&mut rng, c),
+                    p2: jitter(&mut rng, c),
+                    material: (i % 5) as u32,
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_bvh_matches_brute_force() {
+        let mut tris = random_scene(500, 42);
+        let nodes = build_bvh(&mut tris);
+        assert!(!nodes.is_empty());
+        let mut rng = Lcg(7);
+        let mut hits = 0;
+        for _ in 0..200 {
+            let ro = rng.point(40.0);
+            let target = rng.point(10.0);
+            let d = [target[0] - ro[0], target[1] - ro[1], target[2] - ro[2]];
+            let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-6);
+            let rd = [d[0] / len, d[1] / len, d[2] / len];
+            let (t_bvh, tri_bvh) = traverse_bvh_cpu(&nodes, &tris, ro, rd);
+            let (t_ref, tri_ref) = brute_force(&tris, ro, rd);
+            assert_eq!(tri_bvh, tri_ref, "different triangle hit");
+            assert!((t_bvh - t_ref).abs() < 1e-4, "t mismatch: {t_bvh} vs {t_ref}");
+            if tri_bvh.is_some() {
+                hits += 1;
+            }
+        }
+        assert!(hits > 20, "test rays barely hit the scene ({hits}/200)");
+    }
+
+    #[test]
+    fn test_bvh_leaf_ranges_cover_all_triangles() {
+        let mut tris = random_scene(300, 9);
+        let nodes = build_bvh(&mut tris);
+        let mut seen = vec![false; tris.len()];
+        for node in &nodes {
+            if node.count > 0 {
+                for i in node.left_first..node.left_first + node.count {
+                    assert!(!seen[i as usize], "triangle {i} in two leaves");
+                    seen[i as usize] = true;
+                }
+            }
+        }
+        assert!(seen.iter().all(|&s| s), "not every triangle is in a leaf");
+    }
+
+    #[test]
+    fn test_bvh_degenerate_identical_centroids() {
+        // All triangles share one centroid: SAH can't split, the median
+        // fallback must still terminate and cover everything.
+        let tri = RtTriangle {
+            p0: [0.0, 0.0, 0.0],
+            p1: [1.0, 0.0, 0.0],
+            p2: [0.0, 1.0, 0.0],
+            material: 0,
+        };
+        let mut tris = vec![tri; 100];
+        let nodes = build_bvh(&mut tris);
+        let covered: u32 = nodes.iter().filter(|n| n.count > 0).map(|n| n.count).sum();
+        assert_eq!(covered, 100);
+        let (t, hit) = traverse_bvh_cpu(&nodes, &tris, [0.2, 0.2, -5.0], [0.0, 0.0, 1.0]);
+        assert!(hit.is_some());
+        assert!((t - 5.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn test_bvh_empty_and_single() {
+        let mut empty: Vec<RtTriangle> = Vec::new();
+        assert!(build_bvh(&mut empty).is_empty());
+
+        let mut single = vec![RtTriangle {
+            p0: [-1.0, -1.0, 0.0],
+            p1: [1.0, -1.0, 0.0],
+            p2: [0.0, 1.0, 0.0],
+            material: 3,
+        }];
+        let nodes = build_bvh(&mut single);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].count, 1);
+        let (t, hit) = traverse_bvh_cpu(&nodes, &single, [0.0, 0.0, -3.0], [0.0, 0.0, 1.0]);
+        assert_eq!(hit, Some(0));
+        assert!((t - 3.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_rt_shader_compiles() {
+        // naga parse + validate + SPIR-V write; panics on failure.
+        let spirv = compile_wgsl(include_str!("rt.wgsl"));
+        assert!(!spirv.is_empty());
+    }
+}

@@ -16,6 +16,7 @@ use gpu_allocator::MemoryLocation;
 use crate::engine::Vertex;
 
 use super::image::{ImageQuad, ImageStage};
+use super::rt::{RtCamera, RtMaterial, RtStage, RtTriangle};
 use super::scene::{MeshId, SceneDraw, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
 
@@ -153,6 +154,9 @@ pub struct VkRenderer {
     text: TextStage,
     scene: SceneStage,
     image: ImageStage,
+    /// Built lazily on the first `set_rt_scene`, so ordinary UI apps never
+    /// compile the path-tracer pipeline.
+    rt: Option<RtStage>,
 
     desired_extent: vk::Extent2D,
     corner_radius_px: f32,
@@ -658,6 +662,7 @@ impl VkRenderer {
             text,
             scene,
             image,
+            rt: None,
             desired_extent: vk::Extent2D { width: width.max(1), height: height.max(1) },
             corner_radius_px,
             swapchain_dirty: false,
@@ -883,6 +888,43 @@ impl VkRenderer {
         self.scene.stage(scissor, draws);
     }
 
+    /// Replace the path tracer's scene (triangles in the space the camera's
+    /// `inv_mvp` unprojects into). Builds the BVH on the CPU and uploads it;
+    /// waits for the GPU to go idle first — scene replacement is rare
+    /// (geometry rebuilds), matching `update_mesh`. The first call compiles
+    /// the compute pipeline.
+    pub fn set_rt_scene(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial]) {
+        unsafe {
+            let _ = self.core.device.device_wait_idle();
+        }
+        let allocator = self.core.allocator.as_mut().unwrap();
+        let rt = self
+            .rt
+            .get_or_insert_with(|| RtStage::new(&self.core.device, allocator, FRAMES_IN_FLIGHT));
+        rt.set_scene(&self.core.device, allocator, triangles, materials);
+    }
+
+    /// Stage one progressive path-tracing pass into the viewport pane
+    /// (physical pixels) for the next `draw_frame`. Call it every frame while
+    /// RT mode is on: each frame adds a sample; a camera/pane/scene change
+    /// restarts the accumulation. No-op until `set_rt_scene` has run.
+    pub fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera) {
+        if let Some(rt) = self.rt.as_mut() {
+            rt.stage(
+                &self.core.device,
+                self.core.allocator.as_mut().unwrap(),
+                pane,
+                camera,
+            );
+        }
+    }
+
+    /// True while more `stage_rt` + `draw_frame` rounds would still refine the
+    /// image — the app's cue to keep requesting frames.
+    pub fn rt_accumulating(&self) -> bool {
+        self.rt.as_ref().is_some_and(|rt| rt.accumulating())
+    }
+
     /// Request a new physical size (from xdg configure / scale changes). Applied
     /// lazily on the next `draw_frame`.
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -1028,6 +1070,9 @@ impl VkRenderer {
                 frame_index,
                 self.corner_radius_px,
             );
+            if let Some(rt) = self.rt.as_mut() {
+                rt.write_frame_uniforms(frame_index);
+            }
 
             // Record.
             let cmd = self.frames[frame_index].cmd;
@@ -1038,7 +1083,26 @@ impl VkRenderer {
 
             // Offscreen 3D pass (only when a scene was staged); leaves the
             // backdrop in TRANSFER_SRC.
-            let scene_recorded = self.scene.record(&self.core.device, cmd, frame_index);
+            let mut scene_recorded = self.scene.record(&self.core.device, cmd, frame_index);
+
+            // Path-tracer pass (only when staged via `stage_rt`): one
+            // accumulation dispatch, blitted into the backdrop's pane region —
+            // it fills the same slot as the raster scene pass and leaves the
+            // backdrop in TRANSFER_SRC likewise.
+            if let Some(rt) = self.rt.as_mut() {
+                let rt_recorded = rt.record(
+                    &self.core.device,
+                    cmd,
+                    frame_index,
+                    self.scene.backdrop_image,
+                    self.extent,
+                    scene_recorded,
+                );
+                if rt_recorded {
+                    self.scene.backdrop_valid = true;
+                    scene_recorded = true;
+                }
+            }
 
             // With a valid backdrop, replay it under the UI: copy it into the
             // swapchain image and open the UI pass with LOAD instead of CLEAR.
@@ -1343,6 +1407,9 @@ impl Drop for VkRenderer {
             if let Some(allocator) = self.core.allocator.as_mut() {
                 self.scene.destroy(&self.core.device, allocator);
                 self.image.destroy(&self.core.device, allocator);
+                if let Some(mut rt) = self.rt.take() {
+                    rt.destroy(&self.core.device, allocator);
+                }
             }
             let mut window_info = std::mem::replace(&mut self.window_info, AllocatedBuffer::null());
             if let Some(allocator) = self.core.allocator.as_mut() {
