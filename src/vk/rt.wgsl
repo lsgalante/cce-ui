@@ -17,6 +17,13 @@ struct Params {
     height: u32,
     sample_index: u32,
     max_bounces: u32,
+    // Samples per dispatch: 1 for the interactive viewport (one refinement
+    // step per frame), higher for offscreen/thumbnail rendering so a whole
+    // image needs only a few submits.
+    spp: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -204,43 +211,48 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     let idx = gid.y * params.width + gid.x;
-    var rng: u32 = (idx * 9781u) ^ (params.sample_index * 26699u) ^ 0x9e3779b9u;
 
-    // Jittered primary ray, unprojected through inv_mvp (NDC y up, z 0..1).
-    let jx = rand(&rng);
-    let jy = rand(&rng);
-    let ndc_x = (f32(gid.x) + jx) / f32(params.width) * 2.0 - 1.0;
-    let ndc_y = 1.0 - (f32(gid.y) + jy) / f32(params.height) * 2.0;
-    let p_near = params.inv_mvp * vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
-    let p_far = params.inv_mvp * vec4<f32>(ndc_x, ndc_y, 1.0, 1.0);
-    var ro = p_near.xyz / p_near.w;
-    var rd = normalize(p_far.xyz / p_far.w - ro);
+    var total = vec3<f32>(0.0);
+    for (var s: u32 = 0u; s < params.spp; s = s + 1u) {
+        var rng: u32 = (idx * 9781u) ^ ((params.sample_index + s) * 26699u) ^ 0x9e3779b9u;
 
-    var radiance = vec3<f32>(0.0);
-    var throughput = vec3<f32>(1.0);
-    for (var bounce: u32 = 0u; bounce < params.max_bounces; bounce = bounce + 1u) {
-        let hit = intersect_scene(ro, rd);
-        if hit.t >= 1e30 {
-            radiance = radiance + throughput * sky(rd);
-            break;
+        // Jittered primary ray, unprojected through inv_mvp (NDC y up, z 0..1).
+        let jx = rand(&rng);
+        let jy = rand(&rng);
+        let ndc_x = (f32(gid.x) + jx) / f32(params.width) * 2.0 - 1.0;
+        let ndc_y = 1.0 - (f32(gid.y) + jy) / f32(params.height) * 2.0;
+        let p_near = params.inv_mvp * vec4<f32>(ndc_x, ndc_y, 0.0, 1.0);
+        let p_far = params.inv_mvp * vec4<f32>(ndc_x, ndc_y, 1.0, 1.0);
+        var ro = p_near.xyz / p_near.w;
+        var rd = normalize(p_far.xyz / p_far.w - ro);
+
+        var radiance = vec3<f32>(0.0);
+        var throughput = vec3<f32>(1.0);
+        for (var bounce: u32 = 0u; bounce < params.max_bounces; bounce = bounce + 1u) {
+            let hit = intersect_scene(ro, rd);
+            if hit.t >= 1e30 {
+                radiance = radiance + throughput * sky(rd);
+                break;
+            }
+            let tri = tris[hit.tri];
+            let mat = materials[bitcast<u32>(tri.p0.w)];
+            radiance = radiance + throughput * mat.emission.rgb;
+            var n = normalize(cross(tri.p1.xyz - tri.p0.xyz, tri.p2.xyz - tri.p0.xyz));
+            if dot(n, rd) > 0.0 {
+                n = -n;
+            }
+            throughput = throughput * mat.albedo.rgb;
+            ro = ro + rd * hit.t + n * 1e-4;
+            rd = cosine_dir(n, rand(&rng), rand(&rng));
         }
-        let tri = tris[hit.tri];
-        let mat = materials[bitcast<u32>(tri.p0.w)];
-        radiance = radiance + throughput * mat.emission.rgb;
-        var n = normalize(cross(tri.p1.xyz - tri.p0.xyz, tri.p2.xyz - tri.p0.xyz));
-        if dot(n, rd) > 0.0 {
-            n = -n;
-        }
-        throughput = throughput * mat.albedo.rgb;
-        ro = ro + rd * hit.t + n * 1e-4;
-        rd = cosine_dir(n, rand(&rng), rand(&rng));
+        total = total + radiance;
     }
 
     var acc = accum[idx];
     if params.sample_index == 0u {
         acc = vec4<f32>(0.0);
     }
-    acc = acc + vec4<f32>(radiance, 1.0);
+    acc = acc + vec4<f32>(total, f32(params.spp));
     accum[idx] = acc;
     let color = acc.rgb / max(acc.a, 1.0);
     textureStore(
