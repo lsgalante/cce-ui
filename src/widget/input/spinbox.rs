@@ -140,6 +140,26 @@ impl Spinbox {
             self.cursor_idx = self.edit_buffer.chars().count();
         }
     }
+
+    /// Step the value by `delta` steps. While editing (the display shows
+    /// `edit_buffer`), commit the typed text first and refresh the buffer
+    /// after — otherwise the value moves invisibly behind a frozen buffer,
+    /// and the next commit (FocusOut/Enter) resets it to the stale text.
+    fn step_by(&mut self, delta: i32) {
+        if self.editing {
+            let text = self.edit_buffer.clone();
+            self.parse_into_value(&text);
+        }
+        let old_val = self.value;
+        self.value = (self.value + delta * self.step).clamp(self.min, self.max);
+        if self.value != old_val {
+            self.just_changed = true;
+        }
+        if self.editing {
+            self.edit_buffer = self.formatted_value();
+            self.cursor_idx = self.edit_buffer.chars().count();
+        }
+    }
 }
 
 impl Adapted<Spinbox> {
@@ -303,18 +323,10 @@ impl Input for Spinbox {
                 let g = self.geom(ectx.rect);
                 let in_y = *py >= g.btn_y && *py < g.btn_y + g.btn_h;
                 if in_y && *px >= g.split_dec + g.pad && *px < g.x + g.w * 0.775 {
-                    let old_val = self.value;
-                    self.value = (self.value - self.step).max(self.min);
-                    if self.value != old_val {
-                        self.just_changed = true;
-                    }
+                    self.step_by(-1);
                     true
                 } else if in_y && *px >= g.x + g.w * 0.775 && *px < g.x + g.w - g.pad {
-                    let old_val = self.value;
-                    self.value = (self.value + self.step).min(self.max);
-                    if self.value != old_val {
-                        self.just_changed = true;
-                    }
+                    self.step_by(1);
                     true
                 } else if *px < g.split_dec {
                     self.begin_edit(false);
@@ -453,6 +465,30 @@ mod tests {
         // Increment zone (past 77.5% of the width).
         assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
         assert_eq!(sb.value, 0);
+    }
+
+    #[test]
+    fn spinbox_buttons_step_visibly_while_editing() {
+        // Row-selection focus puts the spinbox in edit mode (FocusIn →
+        // begin_edit): the display shows edit_buffer. Stepping must commit
+        // and refresh the buffer, or the value moves invisibly and the next
+        // FocusOut commit resets it to the stale text.
+        let mut ctx = UiContext::new();
+        let mut sb = Spinbox::new(6, 0, 100, 1);
+        let (id, ptr) = (sb.id(), sb.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
+        sb.begin_edit(true);
+        assert_eq!(sb.edit_buffer, "6");
+
+        assert!(sb.mouse_input(MouseButton::Left, ElementState::Pressed, 92.0, 33.0, &mut ctx));
+        assert_eq!(sb.value, 7);
+        assert_eq!(sb.edit_buffer, "7");
+        assert!(sb.take_change());
+
+        // FocusOut now commits the refreshed buffer — the step survives.
+        sb.handle_event(&Event::FocusOut, &mut ctx);
+        assert_eq!(sb.value, 7);
     }
 
     #[test]
