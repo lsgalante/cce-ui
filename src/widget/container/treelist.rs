@@ -922,8 +922,11 @@ impl Paint for TreeList {
         let header_h = 26.0;
         let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
         let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
-        for (idx, l) in self.own_labels().into_iter().enumerate() {
-            let b = if idx < 3 { header_bounds } else { list_bounds };
+        for (idx, (l, col_max_x)) in self.own_labels().into_iter().enumerate() {
+            let mut b = if idx < 3 { header_bounds } else { list_bounds };
+            if let (Some(bb), Some(mx)) = (b.as_mut(), col_max_x) {
+                bb[2] = bb[2].min(mx);
+            }
             pc.text_with(l.text, l.x, l.y, l.font_size, l.color, font.clone(), b);
         }
 
@@ -1361,7 +1364,7 @@ mod tests {
             println!("TEST LABEL: {:?}", label);
         }
         
-        let has_menu_label = labels.iter().any(|l| l.text == "(menu)");
+        let has_menu_label = labels.iter().any(|(l, _)| l.text == "(menu)");
         assert!(has_menu_label, "Should have (menu) label!");
     }
 
@@ -1369,9 +1372,9 @@ mod tests {
     fn test_treelist_headers() {
         let tree_list = TreeList::new();
         let labels = tree_list.own_labels();
-        assert!(labels.iter().any(|l| l.text == "Key"), "Should have Key header!");
-        assert!(labels.iter().any(|l| l.text == "Type"), "Should have Type header!");
-        assert!(labels.iter().any(|l| l.text == "Value"), "Should have Value header!");
+        assert!(labels.iter().any(|(l, _)| l.text == "Key"), "Should have Key header!");
+        assert!(labels.iter().any(|(l, _)| l.text == "Type"), "Should have Type header!");
+        assert!(labels.iter().any(|(l, _)| l.text == "Value"), "Should have Value header!");
     }
 
     #[test]
@@ -1478,7 +1481,11 @@ mod tests {
 }
 
 impl TreeList {
-    pub(crate) fn own_labels(&self) -> Vec<TextLabel> {
+    /// Row/header labels plus each label's column clip: the x where its
+    /// column ends (None = only the shared list/header bounds apply). Key and
+    /// Type cells clip at their separators so text can't bleed into the next
+    /// column; sections span the whole row.
+    pub(crate) fn own_labels(&self) -> Vec<(TextLabel, Option<f32>)> {
         let f32_to_rgb = |c: [f32; 4]| -> [u8; 3] {
             [
                 (crate::color::linear_to_srgb(c[0]) * 255.0).round() as u8,
@@ -1499,27 +1506,27 @@ impl TreeList {
         let search_h = 26.0;
         let offset_y = search_h + 2.0 * search_margin_y;
 
-        labels.push(TextLabel {
+        labels.push((TextLabel {
             text: "Key".to_string(),
             x: list_left + 8.0,
             y: self.base.y + offset_y + 6.0,
             font_size: header_font_size,
             color: [200, 200, 210],
-        });
-        labels.push(TextLabel {
+        }, None));
+        labels.push((TextLabel {
             text: "Type".to_string(),
             x: list_left + 180.0 + 8.0,
             y: self.base.y + offset_y + 6.0,
             font_size: header_font_size,
             color: [200, 200, 210],
-        });
-        labels.push(TextLabel {
+        }, None));
+        labels.push((TextLabel {
             text: "Value".to_string(),
             x: list_left + 235.0 + 8.0,
             y: self.base.y + offset_y + 6.0,
             font_size: header_font_size,
             color: [200, 200, 210],
-        });
+        }, None));
 
         for (i, item) in self.items.iter().enumerate() {
             let row_y = list_top + i as f32 * self.item_height - self.scroll_box.scroll_y;
@@ -1531,19 +1538,23 @@ impl TreeList {
                 TreeElement::Section { name, indent, collapsed, .. } => {
                     if self.editing_key_idx != Some(i) {
                         let display_text = format!("{} {}", if *collapsed { "▶" } else { "▼" }, name);
-                        labels.push(TextLabel {
+                        labels.push((TextLabel {
                             text: display_text,
                             x: list_left + 8.0 + *indent as f32 * 12.0,
                             y: row_y + 6.0,
                             font_size: tree_font_size,
                             color: f32_to_rgb(crate::color::tree_section_text_color()),
-                        });
+                        }, None));
                     }
                 }
                 TreeElement::Leaf { name, indent, val, original_idx, .. } => {
                     let val_str = serde_json::to_string(val).unwrap_or_default();
-                    let display_val = if val_str.len() > 18 {
-                        format!("{}...", &val_str[..15])
+                    // Generous shaping cap only — the column bounds clip the
+                    // visible text at the list edge. (char-based: the old
+                    // byte slice could panic on multibyte text.)
+                    let display_val = if val_str.chars().count() > 120 {
+                        let cut: String = val_str.chars().take(117).collect();
+                        format!("{}...", cut)
                     } else {
                         val_str
                     };
@@ -1555,13 +1566,13 @@ impl TreeList {
                     };
 
                     if self.editing_key_idx != Some(i) {
-                        labels.push(TextLabel {
+                        labels.push((TextLabel {
                             text: name.clone(),
                             x: list_left + 8.0 + *indent as f32 * 12.0,
                             y: row_y + 6.0,
                             font_size: tree_font_size,
                             color,
-                        });
+                        }, Some(list_left + 178.0)));
                     }
 
                     let val_ty = match val {
@@ -1608,13 +1619,13 @@ impl TreeList {
 
                     if let Some(ty) = display_ty {
                         let ty_text = format!("({})", ty);
-                        labels.push(TextLabel {
+                        labels.push((TextLabel {
                             text: ty_text,
                             x: list_left + 190.0,
                             y: row_y + 6.0,
                             font_size: tree_font_size,
                             color: f32_to_rgb(crate::color::tree_type_text_color()),
-                        });
+                        }, Some(list_left + 233.0)));
                     }
 
                     if Some(*original_idx) != self.selected_key_idx {
@@ -1638,21 +1649,21 @@ impl TreeList {
                         };
 
                         if is_button {
-                            labels.push(TextLabel {
+                            labels.push((TextLabel {
                                 text: display_val,
                                 x: list_left + 245.0 + 8.0,
                                 y: row_y + 6.0,
                                 font_size: tree_font_size,
                                 color: [240, 240, 245],
-                            });
+                            }, None));
                         } else {
-                            labels.push(TextLabel {
+                            labels.push((TextLabel {
                                 text: display_val,
                                 x: label_x,
                                 y: row_y + 6.0,
                                 font_size: tree_font_size,
                                 color: f32_to_rgb(crate::color::tree_value_text_color()),
-                            });
+                            }, None));
                         }
                     }
                 }
