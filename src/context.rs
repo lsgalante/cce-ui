@@ -194,6 +194,20 @@ impl UiContext {
                         // its first move. drag_start_pos is cleared on release, so an
                         // equal position here means "same press, next root".
                         if self.drag_start_pos != Some((*x, *y)) {
+                            // A fresh press while a grab is still armed means the
+                            // release never arrived (lost to a focus change or eaten
+                            // compositor-side). End the stale drag and drop the grab —
+                            // otherwise active_grab redirects every event to the old
+                            // target forever and the whole UI stops responding.
+                            if self.active_grab.is_some() {
+                                if self.is_dragging {
+                                    if let Some(target_ptr) = self.drag_target.and_then(|id| self.tree.get_ptr(id)) {
+                                        (*target_ptr).handle_event(&Event::DragEnd, self);
+                                        (*target_ptr).mark_dirty(self);
+                                    }
+                                }
+                                self.active_grab = None;
+                            }
                             self.drag_start_pos = Some((*x, *y));
                             self.is_dragging = false;
                             self.drag_target = None;
