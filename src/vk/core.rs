@@ -43,8 +43,8 @@ unsafe extern "system" fn debug_callback(
 
 pub struct VkCore {
     // Field order is drop order: allocator and command pool go before the
-    // device, the device before debug/instance; `_entry` (the loaded library)
-    // must outlive everything.
+    // device. The instance (and the loaded library) is process-shared and
+    // never destroyed — see `shared_instance()`.
     pub(crate) allocator: Option<Allocator>,
     pub(crate) command_pool: vk::CommandPool,
     pub(crate) queue: vk::Queue,
@@ -57,53 +57,33 @@ pub struct VkCore {
     pub(crate) device: ash::Device,
     pub(crate) physical_device: vk::PhysicalDevice,
     pub(crate) surface_loader: ash::khr::surface::Instance,
-    pub(crate) debug: Option<(ash::ext::debug_utils::Instance, vk::DebugUtilsMessengerEXT)>,
     pub(crate) instance: ash::Instance,
-    pub(crate) _entry: ash::Entry,
     pub(crate) min_uniform_align: vk::DeviceSize,
     /// minAccelerationStructureScratchOffsetAlignment; 1 when no ray-query stack.
     pub(crate) as_scratch_align: vk::DeviceSize,
 }
 
-impl VkCore {
-    /// A core bound to a Wayland surface: the returned `vk::SurfaceKHR` is
-    /// created from the raw pointers and the chosen device supports presenting
-    /// to it. The caller owns the surface handle (destroy it before the core).
-    ///
-    /// # Safety
-    /// `display_ptr` and `surface_ptr` must be live `wl_display` / `wl_surface`
-    /// pointers that outlive the core and everything created from it.
-    pub unsafe fn new_for_wayland_surface(
-        display_ptr: *mut c_void,
-        surface_ptr: *mut c_void,
-    ) -> (Self, vk::SurfaceKHR) {
-        let (core, surface) = Self::new_inner(Some((display_ptr, surface_ptr)));
-        (core, surface.expect("surface requested but not created"))
-    }
+/// The process-wide Vulkan entry + instance every [`VkCore`] hangs off.
+///
+/// Instance creation is the expensive part of bringing up a renderer (ICD
+/// enumeration + driver init, ~70ms warm and much worse on a cold cache), and
+/// popup-style consumers (the cce-cloud daemon) create a renderer per window —
+/// so the instance is created once and intentionally lives for the process.
+struct SharedInstance {
+    entry: ash::Entry,
+    instance: ash::Instance,
+    // Held so the messenger stays alive; never destroyed.
+    _debug: Option<(ash::ext::debug_utils::Instance, vk::DebugUtilsMessengerEXT)>,
+    /// VK_KHR_surface + VK_KHR_wayland_surface were available and enabled.
+    has_wayland_surface: bool,
+    api_version: u32,
+}
 
-    /// A windowless core: no surface extensions, any graphics-capable device.
-    /// For offscreen rendering (thumbnails, previews) and compute.
-    pub fn new_headless() -> Self {
-        unsafe { Self::new_inner(None).0 }
-    }
+static SHARED_INSTANCE: std::sync::OnceLock<SharedInstance> = std::sync::OnceLock::new();
 
-    unsafe fn new_inner(
-        wayland: Option<(*mut c_void, *mut c_void)>,
-    ) -> (Self, Option<vk::SurfaceKHR>) {
-        // CCE_VK_DEVICE: "integrated" (the default), "discrete", or a device
-        // name substring. An explicit request also lifts a session-wide ICD
-        // pin (VK_DRIVER_FILES / VK_ICD_FILENAMES) for THIS process — the
-        // common setup pins Vulkan to the iGPU to keep the dGPU asleep, which
-        // would otherwise make "discrete" unsatisfiable.
-        let device_pref = std::env::var("CCE_VK_DEVICE")
-            .ok()
-            .map(|v| v.to_lowercase())
-            .filter(|v| !v.is_empty());
-        if device_pref.is_some() {
-            std::env::remove_var("VK_DRIVER_FILES");
-            std::env::remove_var("VK_ICD_FILENAMES");
-        }
-
+fn shared_instance() -> &'static SharedInstance {
+    SHARED_INSTANCE.get_or_init(|| unsafe {
+        let t = std::time::Instant::now();
         let entry = ash::Entry::load().expect("Failed to load libvulkan");
 
         // Validation when available (debug builds or CCE_VK_VALIDATION=1).
@@ -135,8 +115,21 @@ impl VkCore {
             .engine_name(app_name)
             .api_version(api_version);
 
+        // Surface extensions are enabled whenever the loader offers them, so
+        // the one shared instance serves both windowed and headless cores.
+        let ext_props = entry
+            .enumerate_instance_extension_properties(None)
+            .unwrap_or_default();
+        let has_inst_ext = |name: &CStr| {
+            ext_props
+                .iter()
+                .any(|e| CStr::from_ptr(e.extension_name.as_ptr()) == name)
+        };
+        let has_wayland_surface =
+            has_inst_ext(ash::khr::surface::NAME) && has_inst_ext(ash::khr::wayland_surface::NAME);
+
         let mut extension_names: Vec<*const i8> = Vec::new();
-        if wayland.is_some() {
+        if has_wayland_surface {
             extension_names.push(ash::khr::surface::NAME.as_ptr());
             extension_names.push(ash::khr::wayland_surface::NAME.as_ptr());
         }
@@ -184,11 +177,69 @@ impl VkCore {
             None
         };
 
+        log::debug!("[timing] shared Vulkan instance init: {:?}", t.elapsed());
+        SharedInstance {
+            entry,
+            instance,
+            _debug: debug,
+            has_wayland_surface,
+            api_version,
+        }
+    })
+}
+
+impl VkCore {
+    /// A core bound to a Wayland surface: the returned `vk::SurfaceKHR` is
+    /// created from the raw pointers and the chosen device supports presenting
+    /// to it. The caller owns the surface handle (destroy it before the core).
+    ///
+    /// # Safety
+    /// `display_ptr` and `surface_ptr` must be live `wl_display` / `wl_surface`
+    /// pointers that outlive the core and everything created from it.
+    pub unsafe fn new_for_wayland_surface(
+        display_ptr: *mut c_void,
+        surface_ptr: *mut c_void,
+    ) -> (Self, vk::SurfaceKHR) {
+        let (core, surface) = Self::new_inner(Some((display_ptr, surface_ptr)));
+        (core, surface.expect("surface requested but not created"))
+    }
+
+    /// A windowless core: no surface extensions, any graphics-capable device.
+    /// For offscreen rendering (thumbnails, previews) and compute.
+    pub fn new_headless() -> Self {
+        unsafe { Self::new_inner(None).0 }
+    }
+
+    unsafe fn new_inner(
+        wayland: Option<(*mut c_void, *mut c_void)>,
+    ) -> (Self, Option<vk::SurfaceKHR>) {
+        // CCE_VK_DEVICE: "integrated" (the default), "discrete", or a device
+        // name substring. An explicit request also lifts a session-wide ICD
+        // pin (VK_DRIVER_FILES / VK_ICD_FILENAMES) for THIS process — the
+        // common setup pins Vulkan to the iGPU to keep the dGPU asleep, which
+        // would otherwise make "discrete" unsatisfiable.
+        let device_pref = std::env::var("CCE_VK_DEVICE")
+            .ok()
+            .map(|v| v.to_lowercase())
+            .filter(|v| !v.is_empty());
+        if device_pref.is_some() {
+            std::env::remove_var("VK_DRIVER_FILES");
+            std::env::remove_var("VK_ICD_FILENAMES");
+        }
+
+        let shared = shared_instance();
+        let entry = &shared.entry;
+        let instance = shared.instance.clone();
+        let api_version = shared.api_version;
+        if wayland.is_some() && !shared.has_wayland_surface {
+            panic!("Vulkan loader offers no VK_KHR_wayland_surface but a window was requested");
+        }
+
         // Instance-level loader; only usable when VK_KHR_surface was enabled.
-        let surface_loader = ash::khr::surface::Instance::new(&entry, &instance);
+        let surface_loader = ash::khr::surface::Instance::new(entry, &instance);
 
         let surface = wayland.map(|(display_ptr, surface_ptr)| {
-            let wayland_loader = ash::khr::wayland_surface::Instance::new(&entry, &instance);
+            let wayland_loader = ash::khr::wayland_surface::Instance::new(entry, &instance);
             wayland_loader
                 .create_wayland_surface(
                     &vk::WaylandSurfaceCreateInfoKHR::default()
@@ -327,6 +378,7 @@ impl VkCore {
                 .push_next(&mut rq_features);
             log::info!("Vulkan ray-query stack enabled (RT tier 2 available)");
         }
+        let t = std::time::Instant::now();
         let device = instance
             .create_device(
                 physical_device,
@@ -334,6 +386,7 @@ impl VkCore {
                 None,
             )
             .expect("Failed to create Vulkan device");
+        log::debug!("[timing] vk create_device: {:?}", t.elapsed());
         let queue = device.get_device_queue(queue_family, 0);
         let accel_loader =
             ray_query.then(|| ash::khr::acceleration_structure::Device::new(&instance, &device));
@@ -375,9 +428,7 @@ impl VkCore {
                 device,
                 physical_device,
                 surface_loader,
-                debug,
                 instance,
-                _entry: entry,
                 min_uniform_align,
                 as_scratch_align,
             },
@@ -390,14 +441,11 @@ impl Drop for VkCore {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.device_wait_idle();
-            // The allocator must go before the device it allocates from.
+            // The allocator must go before the device it allocates from. The
+            // instance is process-shared and intentionally never destroyed.
             drop(self.allocator.take());
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_device(None);
-            if let Some((loader, messenger)) = self.debug.take() {
-                loader.destroy_debug_utils_messenger(messenger, None);
-            }
-            self.instance.destroy_instance(None);
         }
     }
 }

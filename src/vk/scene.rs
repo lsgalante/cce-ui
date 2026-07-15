@@ -14,7 +14,7 @@ use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator};
 use gpu_allocator::MemoryLocation;
 
-use super::renderer::{compile_wgsl, create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
+use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 
 /// Layout-identical to the app's `geometry::Vertex3D` (bytemuck-castable at cutover).
 #[repr(C)]
@@ -187,9 +187,9 @@ impl SceneStage {
                 )
                 .expect("Failed to create scene pipeline layout");
 
-            let spirv = compile_wgsl(include_str!("scene3d.wgsl"));
+            let spirv = super::renderer::scene3d_spirv();
             let shader_module = device
-                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spirv), None)
                 .expect("Failed to create 3D shader module");
             let stages = [
                 vk::PipelineShaderStageCreateInfo::default()

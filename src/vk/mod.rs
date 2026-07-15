@@ -44,3 +44,16 @@ pub use renderer::{Batch2D, Frame2D, VkRenderer};
 pub use rt::{RtCamera, RtMaterial, RtOffscreen, RtTriangle};
 pub use scene::{MeshId, SceneDraw, Vertex3D};
 pub use text::TextSpan;
+
+/// Pay the process-wide, window-independent renderer costs up front: the
+/// shared Vulkan instance (ICD enumeration + driver init), one throwaway
+/// device (loads the driver's device-level libraries), and the naga WGSL
+/// compiles. For daemon-style processes (cce-cloud) that build a renderer per
+/// window: called at daemon startup, it moves the multi-second cold-cache hit
+/// off the first window's critical path.
+pub fn prewarm() {
+    renderer::shader2d_spirv();
+    renderer::glyph_spirv();
+    renderer::scene3d_spirv();
+    drop(VkCore::new_headless());
+}

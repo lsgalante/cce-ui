@@ -187,6 +187,24 @@ pub(crate) fn compile_wgsl(source: &str) -> Vec<u32> {
     naga::back::spv::write_vec(&module, &info, &options, None).expect("SPIR-V write failed")
 }
 
+/// Cached SPIR-V for the always-compiled UI shaders. The daemon-style
+/// consumers (cce-cloud) build a renderer per popup; naga compilation is pure,
+/// so compile each shader once per process.
+pub(crate) fn shader2d_spirv() -> &'static [u32] {
+    static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
+    SPIRV.get_or_init(|| compile_wgsl(include_str!("shader2d.wgsl")))
+}
+
+pub(crate) fn glyph_spirv() -> &'static [u32] {
+    static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
+    SPIRV.get_or_init(|| compile_wgsl(include_str!("glyph.wgsl")))
+}
+
+pub(crate) fn scene3d_spirv() -> &'static [u32] {
+    static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
+    SPIRV.get_or_init(|| compile_wgsl(include_str!("scene3d.wgsl")))
+}
+
 /// Like [`compile_wgsl`], but with naga's RAY_QUERY capability and SPIR-V 1.4
 /// (required by SPV_KHR_ray_query). Only used on devices where the ray-query
 /// device stack was enabled — those are Vulkan 1.2+, which accepts 1.4.
@@ -314,8 +332,11 @@ impl VkRenderer {
         height: u32,
         corner_radius_px: f32,
     ) -> Self {
+        let t_new = std::time::Instant::now();
         let (mut core, surface) =
             super::core::VkCore::new_for_wayland_surface(display_ptr, surface_ptr);
+        log::debug!("[timing] VkCore::new_for_wayland_surface: {:?}", t_new.elapsed());
+        let t_rest = std::time::Instant::now();
         // Locals over the core for the setup below (methods use self.core.*).
         let device = core.device.clone();
         let queue = core.queue;
@@ -437,9 +458,9 @@ impl VkRenderer {
             .expect("Failed to create pipeline layout");
 
         // Pipeline from shader.wgsl (both entry points live in one SPIR-V module).
-        let spirv = compile_wgsl(include_str!("shader2d.wgsl"));
+        let spirv = shader2d_spirv();
         let shader_module = device
-            .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+            .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spirv), None)
             .expect("Failed to create shader module");
 
         let stages = [
@@ -687,11 +708,14 @@ impl VkRenderer {
             swapchain_dirty: false,
             core,
         };
+        log::debug!("[timing] VkRenderer pipelines/stages: {:?}", t_rest.elapsed());
+        let t_swap = std::time::Instant::now();
         renderer.create_swapchain();
         renderer.write_window_info();
         // The swapchain may have settled on a different extent than requested;
         // keep the backdrop targets in lockstep.
         renderer.sync_backdrop_targets();
+        log::debug!("[timing] swapchain setup: {:?}", t_swap.elapsed());
         renderer
     }
 

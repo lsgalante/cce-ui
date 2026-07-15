@@ -25,7 +25,7 @@ use gpu_allocator::MemoryLocation;
 use glyphon::cosmic_text::{Buffer as TextBuffer, CacheKey, SwashContent};
 use glyphon::{FontSystem, SwashCache};
 
-use super::renderer::{compile_wgsl, create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
+use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 
 const ATLAS_SIZE: u32 = 1024;
 const ATLAS_PAD: u32 = 1;
@@ -170,9 +170,9 @@ impl TextStage {
                 )
                 .expect("Failed to create text pipeline layout");
 
-            let spirv = compile_wgsl(include_str!("glyph.wgsl"));
+            let spirv = super::renderer::glyph_spirv();
             let shader_module = device
-                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spirv), None)
                 .expect("Failed to create glyph shader module");
 
             let stages = [

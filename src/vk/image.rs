@@ -17,7 +17,7 @@ use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator};
 use gpu_allocator::MemoryLocation;
 
-use super::renderer::{compile_wgsl, create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
+use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 
 /// One image draw in a 2D frame.
 pub struct ImageQuad {
@@ -121,9 +121,9 @@ impl ImageStage {
                 .expect("Failed to create image pipeline layout");
 
             // Same shader as glyphs: sampled texel * vertex color (+ circle clip).
-            let spirv = compile_wgsl(include_str!("glyph.wgsl"));
+            let spirv = super::renderer::glyph_spirv();
             let shader_module = device
-                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(&spirv), None)
+                .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spirv), None)
                 .expect("Failed to create image shader module");
             let stages = [
                 vk::PipelineShaderStageCreateInfo::default()
