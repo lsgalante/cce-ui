@@ -13,6 +13,7 @@ pub mod scene;
 pub mod process;
 pub mod file_dialog;
 pub mod ipc;
+pub mod mcp;
 pub mod vk;
 
 pub mod colors {
