@@ -51,7 +51,15 @@ pub struct ParametersBg {
     pub content_h: f32,
     scrollbar_dragging: bool,
     drag_offset_y: f32,
+    /// Seconds left in the "recently scrolled" window that keeps the scrollbar raised in
+    /// front of the pane plate; decays in `tick`. See [`ParametersBg::scrollbar_active`].
+    scroll_activity: f32,
+    /// Whether the pointer currently sits over the scrollbar track (updated on pointer move).
+    scrollbar_hover: bool,
 }
+
+/// How long (seconds) the scrollbar stays raised after the last wheel scroll or drag release.
+const SCROLL_ACTIVE_HOLD: f32 = 0.7;
 
 impl ParametersBg {
     pub fn new() -> Adapted<ParametersBg> {
@@ -75,6 +83,8 @@ impl ParametersBg {
             content_h: 0.0,
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
+            scroll_activity: 0.0,
+            scrollbar_hover: false,
         })
     }
 
@@ -163,6 +173,47 @@ impl ParametersBg {
 
         px >= sb_x - 4.0 && px <= sb_x + sb_w + 4.0
             && py >= sb_track_y && py <= sb_track_y + sb_track_h
+    }
+
+    /// Whether the pane holds enough content to need a scrollbar at all.
+    pub fn scrollbar_visible(&self) -> bool {
+        self.content_h > self.rect.height
+    }
+
+    /// Whether the scrollbar is "active" — raised in front of the pane plate. It rises while
+    /// being dragged, while a recent wheel scroll still holds it up, or while the pointer
+    /// hovers its track; otherwise it sinks behind the plate.
+    pub fn scrollbar_active(&self) -> bool {
+        self.scrollbar_visible()
+            && (self.scrollbar_dragging || self.scroll_activity > 0.0 || self.scrollbar_hover)
+    }
+
+    /// The scrollbar's track + thumb quads (empty when no scrollbar is needed). The host draws
+    /// these either behind or in front of the pane plate per [`Self::scrollbar_active`]; they
+    /// are deliberately kept out of [`Self::plain_quads`] so the host controls their depth.
+    pub fn scrollbar_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        if !self.scrollbar_visible() {
+            return Vec::new();
+        }
+        let sb_w = crate::layout::scrollbar_width();
+        let sb_x = self.rect.x + self.rect.width - sb_w - 4.0;
+        let sb_track_h = self.rect.height - 8.0;
+        let sb_track_y = self.rect.y + 4.0;
+
+        let visible_ratio = self.rect.height / self.content_h;
+        let thumb_h = if sb_track_h <= 20.0 {
+            sb_track_h
+        } else {
+            (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+        };
+        let max_scroll = self.content_h - self.rect.height;
+        let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+        let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
+
+        vec![
+            (sb_x, sb_track_y, sb_w, sb_track_h, crate::color::scrollbar_track_color()),
+            (sb_x, thumb_y, sb_w, thumb_h, crate::color::scrollbar_thumb_color()),
+        ]
     }
 
     fn update_slider_rects(&mut self) {
@@ -541,28 +592,8 @@ impl ParametersBg {
             }
         }
 
-        // Draw Scrollbar (unclipped) if content_h > base.h
-        if self.content_h > self.rect.height {
-            let sb_w = crate::layout::scrollbar_width();
-            let sb_x = self.rect.x + self.rect.width - sb_w - 4.0;
-            let sb_track_h = self.rect.height - 8.0;
-            let sb_track_y = self.rect.y + 4.0;
-
-            // Track
-            quads.push((sb_x, sb_track_y, sb_w, sb_track_h, crate::color::scrollbar_track_color()));
-
-            // Thumb
-            let visible_ratio = self.rect.height / self.content_h;
-            let thumb_h = if sb_track_h <= 20.0 {
-                sb_track_h
-            } else {
-                (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-            };
-            let max_scroll = self.content_h - self.rect.height;
-            let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
-            let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
-            quads.push((sb_x, thumb_y, sb_w, thumb_h, crate::color::scrollbar_thumb_color()));
-        }
+        // The scrollbar is NOT emitted here: the host draws it via `scrollbar_quads`, above
+        // or below the pane plate depending on `scrollbar_active`.
 
         quads
     }
@@ -620,19 +651,33 @@ impl Layout for ParametersBg {
 }
 
 impl Paint for ParametersBg {
-    /// Transparent while hidden, like legacy — the designer draws the panel's background plate
-    /// itself from `color()` + the corner style (`push_widget_vertices`), so this must NOT be
-    /// emitted as a quad anywhere (the translucent PARAM_BG would double-blend).
+    /// The panel IS its own background plate (the host draws it from `color()` + the corner
+    /// style via `push_widget_vertices`) — there is no separate plate widget behind it, so
+    /// this carries the full plate treatment: `PARAM_BG` scaled by the global plate opacity,
+    /// with the alpha negated as the scenefx blur marker when plate blur is on. Transparent
+    /// while hidden. It must not ALSO be emitted as a quad anywhere or it would double-blend.
     fn color(&self) -> [f32; 4] {
         if !self.visible {
             return [0.0, 0.0, 0.0, 0.0];
         }
-        colors::PARAM_BG
+        let mut c = colors::PARAM_BG;
+        c[3] *= crate::layout::plate_opacity();
+        if colors::plate_blur() {
+            c[3] = -c[3].abs();
+        }
+        c
     }
 
-    /// Legacy `rounded_corners` all-true at the default 12.0 radius.
+    /// The shared plate corner radius (rounded on all four corners when non-zero).
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        Some((12.0, (true, true, true, true)))
+        let r = crate::layout::plate_corner_radius();
+        let on = r > 0.0;
+        Some((r, (on, on, on, on)))
+    }
+
+    /// The shared plate border (folded in from the retired backing plate widget).
+    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+        colors::plate_border_color().map(|bc| (bc, colors::plate_border_thickness()))
     }
 
     fn widget_font(&self) -> Option<String> {
@@ -644,6 +689,11 @@ impl Paint for ParametersBg {
     /// [`color`](Paint::color).
     fn paint(&self, _rect: Rect, ctx: &mut PaintCtx) {
         for (qx, qy, qw, qh, qc) in self.plain_quads() {
+            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+        }
+        // Scene-path hosts get the scrollbar on top (the designer instead straddles it around
+        // the pane plate through `scrollbar_quads`).
+        for (qx, qy, qw, qh, qc) in self.scrollbar_quads() {
             ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
         let view_min = self.rect.y + 4.0;
@@ -847,6 +897,7 @@ impl Input for ParametersBg {
     fn drag_end(&mut self) {
         if self.scrollbar_dragging {
             self.scrollbar_dragging = false;
+            self.scroll_activity = SCROLL_ACTIVE_HOLD;
             return;
         }
         if let Some(i) = self.dragging_param.take() {
@@ -875,6 +926,12 @@ impl Input for ParametersBg {
                 }
             }
         }
+        // Decay the "recently scrolled" window; keep frames coming until it expires so the
+        // scrollbar's sink behind the plate actually renders.
+        if self.scroll_activity > 0.0 {
+            self.scroll_activity = (self.scroll_activity - dt).max(0.0);
+            changed = true;
+        }
         changed
     }
 
@@ -897,10 +954,14 @@ impl Input for ParametersBg {
             Event::PointerMove { x: px, y: py, .. } => {
                 let (px, py) = (*px, *py);
                 self.mouse_pos = Some((px, py));
+                // Track scrollbar hover so it rises/sinks on move; redraw on the transition.
+                let hov = self.hit_test_scrollbar(px, py);
+                let hover_changed = hov != self.scrollbar_hover;
+                self.scrollbar_hover = hov;
                 let Some(ui) = ectx.ui.as_deref_mut() else {
-                    return false;
+                    return hover_changed;
                 };
-                let mut changed = false;
+                let mut changed = hover_changed;
 
                 if self.scrollbar_dragging {
                     let sb_track_h = self.rect.height - 8.0;
@@ -1028,6 +1089,7 @@ impl Input for ParametersBg {
                     } else if state == ElementState::Released {
                         if self.scrollbar_dragging {
                             self.scrollbar_dragging = false;
+                            self.scroll_activity = SCROLL_ACTIVE_HOLD;
                             return true;
                         }
                     }
@@ -1513,6 +1575,7 @@ impl Input for ParametersBg {
                         self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
                         if (self.scroll_y - old_scroll).abs() > 0.01 {
                             self.update_slider_rects();
+                            self.scroll_activity = SCROLL_ACTIVE_HOLD;
                             changed = true;
                         }
                     }
