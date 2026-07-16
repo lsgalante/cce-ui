@@ -349,6 +349,17 @@ pub fn cached() -> &'static InputConfig {
     CACHED.get_or_init(InputConfig::load)
 }
 
+/// Chord for one of this app's bindings: `<app>.<name>` → `cce-ui.<name>` →
+/// the compiled-in default. The app domain is the binary name. This is the
+/// standard way for a client to resolve its shortcuts at startup:
+///
+///     let open = cce_ui::input::app_chord("open_file", "enter");
+///     ... cce_ui::widget::match_key_shortcut(event, &open) ...
+pub fn app_chord(name: &str, default: &str) -> String {
+    let app = crate::config::get_app_name().unwrap_or_default();
+    cached().resolve_chord(&app, name, default)
+}
+
 /// This app's effective wheel-delta multipliers, resolved once per process.
 /// Pixel (smooth) deltas scale by `trackpad`, discrete clicks by `mouse`.
 #[derive(Debug, Clone, Copy, PartialEq)]
