@@ -31,6 +31,8 @@ use wayland_protocols::wp::pointer_gestures::zv1::client::{
     zwp_pointer_gesture_pinch_v1::{self, ZwpPointerGesturePinchV1},
     zwp_pointer_gestures_v1::{self as zwp_pointer_gestures, ZwpPointerGesturesV1},
 };
+pub use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel;
+pub use smithay_client_toolkit::seat::pointer::CursorIcon as PointerCursorIcon;
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
 use glyphon::{
@@ -1460,6 +1462,15 @@ pub struct WindowSettings {
     pub min_size: Option<(u32, u32)>,
 }
 
+/// A compositor-side window operation requested by the app: an interactive
+/// move or resize grab. Returned from [`Application::take_window_action`];
+/// the runner executes it with the serial of the most recent pointer press.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowAction {
+    Move,
+    Resize(xdg_toplevel::ResizeEdge),
+}
+
 // Re-export the wlr-layer-shell types apps need to describe a layer surface.
 pub use smithay_client_toolkit::shell::wlr_layer::{
     Anchor as LayerAnchor, KeyboardInteractivity as LayerKeyboardInteractivity, Layer as LayerKind,
@@ -1598,6 +1609,56 @@ pub trait Application: Sized + 'static {
     fn load_system_fonts(&self) -> bool {
         false
     }
+
+    /// Called once, right after the renderer is created and before the first
+    /// frame: create persistent renderer resources here (3D meshes via
+    /// [`VkRenderer::create_mesh`]). Most 2D apps never need this.
+    fn renderer_init(&mut self, _renderer: &mut VkRenderer) {}
+
+    /// Direct renderer staging, called every frame after the engine's own text
+    /// prep and immediately before the frame is drawn: stage 3D scene panes
+    /// (`stage_scene`), path-traced panes (`stage_rt`), flush mesh updates, or
+    /// prepare app-shaped text (`prepare_text` — an app that returns `false`
+    /// from [`display_list_text`](Application::display_list_text) fully owns
+    /// the renderer's text state, the engine never touches it). Return `true`
+    /// to request another frame immediately (e.g. while a path tracer is still
+    /// accumulating samples).
+    fn stage_renderer(&mut self, _renderer: &mut VkRenderer, _size: LogicalSize, _scale: f64) -> bool {
+        false
+    }
+
+    /// The surface was resized (or the scale factor changed): `width`/`height`
+    /// are the new logical size. The renderer has already been resized; use
+    /// this for stateful relayout that can't wait for the next paint callback.
+    fn handle_resize(&mut self, _width: f32, _height: f32, _scale: f64) {}
+
+    /// Whether the runner's built-in client-side decorations apply: the 8px
+    /// rect-edge resize grabs, the titlebar move band, and the matching edge
+    /// cursors. Return `false` for a window whose chrome doesn't follow its
+    /// rect (e.g. a circular pane) and drive moves/resizes yourself via
+    /// [`take_window_action`](Application::take_window_action).
+    fn standard_csd(&self) -> bool {
+        true
+    }
+
+    /// Override the pointer cursor at (x, y). `None` falls back to the
+    /// runner's standard CSD edge cursors (or `Default` when
+    /// [`standard_csd`](Application::standard_csd) is off).
+    fn cursor_icon(&self, _x: f32, _y: f32) -> Option<CursorIcon> {
+        None
+    }
+
+    /// Polled after each pointer frame is dispatched: return a
+    /// [`WindowAction`] to start an interactive move/resize grab with the
+    /// serial of the most recent pointer press. This is take-semantics — the
+    /// implementation should clear its pending action when returning it.
+    fn take_window_action(&mut self) -> Option<WindowAction> {
+        None
+    }
+
+    /// Called once when the event loop ends (window closed, app-requested
+    /// exit): last-chance work like autosave. The surface is still alive.
+    fn on_exit(&mut self) {}
 }
 
 pub struct PressedKey {
@@ -1665,6 +1726,9 @@ pub struct EngineState<A: Application> {
     pub pinch_gesture: Option<ZwpPointerGesturePinchV1>,
     pub last_pinch_scale: f32,
     pub cursor_pos: (f32, f32),
+    /// Serial of the most recent pointer press, kept for
+    /// [`Application::take_window_action`] move/resize grabs.
+    pub last_press_serial: Option<u32>,
     /// This frame's display-list text, shaped and held here so the glyphon `TextArea`s built
     /// in the render pass can borrow the buffers (Phase 6 —
     /// [`Application::display_list_text`]).
@@ -1704,9 +1768,48 @@ impl<A: Application> EngineState<A> {
             if let Some(ref mut renderer) = self.renderer {
                 renderer.resize((w as f64 * self.scale_factor) as u32, (h as f64 * self.scale_factor) as u32);
             }
+            let scale = self.scale_factor;
+            self.inner.as_mut().unwrap().handle_resize(w, h, scale);
         }
     }
     
+    /// The cursor for the pointer at (lx, ly): the app's
+    /// [`Application::cursor_icon`] override, else the standard-CSD edge
+    /// cursors (status bars and non-standard-CSD apps fall back to Default).
+    fn cursor_icon_at(&self, lx: f32, ly: f32) -> CursorIcon {
+        let inner = self.inner.as_ref().unwrap();
+        if let Some(icon) = inner.cursor_icon(lx, ly) {
+            return icon;
+        }
+        if inner.settings().app_id.starts_with("cce-status") || !inner.standard_csd() {
+            return CursorIcon::Default;
+        }
+        let border = 8.0f32;
+        if ly < border {
+            if lx < border {
+                CursorIcon::NwResize
+            } else if lx > self.logical_width - border {
+                CursorIcon::NeResize
+            } else {
+                CursorIcon::NResize
+            }
+        } else if ly > self.logical_height - border {
+            if lx < border {
+                CursorIcon::SwResize
+            } else if lx > self.logical_width - border {
+                CursorIcon::SeResize
+            } else {
+                CursorIcon::SResize
+            }
+        } else if lx < border {
+            CursorIcon::WResize
+        } else if lx > self.logical_width - border {
+            CursorIcon::EResize
+        } else {
+            CursorIcon::Default
+        }
+    }
+
     pub fn render(&mut self) {
         let logical_w = self.logical_width;
         let logical_h = self.logical_height;
@@ -1849,8 +1952,12 @@ impl<A: Application> EngineState<A> {
 
         // 3. Frame: display-list batches under their physical scissors, then
         // text, then overlays. The renderer owns swapchain rebuild/recovery.
+        // An app without display-list text owns the renderer's text state
+        // itself (it stages via stage_renderer below); don't wipe it here.
         let renderer = self.renderer.as_mut().unwrap();
-        renderer.prepare_text(self.font_system.as_mut().unwrap(), &mut self.swash_cache, &spans);
+        if self.inner.as_ref().unwrap().display_list_text() {
+            renderer.prepare_text(self.font_system.as_mut().unwrap(), &mut self.swash_cache, &spans);
+        }
 
         let image_quads: Vec<crate::vk::ImageQuad> = dl_images
             .iter()
@@ -1897,6 +2004,15 @@ impl<A: Application> EngineState<A> {
         if let Some(ref surface) = self.surface {
             let _callback = surface.frame(&self.qh, ());
             self.frame_callback_pending = true;
+        }
+
+        // Direct renderer staging (3D scenes, RT panes, app-shaped text).
+        if self.inner.as_mut().unwrap().stage_renderer(
+            renderer,
+            LogicalSize::new(logical_w, logical_h),
+            scale_factor,
+        ) {
+            self.redraw = true;
         }
 
         renderer.draw_frame_2d(Frame2D {
@@ -2166,32 +2282,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         self.redraw = true;
                     }
 
-                    let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
-                    let mut cursor_icon = CursorIcon::Default;
-                    if !is_status_bar {
-                        let border = 8.0f32;
-                        if ly < border {
-                            if lx < border {
-                                cursor_icon = CursorIcon::NwResize;
-                            } else if lx > self.logical_width - border {
-                                cursor_icon = CursorIcon::NeResize;
-                            } else {
-                                cursor_icon = CursorIcon::NResize;
-                            }
-                        } else if ly > self.logical_height - border {
-                            if lx < border {
-                                cursor_icon = CursorIcon::SwResize;
-                            } else if lx > self.logical_width - border {
-                                cursor_icon = CursorIcon::SeResize;
-                            } else {
-                                cursor_icon = CursorIcon::SResize;
-                            }
-                        } else if lx < border {
-                            cursor_icon = CursorIcon::WResize;
-                        } else if lx > self.logical_width - border {
-                            cursor_icon = CursorIcon::EResize;
-                        }
-                    }
+                    let cursor_icon = self.cursor_icon_at(lx, ly);
                     self.current_cursor_icon = Some(cursor_icon);
                     if let Some(ref themed_pointer) = self.pointer {
                         let _ = themed_pointer.set_cursor(_conn, cursor_icon);
@@ -2212,32 +2303,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         self.redraw = true;
                     }
 
-                    let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
-                    let mut cursor_icon = CursorIcon::Default;
-                    if !is_status_bar {
-                        let border = 8.0f32;
-                        if ly < border {
-                            if lx < border {
-                                cursor_icon = CursorIcon::NwResize;
-                            } else if lx > self.logical_width - border {
-                                cursor_icon = CursorIcon::NeResize;
-                            } else {
-                                cursor_icon = CursorIcon::NResize;
-                            }
-                        } else if ly > self.logical_height - border {
-                            if lx < border {
-                                cursor_icon = CursorIcon::SwResize;
-                            } else if lx > self.logical_width - border {
-                                cursor_icon = CursorIcon::SeResize;
-                            } else {
-                                cursor_icon = CursorIcon::SResize;
-                            }
-                        } else if lx < border {
-                            cursor_icon = CursorIcon::WResize;
-                        } else if lx > self.logical_width - border {
-                            cursor_icon = CursorIcon::EResize;
-                        }
-                    }
+                    let cursor_icon = self.cursor_icon_at(lx, ly);
 
                     if self.current_cursor_icon != Some(cursor_icon) {
                         self.current_cursor_icon = Some(cursor_icon);
@@ -2253,10 +2319,11 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         274 => MouseButton::Middle,
                         _ => continue,
                     };
+                    self.last_press_serial = Some(*serial);
 
                     // Client-Side Decorations (CSD) Drag & Resize Handling
                     let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
-                    if btn == MouseButton::Left && !is_status_bar {
+                    if btn == MouseButton::Left && !is_status_bar && self.inner.as_ref().unwrap().standard_csd() {
                         let border = 8.0f32;
                         let mut edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None;
                         if ly < border {
@@ -2382,6 +2449,20 @@ impl<A: Application> PointerHandler for EngineState<A> {
             self.inner.as_mut().unwrap().handle_mouse_wheel(&delta, LogicalPosition::new(last_lx, last_ly), &mut rebuild);
             if rebuild {
                 self.redraw = true;
+            }
+        }
+
+        // App-driven window move/resize (non-standard CSD; see WindowAction):
+        // executed with the serial of the most recent pointer press.
+        if let Some(action) = self.inner.as_mut().unwrap().take_window_action() {
+            if let (Some(ref window), Some(serial)) = (&self.window, self.last_press_serial) {
+                let seat_owned = self.seats.first().cloned().or_else(|| self.seat_state.seats().next());
+                if let Some(ref seat) = seat_owned {
+                    match action {
+                        WindowAction::Move => window.move_(seat, serial),
+                        WindowAction::Resize(edge) => window.resize(seat, serial, edge),
+                    }
+                }
             }
         }
     }
@@ -2741,6 +2822,7 @@ pub fn run<A: Application>() {
         pinch_gesture: None,
         last_pinch_scale: 1.0,
         cursor_pos: (0.0, 0.0),
+        last_press_serial: None,
         dl_text_items: Vec::new(),
     };
 
@@ -2805,6 +2887,11 @@ pub fn run<A: Application>() {
     engine_state.surface = Some(surface);
 
     engine_state.init_gpu(&conn, settings.width as f32, settings.height as f32);
+    engine_state
+        .inner
+        .as_mut()
+        .unwrap()
+        .renderer_init(engine_state.renderer.as_mut().unwrap());
 
     let mut event_loop = EventLoop::try_new().unwrap();
     let loop_handle = event_loop.handle();
@@ -2912,5 +2999,6 @@ pub fn run<A: Application>() {
             }
         }
     }
+    engine_state.inner.as_mut().unwrap().on_exit();
     crate::process::cleanup_spawned_processes();
 }
