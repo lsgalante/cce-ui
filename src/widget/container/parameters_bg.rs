@@ -557,6 +557,47 @@ impl ParametersBg {
 
         quads
     }
+
+    /// The rounded companion to [`Self::plain_quads`]: the row controls whose boxes are
+    /// `Prim::RoundedRect` (textbox, dropdown, button, checkbox, color selector). Those
+    /// backgrounds never reach the plain view — `own_plain_quads` keeps `Prim::Quad` only —
+    /// so a host that renders this panel through the legacy plain-quad hatch must read this
+    /// getter too or the controls draw as bare text. Returned unclipped; the host clips to
+    /// the pane's scroll viewport when it pushes vertices. Tuple layout matches
+    /// `all_rounded_quads`: (x, y, w, h, radius, color, (tl, tr, br, bl)).
+    pub fn rounded_quads(
+        &self,
+        ctx: &UiContext,
+    ) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if p.2 == "text" {
+                if let Some(tb) = &self.texts[i] {
+                    out.extend(tb.all_rounded_quads(ctx));
+                }
+            } else if p.2.starts_with("choice") {
+                if let Some(d) = &self.choices[i] {
+                    out.extend(d.all_rounded_quads(ctx));
+                }
+            } else if p.2 == "button" {
+                if let Some(b) = &self.buttons[i] {
+                    out.extend(b.all_rounded_quads(ctx));
+                }
+            } else if p.2 == "toggle" || p.2 == "checkbox" {
+                if let Some(cb) = &self.checkboxes[i] {
+                    out.extend(cb.all_rounded_quads(ctx));
+                }
+            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+                if let Some(c) = &self.colors[i] {
+                    out.extend(c.all_rounded_quads(ctx));
+                }
+            }
+        }
+        out
+    }
 }
 
 impl Layout for ParametersBg {
