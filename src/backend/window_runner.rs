@@ -2427,17 +2427,21 @@ impl<A: Application> PointerHandler for EngineState<A> {
         }
 
         if has_scroll {
+            // Per-app scroll factors from input.kdl (`<app>`/`cce-ui` domain
+            // `input { }` blocks); the compositor's global device scaling has
+            // already been applied at the source.
+            let factors = crate::input::scroll_factors();
             let delta = if discrete_h == 0 && discrete_v == 0 {
                 // Pixel scroll event from touchpad / smooth mouse
                 MouseScrollDelta::PixelDelta(Position {
-                    x: -coalesced_h,
-                    y: -coalesced_v,
+                    x: -coalesced_h * factors.trackpad,
+                    y: -coalesced_v * factors.trackpad,
                 })
             } else {
                 // Discrete scroll event (e.g. wheel clicks)
                 let h_lines = if discrete_h != 0 { discrete_h as f32 } else { coalesced_h as f32 / 10.0 };
                 let v_lines = if discrete_v != 0 { discrete_v as f32 } else { coalesced_v as f32 / 10.0 };
-                MouseScrollDelta::LineDelta(-h_lines, -v_lines)
+                MouseScrollDelta::LineDelta(-h_lines * factors.mouse as f32, -v_lines * factors.mouse as f32)
             };
             let mut rebuild = false;
             if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {

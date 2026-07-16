@@ -1,16 +1,33 @@
-// ~/.config/cce/input.kdl — domain-scoped keybindings for the whole desktop.
+// ~/.config/cce/input.kdl — domain-scoped keybindings and pointer input
+// settings for the whole desktop.
 //
-// Top-level nodes are DOMAINS; their children are bindings:
+// Top-level nodes are DOMAINS; their children are bindings. One top-level
+// node is special: `input { }` holds the global hardware pointer defaults
+// (accel, scroll factors per device class), consumed by the compositor.
+// Inside a domain, an `input { }` child holds that app's behavior
+// overrides, consumed client-side by this module:
 //
+//     input {                          // global hardware defaults (compositor)
+//         accel_profile "flat"
+//         accel_speed 1.0
+//         mouse { scroll_factor 1.0 }
+//         trackpad { tap_to_click true; natural_scroll true; scroll_factor 1.5 }
+//         trackpoint { accel_speed 0.5 }
+//     }
 //     cce-window-manager {
 //         close_window "super+q"
 //         spawn "super+d" command="cce-cloud --apps"
 //     }
 //     cce-ui {
-//         open_search "ctrl+f"      // toolkit-wide widget defaults
+//         open_search "ctrl+f"         // toolkit-wide widget defaults
+//         input { scroll_factor 1.0 }  // toolkit-wide scroll default
 //     }
 //     cce-files {
-//         open_search "/"           // per-app override of the cce-ui default
+//         open_search "/"              // per-app override of the cce-ui default
+//         input {
+//             scroll_factor 0.8        // both device kinds
+//             trackpad { scroll_factor 0.6 }
+//         }
 //     }
 //
 // The chord is the first string argument (a `(keybind)` type annotation is
@@ -21,6 +38,11 @@
 // match the resolved chord string with `widget::match_key_shortcut`. The
 // `cce-window-manager` domain is consumed by the compositor, which maps
 // names to policy `Action`s — chords never get interpreted here.
+//
+// Per-app scroll factors compose with the compositor's device scaling: the
+// compositor applies the global `input` block at the event source; a client
+// then scales its own wheel deltas by the resolved app factor (pixel deltas
+// count as `trackpad`, discrete wheel clicks as `mouse`).
 
 use std::collections::BTreeMap;
 
@@ -45,9 +67,107 @@ pub struct BindingEntry {
     pub command: Option<String>,
 }
 
+/// A typed value inside an `input { }` settings block.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SettingValue {
+    Float(f64),
+    Bool(bool),
+    Str(String),
+}
+
+impl SettingValue {
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            SettingValue::Float(f) => Some(*f),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            SettingValue::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            SettingValue::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+/// Device classes an `input { }` block may scope settings to.
+pub const DEVICE_CLASSES: [&str; 3] = ["mouse", "trackpad", "trackpoint"];
+
+/// One `input { }` block: generic `name value` settings plus per-device-class
+/// sub-blocks (`mouse` / `trackpad` / `trackpoint`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InputSettings {
+    values: BTreeMap<String, SettingValue>,
+    classes: BTreeMap<String, BTreeMap<String, SettingValue>>,
+}
+
+impl InputSettings {
+    fn parse(node: &kdl::KdlNode) -> InputSettings {
+        let mut settings = InputSettings::default();
+        let Some(children) = node.children() else { return settings };
+        for child in children.nodes() {
+            let name = child.name().value();
+            if DEVICE_CLASSES.contains(&name) {
+                let class = settings.classes.entry(name.to_string()).or_default();
+                if let Some(class_children) = child.children() {
+                    for leaf in class_children.nodes() {
+                        if let Some(v) = setting_value(leaf) {
+                            class.insert(leaf.name().value().to_string(), v);
+                        }
+                    }
+                }
+            } else if let Some(v) = setting_value(child) {
+                settings.values.insert(name.to_string(), v);
+            }
+        }
+        settings
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty() && self.classes.values().all(|c| c.is_empty())
+    }
+
+    /// A generic (class-independent) setting.
+    pub fn get(&self, key: &str) -> Option<&SettingValue> {
+        self.values.get(key)
+    }
+
+    /// A setting for one device class, falling back to the generic value.
+    pub fn get_class(&self, class: &str, key: &str) -> Option<&SettingValue> {
+        self.classes.get(class).and_then(|c| c.get(key)).or_else(|| self.get(key))
+    }
+}
+
+/// First-argument value of a settings leaf node, if it is a scalar.
+fn setting_value(node: &kdl::KdlNode) -> Option<SettingValue> {
+    let entry = node.entries().iter().find(|e| e.name().is_none())?;
+    match entry.value() {
+        kdl::KdlValue::Base10Float(f) => Some(SettingValue::Float(*f)),
+        kdl::KdlValue::Base2(i) | kdl::KdlValue::Base8(i) | kdl::KdlValue::Base10(i) | kdl::KdlValue::Base16(i) => {
+            Some(SettingValue::Float(*i as f64))
+        }
+        kdl::KdlValue::Bool(b) => Some(SettingValue::Bool(*b)),
+        kdl::KdlValue::String(s) | kdl::KdlValue::RawString(s) => Some(SettingValue::Str(s.clone())),
+        kdl::KdlValue::Null => None,
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct InputConfig {
     domains: BTreeMap<String, Vec<BindingEntry>>,
+    /// Per-domain `input { }` behavior overrides.
+    settings: BTreeMap<String, InputSettings>,
+    /// The top-level `input { }` block: global hardware defaults, consumed
+    /// by the compositor.
+    global: InputSettings,
 }
 
 impl InputConfig {
@@ -56,10 +176,24 @@ impl InputConfig {
     pub fn parse(content: &str) -> Result<InputConfig, String> {
         let doc: kdl::KdlDocument = content.parse().map_err(|e| format!("{}", e))?;
         let mut domains: BTreeMap<String, Vec<BindingEntry>> = BTreeMap::new();
+        let mut settings: BTreeMap<String, InputSettings> = BTreeMap::new();
+        let mut global = InputSettings::default();
         for domain_node in doc.nodes() {
+            // The top-level `input { }` block is global hardware defaults,
+            // not a domain.
+            if domain_node.name().value() == "input" {
+                global = InputSettings::parse(domain_node);
+                continue;
+            }
             let Some(children) = domain_node.children() else { continue };
-            let entries = domains.entry(domain_node.name().value().to_string()).or_default();
+            let domain = domain_node.name().value().to_string();
+            let entries = domains.entry(domain.clone()).or_default();
             for node in children.nodes() {
+                // A domain's `input { }` child is its settings block.
+                if node.name().value() == "input" {
+                    settings.insert(domain.clone(), InputSettings::parse(node));
+                    continue;
+                }
                 let mut chord: Option<String> = None;
                 let mut command: Option<String> = None;
                 for entry in node.entries() {
@@ -86,7 +220,7 @@ impl InputConfig {
                 }
             }
         }
-        Ok(InputConfig { domains })
+        Ok(InputConfig { domains, settings, global })
     }
 
     /// Load `input.kdl`. Missing file → empty config; a parse error is
@@ -124,6 +258,26 @@ impl InputConfig {
     /// `cce-ui.<name>`.
     pub fn resolve(&self, app: &str, name: &str) -> Option<&BindingEntry> {
         self.get(app, name).or_else(|| self.get(UI_DOMAIN, name))
+    }
+
+    /// The top-level `input { }` block (global hardware defaults).
+    pub fn global_input(&self) -> &InputSettings {
+        &self.global
+    }
+
+    /// One domain's `input { }` behavior overrides.
+    pub fn domain_input(&self, domain: &str) -> Option<&InputSettings> {
+        self.settings.get(domain)
+    }
+
+    /// Setting resolution for apps, most specific first: the app domain's
+    /// class value → its generic value → the cce-ui domain's class value →
+    /// its generic value. The global `input` block is deliberately NOT in
+    /// the chain — the compositor already applies it at the event source.
+    pub fn resolve_setting(&self, app: &str, class: &str, key: &str) -> Option<&SettingValue> {
+        self.domain_input(app)
+            .and_then(|s| s.get_class(class, key))
+            .or_else(|| self.domain_input(UI_DOMAIN).and_then(|s| s.get_class(class, key)))
     }
 
     /// Resolved chord string for widgets, with a compiled-in default as the
@@ -195,6 +349,31 @@ pub fn cached() -> &'static InputConfig {
     CACHED.get_or_init(InputConfig::load)
 }
 
+/// This app's effective wheel-delta multipliers, resolved once per process.
+/// Pixel (smooth) deltas scale by `trackpad`, discrete clicks by `mouse`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScrollFactors {
+    pub mouse: f64,
+    pub trackpad: f64,
+}
+
+static SCROLL_FACTORS: std::sync::OnceLock<ScrollFactors> = std::sync::OnceLock::new();
+
+pub fn scroll_factors() -> ScrollFactors {
+    *SCROLL_FACTORS.get_or_init(|| {
+        let input = cached();
+        let app = crate::config::get_app_name().unwrap_or_default();
+        let factor = |class: &str| {
+            input
+                .resolve_setting(&app, class, "scroll_factor")
+                .and_then(SettingValue::as_f64)
+                .filter(|f| f.is_finite() && *f > 0.0)
+                .unwrap_or(1.0)
+        };
+        ScrollFactors { mouse: factor("mouse"), trackpad: factor("trackpad") }
+    })
+}
+
 /// Chord for a widget binding, resolved by specificity: the app's own
 /// `input.kdl` domain, then the caller-supplied legacy value (per-widget
 /// `config.kdl` props), then the toolkit-wide `cce-ui` domain, then the
@@ -264,6 +443,67 @@ cce-files {
         assert_eq!(c.resolve("cce-email", "open_search").unwrap().chord, "ctrl+f");
         // Nowhere: compiled-in default.
         assert_eq!(c.resolve_chord("cce-email", "save", "ctrl+s"), "ctrl+s");
+    }
+
+    const SETTINGS_SAMPLE: &str = r#"
+input {
+    accel_profile "flat"
+    accel_speed 1.0
+    mouse {
+        accel_speed 0.5
+        scroll_factor 2.0
+    }
+    trackpad {
+        tap_to_click true
+        scroll_factor 1.5
+    }
+}
+cce-ui {
+    open_search "ctrl+f"
+    input {
+        scroll_factor 1.25
+    }
+}
+cce-files {
+    open_file "enter"
+    input {
+        scroll_factor 0.8
+        trackpad {
+            scroll_factor 0.6
+        }
+    }
+}
+"#;
+
+    #[test]
+    fn parses_settings_blocks() {
+        let c = InputConfig::parse(SETTINGS_SAMPLE).unwrap();
+        // The top-level input block is global, not a domain.
+        assert!(c.domain("input").is_empty());
+        let g = c.global_input();
+        assert_eq!(g.get("accel_profile").and_then(SettingValue::as_str), Some("flat"));
+        assert_eq!(g.get("accel_speed").and_then(SettingValue::as_f64), Some(1.0));
+        // Class value wins over generic; missing class value falls back.
+        assert_eq!(g.get_class("mouse", "accel_speed").and_then(SettingValue::as_f64), Some(0.5));
+        assert_eq!(g.get_class("trackpad", "accel_speed").and_then(SettingValue::as_f64), Some(1.0));
+        assert_eq!(g.get_class("trackpad", "tap_to_click").and_then(SettingValue::as_bool), Some(true));
+        // Settings blocks don't pollute the binding lists.
+        assert_eq!(c.domain("cce-files").len(), 1);
+        assert_eq!(c.get("cce-files", "open_file").unwrap().chord, "enter");
+    }
+
+    #[test]
+    fn setting_resolution_prefers_app_then_ui_domain() {
+        let c = InputConfig::parse(SETTINGS_SAMPLE).unwrap();
+        // App class value → app generic → cce-ui.
+        let f = |app: &str, class: &str| {
+            c.resolve_setting(app, class, "scroll_factor").and_then(SettingValue::as_f64)
+        };
+        assert_eq!(f("cce-files", "trackpad"), Some(0.6));
+        assert_eq!(f("cce-files", "mouse"), Some(0.8)); // generic app value
+        assert_eq!(f("cce-email", "trackpad"), Some(1.25)); // cce-ui fallback
+        // The global input block is not in the client chain.
+        assert_eq!(c.resolve_setting("cce-email", "mouse", "accel_speed"), None);
     }
 
     #[test]
