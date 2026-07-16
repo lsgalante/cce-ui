@@ -1538,12 +1538,8 @@ pub fn set_scrollbar_thumb_color(c: [f32; 4]) { if let Ok(mut lock) = SCROLLBAR_
 
 pub fn tree_open_search_key() -> String {
     load_colors_once();
-    let val = TREE_OPEN_SEARCH_KEY.read().unwrap().clone();
-    if val.is_empty() {
-        "ctrl+f".to_string()
-    } else {
-        val
-    }
+    let legacy = TREE_OPEN_SEARCH_KEY.read().unwrap().clone();
+    crate::input::widget_chord("open_search", &legacy, "ctrl+f")
 }
 pub fn set_tree_open_search_key(k: String) {
     if let Ok(mut lock) = TREE_OPEN_SEARCH_KEY.write() {
@@ -1553,12 +1549,8 @@ pub fn set_tree_open_search_key(k: String) {
 
 pub fn list_open_search_key() -> String {
     load_colors_once();
-    let val = LIST_OPEN_SEARCH_KEY.read().unwrap().clone();
-    if val.is_empty() {
-        "ctrl+f".to_string()
-    } else {
-        val
-    }
+    let legacy = LIST_OPEN_SEARCH_KEY.read().unwrap().clone();
+    crate::input::widget_chord("open_search", &legacy, "ctrl+f")
 }
 pub fn set_list_open_search_key(k: String) {
     if let Ok(mut lock) = LIST_OPEN_SEARCH_KEY.write() {
@@ -1568,12 +1560,8 @@ pub fn set_list_open_search_key(k: String) {
 
 pub fn list_close_search_key() -> String {
     load_colors_once();
-    let val = LIST_CLOSE_SEARCH_KEY.read().unwrap().clone();
-    if val.is_empty() {
-        "escape".to_string()
-    } else {
-        val
-    }
+    let legacy = LIST_CLOSE_SEARCH_KEY.read().unwrap().clone();
+    crate::input::widget_chord("close_search", &legacy, "escape")
 }
 pub fn set_list_close_search_key(k: String) {
     if let Ok(mut lock) = LIST_CLOSE_SEARCH_KEY.write() {

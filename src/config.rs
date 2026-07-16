@@ -593,7 +593,7 @@ fn perform_rolling_backup(path: &str) {
     let _ = fs::copy(path, dst);
 }
 
-fn safe_write(path: &str, content: &str) -> bool {
+pub(crate) fn safe_write(path: &str, content: &str) -> bool {
     perform_rolling_backup(path);
     if let Some(parent) = std::path::Path::new(path).parent() {
         let _ = fs::create_dir_all(parent);
@@ -620,61 +620,6 @@ pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &
         return safe_write(path, &updated_str);
     }
     false
-}
-
-pub fn write_keybindings_to_kdl(path: &str, keybinds: &[serde_json::Value]) -> bool {
-    let content = fs::read_to_string(path).unwrap_or_default();
-    let mut doc = match content.parse::<kdl::KdlDocument>() {
-        Ok(d) => d,
-        Err(_) => kdl::KdlDocument::new(),
-    };
-
-    // Remove all existing key_bindings nodes (root-level)
-    doc.nodes_mut().retain(|n| n.name().value() != "key_bindings");
-
-    // Construct nested key_bindings block
-    let mut block_str = "key_bindings {\n".to_string();
-    for v in keybinds {
-        if let Some(obj) = v.as_object() {
-            let mods = obj.get("mods").and_then(|m| m.as_str()).unwrap_or("");
-            let key = obj.get("key").and_then(|k| k.as_str()).unwrap_or("");
-            let action = obj.get("action").and_then(|a| a.as_str()).unwrap_or("");
-            let command = obj.get("command").and_then(|c| c.as_str()).unwrap_or("");
-
-            let full_key = if mods.is_empty() {
-                key.to_string()
-            } else {
-                format!("{}+{}", mods, key)
-            };
-
-            block_str.push_str("    bind");
-            if !action.is_empty() {
-                block_str.push_str(&format!(" action={:?}", action));
-            }
-            if !command.is_empty() {
-                block_str.push_str(&format!(" command={:?}", command));
-            }
-            if !full_key.is_empty() {
-                block_str.push_str(&format!(" key=(keybind){:?}", full_key));
-            }
-            block_str.push('\n');
-        }
-    }
-    block_str.push_str("}\n");
-
-    if let Ok(node) = block_str.parse::<kdl::KdlNode>() {
-        if let Some(input_idx) = doc.nodes().iter().position(|n| n.name().value() == "input") {
-            let input_node = &mut doc.nodes_mut()[input_idx];
-            let children = input_node.ensure_children();
-            children.nodes_mut().retain(|n| n.name().value() != "key_bindings");
-            children.nodes_mut().push(node);
-        } else {
-            doc.nodes_mut().push(node);
-        }
-    }
-
-    let updated_str = doc.to_string();
-    safe_write(path, &updated_str)
 }
 
 pub fn get_kdl_type_annotation(kdl_content: &str, key_path: &str) -> Option<String> {
