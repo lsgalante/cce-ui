@@ -2568,7 +2568,9 @@ impl<A: Application> EngineState<A> {
             xkeysym::Keysym::Up => Key::Named(NamedKey::ArrowUp),
             xkeysym::Keysym::Left => Key::Named(NamedKey::ArrowLeft),
             xkeysym::Keysym::Right => Key::Named(NamedKey::ArrowRight),
-            xkeysym::Keysym::Tab => Key::Named(NamedKey::Tab),
+            // xkb reports Shift+Tab as ISO_Left_Tab; apps see plain Tab plus
+            // the shift modifier, matching winit.
+            xkeysym::Keysym::Tab | xkeysym::Keysym::ISO_Left_Tab => Key::Named(NamedKey::Tab),
             xkeysym::Keysym::Delete => Key::Named(NamedKey::Delete),
             xkeysym::Keysym::space => Key::Named(NamedKey::Space),
             xkeysym::Keysym::Page_Up => Key::Named(NamedKey::PageUp),
