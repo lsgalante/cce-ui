@@ -168,12 +168,19 @@ impl ParametersBg {
         rects
     }
 
+    /// The scrollbar's left x. The bar sits an eighth of the plate's width in from the right
+    /// edge — i.e. that gap separates the bar's right edge from the pane's right side.
+    fn scrollbar_x(&self) -> f32 {
+        let sb_w = crate::layout::scrollbar_width();
+        self.rect.x + self.rect.width - sb_w - self.rect.width / 8.0
+    }
+
     pub fn hit_test_scrollbar(&self, px: f32, py: f32) -> bool {
         if self.content_h <= self.rect.height {
             return false;
         }
         let sb_w = crate::layout::scrollbar_width();
-        let sb_x = self.rect.x + self.rect.width - sb_w - 4.0;
+        let sb_x = self.scrollbar_x();
         let sb_track_h = self.rect.height - 8.0;
         let sb_track_y = self.rect.y + 4.0;
 
@@ -216,7 +223,7 @@ impl ParametersBg {
             return Vec::new();
         }
         let sb_w = crate::layout::scrollbar_width();
-        let sb_x = self.rect.x + self.rect.width - sb_w - 4.0;
+        let sb_x = self.scrollbar_x();
         let sb_track_h = self.rect.height - 8.0;
         let sb_track_y = self.rect.y + 4.0;
 
