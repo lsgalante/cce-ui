@@ -244,6 +244,7 @@ impl StyledLabel {
             y: if is_vert { 0.0 } else { y },
             color: self.g_color,
             bounds: None,
+            clip_circle: None,
         });
         w
     }

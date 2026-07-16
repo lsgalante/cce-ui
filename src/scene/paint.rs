@@ -54,8 +54,9 @@ pub enum Prim {
     /// beyond family+size (the font picker's italic/weight preview variants). `layout`, when
     /// `Some`, requests box layout — word-wrap at a width and horizontal/vertical alignment
     /// within a box (the placed-text-box case, e.g. cce-layout-interface's canvas elements);
-    /// `None` is the ordinary single-run label.
-    Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3], font: Option<String>, bounds: Option<[f32; 4]>, attrs: TextAttrs, layout: Option<TextLayout> },
+    /// `None` is the ordinary single-run label. `alpha` fades the glyphs (1.0 = opaque) —
+    /// the color stays sRGB u8, so translucent text doesn't need a color-type change.
+    Text { text: String, x: f32, y: f32, font_size: f32, color: [u8; 3], alpha: f32, font: Option<String>, bounds: Option<[f32; 4]>, attrs: TextAttrs, layout: Option<TextLayout> },
     /// A user image (id from `cce_ui::vk::upload_rgba`) drawn as a quad, in
     /// display-list order like any other primitive. The paint walk's clip
     /// applies through the item's `clip` as usual.
@@ -103,11 +104,16 @@ pub struct TextAttrs {
     pub weight: Option<u16>,
 }
 
-/// A primitive plus the scissor rect it must be clipped to (`None` = unclipped).
+/// A primitive plus the scissor rect it must be clipped to (`None` = unclipped), and an
+/// optional circular clip `[cx, cy, r]` in logical pixels (`None` = unclipped) — the
+/// per-vertex circle clip the tessellators already support, for round panes (the designer's
+/// circular network pane). Both clips compose: the scissor is GPU state, the circle rides
+/// the vertices.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaintItem {
     pub prim: Prim,
     pub clip: Option<Rect>,
+    pub clip_circle: Option<[f32; 3]>,
 }
 
 /// An ordered list of clipped primitives — the single source of truth for a frame's geometry.
@@ -146,6 +152,9 @@ pub struct PaintCtx {
     list: DisplayList,
     /// Each entry is the effective (already-intersected, absolute) clip at that depth.
     clip_stack: Vec<Rect>,
+    /// Active circular clips; primitives record the innermost (`last`). Circles don't
+    /// intersect analytically like rects, so nesting keeps the innermost only.
+    clip_circle_stack: Vec<[f32; 3]>,
     /// Saved offsets for nesting; `offset` is the current cumulative translation.
     offset_stack: Vec<(f32, f32)>,
     offset: (f32, f32),
@@ -159,7 +168,13 @@ impl Default for PaintCtx {
 
 impl PaintCtx {
     pub fn new() -> Self {
-        PaintCtx { list: DisplayList::new(), clip_stack: Vec::new(), offset_stack: Vec::new(), offset: (0.0, 0.0) }
+        PaintCtx {
+            list: DisplayList::new(),
+            clip_stack: Vec::new(),
+            clip_circle_stack: Vec::new(),
+            offset_stack: Vec::new(),
+            offset: (0.0, 0.0),
+        }
     }
 
     /// The scissor rect primitives are currently recorded under.
@@ -190,6 +205,26 @@ impl PaintCtx {
         out
     }
 
+    /// Push a circular clip `[cx, cy, r]` (current local space, translated to absolute).
+    /// Primitives emitted while it is active record it and tessellate with the per-vertex
+    /// circle clip. Pair with [`pop_clip_circle`](PaintCtx::pop_clip_circle), or prefer
+    /// [`clip_circle`](PaintCtx::clip_circle).
+    pub fn push_clip_circle(&mut self, c: [f32; 3]) {
+        self.clip_circle_stack.push([c[0] + self.offset.0, c[1] + self.offset.1, c[2]]);
+    }
+
+    pub fn pop_clip_circle(&mut self) {
+        self.clip_circle_stack.pop();
+    }
+
+    /// Run `f` with `[cx, cy, r]` pushed as a circular clip, popping it afterward.
+    pub fn clip_circle<R>(&mut self, c: [f32; 3], f: impl FnOnce(&mut Self) -> R) -> R {
+        self.push_clip_circle(c);
+        let out = f(self);
+        self.pop_clip_circle();
+        out
+    }
+
     /// Run `f` with an additional translation applied to all emitted coordinates.
     pub fn translate<R>(&mut self, dx: f32, dy: f32, f: impl FnOnce(&mut Self) -> R) -> R {
         self.offset_stack.push(self.offset);
@@ -205,7 +240,8 @@ impl PaintCtx {
 
     fn push(&mut self, prim: Prim) {
         let clip = self.current_clip();
-        self.list.items.push(PaintItem { prim, clip });
+        let clip_circle = self.clip_circle_stack.last().copied();
+        self.list.items.push(PaintItem { prim, clip, clip_circle });
     }
 
     pub fn quad(&mut self, rect: Rect, color: [f32; 4]) {
@@ -285,7 +321,37 @@ impl PaintCtx {
     ) {
         let (ox, oy) = self.offset;
         let bounds = bounds.map(|[l, t, r, b]| [l + ox, t + oy, r + ox, b + oy]);
-        self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color, font, bounds, attrs, layout: None });
+        self.push(Prim::Text { text: text.into(), x: x + ox, y: y + oy, font_size, color, alpha: 1.0, font, bounds, attrs, layout: None });
+    }
+
+    /// [`text_with`](PaintCtx::text_with) plus a glyph alpha (1.0 = opaque) — translucent
+    /// labels (a pane fading out) without changing the sRGB u8 color convention.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_faded(
+        &mut self,
+        text: impl Into<String>,
+        x: f32,
+        y: f32,
+        font_size: f32,
+        color: [u8; 3],
+        alpha: f32,
+        font: Option<String>,
+        bounds: Option<[f32; 4]>,
+    ) {
+        let (ox, oy) = self.offset;
+        let bounds = bounds.map(|[l, t, r, b]| [l + ox, t + oy, r + ox, b + oy]);
+        self.push(Prim::Text {
+            text: text.into(),
+            x: x + ox,
+            y: y + oy,
+            font_size,
+            color,
+            alpha,
+            font,
+            bounds,
+            attrs: TextAttrs::default(),
+            layout: None,
+        });
     }
 
     /// Boxed text: word-wrap + horizontal/vertical alignment within a box (a placed text box).
@@ -312,6 +378,7 @@ impl PaintCtx {
             y: y + oy,
             font_size,
             color,
+            alpha: 1.0,
             font,
             bounds,
             attrs,

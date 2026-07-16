@@ -1025,21 +1025,30 @@ pub struct DlImage {
 /// Tessellate a `scene::paint::DisplayList`'s geometry into a flat vertex buffer plus per-clip draw
 /// batches, reusing the same tessellators as the legacy path so vertices are identical. `Text`
 /// prims are skipped here — text is still rendered via the app's `text_areas()` path. `sw`/`sh` are
-/// logical surface dimensions (as everywhere else). Consecutive prims sharing a clip are merged
-/// into one batch.
+/// logical surface dimensions (as everywhere else); `scale` is the HiDPI factor, needed because an
+/// item's circular clip rides the vertices in PHYSICAL pixels. Consecutive prims sharing a clip are
+/// merged into one batch (the circle clip is per-vertex, so it never splits batches).
 pub fn tessellate_display_list(
     dl: &crate::scene::paint::DisplayList,
     sw: f32,
     sh: f32,
+    scale: f32,
 ) -> (Vec<Vertex>, Vec<DlBatch>, Vec<DlImage>) {
     use crate::scene::paint::{Cap, Prim};
-    let no = [0.0f32, 0.0, 0.0];
     let mut verts: Vec<Vertex> = Vec::new();
     let mut batches: Vec<DlBatch> = Vec::new();
     let mut images: Vec<DlImage> = Vec::new();
 
     for item in &dl.items {
         let start = verts.len() as u32;
+        // Logical [cx, cy, r] → the physical-pixel triple the vertex attribute carries.
+        let no = item
+            .clip_circle
+            .map(|c| [c[0] * scale, c[1] * scale, c[2] * scale])
+            .unwrap_or([0.0f32, 0.0, 0.0]);
+        // Fixed 16-segment fans read as polygons once a circle/arc is pane-sized; scale
+        // the fan with the radius (capped — beyond 64 the chord error is subpixel).
+        let segs = |radius: f32| -> usize { (radius as usize).clamp(16, 64) };
         match &item.prim {
             Prim::Text { .. } => continue, // text goes through the glyph/text-span path
             Prim::Image { image, rect, alpha } => {
@@ -1082,7 +1091,7 @@ pub fn tessellate_display_list(
                 push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, t, sw, sh, *color, no, &mut verts);
             }
             Prim::Arc { cx, cy, radius, thickness, start: sa, end: ea, color } => {
-                push_arc_background_vertices(*cx, *cy, *radius, *thickness, *sa, *ea, sw, sh, *color, 16, no, &mut verts);
+                push_arc_background_vertices(*cx, *cy, *radius, *thickness, *sa, *ea, sw, sh, *color, segs(*radius), no, &mut verts);
             }
             Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => {
                 let lc = match cap {
@@ -1093,12 +1102,19 @@ pub fn tessellate_display_list(
                 verts.extend(vector_vertices(*x1, *y1, *x2, *y2, *thickness, sw, sh, *color, lc));
             }
             Prim::Circle { cx, cy, radius, color } => {
-                verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, 16, no));
+                verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
             }
         }
         let end = verts.len() as u32;
         if end == start {
             continue;
+        }
+        // Some tessellators (quad_vertices, vector_vertices) don't thread the circle clip —
+        // stamp the whole emitted range so every prim kind honors it uniformly.
+        if item.clip_circle.is_some() {
+            for v in verts[start as usize..].iter_mut() {
+                v.clip_circle = no;
+            }
         }
         // Merge into the previous batch if it shares this clip and is contiguous.
         if let Some(last) = batches.last_mut() {
@@ -1841,7 +1857,7 @@ impl<A: Application> EngineState<A> {
         if self.inner.as_ref().unwrap().display_list_text() {
             let fs = self.font_system.as_mut().unwrap();
             for item in &dl.items {
-                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, attrs, layout } = &item.prim {
+                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, alpha, font, bounds, attrs, layout } = &item.prim {
                     let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
                     let merged = match (clip, *bounds) {
                         (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
@@ -1858,14 +1874,20 @@ impl<A: Application> EngineState<A> {
                         buffer,
                         x: *x,
                         y: *y + y_off,
-                        color: glyphon::Color::rgb(color[0], color[1], color[2]),
+                        color: glyphon::Color::rgba(
+                            color[0],
+                            color[1],
+                            color[2],
+                            (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
+                        ),
                         bounds: merged,
+                        clip_circle: item.clip_circle,
                     });
                 }
             }
         }
 
-        let (mut verts, mut dl_batches, dl_images) = tessellate_display_list(&dl, logical_w, logical_h);
+        let (mut verts, mut dl_batches, dl_images) = tessellate_display_list(&dl, logical_w, logical_h, scale_factor as f32);
         // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
         let pre_custom = verts.len() as u32;
         self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
@@ -1946,7 +1968,10 @@ impl<A: Application> EngineState<A> {
                     ti.color.a() as f32 / 255.0,
                 ],
                 rotation: None,
-                clip_circle: [0.0; 3],
+                clip_circle: ti
+                    .clip_circle
+                    .map(|c| [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32])
+                    .unwrap_or([0.0; 3]),
             });
         }
 

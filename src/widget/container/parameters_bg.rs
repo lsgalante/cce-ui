@@ -264,13 +264,22 @@ impl ParametersBg {
                 } else {
                     value.clone()
                 };
-                labels.push(TextLabel {
-                    text: val_text,
-                    x: r.0 + 12.0,
-                    y: r.1 + 22.0,
-                    font_size: 12.0,
-                    color: [0xee, 0xee, 0xf0],
-                });
+                // One label PER LINE, at the same 16px pitch the cursor math uses
+                // (`plain_quads`' cursor_y) — a single multi-line label would depend on
+                // the consumer's buffer line-height matching that pitch, and never
+                // exactly did.
+                for (line_i, line) in val_text.split('\n').enumerate() {
+                    if line.is_empty() {
+                        continue;
+                    }
+                    labels.push(TextLabel {
+                        text: line.to_string(),
+                        x: r.0 + 12.0,
+                        y: r.1 + 22.0 + line_i as f32 * 16.0,
+                        font_size: 12.0,
+                        color: [0xee, 0xee, 0xf0],
+                    });
+                }
             } else if ptype.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
                     labels.extend(sb.own_text_labels());

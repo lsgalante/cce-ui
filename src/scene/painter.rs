@@ -83,6 +83,27 @@ pub fn paint_legacy_leaf(
     }
 }
 
+/// The prim-level mirror of the backend's `push_widget_vertices`: the widget's own plate —
+/// beveled, or rounded fill + optional solid border — plus its extra arcs. For hosts that
+/// hand-build their display list in their own draw order (the designer) instead of walking
+/// `paint_self`, but want a widget's background exactly as the vertex path drew it.
+pub fn append_widget_plate(w: &dyn WidgetHost, pc: &mut PaintCtx) {
+    let (x, y, ww, h) = w.rect();
+    let rect = Rect { x, y, width: ww, height: h };
+    let radii = w.corner_radii();
+    let radii_tuple = (radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left);
+    if let Some(thickness) = w.plate_bevel() {
+        pc.bevel(rect, radii_tuple, w.color(), thickness);
+    } else if let Some((border_color, thickness)) = w.solid_border() {
+        pc.border(rect, radii_tuple, w.color(), border_color, thickness);
+    } else {
+        pc.border(rect, radii_tuple, w.color(), [0.0; 4], 0.0);
+    }
+    for (cx, cy, r, t, s, e, c) in w.extra_arcs() {
+        pc.arc(cx, cy, r, t, s, e, c);
+    }
+}
+
 /// The scroll-ancestor text clamp the deleted default fonted getter applied. Always `None`
 /// since Phase 6av: ScrollBox (the last scroll ancestor type) was demoted to a plain
 /// embedded struct — it never appeared as a tree parent, so the walk never matched.
