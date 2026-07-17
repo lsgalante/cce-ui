@@ -300,15 +300,15 @@ fn parse_and_set_colors(content: &str) {
         if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = blur_val > 0.001; }
     }
 
-    if let Some(c) = get_color("/style/surface/backplate/statusbar/color") {
+    if let Some(c) = get_color("/style/surface/statusbar/color") {
         if let Ok(mut lock) = BACKPLATE_STATUSBAR_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/style/surface/backplate/statusbar/text_color") {
+    if let Some(c) = get_color("/style/surface/statusbar/text_color") {
         if let Ok(mut lock) = BACKPLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
     }
-    if let Some(blur) = val.pointer("/style/surface/backplate/statusbar/blur").and_then(|v| v.as_bool()) {
+    if let Some(blur) = val.pointer("/style/surface/statusbar/blur").and_then(|v| v.as_bool()) {
         if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = blur; }
-    } else if let Some(blur_val) = val.pointer("/style/surface/backplate/statusbar/blur").and_then(|v| v.as_f64()) {
+    } else if let Some(blur_val) = val.pointer("/style/surface/statusbar/blur").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = blur_val > 0.001; }
     }
     if let Some(c) = get_color("/layout/color_borders_color") {

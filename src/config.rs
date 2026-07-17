@@ -791,8 +791,8 @@ mod tests {
                 surface {
                     backplate blur=(f64)0.1 color=(rgba)"#5e657acf" corner_radius=(i64)12 {
                         menubar blur=(bool)true color=(rgba)"#1a1d26d0" text_color=(rgba)"#e2e4f0ff"
-                        statusbar blur=(bool)false color=(rgba)"#12141cd0" text_color=(rgba)"#b5b9c8ff"
                     }
+                    statusbar blur=(bool)false color=(rgba)"#12141cd0" text_color=(rgba)"#b5b9c8ff"
                 }
                 control {
                     dropdown color=(rgba)"#08080cff"
