@@ -1,10 +1,10 @@
 //! Narrow-trait `StatusBar` (Phase 5t) — a one-line text bar whose theming is parent-coupled
 //! exactly like MenuBar's: when its tracked parent is a Backplate it pulls the backplate
 //! statusbar color/text-color/blur and derives its rounded corners from where it sits against
-//! the parent's edges ([`Paint::corner_style`] + the corners walk). Two text paths, both
-//! legacy: `TextLabel`s out of [`Paint::paint`] (container aggregation — deliberately with NO
-//! `widget_font`, matching the legacy default-font behavior on that path), and pre-shaped
-//! glyphon buffers through [`Paint::text_items`] (new with this migration) for manual hosts —
+//! the parent's edges ([`Paint::corner_style`] + the corners walk). Two text paths: the
+//! [`Paint::paint`] prim (carrying the configured statusbar font — the legacy default-font
+//! behavior on this path dropped the family and rendered sans), and pre-shaped glyphon
+//! buffers through [`Paint::text_items`] (new with this migration) for manual hosts —
 //! cce-status-interface calls `prepare_text` then `get_text_items` into its own paint.
 
 use crate::colors;
@@ -135,7 +135,15 @@ impl Paint for StatusBar {
             ];
             let size = self.statusbar_font_size();
             let text_y = crate::layout::align_text_y(rect.y, rect.height, size, 0.0);
-            ctx.text(self.text.clone(), rect.x + offset_x, text_y, size, color);
+            ctx.text_with(
+                self.text.clone(),
+                rect.x + offset_x,
+                text_y,
+                size,
+                color,
+                Some(crate::layout::statusbar_font()),
+                None,
+            );
         }
     }
 
