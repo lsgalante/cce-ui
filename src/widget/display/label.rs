@@ -245,6 +245,7 @@ impl StyledLabel {
             color: self.g_color,
             bounds: None,
             clip_circle: None,
+            clip_rrect: None,
         });
         w
     }

@@ -10,6 +10,7 @@ struct VertexOutput {
     @location(0) uv: vec2f,
     @location(1) color: vec4f,
     @location(2) clip_circle: vec3f,
+    @location(3) clip_extents: vec2f,
 }
 
 @vertex
@@ -18,23 +19,27 @@ fn vs_main(
     @location(1) uv: vec2f,
     @location(2) color: vec4f,
     @location(3) clip_circle: vec3f,
+    @location(4) clip_extents: vec2f,
 ) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = vec4f(position, 0.0, 1.0);
     out.uv = uv;
     out.color = color;
     out.clip_circle = clip_circle;
+    out.clip_extents = clip_extents;
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    // Same circle clip as shader.wgsl (framebuffer px): used by the circular
-    // network pane's curved rim labels.
+    // Rounded-rect SDF clip in framebuffer px: center clip_circle.xy, corner radius
+    // clip_circle.z, inner-box half-size clip_extents. Zero extents degenerate to the
+    // plain circle clip (the circular network pane's curved rim labels); a non-zero
+    // box clips plate children at the plate's rounded corners.
     if (in.clip_circle.z > 0.0) {
-        let dx = in.clip_position.x - in.clip_circle.x;
-        let dy = in.clip_position.y - in.clip_circle.y;
-        if (dx * dx + dy * dy > in.clip_circle.z * in.clip_circle.z) {
+        let q = abs(in.clip_position.xy - in.clip_circle.xy) - in.clip_extents;
+        let d = length(max(q, vec2f(0.0))) - in.clip_circle.z;
+        if (d > 0.0) {
             discard;
         }
     }

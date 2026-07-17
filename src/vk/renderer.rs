@@ -21,9 +21,13 @@ use super::scene::{MeshId, SceneDraw, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
 
 /// One scissored draw range of a 2D frame. `scissor` is (x, y, w, h) in
-/// physical pixels; None draws with the full-surface scissor.
+/// physical pixels; None draws with the full-surface scissor. `clip_rrect` is an
+/// optional rounded-rect clip `[cx, cy, bx, by, r]` (center, SDF half-extents, corner
+/// radius; physical px) applied via push constants — fragments outside it discard, so a
+/// plate's children cut off at its rounded corners.
 pub struct Batch2D {
     pub scissor: Option<(u32, u32, u32, u32)>,
+    pub clip_rrect: Option<[f32; 5]>,
     pub start: u32,
     pub end: u32,
 }
@@ -175,7 +179,7 @@ pub(crate) fn compile_wgsl(source: &str) -> Vec<u32> {
     let module = naga::front::wgsl::parse_str(source).expect("WGSL parse failed");
     let info = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
-        naga::valid::Capabilities::empty(),
+        naga::valid::Capabilities::PUSH_CONSTANT,
     )
     .validate(&module)
     .expect("WGSL validation failed");
@@ -450,9 +454,17 @@ impl VkRenderer {
             .expect("Failed to create descriptor set layout");
 
         let set_layouts = [descriptor_set_layout];
+        // Push constants: the per-batch rounded-rect clip (two vec4s — [cx, cy, bx, by]
+        // and [r, enabled, 0, 0]) read by shader2d's fragment stage.
+        let push_ranges = [vk::PushConstantRange::default()
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+            .offset(0)
+            .size(32)];
         let pipeline_layout = device
             .create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::default().set_layouts(&set_layouts),
+                &vk::PipelineLayoutCreateInfo::default()
+                    .set_layouts(&set_layouts)
+                    .push_constant_ranges(&push_ranges),
                 None,
             )
             .expect("Failed to create pipeline layout");
@@ -1287,7 +1299,7 @@ impl VkRenderer {
                 let mut img_i = 0usize;
 
                 let default_batch =
-                    [Batch2D { scissor: None, start: 0, end: frame.vertex_count }];
+                    [Batch2D { scissor: None, clip_rrect: None, start: 0, end: frame.vertex_count }];
                 let batches: &[Batch2D] =
                     if frame2d.batches.is_empty() { &default_batch } else { frame2d.batches };
 
@@ -1351,6 +1363,17 @@ impl VkRenderer {
                             self.core.device
                                 .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
                             self.core.device.cmd_set_scissor(cmd, 0, &[scissor]);
+                            // Per-batch rounded-rect clip (fragments outside discard).
+                            let rr = batch.clip_rrect.unwrap_or([0.0; 5]);
+                            let enabled = if batch.clip_rrect.is_some() { 1.0f32 } else { 0.0 };
+                            let pc = [rr[0], rr[1], rr[2], rr[3], rr[4], enabled, 0.0, 0.0];
+                            self.core.device.cmd_push_constants(
+                                cmd,
+                                self.pipeline_layout,
+                                vk::ShaderStageFlags::FRAGMENT,
+                                0,
+                                bytemuck::cast_slice(&pc),
+                            );
                             self.core.device.cmd_draw(cmd, upto - cursor, 1, cursor, 0);
                         }
                         cursor = upto;
@@ -1391,6 +1414,15 @@ impl VkRenderer {
                 );
                 self.core.device
                     .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
+                // Push constants persist across binds — clear any batch's rounded clip.
+                let pc = [0.0f32; 8];
+                self.core.device.cmd_push_constants(
+                    cmd,
+                    self.pipeline_layout,
+                    vk::ShaderStageFlags::FRAGMENT,
+                    0,
+                    bytemuck::cast_slice(&pc),
+                );
                 self.core.device
                     .cmd_draw(cmd, frame.overlay_count, 1, frame.overlay_start, 0);
             }

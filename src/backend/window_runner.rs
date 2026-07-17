@@ -1003,10 +1003,13 @@ pub fn push_widget_vertices(w: &dyn crate::widget::WidgetHost, sw: f32, sh: f32,
     }
 }
 
-/// A contiguous run of vertices sharing one scissor rect (Phase 3 single paint path). `scissor` is
-/// a logical-pixel clip (`None` = unclipped); `start..end` indexes the flat vertex buffer.
+/// A contiguous run of vertices sharing one scissor rect (Phase 3 single paint path) and one
+/// rounded-rect clip. `scissor` is a logical-pixel clip (`None` = unclipped); `clip_rrect` is
+/// the paint walk's `[cx, cy, bx, by, r]` rounded clip in logical px (`None` = unclipped),
+/// applied as per-draw push-constant state; `start..end` indexes the flat vertex buffer.
 pub struct DlBatch {
     pub scissor: Option<crate::scene::layout::Rect>,
+    pub clip_rrect: Option<[f32; 5]>,
     pub start: u32,
     pub end: u32,
 }
@@ -1116,14 +1119,14 @@ pub fn tessellate_display_list(
                 v.clip_circle = no;
             }
         }
-        // Merge into the previous batch if it shares this clip and is contiguous.
+        // Merge into the previous batch if it shares this clip pair and is contiguous.
         if let Some(last) = batches.last_mut() {
-            if last.scissor == item.clip && last.end == start {
+            if last.scissor == item.clip && last.clip_rrect == item.clip_rrect && last.end == start {
                 last.end = end;
                 continue;
             }
         }
-        batches.push(DlBatch { scissor: item.clip, start, end });
+        batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end });
     }
 
     (verts, batches, images)
@@ -1893,6 +1896,7 @@ impl<A: Application> EngineState<A> {
                         ),
                         bounds: merged,
                         clip_circle: item.clip_circle,
+                        clip_rrect: item.clip_rrect,
                     });
                 }
             }
@@ -1903,7 +1907,7 @@ impl<A: Application> EngineState<A> {
         let pre_custom = verts.len() as u32;
         self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
         if (verts.len() as u32) > pre_custom {
-            dl_batches.push(DlBatch { scissor: None, start: pre_custom, end: verts.len() as u32 });
+            dl_batches.push(DlBatch { scissor: None, clip_rrect: None, start: pre_custom, end: verts.len() as u32 });
         }
 
         // 1b. Overlay quads (drawn after the text pass).
@@ -1979,10 +1983,17 @@ impl<A: Application> EngineState<A> {
                     ti.color.a() as f32 / 255.0,
                 ],
                 rotation: None,
-                clip_circle: ti
-                    .clip_circle
-                    .map(|c| [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32])
-                    .unwrap_or([0.0; 3]),
+                // Circle wins when both are set (the circular pane's innermost clip);
+                // otherwise a rounded-rect clip rides as center+radius with extents.
+                clip_circle: match (ti.clip_circle, ti.clip_rrect) {
+                    (Some(c), _) => [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32],
+                    (None, Some(rr)) => [rr[0] * scale_f32, rr[1] * scale_f32, rr[4] * scale_f32],
+                    (None, None) => [0.0; 3],
+                },
+                clip_extents: match (ti.clip_circle, ti.clip_rrect) {
+                    (None, Some(rr)) => [rr[2] * scale_f32, rr[3] * scale_f32],
+                    _ => [0.0; 2],
+                },
             });
         }
 
@@ -2029,6 +2040,9 @@ impl<A: Application> EngineState<A> {
                         (clip.height * scale_f32) as u32,
                     )
                 }),
+                clip_rrect: batch
+                    .clip_rrect
+                    .map(|c| [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32, c[3] * scale_f32, c[4] * scale_f32]),
                 start: batch.start,
                 end: batch.end,
             })

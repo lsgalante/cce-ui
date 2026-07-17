@@ -104,16 +104,19 @@ pub struct TextAttrs {
     pub weight: Option<u16>,
 }
 
-/// A primitive plus the scissor rect it must be clipped to (`None` = unclipped), and an
+/// A primitive plus the scissor rect it must be clipped to (`None` = unclipped), an
 /// optional circular clip `[cx, cy, r]` in logical pixels (`None` = unclipped) — the
 /// per-vertex circle clip the tessellators already support, for round panes (the designer's
-/// circular network pane). Both clips compose: the scissor is GPU state, the circle rides
-/// the vertices.
+/// circular network pane) — and an optional rounded-rect clip `[cx, cy, bx, by, r]`
+/// (center, SDF half-extents = half-size minus radius, corner radius; logical px) so a
+/// plate's children cut off at its rounded corners. The clips compose: the scissor is GPU
+/// state, the circle rides the vertices, the rounded rect is per-draw-batch state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PaintItem {
     pub prim: Prim,
     pub clip: Option<Rect>,
     pub clip_circle: Option<[f32; 3]>,
+    pub clip_rrect: Option<[f32; 5]>,
 }
 
 /// An ordered list of clipped primitives — the single source of truth for a frame's geometry.
@@ -155,6 +158,8 @@ pub struct PaintCtx {
     /// Active circular clips; primitives record the innermost (`last`). Circles don't
     /// intersect analytically like rects, so nesting keeps the innermost only.
     clip_circle_stack: Vec<[f32; 3]>,
+    /// Active rounded-rect clips `[cx, cy, bx, by, r]`; innermost wins, like circles.
+    clip_rrect_stack: Vec<[f32; 5]>,
     /// Saved offsets for nesting; `offset` is the current cumulative translation.
     offset_stack: Vec<(f32, f32)>,
     offset: (f32, f32),
@@ -172,6 +177,7 @@ impl PaintCtx {
             list: DisplayList::new(),
             clip_stack: Vec::new(),
             clip_circle_stack: Vec::new(),
+            clip_rrect_stack: Vec::new(),
             offset_stack: Vec::new(),
             offset: (0.0, 0.0),
         }
@@ -225,6 +231,43 @@ impl PaintCtx {
         out
     }
 
+    /// Push a rounded-rect clip: `rect` (current local space) with corner radius `radius`,
+    /// so children of a rounded plate cut off at its corners. Pushes the rect as a scissor
+    /// too — the scissor handles the straight edges (and keeps batching), the SDF trims the
+    /// corners. A radius of zero degenerates to the plain rect clip. Pair with
+    /// [`pop_clip_rounded`](PaintCtx::pop_clip_rounded), or prefer
+    /// [`clip_rounded`](PaintCtx::clip_rounded).
+    pub fn push_clip_rounded(&mut self, rect: Rect, radius: f32) {
+        self.push_clip(rect);
+        let r = radius.max(0.0);
+        if r > 0.0 {
+            let abs = self.apply_offset(rect);
+            self.clip_rrect_stack.push([
+                abs.x + abs.width / 2.0,
+                abs.y + abs.height / 2.0,
+                (abs.width / 2.0 - r).max(0.0),
+                (abs.height / 2.0 - r).max(0.0),
+                r,
+            ]);
+        } else {
+            // Keep push/pop balanced regardless of radius.
+            self.clip_rrect_stack.push([0.0; 5]);
+        }
+    }
+
+    pub fn pop_clip_rounded(&mut self) {
+        self.clip_rrect_stack.pop();
+        self.pop_clip();
+    }
+
+    /// Run `f` with `rect` (radius `radius`) pushed as a rounded clip, popping it afterward.
+    pub fn clip_rounded<R>(&mut self, rect: Rect, radius: f32, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.push_clip_rounded(rect, radius);
+        let out = f(self);
+        self.pop_clip_rounded();
+        out
+    }
+
     /// Run `f` with an additional translation applied to all emitted coordinates.
     pub fn translate<R>(&mut self, dx: f32, dy: f32, f: impl FnOnce(&mut Self) -> R) -> R {
         self.offset_stack.push(self.offset);
@@ -241,7 +284,10 @@ impl PaintCtx {
     fn push(&mut self, prim: Prim) {
         let clip = self.current_clip();
         let clip_circle = self.clip_circle_stack.last().copied();
-        self.list.items.push(PaintItem { prim, clip, clip_circle });
+        // r == 0 entries are balance placeholders (a zero-radius rounded clip is just its
+        // scissor rect) — record no rounded clip so batches keep merging.
+        let clip_rrect = self.clip_rrect_stack.last().copied().filter(|c| c[4] > 0.0);
+        self.list.items.push(PaintItem { prim, clip, clip_circle, clip_rrect });
     }
 
     pub fn quad(&mut self, rect: Rect, color: [f32; 4]) {

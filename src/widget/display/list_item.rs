@@ -17,6 +17,9 @@ pub struct TextItem {
     /// Optional circular clip `[cx, cy, r]` in logical pixels (a display-list item's
     /// `clip_circle` carried through to the glyph pass). `None` for ordinary labels.
     pub clip_circle: Option<[f32; 3]>,
+    /// Optional rounded-rect clip `[cx, cy, bx, by, r]` in logical pixels (a display-list
+    /// item's `clip_rrect` carried through to the glyph pass). `None` for ordinary labels.
+    pub clip_rrect: Option<[f32; 5]>,
 }
 
 impl TextItem {
@@ -31,7 +34,7 @@ impl TextItem {
         bounds: Option<[f32; 4]>,
     ) -> Self {
         let buffer = crate::backend::window_runner::get_text_buffer(fs, text, size, font);
-        Self { buffer, x, y, color, bounds, clip_circle: None }
+        Self { buffer, x, y, color, bounds, clip_circle: None, clip_rrect: None }
     }
 }
 

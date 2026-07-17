@@ -55,6 +55,14 @@ fn is_outside_window_corners(pos: vec2<f32>) -> bool {
     return false;
 }
 
+// Per-batch rounded-rect clip: rect0 = [cx, cy, bx, by] (center + SDF half-extents),
+// rect1 = [corner radius, enabled flag, 0, 0]. Physical pixels, like clip_position.
+struct RRectClip {
+    rect0: vec4f,
+    rect1: vec4f,
+}
+var<push_constant> rrect_clip: RRectClip;
+
 struct VertexOutput {
     @builtin(position) clip_position: vec4f,
     @location(0) color: vec4f,
@@ -116,6 +124,14 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         let dx = in.clip_position.x - in.clip_circle.x;
         let dy = in.clip_position.y - in.clip_circle.y;
         if (dx * dx + dy * dy > in.clip_circle.z * in.clip_circle.z) {
+            discard;
+        }
+    }
+    // Rounded-rect clip (per-batch): SDF of the round-cornered box; outside discards.
+    if (rrect_clip.rect1.y > 0.5) {
+        let q = abs(in.clip_position.xy - rrect_clip.rect0.xy) - rrect_clip.rect0.zw;
+        let d = length(max(q, vec2f(0.0))) - rrect_clip.rect1.x;
+        if (d > 0.0) {
             discard;
         }
     }

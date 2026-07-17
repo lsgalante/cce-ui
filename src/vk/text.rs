@@ -48,6 +48,11 @@ pub struct TextSpan<'a> {
     /// Fragment circle clip (center_x, center_y, radius) in physical pixels;
     /// zero radius disables (matches shader.wgsl's clip_circle).
     pub clip_circle: [f32; 3],
+    /// Rounded-rect clip half-extents (physical px). Zero keeps `clip_circle` a plain
+    /// circle; non-zero reinterprets it as a rounded-rect SDF clip — center
+    /// `clip_circle.xy`, corner radius `clip_circle.z`, inner box half-size
+    /// `clip_extents` — so plate children (labels included) cut off at rounded corners.
+    pub clip_extents: [f32; 2],
 }
 
 #[repr(C)]
@@ -57,6 +62,7 @@ struct GlyphVertex {
     uv: [f32; 2],
     color: [f32; 4],
     clip_circle: [f32; 3],
+    clip_extents: [f32; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -210,6 +216,11 @@ impl TextStage {
                     .binding(0)
                     .format(vk::Format::R32G32B32_SFLOAT)
                     .offset(32),
+                vk::VertexInputAttributeDescription::default()
+                    .location(4)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(44),
             ];
             let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
                 .vertex_binding_descriptions(&vertex_bindings)
@@ -586,10 +597,11 @@ impl TextStage {
                     };
                     let uv = |u: f32, v: f32| [u / ATLAS_SIZE as f32, v / ATLAS_SIZE as f32];
                     let clip_circle = span.clip_circle;
-                    let tl = GlyphVertex { position: ndc(corners[0]), uv: uv(u0, v0), color, clip_circle };
-                    let tr = GlyphVertex { position: ndc(corners[1]), uv: uv(u1, v0), color, clip_circle };
-                    let bl = GlyphVertex { position: ndc(corners[2]), uv: uv(u0, v1), color, clip_circle };
-                    let br = GlyphVertex { position: ndc(corners[3]), uv: uv(u1, v1), color, clip_circle };
+                    let clip_extents = span.clip_extents;
+                    let tl = GlyphVertex { position: ndc(corners[0]), uv: uv(u0, v0), color, clip_circle, clip_extents };
+                    let tr = GlyphVertex { position: ndc(corners[1]), uv: uv(u1, v0), color, clip_circle, clip_extents };
+                    let bl = GlyphVertex { position: ndc(corners[2]), uv: uv(u0, v1), color, clip_circle, clip_extents };
+                    let br = GlyphVertex { position: ndc(corners[3]), uv: uv(u1, v1), color, clip_circle, clip_extents };
                     self.pending_vertices.extend([tl, tr, bl, tr, br, bl]);
                 }
             }
