@@ -499,52 +499,65 @@ impl ParametersBg {
 
         let mut param_quads = Vec::new();
 
-        // Find sections and their ranges
-        let mut sections = Vec::new();
-        let mut current_section: Option<(usize, usize)> = None;
-        let mut in_section = false;
+        // Find each section: its header row index plus the content-row range
+        // beneath it (up to the next header). `content` is None for a header
+        // with no rows under it.
+        let mut sections: Vec<(usize, Option<(usize, usize)>)> = Vec::new();
         for (i, p) in self.display_params.iter().enumerate() {
             if p.2 == "section" {
-                if let Some((start, end)) = current_section {
-                    sections.push((start, end));
-                }
-                current_section = None;
-                in_section = true;
-            } else {
-                if in_section {
-                    if let Some((_, ref mut end)) = current_section {
-                        *end = i;
-                    } else {
-                        current_section = Some((i, i));
-                    }
+                sections.push((i, None));
+            } else if let Some((_, content)) = sections.last_mut() {
+                match content {
+                    Some((_, end)) => *end = i,
+                    None => *content = Some((i, i)),
                 }
             }
         }
-        if let Some((start, end)) = current_section {
-            sections.push((start, end));
-        }
 
-        // Draw section border boxes
-        for (start, end) in sections {
-            if start <= end && start < rects.len() && end < rects.len() {
-                let r_start = rects[start];
-                let r_end = rects[end];
-                let bx = self.rect.x + 4.0;
-                let bw = self.rect.width - 8.0;
-                let by = r_start.1 - 4.0;
-                let bh = (r_end.1 + r_end.3 + 4.0) - by;
+        // Draw, per section: a box around the title, a box around the content
+        // rows, and a short vertical line joining the two.
+        let border_color = [0.18, 0.18, 0.27, 1.0];
+        let border_t = 1.0;
+        let push_box = |quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>,
+                        bx: f32, by: f32, bw: f32, bh: f32| {
+            quads.push((bx, by, bw, border_t, border_color)); // top
+            quads.push((bx, by + bh - border_t, bw, border_t, border_color)); // bottom
+            quads.push((bx, by, border_t, bh, border_color)); // left
+            quads.push((bx + bw - border_t, by, border_t, bh, border_color)); // right
+        };
 
-                let border_color = [0.18, 0.18, 0.27, 1.0];
-                let border_t = 1.0;
+        let full_w = self.rect.width - 8.0;
+        for (hdr, content) in sections {
+            if hdr >= rects.len() {
+                continue;
+            }
+            let r_hdr = rects[hdr];
 
-                // Top border
-                param_quads.push((bx, by, bw, border_t, border_color));
-                // Bottom border
-                param_quads.push((bx, by + bh - border_t, bw, border_t, border_color));
-                // Left border
-                param_quads.push((bx, by, border_t, bh, border_color));
-                // Right border
-                param_quads.push((bx + bw - border_t, by, border_t, bh, border_color));
+            // Title box, wrapping the header label (drawn at rect.x + 12,
+            // 13px). Width is estimated from the label length since glyph
+            // metrics aren't available in the quad pass.
+            let title = &self.display_params[hdr].0;
+            let title_w = (title.chars().count() as f32 * 7.0 + 16.0).min(full_w);
+            let tb_x = self.rect.x + 4.0;
+            let tb_y = r_hdr.1 - 2.0;
+            let tb_h = 22.0;
+            push_box(&mut param_quads, tb_x, tb_y, title_w, tb_h);
+
+            // Content box + the connector line dropping into it from the title.
+            if let Some((start, end)) = content {
+                if start <= end && start < rects.len() && end < rects.len() {
+                    let r_start = rects[start];
+                    let r_end = rects[end];
+                    let by = r_start.1 - 4.0;
+                    let bh = (r_end.1 + r_end.3 + 4.0) - by;
+                    push_box(&mut param_quads, tb_x, by, full_w, bh);
+
+                    let line_x = tb_x + 12.0;
+                    let line_top = tb_y + tb_h;
+                    if by > line_top {
+                        param_quads.push((line_x, line_top, border_t, by - line_top, border_color));
+                    }
+                }
             }
         }
 
