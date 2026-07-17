@@ -1,5 +1,5 @@
 //! Narrow-trait `ParametersBg` (Phase 5s) — the designer's parameter panel: a scrollable column
-//! of param rows (sliders, spinboxes, dropdowns, text boxes, checkboxes, colors, float3s,
+//! of param rows (sliders, spinboxes, dropdowns, text boxes, toggles, colors, float3s,
 //! buttons, section borders, and an inline emacs-flavored code editor), each row's widget owned
 //! by value in parallel `Vec<Option<..>>` fields (most already `Adapted<W>` from earlier
 //! phases), plus a raw-pointer `children` container list. The designer stores it as
@@ -25,7 +25,7 @@ use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};
-use crate::widget::input::{Button, Checkbox, ColorSelector, Dropdown, Slider, Spinbox, TextBox};
+use crate::widget::input::{Button, ColorSelector, Dropdown, Slider, Spinbox, TextBox, Toggle};
 use crate::widget::{
     Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
     MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext,
@@ -44,7 +44,7 @@ pub struct ParametersBg {
     pub buttons: Vec<Option<Adapted<Button>>>,
     pub choices: Vec<Option<Adapted<Dropdown>>>,
     pub texts: Vec<Option<Adapted<TextBox>>>,
-    pub checkboxes: Vec<Option<Adapted<Checkbox>>>,
+    pub toggles: Vec<Option<Adapted<Toggle>>>,
     pub colors: Vec<Option<crate::widget::Adapted<ColorSelector>>>,
     visible: bool,
     pub scroll_y: f32,
@@ -81,7 +81,7 @@ impl ParametersBg {
             buttons: Vec::new(),
             choices: Vec::new(),
             texts: Vec::new(),
-            checkboxes: Vec::new(),
+            toggles: Vec::new(),
             colors: Vec::new(),
             visible: true,
             scroll_y: 0.0,
@@ -281,7 +281,7 @@ impl ParametersBg {
                 tb.set_rect(r.0, r.1, r.2, r.3);
             }
         }
-        for (i, cb_opt) in self.checkboxes.iter_mut().enumerate() {
+        for (i, cb_opt) in self.toggles.iter_mut().enumerate() {
             if let Some(cb) = cb_opt {
                 let r = rects[i];
                 cb.set_rect(r.0, r.1, r.2, r.3);
@@ -375,7 +375,7 @@ impl ParametersBg {
                     labels.extend(b.own_text_labels());
                 }
             } else if ptype == "toggle" || ptype == "checkbox" {
-                if let Some(cb) = &self.checkboxes[i] {
+                if let Some(cb) = &self.toggles[i] {
                     labels.extend(cb.own_text_labels());
                 }
             } else if ptype.starts_with("color") || ptype == "rgb" || ptype == "rgba" {
@@ -602,7 +602,7 @@ impl ParametersBg {
                     param_quads.extend(sb.extra_quads());
                 }
             } else if p.2 == "toggle" || p.2 == "checkbox" {
-                if let Some(cb) = &self.checkboxes[i] {
+                if let Some(cb) = &self.toggles[i] {
                     param_quads.extend(cb.extra_quads());
                 }
             } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
@@ -626,7 +626,7 @@ impl ParametersBg {
     }
 
     /// The rounded companion to [`Self::plain_quads`]: the row controls whose boxes are
-    /// `Prim::RoundedRect` (textbox, dropdown, button, checkbox, color selector). Those
+    /// `Prim::RoundedRect` (textbox, dropdown, button, toggle, color selector). Those
     /// backgrounds never reach the plain view — `own_plain_quads` keeps `Prim::Quad` only —
     /// so a host that renders this panel through the legacy plain-quad hatch must read this
     /// getter too or the controls draw as bare text. Returned unclipped; the host clips to
@@ -654,12 +654,31 @@ impl ParametersBg {
                     out.extend(b.all_rounded_quads(ctx));
                 }
             } else if p.2 == "toggle" || p.2 == "checkbox" {
-                if let Some(cb) = &self.checkboxes[i] {
+                if let Some(cb) = &self.toggles[i] {
                     out.extend(cb.all_rounded_quads(ctx));
                 }
             } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                 if let Some(c) = &self.colors[i] {
                     out.extend(c.all_rounded_quads(ctx));
+                }
+            }
+        }
+        out
+    }
+
+    /// Arc companion to [`Self::rounded_quads`]: the toggle rows' border corner arcs
+    /// (`Prim::Arc`, emitted only in rounded mode). Returned unclipped, same as
+    /// `rounded_quads`; tuple layout matches `extra_arcs`:
+    /// (cx, cy, radius, thickness, start, end, color).
+    pub fn arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if p.2 == "toggle" || p.2 == "checkbox" {
+                if let Some(t) = &self.toggles[i] {
+                    out.extend(t.extra_arcs());
                 }
             }
         }
@@ -946,7 +965,7 @@ impl Input for ParametersBg {
         }
         let mut changed = false;
         let mut dummy = crate::context::UiContext::new();
-        for cb_opt in &mut self.checkboxes {
+        for cb_opt in &mut self.toggles {
             if let Some(cb) = cb_opt {
                 if cb.tick(dt, &mut dummy) {
                     changed = true;
@@ -1056,7 +1075,7 @@ impl Input for ParametersBg {
                         }
                     }
                 }
-                for cb_opt in &mut self.checkboxes {
+                for cb_opt in &mut self.toggles {
                     if let Some(cb) = cb_opt {
                         if cb.on_cursor_moved(px, py, ui) {
                             changed = true;
@@ -1200,7 +1219,7 @@ impl Input for ParametersBg {
                             }
                         }
                     } else if p.2 == "toggle" || p.2 == "checkbox" {
-                        if let Some(cb) = &mut self.checkboxes[i] {
+                        if let Some(cb) = &mut self.toggles[i] {
                             if cb.mouse_input(button, state, px, py, ui) {
                                 if cb.take_change() {
                                     if let Some(val) = cb.get_value_string() {
@@ -1752,12 +1771,12 @@ impl ParamController for ParametersBg {
                     None
                 }
             }).collect();
-            self.checkboxes = self.display_params.iter().map(|p| {
+            self.toggles = self.display_params.iter().map(|p| {
                 if p.2 == "toggle" || p.2 == "checkbox" {
-                    let checked = p.1.trim().to_lowercase() == "true";
-                    let mut cb = Checkbox::new().with_label(&p.0);
-                    cb.set_checked(checked);
-                    Some(cb)
+                    let on = p.1.trim().to_lowercase() == "true";
+                    let mut t = Toggle::new().with_label(&p.0);
+                    t.set_toggled(on);
+                    Some(t)
                 } else {
                     None
                 }
@@ -1809,9 +1828,9 @@ impl ParamController for ParametersBg {
                         if !tb.editing {
                             tb.set_value_string(&p_new.1);
                         }
-                    } else if let Some(ref mut cb) = self.checkboxes[i] {
-                        let checked = p_new.1.trim().to_lowercase() == "true";
-                        cb.set_checked(checked);
+                    } else if let Some(ref mut t) = self.toggles[i] {
+                        let on = p_new.1.trim().to_lowercase() == "true";
+                        t.set_toggled(on);
                     } else if let Some(ref mut c) = self.colors[i] {
                         if !c.editing {
                             c.set_value_string(&p_new.1);
@@ -1907,18 +1926,18 @@ mod tests {
             ("On", "true", "checkbox"),
         ]);
         assert_eq!(ParamController::node_params(&*p).len(), 3);
-        assert!(p.sliders[0].is_some() && p.choices[1].is_some() && p.checkboxes[2].is_some());
+        assert!(p.sliders[0].is_some() && p.choices[1].is_some() && p.toggles[2].is_some());
         // Rows were laid out from the cached rect.
         let (sx, _, sw, _) = p.sliders[0].as_ref().unwrap().rect();
         assert_eq!((sx, sw), (8.0, 284.0), "row rect derives from the assigned rect");
     }
 
     #[test]
-    fn checkbox_click_commits_value_and_unfocus_commits_editor() {
+    fn toggle_click_commits_value_and_unfocus_commits_editor() {
         let mut ctx = UiContext::new();
         let mut p = panel_with(&[("On", "false", "checkbox")]);
-        let (cx, cy, _, ch) = p.checkboxes[0].as_ref().unwrap().rect();
-        // Click the checkbox row (presses are ungated for this widget; the panel consumes
+        let (cx, cy, _, ch) = p.toggles[0].as_ref().unwrap().rect();
+        // Click the toggle row (presses are ungated for this widget; the panel consumes
         // every left press, so the return is true either way — assert the value flip).
         p.mouse_input(MouseButton::Left, ElementState::Pressed, cx + 6.0, cy + ch / 2.0, &mut ctx);
         p.mouse_input(MouseButton::Left, ElementState::Released, cx + 6.0, cy + ch / 2.0, &mut ctx);

@@ -1197,7 +1197,7 @@ fn get_child_widget_for_quad<'a>(
                 }
             }
         }
-        for cb_opt in &pbg.checkboxes {
+        for cb_opt in &pbg.toggles {
             if let Some(cb) = cb_opt {
                 let (cx, cy, cww, chh) = cb.rect();
                 if qx >= cx - 0.1 && qx + qw <= cx + cww + 0.1 && qy >= cy - 0.1 && qy + qh <= cy + chh + 0.1 {
