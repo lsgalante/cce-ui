@@ -629,7 +629,13 @@ impl Layout for TreeList {
         let search_h = 26.0;
         let offset_y = search_h + 2.0 * search_margin_y;
         
-        let button_width = 80.0;
+        let (btn_family, btn_size) = crate::layout::parse_font_string(&crate::layout::button_font());
+        let label_w = crate::widget::display::measure_text_width(
+            self.add_key_btn.base().label.as_deref().unwrap_or(""),
+            &btn_family,
+            btn_size.unwrap_or(12.0),
+        );
+        let button_width = label_w + 2.0 * crate::layout::button_padding();
         let button_height = search_h;
         let button_x = x + w - search_margin_x - button_width;
         
