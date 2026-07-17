@@ -147,6 +147,12 @@ impl Paint for StatusBar {
         }
     }
 
+    /// The paint walk re-fonts prim-derived labels through this (the prim's own font field
+    /// is stripped by `own_labels_for_walk`) — without it the bar's text falls back to sans.
+    fn text_font(&self) -> Option<String> {
+        Some(crate::layout::statusbar_font())
+    }
+
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem, _rect: Rect) {
         if !self.text.is_empty() && self.text_buf.is_none() {
             let (font_fam, font_size) = crate::layout::statusbar_font_parsed();
@@ -194,5 +200,28 @@ mod tests {
         assert_eq!(extra.len(), 1, "cornerless bg quad");
         assert_eq!(WidgetHost::corner_style(&bar).1, (false, false, false, false));
         assert!(!WidgetHost::blocks_backplate_drag(&bar));
+    }
+
+    /// The paint walk strips prim fonts and re-fonts labels via `Paint::text_font` — the
+    /// bar's text must come out of the walk carrying the configured statusbar font.
+    #[test]
+    fn walk_text_carries_statusbar_font() {
+        let ui = crate::context::UiContext::new();
+        let mut bar = StatusBar::new().with_text("ready");
+        WidgetHost::set_rect(&mut bar, 0.0, 570.0, 800.0, 30.0);
+
+        let mut pc = PaintCtx::new();
+        crate::scene::painter::paint_root_into(&ui, &bar, &mut pc);
+        let fonts: Vec<_> = pc
+            .finish()
+            .items
+            .into_iter()
+            .filter_map(|item| match item.prim {
+                crate::scene::paint::Prim::Text { font, .. } => Some(font),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(fonts.len(), 1, "one text label out of the walk");
+        assert_eq!(fonts[0].as_deref(), Some(crate::layout::statusbar_font().as_str()));
     }
 }
