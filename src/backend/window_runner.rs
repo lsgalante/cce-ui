@@ -1658,13 +1658,14 @@ pub trait Application: Sized + 'static {
     }
 
     /// Whether the standard CSD reserves an implicit title-bar strip (`y` in `[8, 32)`) as a
-    /// drag-to-move handle. Separate from [`standard_csd`](Application::standard_csd), which
-    /// also gates the resize borders. Return `false` for a window that has no title bar and
-    /// should only be moved via explicitly-declared handles
-    /// ([`is_movable_backplate_at`](Application::is_movable_backplate_at)) — nothing is then
-    /// implicitly draggable. Only consulted when `standard_csd()` is on.
+    /// drag-to-move handle. Opt-in: off by default, so a window has no title bar and is moved
+    /// through the compositor (or via explicitly-declared handles —
+    /// [`is_movable_backplate_at`](Application::is_movable_backplate_at)); nothing is
+    /// implicitly draggable. An app with an actual title bar returns `true`. Separate from
+    /// [`standard_csd`](Application::standard_csd), which also gates the resize borders, and
+    /// only consulted when `standard_csd()` is on.
     fn csd_titlebar_move(&self) -> bool {
-        true
+        false
     }
 
     /// Override the pointer cursor at (x, y). `None` falls back to the
