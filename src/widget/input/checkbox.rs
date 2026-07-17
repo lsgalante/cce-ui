@@ -246,7 +246,7 @@ impl Toggle {
         self.toggled
     }
 
-    fn border_color(&self) -> [f32; 4] {
+    fn gradient_color(&self) -> [f32; 4] {
         if self.toggled {
             colors::toggle_on_color()
         } else {
@@ -280,15 +280,6 @@ impl Paint for Toggle {
         }
     }
 
-    fn solid_border(&self) -> Option<([f32; 4], f32)> {
-        let border_w = crate::layout::toggle_border_width();
-        if border_w > 0.0 {
-            Some((self.border_color(), border_w))
-        } else {
-            None
-        }
-    }
-
     fn widget_font(&self) -> Option<String> {
         Some(crate::layout::control_label_font())
     }
@@ -300,76 +291,42 @@ impl Paint for Toggle {
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         let radius = crate::layout::toggle_corner_radius();
-        let border_w = crate::layout::toggle_border_width();
         let bg = colors::toggle_bg_color();
-        let border_color = self.border_color();
 
         if radius > 0.0 {
-            // Rounded mode: the legacy `all_rounded_quads` half-split verbatim — the border
-            // hugs the "on" (top) or "off" (bottom) half.
-            if self.toggled {
-                ctx.rounded_rect(Rect { x, y: y + h / 2.0, width: w, height: h / 2.0 }, radius, (false, false, true, true), bg);
-                if border_w > 0.0 {
-                    ctx.rounded_rect(Rect { x, y, width: w, height: h / 2.0 }, radius, (true, true, false, false), border_color);
-                    let inner_radius = (radius - border_w).max(0.0);
-                    ctx.rounded_rect(
-                        Rect { x: x + border_w, y: y + border_w, width: w - 2.0 * border_w, height: h / 2.0 - border_w },
-                        inner_radius,
-                        (true, true, false, false),
-                        bg,
-                    );
-                }
-                else {
-                    ctx.rounded_rect(Rect { x, y, width: w, height: h / 2.0 }, radius, (true, true, false, false), bg);
-                }
-            } else {
-                ctx.rounded_rect(Rect { x, y, width: w, height: h / 2.0 }, radius, (true, true, false, false), bg);
-                if border_w > 0.0 {
-                    ctx.rounded_rect(Rect { x, y: y + h / 2.0, width: w, height: h / 2.0 }, radius, (false, false, true, true), border_color);
-                    let inner_radius = (radius - border_w).max(0.0);
-                    ctx.rounded_rect(
-                        Rect { x: x + border_w, y: y + h / 2.0, width: w - 2.0 * border_w, height: h / 2.0 - border_w },
-                        inner_radius,
-                        (false, false, true, true),
-                        bg,
-                    );
-                } else {
-                    ctx.rounded_rect(Rect { x, y: y + h / 2.0, width: w, height: h / 2.0 }, radius, (false, false, true, true), bg);
-                }
-            }
-
-            // Corner arcs of the bordered half (legacy `extra_arcs`).
-            if border_w > 0.0 && radius > 0.1 {
-                use std::f32::consts::PI;
-                if self.toggled {
-                    ctx.arc(x + radius, y + radius, radius, border_w, PI, 1.5 * PI, border_color);
-                    ctx.arc(x + w - radius, y + radius, radius, border_w, 1.5 * PI, 2.0 * PI, border_color);
-                } else {
-                    ctx.arc(x + radius, y + h - radius, radius, border_w, 0.5 * PI, PI, border_color);
-                    ctx.arc(x + w - radius, y + h - radius, radius, border_w, 0.0, 0.5 * PI, border_color);
-                }
-            }
+            ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
         } else {
-            // Square mode: the legacy `extra_quads` geometry verbatim — bg quad plus border
-            // edges on the "on" (top) or "off" (bottom) half.
             ctx.quad(rect, bg);
-            if border_w > 0.0 {
-                let t = border_w;
-                let r = radius; // 0.0 here, kept for formula parity with the legacy code
-                let edge_h = ((h / 2.0) - r).max(0.0);
-                if self.toggled {
-                    ctx.quad(Rect { x: x + r, y, width: w - 2.0 * r, height: t }, border_color);
-                    if edge_h > 0.0 {
-                        ctx.quad(Rect { x, y: y + r, width: t, height: edge_h }, border_color);
-                        ctx.quad(Rect { x: x + w - t, y: y + r, width: t, height: edge_h }, border_color);
-                    }
-                } else {
-                    ctx.quad(Rect { x: x + r, y: y + h - t, width: w - 2.0 * r, height: t }, border_color);
-                    if edge_h > 0.0 {
-                        ctx.quad(Rect { x, y: y + h / 2.0, width: t, height: edge_h }, border_color);
-                        ctx.quad(Rect { x: x + w - t, y: y + h / 2.0, width: t, height: edge_h }, border_color);
-                    }
+        }
+
+        // The state half carries a vertical gradient of the state color: full opacity at
+        // the widget's outer edge (top when on, bottom when off), fading to transparent at
+        // the vertical middle. Banded quads (the content_bg gradient pattern) so it flows
+        // through the plain-quad views; bands inside the corner radius inset to follow the
+        // rounded corners.
+        let grad = self.gradient_color();
+        let half = h / 2.0;
+        if half > 0.0 && grad[3] > 0.0 {
+            let steps = (half.ceil() as usize).clamp(4, 32);
+            let band_h = half / steps as f32;
+            for i in 0..steps {
+                let t0 = i as f32 * band_h; // band start, as distance from the outer edge
+                let t_mid = t0 + band_h / 2.0;
+                let alpha = grad[3] * (1.0 - t_mid / half);
+                if alpha <= 0.003 {
+                    continue;
                 }
+                let by = if self.toggled { y + t0 } else { y + h - t0 - band_h };
+                let inset = if radius > 0.0 && t_mid < radius {
+                    let dr = radius - t_mid;
+                    radius - (radius * radius - dr * dr).max(0.0).sqrt()
+                } else {
+                    0.0
+                };
+                ctx.quad(
+                    Rect { x: x + inset, y: by, width: w - 2.0 * inset, height: band_h },
+                    [grad[0], grad[1], grad[2], alpha],
+                );
             }
         }
 
@@ -517,15 +474,15 @@ mod tests {
     }
 
     #[test]
-    fn toggle_click_and_borders_switch_halves() {
+    fn toggle_click_and_gradient_switches_halves() {
         let mut ctx = UiContext::new();
         let mut t = Toggle::new();
         let (id, ptr) = (t.id(), t.as_ptr_mut());
         ctx.register_widget(id, ptr);
         WidgetHost::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
 
-        // Geometry parity is config-dependent (rounded vs square toggle); assert the invariant
-        // that holds in both: the bordered half flips with the state.
+        // Geometry is config-dependent (rounded vs square toggle); assert the invariant
+        // that holds in both: the gradient half flips with the state.
         let before: Vec<_> = WidgetHost::all_rounded_quads(&t, &ctx);
         let before_quads = WidgetHost::extra_quads(&t);
 
@@ -537,7 +494,7 @@ mod tests {
         let after_quads = WidgetHost::extra_quads(&t);
         assert!(
             before != after || before_quads != after_quads,
-            "toggling changes the emitted geometry (border switches halves)",
+            "toggling changes the emitted geometry (gradient switches halves)",
         );
 
         // preferred_height forwards the legacy toggle height.

@@ -359,10 +359,11 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/control/label/focus_color") {
         if let Ok(mut lock) = CONTROL_LABEL_FOCUS_COLOR.write() { *lock = Some(c); }
     }
-    let toggle_border_color = get_color("/style/control/toggle/border_color")
+    let toggle_gradient_color = get_color("/style/control/toggle/gradient_color")
+        .or_else(|| get_color("/style/control/toggle/border_color"))
         .or_else(|| get_color("/layout/toggle_border_color"));
 
-    if let Some(c) = toggle_border_color {
+    if let Some(c) = toggle_gradient_color {
         if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
         if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
     } else {

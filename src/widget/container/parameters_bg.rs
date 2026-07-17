@@ -666,24 +666,6 @@ impl ParametersBg {
         out
     }
 
-    /// Arc companion to [`Self::rounded_quads`]: the toggle rows' border corner arcs
-    /// (`Prim::Arc`, emitted only in rounded mode). Returned unclipped, same as
-    /// `rounded_quads`; tuple layout matches `extra_arcs`:
-    /// (cx, cy, radius, thickness, start, end, color).
-    pub fn arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut out = Vec::new();
-        for (i, p) in self.display_params.iter().enumerate() {
-            if p.2 == "toggle" || p.2 == "checkbox" {
-                if let Some(t) = &self.toggles[i] {
-                    out.extend(t.extra_arcs());
-                }
-            }
-        }
-        out
-    }
 }
 
 impl Layout for ParametersBg {
