@@ -534,10 +534,17 @@ impl ParametersBg {
             let r_hdr = rects[hdr];
 
             // Title box, wrapping the header label (drawn at rect.x + 12,
-            // 13px). Width is estimated from the label length since glyph
-            // metrics aren't available in the quad pass.
+            // 13px). The label sits 8px in from the box's left edge; matching
+            // that 8px on the right (box width = text + 16) centers the text
+            // in the box. Measure the run in the actual (monospace) label font
+            // so long titles no longer spill past the border.
             let title = &self.display_params[hdr].0;
-            let title_w = (title.chars().count() as f32 * 7.0 + 16.0).min(full_w);
+            let text_w = crate::widget::display::measure_text_width(
+                title,
+                &crate::layout::control_label_font(),
+                13.0,
+            );
+            let title_w = (text_w + 16.0).min(full_w);
             let tb_x = self.rect.x + 4.0;
             let tb_y = r_hdr.1 - 2.0;
             let tb_h = 22.0;
