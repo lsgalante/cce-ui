@@ -1657,6 +1657,16 @@ pub trait Application: Sized + 'static {
         true
     }
 
+    /// Whether the standard CSD reserves an implicit title-bar strip (`y` in `[8, 32)`) as a
+    /// drag-to-move handle. Separate from [`standard_csd`](Application::standard_csd), which
+    /// also gates the resize borders. Return `false` for a window that has no title bar and
+    /// should only be moved via explicitly-declared handles
+    /// ([`is_movable_backplate_at`](Application::is_movable_backplate_at)) — nothing is then
+    /// implicitly draggable. Only consulted when `standard_csd()` is on.
+    fn csd_titlebar_move(&self) -> bool {
+        true
+    }
+
     /// Override the pointer cursor at (x, y). `None` falls back to the
     /// runner's standard CSD edge cursors (or `Default` when
     /// [`standard_csd`](Application::standard_csd) is off).
@@ -2391,7 +2401,10 @@ impl<A: Application> PointerHandler for EngineState<A> {
                                 is_widget = true;
                             }
                         }
-                        if !is_widget && ly >= border && ly < 32.0 && lx < self.logical_width - 70.0 {
+                        if !is_widget
+                            && self.inner.as_ref().unwrap().csd_titlebar_move()
+                            && ly >= border && ly < 32.0 && lx < self.logical_width - 70.0
+                        {
                             should_move = true;
                         } else if self.inner.as_ref().unwrap().is_movable_backplate_at(lx, ly) {
                             should_move = true;
