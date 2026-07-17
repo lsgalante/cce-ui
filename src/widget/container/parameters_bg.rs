@@ -533,17 +533,15 @@ impl ParametersBg {
             }
             let r_hdr = rects[hdr];
 
-            // Title box, wrapping the header label (drawn at rect.x + 12,
-            // 13px). The label sits 8px in from the box's left edge; matching
-            // that 8px on the right (box width = text + 16) centers the text
-            // in the box. Measure the run in the actual (monospace) label font
-            // so long titles no longer spill past the border.
+            // Title box, wrapping the header label (drawn at rect.x + 12). The
+            // label sits 8px in from the box's left edge; matching that 8px on
+            // the right (box width = text + 16) centers the text in the box.
+            // Measure the run in the label's real family AND size — parsed, not
+            // the raw "Family NN" spec string, which resvg can't resolve (it
+            // would fall back to a narrow font and undersize the box).
             let title = &self.display_params[hdr].0;
-            let text_w = crate::widget::display::measure_text_width(
-                title,
-                &crate::layout::control_label_font(),
-                13.0,
-            );
+            let (label_family, label_size) = crate::layout::control_label_font_parsed();
+            let text_w = crate::widget::display::measure_text_width(title, &label_family, label_size);
             let title_w = (text_w + 16.0).min(full_w);
             let tb_x = self.rect.x + 4.0;
             let tb_y = r_hdr.1 - 2.0;
