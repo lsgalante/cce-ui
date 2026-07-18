@@ -303,7 +303,9 @@ impl Paint for Toggle {
         // the widget's outer edge (top when on, bottom when off), fading to transparent at
         // the vertical middle. Banded quads (the content_bg gradient pattern) so it flows
         // through the plain-quad views; bands inside the corner radius inset to follow the
-        // rounded corners.
+        // rounded corners. The band alphas follow a perceptual curve, not a straight ramp —
+        // see `colors::perceptual_fade_alpha`. The bands composite onto the bg quad above,
+        // so that is the backdrop the curve is solved against.
         let grad = self.gradient_color();
         let half = h / 2.0;
         if half > 0.0 && grad[3] > 0.0 {
@@ -312,7 +314,12 @@ impl Paint for Toggle {
             for i in 0..steps {
                 let t0 = i as f32 * band_h; // band start, as distance from the outer edge
                 let t_mid = t0 + band_h / 2.0;
-                let alpha = grad[3] * (1.0 - t_mid / half);
+                let alpha = colors::perceptual_fade_alpha(
+                    t_mid / half,
+                    [grad[0], grad[1], grad[2]],
+                    [bg[0], bg[1], bg[2]],
+                    grad[3],
+                );
                 if alpha <= 0.003 {
                     continue;
                 }

@@ -1014,6 +1014,42 @@ pub fn oklab_to_linear_srgb(lab: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// The alpha that makes an overlay's fade-out read as an EVEN fade to the eye.
+///
+/// `t` runs 0 (overlay at `max_alpha`) to 1 (fully faded); `overlay` and `backdrop` are
+/// linear-light RGB, the backdrop being whatever the fade composites onto.
+///
+/// A linear alpha ramp is not a linear fade: the surface is an sRGB attachment, so the GPU
+/// blends in LINEAR light, and perceived lightness goes as roughly the cube root of that. A
+/// straight alpha ramp therefore hangs bright through the middle and then dives near the
+/// end. This walks perceived lightness linearly instead and solves back for the alpha that
+/// lands on it — exactly, since the composite is linear in alpha:
+///
+/// ```text
+/// Y(a) = a·Y_overlay + (1 - a)·Y_backdrop        (blending, in linear light)
+/// L    ≈ cbrt(Y)                                 (perception — OKLab's L, and CIE L* to within a hair)
+/// ```
+///
+/// Solved on luminance rather than per channel because a single alpha can only satisfy one
+/// axis, and lightness is the one the eye reads a fade by. With no lightness contrast to
+/// shape (a fade between equally-bright colors) it falls back to the linear ramp.
+pub fn perceptual_fade_alpha(t: f32, overlay: [f32; 3], backdrop: [f32; 3], max_alpha: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    let luminance = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    let y_over = luminance(overlay);
+    let y_back = luminance(backdrop);
+    let contrast = y_over - y_back;
+    if contrast.abs() < 1e-4 {
+        return max_alpha * (1.0 - t);
+    }
+    // Walk L from the fully-applied composite down to the bare backdrop.
+    let l = |y: f32| y.max(0.0).cbrt();
+    let y_full = max_alpha * y_over + (1.0 - max_alpha) * y_back;
+    let l_t = l(y_full) + (l(y_back) - l(y_full)) * t;
+    let y_t = l_t * l_t * l_t;
+    ((y_t - y_back) / contrast).clamp(0.0, max_alpha)
+}
+
 pub fn sidebar_bg_color() -> [f32; 4] {
     load_colors_once();
     let mut color = *SIDEBAR_BG_COLOR.read().unwrap();
@@ -1780,6 +1816,43 @@ mod color_tests {
         assert_eq!(parse_hex_bytes("#010203"), Some([1, 2, 3, 255]));
         assert_eq!(parse_hex_bytes("#01020304"), Some([1, 2, 3, 4]));
         assert_eq!(parse_hex_bytes("#fff"), None);
+    }
+
+    #[test]
+    fn perceptual_fade_alpha_walks_lightness_not_luminance() {
+        let overlay = [0.62, 0.70, 0.95];
+        let backdrop = [0.028, 0.028, 0.041];
+        let a = |t: f32| perceptual_fade_alpha(t, overlay, backdrop, 1.0);
+
+        // Endpoints are the plain ones, and the ramp only ever falls.
+        assert!((a(0.0) - 1.0).abs() < 1e-4);
+        assert!(a(1.0).abs() < 1e-4);
+        for i in 1..=20 {
+            assert!(a(i as f32 / 20.0) <= a((i - 1) as f32 / 20.0));
+        }
+
+        // The correction runs BELOW the straight ramp — that ramp's excess brightness
+        // through the middle is the bow the eye reads as non-linear.
+        assert!(a(0.5) < 0.5 - 0.1, "midpoint {} should sit well under 0.5", a(0.5));
+
+        // What it buys: composited lightness lands on a straight line. cbrt(luminance) is
+        // the same proxy the implementation uses, checked here end to end through blending.
+        let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let l_at = |t: f32| {
+            let a = a(t);
+            let y: f32 = a * lum(overlay) + (1.0 - a) * lum(backdrop);
+            y.cbrt()
+        };
+        let (top, bottom) = (l_at(0.0), l_at(1.0));
+        for i in 0..=10 {
+            let t = i as f32 / 10.0;
+            let ideal = top + (bottom - top) * t;
+            assert!((l_at(t) - ideal).abs() < 1e-3, "t={t}: {} vs {ideal}", l_at(t));
+        }
+
+        // No lightness contrast to shape: falls back to the straight ramp.
+        let flat = perceptual_fade_alpha(0.5, overlay, overlay, 1.0);
+        assert!((flat - 0.5).abs() < 1e-4);
     }
 
     #[test]
