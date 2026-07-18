@@ -69,6 +69,21 @@ pub struct ParametersBg {
 /// How long (seconds) the scrollbar stays raised after the last wheel scroll or drag release.
 const SCROLL_ACTIVE_HOLD: f32 = 0.7;
 
+/// Vertical pitch between consecutive rows.
+const ROW_GAP: f32 = 8.0;
+/// How far a section's title box overhangs its header row upward, and the box's height.
+const TITLE_BOX_INSET: f32 = 2.0;
+const TITLE_BOX_H: f32 = 22.0;
+/// How far a section's content box overhangs the first and last row it wraps.
+const CONTENT_BOX_PAD: f32 = 4.0;
+/// The gap between one section's bottom box edge and the next section's title box. Equal to
+/// the title→content gap by construction: a header row is `TITLE_BOX_INSET + TITLE_BOX_H`
+/// tall as drawn and `ROW_GAP` from the row under it, whose content box starts
+/// `CONTENT_BOX_PAD` early — leaving exactly `ROW_GAP`. Laying the next header out from the
+/// previous block's *drawn* bottom edge (rather than the uniform row pitch, which the two
+/// boxes' overhangs eat into unequally) keeps the two gaps identical.
+const SECTION_GAP: f32 = ROW_GAP;
+
 impl ParametersBg {
     pub fn new() -> Adapted<ParametersBg> {
         Adapted::new(ParametersBg {
@@ -180,36 +195,67 @@ impl ParametersBg {
         let text_w =
             crate::widget::display::measure_text_width(&self.display_params[hdr].0, &label_family, label_size);
         let title_w = (text_w + 16.0).min(full_w);
-        (self.rect.x + 4.0, r_hdr.1 - 2.0, title_w, 22.0)
+        (self.rect.x + 4.0, r_hdr.1 - TITLE_BOX_INSET, title_w, TITLE_BOX_H)
     }
 
+    /// Where the rows start, in absolute y — the origin `get_param_rects` lays out from.
+    fn rows_origin(&self) -> f32 {
+        self.rect.y - self.scroll_y
+    }
+
+    /// The scrollable height of the row column. Derived from [`Self::get_param_rects`] rather
+    /// than re-walking the advance rules, so the two can't drift apart.
     pub fn get_total_content_height(&self) -> f32 {
         let hidden = self.hidden_rows();
-        let mut cur_y = 30.0;
-        for i in 0..self.display_params.len() {
-            if hidden[i] {
-                continue;
-            }
-            cur_y += self.row_height(i) + 8.0;
+        let rects = self.get_param_rects();
+        let bottom = rects
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !hidden[*i])
+            .map(|(_, r)| r.1 + r.3)
+            .fold(f32::NEG_INFINITY, f32::max);
+        if bottom == f32::NEG_INFINITY {
+            return 30.0 + 10.0; // no rows: the top offset plus the bottom padding
         }
-        cur_y + 10.0 // Add padding at the bottom
+        (bottom - self.rows_origin()) + ROW_GAP + 10.0
     }
 
     /// One rect per row, in index order — collapsed rows get a zero-height rect at the
     /// current cursor (and consume no vertical space), so every index-parallel consumer
     /// keeps working while the row draws and hit-tests as nothing.
+    ///
+    /// Rows advance on a uniform [`ROW_GAP`] pitch, except a section header, which is placed
+    /// [`SECTION_GAP`] below the previous section's drawn bottom edge — see [`SECTION_GAP`].
     pub fn get_param_rects(&self) -> Vec<(f32, f32, f32, f32)> {
         let hidden = self.hidden_rows();
         let mut rects = Vec::new();
-        let mut cur_y = self.rect.y + 30.0 - self.scroll_y;
+        let mut cur_y = self.rows_origin() + 30.0;
+        // Bottom edge of the last row as DRAWN: a row inside a section is wrapped by the
+        // content box, which overhangs it; a header with no visible rows under it (empty or
+        // collapsed) ends at its own title box. `None` until the first section starts —
+        // rows above it are bare, with no box to measure against.
+        let mut prev_bottom: Option<f32> = None;
         for i in 0..self.display_params.len() {
             if hidden[i] {
                 rects.push((self.rect.x + 8.0, cur_y, self.rect.width - 16.0, 0.0));
                 continue;
             }
+            let is_header = self.display_params[i].2 == "section";
+            if is_header {
+                if let Some(bottom) = prev_bottom {
+                    cur_y = bottom + SECTION_GAP + TITLE_BOX_INSET;
+                }
+            }
             let h = self.row_height(i);
             rects.push((self.rect.x + 8.0, cur_y, self.rect.width - 16.0, h));
-            cur_y += h + 8.0;
+            prev_bottom = Some(if is_header {
+                cur_y - TITLE_BOX_INSET + TITLE_BOX_H
+            } else if prev_bottom.is_some() {
+                cur_y + h + CONTENT_BOX_PAD
+            } else {
+                cur_y + h
+            });
+            cur_y += h + ROW_GAP;
         }
         rects
     }
@@ -598,8 +644,8 @@ impl ParametersBg {
                 if start <= end && start < rects.len() && end < rects.len() {
                     let r_start = rects[start];
                     let r_end = rects[end];
-                    let by = r_start.1 - 4.0;
-                    let bh = (r_end.1 + r_end.3 + 4.0) - by;
+                    let by = r_start.1 - CONTENT_BOX_PAD;
+                    let bh = (r_end.1 + r_end.3 + CONTENT_BOX_PAD) - by;
                     push_box(&mut param_quads, tb_x, by, full_w, bh);
 
                     let line_x = tb_x + 12.0;
@@ -2075,6 +2121,41 @@ mod tests {
         p.mouse_input(MouseButton::Left, ElementState::Pressed, bx + 4.0, by + bh / 2.0, &mut ctx);
         assert!(!p.section_collapsed("Transform"));
         assert_eq!(p.get_total_content_height(), expanded_h);
+    }
+
+    #[test]
+    fn section_to_section_gap_matches_the_title_to_content_gap() {
+        let p = panel_with(&[
+            ("Transform", "", "section"),
+            ("Size", "1.00", "slider:0:2"),
+            ("Shading", "", "section"),
+            ("On", "true", "checkbox"),
+        ]);
+        let rects = p.get_param_rects();
+        let title_bottom = |i: usize| rects[i].1 - TITLE_BOX_INSET + TITLE_BOX_H;
+        let content_top = |i: usize| rects[i].1 - CONTENT_BOX_PAD;
+        let content_bottom = |i: usize| rects[i].1 + rects[i].3 + CONTENT_BOX_PAD;
+        let title_top = |i: usize| rects[i].1 - TITLE_BOX_INSET;
+
+        assert_eq!(content_top(1) - title_bottom(0), SECTION_GAP, "title -> its content box");
+        assert_eq!(title_top(2) - content_bottom(1), SECTION_GAP, "section -> next section");
+    }
+
+    #[test]
+    fn a_collapsed_section_keeps_the_same_gap_to_the_next_one() {
+        // With no content box under it, the collapsed section's bottom edge is its own title
+        // box — a fixed row-pitch bump would leave a double gap here.
+        let mut p = panel_with(&[
+            ("Transform", "", "section"),
+            ("Size", "1.00", "slider:0:2"),
+            ("Shading", "", "section"),
+            ("On", "true", "checkbox"),
+        ]);
+        p.set_section_collapsed("Transform", true);
+        let rects = p.get_param_rects();
+        let collapsed_bottom = rects[0].1 - TITLE_BOX_INSET + TITLE_BOX_H;
+        let next_title_top = rects[2].1 - TITLE_BOX_INSET;
+        assert_eq!(next_title_top - collapsed_bottom, SECTION_GAP);
     }
 
     #[test]
