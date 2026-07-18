@@ -1651,13 +1651,30 @@ pub trait Application: Sized + 'static {
     /// this for stateful relayout that can't wait for the next paint callback.
     fn handle_resize(&mut self, _width: f32, _height: f32, _scale: f64) {}
 
-    /// Whether the runner's built-in client-side decorations apply: the 8px
-    /// rect-edge resize grabs, the titlebar move band, and the matching edge
-    /// cursors. Return `false` for a window whose chrome doesn't follow its
-    /// rect (e.g. a circular pane) and drive moves/resizes yourself via
+    /// Whether the runner's built-in client-side decorations apply: the
+    /// titlebar move band, the movable-backplate drag regions, and — when
+    /// [`csd_resize_borders`](Application::csd_resize_borders) is also on —
+    /// the rect-edge resize grabs and their edge cursors. Return `false` for a
+    /// window whose chrome doesn't follow its rect (e.g. a circular pane) and
+    /// drive moves/resizes yourself via
     /// [`take_window_action`](Application::take_window_action).
     fn standard_csd(&self) -> bool {
         true
+    }
+
+    /// Whether the standard CSD claims the outer 8px of the surface as resize
+    /// grabs (with matching edge cursors). Off by default: under the cce
+    /// compositor the server already provides a resize band just *outside* the
+    /// window, so enabling this gives a window two adjacent 8px gutters driven
+    /// by different code paths — and only the compositor's snaps to the
+    /// desktop grid. It also costs the app clicks, since a press inside the
+    /// band starts a grab and never reaches the widgets underneath.
+    ///
+    /// Turn it on for a window that must be resizable by its own edges under a
+    /// compositor that provides no such affordance. Only consulted when
+    /// [`standard_csd`](Application::standard_csd) is on.
+    fn csd_resize_borders(&self) -> bool {
+        false
     }
 
     /// Whether the standard CSD reserves an implicit title-bar strip (`y` in `[8, 32)`) as a
@@ -1811,7 +1828,10 @@ impl<A: Application> EngineState<A> {
         if let Some(icon) = inner.cursor_icon(lx, ly) {
             return icon;
         }
-        if inner.settings().app_id.starts_with("cce-status") || !inner.standard_csd() {
+        if inner.settings().app_id.starts_with("cce-status")
+            || !inner.standard_csd()
+            || !inner.csd_resize_borders()
+        {
             return CursorIcon::Default;
         }
         let border = 8.0f32;
@@ -2376,7 +2396,11 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     if btn == MouseButton::Left && !is_status_bar && self.inner.as_ref().unwrap().standard_csd() {
                         let border = 8.0f32;
                         let mut edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None;
-                        if ly < border {
+                        if !self.inner.as_ref().unwrap().csd_resize_borders() {
+                            // Resize borders are off: the compositor's own band
+                            // outside the window handles it. Fall through to the
+                            // move checks so drag-to-move still works.
+                        } else if ly < border {
                             if lx < border {
                                 edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::TopLeft;
                             } else if lx > self.logical_width - border {
