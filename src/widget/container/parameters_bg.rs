@@ -76,6 +76,20 @@ const TITLE_BOX_INSET: f32 = 2.0;
 const TITLE_BOX_H: f32 = 22.0;
 /// How far a section's content box overhangs the first and last row it wraps.
 const CONTENT_BOX_PAD: f32 = 4.0;
+/// The section outline's color, stroke width, and its corner radii: convex (outer) corners, and the
+/// concave (inner) corners where the neck joins the title and content boxes.
+const SECTION_BORDER_COLOR: [f32; 4] = [0.18, 0.18, 0.27, 1.0];
+const SECTION_BORDER_T: f32 = 1.0;
+const SECTION_R: f32 = 4.0;
+const SECTION_NECK_R: f32 = 3.0;
+/// The neck — the two sides of the outline running close together where a single connector
+/// line used to. `SECTION_NECK_X` is its left side, at the old connector's x.
+const SECTION_NECK_W: f32 = 4.0;
+const SECTION_NECK_X: f32 = 12.0;
+/// Narrowest a title box may be: both its corners, both neck fillets, and the neck between
+/// them. Titles run wider than this in practice; it only keeps the neck inside the box.
+const SECTION_TITLE_MIN_W: f32 = 2.0 * SECTION_R + 2.0 * SECTION_NECK_R + SECTION_NECK_W;
+
 /// The gap between one section's bottom box edge and the next section's title box. Equal to
 /// the title→content gap by construction: a header row is `TITLE_BOX_INSET + TITLE_BOX_H`
 /// tall as drawn and `ROW_GAP` from the row under it, whose content box starts
@@ -194,8 +208,156 @@ impl ParametersBg {
         let (label_family, label_size) = crate::layout::control_label_font_parsed();
         let text_w =
             crate::widget::display::measure_text_width(&self.display_params[hdr].0, &label_family, label_size);
-        let title_w = (text_w + 16.0).min(full_w);
+        let title_w = (text_w + 16.0).max(SECTION_TITLE_MIN_W).min(full_w);
         (self.rect.x + 4.0, r_hdr.1 - TITLE_BOX_INSET, title_w, TITLE_BOX_H)
+    }
+
+    /// Each section as `(header index, its content-row range)` — the rows between a header
+    /// and the next one, `None` for a header with nothing under it.
+    fn sections(&self) -> Vec<(usize, Option<(usize, usize)>)> {
+        let mut out: Vec<(usize, Option<(usize, usize)>)> = Vec::new();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if p.2 == "section" {
+                out.push((i, None));
+            } else if let Some((_, content)) = out.last_mut() {
+                match content {
+                    Some((_, end)) => *end = i,
+                    None => *content = Some((i, i)),
+                }
+            }
+        }
+        out
+    }
+
+    /// Each section's boxes: the title box, plus the box wrapping its rows (`None` when the
+    /// section is collapsed or has no rows). The shared source for the outline's straight
+    /// runs and its corner fillets, so the two halves can't disagree.
+    fn section_boxes(&self) -> Vec<((f32, f32, f32, f32), Option<(f32, f32, f32, f32)>)> {
+        let rects = self.get_param_rects();
+        let full_w = self.rect.width - 8.0;
+        let mut out = Vec::new();
+        for (hdr, content) in self.sections() {
+            if hdr >= rects.len() {
+                continue;
+            }
+            let title = self.section_title_box(hdr, rects[hdr]);
+            let content_box = if self.collapsed.contains(&self.display_params[hdr].0) {
+                None
+            } else {
+                content.and_then(|(start, end)| {
+                    if start <= end && start < rects.len() && end < rects.len() {
+                        let by = rects[start].1 - CONTENT_BOX_PAD;
+                        let bh = (rects[end].1 + rects[end].3 + CONTENT_BOX_PAD) - by;
+                        Some((title.0, by, full_w, bh))
+                    } else {
+                        None
+                    }
+                })
+            };
+            out.push((title, content_box));
+        }
+        out
+    }
+
+    /// One section's outline: a SINGLE continuous border that wraps the title box, necks
+    /// down through the two close-together sides where the old connector line ran, and wraps
+    /// the content rows — as `(straight runs, corner fillets)`.
+    ///
+    /// Runs are `(x, y, w, h)`; fillets are `(cx, cy, radius, start, end)` for an arc stroked
+    /// `SECTION_BORDER_T` inward of `radius` (the renderer's convention). Convex corners take
+    /// the stroke inside the box, so their radius is the outer one; the concave neck corners
+    /// have their centre out in the empty pocket, so theirs carries the `+ T` that puts the
+    /// ink on the far side. Every run stops a radius short of its corner, and each fillet
+    /// picks it up there — the path closes.
+    fn section_outline(
+        &self,
+        title: (f32, f32, f32, f32),
+        content: Option<(f32, f32, f32, f32)>,
+    ) -> (Vec<(f32, f32, f32, f32)>, Vec<(f32, f32, f32, f32, f32)>) {
+        use std::f32::consts::{PI, TAU};
+        const Q: f32 = std::f32::consts::FRAC_PI_2;
+        let (t, r) = (SECTION_BORDER_T, SECTION_R);
+        let mut quads: Vec<(f32, f32, f32, f32)> = Vec::new();
+        let mut arcs: Vec<(f32, f32, f32, f32, f32)> = Vec::new();
+        fn hrun(out: &mut Vec<(f32, f32, f32, f32)>, x0: f32, x1: f32, y: f32) {
+            if x1 - x0 > 0.01 {
+                out.push((x0, y, x1 - x0, SECTION_BORDER_T));
+            }
+        }
+        fn vrun(out: &mut Vec<(f32, f32, f32, f32)>, y0: f32, y1: f32, x: f32) {
+            if y1 - y0 > 0.01 {
+                out.push((x, y0, SECTION_BORDER_T, y1 - y0));
+            }
+        }
+
+        let (tx, ty, tw, th) = title;
+        let ty_b = ty + th; // the title box's bottom edge
+        arcs.push((tx + r, ty + r, r, PI, PI + Q)); // title top-left
+        arcs.push((tx + tw - r, ty + r, r, PI + Q, TAU)); // title top-right
+        arcs.push((tx + tw - r, ty_b - r, r, 0.0, Q)); // title bottom-right
+        arcs.push((tx + r, ty_b - r, r, Q, PI)); // title bottom-left
+        hrun(&mut quads, tx + r, tx + tw - r, ty); // title top
+        vrun(&mut quads, ty + r, ty_b - r, tx + tw - t); // title right
+        vrun(&mut quads, ty + r, ty_b - r, tx); // title left
+
+        let Some((cx, cy_t, cw, ch)) = content else {
+            // Collapsed or empty: the title box IS the section, so it closes on itself.
+            hrun(&mut quads, tx + r, tx + tw - r, ty_b - t);
+            return (quads, arcs);
+        };
+
+        // The neck. Its fillets shrink if the gap is tighter than they are, and its x is
+        // clamped so it can't run out past the title box's own corners.
+        let nr = SECTION_NECK_R.min((cy_t - ty_b) / 2.0).max(0.0);
+        let lo = tx + r + nr;
+        let hi = (tx + tw - r - nr - SECTION_NECK_W).max(lo);
+        let nx0 = (tx + SECTION_NECK_X).clamp(lo, hi);
+        let nx1 = nx0 + SECTION_NECK_W;
+
+        hrun(&mut quads, tx + r, nx0 - nr, ty_b - t); // title bottom, left of the neck
+        hrun(&mut quads, nx1 + nr, tx + tw - r, ty_b - t); // title bottom, right of it
+        vrun(&mut quads, ty_b + nr, cy_t - nr, nx0); // neck, left side
+        vrun(&mut quads, ty_b + nr, cy_t - nr, nx1 - t); // neck, right side
+        arcs.push((nx0 - nr, ty_b + nr, nr + t, PI + Q, TAU)); // title -> neck, left
+        arcs.push((nx1 + nr, ty_b + nr, nr + t, PI, PI + Q)); // title -> neck, right
+        arcs.push((nx0 - nr, cy_t - nr, nr + t, 0.0, Q)); // neck -> content, left
+        arcs.push((nx1 + nr, cy_t - nr, nr + t, Q, PI)); // neck -> content, right
+
+        arcs.push((cx + r, cy_t + r, r, PI, PI + Q)); // content top-left
+        arcs.push((cx + cw - r, cy_t + r, r, PI + Q, TAU)); // content top-right
+        arcs.push((cx + cw - r, cy_t + ch - r, r, 0.0, Q)); // content bottom-right
+        arcs.push((cx + r, cy_t + ch - r, r, Q, PI)); // content bottom-left
+        hrun(&mut quads, cx + r, nx0 - nr, cy_t); // content top, left of the neck
+        hrun(&mut quads, nx1 + nr, cx + cw - r, cy_t); // content top, right of it
+        vrun(&mut quads, cy_t + r, cy_t + ch - r, cx + cw - t); // content right
+        hrun(&mut quads, cx + r, cx + cw - r, cy_t + ch - t); // content bottom
+        vrun(&mut quads, cy_t + r, cy_t + ch - r, cx); // content left
+
+        (quads, arcs)
+    }
+
+    /// The section outlines' corner fillets, as the renderer's arc tuples
+    /// `(cx, cy, radius, thickness, start, end, color)`.
+    ///
+    /// A concrete accessor rather than prims out of [`Paint::paint`] on purpose: the host
+    /// draws this panel through the legacy plain-quad hatch, and `append_widget_plate` serves
+    /// a widget's arcs UNCLIPPED — these have to land inside the pane's scroll viewport, so
+    /// the host draws them itself under its own clip (the straight runs ride `plain_quads`,
+    /// which clips them there by hand).
+    pub fn arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let color = SECTION_BORDER_COLOR;
+        let mut out = Vec::new();
+        for (title, content) in self.section_boxes() {
+            let (_, arcs) = self.section_outline(title, content);
+            out.extend(
+                arcs.into_iter()
+                    .map(|(cx, cy, r, a0, a1)| (cx, cy, r, SECTION_BORDER_T, a0, a1, color)),
+            );
+        }
+        out
     }
 
     /// Where the rows start, in absolute y — the origin `get_param_rects` lays out from.
@@ -595,66 +757,12 @@ impl ParametersBg {
 
         let mut param_quads = Vec::new();
 
-        // Find each section: its header row index plus the content-row range
-        // beneath it (up to the next header). `content` is None for a header
-        // with no rows under it.
-        let mut sections: Vec<(usize, Option<(usize, usize)>)> = Vec::new();
-        for (i, p) in self.display_params.iter().enumerate() {
-            if p.2 == "section" {
-                sections.push((i, None));
-            } else if let Some((_, content)) = sections.last_mut() {
-                match content {
-                    Some((_, end)) => *end = i,
-                    None => *content = Some((i, i)),
-                }
-            }
-        }
-
-        // Draw, per section: a box around the title, a box around the content
-        // rows, and a short vertical line joining the two.
-        let border_color = [0.18, 0.18, 0.27, 1.0];
-        let border_t = 1.0;
-        let push_box = |quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>,
-                        bx: f32, by: f32, bw: f32, bh: f32| {
-            quads.push((bx, by, bw, border_t, border_color)); // top
-            quads.push((bx, by + bh - border_t, bw, border_t, border_color)); // bottom
-            quads.push((bx, by, border_t, bh, border_color)); // left
-            quads.push((bx + bw - border_t, by, border_t, bh, border_color)); // right
-        };
-
-        let full_w = self.rect.width - 8.0;
-        for (hdr, content) in sections {
-            if hdr >= rects.len() {
-                continue;
-            }
-            let r_hdr = rects[hdr];
-
-            // Title box, wrapping the header label (drawn at rect.x + 12) — also the
-            // click target that collapses the section.
-            let (tb_x, tb_y, title_w, tb_h) = self.section_title_box(hdr, r_hdr);
-            push_box(&mut param_quads, tb_x, tb_y, title_w, tb_h);
-
-            // Collapsed: the title box is the whole section — no content box, no connector.
-            if self.collapsed.contains(&self.display_params[hdr].0) {
-                continue;
-            }
-
-            // Content box + the connector line dropping into it from the title.
-            if let Some((start, end)) = content {
-                if start <= end && start < rects.len() && end < rects.len() {
-                    let r_start = rects[start];
-                    let r_end = rects[end];
-                    let by = r_start.1 - CONTENT_BOX_PAD;
-                    let bh = (r_end.1 + r_end.3 + CONTENT_BOX_PAD) - by;
-                    push_box(&mut param_quads, tb_x, by, full_w, bh);
-
-                    let line_x = tb_x + 12.0;
-                    let line_top = tb_y + tb_h;
-                    if by > line_top {
-                        param_quads.push((line_x, line_top, border_t, by - line_top, border_color));
-                    }
-                }
-            }
+        // Each section is drawn as ONE continuous outline — around the title, down the
+        // neck, around the content rows — whose straight runs are these quads; its corner
+        // fillets ride `arcs()`, which the host draws under the same clip.
+        for (title, content) in self.section_boxes() {
+            let (runs, _) = self.section_outline(title, content);
+            param_quads.extend(runs.into_iter().map(|(x, y, w, h)| (x, y, w, h, SECTION_BORDER_COLOR)));
         }
 
         let hidden = self.hidden_rows();
@@ -2123,6 +2231,81 @@ mod tests {
         p.mouse_input(MouseButton::Left, ElementState::Pressed, bx + 4.0, by + bh / 2.0, &mut ctx);
         assert!(!p.section_collapsed("Transform"));
         assert_eq!(p.get_total_content_height(), expanded_h);
+    }
+
+    /// Both ends of a straight run, and of an arc, as points on the path.
+    fn run_ends(r: &(f32, f32, f32, f32)) -> [(f32, f32); 2] {
+        let (x, y, w, h) = *r;
+        if w > h {
+            [(x, y), (x + w, y)]
+        } else {
+            [(x, y), (x, y + h)]
+        }
+    }
+    fn arc_ends(a: &(f32, f32, f32, f32, f32)) -> [(f32, f32); 2] {
+        let (cx, cy, r, a0, a1) = *a;
+        [
+            (cx + r * a0.cos(), cy + r * a0.sin()),
+            (cx + r * a1.cos(), cy + r * a1.sin()),
+        ]
+    }
+
+    #[test]
+    fn section_outline_is_one_continuous_path() {
+        let p = panel_with(&[("Transform", "", "section"), ("Size", "1.00", "slider:0:2")]);
+        let (title, content) = p.section_boxes().into_iter().next().expect("one section");
+        let content = content.expect("the section has a content box");
+        let (runs, arcs) = p.section_outline(title, content.into());
+
+        // Title, neck, content: four corners each.
+        assert_eq!(arcs.len(), 12);
+        // The concave four are the ones centred out in the gap between the boxes — their
+        // centres sit in the empty pocket, which is what makes them curve the other way.
+        let (title_bottom_edge, content_top_edge) = (title.1 + title.3, content.1);
+        let concave = arcs
+            .iter()
+            .filter(|(_, cy, ..)| *cy > title_bottom_edge && *cy < content_top_edge)
+            .count();
+        assert_eq!(concave, 4, "the neck's inside corners");
+
+        // Every corner hands off to a straight run — no arc dangles. (Within a stroke width:
+        // runs and arcs are anchored on opposite ink sides at the concave corners.)
+        let ends: Vec<(f32, f32)> = runs.iter().flat_map(|r| run_ends(r)).collect();
+        for arc in &arcs {
+            for (ax, ay) in arc_ends(arc) {
+                let nearest = ends
+                    .iter()
+                    .map(|(x, y)| ((x - ax).powi(2) + (y - ay).powi(2)).sqrt())
+                    .fold(f32::INFINITY, f32::min);
+                assert!(nearest <= SECTION_BORDER_T + 0.01, "corner at ({ax}, {ay}) dangles: {nearest}");
+            }
+        }
+
+        // The neck is two sides a set distance apart, spanning the title/content gap — and
+        // both boxes' edges break around it rather than running through.
+        let verticals: Vec<&(f32, f32, f32, f32)> = runs
+            .iter()
+            .filter(|(_, y, _, h)| *h > 0.0 && *y >= title.1 + title.3 && *y < content.1)
+            .collect();
+        assert_eq!(verticals.len(), 2, "the neck's two sides");
+        let (nx0, nx1) = (verticals[0].0, verticals[1].0);
+        assert!((nx1 - nx0 - (SECTION_NECK_W - SECTION_BORDER_T)).abs() < 0.01);
+        let title_bottom = title.1 + title.3 - SECTION_BORDER_T;
+        let bottom_runs = runs.iter().filter(|(_, y, _, _)| (*y - title_bottom).abs() < 0.01).count();
+        assert_eq!(bottom_runs, 2, "the title's bottom edge splits around the neck");
+        let content_top_runs = runs.iter().filter(|(_, y, _, _)| (*y - content.1).abs() < 0.01).count();
+        assert_eq!(content_top_runs, 2, "the content box's top edge splits around the neck");
+    }
+
+    #[test]
+    fn a_collapsed_section_outline_closes_on_itself() {
+        let mut p = panel_with(&[("Transform", "", "section"), ("Size", "1.00", "slider:0:2")]);
+        p.set_section_collapsed("Transform", true);
+        let (title, content) = p.section_boxes().into_iter().next().expect("one section");
+        assert!(content.is_none(), "nothing to wrap below a collapsed header");
+        let (runs, arcs) = p.section_outline(title, None);
+        assert_eq!(arcs.len(), 4, "a plain rounded rect");
+        assert_eq!(runs.len(), 4);
     }
 
     #[test]
