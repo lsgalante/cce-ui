@@ -828,6 +828,10 @@ impl VkRenderer {
                 self.swapchain_loader.destroy_swapchain(old_swapchain, None);
             }
             self.extent = extent;
+            // Keep the two in step so a rebuild queued for a non-resize reason
+            // (suboptimal/out-of-date) doesn't hand `pending_extent` a stale or
+            // unclamped size.
+            self.desired_extent = extent;
 
             let images = self
                 .swapchain_loader
@@ -995,6 +999,12 @@ impl VkRenderer {
         self.rt.as_ref().is_some_and(|rt| rt.accumulating())
     }
 
+    /// The extent the next `draw_frame` will render at: the pending size when a
+    /// swapchain rebuild is queued, otherwise the live one.
+    fn pending_extent(&self) -> vk::Extent2D {
+        if self.swapchain_dirty { self.desired_extent } else { self.extent }
+    }
+
     /// Request a new physical size (from xdg configure / scale changes). Applied
     /// lazily on the next `draw_frame`.
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -1023,7 +1033,11 @@ impl VkRenderer {
         swash_cache: &mut glyphon::SwashCache,
         spans: &[TextSpan<'_>],
     ) {
-        self.text.prepare(font_system, swash_cache, spans, self.extent);
+        // Against the extent this frame will actually be drawn at: `resize` is
+        // lazy, so with a rebuild pending `self.extent` is still the previous
+        // size and text would land in the wrong NDC (visibly mis-scaled and
+        // offset while a window auto-sizes to its content).
+        self.text.prepare(font_system, swash_cache, spans, self.pending_extent());
     }
 
     /// Render one frame of plain 2D geometry: a single unclipped batch, no
