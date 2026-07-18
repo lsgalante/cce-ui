@@ -53,7 +53,16 @@ pub enum Prim {
     /// `surface` is the color of what lies beneath (the thing being carved); it is only
     /// the base for the edge shading, and is never filled. Its alpha carries through to
     /// the edges, so a recess in a translucent plate stays translucent.
-    Recess { rect: Rect, radii: Radii, surface: [f32; 4], depth: f32 },
+    /// `edges` is (top, right, bottom, left): which walls of the carve actually exist.
+    /// A region flush with the plate's own edge is a step, not a trough — see
+    /// `push_bevel_edge_vertices_banded`.
+    Recess { rect: Rect, radii: Radii, surface: [f32; 4], depth: f32, edges: (bool, bool, bool, bool) },
+    /// The window's glass slab: a rounded fill plus a rolled, lit edge around its whole
+    /// perimeter, drawn at full size. Distinct from `Bevel`, which insets its fill by
+    /// `depth` — a plate must fill the window exactly, or the compositor's rounded window
+    /// corners would show a gap. `depth` is the width of the roll-off in px, not a color
+    /// offset (the shading amplitude is the DE-wide `bevel_depth`).
+    Plate { rect: Rect, radii: Radii, color: [f32; 4], depth: f32 },
     Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
     Vector { x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap },
     Circle { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
@@ -340,8 +349,24 @@ impl PaintCtx {
     /// Carve a recess into the already-painted surface below. Unlike `bevel`, this fills
     /// nothing — `surface` is the color being carved, used only to shade the edges.
     pub fn recess(&mut self, rect: Rect, radii: Radii, surface: [f32; 4], depth: f32) {
+        self.recess_edges(rect, radii, surface, depth, (true, true, true, true));
+    }
+
+    /// [`PaintCtx::recess`] with only some of the walls — see `Prim::Recess`.
+    pub fn recess_edges(
+        &mut self, rect: Rect, radii: Radii, surface: [f32; 4], depth: f32,
+        edges: (bool, bool, bool, bool),
+    ) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Recess { rect, radii, surface, depth });
+        self.push(Prim::Recess { rect, radii, surface, depth, edges });
+    }
+
+    /// The window's glass slab: rounded fill at full size plus a rolled, lit perimeter.
+    /// `depth` is the roll-off width in px — pass [`crate::layout::bevel_width`] unless the
+    /// window wants a shallower edge than the DE default.
+    pub fn plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Plate { rect, radii, color, depth });
     }
 
     pub fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {

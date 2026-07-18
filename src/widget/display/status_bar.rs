@@ -20,6 +20,11 @@ pub struct StatusBar {
     pub text_offset_x: Option<f32>,
     pub text_color: Option<[f32; 4]>,
     pub bg_color: Option<[f32; 4]>,
+    /// Draw as a step carved into the window backplate instead of an opaque slab: no
+    /// background fill of its own, just the shaded wall facing the content, so the plate
+    /// shows through. `bg_color` is ignored while this is set — see
+    /// [`Adapted::<StatusBar>::with_recess`].
+    pub recessed: bool,
 }
 
 impl StatusBar {
@@ -31,6 +36,7 @@ impl StatusBar {
             text_offset_x: None,
             text_color: None,
             bg_color: None,
+            recessed: false,
         })
     }
 
@@ -79,6 +85,16 @@ impl Adapted<StatusBar> {
         self.bg_color = Some(color);
         self
     }
+
+    /// Drop the bar's own background and sink it into the window backplate instead, the
+    /// mirror of `MenuBar::with_recess`. A status bar always sits flush with the bottom of
+    /// the plate, so it is shaded as a plateau one step down whose only wall is the top one
+    /// (facing the content) — the other three sides are the plate's outer edge, which
+    /// carries its own roll.
+    pub fn with_recess(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
+    }
 }
 
 impl Layout for StatusBar {
@@ -121,9 +137,23 @@ impl Paint for StatusBar {
     /// default `all_rounded_quads` path) — plus the text label (the legacy `text_labels`
     /// body; deliberately no `widget_font`, see module docs).
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // Always the plain background quad — the rounded-against-parent variant required a
-        // backplate parent, which no longer exists.
-        ctx.quad(rect, self.bg());
+        if self.recessed {
+            // The shading base is the plate's own color (page_low at the active backplate
+            // opacity, matching how the window emits it) — these edges are that surface
+            // catching and losing light, so shading a transparent color would just produce
+            // transparent edges.
+            let mut surface = colors::page_low_color();
+            if surface[3] > 0.001 {
+                surface[3] = colors::active_backplate_opacity();
+            }
+            // Capped against the bar's own height so a deep DE-wide roll can't swallow it.
+            let depth = crate::layout::bevel_width().min(rect.height * 0.4);
+            ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), surface, depth, (true, false, false, false));
+        } else {
+            // Always the plain background quad — the rounded-against-parent variant required a
+            // backplate parent, which no longer exists.
+            ctx.quad(rect, self.bg());
+        }
 
         if !self.text.is_empty() {
             let offset_x = self.text_offset_x.unwrap_or(12.0);

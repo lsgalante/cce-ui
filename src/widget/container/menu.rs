@@ -27,10 +27,6 @@ use crate::widget::{
     MenuController, MouseButton, NamedKey, PageSelector, Paint, DROPDOWN_ITEM_H,
 };
 
-/// Thickness in logical px of the shaded lip around a recessed menubar. Two px reads as
-/// a carved edge at a glance without turning into a drawn border.
-const RECESS_EDGE_PX: f32 = 2.0;
-
 pub struct MenuBar {
     pub visible: bool,
     pub network_opacity: f32,
@@ -478,17 +474,22 @@ impl Paint for MenuBar {
             if surface[3] > 0.001 {
                 surface[3] = colors::active_backplate_opacity();
             }
-            // `depth` is the edge's thickness in px (the color offset is a separate thing:
-            // the renderer applies `bevel_depth` itself). The top corners follow the plate's
-            // radius so the lip stays inside its arc — square ones there paint a notch out
-            // past the rounded plate, into the transparent corner. The bottom corners stay
-            // square: that edge meets the content below, not the window edge.
-            let plate_r = if rect.x <= 0.5 && rect.y <= 0.5 {
-                colors::backplate_corner_radius()
+            // `depth` is the roll-off width in px (the shading amplitude is separate: the
+            // renderer applies `bevel_depth` itself), capped so a deep DE-wide setting can
+            // never swallow a short bar — the two walls would meet in the middle and the
+            // flat floor would vanish.
+            let depth = crate::layout::bevel_width().min(rect.height * 0.4);
+            if rect.x <= 0.5 && rect.y <= 0.5 {
+                // Flush with the plate's top-left: the bar is a plateau one step down, not a
+                // trough, so its only wall is the one facing the content. The other three
+                // sides are the plate's outer edge, where the plate's own roll already lives
+                // — carving there too would cut a second lip into the same pixels.
+                ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), surface, depth, (false, false, true, false));
             } else {
-                0.0
-            };
-            ctx.recess(rect, (plate_r, plate_r, 0.0, 0.0), surface, RECESS_EDGE_PX);
+                // Inset from the plate edge: a real trough, walled all round, its corners
+                // rounded by the roll itself.
+                ctx.recess(rect, (depth, depth, depth, depth), surface, depth);
+            }
         } else {
             // Background: always the plain quad — the rounded-against-parent variant required a
             // backplate parent, which no longer exists.

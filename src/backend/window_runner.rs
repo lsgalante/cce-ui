@@ -381,6 +381,30 @@ pub fn quad_vertices_with_clip(
     ]
 }
 
+/// A quad whose four corners each carry their own color, Gouraud-interpolated across both
+/// triangles by the shader (`@location(0) color` has no `flat` qualifier). Corner order is
+/// TL, TR, BR, BL. Keep the alpha equal on all four: negative alpha is the blur sentinel,
+/// so a gradient that crossed zero would tear the triangle in half.
+pub fn quad_vertices_shaded(
+    x: f32, y: f32, w: f32, h: f32,
+    sw: f32, sh: f32,
+    c_tl: [f32; 4], c_tr: [f32; 4], c_br: [f32; 4], c_bl: [f32; 4],
+    clip_circle: [f32; 3],
+) -> [Vertex; 6] {
+    let x0 = (x / sw) * 2.0 - 1.0;
+    let y0 = 1.0 - (y / sh) * 2.0;
+    let x1 = ((x + w) / sw) * 2.0 - 1.0;
+    let y1 = 1.0 - ((y + h) / sh) * 2.0;
+    [
+        Vertex { position: [x0, y0], color: c_tl, clip_circle },
+        Vertex { position: [x1, y0], color: c_tr, clip_circle },
+        Vertex { position: [x0, y1], color: c_bl, clip_circle },
+        Vertex { position: [x1, y0], color: c_tr, clip_circle },
+        Vertex { position: [x1, y1], color: c_br, clip_circle },
+        Vertex { position: [x0, y1], color: c_bl, clip_circle },
+    ]
+}
+
 pub fn quad_vertices_clipped(
     x: f32, y: f32, w: f32, h: f32,
     surface_w: f32, surface_h: f32,
@@ -863,6 +887,90 @@ pub fn push_bevel_edge_vertices_radii(
     light_sign: f32,
     out: &mut Vec<Vertex>,
 ) {
+    push_bevel_edge_vertices_banded(
+        x, y, ww, h, radii, t, sw, sh, base_color, clip_circle, light_sign,
+        default_bevel_bands(t), (true, true, true, true), EdgeKind::Rim, out,
+    );
+}
+
+/// What kind of height change an edge represents. The two shade differently because they
+/// are different shapes, and using one where the other belongs is what makes a bevel read
+/// as a drawn line instead of a surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EdgeKind {
+    /// The surface *ends* here: a quarter-round rolling from face-on at the inner edge of
+    /// the lip to fully in-plane at the outer boundary, where it drops away. The shading
+    /// therefore peaks exactly at the boundary and dies inward. This is a plate's outer
+    /// perimeter.
+    Rim,
+    /// The surface *continues* at a different height: one plateau steps down to another.
+    /// A height field that falls monotonically across the transition has its normal tilted
+    /// toward the low side the whole way, steepest in the middle and flat at both ends —
+    /// so the shading is a bump straddling the boundary, not a band butted against it.
+    /// Hanging the band on one side instead leaves the seam the eye reads as a drawn line.
+    Step,
+}
+
+/// Shading across an edge at signed distance `d` from the boundary (positive = toward the
+/// shape's interior), for a transition of width `t`. Returns the light term as a fraction
+/// of full tilt.
+#[inline]
+fn bevel_profile(kind: EdgeKind, d: f32, t: f32) -> f32 {
+    if t <= 0.0 {
+        return 0.0;
+    }
+    match kind {
+        // Normal rotates from in-plane (d = 0) to face-on (d = t): sine of what tilt is
+        // left. A linear ramp here reads as a flat 45° chamfer instead of a roll.
+        EdgeKind::Rim => ((1.0 - (d / t).clamp(0.0, 1.0)) * std::f32::consts::FRAC_PI_2).sin(),
+        // Symmetric bump over [-t/2, +t/2], zero at both ends so the transition blends into
+        // both plateaus with no seam.
+        EdgeKind::Step => {
+            let s = (d / t + 0.5).clamp(0.0, 1.0);
+            (s * std::f32::consts::PI).sin()
+        }
+    }
+}
+
+/// The signed distance range an edge's shading occupies, relative to the boundary.
+#[inline]
+fn bevel_span(kind: EdgeKind, t: f32) -> (f32, f32) {
+    match kind {
+        EdgeKind::Rim => (0.0, t),
+        EdgeKind::Step => (-0.5 * t, 0.5 * t),
+    }
+}
+
+/// How many gradient bands to slice a lip of thickness `t` into. Vertex colors interpolate
+/// linearly, so each band is a chord of [`bevel_profile`]'s curve; one band per ~1.5px
+/// keeps the error under a shade step without emitting geometry finer than the display
+/// resolves. A 2px lip stays a single ramp; a 12px rolled edge gets eight.
+fn default_bevel_bands(t: f32) -> usize {
+    ((t / 1.5).ceil() as usize).clamp(1, 8)
+}
+
+/// As [`push_bevel_edge_vertices_radii`], with the band count forced and the walls
+/// selectable — for callers that want a coarser or finer roll-off than thickness alone
+/// implies, or that are shading a step rather than a closed shape.
+///
+/// `edges` is (top, right, bottom, left). Suppressing a wall matters for a region that
+/// runs flush to the surface's own edge: a full-width menubar sunk into the top of a plate
+/// is a *plateau one step down*, not a trough, so its only real wall is the one facing the
+/// content. Drawing the other three would carve a lip along the plate's outer edge, where
+/// the plate's own roll already lives, and the two would fight.
+pub fn push_bevel_edge_vertices_banded(
+    x: f32, y: f32, ww: f32, h: f32,
+    radii: (f32, f32, f32, f32),
+    t: f32,
+    sw: f32, sh: f32,
+    base_color: [f32; 4],
+    clip_circle: [f32; 3],
+    light_sign: f32,
+    bands: usize,
+    edges: (bool, bool, bool, bool),
+    kind: EdgeKind,
+    out: &mut Vec<Vertex>,
+) {
     let cap = ww.min(h) * 0.5;
     let (tl, tr, br, bl) = (
         radii.0.clamp(0.0, cap),
@@ -870,14 +978,22 @@ pub fn push_bevel_edge_vertices_radii(
         radii.2.clamp(0.0, cap),
         radii.3.clamp(0.0, cap),
     );
+    let t = t.clamp(0.0, cap);
+    if t <= 0.0 {
+        return;
+    }
+    let bands = bands.max(1);
 
     let rad = crate::layout::light_source_position();
     let lx = rad.cos() * light_sign;
     let ly = -rad.sin() * light_sign;
+    let depth = crate::layout::bevel_depth();
 
-    let edge_color = |factor: f32| -> [f32; 4] {
-        let max_offset = crate::layout::bevel_depth();
-        let offset = factor * max_offset;
+    // Only RGB moves; alpha is held at the base value on every vertex. The renderer reads
+    // a negative alpha as the blur-behind sentinel (shader2d.wgsl), so interpolating alpha
+    // could cross zero and flip part of a triangle into blur mode.
+    let shade = |factor: f32| -> [f32; 4] {
+        let offset = factor.clamp(-1.0, 1.0) * depth;
         [
             (base_color[0] + offset).clamp(0.0, 1.0),
             (base_color[1] + offset).clamp(0.0, 1.0),
@@ -885,46 +1001,106 @@ pub fn push_bevel_edge_vertices_radii(
             base_color[3],
         ]
     };
-
-    let top_color = edge_color(-ly);
-    let left_color = edge_color(-lx);
-    let bottom_color = edge_color(ly);
-    let right_color = edge_color(lx);
+    // Color at signed distance `d` from the boundary, for an edge whose outward normal is
+    // `dir`. A `Step` band runs negative — it straddles the boundary into the plateau
+    // outside the rect, which is exactly what removes the seam.
+    let band = |dir: (f32, f32), d: f32| shade(bevel_profile(kind, d, t) * (dir.0 * lx + dir.1 * ly));
+    let (span_lo, span_hi) = bevel_span(kind, t);
 
     // Each flat edge spans between its two adjoining corner radii, not a single uniform
-    // inset — that is what lets the corners differ.
-    out.extend_from_slice(&quad_vertices_with_clip(x + tl, y, ww - tl - tr, t, sw, sh, top_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x, y + tl, t, h - tl - bl, sw, sh, left_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x + bl, y + h - t, ww - bl - br, t, sw, sh, bottom_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + tr, t, h - tr - br, sw, sh, right_color, clip_circle));
+    // inset — that is what lets the corners differ. At a square corner there is no arc to
+    // cover the t×t patch where two edges meet, so the horizontal edges claim it (they run
+    // the full span) and the vertical ones inset by `t`; overlapping them instead would
+    // double-blend that patch, which shows as a dark notch on a translucent surface.
+    let (left_top, left_bot) = (if tl > 0.0 { tl } else { t }, if bl > 0.0 { bl } else { t });
+    let (right_top, right_bot) = (if tr > 0.0 { tr } else { t }, if br > 0.0 { br } else { t });
+    let top_w = ww - tl - tr;
+    let bottom_w = ww - bl - br;
+    let left_h = h - left_top - left_bot;
+    let right_h = h - right_top - right_bot;
 
-    let segments = 16;
+    for k in 0..bands {
+        let d0 = span_lo + (span_hi - span_lo) * (k as f32 / bands as f32);
+        let d1 = span_lo + (span_hi - span_lo) * ((k + 1) as f32 / bands as f32);
+        let bw = d1 - d0;
+
+        // Top: outward normal (0,-1); the gradient runs downward, into the surface.
+        if top_w > 0.0 && edges.0 {
+            let (c0, c1) = (band((0.0, -1.0), d0), band((0.0, -1.0), d1));
+            out.extend_from_slice(&quad_vertices_shaded(
+                x + tl, y + d0, top_w, bw, sw, sh, c0, c0, c1, c1, clip_circle,
+            ));
+        }
+        // Bottom: outward normal (0,1); gradient runs upward.
+        if bottom_w > 0.0 && edges.2 {
+            let (c0, c1) = (band((0.0, 1.0), d0), band((0.0, 1.0), d1));
+            out.extend_from_slice(&quad_vertices_shaded(
+                x + bl, y + h - d1, bottom_w, bw, sw, sh, c1, c1, c0, c0, clip_circle,
+            ));
+        }
+        // Left: outward normal (-1,0); gradient runs rightward.
+        if left_h > 0.0 && edges.3 {
+            let (c0, c1) = (band((-1.0, 0.0), d0), band((-1.0, 0.0), d1));
+            out.extend_from_slice(&quad_vertices_shaded(
+                x + d0, y + left_top, bw, left_h, sw, sh, c0, c1, c1, c0, clip_circle,
+            ));
+        }
+        // Right: outward normal (1,0); gradient runs leftward.
+        if right_h > 0.0 && edges.1 {
+            let (c0, c1) = (band((1.0, 0.0), d0), band((1.0, 0.0), d1));
+            out.extend_from_slice(&quad_vertices_shaded(
+                x + ww - d1, y + right_top, bw, right_h, sw, sh, c1, c0, c0, c1, clip_circle,
+            ));
+        }
+    }
+
+    // A corner arc belongs to both of its adjoining walls, so it is drawn only when both
+    // are — otherwise a suppressed wall would still get a quarter of a lip.
     let corners = [
-        (x + tl, y + tl, tl, std::f32::consts::PI, 1.5 * std::f32::consts::PI), // Top-Left
-        (x + ww - tr, y + tr, tr, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI), // Top-Right
-        (x + ww - br, y + h - br, br, 0.0, 0.5 * std::f32::consts::PI), // Bottom-Right
-        (x + bl, y + h - bl, bl, 0.5 * std::f32::consts::PI, std::f32::consts::PI), // Bottom-Left
+        (x + tl, y + tl, tl, std::f32::consts::PI, 1.5 * std::f32::consts::PI, edges.0 && edges.3), // Top-Left
+        (x + ww - tr, y + tr, tr, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI, edges.0 && edges.1), // Top-Right
+        (x + ww - br, y + h - br, br, 0.0, 0.5 * std::f32::consts::PI, edges.2 && edges.1), // Bottom-Right
+        (x + bl, y + h - bl, bl, 0.5 * std::f32::consts::PI, std::f32::consts::PI, edges.2 && edges.3), // Bottom-Left
     ];
 
-    for &(cx, cy, r, start_angle, end_angle) in &corners {
-        // A square corner has no arc to sweep — the two flat edges already meet there.
-        if r <= 0.0 {
+    for &(cx, cy, r, start_angle, end_angle, enabled) in &corners {
+        // A square corner has no arc to sweep — the flat edges already met there.
+        if r <= 0.0 || !enabled {
             continue;
         }
+        // The corner is a quarter of a torus: shading varies along the sweep (the normal
+        // swings through 90° of the light) *and* across the lip (the roll-off). Both come
+        // out of the vertex colors, so one quad per (segment × band) cell is enough — no
+        // faceting, unlike the 16 flat wedges this replaced.
+        let segments = ((r * 0.75) as usize).clamp(8, 48);
+        let ct = t.min(r);
         for j in 0..segments {
-            let theta1 = start_angle + (j as f32) * (end_angle - start_angle) / (segments as f32);
-            let theta2 = start_angle + ((j + 1) as f32) * (end_angle - start_angle) / (segments as f32);
-            let theta_mid = 0.5 * (theta1 + theta2);
-
-            let factor = (theta_mid.cos() * lx + theta_mid.sin() * ly).clamp(-1.0, 1.0);
-            let segment_color = edge_color(factor);
-
-            push_arc_background_vertices(
-                cx, cy, r, t,
-                theta1, theta2,
-                sw, sh, segment_color, 1, clip_circle,
-                out,
-            );
+            let theta0 = start_angle + (j as f32) * (end_angle - start_angle) / (segments as f32);
+            let theta1 = start_angle + ((j + 1) as f32) * (end_angle - start_angle) / (segments as f32);
+            let (cos0, sin0) = (theta0.cos(), theta0.sin());
+            let (cos1, sin1) = (theta1.cos(), theta1.sin());
+            let f0 = cos0 * lx + sin0 * ly;
+            let f1 = cos1 * lx + sin1 * ly;
+            for k in 0..bands {
+                let d0 = span_lo + (span_hi - span_lo) * (k as f32 / bands as f32);
+                let d1 = span_lo + (span_hi - span_lo) * ((k + 1) as f32 / bands as f32);
+                // Inward along the corner's radius is the same signed distance as inward
+                // from a flat edge, so the arc scales the span the same way.
+                let (r0, r1) = (r - ct * (d0 / t), r - ct * (d1 / t));
+                let p = |rho: f32, c: f32, s: f32| -> [f32; 2] {
+                    [
+                        ((cx + rho * c) / sw) * 2.0 - 1.0,
+                        1.0 - ((cy + rho * s) / sh) * 2.0,
+                    ]
+                };
+                // Outer/inner × the two sweep ends; each vertex gets its own shade.
+                let (p0, p1) = (bevel_profile(kind, d0, t), bevel_profile(kind, d1, t));
+                let v00 = Vertex { position: p(r0, cos0, sin0), color: shade(p0 * f0), clip_circle };
+                let v10 = Vertex { position: p(r0, cos1, sin1), color: shade(p0 * f1), clip_circle };
+                let v11 = Vertex { position: p(r1, cos1, sin1), color: shade(p1 * f1), clip_circle };
+                let v01 = Vertex { position: p(r1, cos0, sin0), color: shade(p1 * f0), clip_circle };
+                out.extend_from_slice(&[v00, v10, v11, v00, v11, v01]);
+            }
         }
     }
 }
@@ -1144,13 +1320,31 @@ pub fn tessellate_display_list(
                 push_rounded_rect_vertices_corners(rect.x + t, rect.y + t, rect.width - 2.0 * t, rect.height - 2.0 * t, inner, sw, sh, *color, no, None, &mut verts);
                 push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, t, sw, sh, *color, no, &mut verts);
             }
-            Prim::Recess { rect, radii, surface, depth } => {
+            Prim::Plate { rect, radii, color, depth } => {
+                // Fill at full size (no inset — see Prim::Plate), then roll the perimeter.
+                // The lip rides on top of the fill's outer band rather than replacing it,
+                // so the plate's silhouette and the compositor's rounded window corners
+                // still agree exactly.
+                let corners = crate::widget::CornerRadii {
+                    top_left: radii.0, top_right: radii.1,
+                    bottom_right: radii.2, bottom_left: radii.3,
+                };
+                push_rounded_rect_vertices_corners(
+                    rect.x, rect.y, rect.width, rect.height, corners, sw, sh, *color, no, None, &mut verts,
+                );
+                push_bevel_edge_vertices_radii(
+                    rect.x, rect.y, rect.width, rect.height, *radii, *depth,
+                    sw, sh, *color, no, 1.0, &mut verts,
+                );
+            }
+            Prim::Recess { rect, radii, surface, depth, edges } => {
                 // Edges only — no fill, so the surface already painted below shows through
                 // the middle of the carve. `light_sign = -1.0` shadows the lit-facing edges,
                 // which is the raised->recessed inversion.
-                push_bevel_edge_vertices_radii(
+                push_bevel_edge_vertices_banded(
                     rect.x, rect.y, rect.width, rect.height, *radii, *depth,
-                    sw, sh, *surface, no, -1.0, &mut verts,
+                    sw, sh, *surface, no, -1.0, default_bevel_bands(*depth), *edges,
+                    EdgeKind::Step, &mut verts,
                 );
             }
             Prim::Arc { cx, cy, radius, thickness, start: sa, end: ea, color } => {

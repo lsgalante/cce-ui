@@ -108,6 +108,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.toggle.corner_radius" => "toggle_corner_radius",
                 "window_manager.light_source_position" => "light_source_position",
                 "window_manager.bevel_depth" => "bevel_depth",
+                "window_manager.bevel_width" => "bevel_width",
                 "style.control.ramp.height" => "ramp_height",
                 "style.layout.column.gap" => "column_gap",
                 "style.control.control_panel.padding" => "control_panel_padding",
@@ -1485,6 +1486,15 @@ pub fn light_source_position() -> f32 {
 
 pub fn bevel_depth() -> f32 {
     get_style_registry().read().unwrap().get_float("bevel_depth").unwrap_or(0.15)
+}
+
+/// How wide a rolled edge is, in logical px — the distance over which a plate's perimeter
+/// or a recess wall curves away from the flat surface. `bevel_depth` is the companion
+/// knob: it sets how hard the light falls across that distance. Wide and shallow reads as
+/// thick glass; narrow and deep reads as a stamped metal lip.
+pub fn bevel_width() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("bevel_width").unwrap_or(14.0)
 }
 
 pub fn toggle_corner_radius() -> f32 {
