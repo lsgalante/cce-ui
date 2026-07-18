@@ -43,6 +43,17 @@ pub enum Prim {
     /// A beveled plate: an inset rounded fill plus lightened/darkened edges (mirrors
     /// `push_widget_vertices`' bevel branch).
     Bevel { rect: Rect, radii: Radii, color: [f32; 4], depth: f32 },
+    /// A recess carved into whatever is already painted underneath — the inverse of
+    /// `Bevel`. Emits ONLY the shaded edges, never a fill, so the surface below shows
+    /// through the middle: a relief cut into the backplate rather than a plate laid on
+    /// top of it. The light vector is negated relative to `Bevel`, so the edges facing
+    /// `light_source_position` fall into shadow and the far edges catch the light —
+    /// which is what reads as "lower" instead of "raised".
+    ///
+    /// `surface` is the color of what lies beneath (the thing being carved); it is only
+    /// the base for the edge shading, and is never filled. Its alpha carries through to
+    /// the edges, so a recess in a translucent plate stays translucent.
+    Recess { rect: Rect, radii: Radii, surface: [f32; 4], depth: f32 },
     Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
     Vector { x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap },
     Circle { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
@@ -324,6 +335,13 @@ impl PaintCtx {
     pub fn bevel(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Bevel { rect, radii, color, depth });
+    }
+
+    /// Carve a recess into the already-painted surface below. Unlike `bevel`, this fills
+    /// nothing — `surface` is the color being carved, used only to shade the edges.
+    pub fn recess(&mut self, rect: Rect, radii: Radii, surface: [f32; 4], depth: f32) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Recess { rect, radii, surface, depth });
     }
 
     pub fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {

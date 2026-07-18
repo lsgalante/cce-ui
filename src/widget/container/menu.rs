@@ -27,12 +27,20 @@ use crate::widget::{
     MenuController, MouseButton, NamedKey, PageSelector, Paint, DROPDOWN_ITEM_H,
 };
 
+/// Thickness in logical px of the shaded lip around a recessed menubar. Two px reads as
+/// a carved edge at a glance without turning into a drawn border.
+const RECESS_EDGE_PX: f32 = 2.0;
+
 pub struct MenuBar {
     pub visible: bool,
     pub network_opacity: f32,
     pub curved_circle: Option<(f32, f32, f32)>,
     pub blur: bool,
     pub color: Option<[f32; 4]>,
+    /// Draw as a recess carved into the window backplate instead of as an opaque bar:
+    /// no background fill of its own, just shaded edges, so the plate shows through.
+    /// `color` is ignored while this is set — see [`Adapted::<MenuBar>::with_recess`].
+    pub recessed: bool,
     pub title: String,
     pub menus: Adapted<ButtonStrip>,
     pub menu_items: Vec<String>,
@@ -68,6 +76,7 @@ impl MenuBar {
             curved_circle: None,
             blur: false,
             color: None,
+            recessed: false,
             title: String::new(),
             menus: Adapted::new(ButtonStrip::new(x, y, w, h).with_inherit_menubar_font(true)),
             menu_items: Vec::new(),
@@ -349,6 +358,15 @@ impl Adapted<MenuBar> {
         self
     }
 
+    /// Drop the bar's own background and carve it into the window backplate instead, so
+    /// the plate reads as recessed under the menu — a relief cut into the surface rather
+    /// than a slab sitting on it. Shading follows the DE-wide `light_source_position` /
+    /// `bevel_depth` config, inverted so the light-facing edges are the shadowed ones.
+    pub fn with_recess(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
+    }
+
     pub fn with_blur(mut self, blur: bool) -> Self {
         self.blur = blur;
         self
@@ -450,9 +468,32 @@ impl Paint for MenuBar {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // Background: always the plain quad — the rounded-against-parent variant required a
-        // backplate parent, which no longer exists.
-        ctx.quad(rect, self.bg_color());
+        if self.recessed {
+            // No background of our own: carve the backplate instead, so the plate below is
+            // what shows through the bar. The shading base has to be the plate's own color
+            // (matching how the window emits it: page_low tinted by the active-backplate
+            // opacity), because the recess edges are that surface catching/losing light —
+            // shading a transparent color would just produce transparent edges.
+            let mut surface = colors::page_low_color();
+            if surface[3] > 0.001 {
+                surface[3] = colors::active_backplate_opacity();
+            }
+            // `depth` is the edge's thickness in px (the color offset is a separate thing:
+            // the renderer applies `bevel_depth` itself). The top corners follow the plate's
+            // radius so the lip stays inside its arc — square ones there paint a notch out
+            // past the rounded plate, into the transparent corner. The bottom corners stay
+            // square: that edge meets the content below, not the window edge.
+            let plate_r = if rect.x <= 0.5 && rect.y <= 0.5 {
+                colors::backplate_corner_radius()
+            } else {
+                0.0
+            };
+            ctx.recess(rect, (plate_r, plate_r, 0.0, 0.0), surface, RECESS_EDGE_PX);
+        } else {
+            // Background: always the plain quad — the rounded-against-parent variant required a
+            // backplate parent, which no longer exists.
+            ctx.quad(rect, self.bg_color());
+        }
 
         // Title highlight while the context dropdown is open / hovered.
         if !self.context_options.is_empty() {

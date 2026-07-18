@@ -824,11 +824,56 @@ pub fn push_plate_bevel_vertices(
     clip_circle: [f32; 3],
     out: &mut Vec<Vertex>,
 ) {
-    let r = r.min(ww * 0.5).min(h * 0.5);
+    push_bevel_edge_vertices(x, y, ww, h, r, t, sw, sh, base_color, clip_circle, 1.0, out);
+}
+
+/// The bevel edge shading, with the light direction selectable: `light_sign` is `1.0`
+/// for a raised plate (edges facing `light_source_position` are lit) and `-1.0` for a
+/// recess (those same edges fall into shadow instead, and the far edges catch the
+/// light). Negating the whole light vector flips every edge and every corner segment
+/// consistently, because both the flat-edge factors and the arc-normal dot product
+/// below are linear in it.
+pub fn push_bevel_edge_vertices(
+    x: f32, y: f32, ww: f32, h: f32,
+    r: f32,
+    t: f32,
+    sw: f32, sh: f32,
+    base_color: [f32; 4],
+    clip_circle: [f32; 3],
+    light_sign: f32,
+    out: &mut Vec<Vertex>,
+) {
+    push_bevel_edge_vertices_radii(
+        x, y, ww, h, (r, r, r, r), t, sw, sh, base_color, clip_circle, light_sign, out,
+    );
+}
+
+/// As [`push_bevel_edge_vertices`], but with a per-corner radius (TL, TR, BR, BL) so the
+/// lip can follow a shape whose corners differ — a recess carved along the top of a
+/// rounded plate needs the plate's radius on its top corners and square ones where it
+/// meets the content below. A uniform radius there would either square off the plate's
+/// arc (painting a notch outside it) or wrongly round the inner corners.
+pub fn push_bevel_edge_vertices_radii(
+    x: f32, y: f32, ww: f32, h: f32,
+    radii: (f32, f32, f32, f32),
+    t: f32,
+    sw: f32, sh: f32,
+    base_color: [f32; 4],
+    clip_circle: [f32; 3],
+    light_sign: f32,
+    out: &mut Vec<Vertex>,
+) {
+    let cap = ww.min(h) * 0.5;
+    let (tl, tr, br, bl) = (
+        radii.0.clamp(0.0, cap),
+        radii.1.clamp(0.0, cap),
+        radii.2.clamp(0.0, cap),
+        radii.3.clamp(0.0, cap),
+    );
 
     let rad = crate::layout::light_source_position();
-    let lx = rad.cos();
-    let ly = -rad.sin();
+    let lx = rad.cos() * light_sign;
+    let ly = -rad.sin() * light_sign;
 
     let edge_color = |factor: f32| -> [f32; 4] {
         let max_offset = crate::layout::bevel_depth();
@@ -846,20 +891,26 @@ pub fn push_plate_bevel_vertices(
     let bottom_color = edge_color(ly);
     let right_color = edge_color(lx);
 
-    out.extend_from_slice(&quad_vertices_with_clip(x + r, y, ww - 2.0 * r, t, sw, sh, top_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x, y + r, t, h - 2.0 * r, sw, sh, left_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x + r, y + h - t, ww - 2.0 * r, t, sw, sh, bottom_color, clip_circle));
-    out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + r, t, h - 2.0 * r, sw, sh, right_color, clip_circle));
+    // Each flat edge spans between its two adjoining corner radii, not a single uniform
+    // inset — that is what lets the corners differ.
+    out.extend_from_slice(&quad_vertices_with_clip(x + tl, y, ww - tl - tr, t, sw, sh, top_color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x, y + tl, t, h - tl - bl, sw, sh, left_color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x + bl, y + h - t, ww - bl - br, t, sw, sh, bottom_color, clip_circle));
+    out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + tr, t, h - tr - br, sw, sh, right_color, clip_circle));
 
     let segments = 16;
     let corners = [
-        (x + r, y + r, std::f32::consts::PI, 1.5 * std::f32::consts::PI), // Top-Left
-        (x + ww - r, y + r, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI), // Top-Right
-        (x + ww - r, y + h - r, 0.0, 0.5 * std::f32::consts::PI), // Bottom-Right
-        (x + r, y + h - r, 0.5 * std::f32::consts::PI, std::f32::consts::PI), // Bottom-Left
+        (x + tl, y + tl, tl, std::f32::consts::PI, 1.5 * std::f32::consts::PI), // Top-Left
+        (x + ww - tr, y + tr, tr, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI), // Top-Right
+        (x + ww - br, y + h - br, br, 0.0, 0.5 * std::f32::consts::PI), // Bottom-Right
+        (x + bl, y + h - bl, bl, 0.5 * std::f32::consts::PI, std::f32::consts::PI), // Bottom-Left
     ];
 
-    for &(cx, cy, start_angle, end_angle) in &corners {
+    for &(cx, cy, r, start_angle, end_angle) in &corners {
+        // A square corner has no arc to sweep — the two flat edges already meet there.
+        if r <= 0.0 {
+            continue;
+        }
         for j in 0..segments {
             let theta1 = start_angle + (j as f32) * (end_angle - start_angle) / (segments as f32);
             let theta2 = start_angle + ((j + 1) as f32) * (end_angle - start_angle) / (segments as f32);
@@ -1092,6 +1143,15 @@ pub fn tessellate_display_list(
                 );
                 push_rounded_rect_vertices_corners(rect.x + t, rect.y + t, rect.width - 2.0 * t, rect.height - 2.0 * t, inner, sw, sh, *color, no, None, &mut verts);
                 push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, t, sw, sh, *color, no, &mut verts);
+            }
+            Prim::Recess { rect, radii, surface, depth } => {
+                // Edges only — no fill, so the surface already painted below shows through
+                // the middle of the carve. `light_sign = -1.0` shadows the lit-facing edges,
+                // which is the raised->recessed inversion.
+                push_bevel_edge_vertices_radii(
+                    rect.x, rect.y, rect.width, rect.height, *radii, *depth,
+                    sw, sh, *surface, no, -1.0, &mut verts,
+                );
             }
             Prim::Arc { cx, cy, radius, thickness, start: sa, end: ea, color } => {
                 push_arc_background_vertices(*cx, *cy, *radius, *thickness, *sa, *ea, sw, sh, *color, segs(*radius), no, &mut verts);
