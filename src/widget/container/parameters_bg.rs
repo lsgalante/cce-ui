@@ -1882,7 +1882,9 @@ impl ParamController for ParametersBg {
             }).collect();
             self.buttons = self.display_params.iter().map(|p| {
                 if p.2 == "button" {
-                    Some(Button::new(0.0, 0.0, 0.0, 0.0).with_label(&p.0))
+                    // Left-aligned, like the toggles below: the rows form one column, and
+                    // centered labels made each row's text start at a different x.
+                    Some(Button::new(0.0, 0.0, 0.0, 0.0).with_label(&p.0).with_left_align(true))
                 } else {
                     None
                 }
@@ -1907,7 +1909,7 @@ impl ParamController for ParametersBg {
             self.toggles = self.display_params.iter().map(|p| {
                 if p.2 == "toggle" || p.2 == "checkbox" {
                     let on = p.1.trim().to_lowercase() == "true";
-                    let mut t = Toggle::new().with_label(&p.0);
+                    let mut t = Toggle::new().with_label(&p.0).with_left_align(true);
                     t.set_toggled(on);
                     Some(t)
                 } else {

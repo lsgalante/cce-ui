@@ -12,7 +12,9 @@
 use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
-use crate::widget::{Adapted, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
+use crate::widget::{
+    Adapted, ElementState, Event, EventCtx, Input, Justification, Layout, MouseButton, Paint,
+};
 
 fn parse_bool(val: &str) -> Option<bool> {
     match val.trim().to_lowercase().as_str() {
@@ -221,6 +223,9 @@ pub struct Toggle {
     label: Option<String>,
     hovered: bool,
     focused: bool,
+    /// Where the label sits across the pill. Mirrors `Button::justify` — same enum, same
+    /// 8px edge inset — so the two read as one control set wherever they share a column.
+    justify: Justification,
 }
 
 impl Toggle {
@@ -231,6 +236,7 @@ impl Toggle {
             label: None,
             hovered: false,
             focused: false,
+            justify: Justification::Center,
         })
     }
 
@@ -252,6 +258,18 @@ impl Toggle {
         } else {
             colors::toggle_off_color()
         }
+    }
+}
+
+impl Adapted<Toggle> {
+    pub fn with_left_align(mut self, left_align: bool) -> Self {
+        self.justify = if left_align { Justification::Left } else { Justification::Center };
+        self
+    }
+
+    pub fn with_justify(mut self, justify: Justification) -> Self {
+        self.justify = justify;
+        self
     }
 }
 
@@ -340,9 +358,14 @@ impl Paint for Toggle {
         if let Some(ref label) = self.label {
             let (font_fam, font_size) = crate::layout::control_label_font_parsed();
             let est_w = crate::widget::display::measure_text_width(label, &font_fam, font_size);
+            let tx = match self.justify {
+                Justification::Left => x + 8.0,
+                Justification::Right => x + w - est_w - 8.0,
+                Justification::Center => x + (w - est_w) / 2.0,
+            };
             ctx.text(
                 label.clone(),
-                x + (w - est_w) / 2.0,
+                tx,
                 crate::layout::align_text_y(y, h, font_size, 0.0),
                 font_size,
                 colors::control_label_color_for_state(self.hovered, self.focused),
