@@ -34,6 +34,44 @@ pub struct ParentSnapshot {
     pub color: [f32; 4],
 }
 
+/// Monospace detection — the paint pass lays characters out on a fixed cell in a monospace font
+/// and on measured per-character advances otherwise, so the sizing pass must branch the same way.
+fn is_monospace_font(font_family: &str, font_size: f32) -> bool {
+    let w_i10 = crate::widget::display::measure_text_width("iiiiiiiiii", font_family, font_size);
+    let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", font_family, font_size);
+    (w_i10 - w_m10).abs() < 5.0
+}
+
+/// The fixed per-character cell of a monospace font, taken as the slope between a 10- and a
+/// 20-`m` run so any constant side bearing in the measurement cancels out.
+fn monospace_cell_width(font_family: &str, font_size: f32) -> f32 {
+    let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", font_family, font_size);
+    let w_m20 = crate::widget::display::measure_text_width("mmmmmmmmmmmmmmmmmmmm", font_family, font_size);
+    ((w_m20 - w_m10) / 10.0).max(1.0)
+}
+
+/// The advance width `paint_text` will actually lay `text` out to.
+///
+/// This is the single source of truth shared by the sizing pass (`content_width` /
+/// `display_width`) and the paint pass. It is deliberately NOT a plain `measure_text_width`: the
+/// paint pass advances on the monospace cell or on the M-dummy trick, and either can exceed the
+/// raw ink measure. Sizing a dropdown from the ink measure therefore left the trigger a few px too
+/// narrow and tripped its own right-edge fade — badly under a monospace UI font like the default
+/// Berkeley Mono. Keep this in step with `paint_text`.
+fn text_advance(text: &str, font_family: &str, font_size: f32) -> f32 {
+    let n = text.chars().count();
+    if n == 0 {
+        return 0.0;
+    }
+    if is_monospace_font(font_family, font_size) {
+        n as f32 * monospace_cell_width(font_family, font_size)
+    } else {
+        let w_dummy = crate::widget::display::measure_text_width("M", font_family, font_size);
+        let measure_str = format!("{}M", text);
+        (crate::widget::display::measure_text_width(&measure_str, font_family, font_size) - w_dummy).max(0.0)
+    }
+}
+
 /// Side-layout label inset — the legacy `WidgetHost::label_x_offset` default for non-exempt
 /// widgets (Dropdown was never in the exempt list).
 fn side_offset(label: &Option<String>) -> f32 {
@@ -103,18 +141,46 @@ impl Dropdown {
         changed
     }
 
+    /// Horizontal inset added to a measured label to get a dropdown width the label fits inside
+    /// without tripping `paint_text`'s right-edge fade: an 8px left pad plus the 28px right
+    /// reservation (`right_limit = w - 28`, room for the 10px gap and the ▼ arrow) = 36px, plus a
+    /// 2px cushion for the small gap between the ink-`measure_text_width` used here and the M-dummy
+    /// advance the paint pass measures with. Shared by `content_width` (widest option) and
+    /// `display_width` (collapsed display text) so the two can't drift.
+    const LABEL_INSET: f32 = 38.0;
+
     pub fn content_width(&self) -> f32 {
         let font_setting = crate::layout::control_label_font_detached();
         let (font_family, font_size_opt) = crate::layout::parse_font_string(&font_setting);
         let font_size = font_size_opt.unwrap_or(12.0);
         let mut max_w = 0.0f32;
         for opt in &self.options {
-            let opt_w = crate::widget::display::measure_text_width(opt, &font_family, font_size) + 32.0;
+            let opt_w = text_advance(opt, &font_family, font_size) + Self::LABEL_INSET;
             if opt_w > max_w {
                 max_w = opt_w;
             }
         }
         max_w
+    }
+
+    /// The text shown on the collapsed trigger — the fixed `custom_display_text` (menu-button
+    /// mode) if set, otherwise the selected option. Mirrors the selection logic in `paint_text`.
+    fn display_text(&self) -> String {
+        if let Some(ref custom_text) = self.custom_display_text {
+            custom_text.clone()
+        } else {
+            self.options.get(self.selected).cloned().unwrap_or_default()
+        }
+    }
+
+    /// Trigger width sized to the collapsed display text rather than the widest option (via
+    /// `content_width`). Used by menu-button dropdowns whose label is fixed, so "File"/"Edit" don't
+    /// stretch to their longest menu entry. Shares `LABEL_INSET` so the label fits without fading.
+    fn display_width(&self) -> f32 {
+        let font_setting = crate::layout::control_label_font_detached();
+        let (font_family, font_size_opt) = crate::layout::parse_font_string(&font_setting);
+        let font_size = font_size_opt.unwrap_or(12.0);
+        text_advance(&self.display_text(), &font_family, font_size) + Self::LABEL_INSET
     }
 
     /// The detached-label strip height above the content rect — a replica of
@@ -326,16 +392,10 @@ impl Dropdown {
         let chars: Vec<char> = selected_text.chars().collect();
         let n = chars.len();
 
-        let is_monospace = {
-            let w_i10 = crate::widget::display::measure_text_width("iiiiiiiiii", &font_family, font_size);
-            let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", &font_family, font_size);
-            (w_i10 - w_m10).abs() < 5.0
-        };
+        let is_monospace = is_monospace_font(&font_family, font_size);
 
         let cell_width = if is_monospace {
-            let w_m10 = crate::widget::display::measure_text_width("mmmmmmmmmm", &font_family, font_size);
-            let w_m20 = crate::widget::display::measure_text_width("mmmmmmmmmmmmmmmmmmmm", &font_family, font_size);
-            ((w_m20 - w_m10) / 10.0).max(1.0)
+            monospace_cell_width(&font_family, font_size)
         } else {
             0.0
         };
@@ -359,16 +419,7 @@ impl Dropdown {
             }
         }
 
-        let total_advance = if n > 0 {
-            if is_monospace {
-                n as f32 * cell_width
-            } else {
-                let measure_str = format!("{}M", selected_text);
-                (crate::widget::display::measure_text_width(&measure_str, &font_family, font_size) - w_dummy).max(0.0)
-            }
-        } else {
-            0.0
-        };
+        let total_advance = text_advance(&selected_text, &font_family, font_size);
 
         // Draw and fade every character individually
         let mut prev_char_end = 0.0;
@@ -543,11 +594,19 @@ impl Layout for Dropdown {
         4.0
     }
 
-    /// Content size for the scene layout engine (Phase 2b): wide enough for the widest option
-    /// (via `content_width`, which already includes the arrow/padding inset), at the configured
-    /// dropdown height — so the control doesn't resize as the selection changes.
+    /// Content size for the scene layout engine (Phase 2b). A normal dropdown is wide enough for
+    /// the widest option (via `content_width`, which already includes the arrow/padding inset), so
+    /// the control doesn't resize as the selection changes. A menu-button dropdown (fixed
+    /// `custom_display_text`, e.g. a "File" menu) instead sizes to its display text — its label is
+    /// fixed regardless of options, so fitting the widest entry would just stretch the trigger. The
+    /// open popover still expands to the widest option via `popover_width`'s `.max(content_width())`.
     fn intrinsic_size(&self) -> Option<Size> {
-        Some(Size::new(self.content_width(), crate::layout::dropdown_height()))
+        let width = if self.custom_display_text.is_some() {
+            self.display_width()
+        } else {
+            self.content_width()
+        };
+        Some(Size::new(width, crate::layout::dropdown_height()))
     }
 
     fn intrinsic_measure_width(&self) -> bool {
@@ -1000,6 +1059,51 @@ mod tests {
         assert!(
             size.width > Layout::intrinsic_size(narrow.inner()).unwrap().width,
             "more/longer options measure wider",
+        );
+    }
+
+    #[test]
+    fn menu_button_trigger_fits_display_text_not_widest_option() {
+        // A menu-button dropdown (fixed custom display text) sizes its trigger to that text, so a
+        // long menu entry (e.g. a recent-file path) no longer stretches the "File" button.
+        let menu = Dropdown::new(
+            vec![
+                "New".to_string(),
+                "/home/user/some/very/long/recent/project/path".to_string(),
+            ],
+            0,
+        )
+        .with_custom_display_text("File");
+
+        let trigger = Layout::intrinsic_size(menu.inner()).expect("dropdown reports intrinsic size");
+        assert!(
+            trigger.width < menu.inner().content_width(),
+            "menu-button trigger ({}) fits its display text, not the widest option ({})",
+            trigger.width,
+            menu.inner().content_width(),
+        );
+
+        // The open popover still expands to the widest option.
+        let content = Rect { x: 0.0, y: 0.0, width: trigger.width, height: trigger.height };
+        assert!(
+            menu.inner().popover_geom(content).2 >= menu.inner().content_width(),
+            "popover still fits the widest option",
+        );
+
+        // The trigger leaves the paint pass's full budget (8px left pad + 28px right/arrow
+        // reservation) for the label, so the display text renders without tripping the right-edge
+        // fade. This is the paint condition `start_x + total_advance > right_limit` restated:
+        // `content.x + 8 + advance > content.x + width - 28`, i.e. it must hold that
+        // `width >= advance + 36`. Measured via `text_advance` — the same function the paint pass
+        // lays out with — so the guarantee holds in a monospace UI font too.
+        let (font_family, font_size) = crate::layout::control_label_font_detached_parsed();
+        let advance = text_advance("File", &font_family, font_size);
+        assert!(
+            trigger.width >= advance + 36.0,
+            "trigger width ({}) leaves room for the laid-out label (advance {} + 36px budget), \
+             so it doesn't fade",
+            trigger.width,
+            advance,
         );
     }
 
