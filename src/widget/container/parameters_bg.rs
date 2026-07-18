@@ -46,6 +46,9 @@ pub struct ParametersBg {
     pub texts: Vec<Option<Adapted<TextBox>>>,
     pub toggles: Vec<Option<Adapted<Toggle>>>,
     pub colors: Vec<Option<crate::widget::Adapted<ColorSelector>>>,
+    /// Titles of the sections the user has collapsed by clicking their header. Keyed by
+    /// title so it outlives the row rebuild `set_display_params` runs on every node change.
+    collapsed: std::collections::HashSet<String>,
     visible: bool,
     pub scroll_y: f32,
     pub content_h: f32,
@@ -83,6 +86,7 @@ impl ParametersBg {
             texts: Vec::new(),
             toggles: Vec::new(),
             colors: Vec::new(),
+            collapsed: std::collections::HashSet::new(),
             visible: true,
             scroll_y: 0.0,
             content_h: 0.0,
@@ -94,74 +98,116 @@ impl ParametersBg {
         })
     }
 
-    pub fn get_total_content_height(&self) -> f32 {
-        let mut cur_y = 30.0;
-        for (i, p) in self.display_params.iter().enumerate() {
-            let h = if p.2 == "code" {
-                let val_text = if self.focused_param == Some(i) {
-                    if let Some(ref editor) = self.code_editor {
-                        &editor.buffer
-                    } else {
-                        &p.1
-                    }
+    /// Row `i`'s laid-out height, ignoring collapse (the row-type table).
+    fn row_height(&self, i: usize) -> f32 {
+        let p = &self.display_params[i];
+        if p.2 == "code" {
+            let val_text = if self.focused_param == Some(i) {
+                if let Some(ref editor) = self.code_editor {
+                    &editor.buffer
                 } else {
                     &p.1
-                };
-                let line_count = val_text.split('\n').count();
-                let content_h = 22.0 + (line_count as f32 * 16.0) + 12.0;
-                content_h.max(200.0)
-            } else if p.2 == "section" {
-                24.0
-            } else if p.2.starts_with("float3") {
-                108.0
-            } else if p.2.starts_with("slider") {
-                38.0
-            } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
-                42.0
-            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                40.0
-            } else if p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
-                24.0
+                }
             } else {
-                20.0
+                &p.1
             };
-            cur_y += h + 8.0;
+            let line_count = val_text.split('\n').count();
+            let content_h = 22.0 + (line_count as f32 * 16.0) + 12.0;
+            content_h.max(200.0)
+        } else if p.2 == "section" {
+            24.0
+        } else if p.2.starts_with("float3") {
+            108.0
+        } else if p.2.starts_with("slider") {
+            38.0
+        } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
+            42.0
+        } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+            40.0
+        } else if p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
+            24.0
+        } else {
+            20.0
+        }
+    }
+
+    /// Per-row "sits inside a collapsed section" flags: a section owns every row between its
+    /// header and the next header. Headers themselves are never hidden — they stay clickable
+    /// so a collapsed section can be reopened. Rows before the first header belong to no
+    /// section and are always shown.
+    fn hidden_rows(&self) -> Vec<bool> {
+        let mut out = Vec::with_capacity(self.display_params.len());
+        let mut hiding = false;
+        for p in &self.display_params {
+            if p.2 == "section" {
+                hiding = self.collapsed.contains(&p.0);
+                out.push(false);
+            } else {
+                out.push(hiding);
+            }
+        }
+        out
+    }
+
+    /// Whether the section titled `title` is collapsed.
+    pub fn section_collapsed(&self, title: &str) -> bool {
+        self.collapsed.contains(title)
+    }
+
+    /// Collapse/expand the section titled `title`, re-laying the rows. Keyed by title, not
+    /// row index, so the state survives the `set_display_params` rebuilds a host runs
+    /// whenever the inspected node changes.
+    pub fn set_section_collapsed(&mut self, title: &str, collapsed: bool) {
+        let changed = if collapsed {
+            self.collapsed.insert(title.to_string())
+        } else {
+            self.collapsed.remove(title)
+        };
+        if changed {
+            self.refresh_scroll_metrics();
+        }
+    }
+
+    /// The box drawn around a section header's title — and, since the title is the collapse
+    /// affordance, that box is also the header's click target.
+    fn section_title_box(&self, hdr: usize, r_hdr: (f32, f32, f32, f32)) -> (f32, f32, f32, f32) {
+        // The label sits 8px in from the box's left edge; matching that 8px on the right
+        // (box width = text + 16) centers the text in the box. Measure the run in the
+        // label's real family AND size — parsed, not the raw "Family NN" spec string, which
+        // resvg can't resolve (it would fall back to a narrow font and undersize the box).
+        let full_w = self.rect.width - 8.0;
+        let (label_family, label_size) = crate::layout::control_label_font_parsed();
+        let text_w =
+            crate::widget::display::measure_text_width(&self.display_params[hdr].0, &label_family, label_size);
+        let title_w = (text_w + 16.0).min(full_w);
+        (self.rect.x + 4.0, r_hdr.1 - 2.0, title_w, 22.0)
+    }
+
+    pub fn get_total_content_height(&self) -> f32 {
+        let hidden = self.hidden_rows();
+        let mut cur_y = 30.0;
+        for i in 0..self.display_params.len() {
+            if hidden[i] {
+                continue;
+            }
+            cur_y += self.row_height(i) + 8.0;
         }
         cur_y + 10.0 // Add padding at the bottom
     }
 
+    /// One rect per row, in index order — collapsed rows get a zero-height rect at the
+    /// current cursor (and consume no vertical space), so every index-parallel consumer
+    /// keeps working while the row draws and hit-tests as nothing.
     pub fn get_param_rects(&self) -> Vec<(f32, f32, f32, f32)> {
+        let hidden = self.hidden_rows();
         let mut rects = Vec::new();
         let mut cur_y = self.rect.y + 30.0 - self.scroll_y;
-        for (i, p) in self.display_params.iter().enumerate() {
-            let h = if p.2 == "code" {
-                let val_text = if self.focused_param == Some(i) {
-                    if let Some(ref editor) = self.code_editor {
-                        &editor.buffer
-                    } else {
-                        &p.1
-                    }
-                } else {
-                    &p.1
-                };
-                let line_count = val_text.split('\n').count();
-                let content_h = 22.0 + (line_count as f32 * 16.0) + 12.0;
-                content_h.max(200.0)
-            } else if p.2 == "section" {
-                24.0
-            } else if p.2.starts_with("float3") {
-                108.0
-            } else if p.2.starts_with("slider") {
-                38.0
-            } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
-                42.0
-            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                40.0
-            } else if p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
-                24.0
-            } else {
-                20.0
-            };
+        for i in 0..self.display_params.len() {
+            if hidden[i] {
+                rects.push((self.rect.x + 8.0, cur_y, self.rect.width - 16.0, 0.0));
+                continue;
+            }
+            let h = self.row_height(i);
             rects.push((self.rect.x + 8.0, cur_y, self.rect.width - 16.0, h));
             cur_y += h + 8.0;
         }
@@ -306,8 +352,12 @@ impl ParametersBg {
 
     fn own_text_labels(&self) -> Vec<TextLabel> {
         let rects = self.get_param_rects();
+        let hidden = self.hidden_rows();
         let mut labels = Vec::new();
         for (i, (name, value, ptype)) in self.display_params.iter().enumerate() {
+            if hidden[i] {
+                continue;
+            }
             let r = rects[i];
             if ptype.starts_with("slider") {
                 if let Some(s) = &self.sliders[i] {
@@ -533,20 +583,15 @@ impl ParametersBg {
             }
             let r_hdr = rects[hdr];
 
-            // Title box, wrapping the header label (drawn at rect.x + 12). The
-            // label sits 8px in from the box's left edge; matching that 8px on
-            // the right (box width = text + 16) centers the text in the box.
-            // Measure the run in the label's real family AND size — parsed, not
-            // the raw "Family NN" spec string, which resvg can't resolve (it
-            // would fall back to a narrow font and undersize the box).
-            let title = &self.display_params[hdr].0;
-            let (label_family, label_size) = crate::layout::control_label_font_parsed();
-            let text_w = crate::widget::display::measure_text_width(title, &label_family, label_size);
-            let title_w = (text_w + 16.0).min(full_w);
-            let tb_x = self.rect.x + 4.0;
-            let tb_y = r_hdr.1 - 2.0;
-            let tb_h = 22.0;
+            // Title box, wrapping the header label (drawn at rect.x + 12) — also the
+            // click target that collapses the section.
+            let (tb_x, tb_y, title_w, tb_h) = self.section_title_box(hdr, r_hdr);
             push_box(&mut param_quads, tb_x, tb_y, title_w, tb_h);
+
+            // Collapsed: the title box is the whole section — no content box, no connector.
+            if self.collapsed.contains(&self.display_params[hdr].0) {
+                continue;
+            }
 
             // Content box + the connector line dropping into it from the title.
             if let Some((start, end)) = content {
@@ -566,7 +611,11 @@ impl ParametersBg {
             }
         }
 
+        let hidden = self.hidden_rows();
         for (i, p) in self.display_params.iter().enumerate() {
+            if hidden[i] {
+                continue;
+            }
             let r = rects[i];
             if p.2.starts_with("slider") {
                 if let Some(s) = &self.sliders[i] {
@@ -658,7 +707,11 @@ impl ParametersBg {
             return Vec::new();
         }
         let mut out = Vec::new();
+        let hidden = self.hidden_rows();
         for (i, p) in self.display_params.iter().enumerate() {
+            if hidden[i] {
+                continue;
+            }
             if p.2 == "text" {
                 if let Some(tb) = &self.texts[i] {
                     out.extend(tb.all_rounded_quads(ctx));
@@ -1148,8 +1201,36 @@ impl Input for ParametersBg {
                     }
                 }
 
+                // A press on a section's title box collapses/expands it. Checked before the
+                // rows so a header can never be shadowed by a control under it, and only on
+                // the press — the matching release lands on whatever the relayout moved
+                // under the pointer, which must not toggle it straight back.
+                if button == MouseButton::Left && state == ElementState::Pressed {
+                    let rects = self.get_param_rects();
+                    let hit = self.display_params.iter().enumerate().position(|(i, p)| {
+                        if p.2 != "section" {
+                            return false;
+                        }
+                        let (bx, by, bw, bh) = self.section_title_box(i, rects[i]);
+                        px >= bx && px <= bx + bw && py >= by && py <= by + bh
+                    });
+                    if let Some(i) = hit {
+                        let title = self.display_params[i].0.clone();
+                        let collapsed = self.collapsed.contains(&title);
+                        // Collapsing out from under a focused row would strand the editor.
+                        self.commit_and_unfocus();
+                        self.set_section_collapsed(&title, !collapsed);
+                        return true;
+                    }
+                }
+
+                let hidden = self.hidden_rows();
+
                 // 1. Check open dropdown popovers first (since they are drawn on top)
                 for (i, d_opt) in self.choices.iter_mut().enumerate() {
+                    if hidden[i] {
+                        continue;
+                    }
                     if let Some(d) = d_opt {
                         if d.popover_rect().is_some() {
                             if d.mouse_input(button, state, px, py, ui) {
@@ -1166,6 +1247,9 @@ impl Input for ParametersBg {
 
                 // 2. Propagate to our widgets
                 for (i, p) in self.display_params.iter_mut().enumerate() {
+                    if hidden[i] {
+                        continue;
+                    }
                     if p.2.starts_with("choice") {
                         if let Some(d) = &mut self.choices[i] {
                             if d.mouse_input(button, state, px, py, ui) {
@@ -1252,6 +1336,9 @@ impl Input for ParametersBg {
                     let rects = self.get_param_rects();
                     let mut clicked_any_focusable = false;
                     for (i, p) in self.display_params.iter_mut().enumerate() {
+                        if hidden[i] {
+                            continue;
+                        }
                         if p.2 == "code" {
                             let r = rects[i];
                             if px >= r.0 && px <= r.0 + r.2 && py >= r.1 + 18.0 && py <= r.1 + r.3 {
@@ -1955,6 +2042,61 @@ mod tests {
         assert_eq!(p.focused_param, None);
         assert!(p.code_editor.is_none());
         assert!(ParamController::node_params(&*p)[0].1.contains('y'), "editor buffer committed on unfocus");
+    }
+
+    #[test]
+    fn clicking_a_section_title_collapses_its_rows() {
+        let mut ctx = UiContext::new();
+        let mut p = panel_with(&[
+            ("Transform", "", "section"),
+            ("Size", "1.00", "slider:0:2"),
+            ("Shading", "", "section"),
+            ("On", "true", "checkbox"),
+        ]);
+        let expanded_h = p.get_total_content_height();
+        let below_before = p.get_param_rects()[2].1;
+
+        // Press the first section's title box.
+        let r_hdr = p.get_param_rects()[0];
+        let (bx, by, _, bh) = p.section_title_box(0, r_hdr);
+        p.mouse_input(MouseButton::Left, ElementState::Pressed, bx + 4.0, by + bh / 2.0, &mut ctx);
+
+        assert!(p.section_collapsed("Transform"));
+        assert_eq!(p.get_param_rects()[1].3, 0.0, "the collapsed section's row has no height");
+        assert!(p.get_param_rects()[2].1 < below_before, "the next section moves up");
+        assert!(p.get_total_content_height() < expanded_h);
+        // The row's chrome and label are gone; the header's stay.
+        assert!(!p.own_text_labels().iter().any(|l| l.text.contains("Size")));
+        assert!(p.own_text_labels().iter().any(|l| l.text.contains("Transform")));
+
+        // Clicking it again restores the section.
+        let r_hdr = p.get_param_rects()[0];
+        let (bx, by, _, bh) = p.section_title_box(0, r_hdr);
+        p.mouse_input(MouseButton::Left, ElementState::Pressed, bx + 4.0, by + bh / 2.0, &mut ctx);
+        assert!(!p.section_collapsed("Transform"));
+        assert_eq!(p.get_total_content_height(), expanded_h);
+    }
+
+    #[test]
+    fn collapse_survives_a_param_rebuild_and_swallows_row_clicks() {
+        let mut ctx = UiContext::new();
+        let mut p = panel_with(&[("Shading", "", "section"), ("On", "false", "checkbox")]);
+        p.set_section_collapsed("Shading", true);
+
+        // A click where the toggle used to sit must not reach it.
+        let (cx, cy, _, ch) = p.toggles[1].as_ref().unwrap().rect();
+        p.mouse_input(MouseButton::Left, ElementState::Pressed, cx + 6.0, cy + ch / 2.0, &mut ctx);
+        p.mouse_input(MouseButton::Left, ElementState::Released, cx + 6.0, cy + ch / 2.0, &mut ctx);
+        assert_eq!(ParamController::node_params(&*p)[1].1, "false", "hidden row ignores clicks");
+
+        // The host re-syncs the panel (node change): collapse is keyed by title, so it holds.
+        let params: Vec<(String, String, String)> = [("Shading", "", "section"), ("On", "false", "checkbox"), ("Extra", "1", "int")]
+            .iter()
+            .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
+            .collect();
+        ParamController::set_display_params(&mut *p, &params);
+        assert!(p.section_collapsed("Shading"));
+        assert_eq!(p.get_param_rects()[1].3, 0.0);
     }
 
     #[test]
