@@ -7,10 +7,23 @@
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
-use crate::widget::input::{BREADCRUMB_PADDING, SEGMENT_GAP};
+use crate::widget::input::BREADCRUMB_PADDING;
 use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint, PathController,
 };
+
+/// Point size the breadcrumb text is painted at; also the size measured for segment layout so
+/// the two stay in lockstep.
+const BREADCRUMB_FONT_SIZE: f32 = 12.0;
+
+/// A segment as actually laid out for painting/hit-testing: its text, left edge, width, and
+/// logical index in [`Breadcrumb::virtual_segs`] (`None` for the leading "…/" ellipsis marker).
+struct VisibleSeg {
+    text: String,
+    x: f32,
+    w: f32,
+    logical: Option<usize>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Breadcrumb {
@@ -61,25 +74,90 @@ impl Breadcrumb {
         segs
     }
 
-    /// Each segment with its left edge and width, derived from the widget's left edge — the one
-    /// source for hit-testing, the hover overlay, and the text run (legacy had three copies).
-    fn segs_with_x(&self, left: f32) -> Vec<(String, f32, f32)> {
-        let mut cx = left + BREADCRUMB_PADDING;
-        self.virtual_segs()
-            .into_iter()
-            .map(|seg| {
-                let w = seg.len() as f32 * 7.5;
-                let x = cx;
-                cx += w + SEGMENT_GAP;
-                (seg, x, w)
-            })
-            .collect()
+    /// The breadcrumb font split into (family, size). The configured font string carries both
+    /// (e.g. "Berkeley Mono 14"); the render path parses the size out of it and shapes at that
+    /// size, so layout must measure with the SAME family and size — passing the whole string
+    /// as a family name (which no font matches) or measuring at a different size mis-sizes
+    /// every segment and makes them overlap or gap.
+    fn font_and_size() -> (String, f32) {
+        let (family, size) = crate::layout::parse_font_string(&crate::layout::breadcrumb_font());
+        (family, size.unwrap_or(BREADCRUMB_FONT_SIZE))
     }
 
-    fn seg_at(&self, left: f32, px: f32) -> Option<usize> {
-        self.segs_with_x(left)
+    /// The segments to actually paint, each with left edge, width, and its *logical* index
+    /// (position in [`virtual_segs`]; `None` marks the leading "…/" ellipsis). This is the
+    /// one source for hit-testing, the hover overlay, and the text run.
+    ///
+    /// Segments abut with no inter-segment gap so the path renders as one continuous string.
+    /// Widths come from measuring the *cumulative* prefix rather than each segment alone:
+    /// `measure_text_width` reports an ink box (narrower than the glyph advance by the first/
+    /// last side bearings), and every segment ends in `/`, so a segment's width taken as the
+    /// difference of two consecutive prefix measurements has those bearings cancel out —
+    /// yielding the exact advance for proportional and monospace fonts alike. Measuring each
+    /// segment in isolation instead left segments overlapping (advance underestimated) or,
+    /// with a fixed per-char advance on a proportional font, unevenly gapped.
+    ///
+    /// When the full path is wider than the container, leading segments are dropped and
+    /// replaced with a "…/" marker, so the trailing (current) segments stay visible. The
+    /// last segment is always kept.
+    fn visible_segs(&self, rect: Rect) -> Vec<VisibleSeg> {
+        let all = self.virtual_segs();
+        let avail = (rect.width - 2.0 * BREADCRUMB_PADDING).max(0.0);
+
+        let (font, size) = Self::font_and_size();
+        let measure = |s: &str| crate::widget::display::measure_text_width(s, &font, size);
+
+        // Lay a list of (text, logical index) out left-to-right from the widget's left edge.
+        // Each segment's x/width is derived from the measured width of the concatenated prefix
+        // up to and including it, so abutting segments reproduce a single-string layout.
+        let place = |items: Vec<(String, Option<usize>)>| -> Vec<VisibleSeg> {
+            let mut prefix = String::new();
+            let mut prev = 0.0f32;
+            items
+                .into_iter()
+                .map(|(text, logical)| {
+                    let x = rect.x + BREADCRUMB_PADDING + prev;
+                    prefix.push_str(&text);
+                    let cum = measure(&prefix);
+                    let w = (cum - prev).max(0.0);
+                    prev = cum;
+                    VisibleSeg { text, x, w, logical }
+                })
+                .collect()
+        };
+
+        // Total width of the whole path measured as one string.
+        let full = measure(&all.concat());
+
+        if full <= avail || all.len() <= 1 {
+            return place(all.into_iter().enumerate().map(|(i, s)| (s, Some(i))).collect());
+        }
+
+        // Keep the last segment, then add trailing segments while the "…/" marker plus the
+        // kept run still fits (measured as the actual concatenated string); finally prepend
+        // the marker and restore left-to-right order.
+        let ell = "…/".to_string();
+        let mut kept: Vec<(String, Option<usize>)> = Vec::new();
+        for i in (0..all.len()).rev() {
+            let trial: String = std::iter::once(ell.as_str())
+                .chain(std::iter::once(all[i].as_str()))
+                .chain(kept.iter().rev().map(|(t, _): &(String, Option<usize>)| t.as_str()))
+                .collect();
+            if !kept.is_empty() && measure(&trial) > avail {
+                break;
+            }
+            kept.push((all[i].clone(), Some(i)));
+        }
+        kept.push((ell, None));
+        kept.reverse();
+        place(kept)
+    }
+
+    fn seg_at(&self, rect: Rect, px: f32) -> Option<usize> {
+        self.visible_segs(rect)
             .iter()
-            .position(|(_, x, w)| px >= *x && px < *x + *w)
+            .find(|s| px >= s.x && px < s.x + s.w)
+            .and_then(|s| s.logical)
     }
 
     fn bg_color(&self) -> [f32; 4] {
@@ -118,18 +196,25 @@ impl Paint for Breadcrumb {
             ctx.rounded_rect(rect, radius, (true, true, false, false), self.bg_color());
         }
 
-        let segs = self.segs_with_x(rect.x);
-        if let Some((_, x, w)) = self.hovered_seg.and_then(|i| segs.get(i)) {
+        let segs = self.visible_segs(rect);
+        if let Some(vs) =
+            self.hovered_seg.and_then(|i| segs.iter().find(|s| s.logical == Some(i)))
+        {
             ctx.quad(
-                Rect { x: *x, y: rect.y, width: *w, height: rect.height },
+                Rect { x: vs.x, y: rect.y, width: vs.w, height: rect.height },
                 [1.0, 1.0, 1.0, 0.06],
             );
         }
 
-        let last = segs.len().saturating_sub(1);
-        for (i, (seg, x, _)) in segs.into_iter().enumerate() {
-            let color = if i == last { [0xcc, 0xcc, 0xd4] } else { [0x88, 0x88, 0x99] };
-            ctx.text(seg, x, rect.y + 6.0, 12.0, color);
+        // The current directory (last logical segment) is drawn brightly; everything else,
+        // including the "…/" ellipsis marker, is dimmed. Paint at the configured font size so
+        // the glyph run matches the widths `visible_segs` measured (and thus its x positions).
+        let (_, size) = Self::font_and_size();
+        let last_logical = self.virtual_segs().len().saturating_sub(1);
+        for vs in segs {
+            let color =
+                if vs.logical == Some(last_logical) { [0xcc, 0xcc, 0xd4] } else { [0x88, 0x88, 0x99] };
+            ctx.text(vs.text, vs.x, rect.y + 6.0, size, color);
         }
     }
 }
@@ -143,7 +228,7 @@ impl Input for Breadcrumb {
                 self.hovered =
                     *px >= r.x && *px <= r.x + r.width && *py >= r.y && *py <= r.y + r.height;
                 let old = self.hovered_seg;
-                self.hovered_seg = if self.hovered { self.seg_at(r.x, *px) } else { None };
+                self.hovered_seg = if self.hovered { self.seg_at(r, *px) } else { None };
                 was != self.hovered || old != self.hovered_seg
             }
             Event::MouseLeave => {
@@ -162,7 +247,7 @@ impl Input for Breadcrumb {
                 // Record the segment first: the shared menu's header reads it (via the
                 // `as_any` downcast in `UiContext::handle_right_click`) to title itself with
                 // that segment's path, and "Copy Path" copies it.
-                self.right_clicked_seg = self.seg_at(ectx.rect.x, *px);
+                self.right_clicked_seg = self.seg_at(ectx.rect, *px);
                 ectx.open_context_menu(*px, *py);
                 true
             }
@@ -172,7 +257,7 @@ impl Input for Breadcrumb {
                 x: px,
                 ..
             } => {
-                if let Some(i) = self.seg_at(ectx.rect.x, *px) {
+                if let Some(i) = self.seg_at(ectx.rect, *px) {
                     if i < self.path.len() {
                         self.clicked_seg = Some(i);
                         return true;
@@ -211,38 +296,48 @@ mod tests {
     use crate::context::UiContext;
     use crate::widget::WidgetHost;
 
+    /// Center x of the visible segment with the given logical index, derived from the
+    /// widget's own layout so the tests don't depend on the font's exact metrics.
+    fn seg_center_x(breadcrumb: &Breadcrumb, rect: Rect, logical: usize) -> f32 {
+        let s = breadcrumb
+            .visible_segs(rect)
+            .into_iter()
+            .find(|s| s.logical == Some(logical))
+            .expect("segment visible");
+        s.x + s.w / 2.0
+    }
+
     #[test]
     fn test_breadcrumb_clicks() {
         let mut breadcrumb = Breadcrumb::new();
         breadcrumb.set_path(&["home".to_string(), "lsgalante".to_string()]);
         // Set coordinates: x=10.0, y=20.0, w=300.0, h=24.0
-        breadcrumb.set_rect(10.0, 20.0, 300.0, 24.0);
+        let rect = Rect { x: 10.0, y: 20.0, width: 300.0, height: 24.0 };
+        breadcrumb.set_rect(rect.x, rect.y, rect.width, rect.height);
 
         let ctx = UiContext::new();
 
         // Let's test hit_test
         assert!(breadcrumb.hit_test(15.0, 25.0, &ctx));
 
-        // Let's test seg_at:
-        // x + padding = 10.0 + 8.0 = 18.0
-        // Segment 0 ("/"): length 1. width = 1 * 7.5 = 7.5. range: [18.0, 25.5)
-        // GAP = 4.0. next = 25.5 + 4.0 = 29.5
-        // Segment 1 ("home/"): length 5. width = 5 * 7.5 = 37.5. range: [29.5, 67.0)
-        // GAP = 4.0. next = 67.0 + 4.0 = 71.0
-        // Segment 2 ("lsgalante/"): length 10. width = 10 * 7.5 = 75.0. range: [71.0, 146.0)
+        // Segments abut (no inter-segment gap) and are sized by real font measurement, so
+        // click coordinates are taken from the widget's own layout rather than hardcoded.
 
         // Click in segment 0 (/) — through the adapter's direct-dispatch mouse_input, the
         // same entry cce-files drives.
         let mut ui_ctx = UiContext::new();
-        assert!(breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, 20.0, 25.0, &mut ui_ctx));
+        let x0 = seg_center_x(&breadcrumb, rect, 0);
+        assert!(breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, x0, 25.0, &mut ui_ctx));
         assert_eq!(breadcrumb.path_click(), Some(0));
 
         // Click in segment 1 (home/)
-        assert!(breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, 50.0, 25.0, &mut ui_ctx));
+        let x1 = seg_center_x(&breadcrumb, rect, 1);
+        assert!(breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, x1, 25.0, &mut ui_ctx));
         assert_eq!(breadcrumb.path_click(), Some(1));
 
         // Click in segment 2 (lsgalante/) — the last segment is the current dir, not a link.
-        assert!(!breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, 100.0, 25.0, &mut ui_ctx));
+        let x2 = seg_center_x(&breadcrumb, rect, 2);
+        assert!(!breadcrumb.mouse_input(crate::widget::MouseButton::Left, crate::widget::ElementState::Pressed, x2, 25.0, &mut ui_ctx));
         assert_eq!(breadcrumb.path_click(), None);
     }
 
@@ -250,12 +345,14 @@ mod tests {
     fn test_breadcrumb_right_clicks() {
         let mut breadcrumb = Breadcrumb::new();
         breadcrumb.set_path(&["home".to_string(), "lsgalante".to_string()]);
-        breadcrumb.set_rect(10.0, 20.0, 300.0, 24.0);
+        let rect = Rect { x: 10.0, y: 20.0, width: 300.0, height: 24.0 };
+        breadcrumb.set_rect(rect.x, rect.y, rect.width, rect.height);
 
         let mut ui_ctx = UiContext::new();
 
         // Right click segment 1 (home/)
-        let handled = breadcrumb.mouse_input(crate::widget::MouseButton::Right, crate::widget::ElementState::Pressed, 50.0, 25.0, &mut ui_ctx);
+        let x1 = seg_center_x(&breadcrumb, rect, 1);
+        let handled = breadcrumb.mouse_input(crate::widget::MouseButton::Right, crate::widget::ElementState::Pressed, x1, 25.0, &mut ui_ctx);
         assert!(handled);
         assert_eq!(breadcrumb.right_clicked_seg, Some(1));
 
@@ -263,6 +360,56 @@ mod tests {
         assert_eq!(breadcrumb.path_to_seg(0), "/");
         assert_eq!(breadcrumb.path_to_seg(1), "/home");
         assert_eq!(breadcrumb.path_to_seg(2), "/home/lsgalante");
+    }
+
+    #[test]
+    fn long_path_elides_leading_segments() {
+        let mut breadcrumb = Breadcrumb::new();
+        breadcrumb.set_path(&[
+            "home".to_string(),
+            "lsgalante".to_string(),
+            "Dropbox".to_string(),
+            "cce".to_string(),
+            "cce-ui".to_string(),
+        ]);
+        // Narrow container: the full path can't fit, so leading segments get dropped.
+        breadcrumb.set_rect(0.0, 0.0, 160.0, 24.0);
+
+        let segs = breadcrumb.visible_segs(Rect { x: 0.0, y: 0.0, width: 160.0, height: 24.0 });
+
+        // First visible segment is the "…/" ellipsis marker (no logical index → not a link).
+        assert_eq!(segs.first().map(|s| s.text.as_str()), Some("…/"));
+        assert_eq!(segs.first().and_then(|s| s.logical), None);
+
+        // The current directory (last logical segment) is always visible.
+        let last_logical = breadcrumb.path.len(); // "/" is index 0, so path.len() == last idx
+        assert_eq!(segs.last().and_then(|s| s.logical), Some(last_logical));
+        assert_eq!(segs.last().map(|s| s.text.as_str()), Some("cce-ui/"));
+
+        // Everything painted stays within the container's right edge.
+        for s in &segs {
+            assert!(s.x + s.w <= 160.0 + 0.01, "segment {:?} overflows", s.text);
+        }
+
+        // A kept trailing segment still hit-tests to its original logical index, so clicking
+        // it navigates to the correct path.
+        let visible_seg = segs.iter().rev().nth(1).unwrap();
+        let hit = breadcrumb
+            .seg_at(Rect { x: 0.0, y: 0.0, width: 160.0, height: 24.0 }, visible_seg.x + 1.0);
+        assert_eq!(hit, visible_seg.logical);
+    }
+
+    #[test]
+    fn short_path_is_not_elided() {
+        let mut breadcrumb = Breadcrumb::new();
+        breadcrumb.set_path(&["home".to_string(), "lsgalante".to_string()]);
+        breadcrumb.set_rect(0.0, 0.0, 300.0, 24.0);
+
+        let segs = breadcrumb.visible_segs(Rect { x: 0.0, y: 0.0, width: 300.0, height: 24.0 });
+        // Root + two components, no ellipsis.
+        assert_eq!(segs.len(), 3);
+        assert!(segs.iter().all(|s| s.logical.is_some()));
+        assert_eq!(segs[0].text, "/");
     }
 
     #[test]
