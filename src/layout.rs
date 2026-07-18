@@ -156,6 +156,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.opacity" => "graph_opacity",
                 "style.surface.graph.spacing_x" => "graph_spacing_x",
                 "style.surface.graph.spacing_y" => "graph_spacing_y",
+                "style.surface.graph.gap_col_w" => "graph_gap_col_w",
+                "style.surface.graph.gap_row_h" => "graph_gap_row_h",
                 "style.surface.graph.grid_snap" => "graph_grid_snap",
                 "style.surface.graph.blur" => "graph_blur",
                 "style.surface.graph.font" => "graph_font",
@@ -2627,6 +2629,33 @@ pub fn set_graph_spacing_y(spacing: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("graph_spacing_y", spacing);
+    }
+}
+
+/// The gap between grid cells, the companion to `graph_spacing_*` (which is the cell
+/// itself). One node slot to the next is the two added up. Defaults match `ContentBg`'s
+/// own, i.e. a quarter of the cell.
+pub fn graph_gap_col_w() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_gap_col_w").unwrap_or(37.5)
+}
+
+pub fn set_graph_gap_col_w(gap: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_gap_col_w", gap);
+    }
+}
+
+pub fn graph_gap_row_h() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_gap_row_h").unwrap_or(37.5)
+}
+
+pub fn set_graph_gap_row_h(gap: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_gap_row_h", gap);
     }
 }
 
