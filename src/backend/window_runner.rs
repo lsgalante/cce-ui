@@ -932,6 +932,83 @@ fn bevel_profile(kind: EdgeKind, d: f32, t: f32) -> f32 {
     }
 }
 
+/// The light-independent curvature term at signed distance `d` — the second depth cue,
+/// on top of the directional one. Curvature shading is what ambient light does: convex
+/// surface catches it from everywhere (bright), concave is self-occluded (dark). Because
+/// it does not rotate with the light, it survives exactly where the directional term
+/// dies — walls parallel to the light vector — so no edge ever vanishes entirely.
+///
+/// `high_sign` is +1 when the rect interior is the HIGH side of the transition and -1
+/// when it is the low side (a recess). Geometry, not lighting: it does not flip with
+/// `light_sign`... except that for these 2.5D shapes the two are the same number, since
+/// a raised shape is lit like a plateau and shaded like one.
+#[inline]
+fn bevel_curvature(kind: EdgeKind, d: f32, t: f32, high_sign: f32) -> f32 {
+    if t <= 0.0 {
+        return 0.0;
+    }
+    match kind {
+        // A rim is convex everywhere, tightest right at the silhouette: a bright crest
+        // line hugging the boundary and dying fast inward. This is the line that makes
+        // glass read as glass — the edge catches ambient light all the way around, even
+        // (dimmer, via the gain asymmetry below) on the side facing away from the light.
+        EdgeKind::Rim => {
+            let u = (d / t).clamp(0.0, 1.0);
+            let f = 1.0 - u;
+            CREST_RATIO * f * f * f
+        }
+        // An S-curve step is convex on its high half (the shoulder) and concave on its
+        // low half (the fillet, where the wall meets the floor): antisymmetric, zero at
+        // the ends (no seam against either plateau) and at the midpoint.
+        EdgeKind::Step => {
+            let s = (d / t + 0.5).clamp(0.0, 1.0);
+            let outer_is_high = -high_sign; // d < 0 is outside the rect
+            // sin(2πs) is positive on the outer half — the shoulder when the outside is
+            // the high side — and negative on the inner (fillet) half.
+            AO_RATIO * outer_is_high * (s * std::f32::consts::TAU).sin()
+        }
+    }
+}
+
+/// Crest amplitude as a fraction of `bevel_depth` — how much brighter a rim's silhouette
+/// line is than flat surface under even light. Must stay clearly below ~0.7 (the
+/// projection of a 135° light onto an axis edge), or it cancels the directional shadow
+/// on the dark side and the rim goes flat there instead of showing a faint bright line
+/// over a shadowed roll.
+const CREST_RATIO: f32 = 0.4;
+/// Shoulder/fillet amplitude as a fraction of `bevel_depth`.
+const AO_RATIO: f32 = 0.6;
+/// Per-sign overlay gains. These are asymmetric the opposite way from intuition: on the
+/// dark bases this DE runs, white-over blending (`b + a(1-b)`) moves the pixel far more
+/// per unit alpha than black-over (`b(1-a)`) — a dark surface has little brightness for
+/// black to take away. The old subtractive shading effectively crushed shadow sides to
+/// black in linear space; the black overlay needs a high gain to keep shadows reading
+/// at all, while white needs damping to keep highlights from blowing out.
+const LIGHT_GAIN: f32 = 0.7;
+const DARK_GAIN: f32 = 3.0;
+
+/// A shading value (already scaled by `bevel_depth`) as the two overlay passes: the lit
+/// pass is translucent white, the shadow pass translucent black. Painting the
+/// *modulation* instead of a resolved surface color is what lets bevels compose — a step
+/// crossing a rim shades the rim's gradient instead of stamping a flat band over it, a
+/// lip on a translucent plate no longer doubles its opacity, and a recess needs no
+/// knowledge of the surface color it carves.
+///
+/// Why two passes with fixed RGB rather than one signed color: a primitive whose value
+/// crosses zero inside a band would interpolate white→black through mid-gray at
+/// non-negligible alpha — on a dark base a *brightening* artifact right where the
+/// shading should vanish. With per-pass alphas clamped at the crossing, each pass fades
+/// to zero there and the hue can never be wrong. Alphas also stay non-negative on every
+/// vertex, which the renderer requires (negative alpha is the blur sentinel).
+#[inline]
+fn overlay_light(v: f32) -> [f32; 4] {
+    [1.0, 1.0, 1.0, (v.max(0.0) * LIGHT_GAIN).min(1.0)]
+}
+#[inline]
+fn overlay_dark(v: f32) -> [f32; 4] {
+    [0.0, 0.0, 0.0, ((-v).max(0.0) * DARK_GAIN).min(1.0)]
+}
+
 /// The signed distance range an edge's shading occupies, relative to the boundary.
 #[inline]
 fn bevel_span(kind: EdgeKind, t: f32) -> (f32, f32) {
@@ -942,11 +1019,12 @@ fn bevel_span(kind: EdgeKind, t: f32) -> (f32, f32) {
 }
 
 /// How many gradient bands to slice a lip of thickness `t` into. Vertex colors interpolate
-/// linearly, so each band is a chord of [`bevel_profile`]'s curve; one band per ~1.5px
-/// keeps the error under a shade step without emitting geometry finer than the display
-/// resolves. A 2px lip stays a single ramp; a 12px rolled edge gets eight.
+/// linearly, so each band is a chord of the shading curve; one band per ~1.25px keeps the
+/// error under a shade step without emitting geometry finer than the display resolves.
+/// The cap rose with the curvature term: a step now has two features across its width
+/// (shoulder and fillet), so it needs double the samples a single bump did.
 fn default_bevel_bands(t: f32) -> usize {
-    ((t / 1.5).ceil() as usize).clamp(1, 8)
+    ((t / 1.25).ceil() as usize).clamp(1, 12)
 }
 
 /// As [`push_bevel_edge_vertices_radii`], with the band count forced and the walls
@@ -989,22 +1067,25 @@ pub fn push_bevel_edge_vertices_banded(
     let ly = -rad.sin() * light_sign;
     let depth = crate::layout::bevel_depth();
 
-    // Only RGB moves; alpha is held at the base value on every vertex. The renderer reads
-    // a negative alpha as the blur-behind sentinel (shader2d.wgsl), so interpolating alpha
-    // could cross zero and flip part of a triangle into blur mode.
-    let shade = |factor: f32| -> [f32; 4] {
-        let offset = factor.clamp(-1.0, 1.0) * depth;
+    // `base_color` is no longer painted: shading is an overlay (see `overlay_color`), so
+    // the surface below shows through with its own gradients and translucency intact.
+    let _ = base_color;
+    // Shading (directional + curvature, scaled by bevel_depth) at signed distance `d`,
+    // for an edge whose outward flat normal is `dir`. A `Step` band runs negative — it
+    // straddles the boundary into the plateau outside the rect, which is exactly what
+    // removes the seam.
+    let value = |dot: f32, d: f32| {
+        depth * (bevel_profile(kind, d, t) * dot + bevel_curvature(kind, d, t, light_sign))
+    };
+    // The (up to two) overlay color pairs for a band running from value `v0` to `v1`:
+    // one white pair and/or one black pair, each pass fading to zero alpha wherever the
+    // value has the other sign. Both fire only when the band straddles the terminator.
+    let passes = |v0: f32, v1: f32| -> [Option<([f32; 4], [f32; 4])>; 2] {
         [
-            (base_color[0] + offset).clamp(0.0, 1.0),
-            (base_color[1] + offset).clamp(0.0, 1.0),
-            (base_color[2] + offset).clamp(0.0, 1.0),
-            base_color[3],
+            (v0 > 0.0 || v1 > 0.0).then(|| (overlay_light(v0), overlay_light(v1))),
+            (v0 < 0.0 || v1 < 0.0).then(|| (overlay_dark(v0), overlay_dark(v1))),
         ]
     };
-    // Color at signed distance `d` from the boundary, for an edge whose outward normal is
-    // `dir`. A `Step` band runs negative — it straddles the boundary into the plateau
-    // outside the rect, which is exactly what removes the seam.
-    let band = |dir: (f32, f32), d: f32| shade(bevel_profile(kind, d, t) * (dir.0 * lx + dir.1 * ly));
     let (span_lo, span_hi) = bevel_span(kind, t);
 
     // Each flat edge spans between its two adjoining corner radii, not a single uniform
@@ -1026,31 +1107,39 @@ pub fn push_bevel_edge_vertices_banded(
 
         // Top: outward normal (0,-1); the gradient runs downward, into the surface.
         if top_w > 0.0 && edges.0 {
-            let (c0, c1) = (band((0.0, -1.0), d0), band((0.0, -1.0), d1));
-            out.extend_from_slice(&quad_vertices_shaded(
-                x + tl, y + d0, top_w, bw, sw, sh, c0, c0, c1, c1, clip_circle,
-            ));
+            let (v0, v1) = (value(-ly, d0), value(-ly, d1));
+            for (c0, c1) in passes(v0, v1).into_iter().flatten() {
+                out.extend_from_slice(&quad_vertices_shaded(
+                    x + tl, y + d0, top_w, bw, sw, sh, c0, c0, c1, c1, clip_circle,
+                ));
+            }
         }
         // Bottom: outward normal (0,1); gradient runs upward.
         if bottom_w > 0.0 && edges.2 {
-            let (c0, c1) = (band((0.0, 1.0), d0), band((0.0, 1.0), d1));
-            out.extend_from_slice(&quad_vertices_shaded(
-                x + bl, y + h - d1, bottom_w, bw, sw, sh, c1, c1, c0, c0, clip_circle,
-            ));
+            let (v0, v1) = (value(ly, d0), value(ly, d1));
+            for (c0, c1) in passes(v0, v1).into_iter().flatten() {
+                out.extend_from_slice(&quad_vertices_shaded(
+                    x + bl, y + h - d1, bottom_w, bw, sw, sh, c1, c1, c0, c0, clip_circle,
+                ));
+            }
         }
         // Left: outward normal (-1,0); gradient runs rightward.
         if left_h > 0.0 && edges.3 {
-            let (c0, c1) = (band((-1.0, 0.0), d0), band((-1.0, 0.0), d1));
-            out.extend_from_slice(&quad_vertices_shaded(
-                x + d0, y + left_top, bw, left_h, sw, sh, c0, c1, c1, c0, clip_circle,
-            ));
+            let (v0, v1) = (value(-lx, d0), value(-lx, d1));
+            for (c0, c1) in passes(v0, v1).into_iter().flatten() {
+                out.extend_from_slice(&quad_vertices_shaded(
+                    x + d0, y + left_top, bw, left_h, sw, sh, c0, c1, c1, c0, clip_circle,
+                ));
+            }
         }
         // Right: outward normal (1,0); gradient runs leftward.
         if right_h > 0.0 && edges.1 {
-            let (c0, c1) = (band((1.0, 0.0), d0), band((1.0, 0.0), d1));
-            out.extend_from_slice(&quad_vertices_shaded(
-                x + ww - d1, y + right_top, bw, right_h, sw, sh, c1, c0, c0, c1, clip_circle,
-            ));
+            let (v0, v1) = (value(lx, d0), value(lx, d1));
+            for (c0, c1) in passes(v0, v1).into_iter().flatten() {
+                out.extend_from_slice(&quad_vertices_shaded(
+                    x + ww - d1, y + right_top, bw, right_h, sw, sh, c1, c0, c0, c1, clip_circle,
+                ));
+            }
         }
     }
 
@@ -1079,8 +1168,6 @@ pub fn push_bevel_edge_vertices_banded(
             let theta1 = start_angle + ((j + 1) as f32) * (end_angle - start_angle) / (segments as f32);
             let (cos0, sin0) = (theta0.cos(), theta0.sin());
             let (cos1, sin1) = (theta1.cos(), theta1.sin());
-            let f0 = cos0 * lx + sin0 * ly;
-            let f1 = cos1 * lx + sin1 * ly;
             for k in 0..bands {
                 let d0 = span_lo + (span_hi - span_lo) * (k as f32 / bands as f32);
                 let d1 = span_lo + (span_hi - span_lo) * ((k + 1) as f32 / bands as f32);
@@ -1093,13 +1180,33 @@ pub fn push_bevel_edge_vertices_banded(
                         1.0 - ((cy + rho * s) / sh) * 2.0,
                     ]
                 };
-                // Outer/inner × the two sweep ends; each vertex gets its own shade.
-                let (p0, p1) = (bevel_profile(kind, d0, t), bevel_profile(kind, d1, t));
-                let v00 = Vertex { position: p(r0, cos0, sin0), color: shade(p0 * f0), clip_circle };
-                let v10 = Vertex { position: p(r0, cos1, sin1), color: shade(p0 * f1), clip_circle };
-                let v11 = Vertex { position: p(r1, cos1, sin1), color: shade(p1 * f1), clip_circle };
-                let v01 = Vertex { position: p(r1, cos0, sin0), color: shade(p1 * f0), clip_circle };
-                out.extend_from_slice(&[v00, v10, v11, v00, v11, v01]);
+                // Outer/inner × the two sweep ends; each vertex gets its own value, and
+                // the cell is drawn once per overlay pass that has any coverage.
+                let vals = [
+                    value(cos0 * lx + sin0 * ly, d0),
+                    value(cos1 * lx + sin1 * ly, d0),
+                    value(cos1 * lx + sin1 * ly, d1),
+                    value(cos0 * lx + sin0 * ly, d1),
+                ];
+                let geo = [
+                    p(r0, cos0, sin0),
+                    p(r0, cos1, sin1),
+                    p(r1, cos1, sin1),
+                    p(r1, cos0, sin0),
+                ];
+                let mut cells: [Option<fn(f32) -> [f32; 4]>; 2] = [None, None];
+                if vals.iter().any(|&v| v > 0.0) {
+                    cells[0] = Some(overlay_light);
+                }
+                if vals.iter().any(|&v| v < 0.0) {
+                    cells[1] = Some(overlay_dark);
+                }
+                for f in cells.into_iter().flatten() {
+                    let c: Vec<Vertex> = (0..4)
+                        .map(|i| Vertex { position: geo[i], color: f(vals[i]), clip_circle })
+                        .collect();
+                    out.extend_from_slice(&[c[0], c[1], c[2], c[0], c[2], c[3]]);
+                }
             }
         }
     }
@@ -1210,13 +1317,9 @@ pub fn push_widget_vertices(w: &dyn crate::widget::WidgetHost, sw: f32, sh: f32,
     let radii = w.corner_radii();
     if let Some(thickness) = w.plate_bevel() {
         let t = thickness;
-        let inner_radii = crate::widget::CornerRadii {
-            top_left: (radii.top_left - t).max(0.0),
-            top_right: (radii.top_right - t).max(0.0),
-            bottom_right: (radii.bottom_right - t).max(0.0),
-            bottom_left: (radii.bottom_left - t).max(0.0),
-        };
-        push_rounded_rect_vertices_corners(x + t, y + t, ww - 2.0 * t, h - 2.0 * t, inner_radii, sw, sh, w.color(), clip_circle, None, out);
+        // Full-size fill: the bevel lip is a shading overlay now, not a paint of the
+        // outer ring, so an inset fill would leave the ring unfilled.
+        push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
         push_plate_bevel_vertices(x, y, ww, h, radii.top_left, t, sw, sh, w.color(), clip_circle, out);
     } else {
         push_rounded_rect_vertices_corners(x, y, ww, h, radii, sw, sh, w.color(), clip_circle, None, out);
@@ -1309,16 +1412,15 @@ pub fn tessellate_display_list(
                 push_plate_solid_border_vertices(rect.x, rect.y, rect.width, rect.height, cr, *thickness, sw, sh, *border, no, &mut verts);
             }
             Prim::Bevel { rect, radii, color, depth } => {
-                // Mirror push_widget_vertices' bevel branch: inset rounded fill + bevel edges.
-                let t = *depth;
-                let inner = crate::widget::CornerRadii::new(
-                    (radii.0 - t).max(0.0),
-                    (radii.1 - t).max(0.0),
-                    (radii.2 - t).max(0.0),
-                    (radii.3 - t).max(0.0),
-                );
-                push_rounded_rect_vertices_corners(rect.x + t, rect.y + t, rect.width - 2.0 * t, rect.height - 2.0 * t, inner, sw, sh, *color, no, None, &mut verts);
-                push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, t, sw, sh, *color, no, &mut verts);
+                // Full-size fill: the lip is now a shading overlay, not a paint of the
+                // outer ring, so the fill must cover the whole rect (the old inset fill
+                // would leave the ring showing whatever lay beneath).
+                let corners = crate::widget::CornerRadii {
+                    top_left: radii.0, top_right: radii.1,
+                    bottom_right: radii.2, bottom_left: radii.3,
+                };
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, corners, sw, sh, *color, no, None, &mut verts);
+                push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, *depth, sw, sh, *color, no, &mut verts);
             }
             Prim::Plate { rect, radii, color, depth } => {
                 // Fill at full size (no inset — see Prim::Plate), then roll the perimeter.
@@ -1337,13 +1439,14 @@ pub fn tessellate_display_list(
                     sw, sh, *color, no, 1.0, &mut verts,
                 );
             }
-            Prim::Recess { rect, radii, surface, depth, edges } => {
-                // Edges only — no fill, so the surface already painted below shows through
-                // the middle of the carve. `light_sign = -1.0` shadows the lit-facing edges,
+            Prim::Recess { rect, radii, depth, edges } => {
+                // Edges only — no fill: the shading is an overlay, so whatever is painted
+                // below (fill, rim gradient, blur) shows through the carve modulated
+                // rather than repainted. `light_sign = -1.0` shadows the lit-facing edges,
                 // which is the raised->recessed inversion.
                 push_bevel_edge_vertices_banded(
                     rect.x, rect.y, rect.width, rect.height, *radii, *depth,
-                    sw, sh, *surface, no, -1.0, default_bevel_bands(*depth), *edges,
+                    sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(*depth), *edges,
                     EdgeKind::Step, &mut verts,
                 );
             }

@@ -40,8 +40,8 @@ pub enum Prim {
     /// A rounded fill plus a solid border stroke — a widget's own "plate" (mirrors
     /// `push_widget_vertices`' non-bevel branch: rounded bg + `push_plate_solid_border_vertices`).
     Border { rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32 },
-    /// A beveled plate: an inset rounded fill plus lightened/darkened edges (mirrors
-    /// `push_widget_vertices`' bevel branch).
+    /// A beveled plate: a rounded fill at full size plus a light/shadow overlay lip
+    /// (mirrors `push_widget_vertices`' bevel branch).
     Bevel { rect: Rect, radii: Radii, color: [f32; 4], depth: f32 },
     /// A recess carved into whatever is already painted underneath — the inverse of
     /// `Bevel`. Emits ONLY the shaded edges, never a fill, so the surface below shows
@@ -50,13 +50,13 @@ pub enum Prim {
     /// `light_source_position` fall into shadow and the far edges catch the light —
     /// which is what reads as "lower" instead of "raised".
     ///
-    /// `surface` is the color of what lies beneath (the thing being carved); it is only
-    /// the base for the edge shading, and is never filled. Its alpha carries through to
-    /// the edges, so a recess in a translucent plate stays translucent.
+    /// The shading is a translucent light/shadow overlay, so the carve needs no knowledge
+    /// of what it carves: fills, gradients, and translucency below all show through
+    /// modulated rather than repainted.
     /// `edges` is (top, right, bottom, left): which walls of the carve actually exist.
     /// A region flush with the plate's own edge is a step, not a trough — see
     /// `push_bevel_edge_vertices_banded`.
-    Recess { rect: Rect, radii: Radii, surface: [f32; 4], depth: f32, edges: (bool, bool, bool, bool) },
+    Recess { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
     /// The window's glass slab: a rounded fill plus a rolled, lit edge around its whole
     /// perimeter, drawn at full size. Distinct from `Bevel`, which insets its fill by
     /// `depth` — a plate must fill the window exactly, or the compositor's rounded window
@@ -347,18 +347,18 @@ impl PaintCtx {
     }
 
     /// Carve a recess into the already-painted surface below. Unlike `bevel`, this fills
-    /// nothing — `surface` is the color being carved, used only to shade the edges.
-    pub fn recess(&mut self, rect: Rect, radii: Radii, surface: [f32; 4], depth: f32) {
-        self.recess_edges(rect, radii, surface, depth, (true, true, true, true));
+    /// nothing — the shading is an overlay, so it composes over whatever was painted.
+    pub fn recess(&mut self, rect: Rect, radii: Radii, depth: f32) {
+        self.recess_edges(rect, radii, depth, (true, true, true, true));
     }
 
     /// [`PaintCtx::recess`] with only some of the walls — see `Prim::Recess`.
     pub fn recess_edges(
-        &mut self, rect: Rect, radii: Radii, surface: [f32; 4], depth: f32,
+        &mut self, rect: Rect, radii: Radii, depth: f32,
         edges: (bool, bool, bool, bool),
     ) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Recess { rect, radii, surface, depth, edges });
+        self.push(Prim::Recess { rect, radii, depth, edges });
     }
 
     /// The window's glass slab: rounded fill at full size plus a rolled, lit perimeter.

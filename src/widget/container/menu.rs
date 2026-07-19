@@ -465,15 +465,9 @@ impl Paint for MenuBar {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         if self.recessed {
-            // No background of our own: carve the backplate instead, so the plate below is
-            // what shows through the bar. The shading base has to be the plate's own color
-            // (matching how the window emits it: page_low tinted by the active-backplate
-            // opacity), because the recess edges are that surface catching/losing light —
-            // shading a transparent color would just produce transparent edges.
-            let mut surface = colors::page_low_color();
-            if surface[3] > 0.001 {
-                surface[3] = colors::active_backplate_opacity();
-            }
+            // No background of our own: carve the backplate instead. The recess shading is
+            // a light/shadow overlay, so whatever the plate painted here (fill, rim
+            // gradient, blur) shows through modulated.
             // `depth` is the roll-off width in px (the shading amplitude is separate: the
             // renderer applies `bevel_depth` itself), capped so a deep DE-wide setting can
             // never swallow a short bar — the two walls would meet in the middle and the
@@ -484,11 +478,11 @@ impl Paint for MenuBar {
                 // trough, so its only wall is the one facing the content. The other three
                 // sides are the plate's outer edge, where the plate's own roll already lives
                 // — carving there too would cut a second lip into the same pixels.
-                ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), surface, depth, (false, false, true, false));
+                ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), depth, (false, false, true, false));
             } else {
                 // Inset from the plate edge: a real trough, walled all round, its corners
                 // rounded by the roll itself.
-                ctx.recess(rect, (depth, depth, depth, depth), surface, depth);
+                ctx.recess(rect, (depth, depth, depth, depth), depth);
             }
         } else {
             // Background: always the plain quad — the rounded-against-parent variant required a

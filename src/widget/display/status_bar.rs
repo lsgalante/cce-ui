@@ -138,17 +138,11 @@ impl Paint for StatusBar {
     /// body; deliberately no `widget_font`, see module docs).
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         if self.recessed {
-            // The shading base is the plate's own color (page_low at the active backplate
-            // opacity, matching how the window emits it) — these edges are that surface
-            // catching and losing light, so shading a transparent color would just produce
-            // transparent edges.
-            let mut surface = colors::page_low_color();
-            if surface[3] > 0.001 {
-                surface[3] = colors::active_backplate_opacity();
-            }
+            // The recess shading is a light/shadow overlay — whatever the plate painted
+            // here shows through modulated, so no surface color is needed.
             // Capped against the bar's own height so a deep DE-wide roll can't swallow it.
             let depth = crate::layout::bevel_width().min(rect.height * 0.4);
-            ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), surface, depth, (true, false, false, false));
+            ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), depth, (true, false, false, false));
         } else {
             // Always the plain background quad — the rounded-against-parent variant required a
             // backplate parent, which no longer exists.
