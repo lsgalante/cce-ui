@@ -1494,7 +1494,7 @@ pub fn bevel_depth() -> f32 {
 /// thick glass; narrow and deep reads as a stamped metal lip.
 pub fn bevel_width() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("bevel_width").unwrap_or(14.0)
+    get_style_registry().read().unwrap().get_float("bevel_width").unwrap_or(9.3)
 }
 
 pub fn toggle_corner_radius() -> f32 {
