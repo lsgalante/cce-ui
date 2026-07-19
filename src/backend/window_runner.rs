@@ -1212,6 +1212,54 @@ pub fn push_bevel_edge_vertices_banded(
     }
 }
 
+/// How strong the face gradient is, as a fraction of `bevel_depth` at the corner nearest
+/// the light. Deliberately well below the edge amplitude: the face is a plane, not a
+/// roll — it only *leans* toward the light.
+const FACE_RATIO: f32 = 0.35;
+
+/// The face lighting of a plate: a single diagonal luminance gradient across the whole
+/// surface, brightest at the corner facing `light_source_position` and darkest at the
+/// opposite one. This is the difference between an object and a sticker: a real surface
+/// under directional light is never uniform, and a perfectly flat fill makes the eye
+/// read the (much smaller) edge shading as frame decoration rather than shape.
+///
+/// Emitted as the same two-pass white/black overlays as the bevels (see
+/// [`overlay_light`]/[`overlay_dark`]): fixed RGB per pass, per-corner alphas clamped at
+/// the terminator, bilinear across the quad. The quad is square — its corners poke past
+/// a rounded plate's arcs — but the compositor clips the window surface to the same
+/// radius, so the overhang never reaches the screen.
+pub fn push_plate_face_vertices(
+    x: f32, y: f32, ww: f32, h: f32,
+    sw: f32, sh: f32,
+    clip_circle: [f32; 3],
+    out: &mut Vec<Vertex>,
+) {
+    let rad = crate::layout::light_source_position();
+    let (lx, ly) = (rad.cos(), -rad.sin());
+    let amp = crate::layout::bevel_depth() * FACE_RATIO;
+    // Corner value = how much its outward diagonal faces the light.
+    let inv = std::f32::consts::FRAC_1_SQRT_2;
+    let v_tl = amp * inv * (-lx - ly);
+    let v_tr = amp * inv * (lx - ly);
+    let v_br = amp * inv * (lx + ly);
+    let v_bl = amp * inv * (-lx + ly);
+    let vs = [v_tl, v_tr, v_br, v_bl];
+    if vs.iter().any(|&v| v > 0.0) {
+        out.extend_from_slice(&quad_vertices_shaded(
+            x, y, ww, h, sw, sh,
+            overlay_light(v_tl), overlay_light(v_tr), overlay_light(v_br), overlay_light(v_bl),
+            clip_circle,
+        ));
+    }
+    if vs.iter().any(|&v| v < 0.0) {
+        out.extend_from_slice(&quad_vertices_shaded(
+            x, y, ww, h, sw, sh,
+            overlay_dark(v_tl), overlay_dark(v_tr), overlay_dark(v_br), overlay_dark(v_bl),
+            clip_circle,
+        ));
+    }
+}
+
 pub fn push_plate_solid_border_vertices(
     x: f32, y: f32, ww: f32, h: f32,
     radii: crate::widget::CornerRadii,
@@ -1423,10 +1471,10 @@ pub fn tessellate_display_list(
                 push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, *depth, sw, sh, *color, no, &mut verts);
             }
             Prim::Plate { rect, radii, color, depth } => {
-                // Fill at full size (no inset — see Prim::Plate), then roll the perimeter.
-                // The lip rides on top of the fill's outer band rather than replacing it,
-                // so the plate's silhouette and the compositor's rounded window corners
-                // still agree exactly.
+                // Fill at full size (no inset — see Prim::Plate), then light the face,
+                // then roll the perimeter. The lip rides on top of the fill's outer band
+                // rather than replacing it, so the plate's silhouette and the
+                // compositor's rounded window corners still agree exactly.
                 let corners = crate::widget::CornerRadii {
                     top_left: radii.0, top_right: radii.1,
                     bottom_right: radii.2, bottom_left: radii.3,
@@ -1434,6 +1482,7 @@ pub fn tessellate_display_list(
                 push_rounded_rect_vertices_corners(
                     rect.x, rect.y, rect.width, rect.height, corners, sw, sh, *color, no, None, &mut verts,
                 );
+                push_plate_face_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, no, &mut verts);
                 push_bevel_edge_vertices_radii(
                     rect.x, rect.y, rect.width, rect.height, *radii, *depth,
                     sw, sh, *color, no, 1.0, &mut verts,
