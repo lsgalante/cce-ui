@@ -1501,6 +1501,24 @@ pub fn corner_shape() -> f32 {
     get_style_registry().read().unwrap().get_float("corner_shape").unwrap_or(2.0).clamp(2.0, 16.0)
 }
 
+/// The curvature-matched corner-span factor for window-scale squircle corners.
+/// A raw superellipse of exponent n at a circle's nominal radius turns tighter
+/// at the diagonal than that circle — its radius of curvature there is
+/// √2·r / (2^(1/n)·(n − 1)). Scaling the corner span by this factor makes the
+/// diagonal curvature equal the configured radius, so the corner reads as the
+/// same size as a circular one (the same reason Apple's continuous corners run
+/// ~1.5·r along the edge). Exactly 1 at n = 2. Applied to window-scale corners
+/// only — `Prim::Plate` and the renderer's window-corner clip — never to
+/// widget-scale radii, which must match the nominal-radius squircles around them.
+pub fn corner_span_factor() -> f32 {
+    let n = corner_shape();
+    if n > 2.001 {
+        (n - 1.0) * 2f32.powf(1.0 / n) / std::f32::consts::SQRT_2
+    } else {
+        1.0
+    }
+}
+
 /// Whether plates/bevels/recesses render through shader2d's per-pixel SDF-lit
 /// plate branch (the default) or the legacy banded vertex shading. `bevel_shader 0`
 /// in config flips back to the old look for A/B comparison.

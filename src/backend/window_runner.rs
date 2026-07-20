@@ -1801,24 +1801,16 @@ fn plate_push_raised(
 ) -> crate::vk::PlatePush {
     let cap = rect.width.min(rect.height) * 0.5;
     let shape = crate::layout::corner_shape();
-    // A raw superellipse of exponent n at the circle's nominal radius turns
-    // TIGHTER at the diagonal than that circle — its radius of curvature there
-    // is √2·r / (2^(1/n)·(n − 1)) — and once the roll inset exceeds it, the
-    // offset curve the specular band follows creases into a visible square
-    // corner. For PLATES (`scale_corners`), scale the corner span so the
-    // diagonal curvature radius equals the configured radius: the corner reads
-    // as the same size, entered and exited smoothly (the same reason Apple's
-    // continuous corners run ~1.5·r along the edge), and every inset ≤ r stays
-    // crease-free. Continuous at n = 2, where the factor is exactly 1.
-    // Widget-scale overlay reliefs (recess/boss/ridge fallbacks) pass false:
-    // their radii must MATCH the nominal-radius squircles of the widget
-    // silhouettes around them, and at their few-px roll widths the offset
-    // crease is subpixel.
-    let rscale = if scale_corners && shape > 2.001 {
-        (shape - 1.0) * 2f32.powf(1.0 / shape) / std::f32::consts::SQRT_2
-    } else {
-        1.0
-    };
+    // For PLATES (`scale_corners`), widen the corner span by the
+    // curvature-match factor (see `layout::corner_span_factor`): the diagonal
+    // curvature radius equals the configured radius, the corner reads as the
+    // same size as a circular one, and every roll inset ≤ r stays crease-free
+    // (past the diagonal curvature radius the offset curve the specular band
+    // follows creases into a visible square corner). Widget-scale overlay
+    // reliefs (recess/boss/ridge fallbacks) pass false: their radii must MATCH
+    // the nominal-radius squircles of the widget silhouettes around them, and
+    // at their few-px roll widths the offset crease is subpixel.
+    let rscale = if scale_corners { crate::layout::corner_span_factor() } else { 1.0 };
     crate::vk::PlatePush {
         rect: [
             (rect.x + rect.width * 0.5) * scale,

@@ -794,11 +794,21 @@ impl VkRenderer {
         renderer
     }
 
+    /// The window-clip corner radius as the shaders consume it: the nominal
+    /// radius widened by the curvature-match factor, so the clip cuts along
+    /// the same curve as window-scale plate corners (`plate_push_raised` with
+    /// `scale_corners`) and a clipped window reads the same as a plate-drawn
+    /// one. Capped at half the smaller extent, like the plate path's cap.
+    fn clip_corner_radius(&self) -> f32 {
+        let cap = 0.5 * self.extent.width.min(self.extent.height) as f32;
+        (self.corner_radius_px * crate::layout::corner_span_factor()).min(cap)
+    }
+
     fn write_window_info(&mut self) {
         let data = [
             self.extent.width as f32,
             self.extent.height as f32,
-            self.corner_radius_px,
+            self.clip_corner_radius(),
             crate::layout::corner_shape(),
         ];
         if let Some(allocation) = self.window_info.allocation.as_mut() {
@@ -1079,6 +1089,9 @@ impl VkRenderer {
     }
 
     // Used at cutover, when scale changes re-derive the radius; vk-smoke fixes it at init.
+    // Nominal (circle-equivalent) radius in physical px — the curvature-match
+    // widening for squircle corner shapes happens at consumption
+    // (`clip_corner_radius`), so callers pass the configured radius as-is.
     #[allow(dead_code)]
     pub fn set_corner_radius(&mut self, radius_px: f32) {
         self.corner_radius_px = radius_px;
@@ -1224,11 +1237,12 @@ impl VkRenderer {
                 frame2d.images,
                 self.extent,
             );
+            let clip_radius = self.clip_corner_radius();
             self.scene.write_frame_uniforms(
                 &self.core.device,
                 self.core.allocator.as_mut().unwrap(),
                 frame_index,
-                self.corner_radius_px,
+                clip_radius,
             );
             if let Some(rt) = self.rt.as_mut() {
                 rt.write_frame_uniforms(frame_index);
