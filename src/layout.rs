@@ -1517,6 +1517,15 @@ pub fn bevel_width() -> f32 {
     get_style_registry().read().unwrap().get_float("bevel_width").unwrap_or(9.3)
 }
 
+/// Roll-off width for the wall where a bar (menubar / status bar / the demo's
+/// header band) steps down into the window plate. Wider than the plate's own
+/// perimeter roll on purpose: the carve depth saturates at `bevel_width` in the
+/// tessellator, so the extra width flattens the wall's slope — a soft, gradual
+/// transition into the bar — instead of cutting a proportionally deeper groove.
+pub fn bar_wall_width() -> f32 {
+    bevel_width() * 1.75
+}
+
 pub fn toggle_corner_radius() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("toggle_corner_radius").unwrap_or(4.0)

@@ -327,7 +327,7 @@ impl Application for DemoApp {
         pc.recess_edges(
             Rect { x: 0.0, y: 0.0, width: w, height: band_h },
             (0.0, 0.0, 0.0, 0.0),
-            bevel,
+            cce_ui::layout::bar_wall_width(),
             (false, false, true, false),
         );
 
@@ -342,7 +342,7 @@ impl Application for DemoApp {
         pc.recess_edges(
             Rect { x: 0.0, y: status_top, width: w, height: status_h },
             (0.0, 0.0, 0.0, 0.0),
-            bevel,
+            cce_ui::layout::bar_wall_width(),
             (true, false, false, false),
         );
 

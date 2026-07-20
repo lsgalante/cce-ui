@@ -140,8 +140,9 @@ impl Paint for StatusBar {
         if self.recessed {
             // The recess shading is a light/shadow overlay — whatever the plate painted
             // here shows through modulated, so no surface color is needed.
-            // Capped against the bar's own height so a deep DE-wide roll can't swallow it.
-            let depth = crate::layout::bevel_width().min(rect.height * 0.4);
+            // Capped against the bar's own height so a deep DE-wide roll can't swallow it
+            // (a single wall straddling the boundary intrudes only half its width).
+            let depth = crate::layout::bar_wall_width().min(rect.height * 0.6);
             ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), depth, (true, false, false, false));
         } else {
             // Always the plain background quad — the rounded-against-parent variant required a

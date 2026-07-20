@@ -1566,10 +1566,15 @@ pub fn tessellate_display_list(
                         if !edges.2 { y1 += ext; }
                         if !edges.3 { x0 -= ext; }
                         let t_px = *depth * scale;
+                        // Depth saturates at the DE's nominal roll width: a wall
+                        // wider than the plate's own perimeter roll spreads that
+                        // same step over the longer run — a softer transition —
+                        // instead of cutting proportionally deeper (which would
+                        // keep the wall just as steep no matter how wide it got).
+                        let k_mag = RECESS_DEPTH_RATIO * t_px.min(crate::layout::bevel_width() * scale);
                         // Negative depth = raised (Boss); the shader's summed
                         // slope vectors and curvature sign follow it.
-                        let k_px =
-                            if raised { -RECESS_DEPTH_RATIO * t_px } else { RECESS_DEPTH_RATIO * t_px };
+                        let k_px = if raised { -k_mag } else { k_mag };
                         if let Some(p) = batches[bi].plate.as_mut() {
                             if p.host[1] == 0.0 {
                                 p.host[0] = features.len() as f32;

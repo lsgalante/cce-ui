@@ -472,16 +472,19 @@ impl Paint for MenuBar {
             // renderer applies `bevel_depth` itself), capped so a deep DE-wide setting can
             // never swallow a short bar — the two walls would meet in the middle and the
             // flat floor would vanish.
-            let depth = crate::layout::bevel_width().min(rect.height * 0.4);
             if rect.x <= 0.5 && rect.y <= 0.5 {
                 // Flush with the plate's top-left: the bar is a plateau one step down, not a
                 // trough, so its only wall is the one facing the content. The other three
                 // sides are the plate's outer edge, where the plate's own roll already lives
-                // — carving there too would cut a second lip into the same pixels.
+                // — carving there too would cut a second lip into the same pixels. One wall
+                // straddling the boundary intrudes only half its width, so the cap is looser
+                // than the trough's.
+                let depth = crate::layout::bar_wall_width().min(rect.height * 0.6);
                 ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), depth, (false, false, true, false));
             } else {
                 // Inset from the plate edge: a real trough, walled all round, its corners
                 // rounded by the roll itself.
+                let depth = crate::layout::bar_wall_width().min(rect.height * 0.4);
                 ctx.recess(rect, (depth, depth, depth, depth), depth);
             }
         } else {
