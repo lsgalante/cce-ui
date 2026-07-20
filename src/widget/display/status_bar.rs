@@ -36,7 +36,7 @@ impl StatusBar {
             text_offset_x: None,
             text_color: None,
             bg_color: None,
-            recessed: false,
+            recessed: crate::layout::control_relief(),
         })
     }
 
@@ -206,7 +206,9 @@ mod tests {
     #[test]
     fn manual_host_text_pipeline() {
         let mut fs = glyphon::FontSystem::new();
-        let mut bar = StatusBar::new().with_text("hello").with_text_offset_x(15.0);
+        // Pin the flat style: the bg-quad bridge under test is skipped by the
+        // config-default recessed band.
+        let mut bar = StatusBar::new().with_text("hello").with_text_offset_x(15.0).with_recess(false);
         WidgetHost::set_rect(&mut bar, 0.0, 570.0, 800.0, 30.0);
 
         assert!(bar.text_buf.is_none(), "no buffer before prepare_text");

@@ -70,7 +70,7 @@ impl Slider {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             label: None,
-            recessed: false,
+            recessed: crate::layout::control_relief(),
         })
     }
 

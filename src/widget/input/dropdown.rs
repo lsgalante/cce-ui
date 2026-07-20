@@ -130,7 +130,7 @@ impl Dropdown {
             label: None,
             hovered: false,
             corner_frame: None,
-            raised: false,
+            raised: crate::layout::control_relief(),
         })
     }
 

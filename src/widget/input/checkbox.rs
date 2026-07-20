@@ -240,7 +240,7 @@ impl Toggle {
             hovered: false,
             focused: false,
             justify: Justification::Center,
-            raised: false,
+            raised: crate::layout::control_relief(),
         })
     }
 

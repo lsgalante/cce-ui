@@ -141,23 +141,22 @@ impl Application for DemoApp {
     ) -> Self {
         cce_ui::scale::set_scale_factor(1.0);
         Self {
-            button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Click me").with_raised(true),
-            toggle: Toggle::new().with_raised(true),
+            // Relief styling (raised buttons/toggles/dropdowns, recessed
+            // wells) is the `control_relief` config default — no opt-in.
+            button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Click me"),
+            toggle: Toggle::new(),
             // Slider `value` is NORMALIZED 0..1; `with_range` only scales the readout
             // (`get_scaled_value`). Wheel nudging is an explicit opt-in.
             slider: Slider::new()
                 .with_range(0.0, 100.0)
                 .with_value(0.4)
-                .with_scroll(true)
-                .with_recessed(true),
+                .with_scroll(true),
             name_box: TextBox::new(String::new())
-                .with_placeholder("Type a name...")
-                .with_recessed(true),
+                .with_placeholder("Type a name..."),
             theme_dropdown: Dropdown::new(
                 vec!["Forest".into(), "Ocean".into(), "Ember".into()],
                 0,
-            )
-            .with_raised(true),
+            ),
             toggle_on: false,
             clicks: 0,
             status: "Ready.".to_string(),

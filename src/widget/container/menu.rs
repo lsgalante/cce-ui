@@ -72,7 +72,7 @@ impl MenuBar {
             curved_circle: None,
             blur: false,
             color: None,
-            recessed: false,
+            recessed: crate::layout::control_relief(),
             title: String::new(),
             menus: Adapted::new(ButtonStrip::new(x, y, w, h).with_inherit_menubar_font(true)),
             menu_items: Vec::new(),

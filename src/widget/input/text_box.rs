@@ -125,7 +125,7 @@ impl TextBox {
             label: None,
             hovered: false,
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
-            recessed: false,
+            recessed: crate::layout::control_relief(),
         })
     }
 

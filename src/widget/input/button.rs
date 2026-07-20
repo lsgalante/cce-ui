@@ -66,7 +66,7 @@ impl Button {
             justify: Justification::Center,
             label: None,
             hovered: false,
-            raised: false,
+            raised: crate::layout::control_relief(),
         }
     }
 
@@ -439,7 +439,9 @@ mod tests {
     #[test]
     fn geometry_and_label_parity() {
         let ctx = UiContext::new();
-        let b = Button::new(0.0, 0.0, 100.0, 24.0).with_label("Go");
+        // Pin the flat style: this test is about the legacy quad-bridge paths,
+        // which the config-default raised plate bypasses entirely.
+        let b = Button::new(0.0, 0.0, 100.0, 24.0).with_label("Go").with_raised(false);
 
         let radius = crate::layout::button_corner_radius();
         let rounded = WidgetHost::all_rounded_quads(&b, &ctx);

@@ -110,6 +110,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "window_manager.bevel_depth" => "bevel_depth",
                 "window_manager.bevel_width" => "bevel_width",
                 "window_manager.bevel_shader" => "bevel_shader",
+                "window_manager.control_relief" => "control_relief",
                 "window_manager.corner_shape" => "corner_shape",
                 "style.control.ramp.height" => "ramp_height",
                 "style.layout.column.gap" => "column_gap",
@@ -1524,6 +1525,16 @@ pub fn bevel_width() -> f32 {
 /// transition into the bar — instead of cutting a proportionally deeper groove.
 pub fn bar_wall_width() -> f32 {
     bevel_width() * 1.75
+}
+
+/// DE-wide default for the controls' relief styling (`window_manager.control_relief`
+/// in config.kdl, default on): raised Button/Toggle/Dropdown plates, recessed
+/// TextBox/Slider wells, recessed MenuBar/StatusBar bands. Widgets read this at
+/// construction; the per-widget `with_raised` / `with_recessed` / `with_recess`
+/// builders override it either way. `0` reverts the whole DE to the flat look.
+pub fn control_relief() -> bool {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("control_relief").map(|v| v != 0.0).unwrap_or(true)
 }
 
 pub fn toggle_corner_radius() -> f32 {
