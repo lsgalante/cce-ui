@@ -1388,6 +1388,12 @@ impl VkRenderer {
                 order.sort_by_key(|&k| images[k].z_before);
                 let mut img_i = 0usize;
 
+                // Corner-shape exponent for the rounded-rect clip SDF, so clipped
+                // edges cut along the same squircle family as the tessellated and
+                // SDF-lit plate corners (a plate batch overwrites the slot with
+                // its own — identical — per-plate value).
+                let clip_shape = crate::layout::corner_shape();
+
                 let default_batch = [Batch2D {
                     scissor: None,
                     clip_rrect: None,
@@ -1466,6 +1472,7 @@ impl VkRenderer {
                             let mut pc = [0.0f32; 28];
                             pc[..5].copy_from_slice(&rr);
                             pc[5] = enabled;
+                            pc[7] = clip_shape;
                             if let Some(p) = &batch.plate {
                                 pc[6] = p.mode;
                                 pc[7] = p.shape;

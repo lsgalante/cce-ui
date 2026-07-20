@@ -74,10 +74,11 @@ fn is_outside_window_corners(pos: vec2<f32>) -> bool {
 
 // Per-batch push constants (112 bytes). The first two vec4s are the rounded-rect
 // clip: rect0 = [cx, cy, bx, by] (center + SDF half-extents), rect1 = [corner
-// radius, enabled flag, plate mode, plate corner shape]. When plate mode is
+// radius, enabled flag, plate mode, corner shape]. When plate mode is
 // nonzero the batch is an SDF-lit plate (1 = raised plate, 2 = recess overlay)
-// and the p_* block describes it; the corner shape exponent selects circular
-// (2) vs superellipse (> 2) plate corners — see plate_sdf_grad. Physical
+// and the p_* block describes it. The corner shape exponent selects circular
+// (2) vs superellipse (> 2) corners for BOTH the clip SDF and the plate —
+// see rr_sdf_grad; it is set whenever either consumer is live. Physical
 // pixels, like clip_position.
 struct RRectClip {
     rect0: vec4f,
@@ -409,27 +410,37 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
             discard;
         }
     }
-    // Rounded-rect clip (per-batch): SDF of the round-cornered box; outside discards.
+    // Rounded-rect clip (per-batch): the round-cornered box through rr_sdf_grad,
+    // so the clipped silhouette follows the same corner_shape family (rect1.w:
+    // circular arc at 2, superellipse squircle above) as the tessellated plate
+    // corners around it, with a ~1px feather folded into the fragment alpha in
+    // place of the old hard discard — a clipped edge and a drawn plate corner
+    // share both curve and AA. Fully-outside fragments still discard.
+    var clip_cov = 1.0;
     if (rrect_clip.rect1.y > 0.5) {
-        let q = abs(in.clip_position.xy - rrect_clip.rect0.xy) - rrect_clip.rect0.zw;
-        let d = length(max(q, vec2f(0.0))) - rrect_clip.rect1.x;
-        if (d > 0.0) {
+        let r = rrect_clip.rect1.x;
+        let prect = vec4f(rrect_clip.rect0.xy, rrect_clip.rect0.zw + vec2f(r, r));
+        let d = rr_sdf_grad(in.clip_position.xy, prect, vec4f(r)).z;
+        clip_cov = 1.0 - smoothstep(-0.5, 0.5, d);
+        if (clip_cov <= 0.0) {
             discard;
         }
     }
 
     // SDF-lit plate batch (mode in the push constants; see plate_shade).
     if (rrect_clip.rect1.z > 0.5) {
-        return plate_shade(in.clip_position.xy, in.color);
+        let c = plate_shade(in.clip_position.xy, in.color);
+        return vec4f(c.rgb, c.a * clip_cov);
     }
 
     // Blur-behind plate: negative alpha mixes the (blurred) backdrop with the
     // plate color at |alpha| opacity.
     if (in.color.a < 0.0) {
-        return resolve_blur(in.clip_position.xy, in.color);
+        let c = resolve_blur(in.clip_position.xy, in.color);
+        return vec4f(c.rgb, c.a * clip_cov);
     }
 
-    return in.color;
+    return vec4f(in.color.rgb, in.color.a * clip_cov);
 }
 
 // Blur-behind resolve for a negative-alpha plate color: the (blurred) backdrop
