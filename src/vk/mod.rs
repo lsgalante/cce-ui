@@ -40,7 +40,7 @@ mod text;
 
 pub use core::VkCore;
 pub use image::{free_image, upload_rgba, ImageQuad};
-pub use renderer::{Batch2D, Frame2D, VkRenderer};
+pub use renderer::{Batch2D, Frame2D, PlatePush, VkRenderer, MAX_PLATE_FEATURES};
 pub use rt::{RtCamera, RtMaterial, RtOffscreen, RtTriangle};
 pub use scene::{MeshId, SceneDraw, Vertex3D};
 pub use text::TextSpan;

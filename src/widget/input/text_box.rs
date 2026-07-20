@@ -83,6 +83,9 @@ pub struct TextBox {
     /// The laid-out base rect, cached from [`Layout::rect_assigned`] — the cursor/scroll math
     /// reads geometry between events, which the narrow traits don't otherwise carry.
     rect: Rect,
+    /// Recessed style: a `Recess` overlay is carved over the box's own fill —
+    /// an inset well, the input-direction counterpart of the raised controls.
+    recessed: bool,
 }
 
 impl TextBox {
@@ -122,6 +125,7 @@ impl TextBox {
             label: None,
             hovered: false,
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+            recessed: false,
         })
     }
 
@@ -995,6 +999,12 @@ impl TextBox {
 }
 
 impl Adapted<TextBox> {
+    /// Recessed style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
+    }
+
     pub fn with_update_on_type(mut self, update: bool) -> Self {
         self.update_on_type = update;
         self
@@ -1282,13 +1292,28 @@ impl Paint for TextBox {
 
             if self.draw_bg_border {
                 let corners = (true, true, true, true);
-                ctx.rounded_rect(Rect { x, y: self.rect.y + top, width: w, height: visual_h }, radius, corners, border_color);
-                ctx.rounded_rect(
-                    Rect { x: x + border_w, y: self.rect.y + top + border_w, width: w - 2.0 * border_w, height: visual_h - 2.0 * border_w },
-                    (radius - border_w).max(0.0),
-                    corners,
-                    bg_color,
-                );
+                // Recessed + transparent fill: the carve alone defines the
+                // well — the plate below is its floor, so the flat border and
+                // bg rects are skipped entirely. An opaque fill (e.g. the edit
+                // color while editing) draws as usual and gets carved.
+                let bare = self.recessed && bg_color[3] <= 0.001;
+                if !bare {
+                    ctx.rounded_rect(Rect { x, y: self.rect.y + top, width: w, height: visual_h }, radius, corners, border_color);
+                    ctx.rounded_rect(
+                        Rect { x: x + border_w, y: self.rect.y + top + border_w, width: w - 2.0 * border_w, height: visual_h - 2.0 * border_w },
+                        (radius - border_w).max(0.0),
+                        corners,
+                        bg_color,
+                    );
+                }
+                if self.recessed {
+                    let depth = crate::layout::bevel_width().min(visual_h * 0.2);
+                    ctx.recess(
+                        Rect { x, y: self.rect.y + top, width: w, height: visual_h },
+                        (radius, radius, radius, radius),
+                        depth,
+                    );
+                }
             }
 
             let mut quads: Vec<(f32, f32, f32, f32, [f32; 4])> = Vec::new();

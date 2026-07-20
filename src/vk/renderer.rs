@@ -30,6 +30,35 @@ pub struct Batch2D {
     pub clip_rrect: Option<[f32; 5]>,
     pub start: u32,
     pub end: u32,
+    /// When set, this batch is a single SDF-lit plate cover quad: the params go
+    /// out as push constants and shader2d's plate branch lights it per pixel.
+    pub plate: Option<PlatePush>,
+}
+
+/// Push-constant block for one SDF-lit plate batch (physical px throughout).
+/// Mirrors the `p_*` fields of shader2d's `RRectClip`.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct PlatePush {
+    /// SDF box: center + half-extents. May extend past the cover quad — that is
+    /// how a recess suppresses a wall.
+    pub rect: [f32; 4],
+    /// Per-corner radii [tl, tr, br, bl].
+    pub radii: [f32; 4],
+    /// xyz = unit vector toward the light (+z out of the screen), w = roll width px.
+    pub light: [f32; 4],
+    /// [shading strength, specular strength, shininess, curvature/AO strength].
+    pub material: [f32; 4],
+    /// Mode 1: `[feature offset, feature count, 0, 0]` into the frame's
+    /// `plate_features` — the carves CSG'd out of this plate (the renderer adds
+    /// the frame slot's base offset at record time). Mode 2: the host-plate box
+    /// (center + half-extents) a free recess fades out against; far-away sides
+    /// (±1e5) disable the fade.
+    pub host: [f32; 4],
+    /// 1.0 = raised lit plate, 2.0 = recess overlay.
+    pub mode: f32,
+    /// Corner shape exponent: 2.0 = circular arcs, > 2 = superellipse
+    /// (continuous-curvature) corners — see shader2d's `plate_sdf_grad`.
+    pub shape: f32,
 }
 
 /// A full 2D frame: the display-list vertices (optionally split into scissored
@@ -41,10 +70,18 @@ pub struct Frame2D<'a> {
     pub overlay_verts: &'a [Vertex],
     /// User images drawn interleaved with `verts` by each quad's `z_before`.
     pub images: &'a [ImageQuad],
+    /// Carves CSG'd into this frame's SDF-lit plates, 12 floats each (rect
+    /// center+half-extents, per-corner radii, [width px, depth px, 0, 0]).
+    /// Plate batches reference them by offset+count in `PlatePush::host`.
+    pub plate_features: &'a [[f32; 12]],
     pub clear_color: [f32; 4],
 }
 
 const FRAMES_IN_FLIGHT: usize = 2;
+/// Max plate-carve features per frame; the shader's UBO holds one slot of this
+/// size per frame in flight.
+pub const MAX_PLATE_FEATURES: usize = 64;
+const PLATE_FEATURE_BYTES: usize = 48;
 
 pub(crate) struct AllocatedBuffer {
     pub(crate) buffer: vk::Buffer,
@@ -152,6 +189,7 @@ pub struct VkRenderer {
     descriptor_set: vk::DescriptorSet,
     backdrop_sampler: vk::Sampler,
     window_info: AllocatedBuffer,
+    plate_features: AllocatedBuffer,
 
     frames: Vec<Frame>,
     frame_index: usize,
@@ -445,6 +483,11 @@ impl VkRenderer {
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(3)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
         ];
         let descriptor_set_layout = device
             .create_descriptor_set_layout(
@@ -454,12 +497,13 @@ impl VkRenderer {
             .expect("Failed to create descriptor set layout");
 
         let set_layouts = [descriptor_set_layout];
-        // Push constants: the per-batch rounded-rect clip (two vec4s — [cx, cy, bx, by]
-        // and [r, enabled, 0, 0]) read by shader2d's fragment stage.
+        // Push constants: the per-batch rounded-rect clip plus the SDF-lit
+        // plate block (seven vec4s, matching shader2d's `RRectClip`), read by
+        // shader2d's fragment stage.
         let push_ranges = [vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
             .offset(0)
-            .size(32)];
+            .size(112)];
         let pipeline_layout = device
             .create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default()
@@ -593,6 +637,15 @@ impl VkRenderer {
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             "window-info",
         );
+        // Plate-carve features, one MAX_PLATE_FEATURES slot per frame in
+        // flight so a write never races the previous frame's reads.
+        let plate_features = create_cpu_buffer(
+            &device,
+            allocator,
+            (FRAMES_IN_FLIGHT * MAX_PLATE_FEATURES * PLATE_FEATURE_BYTES) as vk::DeviceSize,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            "plate-features",
+        );
 
         let pool_sizes = [
             vk::DescriptorPoolSize::default()
@@ -603,7 +656,7 @@ impl VkRenderer {
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1),
+                .descriptor_count(2),
         ];
         let descriptor_pool = device
             .create_descriptor_pool(
@@ -629,6 +682,10 @@ impl VkRenderer {
             .buffer(window_info.buffer)
             .offset(0)
             .range(16)];
+        let feature_infos = [vk::DescriptorBufferInfo::default()
+            .buffer(plate_features.buffer)
+            .offset(0)
+            .range((FRAMES_IN_FLIGHT * MAX_PLATE_FEATURES * PLATE_FEATURE_BYTES) as vk::DeviceSize)];
         device.update_descriptor_sets(
             &[
                 vk::WriteDescriptorSet::default()
@@ -646,6 +703,11 @@ impl VkRenderer {
                     .dst_binding(2)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&buffer_infos),
+                vk::WriteDescriptorSet::default()
+                    .dst_set(descriptor_set)
+                    .dst_binding(3)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(&feature_infos),
             ],
             &[],
         );
@@ -709,6 +771,7 @@ impl VkRenderer {
             descriptor_set,
             backdrop_sampler,
             window_info,
+            plate_features,
             frames,
             frame_index: 0,
             text,
@@ -1048,6 +1111,7 @@ impl VkRenderer {
             batches: &[],
             overlay_verts: &[],
             images: &[],
+            plate_features: &[],
             clear_color: [0.0; 4],
         })
     }
@@ -1095,6 +1159,18 @@ impl VkRenderer {
             };
 
             self.core.device.reset_fences(&[in_flight]).unwrap();
+
+            // Upload this frame's plate carves into its slot of the feature
+            // UBO (the slot's previous user has fenced, so no race).
+            if !frame2d.plate_features.is_empty() {
+                let n = frame2d.plate_features.len().min(MAX_PLATE_FEATURES);
+                let base = frame_index * MAX_PLATE_FEATURES * PLATE_FEATURE_BYTES;
+                if let Some(allocation) = self.plate_features.allocation.as_mut() {
+                    let bytes: &[u8] = bytemuck::cast_slice(&frame2d.plate_features[..n]);
+                    allocation.mapped_slice_mut().unwrap()[base..base + bytes.len()]
+                        .copy_from_slice(bytes);
+                }
+            }
 
             // Upload display-list + overlay vertices into this frame's buffer
             // (its fence has signaled, so the GPU is done with it; growing swaps
@@ -1312,8 +1388,13 @@ impl VkRenderer {
                 order.sort_by_key(|&k| images[k].z_before);
                 let mut img_i = 0usize;
 
-                let default_batch =
-                    [Batch2D { scissor: None, clip_rrect: None, start: 0, end: frame.vertex_count }];
+                let default_batch = [Batch2D {
+                    scissor: None,
+                    clip_rrect: None,
+                    start: 0,
+                    end: frame.vertex_count,
+                    plate: None,
+                }];
                 let batches: &[Batch2D] =
                     if frame2d.batches.is_empty() { &default_batch } else { frame2d.batches };
 
@@ -1377,10 +1458,28 @@ impl VkRenderer {
                             self.core.device
                                 .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
                             self.core.device.cmd_set_scissor(cmd, 0, &[scissor]);
-                            // Per-batch rounded-rect clip (fragments outside discard).
+                            // Per-batch rounded-rect clip (fragments outside
+                            // discard) + the SDF-lit plate block when this
+                            // batch is a plate cover quad.
                             let rr = batch.clip_rrect.unwrap_or([0.0; 5]);
                             let enabled = if batch.clip_rrect.is_some() { 1.0f32 } else { 0.0 };
-                            let pc = [rr[0], rr[1], rr[2], rr[3], rr[4], enabled, 0.0, 0.0];
+                            let mut pc = [0.0f32; 28];
+                            pc[..5].copy_from_slice(&rr);
+                            pc[5] = enabled;
+                            if let Some(p) = &batch.plate {
+                                pc[6] = p.mode;
+                                pc[7] = p.shape;
+                                pc[8..12].copy_from_slice(&p.rect);
+                                pc[12..16].copy_from_slice(&p.radii);
+                                pc[16..20].copy_from_slice(&p.light);
+                                pc[20..24].copy_from_slice(&p.material);
+                                pc[24..28].copy_from_slice(&p.host);
+                                if p.mode == 1.0 {
+                                    // Rebase the feature offset onto this
+                                    // frame's UBO slot.
+                                    pc[24] += (frame_index * MAX_PLATE_FEATURES) as f32;
+                                }
+                            }
                             self.core.device.cmd_push_constants(
                                 cmd,
                                 self.pipeline_layout,
@@ -1428,8 +1527,9 @@ impl VkRenderer {
                 );
                 self.core.device
                     .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
-                // Push constants persist across binds — clear any batch's rounded clip.
-                let pc = [0.0f32; 8];
+                // Push constants persist across binds — clear any batch's
+                // rounded clip and plate mode.
+                let pc = [0.0f32; 28];
                 self.core.device.cmd_push_constants(
                     cmd,
                     self.pipeline_layout,
@@ -1516,8 +1616,11 @@ impl Drop for VkRenderer {
                 }
             }
             let mut window_info = std::mem::replace(&mut self.window_info, AllocatedBuffer::null());
+            let mut plate_features =
+                std::mem::replace(&mut self.plate_features, AllocatedBuffer::null());
             if let Some(allocator) = self.core.allocator.as_mut() {
                 destroy_cpu_buffer(&self.core.device, allocator, &mut window_info);
+                destroy_cpu_buffer(&self.core.device, allocator, &mut plate_features);
             }
 
             self.core.device.destroy_descriptor_pool(self.descriptor_pool, None);
@@ -1532,5 +1635,15 @@ impl Drop for VkRenderer {
             // The rest (allocator, command pool, device, instance) is the
             // core's Drop, which runs after this body.
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The WGSL shaders compile at process start, so a syntax or validation
+    /// error is a runtime panic in every client — catch it headlessly here.
+    #[test]
+    fn shader2d_compiles() {
+        assert!(!super::shader2d_spirv().is_empty());
     }
 }

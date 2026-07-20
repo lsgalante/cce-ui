@@ -57,6 +57,21 @@ pub enum Prim {
     /// A region flush with the plate's own edge is a step, not a trough — see
     /// `push_bevel_edge_vertices_banded`.
     Recess { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
+    /// The inverse of [`Prim::Recess`]: a plateau RAISED out of the surface below.
+    /// Like `Recess` it emits only the shaded edges, never a fill — the face is the
+    /// untouched surface underneath — so a region outlined by raised rolled bumps
+    /// keeps the backplate's own color and translucency. Same wall semantics as
+    /// `Recess` (`edges` = top/right/bottom/left); the lighting is the raised sign,
+    /// so the edges facing `light_source_position` catch the light.
+    Boss { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
+    /// A raised RIM riding the rect's boundary: a bump profile straddling the
+    /// outline (span ±depth/2), rising from the surrounding surface to a crest on
+    /// the boundary and falling back to the same level inside — an elevated border
+    /// around a channel, both faces at the underlying surface's own level. One
+    /// primitive, ONE lighting evaluation per pixel: building the same shape from
+    /// a Boss plus an inset Recess stacks two shading passes (double specular /
+    /// shoulder terms at the crest) and reads far hotter than a plate edge.
+    Ridge { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
     /// The window's glass slab: a rounded fill plus a rolled, lit edge around its whole
     /// perimeter, drawn at full size. Distinct from `Bevel`, which insets its fill by
     /// `depth` — a plate must fill the window exactly, or the compositor's rounded window
@@ -350,6 +365,45 @@ impl PaintCtx {
     /// nothing — the shading is an overlay, so it composes over whatever was painted.
     pub fn recess(&mut self, rect: Rect, radii: Radii, depth: f32) {
         self.recess_edges(rect, radii, depth, (true, true, true, true));
+    }
+
+    /// Raise a plateau out of the already-painted surface below — the inverse of
+    /// [`PaintCtx::recess`]. Only the edges are shaded; the face stays the surface
+    /// beneath, so the raised region inherits the backplate's color. `depth` is the
+    /// roll width in px (pass [`crate::layout::bevel_width`] unless the widget
+    /// needs a tighter lip).
+    pub fn boss(&mut self, rect: Rect, radii: Radii, depth: f32) {
+        self.boss_edges(rect, radii, depth, (true, true, true, true));
+    }
+
+    /// [`PaintCtx::boss`] with only some of the walls — see `Prim::Boss`.
+    pub fn boss_edges(
+        &mut self,
+        rect: Rect,
+        radii: Radii,
+        depth: f32,
+        edges: (bool, bool, bool, bool),
+    ) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Boss { rect, radii, depth, edges });
+    }
+
+    /// Raise a rim along `rect`'s boundary — see `Prim::Ridge`. `depth` is the
+    /// full width of the bump (it straddles the outline by ±depth/2).
+    pub fn ridge(&mut self, rect: Rect, radii: Radii, depth: f32) {
+        self.ridge_edges(rect, radii, depth, (true, true, true, true));
+    }
+
+    /// [`PaintCtx::ridge`] with only some of the walls — see `Prim::Ridge`.
+    pub fn ridge_edges(
+        &mut self,
+        rect: Rect,
+        radii: Radii,
+        depth: f32,
+        edges: (bool, bool, bool, bool),
+    ) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Ridge { rect, radii, depth, edges });
     }
 
     /// [`PaintCtx::recess`] with only some of the walls — see `Prim::Recess`.

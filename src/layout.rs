@@ -109,6 +109,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "window_manager.light_source_position" => "light_source_position",
                 "window_manager.bevel_depth" => "bevel_depth",
                 "window_manager.bevel_width" => "bevel_width",
+                "window_manager.bevel_shader" => "bevel_shader",
+                "window_manager.corner_shape" => "corner_shape",
                 "style.control.ramp.height" => "ramp_height",
                 "style.layout.column.gap" => "column_gap",
                 "style.control.control_panel.padding" => "control_panel_padding",
@@ -1486,6 +1488,24 @@ pub fn light_source_position() -> f32 {
 
 pub fn bevel_depth() -> f32 {
     get_style_registry().read().unwrap().get_float("bevel_depth").unwrap_or(0.15)
+}
+
+/// Corner shape exponent for SDF-lit plates: 2.0 (the default) is a circular
+/// arc; higher values are superellipse "squircle" corners with continuous
+/// curvature — ~4.5 is the Apple-like look. Clamped to [2, 16]: below 2 the
+/// Lp construction degenerates toward a chamfer, above 16 it is visually a
+/// square corner and the pow() terms start flirting with f32 range.
+pub fn corner_shape() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("corner_shape").unwrap_or(2.0).clamp(2.0, 16.0)
+}
+
+/// Whether plates/bevels/recesses render through shader2d's per-pixel SDF-lit
+/// plate branch (the default) or the legacy banded vertex shading. `bevel_shader 0`
+/// in config flips back to the old look for A/B comparison.
+pub fn bevel_shader() -> bool {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("bevel_shader").map(|v| v != 0.0).unwrap_or(true)
 }
 
 /// How wide a rolled edge is, in logical px — the distance over which a plate's perimeter

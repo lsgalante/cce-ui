@@ -48,6 +48,10 @@ pub struct Slider {
     pub editor_state: TextEditorState,
     pub just_changed: bool,
     label: Option<String>,
+    /// Raised-track style: the track is drawn as a `Boss` outline — raised
+    /// rolled edges on the surface below — instead of a filled background, so
+    /// the plate's own color shows through the unfilled portion.
+    raised: bool,
 }
 
 impl Slider {
@@ -65,6 +69,7 @@ impl Slider {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             label: None,
+            raised: false,
         })
     }
 
@@ -167,6 +172,12 @@ impl Adapted<Slider> {
         self
     }
 
+    /// Raised-track style: see the `raised` field.
+    pub fn with_raised(mut self, raised: bool) -> Self {
+        self.raised = raised;
+        self
+    }
+
     pub fn with_value(mut self, val: f32) -> Self {
         self.set_value(val);
         self
@@ -224,8 +235,16 @@ impl Paint for Slider {
             }
         };
 
-        // Track.
-        rrect(Rect { x: g.track_x, y: g.y, width: g.track_w, height: g.h }, radius, rc, colors::slider_track(), ctx);
+        // Track. Raised style draws no background at all — the plate below is
+        // the track's surface; the ridge ring after the fill delimits it.
+        let track_rect = Rect { x: g.track_x, y: g.y, width: g.track_w, height: g.h };
+        // Ridge wall width for the raised style: capped well below the bar
+        // height, since the ring needs FOUR wall spans (up+down, top+bottom)
+        // plus a usable channel between them.
+        let ridge_t = crate::layout::bevel_width().min(g.h * 0.2);
+        if !self.raised {
+            rrect(track_rect, radius, rc, colors::slider_track(), ctx);
+        }
 
         // Readout box (+ focus border) and its text.
         if self.show_readout {
@@ -252,25 +271,57 @@ impl Paint for Slider {
             ctx.text(text, rx + 8.0, crate::layout::align_text_y(g.y, g.h, 12.0, 0.0), 12.0, [0xee, 0xee, 0xf0]);
         }
 
-        // Fill up to the thumb center.
+        // Fill up to the thumb center. Raised style insets the fill into the
+        // channel (past the falling inner wall), so the liquid sits in the
+        // valley instead of painting over the ridge.
         let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
         if let Some(fill_color) = colors::slider_fill() {
-            let fill_w = (thumb_x + g.thumb_size / 2.0 - g.track_x).max(0.0).min(g.track_w);
-            let fill_rad = if rounded { radius.min(g.h / 2.0) } else { radius };
-            rrect(Rect { x: g.track_x, y: g.y, width: fill_w, height: g.h }, fill_rad, (true, true, true, true), fill_color, ctx);
+            let (fx, fy, fmax_w, fh) = if self.raised {
+                let inset = 1.5 * ridge_t;
+                (g.track_x + inset, g.y + inset, g.track_w - 2.0 * inset, g.h - 2.0 * inset)
+            } else {
+                (g.track_x, g.y, g.track_w, g.h)
+            };
+            let fill_w = (thumb_x + g.thumb_size / 2.0 - fx).max(0.0).min(fmax_w);
+            let fill_rad = if rounded { radius.min(fh / 2.0) } else { radius };
+            rrect(Rect { x: fx, y: fy, width: fill_w, height: fh }, fill_rad, (true, true, true, true), fill_color, ctx);
         }
 
-        // Thumb.
+        // Raised rim AFTER the fill so its shading modulates whatever it
+        // crosses: one Ridge prim riding the track boundary — up from the
+        // plate, crest, back down into the channel where the control sits.
+        // A single primitive on purpose: boss + inset recess stacks two
+        // shading passes and the crest reads far hotter than a plate edge.
+        if self.raised {
+            ctx.ridge(track_rect, (radius, radius, radius, radius), 2.0 * ridge_t);
+        }
+
+        // Thumb. A real Circle prim, not a full-radius rounded rect: rounded
+        // rects follow the DE-wide corner_shape family, and a squircle knob
+        // reads wrong — the thumb should stay round under any corner style.
         let thumb_y = g.y + (g.h - g.thumb_size) / 2.0;
         let thumb_color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
-        let thumb_rad = if rounded { g.thumb_size / 2.0 } else { 0.0 };
-        rrect(
-            Rect { x: thumb_x, y: thumb_y, width: g.thumb_size, height: g.thumb_size },
-            thumb_rad,
-            (true, true, true, true),
-            thumb_color,
-            ctx,
-        );
+        if rounded {
+            // Raised style: the knob sits IN the valley, so its diameter is the
+            // flat channel floor between the ridge walls — drawn size only; the
+            // drag/hit geometry keeps the full thumb_size.
+            let diameter =
+                if self.raised { g.h - 2.0 * ridge_t } else { g.thumb_size };
+            ctx.circle(
+                thumb_x + g.thumb_size / 2.0,
+                thumb_y + g.thumb_size / 2.0,
+                diameter / 2.0,
+                thumb_color,
+            );
+        } else {
+            rrect(
+                Rect { x: thumb_x, y: thumb_y, width: g.thumb_size, height: g.thumb_size },
+                0.0,
+                (true, true, true, true),
+                thumb_color,
+                ctx,
+            );
+        }
     }
 }
 

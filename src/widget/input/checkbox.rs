@@ -226,6 +226,9 @@ pub struct Toggle {
     /// Where the label sits across the pill. Mirrors `Button::justify` — same enum, same
     /// 8px edge inset — so the two read as one control set wherever they share a column.
     justify: Justification,
+    /// Raised style: the background is an SDF-lit `Bevel` plate (fill + rolled
+    /// lit edge) instead of a flat fill; the state gradient composites on top.
+    raised: bool,
 }
 
 impl Toggle {
@@ -237,6 +240,7 @@ impl Toggle {
             hovered: false,
             focused: false,
             justify: Justification::Center,
+            raised: false,
         })
     }
 
@@ -269,6 +273,12 @@ impl Adapted<Toggle> {
 
     pub fn with_justify(mut self, justify: Justification) -> Self {
         self.justify = justify;
+        self
+    }
+
+    /// Raised style: see the `raised` field.
+    pub fn with_raised(mut self, raised: bool) -> Self {
+        self.raised = raised;
         self
     }
 }
@@ -311,7 +321,17 @@ impl Paint for Toggle {
         let radius = crate::layout::toggle_corner_radius();
         let bg = colors::toggle_bg_color();
 
-        if radius > 0.0 {
+        if self.raised {
+            // One lit Bevel plate owns fill and edge; the state gradient below
+            // composites over it. Transparent fill degrades to a Boss (edges
+            // only — the plate below is the face).
+            let depth = crate::layout::bevel_width().min(h * 0.2);
+            if bg[3] > 0.001 {
+                ctx.bevel(rect, (radius, radius, radius, radius), bg, depth);
+            } else {
+                ctx.boss(rect, (radius, radius, radius, radius), depth);
+            }
+        } else if radius > 0.0 {
             ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
         } else {
             ctx.quad(rect, bg);

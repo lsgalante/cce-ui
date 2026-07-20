@@ -562,6 +562,19 @@ pub fn rounded_rect_vertices_corners(
     verts
 }
 
+/// Sample of the unit superellipse |x|^n + |y|^n = 1 at circle parameter θ —
+/// the (cos θ, sin θ) replacement the corner fans use. Exactly the circle at
+/// n = 2; higher `corner_shape` exponents give the DE's continuous-curvature
+/// corners, so widget silhouettes follow the same corner family as the
+/// SDF-lit plates. `e` is 2/n, hoisted by callers. Tangent points at the
+/// quadrant ends are unchanged, so fans still tile exactly against the body
+/// rects and edge strips.
+#[inline]
+fn superellipse_pt(theta: f32, e: f32) -> (f32, f32) {
+    let (s, c) = theta.sin_cos();
+    (c.signum() * c.abs().powf(e), s.signum() * s.abs().powf(e))
+}
+
 pub fn push_rounded_rect_vertices_corners(
     x: f32, y: f32, ww: f32, h: f32,
     radii: crate::widget::CornerRadii,
@@ -571,6 +584,7 @@ pub fn push_rounded_rect_vertices_corners(
     clip_rect: Option<(f32, f32, f32, f32)>,
     out: &mut Vec<Vertex>,
 ) {
+    let corner_e = 2.0 / crate::layout::corner_shape();
     let mut r_tl = radii.top_left.max(0.0);
     let mut r_tr = radii.top_right.max(0.0);
     let mut r_br = radii.bottom_right.max(0.0);
@@ -672,12 +686,14 @@ pub fn push_rounded_rect_vertices_corners(
             let theta1 = start + (i as f32) * (end - start) / (segments as f32);
             let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
             
+            let (c1, s1) = superellipse_pt(theta1, corner_e);
+            let (c2, s2) = superellipse_pt(theta2, corner_e);
             let x0 = clamp_x(cx);
             let y0 = clamp_y(cy);
-            let x1 = clamp_x(cx + r_tl * theta1.cos());
-            let y1 = clamp_y(cy + r_tl * theta1.sin());
-            let x2 = clamp_x(cx + r_tl * theta2.cos());
-            let y2 = clamp_y(cy + r_tl * theta2.sin());
+            let x1 = clamp_x(cx + r_tl * c1);
+            let y1 = clamp_y(cy + r_tl * s1);
+            let x2 = clamp_x(cx + r_tl * c2);
+            let y2 = clamp_y(cy + r_tl * s2);
             
             let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
             let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
@@ -707,12 +723,14 @@ pub fn push_rounded_rect_vertices_corners(
             let theta1 = start + (i as f32) * (end - start) / (segments as f32);
             let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
             
+            let (c1, s1) = superellipse_pt(theta1, corner_e);
+            let (c2, s2) = superellipse_pt(theta2, corner_e);
             let x0 = clamp_x(cx);
             let y0 = clamp_y(cy);
-            let x1 = clamp_x(cx + r_tr * theta1.cos());
-            let y1 = clamp_y(cy + r_tr * theta1.sin());
-            let x2 = clamp_x(cx + r_tr * theta2.cos());
-            let y2 = clamp_y(cy + r_tr * theta2.sin());
+            let x1 = clamp_x(cx + r_tr * c1);
+            let y1 = clamp_y(cy + r_tr * s1);
+            let x2 = clamp_x(cx + r_tr * c2);
+            let y2 = clamp_y(cy + r_tr * s2);
             
             let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
             let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
@@ -742,12 +760,14 @@ pub fn push_rounded_rect_vertices_corners(
             let theta1 = start + (i as f32) * (end - start) / (segments as f32);
             let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
             
+            let (c1, s1) = superellipse_pt(theta1, corner_e);
+            let (c2, s2) = superellipse_pt(theta2, corner_e);
             let x0 = clamp_x(cx);
             let y0 = clamp_y(cy);
-            let x1 = clamp_x(cx + r_br * theta1.cos());
-            let y1 = clamp_y(cy + r_br * theta1.sin());
-            let x2 = clamp_x(cx + r_br * theta2.cos());
-            let y2 = clamp_y(cy + r_br * theta2.sin());
+            let x1 = clamp_x(cx + r_br * c1);
+            let y1 = clamp_y(cy + r_br * s1);
+            let x2 = clamp_x(cx + r_br * c2);
+            let y2 = clamp_y(cy + r_br * s2);
             
             let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
             let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
@@ -777,12 +797,14 @@ pub fn push_rounded_rect_vertices_corners(
             let theta1 = start + (i as f32) * (end - start) / (segments as f32);
             let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
             
+            let (c1, s1) = superellipse_pt(theta1, corner_e);
+            let (c2, s2) = superellipse_pt(theta2, corner_e);
             let x0 = clamp_x(cx);
             let y0 = clamp_y(cy);
-            let x1 = clamp_x(cx + r_bl * theta1.cos());
-            let y1 = clamp_y(cy + r_bl * theta1.sin());
-            let x2 = clamp_x(cx + r_bl * theta2.cos());
-            let y2 = clamp_y(cy + r_bl * theta2.sin());
+            let x1 = clamp_x(cx + r_bl * c1);
+            let y1 = clamp_y(cy + r_bl * s1);
+            let x2 = clamp_x(cx + r_bl * c2);
+            let y2 = clamp_y(cy + r_bl * s2);
             
             let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
             let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
@@ -1306,38 +1328,45 @@ pub fn push_plate_solid_border_vertices(
     out.extend_from_slice(&quad_vertices_with_clip(x + ww - t, y + r_tr, t, h - r_tr - r_br, sw, sh, color, clip_circle));
 
     let segments = 16;
+    let corner_e = 2.0 / crate::layout::corner_shape();
+
+    // Corner strokes as annulus strips between the outer superellipse (radius
+    // r) and its inner scaled copy (r - t): at 1px thickness the scaled inner
+    // curve is indistinguishable from the true parallel curve, and at
+    // corner_shape 2 this is exactly the circular arc annulus. NOT
+    // push_arc_background_vertices — that stays circular for genuine arcs.
+    let mut corner = |cx: f32, cy: f32, r: f32, start: f32, end: f32, out: &mut Vec<Vertex>| {
+        let r_in = (r - t).max(0.0);
+        let ndc = |px: f32, py: f32| [(px / sw) * 2.0 - 1.0, 1.0 - (py / sh) * 2.0];
+        for i in 0..segments {
+            let t1 = start + (i as f32) * (end - start) / segments as f32;
+            let t2 = start + ((i + 1) as f32) * (end - start) / segments as f32;
+            let (c1, s1) = superellipse_pt(t1, corner_e);
+            let (c2, s2) = superellipse_pt(t2, corner_e);
+            let o1 = ndc(cx + r * c1, cy + r * s1);
+            let o2 = ndc(cx + r * c2, cy + r * s2);
+            let i1 = ndc(cx + r_in * c1, cy + r_in * s1);
+            let i2 = ndc(cx + r_in * c2, cy + r_in * s2);
+            out.push(Vertex { position: o1, color, clip_circle });
+            out.push(Vertex { position: o2, color, clip_circle });
+            out.push(Vertex { position: i1, color, clip_circle });
+            out.push(Vertex { position: o2, color, clip_circle });
+            out.push(Vertex { position: i2, color, clip_circle });
+            out.push(Vertex { position: i1, color, clip_circle });
+        }
+    };
 
     if r_tl > 0.1 {
-        push_arc_background_vertices(
-            x + r_tl, y + r_tl, r_tl, t,
-            std::f32::consts::PI, 1.5 * std::f32::consts::PI,
-            sw, sh, color, segments, clip_circle,
-            out,
-        );
+        corner(x + r_tl, y + r_tl, r_tl, std::f32::consts::PI, 1.5 * std::f32::consts::PI, out);
     }
     if r_tr > 0.1 {
-        push_arc_background_vertices(
-            x + ww - r_tr, y + r_tr, r_tr, t,
-            1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI,
-            sw, sh, color, segments, clip_circle,
-            out,
-        );
+        corner(x + ww - r_tr, y + r_tr, r_tr, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI, out);
     }
     if r_br > 0.1 {
-        push_arc_background_vertices(
-            x + ww - r_br, y + h - r_br, r_br, t,
-            0.0, 0.5 * std::f32::consts::PI,
-            sw, sh, color, segments, clip_circle,
-            out,
-        );
+        corner(x + ww - r_br, y + h - r_br, r_br, 0.0, 0.5 * std::f32::consts::PI, out);
     }
     if r_bl > 0.1 {
-        push_arc_background_vertices(
-            x + r_bl, y + h - r_bl, r_bl, t,
-            0.5 * std::f32::consts::PI, std::f32::consts::PI,
-            sw, sh, color, segments, clip_circle,
-            out,
-        );
+        corner(x + r_bl, y + h - r_bl, r_bl, 0.5 * std::f32::consts::PI, std::f32::consts::PI, out);
     }
 }
 
@@ -1390,6 +1419,9 @@ pub struct DlBatch {
     pub clip_rrect: Option<[f32; 5]>,
     pub start: u32,
     pub end: u32,
+    /// When set, this batch is one SDF-lit plate cover quad (see
+    /// [`crate::vk::PlatePush`]; already in physical px). Never merged.
+    pub plate: Option<crate::vk::PlatePush>,
 }
 
 /// An image draw from the display list: `at` is the vertex index it sorts
@@ -1414,14 +1446,36 @@ pub fn tessellate_display_list(
     sw: f32,
     sh: f32,
     scale: f32,
-) -> (Vec<Vertex>, Vec<DlBatch>, Vec<DlImage>) {
+) -> (Vec<Vertex>, Vec<DlBatch>, Vec<DlImage>, Vec<[f32; 12]>) {
     use crate::scene::paint::{Cap, Prim};
     let mut verts: Vec<Vertex> = Vec::new();
     let mut batches: Vec<DlBatch> = Vec::new();
     let mut images: Vec<DlImage> = Vec::new();
+    // Carves CSG'd into plates (see Frame2D::plate_features), plus the plate
+    // they group into: the most recent Plate/Bevel batch, provided only Text
+    // and Image prims (which draw through separate paths anyway) intervene.
+    let mut features: Vec<[f32; 12]> = Vec::new();
+    let mut last_plate: Option<(usize, crate::scene::layout::Rect)> = None;
+
+    // SDF-lit plate path (shader2d's plate branch) vs the legacy banded vertex
+    // shading, plus the frame-constant lighting inputs it pushes per plate.
+    let shader_plates = crate::layout::bevel_shader();
+    let plate_light = {
+        let az = crate::layout::light_source_position();
+        let el = std::f32::consts::FRAC_PI_4; // light elevation above the screen plane
+        [az.cos() * el.cos(), -az.sin() * el.cos(), el.sin()]
+    };
+    // [shading strength (1.0 at the default bevel_depth), specular strength,
+    // shininess, curvature/AO strength] — the plastic material. Curvature is
+    // kept near the raised path's crest amplitude: the recess shoulder's
+    // brightening lands on the same pixels as its specular line, and the two
+    // stack — at 0.5 the step read several times hotter than a plate roll.
+    let plate_mat = [crate::layout::bevel_depth() / 0.15, 0.4, 24.0, 0.2];
 
     for item in &dl.items {
         let start = verts.len() as u32;
+        let mut plate: Option<crate::vk::PlatePush> = None;
+        let mut made_plate: Option<crate::scene::layout::Rect> = None;
         // Logical [cx, cy, r] → the physical-pixel triple the vertex attribute carries.
         let no = item
             .clip_circle
@@ -1458,6 +1512,129 @@ pub fn tessellate_display_list(
                 let cr = crate::widget::CornerRadii::new(radii.0, radii.1, radii.2, radii.3);
                 push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, cr, sw, sh, *fill, no, None, &mut verts);
                 push_plate_solid_border_vertices(rect.x, rect.y, rect.width, rect.height, cr, *thickness, sw, sh, *border, no, &mut verts);
+            }
+            Prim::Bevel { rect, radii, color, depth } if shader_plates => {
+                // SDF-lit raised plate: one cover quad; the shader owns fill,
+                // roll shading, corners, and silhouette AA. Nominal corner
+                // radii (scale_corners false): a Bevel is a WIDGET-scale plate
+                // whose silhouette must match the nominal-radius squircles of
+                // the controls around it — only window-scale `Plate`s get the
+                // curvature-matched span.
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, false));
+                made_plate = Some(*rect);
+            }
+            Prim::Plate { rect, radii, color, depth } if shader_plates => {
+                // Same lit-plate branch; the cover quad is the exact rect so the
+                // silhouette and the compositor's rounded window corners agree.
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, true));
+                made_plate = Some(*rect);
+            }
+            Prim::Recess { rect, radii, depth, edges }
+            | Prim::Boss { rect, radii, depth, edges }
+            | Prim::Ridge { rect, radii, depth, edges }
+                if shader_plates =>
+            {
+                // Recess carves down into the surface; Boss raises a plateau out
+                // of it (same machinery, depth sign flipped); Ridge is a raised
+                // rim straddling the boundary (its own overlay profile — never
+                // grouped, the CSG features only model monotonic steps).
+                let mode = match &item.prim {
+                    Prim::Boss { .. } => 3.0f32,
+                    Prim::Ridge { .. } => 4.0,
+                    _ => 2.0,
+                };
+                let raised = mode > 2.5;
+                // Grouped into the enclosing plate whenever one is live: the
+                // carve becomes a CSG feature of that plate's single draw —
+                // exact composite shading, real junctions at the plate's rolled
+                // perimeter — instead of a shading overlay (the fallback below).
+                if let Some((bi, prect)) = last_plate.filter(|_| mode < 3.5) {
+                    let inside = rect.x >= prect.x - 0.5
+                        && rect.y >= prect.y - 0.5
+                        && rect.x + rect.width <= prect.x + prect.width + 0.5
+                        && rect.y + rect.height <= prect.y + prect.height + 0.5;
+                    if inside && features.len() < crate::vk::MAX_PLATE_FEATURES {
+                        // A wall the carve shares with the plate's edge extends
+                        // past the plate, so the carve has no wall there.
+                        let ext = *depth + 4.0;
+                        let (mut x0, mut y0) = (rect.x, rect.y);
+                        let (mut x1, mut y1) = (rect.x + rect.width, rect.y + rect.height);
+                        if !edges.0 { y0 -= ext; }
+                        if !edges.1 { x1 += ext; }
+                        if !edges.2 { y1 += ext; }
+                        if !edges.3 { x0 -= ext; }
+                        let t_px = *depth * scale;
+                        // Negative depth = raised (Boss); the shader's summed
+                        // slope vectors and curvature sign follow it.
+                        let k_px =
+                            if raised { -RECESS_DEPTH_RATIO * t_px } else { RECESS_DEPTH_RATIO * t_px };
+                        if let Some(p) = batches[bi].plate.as_mut() {
+                            if p.host[1] == 0.0 {
+                                p.host[0] = features.len() as f32;
+                            }
+                            p.host[1] += 1.0;
+                        }
+                        features.push([
+                            (x0 + x1) * 0.5 * scale,
+                            (y0 + y1) * 0.5 * scale,
+                            (x1 - x0) * 0.5 * scale,
+                            (y1 - y0) * 0.5 * scale,
+                            radii.0 * scale,
+                            radii.1 * scale,
+                            radii.2 * scale,
+                            radii.3 * scale,
+                            t_px,
+                            k_px,
+                            0.0,
+                            0.0,
+                        ]);
+                        continue;
+                    }
+                }
+                // Overlay-only carve: the cover quad inflates by half the roll
+                // width (the step straddles the boundary) and carries no color —
+                // the shader emits translucent white/black over what's beneath.
+                let infl = *depth * 0.5 + 2.0;
+                verts.extend(quad_vertices(
+                    rect.x - infl, rect.y - infl,
+                    rect.width + 2.0 * infl, rect.height + 2.0 * infl,
+                    sw, sh, [0.0; 4],
+                ));
+                // A suppressed wall is pushed past the cover quad, so its
+                // shading falls outside the drawn pixels (see Prim::Recess on
+                // why a flush region is a step, not a trough).
+                let ext = *depth + 4.0;
+                let (mut x0, mut y0) = (rect.x, rect.y);
+                let (mut x1, mut y1) = (rect.x + rect.width, rect.y + rect.height);
+                if !edges.0 { y0 -= ext; }
+                if !edges.1 { x1 += ext; }
+                if !edges.2 { y1 += ext; }
+                if !edges.3 { x0 -= ext; }
+                let sdf_rect = crate::scene::layout::Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+                let mut p = plate_push_raised(&sdf_rect, *radii, *depth, scale, plate_light, plate_mat, false);
+                p.mode = mode;
+                // Host-plate box for the roll fade: a suppressed wall means the
+                // recess runs flush to the host's edge there, so that side of
+                // the box sits at the original rect edge; enabled walls face
+                // host interior, pushed to ±1e5 so no fade applies.
+                const FAR: f32 = 1e5;
+                let (hx0, hy0) = (
+                    if edges.3 { rect.x - FAR } else { rect.x },
+                    if edges.0 { rect.y - FAR } else { rect.y },
+                );
+                let (hx1, hy1) = (
+                    if edges.1 { rect.x + rect.width + FAR } else { rect.x + rect.width },
+                    if edges.2 { rect.y + rect.height + FAR } else { rect.y + rect.height },
+                );
+                p.host = [
+                    (hx0 + hx1) * 0.5 * scale,
+                    (hy0 + hy1) * 0.5 * scale,
+                    (hx1 - hx0) * 0.5 * scale,
+                    (hy1 - hy0) * 0.5 * scale,
+                ];
+                plate = Some(p);
             }
             Prim::Bevel { rect, radii, color, depth } => {
                 // Full-size fill: the lip is now a shading overlay, not a paint of the
@@ -1499,6 +1676,34 @@ pub fn tessellate_display_list(
                     EdgeKind::Step, &mut verts,
                 );
             }
+            Prim::Boss { rect, radii, depth, edges } => {
+                // Legacy raised step: the recess overlay with the light sign upright.
+                push_bevel_edge_vertices_banded(
+                    rect.x, rect.y, rect.width, rect.height, *radii, *depth,
+                    sw, sh, [0.0; 4], no, 1.0, default_bevel_bands(*depth), *edges,
+                    EdgeKind::Step, &mut verts,
+                );
+            }
+            Prim::Ridge { rect, radii, depth, edges } => {
+                // Legacy approximation: a raised step up at the boundary plus a
+                // recessed step down half a width in (the banded machinery has no
+                // bump profile; the double-pass hot crest is accepted here — the
+                // legacy path exists only for A/B comparison).
+                let half = *depth * 0.5;
+                push_bevel_edge_vertices_banded(
+                    rect.x, rect.y, rect.width, rect.height, *radii, half,
+                    sw, sh, [0.0; 4], no, 1.0, default_bevel_bands(half), *edges,
+                    EdgeKind::Step, &mut verts,
+                );
+                let ir = (radii.0 - half).max(0.0);
+                push_bevel_edge_vertices_banded(
+                    rect.x + half, rect.y + half,
+                    rect.width - *depth, rect.height - *depth,
+                    (ir, ir, ir, ir), half,
+                    sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(half), *edges,
+                    EdgeKind::Step, &mut verts,
+                );
+            }
             Prim::Arc { cx, cy, radius, thickness, start: sa, end: ea, color } => {
                 push_arc_background_vertices(*cx, *cy, *radius, *thickness, *sa, *ea, sw, sh, *color, segs(*radius), no, &mut verts);
             }
@@ -1526,16 +1731,88 @@ pub fn tessellate_display_list(
             }
         }
         // Merge into the previous batch if it shares this clip pair and is contiguous.
-        if let Some(last) = batches.last_mut() {
-            if last.scissor == item.clip && last.clip_rrect == item.clip_rrect && last.end == start {
-                last.end = end;
-                continue;
+        // Plate batches carry per-draw push constants, so they never merge.
+        if plate.is_none() {
+            // Ordinary geometry painted after a plate ends its carve-grouping
+            // window: a recess emitted later must overlay this geometry (the
+            // fallback path), not shade beneath it inside the plate's draw.
+            last_plate = None;
+            if let Some(last) = batches.last_mut() {
+                if last.plate.is_none()
+                    && last.scissor == item.clip
+                    && last.clip_rrect == item.clip_rrect
+                    && last.end == start
+                {
+                    last.end = end;
+                    continue;
+                }
             }
         }
-        batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end });
+        batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end, plate });
+        if let Some(prect) = made_plate {
+            last_plate = Some((batches.len() - 1, prect));
+        }
     }
 
-    (verts, batches, images)
+    (verts, batches, images, features)
+}
+
+/// A carve's depth as a fraction of its transition width — must match the
+/// shader's `RECESS_DEPTH` (used by the mode-2 overlay fallback).
+const RECESS_DEPTH_RATIO: f32 = 0.6;
+
+/// The push-constant block for a raised SDF-lit plate over `rect` (logical px in,
+/// physical px out). Corner radii clamp to the half-extent cap the SDF needs.
+fn plate_push_raised(
+    rect: &crate::scene::layout::Rect,
+    radii: (f32, f32, f32, f32),
+    width: f32,
+    scale: f32,
+    light: [f32; 3],
+    material: [f32; 4],
+    scale_corners: bool,
+) -> crate::vk::PlatePush {
+    let cap = rect.width.min(rect.height) * 0.5;
+    let shape = crate::layout::corner_shape();
+    // A raw superellipse of exponent n at the circle's nominal radius turns
+    // TIGHTER at the diagonal than that circle — its radius of curvature there
+    // is √2·r / (2^(1/n)·(n − 1)) — and once the roll inset exceeds it, the
+    // offset curve the specular band follows creases into a visible square
+    // corner. For PLATES (`scale_corners`), scale the corner span so the
+    // diagonal curvature radius equals the configured radius: the corner reads
+    // as the same size, entered and exited smoothly (the same reason Apple's
+    // continuous corners run ~1.5·r along the edge), and every inset ≤ r stays
+    // crease-free. Continuous at n = 2, where the factor is exactly 1.
+    // Widget-scale overlay reliefs (recess/boss/ridge fallbacks) pass false:
+    // their radii must MATCH the nominal-radius squircles of the widget
+    // silhouettes around them, and at their few-px roll widths the offset
+    // crease is subpixel.
+    let rscale = if scale_corners && shape > 2.001 {
+        (shape - 1.0) * 2f32.powf(1.0 / shape) / std::f32::consts::SQRT_2
+    } else {
+        1.0
+    };
+    crate::vk::PlatePush {
+        rect: [
+            (rect.x + rect.width * 0.5) * scale,
+            (rect.y + rect.height * 0.5) * scale,
+            rect.width * 0.5 * scale,
+            rect.height * 0.5 * scale,
+        ],
+        radii: [
+            (radii.0 * rscale).clamp(0.0, cap) * scale,
+            (radii.1 * rscale).clamp(0.0, cap) * scale,
+            (radii.2 * rscale).clamp(0.0, cap) * scale,
+            (radii.3 * rscale).clamp(0.0, cap) * scale,
+        ],
+        light: [light[0], light[1], light[2], width * scale],
+        material,
+        // Mode-1 semantics: [feature offset, feature count] — no carves yet;
+        // the tessellator fills these in as recesses group into this plate.
+        host: [0.0, 0.0, 0.0, 0.0],
+        mode: 1.0,
+        shape,
+    }
 }
 
 pub fn extra_quad_vertices(
@@ -2328,12 +2605,12 @@ impl<A: Application> EngineState<A> {
             }
         }
 
-        let (mut verts, mut dl_batches, dl_images) = tessellate_display_list(&dl, logical_w, logical_h, scale_factor as f32);
+        let (mut verts, mut dl_batches, dl_images, plate_features) = tessellate_display_list(&dl, logical_w, logical_h, scale_factor as f32);
         // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
         let pre_custom = verts.len() as u32;
         self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
         if (verts.len() as u32) > pre_custom {
-            dl_batches.push(DlBatch { scissor: None, clip_rrect: None, start: pre_custom, end: verts.len() as u32 });
+            dl_batches.push(DlBatch { scissor: None, clip_rrect: None, start: pre_custom, end: verts.len() as u32, plate: None });
         }
 
         // 1b. Overlay quads (drawn after the text pass).
@@ -2471,6 +2748,7 @@ impl<A: Application> EngineState<A> {
                     .map(|c| [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32, c[3] * scale_f32, c[4] * scale_f32]),
                 start: batch.start,
                 end: batch.end,
+                plate: batch.plate,
             })
             .collect();
 
@@ -2496,6 +2774,7 @@ impl<A: Application> EngineState<A> {
             batches: &batches,
             overlay_verts: &overlay_verts,
             images: &image_quads,
+            plate_features: &plate_features,
             clear_color,
         });
     }

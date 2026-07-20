@@ -109,6 +109,9 @@ pub struct Dropdown {
     /// `Backplate` ancestor — the hook that keeps the adjustment after an app dissolves its
     /// root Backplate (the walk finds nothing once the widget is parentless).
     corner_frame: Option<((f32, f32, f32, f32), f32, (bool, bool, bool, bool))>,
+    /// Raised style: the closed control's background is an SDF-lit `Bevel`
+    /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
+    raised: bool,
 }
 
 impl Dropdown {
@@ -127,6 +130,7 @@ impl Dropdown {
             label: None,
             hovered: false,
             corner_frame: None,
+            raised: false,
         })
     }
 
@@ -279,11 +283,27 @@ impl Dropdown {
         let y = content.y;
         let visual_h = content.height;
 
-        let mut bg_color = colors::dropdown_background_color();
+        let raw_bg = colors::dropdown_background_color();
+        let mut bg_color = raw_bg;
         bg_color[3] = 1.0; // Force opaque background to prevent subpixel blending artifacts
         let border_color = self.border_color();
 
         let radius = crate::layout::dropdown_corner_radius();
+        // Raised style: one lit Bevel plate owns fill and edge (the concentric
+        // corner_frame adjustment keeps the legacy path — it exists to nest
+        // flat outlines, which a rolled edge replaces). A transparent
+        // configured fill degrades to a Boss: edges only, plate as the face —
+        // judged on the RAW alpha, before the opacity force above.
+        if self.raised && self.corner_frame.is_none() {
+            let depth = crate::layout::bevel_width().min(visual_h * 0.2);
+            let r4 = (radius, radius, radius, radius);
+            if raw_bg[3] > 0.001 {
+                ctx.bevel(Rect { x, y, width: w, height: visual_h }, r4, bg_color, depth);
+            } else {
+                ctx.boss(Rect { x, y, width: w, height: visual_h }, r4, depth);
+            }
+            return;
+        }
         if radius <= 0.0 {
             ctx.quad(Rect { x, y, width: w, height: visual_h }, border_color);
             ctx.quad(
@@ -547,6 +567,12 @@ impl Dropdown {
 }
 
 impl Adapted<Dropdown> {
+    /// Raised style: see the `raised` field.
+    pub fn with_raised(mut self, raised: bool) -> Self {
+        self.raised = raised;
+        self
+    }
+
     pub fn with_custom_display_text(mut self, text: &str) -> Self {
         self.custom_display_text = Some(text.to_string());
         self

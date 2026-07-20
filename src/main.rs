@@ -36,6 +36,18 @@ enum DemoMessage {
     Exit,
 }
 
+/// Chrome typography: the title/status font sizes, and the layout leaves that
+/// hold them derived as one line-height (×1.2, the toolkit convention) — so the
+/// header and status bands, which anchor to those solved rects, resize with the
+/// typography instead of relying on magic leaf heights.
+const TITLE_FONT_SIZE: f32 = 15.0;
+const STATUS_FONT_SIZE: f32 = 12.0;
+/// Vertical padding on each side of the status band's text line.
+const STATUS_BAND_PAD: f32 = 5.0;
+fn text_leaf_height(font_size: f32) -> f32 {
+    (font_size * 1.2).ceil()
+}
+
 struct DemoApp {
     // ── Widgets: app-owned values on the narrow-trait adapter. Their addresses must be
     // stable across frames (plain struct fields, not Vec elements): the UiContext
@@ -129,16 +141,23 @@ impl Application for DemoApp {
     ) -> Self {
         cce_ui::scale::set_scale_factor(1.0);
         Self {
-            button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Click me"),
-            toggle: Toggle::new(),
+            button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Click me").with_raised(true),
+            toggle: Toggle::new().with_raised(true),
             // Slider `value` is NORMALIZED 0..1; `with_range` only scales the readout
             // (`get_scaled_value`). Wheel nudging is an explicit opt-in.
-            slider: Slider::new().with_range(0.0, 100.0).with_value(0.4).with_scroll(true),
-            name_box: TextBox::new(String::new()).with_placeholder("Type a name..."),
+            slider: Slider::new()
+                .with_range(0.0, 100.0)
+                .with_value(0.4)
+                .with_scroll(true)
+                .with_raised(true),
+            name_box: TextBox::new(String::new())
+                .with_placeholder("Type a name...")
+                .with_recessed(true),
             theme_dropdown: Dropdown::new(
                 vec!["Forest".into(), "Ocean".into(), "Ember".into()],
                 0,
-            ),
+            )
+            .with_raised(true),
             toggle_on: false,
             clicks: 0,
             status: "Ready.".to_string(),
@@ -215,7 +234,17 @@ impl Application for DemoApp {
             let root = arena.insert(LayoutBox::container(
                 Style::column().padding(16.0).gap(14.0).cross_align(CrossAlign::Stretch),
             ));
-            let title = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 22.0)));
+            let title = arena.insert(LayoutBox::leaf(
+                Style::row(),
+                LSize::new(0.0, text_leaf_height(TITLE_FONT_SIZE)),
+            ));
+            // Clearance under the header band: the recess step rolls over `bevel_width`
+            // past the band's bottom edge, so the first content row must stand off by at
+            // least that or it crowds the carve.
+            let band_gap = arena.insert(LayoutBox::leaf(
+                Style::row(),
+                LSize::new(0.0, cce_ui::layout::bevel_width()),
+            ));
             let controls = arena.insert(LayoutBox::container(
                 Style::row().gap(14.0).height(Length::Fixed(28.0)),
             ));
@@ -227,8 +256,12 @@ impl Application for DemoApp {
             let slider = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 24.0)));
             let name_box = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 30.0)));
             let spacer = arena.insert(LayoutBox::container(Style::column().grow(1.0)));
-            let status = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 18.0)));
+            let status = arena.insert(LayoutBox::leaf(
+                Style::row(),
+                LSize::new(0.0, text_leaf_height(STATUS_FONT_SIZE)),
+            ));
             arena.append_child(root, title);
+            arena.append_child(root, band_gap);
             arena.append_child(root, controls);
             arena.append_child(controls, button);
             arena.append_child(controls, toggle);
@@ -274,19 +307,44 @@ impl Application for DemoApp {
         let w = self.width as f32;
         let h = self.height as f32;
 
-        // The window plate — the dissolved root Backplate's exact paint: page-low color
-        // at the configured opacity, config corner radius.
+        // The window plate — the dissolved root Backplate as a lit object: page-low color
+        // at the configured opacity, config corner radius, perimeter rolled over
+        // `bevel_width` so the surface reads as a physical plate rather than a flat fill.
         let mut plate = cce_ui::color::page_low_color();
         if plate[3] > 0.001 {
             plate[3] = cce_ui::color::active_backplate_opacity();
         }
         let radius = cce_ui::colors::backplate_corner_radius();
         let frame = Rect { x: 0.0, y: 0.0, width: w, height: h };
-        if radius > 0.1 {
-            pc.rounded_rect(frame, radius, (true, true, true, true), plate);
-        } else {
-            pc.quad(frame, plate);
-        }
+        let bevel = cce_ui::layout::bevel_width();
+        pc.plate(frame, (radius, radius, radius, radius), plate, bevel);
+
+        // Header band: the title strip carved one step down into the plate. Flush to the
+        // window's top and sides, so its only real wall is the bottom one facing the
+        // content (the recessed-MenuBar idiom — the other three would fight the plate's
+        // own rolled perimeter).
+        let band_h = self.title_rect.y + self.title_rect.height + 10.0;
+        pc.recess_edges(
+            Rect { x: 0.0, y: 0.0, width: w, height: band_h },
+            (0.0, 0.0, 0.0, 0.0),
+            bevel,
+            (false, false, true, false),
+        );
+
+        // Status band: the header's mirror — carved into the bottom of the
+        // plate, flush to the window's bottom and sides, its only wall the top
+        // one facing the content. Emitted here, before any widget geometry, so
+        // it CSG-groups into the plate like the header band does. Sized from
+        // the status font plus a symmetric pad (the layout's status leaf only
+        // reserves the space; the band and its text center independently).
+        let status_h = text_leaf_height(STATUS_FONT_SIZE) + 2.0 * STATUS_BAND_PAD;
+        let status_top = h - status_h;
+        pc.recess_edges(
+            Rect { x: 0.0, y: status_top, width: w, height: status_h },
+            (0.0, 0.0, 0.0, 0.0),
+            bevel,
+            (true, false, false, false),
+        );
 
         // App chrome text: plain prims. `text_with` carries an optional font family and
         // optional bounds; unbounded text is clamped to the surface by the engine.
@@ -294,7 +352,7 @@ impl Application for DemoApp {
             "cce-ui reference gallery".to_string(),
             self.title_rect.x,
             self.title_rect.y,
-            15.0,
+            TITLE_FONT_SIZE,
             [0xdd, 0xdd, 0xe2],
             Some("monospace".to_string()),
             None,
@@ -302,10 +360,12 @@ impl Application for DemoApp {
         pc.text_with(
             self.status.clone(),
             self.status_rect.x,
-            self.status_rect.y,
-            12.0,
+            cce_ui::layout::align_text_y(status_top, status_h, STATUS_FONT_SIZE, 0.0),
+            STATUS_FONT_SIZE,
             [0x9a, 0x9a, 0xa4],
-            None,
+            // None here falls through fontconfig's unbundled sans alias to the
+            // serif fallback — always name a family.
+            Some("monospace".to_string()),
             None,
         );
 

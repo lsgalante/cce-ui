@@ -1236,6 +1236,8 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 Prim::Border { rect, radii, fill, border, thickness } => ctx.border(rect, radii, fill, border, thickness),
                 Prim::Bevel { rect, radii, color, depth } => ctx.bevel(rect, radii, color, depth),
                 Prim::Recess { rect, radii, depth, edges } => ctx.recess_edges(rect, radii, depth, edges),
+                Prim::Boss { rect, radii, depth, edges } => ctx.boss_edges(rect, radii, depth, edges),
+                Prim::Ridge { rect, radii, depth, edges } => ctx.ridge_edges(rect, radii, depth, edges),
                 Prim::Plate { rect, radii, color, depth } => ctx.plate(rect, radii, color, depth),
                 Prim::Arc { cx, cy, radius, thickness, start, end, color } => ctx.arc(cx, cy, radius, thickness, start, end, color),
                 Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => ctx.vector(x1, y1, x2, y2, thickness, color, cap),
