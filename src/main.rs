@@ -245,14 +245,17 @@ impl Application for DemoApp {
                 Style::row(),
                 LSize::new(0.0, cce_ui::layout::bevel_width()),
             ));
+            // One shared height for the whole control row, so the button,
+            // toggle, and dropdown plates land on the same top and bottom edge.
+            const CONTROL_H: f32 = 28.0;
             let controls = arena.insert(LayoutBox::container(
-                Style::row().gap(14.0).height(Length::Fixed(28.0)),
+                Style::row().gap(14.0).height(Length::Fixed(CONTROL_H)),
             ));
             // `shrink` lets the fixed leaves give up width when the window is at its
             // minimum instead of overflowing the row.
-            let button = arena.insert(LayoutBox::leaf(Style::row().shrink(1.0), LSize::new(120.0, 28.0)));
-            let toggle = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(64.0, 28.0)));
-            let dropdown = arena.insert(LayoutBox::leaf(Style::row().shrink(1.0), LSize::new(150.0, 26.0)));
+            let button = arena.insert(LayoutBox::leaf(Style::row().shrink(1.0), LSize::new(120.0, CONTROL_H)));
+            let toggle = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(64.0, CONTROL_H)));
+            let dropdown = arena.insert(LayoutBox::leaf(Style::row().shrink(1.0), LSize::new(150.0, CONTROL_H)));
             let slider = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 24.0)));
             let name_box = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 30.0)));
             let spacer = arena.insert(LayoutBox::container(Style::column().grow(1.0)));
