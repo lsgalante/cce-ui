@@ -1723,6 +1723,28 @@ pub fn tessellate_display_list(
             Prim::Circle { cx, cy, radius, color } => {
                 verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
             }
+            Prim::Sphere { cx, cy, radius, color } if shader_plates => {
+                // A hemisphere lit per pixel by the plate branch (mode 5): one
+                // cover quad, its own never-merged batch. The quad overhangs
+                // the disc by 1px for the shader's silhouette anti-aliasing.
+                let d = *radius + 1.0;
+                verts.extend(quad_vertices(cx - d, cy - d, 2.0 * d, 2.0 * d, sw, sh, *color));
+                plate = Some(crate::vk::PlatePush {
+                    // Center + radius in physical px; the SDF box machinery is
+                    // unused in this mode, so .w is free.
+                    rect: [cx * scale, cy * scale, radius * scale, 0.0],
+                    radii: [0.0; 4],
+                    light: [plate_light[0], plate_light[1], plate_light[2], 0.0],
+                    material: plate_mat,
+                    host: [0.0; 4],
+                    mode: 5.0,
+                    shape: 2.0,
+                });
+            }
+            Prim::Sphere { cx, cy, radius, color } => {
+                // Legacy path: the flat disc, exactly a Circle.
+                verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
+            }
         }
         let end = verts.len() as u32;
         if end == start {

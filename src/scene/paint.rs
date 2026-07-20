@@ -81,6 +81,13 @@ pub enum Prim {
     Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
     Vector { x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap },
     Circle { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
+    /// A `Circle` lit as a ball: the disc is shaded per pixel as a hemisphere
+    /// under the DE's plate light (same ambient/diffuse/specular model), so it
+    /// reads as a sphere sitting on the surface — the slider thumb's look. The
+    /// color is the sphere's face color exactly at the lit center, like a
+    /// plate's face keeps the app's color. Falls back to a flat circle on the
+    /// legacy (`bevel_shader 0`) path.
+    Sphere { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
     /// Text in sRGB u8 (the `TextLabel` convention). `font` is a font string for
     /// `get_text_buffer` (family, or "family:size"); `bounds` is a logical `[l, t, r, b]` clip
     /// for the glyph pass (Phase 6: the backend renders these through glyphon when the app
@@ -349,6 +356,12 @@ impl PaintCtx {
     pub fn circle(&mut self, cx: f32, cy: f32, radius: f32, color: [f32; 4]) {
         let (ox, oy) = self.offset;
         self.push(Prim::Circle { cx: cx + ox, cy: cy + oy, radius, color });
+    }
+
+    /// A sphere-lit circle — see `Prim::Sphere`.
+    pub fn sphere(&mut self, cx: f32, cy: f32, radius: f32, color: [f32; 4]) {
+        let (ox, oy) = self.offset;
+        self.push(Prim::Sphere { cx: cx + ox, cy: cy + oy, radius, color });
     }
 
     pub fn border(&mut self, rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32) {

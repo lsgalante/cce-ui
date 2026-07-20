@@ -220,12 +220,36 @@ fn carve_slope(v: f32) -> f32 {
 // expressed relative to the flat face (shade ratio 1.0, specular delta 0.0)
 // so the face keeps exactly the app's chosen color.
 fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
-    let gd = rr_sdf_grad(frag, rrect_clip.p_rect, rrect_clip.p_radii);
-    let d = -gd.z; // positive inside the plate, in px
-    let t = max(rrect_clip.p_light.w, 0.001);
     let l = rrect_clip.p_light.xyz;
     let strength = rrect_clip.p_mat.x;
     let flat_shade = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * l.z;
+
+    // Mode 5: a sphere-lit disc (the slider thumb). p_rect.xy is the center,
+    // p_rect.z the radius, physical px. The disc is shaded as a hemisphere
+    // under the same light/material as the plates — ambient floor, diffuse off
+    // the sphere normal, the decoupled roll specular (its glint lands where
+    // the surface tilt meets the half-vector, ~a third of the way out toward
+    // the light) — and, like a plate face, the shade is expressed relative to
+    // the flat face so the color at the lit center is exactly the app's.
+    if (rrect_clip.rect1.z > 4.5) {
+        let c = frag - rrect_clip.p_rect.xy;
+        let r = max(rrect_clip.p_rect.z, 0.001);
+        let dist = length(c);
+        let aa = clamp(r - dist + 0.5, 0.0, 1.0); // 1px silhouette anti-aliasing
+        if (aa <= 0.0) {
+            discard;
+        }
+        let h = sqrt(max(r * r - dist * dist, 1e-3));
+        let n = vec3f(c / r, h / r); // unit on the sphere's surface
+        let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
+        let shade = 1.0 + (diff / flat_shade - 1.0) * strength;
+        let spec = roll_spec(c / h);
+        return vec4f(vcol.rgb * shade + vec3f(spec * strength), vcol.a * aa);
+    }
+
+    let gd = rr_sdf_grad(frag, rrect_clip.p_rect, rrect_clip.p_radii);
+    let d = -gd.z; // positive inside the plate, in px
+    let t = max(rrect_clip.p_light.w, 0.001);
 
     if (rrect_clip.rect1.z < 1.5) {
         let aa = clamp(d + 0.5, 0.0, 1.0); // 1px silhouette anti-aliasing

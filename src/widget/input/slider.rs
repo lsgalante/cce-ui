@@ -305,7 +305,7 @@ impl Paint for Slider {
             // drawn size only; the drag/hit geometry keeps the full thumb_size.
             let diameter =
                 if self.recessed { g.h - recess_t } else { g.thumb_size };
-            ctx.circle(
+            ctx.sphere(
                 thumb_x + g.thumb_size / 2.0,
                 thumb_y + g.thumb_size / 2.0,
                 diameter / 2.0,
