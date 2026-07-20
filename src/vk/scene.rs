@@ -41,7 +41,7 @@ struct SceneUniforms {
     mvp: [[f32; 4]; 4],
     window_size: [f32; 2],
     window_radius: f32,
-    _padding: f32,
+    corner_shape: f32,
 }
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
@@ -607,13 +607,14 @@ impl SceneStage {
             Self::write_descriptor(device, frame);
         }
         let window_size = [self.extent.width as f32, self.extent.height as f32];
+        let corner_shape = crate::layout::corner_shape();
         let mapped = frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap();
         for (i, draw) in staged.draws.iter().enumerate() {
             let uniforms = SceneUniforms {
                 mvp: draw.mvp,
                 window_size,
                 window_radius: corner_radius_px,
-                _padding: 0.0,
+                corner_shape,
             };
             let offset = (self.uniform_stride as usize) * i;
             mapped[offset..offset + UNIFORM_SIZE as usize]

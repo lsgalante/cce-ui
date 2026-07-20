@@ -11,7 +11,9 @@
 struct WindowInfo {
     window_size: vec2<f32>,
     corner_radius: f32,
-    padding: f32,
+    // Corner-shape exponent shared with the plates and the rounded-rect clip:
+    // circular arc at 2, superellipse squircle above.
+    corner_shape: f32,
 }
 
 @group(0) @binding(2) var<uniform> window_info: WindowInfo;
@@ -33,43 +35,35 @@ struct PlateFeatures {
 }
 @group(0) @binding(3) var<uniform> plate_features: PlateFeatures;
 
-fn is_outside_window_corners(pos: vec2<f32>) -> bool {
+// Signed distance to the window's rounded silhouette at pos: positive outside
+// the corner arcs (and past the window bounds), large-negative elsewhere so the
+// straight edges keep their exact hard cut at the buffer boundary. The corner
+// family follows window_info.corner_shape — circular arc at 2, superellipse
+// squircle above, with the Lp branch's first-order |∇| correction so a feather
+// built on this distance keeps ~uniform width around the arc (the same
+// construction as rr_sdf_grad and the tessellated plate corners).
+fn window_corner_distance(pos: vec2<f32>) -> f32 {
     let w = window_info.window_size.x;
     let h = window_info.window_size.y;
     let r = window_info.corner_radius;
 
-    if (r <= 0.0) {
-        return false;
-    }
-    // Top-left
-    if (pos.x < r && pos.y < r) {
-        let dx = pos.x - r;
-        let dy = pos.y - r;
-        return (dx * dx + dy * dy) > r * r;
-    }
-    // Top-right
-    if (pos.x > w - r && pos.y < r) {
-        let dx = pos.x - (w - r);
-        let dy = pos.y - r;
-        return (dx * dx + dy * dy) > r * r;
-    }
-    // Bottom-left
-    if (pos.x < r && pos.y > h - r) {
-        let dx = pos.x - r;
-        let dy = pos.y - (h - r);
-        return (dx * dx + dy * dy) > r * r;
-    }
-    // Bottom-right
-    if (pos.x > w - r && pos.y > h - r) {
-        let dx = pos.x - (w - r);
-        let dy = pos.y - (h - r);
-        return (dx * dx + dy * dy) > r * r;
-    }
-    // Boundary check
     if (pos.x < 0.0 || pos.x > w || pos.y < 0.0 || pos.y > h) {
-        return true;
+        return 1e5;
     }
-    return false;
+    if (r <= 0.0) {
+        return -1e5;
+    }
+    let q = abs(pos - vec2f(w * 0.5, h * 0.5)) - vec2f(w * 0.5 - r, h * 0.5 - r);
+    if (q.x > 0.0 && q.y > 0.0) {
+        let shape = window_info.corner_shape;
+        if (shape > 2.001) {
+            let lp = max(pow(pow(q.x, shape) + pow(q.y, shape), 1.0 / shape), 1e-4);
+            let g = vec2f(pow(q.x / lp, shape - 1.0), pow(q.y / lp, shape - 1.0));
+            return (lp - r) / max(length(g), 1e-4);
+        }
+        return length(q) - r;
+    }
+    return -1e5;
 }
 
 // Per-batch push constants (112 bytes). The first two vec4s are the rounded-rect
@@ -400,7 +394,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         return vec4f(gray, final_alpha);
     }
 
-    if (is_outside_window_corners(in.clip_position.xy)) {
+    // Window-corner coverage: ~1px feather along the squircle silhouette in
+    // place of the old hard circular discard, so the window edge, the 3D scene
+    // fill, and the plates' tessellated corners all sit on the same curve.
+    var clip_cov = 1.0 - smoothstep(-0.5, 0.5, window_corner_distance(in.clip_position.xy));
+    if (clip_cov <= 0.0) {
         discard;
     }
     if (in.clip_circle.z > 0.0) {
@@ -416,12 +414,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     // corners around it, with a ~1px feather folded into the fragment alpha in
     // place of the old hard discard — a clipped edge and a drawn plate corner
     // share both curve and AA. Fully-outside fragments still discard.
-    var clip_cov = 1.0;
     if (rrect_clip.rect1.y > 0.5) {
         let r = rrect_clip.rect1.x;
         let prect = vec4f(rrect_clip.rect0.xy, rrect_clip.rect0.zw + vec2f(r, r));
         let d = rr_sdf_grad(in.clip_position.xy, prect, vec4f(r)).z;
-        clip_cov = 1.0 - smoothstep(-0.5, 0.5, d);
+        clip_cov *= 1.0 - smoothstep(-0.5, 0.5, d);
         if (clip_cov <= 0.0) {
             discard;
         }

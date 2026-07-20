@@ -2,45 +2,40 @@ struct Uniforms {
     mvp: mat4x4<f32>,
     window_size: vec2<f32>,
     window_radius: f32,
-    padding: f32,
+    // Corner-shape exponent shared with shader2d: circular arc at 2,
+    // superellipse squircle above.
+    corner_shape: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
-fn is_outside_window_corners(pos: vec2<f32>) -> bool {
+// Signed distance to the window's rounded silhouette — shader2d's
+// window_corner_distance, kept in lockstep so the 3D scene fill cuts along the
+// exact curve the 2D pass (and the plates' tessellated corners) use: positive
+// outside the corner arcs and past the window bounds, large-negative on the
+// straight edges (those keep their hard cut).
+fn window_corner_distance(pos: vec2<f32>) -> f32 {
     let w = uniforms.window_size.x;
     let h = uniforms.window_size.y;
     let r = uniforms.window_radius;
-    
-    // Top-left
-    if (pos.x < r && pos.y < r) {
-        let dx = pos.x - r;
-        let dy = pos.y - r;
-        return (dx * dx + dy * dy) > r * r;
-    }
-    // Top-right
-    if (pos.x > w - r && pos.y < r) {
-        let dx = pos.x - (w - r);
-        let dy = pos.y - r;
-        return (dx * dx + dy * dy) > r * r;
-    }
-    // Bottom-left
-    if (pos.x < r && pos.y > h - r) {
-        let dx = pos.x - r;
-        let dy = pos.y - (h - r);
-        return (dx * dx + dy * dy) > r * r;
-    }
-    // Bottom-right
-    if (pos.x > w - r && pos.y > h - r) {
-        let dx = pos.x - (w - r);
-        let dy = pos.y - (h - r);
-        return (dx * dx + dy * dy) > r * r;
-    }
-    // Boundary check
+
     if (pos.x < 0.0 || pos.x > w || pos.y < 0.0 || pos.y > h) {
-        return true;
+        return 1e5;
     }
-    return false;
+    if (r <= 0.0) {
+        return -1e5;
+    }
+    let q = abs(pos - vec2f(w * 0.5, h * 0.5)) - vec2f(w * 0.5 - r, h * 0.5 - r);
+    if (q.x > 0.0 && q.y > 0.0) {
+        let shape = uniforms.corner_shape;
+        if (shape > 2.001) {
+            let lp = max(pow(pow(q.x, shape) + pow(q.y, shape), 1.0 / shape), 1e-4);
+            let g = vec2f(pow(q.x / lp, shape - 1.0), pow(q.y / lp, shape - 1.0));
+            return (lp - r) / max(length(g), 1e-4);
+        }
+        return length(q) - r;
+    }
+    return -1e5;
 }
 
 struct VertexOutput {
@@ -65,8 +60,12 @@ fn vs_main(
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    if (is_outside_window_corners(in.position.xy)) {
+    // ~1px feather along the squircle window corner (the pass clears to
+    // transparent and blends with straight alpha, so partial coverage fades
+    // the scene out exactly at the silhouette).
+    let cov = 1.0 - smoothstep(-0.5, 0.5, window_corner_distance(in.position.xy));
+    if (cov <= 0.0) {
         discard;
     }
-    return vec4f(in.color, 1.0);
+    return vec4f(in.color, cov);
 }

@@ -799,7 +799,7 @@ impl VkRenderer {
             self.extent.width as f32,
             self.extent.height as f32,
             self.corner_radius_px,
-            0.0f32,
+            crate::layout::corner_shape(),
         ];
         if let Some(allocation) = self.window_info.allocation.as_mut() {
             allocation.mapped_slice_mut().unwrap()[..16]
@@ -1652,5 +1652,10 @@ mod tests {
     #[test]
     fn shader2d_compiles() {
         assert!(!super::shader2d_spirv().is_empty());
+    }
+
+    #[test]
+    fn scene3d_compiles() {
+        assert!(!super::scene3d_spirv().is_empty());
     }
 }
