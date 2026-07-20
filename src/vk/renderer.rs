@@ -1064,7 +1064,7 @@ impl VkRenderer {
 
     /// The extent the next `draw_frame` will render at: the pending size when a
     /// swapchain rebuild is queued, otherwise the live one.
-    fn pending_extent(&self) -> vk::Extent2D {
+    pub fn pending_extent(&self) -> vk::Extent2D {
         if self.swapchain_dirty { self.desired_extent } else { self.extent }
     }
 

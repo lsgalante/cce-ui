@@ -2436,6 +2436,10 @@ pub struct EngineState<A: Application> {
     pub swash_cache: glyphon::SwashCache,
     
     pub scale_factor: f64,
+    /// The buffer scale last sent to the surface. Updated in [`Self::render`],
+    /// paired with the present that commits a matching-size buffer — never on
+    /// the scale event itself, which races in-flight presents of old buffers.
+    pub committed_buffer_scale: i32,
     pub logical_width: f32,
     pub logical_height: f32,
     
@@ -2496,7 +2500,13 @@ impl<A: Application> EngineState<A> {
             self.logical_width = w;
             self.logical_height = h;
             if let Some(ref mut renderer) = self.renderer {
-                renderer.resize((w as f64 * self.scale_factor) as u32, (h as f64 * self.scale_factor) as u32);
+                // wl_surface requires buffer dimensions divisible by the buffer
+                // scale; snap up so a fractional logical size can't queue an
+                // illegal swapchain extent.
+                let s = (self.scale_factor.round() as u32).max(1);
+                let pw = ((w as f64 * self.scale_factor).round() as u32).max(1).div_ceil(s) * s;
+                let ph = ((h as f64 * self.scale_factor).round() as u32).max(1).div_ceil(s) * s;
+                renderer.resize(pw, ph);
             }
             let scale = self.scale_factor;
             self.inner.as_mut().unwrap().handle_resize(w, h, scale);
@@ -2760,6 +2770,23 @@ impl<A: Application> EngineState<A> {
             self.frame_callback_pending = true;
         }
 
+        // Commit the buffer scale together with a buffer it is legal for: the
+        // present inside draw_frame_2d is the only commit on this surface, so
+        // sending the request here orders it right before a matching-size
+        // attach+commit. Skipped while the pending extent isn't divisible (a
+        // transition frame) — the old committed scale stays legal for it.
+        if let Some(ref surface) = self.surface {
+            let s = (self.scale_factor.round() as i32).max(1);
+            let e = renderer.pending_extent();
+            if s != self.committed_buffer_scale
+                && e.width % s as u32 == 0
+                && e.height % s as u32 == 0
+            {
+                surface.set_buffer_scale(s);
+                self.committed_buffer_scale = s;
+            }
+        }
+
         // Direct renderer staging (3D scenes, RT panes, app-shaped text).
         if self.inner.as_mut().unwrap().stage_renderer(
             renderer,
@@ -2794,7 +2821,10 @@ impl<A: Application> CompositorHandler for EngineState<A> {
         _surface: &wl_surface::WlSurface,
         scale_factor: i32,
     ) {
-        _surface.set_buffer_scale(scale_factor);
+        // Don't send set_buffer_scale here: an in-flight present can commit an
+        // old-scale-sized buffer right after it, which is a fatal invalid_size
+        // protocol error (seen on resume, when outputs bounce 2→1→2). The scale
+        // request is sent in `render`, paired with a matching-size present.
         self.scale_factor = scale_factor as f64;
         self.resize(self.logical_width, self.logical_height);
         self.redraw = true;
@@ -3571,6 +3601,7 @@ pub fn run<A: Application>() {
         font_system: None,
         swash_cache: glyphon::SwashCache::new(),
         scale_factor: 1.0,
+        committed_buffer_scale: 1,
         logical_width: 0.0,
         logical_height: 0.0,
         exit: false,
@@ -3609,6 +3640,7 @@ pub fn run<A: Application>() {
 
     let surface = engine_state.compositor_state.create_surface(&qh);
     surface.set_buffer_scale(scale as i32);
+    engine_state.committed_buffer_scale = scale as i32;
 
     if settings.app_id.starts_with("cce-status") {
         let compositor = engine_state.compositor_state.wl_compositor();
@@ -3685,6 +3717,15 @@ pub fn run<A: Application>() {
     loop {
         if let Err(e) = event_loop.dispatch(std::time::Duration::from_millis(16), &mut engine_state) {
             log::error!("[window_runner] Event loop error: {:?}", e);
+            break;
+        }
+        // A protocol error kills the connection permanently, but it surfaces
+        // through queue flushes whose errors calloop's WaylandSource swallows
+        // (it only treats Io errors as fatal) — without this check the loop
+        // spins forever on a dead display while wayland-backend re-prints the
+        // error on every flush attempt.
+        if let Some(perr) = conn.protocol_error() {
+            log::error!("[window_runner] Fatal Wayland protocol error, exiting: {perr}");
             break;
         }
         if engine_state.exit {
