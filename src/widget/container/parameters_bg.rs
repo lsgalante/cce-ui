@@ -891,6 +891,61 @@ impl ParametersBg {
         out
     }
 
+    /// The relief companion to [`Self::rounded_quads`]: the row controls'
+    /// raised/recessed step prims (boss rims, recess wells), which the flat
+    /// views cannot carry — a host rendering this panel through the legacy
+    /// views must read this getter too or the `control_relief` styling is lost
+    /// entirely (with the DE's transparent control backgrounds the controls all
+    /// but vanish). Edges-only variants throughout: the flat views own the
+    /// faces, exactly the widgets' own transparent-fill bevel→boss degradation.
+    /// Returned unclipped; the host clips to the pane's scroll viewport and
+    /// draws these AFTER the flat quads, so the walls' shading modulates the
+    /// fills they cross (the order the widgets' own paints use). Tuple:
+    /// (x, y, w, h, radius, depth, raised) — raised maps to `PaintCtx::boss`,
+    /// flat to `PaintCtx::recess`.
+    pub fn reliefs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, bool)> {
+        if !self.visible || !crate::layout::control_relief() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let hidden = self.hidden_rows();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if hidden[i] {
+                continue;
+            }
+            // (control, its configured corner radius, raised vs recessed)
+            let ctl: Option<(&dyn WidgetHost, f32, bool)> = if p.2 == "text" {
+                self.texts[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::textbox_corner_radius(), false))
+            } else if p.2.starts_with("choice") {
+                self.choices[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::dropdown_corner_radius(), true))
+            } else if p.2 == "button" {
+                self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
+            } else if p.2 == "toggle" || p.2 == "checkbox" {
+                self.toggles[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::toggle_corner_radius(), true))
+            } else {
+                if let Some(s) = &self.sliders[i] {
+                    let (x, y, w, h) = s.rect();
+                    if let Some((rx, ry, rw, rh, rr, rd)) = s.inner().track_relief(Rect { x, y, width: w, height: h }) {
+                        out.push((rx, ry, rw, rh, rr, rd, false));
+                    }
+                }
+                None
+            };
+            if let Some((w, radius, raised)) = ctl {
+                let (x, y, ww, h) = w.rect();
+                if ww <= 0.0 || h <= 0.0 {
+                    continue;
+                }
+                // The side-label inset the widget's own paint applies (0 for the
+                // exempt kinds — button, toggle).
+                let lx = w.label_x_offset();
+                let depth = crate::layout::bevel_width().min(h * 0.2);
+                out.push((x + lx, y, ww - lx, h, radius, depth, raised));
+            }
+        }
+        out
+    }
+
 }
 
 impl Layout for ParametersBg {

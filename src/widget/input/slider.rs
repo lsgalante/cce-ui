@@ -112,6 +112,20 @@ impl Slider {
         }
     }
 
+    /// The recessed track's carve for hosts that draw this control through the
+    /// legacy flat views (see `ParametersBg::reliefs`): (x, y, w, h, radius,
+    /// depth) over the widget's assigned `rect`, or None when the style is off.
+    /// The same geometry `paint` carves.
+    pub fn track_relief(&self, rect: Rect) -> Option<(f32, f32, f32, f32, f32, f32)> {
+        if !self.recessed {
+            return None;
+        }
+        let g = self.geom(rect);
+        let radius = crate::layout::slider_corner_radius();
+        let depth = crate::layout::bevel_width().min(g.h * 0.2);
+        Some((g.track_x, g.y, g.track_w, g.h, radius, depth))
+    }
+
     fn geom(&self, rect: Rect) -> SliderGeom {
         let side = side_offset(&self.label);
         let x = rect.x + side;
