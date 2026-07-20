@@ -149,7 +149,7 @@ impl Application for DemoApp {
                 .with_range(0.0, 100.0)
                 .with_value(0.4)
                 .with_scroll(true)
-                .with_raised(true),
+                .with_recessed(true),
             name_box: TextBox::new(String::new())
                 .with_placeholder("Type a name...")
                 .with_recessed(true),

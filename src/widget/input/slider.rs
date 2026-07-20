@@ -48,10 +48,11 @@ pub struct Slider {
     pub editor_state: TextEditorState,
     pub just_changed: bool,
     label: Option<String>,
-    /// Raised-track style: the track is drawn as a `Boss` outline — raised
-    /// rolled edges on the surface below — instead of a filled background, so
-    /// the plate's own color shows through the unfilled portion.
-    raised: bool,
+    /// Recessed-track style: the track is a well carved into the plate below
+    /// (the TextBox `with_recessed` idiom) — the carve's shading defines the
+    /// channel, and with a transparent track color the plate itself is its
+    /// floor.
+    recessed: bool,
 }
 
 impl Slider {
@@ -69,7 +70,7 @@ impl Slider {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             label: None,
-            raised: false,
+            recessed: false,
         })
     }
 
@@ -172,9 +173,9 @@ impl Adapted<Slider> {
         self
     }
 
-    /// Raised-track style: see the `raised` field.
-    pub fn with_raised(mut self, raised: bool) -> Self {
-        self.raised = raised;
+    /// Recessed-track style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
         self
     }
 
@@ -235,14 +236,14 @@ impl Paint for Slider {
             }
         };
 
-        // Track. Raised style draws no background at all — the plate below is
-        // the track's surface; the ridge ring after the fill delimits it.
+        // Track. Recessed style draws no background at all — the plate below
+        // is the well's floor (the TextBox bare-recess look), and the carve
+        // emitted after the fill defines the channel.
         let track_rect = Rect { x: g.track_x, y: g.y, width: g.track_w, height: g.h };
-        // Ridge wall width for the raised style: capped well below the bar
-        // height, since the ring needs FOUR wall spans (up+down, top+bottom)
-        // plus a usable channel between them.
-        let ridge_t = crate::layout::bevel_width().min(g.h * 0.2);
-        if !self.raised {
+        // Carve wall width, the TextBox formula: capped against the bar height
+        // (the wall straddles the track boundary, intruding half its width).
+        let recess_t = crate::layout::bevel_width().min(g.h * 0.2);
+        if !self.recessed {
             rrect(track_rect, radius, rc, colors::slider_track(), ctx);
         }
 
@@ -271,13 +272,13 @@ impl Paint for Slider {
             ctx.text(text, rx + 8.0, crate::layout::align_text_y(g.y, g.h, 12.0, 0.0), 12.0, [0xee, 0xee, 0xf0]);
         }
 
-        // Fill up to the thumb center. Raised style insets the fill into the
-        // channel (past the falling inner wall), so the liquid sits in the
-        // valley instead of painting over the ridge.
+        // Fill up to the thumb center. Recessed style insets the fill onto the
+        // well's flat floor (past the wall's inner half-span), so the liquid
+        // sits in the well instead of climbing its walls.
         let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
         if let Some(fill_color) = colors::slider_fill() {
-            let (fx, fy, fmax_w, fh) = if self.raised {
-                let inset = 1.5 * ridge_t;
+            let (fx, fy, fmax_w, fh) = if self.recessed {
+                let inset = recess_t * 0.5;
                 (g.track_x + inset, g.y + inset, g.track_w - 2.0 * inset, g.h - 2.0 * inset)
             } else {
                 (g.track_x, g.y, g.track_w, g.h)
@@ -287,13 +288,10 @@ impl Paint for Slider {
             rrect(Rect { x: fx, y: fy, width: fill_w, height: fh }, fill_rad, (true, true, true, true), fill_color, ctx);
         }
 
-        // Raised rim AFTER the fill so its shading modulates whatever it
-        // crosses: one Ridge prim riding the track boundary — up from the
-        // plate, crest, back down into the channel where the control sits.
-        // A single primitive on purpose: boss + inset recess stacks two
-        // shading passes and the crest reads far hotter than a plate edge.
-        if self.raised {
-            ctx.ridge(track_rect, (radius, radius, radius, radius), 2.0 * ridge_t);
+        // Carve AFTER the fill so the wall's shading modulates whatever it
+        // crosses — the same order TextBox uses for its edit fill.
+        if self.recessed {
+            ctx.recess(track_rect, (radius, radius, radius, radius), recess_t);
         }
 
         // Thumb. A real Circle prim, not a full-radius rounded rect: rounded
@@ -302,11 +300,11 @@ impl Paint for Slider {
         let thumb_y = g.y + (g.h - g.thumb_size) / 2.0;
         let thumb_color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
         if rounded {
-            // Raised style: the knob sits IN the valley, so its diameter is the
-            // flat channel floor between the ridge walls — drawn size only; the
-            // drag/hit geometry keeps the full thumb_size.
+            // Recessed style: the knob sits IN the well, so its diameter is the
+            // flat floor between the walls (each intrudes half its width) —
+            // drawn size only; the drag/hit geometry keeps the full thumb_size.
             let diameter =
-                if self.raised { g.h - 2.0 * ridge_t } else { g.thumb_size };
+                if self.recessed { g.h - recess_t } else { g.thumb_size };
             ctx.circle(
                 thumb_x + g.thumb_size / 2.0,
                 thumb_y + g.thumb_size / 2.0,
