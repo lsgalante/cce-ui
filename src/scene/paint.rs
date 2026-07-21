@@ -407,17 +407,19 @@ impl PaintCtx {
     /// up inside. Two opposite-facing bevels; the face never leaves the
     /// surface plane. An opaque `color` fills the face (Bevel); transparent
     /// degrades to edges-only (Boss), the surface below showing through as
-    /// the face. `depth` is the roll width of both walls; the groove ring is
-    /// one `depth` wide.
+    /// the face. `depth` is the roll width of both walls; the ring is
+    /// expanded by depth/2, so the descending wall meets the rising lip in a
+    /// tight V-groove with no flat floor between them.
     pub fn inset_plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
+        let g = depth * 0.5;
         let outer = Rect {
-            x: rect.x - depth,
-            y: rect.y - depth,
-            width: rect.width + 2.0 * depth,
-            height: rect.height + 2.0 * depth,
+            x: rect.x - g,
+            y: rect.y - g,
+            width: rect.width + 2.0 * g,
+            height: rect.height + 2.0 * g,
         };
         let (r1, r2, r3, r4) = radii;
-        self.recess(outer, (r1 + depth, r2 + depth, r3 + depth, r4 + depth), depth);
+        self.recess(outer, (r1 + g, r2 + g, r3 + g, r4 + g), depth);
         if color[3] > 0.001 {
             self.bevel(rect, radii, color, depth);
         } else {
