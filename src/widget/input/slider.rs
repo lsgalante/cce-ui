@@ -126,6 +126,24 @@ impl Slider {
         Some((g.track_x, g.y, g.track_w, g.h, radius, depth))
     }
 
+    /// The thumb knob's circle (cx, cy, radius, color) for hosts that draw this
+    /// control through the legacy flat views (see `ParametersBg::spheres`): the
+    /// `Prim::Sphere` the rounded-corner paint emits — no flat view can carry
+    /// it. None under the square style, whose quad thumb already reaches the
+    /// plain-quad view. The same geometry `paint` draws.
+    pub fn thumb_sphere(&self, rect: Rect) -> Option<(f32, f32, f32, [f32; 4])> {
+        if crate::layout::slider_corner_radius() <= 0.0 {
+            return None;
+        }
+        let g = self.geom(rect);
+        let recess_t = crate::layout::bevel_width().min(g.h * 0.2);
+        let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
+        let thumb_y = g.y + (g.h - g.thumb_size) / 2.0;
+        let diameter = if self.recessed { g.h - recess_t } else { g.thumb_size };
+        let color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
+        Some((thumb_x + g.thumb_size / 2.0, thumb_y + g.thumb_size / 2.0, diameter / 2.0, color))
+    }
+
     fn geom(&self, rect: Rect) -> SliderGeom {
         let side = side_offset(&self.label);
         let x = rect.x + side;
@@ -313,18 +331,11 @@ impl Paint for Slider {
         // reads wrong — the thumb should stay round under any corner style.
         let thumb_y = g.y + (g.h - g.thumb_size) / 2.0;
         let thumb_color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
-        if rounded {
-            // Recessed style: the knob sits IN the well, so its diameter is the
-            // flat floor between the walls (each intrudes half its width) —
-            // drawn size only; the drag/hit geometry keeps the full thumb_size.
-            let diameter =
-                if self.recessed { g.h - recess_t } else { g.thumb_size };
-            ctx.sphere(
-                thumb_x + g.thumb_size / 2.0,
-                thumb_y + g.thumb_size / 2.0,
-                diameter / 2.0,
-                thumb_color,
-            );
+        // Recessed style: the knob sits IN the well, so its diameter is the
+        // flat floor between the walls (each intrudes half its width) —
+        // drawn size only; the drag/hit geometry keeps the full thumb_size.
+        if let Some((cx, cy, r, c)) = self.thumb_sphere(rect) {
+            ctx.sphere(cx, cy, r, c);
         } else {
             rrect(
                 Rect { x: thumb_x, y: thumb_y, width: g.thumb_size, height: g.thumb_size },

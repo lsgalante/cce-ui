@@ -870,6 +870,13 @@ impl ParametersBg {
                 if let Some(tb) = &self.texts[i] {
                     out.extend(tb.all_rounded_quads(ctx));
                 }
+            } else if p.2.starts_with("slider") {
+                // Track (square style only — the recessed style has no track
+                // background), value fill, and readout box; the thumb knob is a
+                // `Prim::Sphere` and rides `spheres()` instead.
+                if let Some(s) = &self.sliders[i] {
+                    out.extend(s.all_rounded_quads(ctx));
+                }
             } else if p.2.starts_with("choice") {
                 if let Some(d) = &self.choices[i] {
                     out.extend(d.all_rounded_quads(ctx));
@@ -941,6 +948,32 @@ impl ParametersBg {
                 let lx = w.label_x_offset();
                 let depth = crate::layout::bevel_width().min(h * 0.2);
                 out.push((x + lx, y, ww - lx, h, radius, depth, raised));
+            }
+        }
+        out
+    }
+
+    /// The sphere companion to [`Self::rounded_quads`]: the slider rows' thumb
+    /// knobs, which are `Prim::Sphere` — a prim NO legacy flat view carries, so
+    /// a host rendering this panel through the legacy views must read this
+    /// getter or the knobs vanish. Returned unclipped; the host clips to the
+    /// pane's scroll viewport and draws these AFTER [`Self::reliefs`], matching
+    /// the widget's own fill → carve → thumb order.
+    pub fn spheres(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
+        if !self.visible {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let hidden = self.hidden_rows();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if hidden[i] || !p.2.starts_with("slider") {
+                continue;
+            }
+            if let Some(s) = &self.sliders[i] {
+                let (x, y, w, h) = s.rect();
+                if let Some(sphere) = s.inner().thumb_sphere(Rect { x, y, width: w, height: h }) {
+                    out.push(sphere);
+                }
             }
         }
         out
