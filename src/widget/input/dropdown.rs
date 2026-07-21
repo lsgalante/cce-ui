@@ -297,11 +297,10 @@ impl Dropdown {
         if self.raised && self.corner_frame.is_none() {
             let depth = crate::layout::bevel_width().min(visual_h * 0.2);
             let r4 = (radius, radius, radius, radius);
-            if raw_bg[3] > 0.001 {
-                ctx.bevel(Rect { x, y, width: w, height: visual_h }, r4, bg_color, depth);
-            } else {
-                ctx.boss(Rect { x, y, width: w, height: visual_h }, r4, depth);
-            }
+            // Flush inset plate: groove ring down, beveled lip back up, face
+            // level with the surface (transparent raw fill = edges only).
+            let face = if raw_bg[3] > 0.001 { bg_color } else { [0.0; 4] };
+            ctx.inset_plate(Rect { x, y, width: w, height: visual_h }, r4, face, depth);
             return;
         }
         if radius <= 0.0 {

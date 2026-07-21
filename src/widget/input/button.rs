@@ -261,17 +261,13 @@ impl Paint for Button {
         let radius = crate::layout::button_corner_radius();
         let color = self.color();
 
-        // Raised style: one lit Bevel plate owns fill and edge — the rolled,
-        // lit rim replaces the flat border stroke. A transparent fill degrades
-        // to a Boss: edges-only, the plate below is the button's face (an
-        // opaque hover_color restores the filled bevel on hover).
+        // Relief style: a flush inset plate — the button sits sunken in a
+        // carved groove ring with its beveled lip rising back to the surface
+        // plane, face level with the surface. Transparent fills degrade to
+        // edges-only inside the groove (an opaque hover_color fills the face).
         if self.raised {
             let depth = crate::layout::bevel_width().min(h * 0.2);
-            if color[3] > 0.001 {
-                ctx.bevel(rect, (radius, radius, radius, radius), color, depth);
-            } else {
-                ctx.boss(rect, (radius, radius, radius, radius), depth);
-            }
+            ctx.inset_plate(rect, (radius, radius, radius, radius), color, depth);
         } else
         // Background (+ optional configured border), split by radius exactly as the legacy
         // `all_rounded_quads` (rounded) / `extra_quads` (square) overrides emitted it.

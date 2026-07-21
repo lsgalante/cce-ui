@@ -401,6 +401,30 @@ impl PaintCtx {
         self.push(Prim::Boss { rect, radii, depth, edges });
     }
 
+    /// A flush inset control: `rect`'s plate sits SUNKEN into the surface with
+    /// its face level with it — a groove ring carved around the control (the
+    /// outward wall steps down) and the control's own beveled lip rising back
+    /// up inside. Two opposite-facing bevels; the face never leaves the
+    /// surface plane. An opaque `color` fills the face (Bevel); transparent
+    /// degrades to edges-only (Boss), the surface below showing through as
+    /// the face. `depth` is the roll width of both walls; the groove ring is
+    /// one `depth` wide.
+    pub fn inset_plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
+        let outer = Rect {
+            x: rect.x - depth,
+            y: rect.y - depth,
+            width: rect.width + 2.0 * depth,
+            height: rect.height + 2.0 * depth,
+        };
+        let (r1, r2, r3, r4) = radii;
+        self.recess(outer, (r1 + depth, r2 + depth, r3 + depth, r4 + depth), depth);
+        if color[3] > 0.001 {
+            self.bevel(rect, radii, color, depth);
+        } else {
+            self.boss(rect, radii, depth);
+        }
+    }
+
     /// Raise a rim along `rect`'s boundary — see `Prim::Ridge`. `depth` is the
     /// full width of the bump (it straddles the outline by ±depth/2).
     pub fn ridge(&mut self, rect: Rect, radii: Radii, depth: f32) {
