@@ -532,7 +532,7 @@ pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
     InfoBox, StatusDot, InteractiveListItem,
     GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
-    DotStatus, Panel, serialize_widgets,
+    DotStatus, Panel, ImageView, serialize_widgets,
     truncate_head, truncate_tail,
 };
 

@@ -22,12 +22,12 @@
 use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::arena::Arena;
 use cce_ui::scene::layout::{
-    compute_layout, CrossAlign, LayoutBox, Length, Rect, Size as LSize, Style,
+    compute_layout, CrossAlign, FitMode, LayoutBox, Length, Rect, Size as LSize, Style,
 };
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::widget::{
-    Adapted, Button, Dropdown, WidgetHost, WidgetId, ElementState, Event, KeyEvent, MouseButton,
-    MouseScrollDelta, Slider, TextBox, Toggle,
+    Adapted, Button, Dropdown, ImageView, WidgetHost, WidgetId, ElementState, Event, KeyEvent,
+    MouseButton, MouseScrollDelta, Slider, TextBox, Toggle,
 };
 use wayland_client::QueueHandle;
 
@@ -57,6 +57,10 @@ struct DemoApp {
     slider: Adapted<Slider>,
     name_box: Adapted<TextBox>,
     theme_dropdown: Adapted<Dropdown>,
+    // ImageView pair sharing ONE uploaded texture (the widget borrows ids —
+    // upload/free stay app-side): Contain letterboxes, Stretch fills.
+    image_contain: Adapted<ImageView>,
+    image_stretch: Adapted<ImageView>,
 
     // ── App state: the source of truth. Widgets are re-asserted from it every rebuild
     // (`set_toggled` below); `take_*` changes flow back into it, never the reverse.
@@ -78,25 +82,29 @@ impl DemoApp {
     /// The widget root ids, in paint order — what the router dispatches over.
     /// `propagate_event` takes a `WidgetId` and resolves it through the registry, so the
     /// event paths need no raw pointers and no unsafe self-alias.
-    fn root_ids(&self) -> [WidgetId; 5] {
+    fn root_ids(&self) -> [WidgetId; 7] {
         [
             self.button.id(),
             self.toggle.id(),
             self.slider.id(),
             self.name_box.id(),
             self.theme_dropdown.id(),
+            self.image_contain.id(),
+            self.image_stretch.id(),
         ]
     }
 
     /// The widget roots as pointers, for the one genuinely pointer-consuming path left:
     /// registration (the registry stores them). The paint walk takes shared borrows.
-    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 5] {
+    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 7] {
         [
             self.button.as_ptr_mut(),
             self.toggle.as_ptr_mut(),
             self.slider.as_ptr_mut(),
             self.name_box.as_ptr_mut(),
             self.theme_dropdown.as_ptr_mut(),
+            self.image_contain.as_ptr_mut(),
+            self.image_stretch.as_ptr_mut(),
         ]
     }
 
@@ -140,6 +148,22 @@ impl Application for DemoApp {
         _sender: calloop::channel::Sender<Self::Message>,
     ) -> Self {
         cce_ui::scale::set_scale_factor(1.0);
+        // One procedurally generated gradient (no asset dependency), uploaded
+        // once and SHARED by both ImageViews — the widget borrows ids;
+        // upload/free stay app-side. upload_rgba queues into the renderer's
+        // pending list, so calling it before the first frame is safe.
+        const GRADIENT_W: u32 = 64;
+        const GRADIENT_H: u32 = 40;
+        let mut gradient = Vec::with_capacity((GRADIENT_W * GRADIENT_H * 4) as usize);
+        for y in 0..GRADIENT_H {
+            for x in 0..GRADIENT_W {
+                gradient.push((x * 255 / (GRADIENT_W - 1)) as u8);
+                gradient.push((y * 255 / (GRADIENT_H - 1)) as u8);
+                gradient.push(160);
+                gradient.push(255);
+            }
+        }
+        let gradient_id = cce_ui::vk::upload_rgba(gradient, GRADIENT_W, GRADIENT_H);
         Self {
             // Relief styling (raised buttons/toggles/dropdowns, recessed
             // wells) is the `control_relief` config default — no opt-in.
@@ -157,6 +181,13 @@ impl Application for DemoApp {
                 vec!["Forest".into(), "Ocean".into(), "Ember".into()],
                 0,
             ),
+            image_contain: ImageView::new()
+                .with_image(gradient_id, GRADIENT_W, GRADIENT_H)
+                .with_fit(FitMode::Contain { max_upscale: 4.0 })
+                .with_bg([0.10, 0.10, 0.16, 1.0]),
+            image_stretch: ImageView::new()
+                .with_image(gradient_id, GRADIENT_W, GRADIENT_H)
+                .with_fit(FitMode::Stretch),
             toggle_on: false,
             clicks: 0,
             status: "Ready.".to_string(),
@@ -257,6 +288,12 @@ impl Application for DemoApp {
             let dropdown = arena.insert(LayoutBox::leaf(Style::row().shrink(1.0), LSize::new(150.0, CONTROL_H)));
             let slider = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 24.0)));
             let name_box = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 30.0)));
+            // ImageView row: same texture through two fit modes side by side.
+            let images = arena.insert(LayoutBox::container(
+                Style::row().gap(14.0).height(Length::Fixed(72.0)),
+            ));
+            let image_contain = arena.insert(LayoutBox::leaf(Style::row().grow(1.0), LSize::new(0.0, 72.0)));
+            let image_stretch = arena.insert(LayoutBox::leaf(Style::row().grow(1.0), LSize::new(0.0, 72.0)));
             let spacer = arena.insert(LayoutBox::container(Style::column().grow(1.0)));
             let status = arena.insert(LayoutBox::leaf(
                 Style::row(),
@@ -270,6 +307,9 @@ impl Application for DemoApp {
             arena.append_child(controls, dropdown);
             arena.append_child(root, slider);
             arena.append_child(root, name_box);
+            arena.append_child(root, images);
+            arena.append_child(images, image_contain);
+            arena.append_child(images, image_stretch);
             arena.append_child(root, spacer);
             arena.append_child(root, status);
             compute_layout(
@@ -290,6 +330,10 @@ impl Application for DemoApp {
             self.slider.set_rect(s.x, s.y, s.width, s.height);
             let n = r(name_box);
             self.name_box.set_rect(n.x, n.y, n.width, n.height);
+            let ic = r(image_contain);
+            self.image_contain.set_rect(ic.x, ic.y, ic.width, ic.height);
+            let is = r(image_stretch);
+            self.image_stretch.set_rect(is.x, is.y, is.width, is.height);
             self.title_rect = r(title);
             self.status_rect = r(status);
 
@@ -378,6 +422,8 @@ impl Application for DemoApp {
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.toggle, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.slider, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.name_box, &mut pc);
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.image_contain, &mut pc);
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.image_stretch, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.theme_dropdown, &mut pc);
 
         // The dropdown popover — geometry and labels last, on top of everything, exactly
