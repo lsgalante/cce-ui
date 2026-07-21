@@ -52,6 +52,45 @@ impl Rect {
     pub const ZERO: Rect = Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
 }
 
+/// How an image maps into a bounding box — see [`fit_rect`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FitMode {
+    /// Aspect-preserving: the image fills the box on its long axis and
+    /// letterboxes on the other, never scaling up past `max_upscale`
+    /// (1.0 = never enlarge; f32::INFINITY = always fill).
+    Contain { max_upscale: f32 },
+    /// The full box, aspect ignored.
+    Stretch,
+}
+
+/// The rect an `img_w` × `img_h` image occupies inside `bounds` under `mode`,
+/// centered on both axes. Zero-sized images yield a zero rect at the box
+/// center rather than a division blow-up.
+pub fn fit_rect(img_w: u32, img_h: u32, bounds: Rect, mode: FitMode) -> Rect {
+    match mode {
+        FitMode::Stretch => bounds,
+        FitMode::Contain { max_upscale } => {
+            if img_w == 0 || img_h == 0 {
+                return Rect {
+                    x: bounds.x + bounds.width * 0.5,
+                    y: bounds.y + bounds.height * 0.5,
+                    width: 0.0,
+                    height: 0.0,
+                };
+            }
+            let (iw, ih) = (img_w as f32, img_h as f32);
+            let scale = (bounds.width / iw).min(bounds.height / ih).min(max_upscale).max(0.0);
+            let (w, h) = (iw * scale, ih * scale);
+            Rect {
+                x: bounds.x + (bounds.width - w) * 0.5,
+                y: bounds.y + (bounds.height - h) * 0.5,
+                width: w,
+                height: h,
+            }
+        }
+    }
+}
+
 /// Per-side spacing (padding).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Edges {
@@ -580,6 +619,40 @@ fn arrange_grid(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_contain_letterboxes_and_centers() {
+        let b = Rect { x: 10.0, y: 20.0, width: 100.0, height: 50.0 };
+        // 200x100 source, scale limited by both axes equally -> 100x50 fill
+        let r = fit_rect(200, 100, b, FitMode::Contain { max_upscale: 4.0 });
+        assert_eq!((r.x, r.y, r.width, r.height), (10.0, 20.0, 100.0, 50.0));
+        // tall source letterboxes horizontally: scale = 50/200 -> 25x50
+        let r = fit_rect(100, 200, b, FitMode::Contain { max_upscale: 4.0 });
+        assert_eq!((r.width, r.height), (25.0, 50.0));
+        assert_eq!(r.x, 10.0 + (100.0 - 25.0) * 0.5);
+        assert_eq!(r.y, 20.0);
+    }
+
+    #[test]
+    fn fit_contain_caps_upscale_but_downscales_freely() {
+        let b = Rect { x: 0.0, y: 0.0, width: 400.0, height: 400.0 };
+        // small source: would need 8x, capped at 4x, centered
+        let r = fit_rect(50, 50, b, FitMode::Contain { max_upscale: 4.0 });
+        assert_eq!((r.width, r.height), (200.0, 200.0));
+        assert_eq!((r.x, r.y), (100.0, 100.0));
+        // large source downscales with no floor (the old .max(1.0) bug)
+        let r = fit_rect(800, 800, b, FitMode::Contain { max_upscale: 4.0 });
+        assert_eq!((r.width, r.height), (400.0, 400.0));
+    }
+
+    #[test]
+    fn fit_degenerate_inputs() {
+        let b = Rect { x: 0.0, y: 0.0, width: 100.0, height: 100.0 };
+        let r = fit_rect(0, 50, b, FitMode::Contain { max_upscale: 4.0 });
+        assert_eq!((r.width, r.height), (0.0, 0.0));
+        let r = fit_rect(10, 10, b, FitMode::Stretch);
+        assert_eq!((r.width, r.height), (100.0, 100.0));
+    }
 
     fn leaf(arena: &mut Arena<LayoutBox>, w: f32, h: f32) -> NodeId {
         arena.insert(LayoutBox::leaf(Style::default(), Size::new(w, h)))
