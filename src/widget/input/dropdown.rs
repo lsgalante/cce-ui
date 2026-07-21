@@ -294,13 +294,39 @@ impl Dropdown {
         // flat outlines, which a rolled edge replaces). A transparent
         // configured fill degrades to a Boss: edges only, plate as the face —
         // judged on the RAW alpha, before the opacity force above.
-        if self.raised && self.corner_frame.is_none() {
+        if self.raised {
             let depth = crate::layout::bevel_width().min(visual_h * 0.2);
-            let r4 = (radius, radius, radius, radius);
+            // Concentric corner_frame adjustment applies to the relief too:
+            // a corner nested at equal gaps into the frame follows its curve
+            // (radius = frame radius - gap), per corner.
+            let mut r4 = [radius; 4];
+            if let Some(((px, py, pw, ph), pr, (pr1, pr2, pr3, pr4))) = self.corner_frame {
+                let g_left = x - px;
+                let g_top = y - py;
+                let g_right = (px + pw) - (x + w);
+                let g_bottom = (py + ph) - (y + visual_h);
+                if pr1 && (g_left - g_top).abs() < 1.0 && g_left >= 0.0 {
+                    r4[0] = (pr - g_left).max(0.0);
+                }
+                if pr2 && (g_right - g_top).abs() < 1.0 && g_right >= 0.0 {
+                    r4[1] = (pr - g_right).max(0.0);
+                }
+                if pr3 && (g_right - g_bottom).abs() < 1.0 && g_right >= 0.0 {
+                    r4[2] = (pr - g_right).max(0.0);
+                }
+                if pr4 && (g_left - g_bottom).abs() < 1.0 && g_left >= 0.0 {
+                    r4[3] = (pr - g_left).max(0.0);
+                }
+            }
             // Flush inset plate: groove ring down, beveled lip back up, face
             // level with the surface (transparent raw fill = edges only).
             let face = if raw_bg[3] > 0.001 { bg_color } else { [0.0; 4] };
-            ctx.inset_plate(Rect { x, y, width: w, height: visual_h }, r4, face, depth);
+            ctx.inset_plate(
+                Rect { x, y, width: w, height: visual_h },
+                (r4[0], r4[1], r4[2], r4[3]),
+                face,
+                depth,
+            );
             return;
         }
         if radius <= 0.0 {
