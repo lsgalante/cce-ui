@@ -345,7 +345,7 @@ impl ParametersBg {
     /// the host draws them itself under its own clip (the straight runs ride `plain_quads`,
     /// which clips them there by hand).
     pub fn arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> {
-        if !self.visible {
+        if !self.visible || crate::layout::control_relief() {
             return Vec::new();
         }
         let color = SECTION_BORDER_COLOR;
@@ -759,10 +759,14 @@ impl ParametersBg {
 
         // Each section is drawn as ONE continuous outline — around the title, down the
         // neck, around the content rows — whose straight runs are these quads; its corner
-        // fillets ride `arcs()`, which the host draws under the same clip.
-        for (title, content) in self.section_boxes() {
-            let (runs, _) = self.section_outline(title, content);
-            param_quads.extend(runs.into_iter().map(|(x, y, w, h)| (x, y, w, h, SECTION_BORDER_COLOR)));
+        // fillets ride `arcs()`, which the host draws under the same clip. Under
+        // `control_relief` the outline is replaced by the inset carves served
+        // through `reliefs` (title tab + content body recessed).
+        if !crate::layout::control_relief() {
+            for (title, content) in self.section_boxes() {
+                let (runs, _) = self.section_outline(title, content);
+                param_quads.extend(runs.into_iter().map(|(x, y, w, h)| (x, y, w, h, SECTION_BORDER_COLOR)));
+            }
         }
 
         let hidden = self.hidden_rows();
@@ -915,6 +919,21 @@ impl ParametersBg {
             return Vec::new();
         }
         let mut out = Vec::new();
+
+        // Sections as inset panels: the title tab and the content body each
+        // carve a recess (the flat outline+fillet path is the non-relief
+        // style). The neck joining them in the outline style has no carved
+        // equivalent — the tab and body read as two wells.
+        for (title, content) in self.section_boxes() {
+            let (tx, ty, tw, th) = title;
+            let depth = crate::layout::bevel_width().min(th * 0.2);
+            out.push((tx, ty, tw, th, SECTION_R, depth, false));
+            if let Some((cx, cy, cw, ch)) = content {
+                let depth = crate::layout::bevel_width().min(ch * 0.2);
+                out.push((cx, cy, cw, ch, SECTION_R, depth, false));
+            }
+        }
+
         let hidden = self.hidden_rows();
         for (i, p) in self.display_params.iter().enumerate() {
             if hidden[i] {
