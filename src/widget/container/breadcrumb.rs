@@ -170,7 +170,12 @@ impl Layout for Breadcrumb {}
 
 impl Paint for Breadcrumb {
     fn color(&self) -> [f32; 4] {
-        self.bg_color()
+        // Relief style: no fill — the recessed carve alone defines the bar.
+        if crate::layout::control_relief() {
+            [0.0; 4]
+        } else {
+            self.bg_color()
+        }
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
@@ -187,10 +192,15 @@ impl Paint for Breadcrumb {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // Background, top corners rounded — replicating the legacy render path's corner
-        // resolution (a radius at or below 0.1 rendered sharp).
         let radius = crate::layout::breadcrumb_corner_radius();
-        if radius <= 0.1 {
+        if crate::layout::control_relief() {
+            // Recessed well, no fill: the carve alone defines the bar — the
+            // surface below is its floor (the text-box bare idiom).
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            ctx.recess(rect, (radius, radius, radius, radius), depth);
+        } else if radius <= 0.1 {
+            // Background, top corners rounded — replicating the legacy render
+            // path's corner resolution (a radius at or below 0.1 rendered sharp).
             ctx.quad(rect, self.bg_color());
         } else {
             ctx.rounded_rect(rect, radius, (true, true, false, false), self.bg_color());
