@@ -260,9 +260,12 @@ impl Application for DemoApp {
             // ── Layout: a plain LayoutBox tree, solved in one call. Leaves carry their
             // intrinsic sizes; `grow` distributes leftover space; the solved rects are
             // assigned straight onto the widgets.
+            // DE-wide plate spacing: rim padding and object gap from config.
+            let plate_pad = cce_ui::layout::backplate_padding();
+            let plate_gap = cce_ui::layout::backplate_gap();
             let mut arena: Arena<LayoutBox> = Arena::new();
             let root = arena.insert(LayoutBox::container(
-                Style::column().padding(16.0).gap(14.0).cross_align(CrossAlign::Stretch),
+                Style::column().padding(plate_pad).gap(plate_gap).cross_align(CrossAlign::Stretch),
             ));
             let title = arena.insert(LayoutBox::leaf(
                 Style::row(),
@@ -279,7 +282,7 @@ impl Application for DemoApp {
             // toggle, and dropdown plates land on the same top and bottom edge.
             const CONTROL_H: f32 = 28.0;
             let controls = arena.insert(LayoutBox::container(
-                Style::row().gap(14.0).height(Length::Fixed(CONTROL_H)),
+                Style::row().gap(plate_gap).height(Length::Fixed(CONTROL_H)),
             ));
             // `shrink` lets the fixed leaves give up width when the window is at its
             // minimum instead of overflowing the row.
@@ -290,7 +293,7 @@ impl Application for DemoApp {
             let name_box = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 30.0)));
             // ImageView row: same texture through two fit modes side by side.
             let images = arena.insert(LayoutBox::container(
-                Style::row().gap(14.0).height(Length::Fixed(72.0)),
+                Style::row().gap(plate_gap).height(Length::Fixed(72.0)),
             ));
             let image_contain = arena.insert(LayoutBox::leaf(Style::row().grow(1.0), LSize::new(0.0, 72.0)));
             let image_stretch = arena.insert(LayoutBox::leaf(Style::row().grow(1.0), LSize::new(0.0, 72.0)));

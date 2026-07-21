@@ -142,6 +142,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.desktop.solid_color" => "desktop_solid_color",
                 "style.surface.desktop.grid_cell_size" => "desktop_grid_scale",
                 "style.surface.plate.padding" => "plate_padding",
+                "style.surface.backplate.padding" => "backplate_padding",
+                "style.surface.backplate.gap" => "backplate_gap",
                 "style.surface.backplate.color" => "backplate_color",
                 "style.surface.backplate.blur" => "backplate_blur",
                 "style.surface.backplate.corner_radius" => "backplate_corner_radius",
@@ -158,6 +160,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.cell_color" => "graph_cell_color",
                 "style.surface.graph.gap_color" => "graph_gap_color",
                 "style.surface.graph.opacity" => "graph_opacity",
+                "style.surface.graph.node.opacity" => "graph_node_opacity",
                 "style.surface.graph.spacing_x" => "graph_spacing_x",
                 "style.surface.graph.spacing_y" => "graph_spacing_y",
                 "style.surface.graph.gap_col_w" => "graph_gap_col_w",
@@ -1534,6 +1537,22 @@ pub fn bevel_shader() -> bool {
 pub fn bevel_width() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("bevel_width").unwrap_or(9.3)
+}
+
+/// Padding between the window plate's edge and the objects sitting on it, in
+/// logical px (`style.surface.backplate.padding` in config.kdl). DE-wide so
+/// every app's content sits the same distance off the plate rim.
+pub fn backplate_padding() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("backplate_padding").unwrap_or(16.0)
+}
+
+/// Gap between sibling objects on the window plate, in logical px
+/// (`style.surface.backplate.gap` in config.kdl) — pane splits, control rows.
+/// The companion to [`backplate_padding`]: rim distance vs object spacing.
+pub fn backplate_gap() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("backplate_gap").unwrap_or(12.0)
 }
 
 /// Roll-off width for the wall where a bar (menubar / status bar / the demo's
