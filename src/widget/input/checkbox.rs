@@ -226,8 +226,9 @@ pub struct Toggle {
     /// Where the label sits across the pill. Mirrors `Button::justify` — same enum, same
     /// 8px edge inset — so the two read as one control set wherever they share a column.
     justify: Justification,
-    /// Raised style: the background is an SDF-lit `Bevel` plate (fill + rolled
-    /// lit edge) instead of a flat fill; the state gradient composites on top.
+    /// Raised style: the pill renders as a rocker — the state half raised, the
+    /// other recessed (`rocker_reliefs`) — and the flat style's state gradient
+    /// is dropped.
     raised: bool,
 }
 
@@ -261,6 +262,34 @@ impl Toggle {
             colors::toggle_on_color()
         } else {
             colors::toggle_off_color()
+        }
+    }
+
+    /// The rocker's two relief halves over `rect`: (half rect, per-corner
+    /// radii, walls, raised). The STATE half — where the flat style paints its
+    /// gradient (top when on, bottom when off) — is raised; the other half is
+    /// recessed. The raised half owns the seam wall (all four edges), the
+    /// recessed half skips it, so the middle reads as one step down. Shared by
+    /// `paint` and hosts on the legacy relief views (`ParametersBg::reliefs`).
+    pub fn rocker_reliefs(
+        &self,
+        rect: Rect,
+    ) -> [(Rect, (f32, f32, f32, f32), (bool, bool, bool, bool), bool); 2] {
+        let r = crate::layout::toggle_corner_radius();
+        let half_h = rect.height / 2.0;
+        let top = Rect { x: rect.x, y: rect.y, width: rect.width, height: half_h };
+        let bottom =
+            Rect { x: rect.x, y: rect.y + half_h, width: rect.width, height: rect.height - half_h };
+        if self.toggled {
+            [
+                (top, (r, r, 0.0, 0.0), (true, true, true, true), true),
+                (bottom, (0.0, 0.0, r, r), (false, true, true, true), false),
+            ]
+        } else {
+            [
+                (bottom, (0.0, 0.0, r, r), (true, true, true, true), true),
+                (top, (r, r, 0.0, 0.0), (true, true, false, true), false),
+            ]
         }
     }
 }
@@ -322,14 +351,24 @@ impl Paint for Toggle {
         let bg = colors::toggle_bg_color();
 
         if self.raised {
-            // One lit Bevel plate owns fill and edge; the state gradient below
-            // composites over it. Transparent fill degrades to a Boss (edges
-            // only — the plate below is the face).
-            let depth = crate::layout::bevel_width().min(h * 0.2);
+            // The rocker: the state half raised, the other recessed — the
+            // physical read of the flat style's state gradient, which this
+            // style drops entirely. The halves' outer walls trace the pill
+            // silhouette, so no full-pill bevel is drawn under them.
             if bg[3] > 0.001 {
-                ctx.bevel(rect, (radius, radius, radius, radius), bg, depth);
-            } else {
-                ctx.boss(rect, (radius, radius, radius, radius), depth);
+                if radius > 0.0 {
+                    ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
+                } else {
+                    ctx.quad(rect, bg);
+                }
+            }
+            let depth = crate::layout::bevel_width().min(h * 0.2);
+            for (half, radii, edges, up) in self.rocker_reliefs(rect) {
+                if up {
+                    ctx.boss_edges(half, radii, depth, edges);
+                } else {
+                    ctx.recess_edges(half, radii, depth, edges);
+                }
             }
         } else if radius > 0.0 {
             ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
@@ -344,7 +383,7 @@ impl Paint for Toggle {
         // rounded corners. The band alphas follow a perceptual curve, not a straight ramp —
         // see `colors::perceptual_fade_alpha`. The bands composite onto the bg quad above,
         // so that is the backdrop the curve is solved against.
-        let grad = self.gradient_color();
+        let grad = if self.raised { [0.0; 4] } else { self.gradient_color() };
         let half = h / 2.0;
         if half > 0.0 && grad[3] > 0.0 {
             let steps = (half.ceil() as usize).clamp(4, 32);
@@ -531,20 +570,31 @@ mod tests {
         ctx.register_widget(id, ptr);
         WidgetHost::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
 
-        // Geometry is config-dependent (rounded vs square toggle); assert the invariant
-        // that holds in both: the gradient half flips with the state.
-        let before: Vec<_> = WidgetHost::all_rounded_quads(&t, &ctx);
-        let before_quads = WidgetHost::extra_quads(&t);
+        // Geometry is config-dependent (rounded vs square, gradient vs rocker);
+        // assert the invariant that holds in all styles: the state side flips —
+        // the flat style's gradient half, the relief style's raised half.
+        let painted = |t: &Adapted<Toggle>| {
+            let mut pc = crate::scene::paint::PaintCtx::new();
+            crate::widget::Paint::paint(
+                t.inner(),
+                Rect { x: 0.0, y: 0.0, width: 60.0, height: 30.0 },
+                &mut pc,
+            );
+            pc.finish()
+                .items
+                .into_iter()
+                .map(|i| format!("{:?}", i.prim))
+                .collect::<Vec<_>>()
+        };
+        let before = painted(&t);
 
         assert!(ctx.propagate_event(&click_at(30.0, 15.0), id), "toggle consumed the click");
         assert!(t.toggled());
         assert!(t.take_click());
 
-        let after: Vec<_> = WidgetHost::all_rounded_quads(&t, &ctx);
-        let after_quads = WidgetHost::extra_quads(&t);
         assert!(
-            before != after || before_quads != after_quads,
-            "toggling changes the emitted geometry (gradient switches halves)",
+            painted(&t) != before,
+            "toggling changes the emitted geometry (state side switches halves)",
         );
 
         // preferred_height forwards the legacy toggle height.

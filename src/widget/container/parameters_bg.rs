@@ -911,9 +911,13 @@ impl ParametersBg {
     /// Returned unclipped; the host clips to the pane's scroll viewport and
     /// draws these AFTER the flat quads, so the walls' shading modulates the
     /// fills they cross (the order the widgets' own paints use). Tuple:
-    /// (x, y, w, h, radius, depth, raised) — raised maps to `PaintCtx::boss`,
-    /// flat to `PaintCtx::recess`.
-    pub fn reliefs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, bool)> {
+    /// (x, y, w, h, per-corner radii, depth, raised, walls) — raised maps to
+    /// `PaintCtx::boss_edges`, flat to `recess_edges`; the toggles' rocker
+    /// halves are why radii/walls are per-entry.
+    #[allow(clippy::type_complexity)]
+    pub fn reliefs(
+        &self,
+    ) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32, bool, (bool, bool, bool, bool))> {
         if !self.visible || !crate::layout::control_relief() {
             return Vec::new();
         }
@@ -923,13 +927,15 @@ impl ParametersBg {
         // carve a recess (the flat outline+fillet path is the non-relief
         // style). The neck joining them in the outline style has no carved
         // equivalent — the tab and body read as two wells.
+        let all = (true, true, true, true);
+        let r4 = |r: f32| (r, r, r, r);
         for (title, content) in self.section_boxes() {
             let (tx, ty, tw, th) = title;
             let depth = crate::layout::bevel_width().min(th * 0.2);
-            out.push((tx, ty, tw, th, SECTION_R, depth, false));
+            out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));
             if let Some((cx, cy, cw, ch)) = content {
                 let depth = crate::layout::bevel_width().min(ch * 0.2);
-                out.push((cx, cy, cw, ch, SECTION_R, depth, false));
+                out.push((cx, cy, cw, ch, r4(SECTION_R), depth, false, all));
             }
         }
 
@@ -946,7 +952,19 @@ impl ParametersBg {
             } else if p.2 == "button" {
                 self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
             } else if p.2 == "toggle" || p.2 == "checkbox" {
-                self.toggles[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::toggle_corner_radius(), true))
+                // The rocker halves, exactly the widget's own paint.
+                if let Some(t) = &self.toggles[i] {
+                    let (x, y, w, h) = t.rect();
+                    if w > 0.0 && h > 0.0 {
+                        let depth = crate::layout::bevel_width().min(h * 0.2);
+                        for (half, radii, edges, up) in
+                            t.inner().rocker_reliefs(Rect { x, y, width: w, height: h })
+                        {
+                            out.push((half.x, half.y, half.width, half.height, radii, depth, up, edges));
+                        }
+                    }
+                }
+                None
             } else {
                 if let Some(s) = &self.sliders[i] {
                     let (x, y, w, h) = s.rect();
@@ -957,7 +975,7 @@ impl ParametersBg {
                     if let Some((rx, ry, rw, rh, rr, rd)) =
                         s.inner().track_relief(Rect { x, y: y + ty, width: w, height: h - ty })
                     {
-                        out.push((rx, ry, rw, rh, rr, rd, false));
+                        out.push((rx, ry, rw, rh, r4(rr), rd, false, all));
                     }
                 }
                 None
@@ -973,7 +991,7 @@ impl ParametersBg {
                 let lx = w.label_x_offset();
                 let ty = crate::widget::label_offset(w);
                 let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                out.push((x + lx, y + ty, ww - lx, h - ty, radius, depth, raised));
+                out.push((x + lx, y + ty, ww - lx, h - ty, r4(radius), depth, raised, all));
             }
         }
         out
