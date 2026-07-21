@@ -294,13 +294,7 @@ impl PreviewState {
                     break;
                 }
                 let limit = (((cw - 40.0) / 6.8).floor() as usize).max(20);
-                let line_truncated = if line.chars().count() > limit {
-                    let mut s: String = line.chars().take(limit - 3).collect();
-                    s.push_str("...");
-                    s
-                } else {
-                    line.to_string()
-                };
+                let line_truncated = crate::widget::display::truncate_tail(line, limit);
                 canvas.text_with_font(&line_truncated, cx + 20.0, text_y, 11.0, text_fg, "monospace");
                 text_y += 15.0;
             }
@@ -333,22 +327,14 @@ impl PreviewState {
         let header_y = details_content_start_y + 6.0;
         canvas.text(icon, cx + 12.0, header_y, 20.0, text_fg);
 
-        let name_truncated = if self.name.len() > 30 {
-            format!("{}...", &self.name[..27])
-        } else {
-            self.name.clone()
-        };
+        let name_truncated = crate::widget::display::truncate_tail(&self.name, 30);
         canvas.text(&name_truncated, cx + 42.0, header_y + 4.0, 16.0, text_fg);
 
         let mut y = details_content_start_y + 36.0;
         for (label, val) in &details {
             canvas.text(label, cx + 12.0, y, 12.0, label_fg);
 
-            let val_str = if val.len() > 40 {
-                format!("...{}", &val[val.len() - 37..])
-            } else {
-                val.to_string()
-            };
+            let val_str = crate::widget::display::truncate_head(val, 40);
             canvas.text(&val_str, cx + 112.0, y, 12.0, text_dim);
             y += 20.0;
         }
@@ -357,11 +343,7 @@ impl PreviewState {
             y += 8.0;
             canvas.text("Target", cx + 12.0, y, 12.0, label_fg);
 
-            let target_str = if self.target.len() > 40 {
-                format!("...{}", &self.target[self.target.len() - 37..])
-            } else {
-                self.target.clone()
-            };
+            let target_str = crate::widget::display::truncate_head(&self.target, 40);
             canvas.text(&target_str, cx + 112.0, y, 12.0, text_dim);
         }
 

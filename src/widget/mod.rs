@@ -532,7 +532,8 @@ pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
     InfoBox, StatusDot, InteractiveListItem,
     GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
-    DotStatus, Panel, PreviewState, ImagePreviewData, serialize_widgets
+    DotStatus, Panel, PreviewState, ImagePreviewData, serialize_widgets,
+    truncate_head, truncate_tail,
 };
 
 pub trait PageSelector {

@@ -33,5 +33,5 @@ pub use self::usage_bar::UsageBar;
 pub use self::info_box::InfoBox;
 pub use self::status_dot::{DotStatus, StatusDot};
 pub use self::preview::{PreviewState, ImagePreviewData};
-pub use self::text_sizer::{measure_text_width, measure_text};
+pub use self::text_sizer::{measure_text_width, measure_text, truncate_head, truncate_tail};
 
