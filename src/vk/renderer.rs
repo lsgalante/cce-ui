@@ -54,6 +54,9 @@ pub struct PlatePush {
     /// (center + half-extents) a free recess fades out against; far-away sides
     /// (±1e5) disable the fade.
     pub host: [f32; 4],
+    /// RGB multiplies the roll's specular color (w unused). Neutral white
+    /// normally; the focused-pane bevel carries the highlight color here.
+    pub specular_tint: [f32; 4],
     /// 1.0 = raised lit plate, 2.0 = recess overlay.
     pub mode: f32,
     /// Corner shape exponent: 2.0 = circular arcs, > 2 = superellipse
@@ -498,12 +501,13 @@ impl VkRenderer {
 
         let set_layouts = [descriptor_set_layout];
         // Push constants: the per-batch rounded-rect clip plus the SDF-lit
-        // plate block (seven vec4s, matching shader2d's `RRectClip`), read by
-        // shader2d's fragment stage.
+        // plate block (eight vec4s, matching shader2d's `RRectClip`), read by
+        // shader2d's fragment stage. 128 bytes — exactly the Vulkan-guaranteed
+        // minimum budget.
         let push_ranges = [vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
             .offset(0)
-            .size(112)];
+            .size(128)];
         let pipeline_layout = device
             .create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default()
@@ -1484,7 +1488,7 @@ impl VkRenderer {
                             // batch is a plate cover quad.
                             let rr = batch.clip_rrect.unwrap_or([0.0; 5]);
                             let enabled = if batch.clip_rrect.is_some() { 1.0f32 } else { 0.0 };
-                            let mut pc = [0.0f32; 28];
+                            let mut pc = [0.0f32; 32];
                             pc[..5].copy_from_slice(&rr);
                             pc[5] = enabled;
                             pc[7] = clip_shape;
@@ -1496,6 +1500,7 @@ impl VkRenderer {
                                 pc[16..20].copy_from_slice(&p.light);
                                 pc[20..24].copy_from_slice(&p.material);
                                 pc[24..28].copy_from_slice(&p.host);
+                                pc[28..32].copy_from_slice(&p.specular_tint);
                                 if p.mode == 1.0 {
                                     // Rebase the feature offset onto this
                                     // frame's UBO slot.
@@ -1551,7 +1556,7 @@ impl VkRenderer {
                     .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
                 // Push constants persist across binds — clear any batch's
                 // rounded clip and plate mode.
-                let pc = [0.0f32; 28];
+                let pc = [0.0f32; 32];
                 self.core.device.cmd_push_constants(
                     cmd,
                     self.pipeline_layout,

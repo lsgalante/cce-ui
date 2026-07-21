@@ -633,6 +633,9 @@ fn parse_and_set_colors(content: &str) {
     if let Some(t) = val.pointer("/style/surface/plate/border_thickness").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = PLATE_BORDER_THICKNESS.write() { *lock = t as f32; }
     }
+    if let Some(t) = val.pointer("/style/surface/plate/bevel_width").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = PLATE_BEVEL_WIDTH.write() { *lock = t as f32; }
+    }
     if let Some(blur) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_bool()) {
         if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur; }
     } else if let Some(blur_val) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_f64()) {
@@ -1675,6 +1678,9 @@ pub fn set_backplate_statusbar_blur(b: bool) {
 static PLATE_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.15, 0.15, 0.2, 0.95]));
 static PLATE_BORDER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.3, 0.3, 0.4, 1.0]));
 static PLATE_BORDER_THICKNESS: RwLock<f32> = RwLock::new(1.0);
+/// Roll width of the beveled plate border (the control_relief replacement for
+/// the flat border line) — `style.surface.plate.bevel_width`.
+static PLATE_BEVEL_WIDTH: RwLock<f32> = RwLock::new(6.0);
 
 pub fn plate_color() -> Option<[f32; 4]> {
     load_colors_once();
@@ -1714,6 +1720,20 @@ pub fn plate_border_thickness() -> f32 {
 
 pub fn set_plate_border_thickness(t: f32) {
     if let Ok(mut lock) = PLATE_BORDER_THICKNESS.write() {
+        *lock = t;
+    }
+}
+
+pub fn plate_bevel_width() -> f32 {
+    load_colors_once();
+    if let Ok(lock) = PLATE_BEVEL_WIDTH.read() {
+        return *lock;
+    }
+    6.0
+}
+
+pub fn set_plate_bevel_width(t: f32) {
+    if let Ok(mut lock) = PLATE_BEVEL_WIDTH.write() {
         *lock = t;
     }
 }

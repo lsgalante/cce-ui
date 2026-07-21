@@ -88,14 +88,29 @@ pub fn paint_legacy_leaf(
 /// hand-build their display list in their own draw order (the designer) instead of walking
 /// `paint_self`, but want a widget's background exactly as the vertex path drew it.
 pub fn append_widget_plate(w: &dyn WidgetHost, pc: &mut PaintCtx) {
+    append_widget_plate_tinted(w, pc, None);
+}
+
+/// [`append_widget_plate`] with an optional specular tint for the plate's
+/// bevel — the focused-pane treatment: the highlight colors the lit roll's
+/// glint instead of drawing a separate border ring. Under `control_relief` a
+/// bordered plate renders as a bevel (`plate_bevel_width` roll) — the beveled
+/// counterpart of the flat border line, exactly the controls' own
+/// outline→relief degradation.
+pub fn append_widget_plate_tinted(w: &dyn WidgetHost, pc: &mut PaintCtx, tint: Option<[f32; 3]>) {
     let (x, y, ww, h) = w.rect();
     let rect = Rect { x, y, width: ww, height: h };
     let radii = w.corner_radii();
     let radii_tuple = (radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left);
+    let tint = tint.unwrap_or([1.0, 1.0, 1.0]);
     if let Some(thickness) = w.plate_bevel() {
-        pc.bevel(rect, radii_tuple, w.color(), thickness);
+        pc.bevel_tinted(rect, radii_tuple, w.color(), thickness, tint);
     } else if let Some((border_color, thickness)) = w.solid_border() {
-        pc.border(rect, radii_tuple, w.color(), border_color, thickness);
+        if crate::layout::control_relief() {
+            pc.bevel_tinted(rect, radii_tuple, w.color(), crate::colors::plate_bevel_width(), tint);
+        } else {
+            pc.border(rect, radii_tuple, w.color(), border_color, thickness);
+        }
     } else {
         pc.border(rect, radii_tuple, w.color(), [0.0; 4], 0.0);
     }

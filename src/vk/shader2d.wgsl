@@ -94,6 +94,9 @@ struct RRectClip {
     // the carve fades out against — a wall flush with the host's edge dies
     // across the host's perimeter roll; far-away sides sit at ±1e5 (no fade).
     p_host: vec4f,
+    // RGB multiplies the lit roll's specular color — neutral white normally,
+    // a highlight color on a marked (focused) plate. w unused.
+    p_spec_tint: vec4f,
 }
 var<push_constant> rrect_clip: RRectClip;
 
@@ -239,7 +242,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
         let shade = 1.0 + (diff / flat_shade - 1.0) * strength;
         let spec = roll_spec(c / h);
-        return vec4f(vcol.rgb * shade + vec3f(spec * strength), vcol.a * aa);
+        return vec4f(vcol.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), vcol.a * aa);
     }
 
     let gd = rr_sdf_grad(frag, rrect_clip.p_rect, rrect_clip.p_radii);
@@ -283,7 +286,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
         let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
         let spec = roll_spec(sv);
-        return vec4f(base.rgb * shade + vec3f(spec * strength), abs(base.a) * aa);
+        return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
     }
 
     // Free-floating recess, boss, or ridge (one not grouped into a host plate —

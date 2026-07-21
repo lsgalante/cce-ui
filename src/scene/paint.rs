@@ -41,8 +41,12 @@ pub enum Prim {
     /// `push_widget_vertices`' non-bevel branch: rounded bg + `push_plate_solid_border_vertices`).
     Border { rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32 },
     /// A beveled plate: a rounded fill at full size plus a light/shadow overlay lip
-    /// (mirrors `push_widget_vertices`' bevel branch).
-    Bevel { rect: Rect, radii: Radii, color: [f32; 4], depth: f32 },
+    /// (mirrors `push_widget_vertices`' bevel branch). `tint` multiplies the lit
+    /// roll's specular color — neutral white normally; a host sets it to a
+    /// highlight color to mark the plate (the focused-pane treatment) without a
+    /// separate border ring. Shader-plates path only; the legacy banded
+    /// tessellation ignores it.
+    Bevel { rect: Rect, radii: Radii, color: [f32; 4], depth: f32, tint: [f32; 3] },
     /// A recess carved into whatever is already painted underneath — the inverse of
     /// `Bevel`. Emits ONLY the shaded edges, never a fill, so the surface below shows
     /// through the middle: a relief cut into the backplate rather than a plate laid on
@@ -370,8 +374,13 @@ impl PaintCtx {
     }
 
     pub fn bevel(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
+        self.bevel_tinted(rect, radii, color, depth, [1.0, 1.0, 1.0]);
+    }
+
+    /// `bevel` with a specular tint — see `Prim::Bevel::tint`.
+    pub fn bevel_tinted(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32, tint: [f32; 3]) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Bevel { rect, radii, color, depth });
+        self.push(Prim::Bevel { rect, radii, color, depth, tint });
     }
 
     /// Carve a recess into the already-painted surface below. Unlike `bevel`, this fills

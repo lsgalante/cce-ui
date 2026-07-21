@@ -1513,7 +1513,7 @@ pub fn tessellate_display_list(
                 push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, cr, sw, sh, *fill, no, None, &mut verts);
                 push_plate_solid_border_vertices(rect.x, rect.y, rect.width, rect.height, cr, *thickness, sw, sh, *border, no, &mut verts);
             }
-            Prim::Bevel { rect, radii, color, depth } if shader_plates => {
+            Prim::Bevel { rect, radii, color, depth, tint } if shader_plates => {
                 // SDF-lit raised plate: one cover quad; the shader owns fill,
                 // roll shading, corners, and silhouette AA. Nominal corner
                 // radii (scale_corners false): a Bevel is a WIDGET-scale plate
@@ -1521,7 +1521,9 @@ pub fn tessellate_display_list(
                 // the controls around it — only window-scale `Plate`s get the
                 // curvature-matched span.
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
-                plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, false));
+                let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, false);
+                p.specular_tint = [tint[0], tint[1], tint[2], 0.0];
+                plate = Some(p);
                 made_plate = Some(*rect);
             }
             Prim::Plate { rect, radii, color, depth } if shader_plates => {
@@ -1641,7 +1643,7 @@ pub fn tessellate_display_list(
                 ];
                 plate = Some(p);
             }
-            Prim::Bevel { rect, radii, color, depth } => {
+            Prim::Bevel { rect, radii, color, depth, tint: _ } => {
                 // Full-size fill: the lip is now a shading overlay, not a paint of the
                 // outer ring, so the fill must cover the whole rect (the old inset fill
                 // would leave the ring showing whatever lay beneath).
@@ -1737,6 +1739,7 @@ pub fn tessellate_display_list(
                     light: [plate_light[0], plate_light[1], plate_light[2], 0.0],
                     material: plate_mat,
                     host: [0.0; 4],
+                    specular_tint: [1.0, 1.0, 1.0, 0.0],
                     mode: 5.0,
                     shape: 2.0,
                 });
@@ -1829,6 +1832,7 @@ fn plate_push_raised(
         // Mode-1 semantics: [feature offset, feature count] — no carves yet;
         // the tessellator fills these in as recesses group into this plate.
         host: [0.0, 0.0, 0.0, 0.0],
+        specular_tint: [1.0, 1.0, 1.0, 0.0],
         mode: 1.0,
         shape,
     }
