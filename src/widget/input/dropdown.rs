@@ -296,26 +296,31 @@ impl Dropdown {
         // judged on the RAW alpha, before the opacity force above.
         if self.raised {
             let depth = crate::layout::bevel_width().min(visual_h * 0.2);
-            // Concentric corner_frame adjustment applies to the relief too:
-            // a corner nested at equal gaps into the frame follows its curve
-            // (radius = frame radius - gap), per corner.
+            // Concentric corner_frame adjustment applies to the relief too: a
+            // corner nested at equal gaps into the frame follows its curve.
+            // The window corner is span-widened (corner_span_factor, diagonal
+            // curvature = pr), so its parallel curve at inset g has diagonal
+            // curvature pr - g — which as a NOMINAL widget-scale squircle
+            // radius is factor * (pr - g). Exactly pr - g for circular
+            // corners (factor 1).
             let mut r4 = [radius; 4];
             if let Some(((px, py, pw, ph), pr, (pr1, pr2, pr3, pr4))) = self.corner_frame {
+                let cf = crate::layout::corner_span_factor();
                 let g_left = x - px;
                 let g_top = y - py;
                 let g_right = (px + pw) - (x + w);
                 let g_bottom = (py + ph) - (y + visual_h);
                 if pr1 && (g_left - g_top).abs() < 1.0 && g_left >= 0.0 {
-                    r4[0] = (pr - g_left).max(0.0);
+                    r4[0] = (pr - g_left).max(0.0) * cf;
                 }
                 if pr2 && (g_right - g_top).abs() < 1.0 && g_right >= 0.0 {
-                    r4[1] = (pr - g_right).max(0.0);
+                    r4[1] = (pr - g_right).max(0.0) * cf;
                 }
                 if pr3 && (g_right - g_bottom).abs() < 1.0 && g_right >= 0.0 {
-                    r4[2] = (pr - g_right).max(0.0);
+                    r4[2] = (pr - g_right).max(0.0) * cf;
                 }
                 if pr4 && (g_left - g_bottom).abs() < 1.0 && g_left >= 0.0 {
-                    r4[3] = (pr - g_left).max(0.0);
+                    r4[3] = (pr - g_left).max(0.0) * cf;
                 }
             }
             // Flush inset plate: groove ring down, beveled lip back up, face
