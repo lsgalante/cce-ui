@@ -952,18 +952,8 @@ impl ParametersBg {
             } else if p.2 == "button" {
                 self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
             } else if p.2 == "toggle" || p.2 == "checkbox" {
-                // The rocker halves, exactly the widget's own paint.
-                if let Some(t) = &self.toggles[i] {
-                    let (x, y, w, h) = t.rect();
-                    if w > 0.0 && h > 0.0 {
-                        let depth = crate::layout::bevel_width().min(h * 0.2);
-                        for (half, radii, edges, up) in
-                            t.inner().rocker_reliefs(Rect { x, y, width: w, height: h })
-                        {
-                            out.push((half.x, half.y, half.width, half.height, radii, depth, up, edges));
-                        }
-                    }
-                }
+                // The rocker's flat faces are RoundedRect prims — they arrive
+                // through the rounded-quad view; no relief entries.
                 None
             } else {
                 if let Some(s) = &self.sliders[i] {

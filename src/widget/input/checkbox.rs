@@ -265,31 +265,29 @@ impl Toggle {
         }
     }
 
-    /// The rocker's two relief halves over `rect`: (half rect, per-corner
-    /// radii, walls, raised). The STATE half — where the flat style paints its
-    /// gradient (top when on, bottom when off) — is raised; the other half is
-    /// recessed. The raised half owns the seam wall (all four edges), the
-    /// recessed half skips it, so the middle reads as one step down. Shared by
-    /// `paint` and hosts on the legacy relief views (`ParametersBg::reliefs`).
-    pub fn rocker_reliefs(
+    /// The rocker's two flat faces over `rect`: (half rect, corner flags,
+    /// tint). The pill reads as a plate pivoting about its horizontal midline —
+    /// two flat ANGLED surfaces meeting at the hinge, not stepped plateaus: the
+    /// STATE half (top when on, bottom when off) tilts out and catches the
+    /// light (white tint), the other tilts away into shadow (black tint). Flat
+    /// uniform tints — a tilted plane has one normal — so the faces flow
+    /// through the rounded-quad views with no relief machinery.
+    pub fn rocker_faces(
         &self,
         rect: Rect,
-    ) -> [(Rect, (f32, f32, f32, f32), (bool, bool, bool, bool), bool); 2] {
-        let r = crate::layout::toggle_corner_radius();
+    ) -> [(Rect, (bool, bool, bool, bool), [f32; 4]); 2] {
+        const LIT: [f32; 4] = [1.0, 1.0, 1.0, 0.10];
+        const SHADED: [f32; 4] = [0.0, 0.0, 0.0, 0.16];
         let half_h = rect.height / 2.0;
         let top = Rect { x: rect.x, y: rect.y, width: rect.width, height: half_h };
         let bottom =
             Rect { x: rect.x, y: rect.y + half_h, width: rect.width, height: rect.height - half_h };
+        let top_corners = (true, true, false, false);
+        let bottom_corners = (false, false, true, true);
         if self.toggled {
-            [
-                (top, (r, r, 0.0, 0.0), (true, true, true, true), true),
-                (bottom, (0.0, 0.0, r, r), (false, true, true, true), false),
-            ]
+            [(top, top_corners, LIT), (bottom, bottom_corners, SHADED)]
         } else {
-            [
-                (bottom, (0.0, 0.0, r, r), (true, true, true, true), true),
-                (top, (r, r, 0.0, 0.0), (true, true, false, true), false),
-            ]
+            [(bottom, bottom_corners, LIT), (top, top_corners, SHADED)]
         }
     }
 }
@@ -351,10 +349,9 @@ impl Paint for Toggle {
         let bg = colors::toggle_bg_color();
 
         if self.raised {
-            // The rocker: the state half raised, the other recessed — the
-            // physical read of the flat style's state gradient, which this
-            // style drops entirely. The halves' outer walls trace the pill
-            // silhouette, so no full-pill bevel is drawn under them.
+            // The rocker: two flat angled faces pivoting about the midline
+            // (see `rocker_faces`) — the physical read of the flat style's
+            // state gradient, which this style drops entirely.
             if bg[3] > 0.001 {
                 if radius > 0.0 {
                     ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
@@ -362,13 +359,8 @@ impl Paint for Toggle {
                     ctx.quad(rect, bg);
                 }
             }
-            let depth = crate::layout::bevel_width().min(h * 0.2);
-            for (half, radii, edges, up) in self.rocker_reliefs(rect) {
-                if up {
-                    ctx.boss_edges(half, radii, depth, edges);
-                } else {
-                    ctx.recess_edges(half, radii, depth, edges);
-                }
+            for (half, corners, tint) in self.rocker_faces(rect) {
+                ctx.rounded_rect(half, radius, corners, tint);
             }
         } else if radius > 0.0 {
             ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
