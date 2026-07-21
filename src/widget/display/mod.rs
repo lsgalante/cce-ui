@@ -13,7 +13,6 @@ pub mod graph;
 pub mod usage_bar;
 pub mod info_box;
 pub mod status_dot;
-pub mod preview;
 pub mod text_sizer;
 
 pub use self::text_label::TextLabel;
@@ -32,6 +31,5 @@ pub use self::graph::{GraphNode, Graph};
 pub use self::usage_bar::UsageBar;
 pub use self::info_box::InfoBox;
 pub use self::status_dot::{DotStatus, StatusDot};
-pub use self::preview::{PreviewState, ImagePreviewData};
 pub use self::text_sizer::{measure_text_width, measure_text, truncate_head, truncate_tail};
 
