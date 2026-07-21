@@ -90,13 +90,12 @@ const SECTION_NECK_X: f32 = 12.0;
 /// them. Titles run wider than this in practice; it only keeps the neck inside the box.
 const SECTION_TITLE_MIN_W: f32 = 2.0 * SECTION_R + 2.0 * SECTION_NECK_R + SECTION_NECK_W;
 
-/// The gap between one section's bottom box edge and the next section's title box. Equal to
-/// the title→content gap by construction: a header row is `TITLE_BOX_INSET + TITLE_BOX_H`
-/// tall as drawn and `ROW_GAP` from the row under it, whose content box starts
-/// `CONTENT_BOX_PAD` early — leaving exactly `ROW_GAP`. Laying the next header out from the
-/// previous block's *drawn* bottom edge (rather than the uniform row pitch, which the two
-/// boxes' overhangs eat into unequally) keeps the two gaps identical.
-const SECTION_GAP: f32 = ROW_GAP;
+/// The gap between one section's bottom box edge and the next section's title box —
+/// deliberately wider than the `ROW_GAP` the title→content gap works out to, so sections
+/// read as separate blocks. Laid out from the previous block's *drawn* bottom edge (rather
+/// than the uniform row pitch, which the two boxes' overhangs eat into unequally) so the
+/// gap is exact.
+const SECTION_GAP: f32 = 2.0 * ROW_GAP;
 
 impl ParametersBg {
     pub fn new() -> Adapted<ParametersBg> {
@@ -2427,7 +2426,7 @@ mod tests {
     }
 
     #[test]
-    fn section_to_section_gap_matches_the_title_to_content_gap() {
+    fn section_to_section_gap_is_wider_than_the_title_to_content_gap() {
         let p = panel_with(&[
             ("Transform", "", "section"),
             ("Size", "1.00", "slider:0:2"),
@@ -2440,8 +2439,9 @@ mod tests {
         let content_bottom = |i: usize| rects[i].1 + rects[i].3 + CONTENT_BOX_PAD;
         let title_top = |i: usize| rects[i].1 - TITLE_BOX_INSET;
 
-        assert_eq!(content_top(1) - title_bottom(0), SECTION_GAP, "title -> its content box");
+        assert_eq!(content_top(1) - title_bottom(0), ROW_GAP, "title -> its content box");
         assert_eq!(title_top(2) - content_bottom(1), SECTION_GAP, "section -> next section");
+        assert!(SECTION_GAP > ROW_GAP, "sections separate wider than a section's own tab");
     }
 
     #[test]
