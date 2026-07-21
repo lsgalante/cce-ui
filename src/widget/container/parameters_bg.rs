@@ -932,7 +932,13 @@ impl ParametersBg {
             } else {
                 if let Some(s) = &self.sliders[i] {
                     let (x, y, w, h) = s.rect();
-                    if let Some((rx, ry, rw, rh, rr, rd)) = s.inner().track_relief(Rect { x, y, width: w, height: h }) {
+                    // The detached top label sits OUTSIDE the carve: shrink to
+                    // the content band, exactly the rect the widget's own
+                    // paint receives (the render_widget label_offset shrink).
+                    let ty = crate::widget::label_offset(s);
+                    if let Some((rx, ry, rw, rh, rr, rd)) =
+                        s.inner().track_relief(Rect { x, y: y + ty, width: w, height: h - ty })
+                    {
                         out.push((rx, ry, rw, rh, rr, rd, false));
                     }
                 }
@@ -944,10 +950,12 @@ impl ParametersBg {
                     continue;
                 }
                 // The side-label inset the widget's own paint applies (0 for the
-                // exempt kinds — button, toggle).
+                // exempt kinds — button, toggle), and the top-label band, which
+                // stays outside the relief like every other host.
                 let lx = w.label_x_offset();
-                let depth = crate::layout::bevel_width().min(h * 0.2);
-                out.push((x + lx, y, ww - lx, h, radius, depth, raised));
+                let ty = crate::widget::label_offset(w);
+                let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
+                out.push((x + lx, y + ty, ww - lx, h - ty, radius, depth, raised));
             }
         }
         out
@@ -971,7 +979,10 @@ impl ParametersBg {
             }
             if let Some(s) = &self.sliders[i] {
                 let (x, y, w, h) = s.rect();
-                if let Some(sphere) = s.inner().thumb_sphere(Rect { x, y, width: w, height: h }) {
+                // Content band, like `reliefs`: the knob sizes to the track
+                // well, not the label-inclusive rect.
+                let ty = crate::widget::label_offset(s);
+                if let Some(sphere) = s.inner().thumb_sphere(Rect { x, y: y + ty, width: w, height: h - ty }) {
                     out.push(sphere);
                 }
             }
