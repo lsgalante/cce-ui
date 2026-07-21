@@ -76,6 +76,9 @@ pub struct Graph {
 
     uniform_background: bool,
     network_opacity: f32,
+    /// Node-domain opacity (bodies, wires, connectors) — independent of
+    /// `network_opacity`, which fades the pane surface (grid cells/gaps).
+    node_opacity: f32,
     cell_color: [f32; 3],
     gap_color: [f32; 3],
 
@@ -120,6 +123,7 @@ impl Graph {
             toggle_hovered_idx: None,
             uniform_background: false,
             network_opacity: crate::color::graph_opacity(),
+            node_opacity: crate::color::graph_node_opacity(),
             cell_color: cell_col,
             gap_color: gap_col,
             connecting_from: None,
@@ -134,6 +138,9 @@ impl Graph {
     }
     pub fn set_network_opacity(&mut self, opacity: f32) {
         self.network_opacity = opacity;
+    }
+    pub fn set_node_opacity(&mut self, opacity: f32) {
+        self.node_opacity = opacity;
     }
     pub fn grid_sizes(&self) -> (f32, f32) {
         (self.grid_size_x, self.grid_size_y)
@@ -295,7 +302,7 @@ impl Graph {
 
         // Connection wires: each node with an "input" parameter draws a wire from that source
         // node's first output port to its own first input port.
-        let wire_color = [0.0, 0.75, 1.0, 0.7 * self.network_opacity]; // Vibrant cyan glow
+        let wire_color = [0.0, 0.75, 1.0, 0.7 * self.node_opacity]; // Vibrant cyan glow
         for i in 0..self.nodes.len() {
             let node = &self.nodes[i];
             if let Some((_, input_name, _)) = node.parameters.iter().find(|(name, _, _)| name.eq_ignore_ascii_case("input")) {
@@ -420,7 +427,7 @@ impl Graph {
                 } else {
                     colors::node_color()
                 };
-                bg_color[3] *= self.network_opacity;
+                bg_color[3] *= self.node_opacity;
                 if nx + nw > min_x && nx < max_x && ny + nh > min_y && ny < max_y {
                     quads.push((nx, ny, nw, nh, bg_color));
                 }
@@ -431,13 +438,13 @@ impl Graph {
                     } else {
                         colors::TOGGLE_OFF
                     };
-                    btn_color[3] *= self.network_opacity;
+                    btn_color[3] *= self.node_opacity;
                     push_clipped(tx, ty, tw, th, btn_color, &mut quads);
 
                     if self.nodes[i].geom_visible {
                         let inset = 3.0 * scale_f;
                         let mut toggle_on_color = colors::TOGGLE_ON;
-                        toggle_on_color[3] *= self.network_opacity;
+                        toggle_on_color[3] *= self.node_opacity;
                         push_clipped(tx + inset, ty + inset, tw - inset * 2.0, th - inset * 2.0, toggle_on_color, &mut quads);
                     }
                 }
@@ -493,8 +500,8 @@ impl Graph {
         let conn_size = crate::layout::graph_connector_size();
         let mut conn_color = colors::graph_connector_color();
         let mut conn_hl_color = colors::graph_connector_highlight_color();
-        conn_color[3] *= self.network_opacity;
-        conn_hl_color[3] *= self.network_opacity;
+        conn_color[3] *= self.node_opacity;
+        conn_hl_color[3] *= self.node_opacity;
 
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {

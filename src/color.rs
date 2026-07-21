@@ -128,6 +128,10 @@ static SCROLLBAR_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new([0.60, 0.60, 0.65, 
 static GRAPH_CELL_COLOR: RwLock<[f32; 3]> = RwLock::new([0.13, 0.13, 0.16]);
 static GRAPH_GAP_COLOR: RwLock<[f32; 3]> = RwLock::new([0.07, 0.07, 0.09]);
 static GRAPH_OPACITY: RwLock<f32> = RwLock::new(0.95);
+/// Opacity of the graph's NODE-domain content (node bodies, wires, connectors,
+/// node text) — `style.surface.graph.node.opacity`, deliberately independent of
+/// `GRAPH_OPACITY`, which fades only the pane surface (grid cells/gaps).
+static GRAPH_NODE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 
 static GRAPH_NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
 static GRAPH_NODE_SELECTED_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_SELECTED);
@@ -553,6 +557,9 @@ fn parse_and_set_colors(content: &str) {
     if let Some(opacity) = val.pointer("/style/surface/graph/opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = GRAPH_OPACITY.write() { *lock = opacity as f32; }
     }
+    if let Some(opacity) = val.pointer("/style/surface/graph/node/opacity").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = GRAPH_NODE_OPACITY.write() { *lock = opacity as f32; }
+    }
 
     if let Some(c) = get_color("/style/data/tree/background_color") {
         if let Ok(mut lock) = TREE_BACKGROUND_COLOR.write() { *lock = c; }
@@ -793,6 +800,17 @@ pub fn set_graph_gap_color(color: [f32; 3]) {
 pub fn graph_opacity() -> f32 {
     load_colors_once();
     *GRAPH_OPACITY.read().unwrap()
+}
+
+pub fn graph_node_opacity() -> f32 {
+    load_colors_once();
+    *GRAPH_NODE_OPACITY.read().unwrap()
+}
+
+pub fn set_graph_node_opacity(opacity: f32) {
+    if let Ok(mut lock) = GRAPH_NODE_OPACITY.write() {
+        *lock = opacity;
+    }
 }
 
 pub fn set_graph_opacity(opacity: f32) {
