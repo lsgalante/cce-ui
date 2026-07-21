@@ -32,6 +32,9 @@ pub struct MeshId(usize);
 pub struct SceneDraw {
     pub mesh: MeshId,
     pub mvp: [[f32; 4]; 4],
+    /// Rasterize as lines (PolygonMode::LINE) instead of filled triangles.
+    /// Falls back to filled when the device lacks fillModeNonSolid.
+    pub wireframe: bool,
 }
 
 /// shader_3d.wgsl's uniform block.
@@ -65,6 +68,9 @@ struct SceneFrame {
 pub(crate) struct SceneStage {
     render_pass: vk::RenderPass,
     pipeline: vk::Pipeline,
+    /// PolygonMode::LINE twin of `pipeline` — None when the device lacks
+    /// fillModeNonSolid (wireframe draws then fall back to the fill pipeline).
+    wireframe_pipeline: Option<vk::Pipeline>,
     pipeline_layout: vk::PipelineLayout,
     descriptor_set_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
@@ -96,6 +102,7 @@ impl SceneStage {
         extent: vk::Extent2D,
         frames_in_flight: usize,
         min_uniform_align: vk::DeviceSize,
+        wireframe_supported: bool,
     ) -> Self {
         unsafe {
             // Offscreen pass: color -> TRANSFER_SRC (copied to the swapchain
@@ -273,6 +280,35 @@ impl SceneStage {
                 )
                 .expect("Failed to create 3D pipeline")[0];
 
+            // The wireframe twin: identical but rasterized as lines. Culling
+            // stays on so the wire view matches the fill's visible surface.
+            let wireframe_pipeline = wireframe_supported.then(|| {
+                let rasterization_lines = vk::PipelineRasterizationStateCreateInfo::default()
+                    .polygon_mode(vk::PolygonMode::LINE)
+                    .cull_mode(vk::CullModeFlags::BACK)
+                    .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+                    .line_width(1.0);
+                device
+                    .create_graphics_pipelines(
+                        vk::PipelineCache::null(),
+                        &[vk::GraphicsPipelineCreateInfo::default()
+                            .stages(&stages)
+                            .vertex_input_state(&vertex_input)
+                            .input_assembly_state(&input_assembly)
+                            .viewport_state(&viewport_state)
+                            .rasterization_state(&rasterization_lines)
+                            .multisample_state(&multisample)
+                            .depth_stencil_state(&depth_stencil)
+                            .color_blend_state(&color_blend)
+                            .dynamic_state(&dynamic_state)
+                            .layout(pipeline_layout)
+                            .render_pass(render_pass)
+                            .subpass(0)],
+                        None,
+                    )
+                    .expect("Failed to create 3D wireframe pipeline")[0]
+            });
+
             let uniform_stride = UNIFORM_SIZE.next_multiple_of(min_uniform_align.max(1));
 
             let pool_sizes = [vk::DescriptorPoolSize::default()
@@ -315,6 +351,7 @@ impl SceneStage {
             let mut stage = SceneStage {
                 render_pass,
                 pipeline,
+                wireframe_pipeline,
                 pipeline_layout,
                 descriptor_set_layout,
                 descriptor_pool,
@@ -682,11 +719,21 @@ impl SceneStage {
                     },
                 }],
             );
-            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.pipeline);
+            let mut bound = self.pipeline;
+            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, bound);
             for (i, draw) in staged.draws.iter().enumerate() {
                 let mesh = &self.meshes[draw.mesh.0];
                 if mesh.count == 0 {
                     continue;
+                }
+                let wanted = if draw.wireframe {
+                    self.wireframe_pipeline.unwrap_or(self.pipeline)
+                } else {
+                    self.pipeline
+                };
+                if wanted != bound {
+                    device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, wanted);
+                    bound = wanted;
                 }
                 device.cmd_bind_descriptor_sets(
                     cmd,
@@ -718,6 +765,9 @@ impl SceneStage {
             }
             device.destroy_descriptor_pool(self.descriptor_pool, None);
             device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            if let Some(p) = self.wireframe_pipeline.take() {
+                device.destroy_pipeline(p, None);
+            }
             device.destroy_pipeline(self.pipeline, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
             device.destroy_shader_module(self.shader_module, None);

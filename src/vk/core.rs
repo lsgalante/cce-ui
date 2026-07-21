@@ -61,6 +61,9 @@ pub struct VkCore {
     pub(crate) min_uniform_align: vk::DeviceSize,
     /// minAccelerationStructureScratchOffsetAlignment; 1 when no ray-query stack.
     pub(crate) as_scratch_align: vk::DeviceSize,
+    /// fillModeNonSolid was available and enabled — the scene stage may build
+    /// its wireframe (PolygonMode::LINE) pipeline.
+    pub(crate) wireframe_supported: bool,
 }
 
 /// The process-wide Vulkan entry + instance every [`VkCore`] hangs off.
@@ -367,7 +370,18 @@ impl VkCore {
         let mut as_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
             .acceleration_structure(true);
         let mut rq_features = vk::PhysicalDeviceRayQueryFeaturesKHR::default().ray_query(true);
-        let mut device_info = vk::DeviceCreateInfo::default().queue_create_infos(&queue_infos);
+        // Non-solid fill (PolygonMode::LINE) for the scene stage's wireframe
+        // pipeline — enabled when the device offers it; consumers check
+        // `wireframe_supported`.
+        let wireframe_supported = instance
+            .get_physical_device_features(physical_device)
+            .fill_mode_non_solid
+            == vk::TRUE;
+        let enabled_features =
+            vk::PhysicalDeviceFeatures::default().fill_mode_non_solid(wireframe_supported);
+        let mut device_info = vk::DeviceCreateInfo::default()
+            .queue_create_infos(&queue_infos)
+            .enabled_features(&enabled_features);
         if ray_query {
             device_extensions.push(ash::khr::acceleration_structure::NAME.as_ptr());
             device_extensions.push(ash::khr::ray_query::NAME.as_ptr());
@@ -431,6 +445,7 @@ impl VkCore {
                 instance,
                 min_uniform_align,
                 as_scratch_align,
+                wireframe_supported,
             },
             surface,
         )

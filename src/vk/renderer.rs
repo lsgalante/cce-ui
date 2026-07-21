@@ -613,6 +613,7 @@ impl VkRenderer {
             initial_extent,
             FRAMES_IN_FLIGHT,
             min_uniform_align,
+            core.wireframe_supported,
         );
         clear_image_to_shader_read(&device, queue, command_pool, scene.backdrop_image);
 
