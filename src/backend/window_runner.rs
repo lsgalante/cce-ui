@@ -1335,7 +1335,7 @@ pub fn push_plate_solid_border_vertices(
     // curve is indistinguishable from the true parallel curve, and at
     // corner_shape 2 this is exactly the circular arc annulus. NOT
     // push_arc_background_vertices — that stays circular for genuine arcs.
-    let mut corner = |cx: f32, cy: f32, r: f32, start: f32, end: f32, out: &mut Vec<Vertex>| {
+    let corner = |cx: f32, cy: f32, r: f32, start: f32, end: f32, out: &mut Vec<Vertex>| {
         let r_in = (r - t).max(0.0);
         let ndc = |px: f32, py: f32| [(px / sw) * 2.0 - 1.0, 1.0 - (py / sh) * 2.0];
         for i in 0..segments {
