@@ -919,6 +919,13 @@ impl Paint for TreeList {
             }
         }
 
+        // Recessed well like a text box or list: the tree floor sits below the
+        // pane surface, its wall carved over the bg and row quads above.
+        if crate::layout::control_relief() {
+            let depth = crate::layout::bevel_width().min(h * 0.2);
+            pc.recess(Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), depth);
+        }
+
         // Row/header labels with the legacy header/list viewport bounds.
         let font = Some(crate::layout::tree_font());
         let (x, y, w, _h) = (rect.x, rect.y, rect.width, rect.height);
