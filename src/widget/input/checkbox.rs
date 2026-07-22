@@ -288,19 +288,39 @@ impl Toggle {
         [(state.0, state.1, state.2, true), (other.0, other.1, other.2, false)]
     }
 
-    /// A rocker face's UNIFORM lighting overlay — flat faces under the same
-    /// DE light the bevels answer to: the raised plateau's face catches the
-    /// light (white), the recessed floor sits in the surround's shade
-    /// (black). Uniform because a flat face has one normal; the amplitude
-    /// rides `bevel_depth` — the knob that scales the walls' shading — so
-    /// faces and bevels brighten and flatten together (both go to zero at
-    /// depth 0, the mesa-flat config).
-    pub fn face_light(raised: bool) -> [f32; 4] {
-        let s = (crate::layout::bevel_depth() / 0.15).clamp(0.0, 2.0);
-        if raised {
-            [1.0, 1.0, 1.0, 0.08 * s]
+    /// A rocker face's UNIFORM lighting overlay, evaluated under the SAME DE
+    /// light the bevels answer to: `light_source_position` through the plate
+    /// model (shader2d's `plate_shade` — ambient floor, diffuse off the
+    /// normal, expressed relative to the flat face). The rocker reads as a
+    /// bent plate: the state half tilts OUT toward the viewer, the other IN,
+    /// so each half has ONE slightly tipped normal — the overlay stays
+    /// uniform (the faces keep their flat-step read) but its sign and amount
+    /// swing with the light azimuth exactly like the walls' shading, and the
+    /// whole thing scales with `bevel_depth` through the same strength term.
+    /// Mirrors `tessellate_display_list`'s `plate_light` construction and
+    /// shader2d's `PLATE_AMBIENT` / `flat_shade` — keep the three in sync.
+    pub fn face_light(&self, top_half: bool) -> [f32; 4] {
+        const AMBIENT: f32 = 0.55; // shader2d PLATE_AMBIENT
+        const FACE_TILT: f32 = 0.25; // the bent plate's slope, as dh over dy
+        let az = crate::layout::light_source_position();
+        let el = std::f32::consts::FRAC_PI_4; // plate_light's elevation
+        let (ly, lz) = (-az.sin() * el.cos(), el.sin());
+        // The state half tilts out (outer edge toward the viewer), the other
+        // in. A heightfield normal is (0, -dh/dy, 1): a top OUT half rises
+        // toward -y, tipping its normal to +y; every other case follows.
+        let out = top_half == self.toggled;
+        let ny = if top_half == out { FACE_TILT } else { -FACE_TILT };
+        // Faces pivot about the horizontal hinge, so only the light's y and
+        // z components reach the dot product — azimuth enters through ly.
+        let dot = ((ny * ly + lz) / (1.0 + ny * ny).sqrt()).max(0.0);
+        let flat = AMBIENT + (1.0 - AMBIENT) * lz;
+        let diff = AMBIENT + (1.0 - AMBIENT) * dot;
+        let strength = crate::layout::bevel_depth() / 0.15;
+        let v = (diff / flat - 1.0) * strength;
+        if v >= 0.0 {
+            [1.0, 1.0, 1.0, v.min(1.0)]
         } else {
-            [0.0, 0.0, 0.0, 0.14 * s]
+            [0.0, 0.0, 0.0, (-v).min(1.0)]
         }
     }
 }
@@ -376,8 +396,8 @@ impl Paint for Toggle {
                     ctx.quad(rect, bg);
                 }
             }
-            for (half, radii, _, raised) in self.rocker_reliefs(rect) {
-                let light = Self::face_light(raised);
+            for (half, radii, _, _) in self.rocker_reliefs(rect) {
+                let light = self.face_light(radii.0 > 0.0);
                 if light[3] > 0.001 {
                     let corners = (radii.0 > 0.0, radii.1 > 0.0, radii.2 > 0.0, radii.3 > 0.0);
                     ctx.rounded_rect(half, radius, corners, light);
