@@ -1552,7 +1552,15 @@ pub fn tessellate_display_list(
                 // carve becomes a CSG feature of that plate's single draw —
                 // exact composite shading, real junctions at the plate's rolled
                 // perimeter — instead of a shading overlay (the fallback below).
-                if let Some((bi, prect)) = last_plate.filter(|_| mode < 3.5) {
+                //
+                // Edge-suppressed carves NEVER group: a suppressed wall's rect
+                // extends past the carve (below), relying on the overlay cover
+                // quad to keep that shading out of the drawn pixels — a clip
+                // the plate's whole-surface draw does not have, so grouped it
+                // smears the extended walls across the plate. Union pieces
+                // (section wells, rocker halves) are exactly these.
+                let full_ring = *edges == (true, true, true, true);
+                if let Some((bi, prect)) = last_plate.filter(|_| mode < 3.5 && full_ring) {
                     let inside = rect.x >= prect.x - 0.5
                         && rect.y >= prect.y - 0.5
                         && rect.x + rect.width <= prect.x + prect.width + 0.5
