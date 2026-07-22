@@ -575,11 +575,29 @@ impl ParametersBg {
                     labels.extend(f.own_text_labels());
                 }
             } else if ptype == "section" {
+                // Centered between the section carve's top (the title box top)
+                // and the first control below; empty/collapsed sections keep
+                // the legacy offset.
+                let font_size = 13.0;
+                let top = r.1 - TITLE_BOX_INSET;
+                let below = self
+                    .display_params
+                    .iter()
+                    .enumerate()
+                    .skip(i + 1)
+                    .find(|(j, q)| !hidden[*j] && q.2 != "section")
+                    .map(|(j, _)| rects[j].1);
+                let y = match below {
+                    Some(control_top) if control_top > top + font_size => {
+                        top + (control_top - top - font_size) / 2.0
+                    }
+                    _ => r.1 + 2.0,
+                };
                 labels.push(TextLabel {
                     text: name.clone(),
                     x: self.rect.x + 12.0,
-                    y: r.1 + 2.0,
-                    font_size: 13.0,
+                    y,
+                    font_size,
                     color: [0xee, 0xee, 0xf0],
                 });
             } else if ptype == "code" {
@@ -924,18 +942,38 @@ impl ParametersBg {
         let mut out = Vec::new();
 
         // Sections as inset panels (the flat outline+fillet path is the
-        // non-relief style): ONE recess per section — full body width, from
-        // the title's top edge down to the content's bottom — so the title
-        // sits inside the same well as its rows instead of in a tab well of
-        // its own. Collapsed sections keep the title-box carve.
+        // non-relief style): ONE union-shaped recess per section — a
+        // title-text-width tab strip flush with the body's left edge, opening
+        // into the full-width body below. Composed from three edge-suppressed
+        // pieces (the tab with its bottom open, the body with its top open,
+        // and the top-wall run right of the tab's throat) so no wall crosses
+        // the union's interior and the whole section reads as a single well.
+        // Collapsed sections keep the title-box carve.
         let all = (true, true, true, true);
         let r4 = |r: f32| (r, r, r, r);
+        let r = SECTION_R;
         for (title, content) in self.section_boxes() {
             let (tx, ty, tw, th) = title;
             if let Some((cx, cy, cw, ch)) = content {
-                let wh = (cy + ch) - ty;
-                let depth = crate::layout::bevel_width().min(wh * 0.2);
-                out.push((cx, ty, cw, wh, r4(SECTION_R), depth, false, all));
+                let depth = crate::layout::bevel_width().min(ch * 0.2);
+                // Tab strip: section top down to the body's top, bottom open.
+                out.push((tx, ty, tw, cy - ty, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
+                // Body: top open — its top wall comes from the segment beside
+                // the tab's throat.
+                out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
+                let throat_r = tx + tw;
+                if cx + cw > throat_r + 0.5 {
+                    out.push((
+                        throat_r,
+                        cy,
+                        cx + cw - throat_r,
+                        ch,
+                        (0.0, r, 0.0, 0.0),
+                        depth,
+                        false,
+                        (true, false, false, false),
+                    ));
+                }
             } else {
                 let depth = crate::layout::bevel_width().min(th * 0.2);
                 out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));
