@@ -62,6 +62,13 @@ fn build_font_system(load_system_fonts: bool) -> glyphon::FontSystem {
     if load_system_fonts || std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
         db.load_system_fonts();
     }
+    // An empty database guarantees a panic on the first shaped glyph
+    // (cosmic-text: "no default font found"), so if the bundled dir yielded
+    // nothing (missing $HOME/Dropbox/Fonts — e.g. the greeter running as
+    // root), fall back to system fonts rather than crash.
+    if db.faces().next().is_none() {
+        db.load_system_fonts();
+    }
 
     // Validate configured custom fonts
     let font_getters = vec![
