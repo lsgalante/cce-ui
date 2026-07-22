@@ -208,7 +208,15 @@ impl ParametersBg {
         let text_w =
             crate::widget::display::measure_text_width(&self.display_params[hdr].0, &label_family, label_size);
         let title_w = (text_w + 16.0).max(SECTION_TITLE_MIN_W).min(full_w);
-        (self.rect.x + 4.0, r_hdr.1 - TITLE_BOX_INSET, title_w, TITLE_BOX_H)
+        // Collapsed, the box sits where the EXPANDED tab sits (one title-box
+        // height above where the body's top edge would be), so collapsing
+        // doesn't jump the tab — and the click-toggle hit zone follows it.
+        let y = if self.collapsed.contains(&self.display_params[hdr].0) {
+            r_hdr.1 + r_hdr.3 + ROW_GAP - CONTENT_BOX_PAD - TITLE_BOX_H
+        } else {
+            r_hdr.1 - TITLE_BOX_INSET
+        };
+        (self.rect.x + 4.0, y, title_w, TITLE_BOX_H)
     }
 
     /// Each section as `(header index, its content-row range)` — the rows between a header
@@ -579,19 +587,27 @@ impl ParametersBg {
                 // atop the body's top edge); empty/collapsed sections keep the
                 // legacy offset.
                 let font_size = 13.0;
+                // The first control of THIS section only: a collapsed/empty
+                // section must not borrow the next section's rows.
                 let below = self
                     .display_params
                     .iter()
                     .enumerate()
                     .skip(i + 1)
-                    .find(|(j, q)| !hidden[*j] && q.2 != "section")
+                    .take_while(|(_, q)| q.2 != "section")
+                    .find(|(j, _)| !hidden[*j])
                     .map(|(j, _)| rects[j].1);
                 let y = match below {
                     Some(control_top) => {
                         let tab_top = control_top - CONTENT_BOX_PAD - TITLE_BOX_H;
                         tab_top + (TITLE_BOX_H - font_size) / 2.0
                     }
-                    _ => r.1 + 2.0,
+                    // Collapsed/empty: centered in the collapsed tab, which
+                    // sits where the expanded tab would (section_title_box).
+                    _ => {
+                        let tab_top = r.1 + r.3 + ROW_GAP - CONTENT_BOX_PAD - TITLE_BOX_H;
+                        tab_top + (TITLE_BOX_H - font_size) / 2.0
+                    }
                 };
                 labels.push(TextLabel {
                     text: name.clone(),
