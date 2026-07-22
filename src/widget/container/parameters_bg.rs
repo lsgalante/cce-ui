@@ -97,6 +97,16 @@ const SECTION_TITLE_MIN_W: f32 = 2.0 * SECTION_R + 2.0 * SECTION_NECK_R + SECTIO
 /// gap is exact.
 const SECTION_GAP: f32 = 2.0 * ROW_GAP;
 
+/// Horizontal inset of a section's boxes (title tab and content body) from the pane
+/// plate's sides — deliberately the wider of the two horizontal gaps, so sections
+/// float clearly inside the plate.
+const SECTION_MARGIN: f32 = 16.0;
+/// Horizontal gap between a control row and its parent section's side walls.
+const CONTROL_INSET: f32 = 12.0;
+/// A row's inset from the plate: the section margin plus the controls' inset within
+/// the section, so bare rows above the first section align with wrapped ones.
+const ROW_X_INSET: f32 = SECTION_MARGIN + CONTROL_INSET;
+
 impl ParametersBg {
     pub fn new() -> Adapted<ParametersBg> {
         Adapted::new(ParametersBg {
@@ -203,7 +213,7 @@ impl ParametersBg {
         // (box width = text + 16) centers the text in the box. Measure the run in the
         // label's real family AND size — parsed, not the raw "Family NN" spec string, which
         // resvg can't resolve (it would fall back to a narrow font and undersize the box).
-        let full_w = self.rect.width - 8.0;
+        let full_w = self.rect.width - 2.0 * SECTION_MARGIN;
         let (label_family, label_size) = crate::layout::control_label_font_parsed();
         let text_w =
             crate::widget::display::measure_text_width(&self.display_params[hdr].0, &label_family, label_size);
@@ -216,7 +226,7 @@ impl ParametersBg {
         } else {
             r_hdr.1 - TITLE_BOX_INSET
         };
-        (self.rect.x + 4.0, y, title_w, TITLE_BOX_H)
+        (self.rect.x + SECTION_MARGIN, y, title_w, TITLE_BOX_H)
     }
 
     /// Each section as `(header index, its content-row range)` — the rows between a header
@@ -241,7 +251,7 @@ impl ParametersBg {
     /// runs and its corner fillets, so the two halves can't disagree.
     fn section_boxes(&self) -> Vec<((f32, f32, f32, f32), Option<(f32, f32, f32, f32)>)> {
         let rects = self.get_param_rects();
-        let full_w = self.rect.width - 8.0;
+        let full_w = self.rect.width - 2.0 * SECTION_MARGIN;
         let mut out = Vec::new();
         for (hdr, content) in self.sections() {
             if hdr >= rects.len() {
@@ -406,7 +416,7 @@ impl ParametersBg {
         let mut prev_bottom: Option<f32> = None;
         for i in 0..self.display_params.len() {
             if hidden[i] {
-                rects.push((self.rect.x + 8.0, cur_y, self.rect.width - 16.0, 0.0));
+                rects.push((self.rect.x + ROW_X_INSET, cur_y, self.rect.width - 2.0 * ROW_X_INSET, 0.0));
                 continue;
             }
             let is_header = self.display_params[i].2 == "section";
@@ -416,7 +426,7 @@ impl ParametersBg {
                 }
             }
             let h = self.row_height(i);
-            rects.push((self.rect.x + 8.0, cur_y, self.rect.width - 16.0, h));
+            rects.push((self.rect.x + ROW_X_INSET, cur_y, self.rect.width - 2.0 * ROW_X_INSET, h));
             prev_bottom = Some(if is_header {
                 cur_y - TITLE_BOX_INSET + TITLE_BOX_H
             } else if prev_bottom.is_some() {
@@ -676,7 +686,7 @@ impl ParametersBg {
             } else {
                 labels.push(TextLabel {
                     text: format!("{}: {}", name, value),
-                    x: self.rect.x + 8.0,
+                    x: self.rect.x + ROW_X_INSET,
                     y: r.1,
                     font_size: 12.0,
                     color: [0xaa, 0xaa, 0xbb],
@@ -2371,7 +2381,11 @@ mod tests {
         assert!(p.sliders[0].is_some() && p.choices[1].is_some() && p.toggles[2].is_some());
         // Rows were laid out from the cached rect.
         let (sx, _, sw, _) = p.sliders[0].as_ref().unwrap().rect();
-        assert_eq!((sx, sw), (8.0, 284.0), "row rect derives from the assigned rect");
+        assert_eq!(
+            (sx, sw),
+            (ROW_X_INSET, 300.0 - 2.0 * ROW_X_INSET),
+            "row rect derives from the assigned rect"
+        );
     }
 
     #[test]
