@@ -575,9 +575,9 @@ impl ParametersBg {
                     labels.extend(f.own_text_labels());
                 }
             } else if ptype == "section" {
-                // Centered in the carve's tab: between its top (one title-box
-                // height above the body's top edge) and the first control
-                // below; empty/collapsed sections keep the legacy offset.
+                // Centered within the carve's tab itself (one title-box height
+                // atop the body's top edge); empty/collapsed sections keep the
+                // legacy offset.
                 let font_size = 13.0;
                 let below = self
                     .display_params
@@ -588,8 +588,8 @@ impl ParametersBg {
                     .map(|(j, _)| rects[j].1);
                 let y = match below {
                     Some(control_top) => {
-                        let top = control_top - CONTENT_BOX_PAD - TITLE_BOX_H;
-                        top + (control_top - top - font_size) / 2.0
+                        let tab_top = control_top - CONTENT_BOX_PAD - TITLE_BOX_H;
+                        tab_top + (TITLE_BOX_H - font_size) / 2.0
                     }
                     _ => r.1 + 2.0,
                 };
