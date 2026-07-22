@@ -34,6 +34,9 @@ impl HasWindowHandle for WaylandSurfaceHandle {
 /// Helper function to detect the initial display scale factor from Wayland output state.
 /// Iterates over all active outputs and returns the maximum scale factor found (defaulting to 1.0).
 pub fn detect_scale_factor(output_state: &OutputState) -> f64 {
+    if let Some(forced) = crate::scale::forced_scale() {
+        return forced as f64;
+    }
     let mut max_scale = 1.0;
     for output in output_state.outputs() {
         if let Some(info) = output_state.info(&output) {

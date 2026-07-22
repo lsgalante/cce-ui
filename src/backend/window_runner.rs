@@ -2525,8 +2525,13 @@ impl<A: Application> EngineState<A> {
             if let Some(ref mut renderer) = self.renderer {
                 // wl_surface requires buffer dimensions divisible by the buffer
                 // scale; snap up so a fractional logical size can't queue an
-                // illegal swapchain extent.
-                let s = (self.scale_factor.round() as u32).max(1);
+                // illegal swapchain extent. In forced-scale mode the surface
+                // stays at buffer_scale 1 (the compositor believes scale 1).
+                let s = if crate::scale::forced_scale().is_some() {
+                    1
+                } else {
+                    (self.scale_factor.round() as u32).max(1)
+                };
                 let pw = ((w as f64 * self.scale_factor).round() as u32).max(1).div_ceil(s) * s;
                 let ph = ((h as f64 * self.scale_factor).round() as u32).max(1).div_ceil(s) * s;
                 renderer.resize(pw, ph);
@@ -2799,7 +2804,11 @@ impl<A: Application> EngineState<A> {
         // attach+commit. Skipped while the pending extent isn't divisible (a
         // transition frame) — the old committed scale stays legal for it.
         if let Some(ref surface) = self.surface {
-            let s = (self.scale_factor.round() as i32).max(1);
+            let s = if crate::scale::forced_scale().is_some() {
+                1
+            } else {
+                (self.scale_factor.round() as i32).max(1)
+            };
             let e = renderer.pending_extent();
             if s != self.committed_buffer_scale
                 && e.width % s as u32 == 0
@@ -2848,6 +2857,11 @@ impl<A: Application> CompositorHandler for EngineState<A> {
         // old-scale-sized buffer right after it, which is a fatal invalid_size
         // protocol error (seen on resume, when outputs bounce 2→1→2). The scale
         // request is sent in `render`, paired with a matching-size present.
+        if crate::scale::forced_scale().is_some() {
+            // Forced mode: the compositor's opinion (scale 1 under cage) must
+            // not clobber the override.
+            return;
+        }
         self.scale_factor = scale_factor as f64;
         self.resize(self.logical_width, self.logical_height);
         self.redraw = true;
@@ -2952,7 +2966,10 @@ impl<A: Application> WindowHandler for EngineState<A> {
         if let (Some(w), Some(h)) = (w, h) {
             let width = w.get();
             let height = h.get();
-            self.resize(width as f32, height as f32);
+            // Forced mode: the compositor's logical size is really physical
+            // pixels (scale-1 output); divide to get the app's logical space.
+            let f = crate::scale::forced_scale().unwrap_or(1.0);
+            self.resize(width as f32 / f, height as f32 / f);
         } else {
             let settings = self.inner.as_ref().unwrap().settings();
             let w = settings.width as f32;
@@ -3072,10 +3089,13 @@ impl<A: Application> PointerHandler for EngineState<A> {
         let mut has_scroll = false;
         let (mut last_lx, mut last_ly) = (0.0f32, 0.0f32);
 
+        // Forced mode: pointer positions arrive in the compositor's scale-1
+        // logical space (= physical); divide into the app's logical space.
+        let forced = crate::scale::forced_scale().unwrap_or(1.0);
         for event in events {
             let (x, y) = event.position;
-            let lx = x as f32;
-            let ly = y as f32;
+            let lx = x as f32 / forced;
+            let ly = y as f32 / forced;
 
             self.cursor_pos = (lx, ly);
             match &event.kind {
@@ -3662,8 +3682,10 @@ pub fn run<A: Application>() {
     engine_state.inner = Some(inner);
 
     let surface = engine_state.compositor_state.create_surface(&qh);
-    surface.set_buffer_scale(scale as i32);
-    engine_state.committed_buffer_scale = scale as i32;
+    // Forced-scale mode renders scaled-up into a buffer_scale-1 surface.
+    let buffer_scale = if crate::scale::forced_scale().is_some() { 1 } else { scale as i32 };
+    surface.set_buffer_scale(buffer_scale);
+    engine_state.committed_buffer_scale = buffer_scale;
 
     if settings.app_id.starts_with("cce-status") {
         let compositor = engine_state.compositor_state.wl_compositor();
