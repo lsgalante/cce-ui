@@ -575,11 +575,10 @@ impl ParametersBg {
                     labels.extend(f.own_text_labels());
                 }
             } else if ptype == "section" {
-                // Centered between the section carve's top (the title box top)
-                // and the first control below; empty/collapsed sections keep
-                // the legacy offset.
+                // Centered in the carve's tab: between its top (one title-box
+                // height above the body's top edge) and the first control
+                // below; empty/collapsed sections keep the legacy offset.
                 let font_size = 13.0;
-                let top = r.1 - TITLE_BOX_INSET;
                 let below = self
                     .display_params
                     .iter()
@@ -588,7 +587,8 @@ impl ParametersBg {
                     .find(|(j, q)| !hidden[*j] && q.2 != "section")
                     .map(|(j, _)| rects[j].1);
                 let y = match below {
-                    Some(control_top) if control_top > top + font_size => {
+                    Some(control_top) => {
+                        let top = control_top - CONTENT_BOX_PAD - TITLE_BOX_H;
                         top + (control_top - top - font_size) / 2.0
                     }
                     _ => r.1 + 2.0,
@@ -956,8 +956,11 @@ impl ParametersBg {
             let (tx, ty, tw, th) = title;
             if let Some((cx, cy, cw, ch)) = content {
                 let depth = crate::layout::bevel_width().min(ch * 0.2);
-                // Tab strip: section top down to the body's top, bottom open.
-                out.push((tx, ty, tw, cy - ty, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
+                // Tab strip: one title-box height tall, sitting directly on the
+                // body's top edge (the header row above it stays plain plate),
+                // bottom open.
+                let tab_y = cy - TITLE_BOX_H;
+                out.push((tx, tab_y, tw, TITLE_BOX_H, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
                 // Body: top open — its top wall comes from the segment beside
                 // the tab's throat.
                 out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
