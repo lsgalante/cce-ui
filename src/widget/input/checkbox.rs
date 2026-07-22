@@ -301,7 +301,7 @@ impl Toggle {
     /// shader2d's `PLATE_AMBIENT` / `flat_shade` — keep the three in sync.
     pub fn face_light(&self, top_half: bool) -> [f32; 4] {
         const AMBIENT: f32 = 0.55; // shader2d PLATE_AMBIENT
-        const FACE_TILT: f32 = 0.25; // the bent plate's slope, as dh over dy
+        const FACE_TILT: f32 = 0.5; // the rocker plate's slope, as dh over dy
         let az = crate::layout::light_source_position();
         let el = std::f32::consts::FRAC_PI_4; // plate_light's elevation
         let (ly, lz) = (-az.sin() * el.cos(), el.sin());
