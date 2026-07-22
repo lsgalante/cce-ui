@@ -102,7 +102,7 @@ const SECTION_GAP: f32 = 2.0 * ROW_GAP;
 /// float clearly inside the plate.
 const SECTION_MARGIN: f32 = 16.0;
 /// Horizontal gap between a control row and its parent section's side walls.
-const CONTROL_INSET: f32 = 12.0;
+const CONTROL_INSET: f32 = 8.0;
 /// A row's inset from the plate: the section margin plus the controls' inset within
 /// the section, so bare rows above the first section align with wrapped ones.
 const ROW_X_INSET: f32 = SECTION_MARGIN + CONTROL_INSET;
@@ -621,7 +621,9 @@ impl ParametersBg {
                 };
                 labels.push(TextLabel {
                     text: name.clone(),
-                    x: self.rect.x + 12.0,
+                    // 8px in from the title box's left edge — the inset
+                    // `section_title_box`'s width math centers against.
+                    x: self.rect.x + SECTION_MARGIN + 8.0,
                     y,
                     font_size,
                     color: [0xee, 0xee, 0xf0],
