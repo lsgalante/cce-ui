@@ -1024,7 +1024,8 @@ impl ParametersBg {
             } else if p.2 == "button" {
                 self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
             } else if p.2 == "toggle" || p.2 == "checkbox" {
-                // The rocker's bg pill arrives through the rounded-quad view;
+                // The rocker's bg pill and its faces' uniform light overlays
+                // (`Toggle::face_light`) arrive through the rounded-quad view;
                 // the entries here are its two flat halves' beveled edges
                 // (`Toggle::rocker_reliefs`, exactly what the widget's own
                 // raised paint emits): the state half a raised plateau, the

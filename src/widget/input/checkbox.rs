@@ -269,10 +269,10 @@ impl Toggle {
     /// The rocker's two halves over `rect` as FLAT relief steps: (half rect,
     /// per-corner radii, (top, right, bottom, left) walls, raised). The state
     /// half (top when on, bottom when off) is a plateau raised out of the
-    /// surface (raised → `boss_edges`), the other falls away (`recess_edges`)
-    /// — both faces stay flat and untinted, so the state reads entirely from
-    /// the beveled edges. The hinge wall is open on both so the halves meet
-    /// in a single step, not a double-shaded trough.
+    /// surface (raised → `boss_edges`), the other falls away (`recess_edges`).
+    /// Both faces stay flat — the lit read comes from `face_light`, not a
+    /// tilt gradient. The hinge wall is open on both so the halves meet in a
+    /// single step, not a double-shaded trough.
     pub fn rocker_reliefs(
         &self,
         rect: Rect,
@@ -286,6 +286,22 @@ impl Toggle {
         let bottom_half = (bottom, (0.0, 0.0, r, r), (false, true, true, true));
         let (state, other) = if self.toggled { (top_half, bottom_half) } else { (bottom_half, top_half) };
         [(state.0, state.1, state.2, true), (other.0, other.1, other.2, false)]
+    }
+
+    /// A rocker face's UNIFORM lighting overlay — flat faces under the same
+    /// DE light the bevels answer to: the raised plateau's face catches the
+    /// light (white), the recessed floor sits in the surround's shade
+    /// (black). Uniform because a flat face has one normal; the amplitude
+    /// rides `bevel_depth` — the knob that scales the walls' shading — so
+    /// faces and bevels brighten and flatten together (both go to zero at
+    /// depth 0, the mesa-flat config).
+    pub fn face_light(raised: bool) -> [f32; 4] {
+        let s = (crate::layout::bevel_depth() / 0.15).clamp(0.0, 2.0);
+        if raised {
+            [1.0, 1.0, 1.0, 0.08 * s]
+        } else {
+            [0.0, 0.0, 0.0, 0.14 * s]
+        }
     }
 }
 
@@ -348,15 +364,23 @@ impl Paint for Toggle {
         if self.raised {
             // The rocker: two FLAT half faces (see `rocker_reliefs`) — the
             // state half a raised plateau, the other recessed, hinge wall
-            // open so they meet in a single step. The faces carry no tint;
-            // the state reads entirely from the beveled edges. This is the
-            // physical read of the flat style's state gradient, which this
-            // style drops entirely.
+            // open so they meet in a single step. Each face carries its
+            // uniform `face_light` overlay (lit plateau, shaded floor) under
+            // the beveled edges, so faces reflect the same light the walls
+            // do. This is the physical read of the flat style's state
+            // gradient, which this style drops entirely.
             if bg[3] > 0.001 {
                 if radius > 0.0 {
                     ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
                 } else {
                     ctx.quad(rect, bg);
+                }
+            }
+            for (half, radii, _, raised) in self.rocker_reliefs(rect) {
+                let light = Self::face_light(raised);
+                if light[3] > 0.001 {
+                    let corners = (radii.0 > 0.0, radii.1 > 0.0, radii.2 > 0.0, radii.3 > 0.0);
+                    ctx.rounded_rect(half, radius, corners, light);
                 }
             }
             let depth = crate::layout::bevel_width().min(h * 0.2);
