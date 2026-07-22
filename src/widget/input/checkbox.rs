@@ -226,10 +226,10 @@ pub struct Toggle {
     /// Where the label sits across the pill. Mirrors `Button::justify` — same enum, same
     /// 8px edge inset — so the two read as one control set wherever they share a column.
     justify: Justification,
-    /// Raised style: the pill renders as a rocker — two angled faces with
-    /// beveled edges, the state half raised, the other recessed (see
-    /// `rocker_faces` and the paint impl) — and the flat style's state
-    /// gradient is dropped.
+    /// Raised style: the pill renders as a rocker — two flat half faces with
+    /// beveled edges, the state half a raised plateau, the other recessed
+    /// (see `rocker_reliefs` and the paint impl) — and the flat style's
+    /// state gradient is dropped.
     raised: bool,
 }
 
@@ -266,52 +266,26 @@ impl Toggle {
         }
     }
 
-    /// The rocker's two flat faces over `rect`: (half rect, corner flags,
-    /// tint). The pill reads as a plate pivoting about its horizontal midline —
-    /// two flat ANGLED surfaces meeting at the hinge, not stepped plateaus: the
-    /// STATE half (top when on, bottom when off) tilts out and catches the
-    /// light (white tint), the other tilts away into shadow (black tint). Flat
-    /// uniform tints — a tilted plane has one normal — so the faces flow
-    /// through the rounded-quad views with no relief machinery.
-    pub fn rocker_faces(
-        &self,
-        rect: Rect,
-    ) -> [(Rect, (bool, bool, bool, bool), [f32; 4]); 2] {
-        const LIT: [f32; 4] = [1.0, 1.0, 1.0, 0.10];
-        const SHADED: [f32; 4] = [0.0, 0.0, 0.0, 0.16];
-        let half_h = rect.height / 2.0;
-        let top = Rect { x: rect.x, y: rect.y, width: rect.width, height: half_h };
-        let bottom =
-            Rect { x: rect.x, y: rect.y + half_h, width: rect.width, height: rect.height - half_h };
-        let top_corners = (true, true, false, false);
-        let bottom_corners = (false, false, true, true);
-        if self.toggled {
-            [(top, top_corners, LIT), (bottom, bottom_corners, SHADED)]
-        } else {
-            [(bottom, bottom_corners, LIT), (top, top_corners, SHADED)]
-        }
-    }
-
-    /// The rocker faces' beveled edges over `rect`: (half rect, per-corner
-    /// radii, (top, right, bottom, left) walls, raised). Companion to
-    /// `rocker_faces`, in the same order — the state half's lip rises out of
-    /// the surface (raised → `boss_edges`), the other falls away
-    /// (`recess_edges`). The hinge wall is open on both so the faces meet in
-    /// a crease, the recessed side reading as a step down from the raised
-    /// one rather than a double-shaded trough.
+    /// The rocker's two halves over `rect` as FLAT relief steps: (half rect,
+    /// per-corner radii, (top, right, bottom, left) walls, raised). The state
+    /// half (top when on, bottom when off) is a plateau raised out of the
+    /// surface (raised → `boss_edges`), the other falls away (`recess_edges`)
+    /// — both faces stay flat and untinted, so the state reads entirely from
+    /// the beveled edges. The hinge wall is open on both so the halves meet
+    /// in a single step, not a double-shaded trough.
     pub fn rocker_reliefs(
         &self,
         rect: Rect,
     ) -> [(Rect, (f32, f32, f32, f32), (bool, bool, bool, bool), bool); 2] {
         let r = crate::layout::toggle_corner_radius();
-        let mut state_half = true;
-        self.rocker_faces(rect).map(|(half, corners, _)| {
-            let is_top = corners.0;
-            let radii = if is_top { (r, r, 0.0, 0.0) } else { (0.0, 0.0, r, r) };
-            let walls = if is_top { (true, true, false, true) } else { (false, true, true, true) };
-            let raised = std::mem::take(&mut state_half);
-            (half, radii, walls, raised)
-        })
+        let half_h = rect.height / 2.0;
+        let top = Rect { x: rect.x, y: rect.y, width: rect.width, height: half_h };
+        let bottom =
+            Rect { x: rect.x, y: rect.y + half_h, width: rect.width, height: rect.height - half_h };
+        let top_half = (top, (r, r, 0.0, 0.0), (true, true, false, true));
+        let bottom_half = (bottom, (0.0, 0.0, r, r), (false, true, true, true));
+        let (state, other) = if self.toggled { (top_half, bottom_half) } else { (bottom_half, top_half) };
+        [(state.0, state.1, state.2, true), (other.0, other.1, other.2, false)]
     }
 }
 
@@ -372,23 +346,18 @@ impl Paint for Toggle {
         let bg = colors::toggle_bg_color();
 
         if self.raised {
-            // The rocker: two flat angled faces pivoting about the midline
-            // (see `rocker_faces`) — the physical read of the flat style's
-            // state gradient, which this style drops entirely. Each face
-            // carries a beveled edge along its outer perimeter: the state
-            // face's lip rises (boss), the other's falls away (recess). The
-            // hinge wall is omitted on both so the faces still meet in a
-            // crease, the recessed side reading as a step down from the
-            // raised one.
+            // The rocker: two FLAT half faces (see `rocker_reliefs`) — the
+            // state half a raised plateau, the other recessed, hinge wall
+            // open so they meet in a single step. The faces carry no tint;
+            // the state reads entirely from the beveled edges. This is the
+            // physical read of the flat style's state gradient, which this
+            // style drops entirely.
             if bg[3] > 0.001 {
                 if radius > 0.0 {
                     ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
                 } else {
                     ctx.quad(rect, bg);
                 }
-            }
-            for (half, corners, tint) in self.rocker_faces(rect) {
-                ctx.rounded_rect(half, radius, corners, tint);
             }
             let depth = crate::layout::bevel_width().min(h * 0.2);
             for (half, radii, walls, raised) in self.rocker_reliefs(rect) {

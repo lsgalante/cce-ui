@@ -1024,11 +1024,11 @@ impl ParametersBg {
             } else if p.2 == "button" {
                 self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
             } else if p.2 == "toggle" || p.2 == "checkbox" {
-                // The rocker's flat faces are RoundedRect prims — they arrive
-                // through the rounded-quad view. The entries here are the
-                // faces' beveled edges (`Toggle::rocker_reliefs`, exactly what
-                // the widget's own raised paint emits): the state half's lip
-                // rises, the other falls away, hinge wall open on both.
+                // The rocker's bg pill arrives through the rounded-quad view;
+                // the entries here are its two flat halves' beveled edges
+                // (`Toggle::rocker_reliefs`, exactly what the widget's own
+                // raised paint emits): the state half a raised plateau, the
+                // other recessed, hinge wall open on both.
                 if let Some(t) = &self.toggles[i] {
                     let (x, y, w, h) = t.rect();
                     if w > 0.0 && h > 0.0 {
