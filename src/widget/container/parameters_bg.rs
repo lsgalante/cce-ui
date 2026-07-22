@@ -923,19 +923,22 @@ impl ParametersBg {
         }
         let mut out = Vec::new();
 
-        // Sections as inset panels: the title tab and the content body each
-        // carve a recess (the flat outline+fillet path is the non-relief
-        // style). The neck joining them in the outline style has no carved
-        // equivalent — the tab and body read as two wells.
+        // Sections as inset panels (the flat outline+fillet path is the
+        // non-relief style): ONE recess per section — full body width, from
+        // the title's top edge down to the content's bottom — so the title
+        // sits inside the same well as its rows instead of in a tab well of
+        // its own. Collapsed sections keep the title-box carve.
         let all = (true, true, true, true);
         let r4 = |r: f32| (r, r, r, r);
         for (title, content) in self.section_boxes() {
             let (tx, ty, tw, th) = title;
-            let depth = crate::layout::bevel_width().min(th * 0.2);
-            out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));
             if let Some((cx, cy, cw, ch)) = content {
-                let depth = crate::layout::bevel_width().min(ch * 0.2);
-                out.push((cx, cy, cw, ch, r4(SECTION_R), depth, false, all));
+                let wh = (cy + ch) - ty;
+                let depth = crate::layout::bevel_width().min(wh * 0.2);
+                out.push((cx, ty, cw, wh, r4(SECTION_R), depth, false, all));
+            } else {
+                let depth = crate::layout::bevel_width().min(th * 0.2);
+                out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));
             }
         }
 
