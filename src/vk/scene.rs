@@ -35,6 +35,12 @@ pub struct SceneDraw {
     /// Rasterize as lines (PolygonMode::LINE) instead of filled triangles.
     /// Falls back to filled when the device lacks fillModeNonSolid.
     pub wireframe: bool,
+    /// rgb + mix: the fragment color is mixed toward `wire_tint.rgb` by
+    /// `wire_tint[3]`. Zero = vertex colors untouched (the default draw).
+    /// A wireframe pass overlaid on its own filled mesh needs this — the
+    /// lines inherit the mesh's colors and would otherwise vanish into the
+    /// identical fill beneath.
+    pub wire_tint: [f32; 4],
 }
 
 /// shader_3d.wgsl's uniform block.
@@ -45,6 +51,7 @@ struct SceneUniforms {
     window_size: [f32; 2],
     window_radius: f32,
     corner_shape: f32,
+    wire_tint: [f32; 4],
 }
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
@@ -282,11 +289,18 @@ impl SceneStage {
 
             // The wireframe twin: identical but rasterized as lines. Culling
             // stays on so the wire view matches the fill's visible surface.
+            // A small negative depth bias pulls the lines toward the viewer,
+            // so a wire pass drawn over its own filled mesh (the overlay
+            // mode) wins the LESS depth test instead of z-fighting the
+            // coplanar fill.
             let wireframe_pipeline = wireframe_supported.then(|| {
                 let rasterization_lines = vk::PipelineRasterizationStateCreateInfo::default()
                     .polygon_mode(vk::PolygonMode::LINE)
                     .cull_mode(vk::CullModeFlags::BACK)
                     .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+                    .depth_bias_enable(true)
+                    .depth_bias_constant_factor(-2.0)
+                    .depth_bias_slope_factor(-1.0)
                     .line_width(1.0);
                 device
                     .create_graphics_pipelines(
@@ -652,6 +666,7 @@ impl SceneStage {
                 window_size,
                 window_radius: corner_radius_px,
                 corner_shape,
+                wire_tint: draw.wire_tint,
             };
             let offset = (self.uniform_stride as usize) * i;
             mapped[offset..offset + UNIFORM_SIZE as usize]

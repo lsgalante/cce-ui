@@ -5,6 +5,10 @@ struct Uniforms {
     // Corner-shape exponent shared with shader2d: circular arc at 2,
     // superellipse squircle above.
     corner_shape: f32,
+    // rgb + mix: fragment color mixed toward .rgb by .a. Zero = vertex
+    // colors untouched; a wireframe pass overlaid on its own filled mesh
+    // sets it so the lines separate from the identical fill beneath.
+    wire_tint: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -67,5 +71,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     if (cov <= 0.0) {
         discard;
     }
-    return vec4f(in.color, cov);
+    let rgb = mix(in.color, uniforms.wire_tint.rgb, uniforms.wire_tint.a);
+    return vec4f(rgb, cov);
 }
