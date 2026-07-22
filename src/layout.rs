@@ -2820,7 +2820,7 @@ pub fn set_graph_wire_activation_radius(radius: f32) {
 
 pub fn graph_connector_size() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("graph_connector_size").unwrap_or(6.0)
+    get_style_registry().read().unwrap().get_float("graph_connector_size").unwrap_or(8.0)
 }
 
 pub fn set_graph_connector_size(size: f32) {
@@ -2832,7 +2832,7 @@ pub fn set_graph_connector_size(size: f32) {
 
 pub fn graph_connector_activation_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("graph_connector_activation_radius").unwrap_or(9.0)
+    get_style_registry().read().unwrap().get_float("graph_connector_activation_radius").unwrap_or(12.0)
 }
 
 pub fn set_graph_connector_activation_radius(radius: f32) {

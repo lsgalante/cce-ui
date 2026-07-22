@@ -188,6 +188,28 @@ impl Graph {
         false
     }
 
+    /// How far a port's center floats off its node edge: the connector's own
+    /// radius plus a small gap, so the circle sits fully OUTSIDE the node's
+    /// bounding box rather than straddling its border.
+    fn port_offset(scale_f: f32) -> f32 {
+        (crate::layout::graph_connector_size() * scale_f).max(2.0) / 2.0 + 2.0 * scale_f
+    }
+
+    /// A port's center in graph coordinates — the ONE source for drawing,
+    /// hover, click hit-testing, and wire endpoints, so they cannot drift.
+    /// Inputs float above the node's top edge, outputs below its bottom.
+    pub fn port_center(&self, idx: usize, port_type: PortType, k: usize) -> Option<(f32, f32)> {
+        let (nx, ny, nw, nh) = self.node_rect(idx)?;
+        let node = self.nodes.get(idx)?;
+        let offset = Self::port_offset(nw / 80.0);
+        match port_type {
+            PortType::Input => (k < node.inputs)
+                .then(|| (nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32, ny - offset)),
+            PortType::Output => (k < node.outputs)
+                .then(|| (nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32, ny + nh + offset)),
+        }
+    }
+
     pub fn toggle_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
         if let Some(node) = self.nodes.get(idx) {
             if node.node_type == "utility" {
@@ -308,22 +330,15 @@ impl Graph {
             if let Some((_, input_name, _)) = node.parameters.iter().find(|(name, _, _)| name.eq_ignore_ascii_case("input")) {
                 if let Some(src_idx) = self.nodes.iter().position(|n| n.name == *input_name) {
                     if let (Some((sx, sy, sw, sh)), Some((ex, ey, ew, _eh))) = (self.node_rect(src_idx), self.node_rect(i)) {
-                        let src_outputs = self.nodes[src_idx].outputs;
-                        let target_inputs = node.inputs;
-
-                        let start_x = if src_outputs > 0 {
-                            sx + sw * 1.0 / (src_outputs + 1) as f32
-                        } else {
-                            sx + sw / 2.0
-                        };
-                        let start_y = sy + sh;
-
-                        let end_x = if target_inputs > 0 {
-                            ex + ew * 1.0 / (target_inputs + 1) as f32
-                        } else {
-                            ex + ew / 2.0
-                        };
-                        let end_y = ey;
+                        // Wires attach at the port circles' centers (which
+                        // float outside the node boxes); portless nodes fall
+                        // back to the edge midpoint.
+                        let (start_x, start_y) = self
+                            .port_center(src_idx, PortType::Output, 0)
+                            .unwrap_or((sx + sw / 2.0, sy + sh));
+                        let (end_x, end_y) = self
+                            .port_center(i, PortType::Input, 0)
+                            .unwrap_or((ex + ew / 2.0, ey));
 
                         push_wire(start_x, start_y, end_x, end_y, wire_color, &mut quads);
                     }
@@ -333,15 +348,7 @@ impl Graph {
 
         // Connection preview while dragging one out
         if let Some((node_idx, port_type, port_idx)) = self.connecting_from {
-            if let Some((nx, ny, nw, nh)) = self.node_rect(node_idx) {
-                let start_x = match port_type {
-                    PortType::Input => nx + nw * (port_idx + 1) as f32 / (self.nodes[node_idx].inputs + 1) as f32,
-                    PortType::Output => nx + nw * (port_idx + 1) as f32 / (self.nodes[node_idx].outputs + 1) as f32,
-                };
-                let start_y = match port_type {
-                    PortType::Input => ny,
-                    PortType::Output => ny + nh,
-                };
+            if let Some((start_x, start_y)) = self.port_center(node_idx, port_type, port_idx) {
                 let preview_color = [1.0, 0.6, 0.0, 0.8]; // Golden orange preview
                 push_wire(start_x, start_y, self.current_mouse_pos.0, self.current_mouse_pos.1, preview_color, &mut quads);
             }
@@ -504,41 +511,29 @@ impl Graph {
         conn_hl_color[3] *= self.node_opacity;
 
         for i in 0..self.nodes.len() {
-            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+            if let Some((_, _, nw, _)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
                 let port_size = (conn_size * scale_f).max(2.0);
                 let base_r = port_size / 2.0;
 
                 let node = &self.nodes[i];
 
-                for k in 0..node.inputs {
-                    let cx = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
-                    let cy = ny;
+                for (port_type, count) in
+                    [(PortType::Input, node.inputs), (PortType::Output, node.outputs)]
+                {
+                    for k in 0..count {
+                        let Some((cx, cy)) = self.port_center(i, port_type, k) else { continue };
 
-                    let is_hovered = self.hovered_port == Some((i, PortType::Input, k));
-                    let is_connecting = self.connecting_from == Some((i, PortType::Input, k));
+                        let is_hovered = self.hovered_port == Some((i, port_type, k));
+                        let is_connecting = self.connecting_from == Some((i, port_type, k));
 
-                    let (r, color) = if is_hovered || is_connecting {
-                        (base_r * 1.4, conn_hl_color)
-                    } else {
-                        (base_r, conn_color)
-                    };
-                    push_circle_clipped(cx, cy, r, color);
-                }
-
-                for k in 0..node.outputs {
-                    let cx = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
-                    let cy = ny + nh;
-
-                    let is_hovered = self.hovered_port == Some((i, PortType::Output, k));
-                    let is_connecting = self.connecting_from == Some((i, PortType::Output, k));
-
-                    let (r, color) = if is_hovered || is_connecting {
-                        (base_r * 1.4, conn_hl_color)
-                    } else {
-                        (base_r, conn_color)
-                    };
-                    push_circle_clipped(cx, cy, r, color);
+                        let (r, color) = if is_hovered || is_connecting {
+                            (base_r * 1.4, conn_hl_color)
+                        } else {
+                            (base_r, conn_color)
+                        };
+                        push_circle_clipped(cx, cy, r, color);
+                    }
                 }
             }
         }
@@ -652,24 +647,21 @@ impl Input for Graph {
                 let conn_act_r = crate::layout::graph_connector_activation_radius();
 
                 for i in 0..self.nodes.len() {
-                    if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                    if let Some((_, _, nw, _)) = self.node_rect(i) {
                         let scale_f = nw / 80.0;
                         let hit_radius = (conn_act_r * scale_f).max(2.0);
                         let node = &self.nodes[i];
 
-                        for k in 0..node.inputs {
-                            let cx = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
-                            let cy = ny;
-                            if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
-                                self.hovered_port = Some((i, PortType::Input, k));
-                            }
-                        }
-
-                        for k in 0..node.outputs {
-                            let cx = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
-                            let cy = ny + nh;
-                            if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
-                                self.hovered_port = Some((i, PortType::Output, k));
+                        for (port_type, count) in
+                            [(PortType::Input, node.inputs), (PortType::Output, node.outputs)]
+                        {
+                            for k in 0..count {
+                                let Some((cx, cy)) = self.port_center(i, port_type, k) else {
+                                    continue;
+                                };
+                                if (px - cx).powi(2) + (py - cy).powi(2) <= hit_radius.powi(2) {
+                                    self.hovered_port = Some((i, port_type, k));
+                                }
                             }
                         }
                     }
@@ -827,58 +819,45 @@ impl Graph {
     /// arming; an empty-space press clears the selection and stays unconsumed.
     fn on_left_press(&mut self, px: f32, py: f32, ectx: &mut EventCtx) -> bool {
         for i in (0..self.nodes.len()).rev() {
-            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+            if let Some((_, _, nw, _)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
                 let conn_act_r = crate::layout::graph_connector_activation_radius();
                 let port_click_radius = (conn_act_r * scale_f).max(2.0);
                 let port_click_radius_sq = port_click_radius * port_click_radius;
 
                 let node = &self.nodes[i];
-                // Inputs (top edge)
-                for k in 0..node.inputs {
-                    let port_x = nx + nw * (k + 1) as f32 / (node.inputs + 1) as f32;
-                    let port_y = ny;
-                    let dx = px - port_x;
-                    let dy = py - port_y;
-                    if dx * dx + dy * dy <= port_click_radius_sq {
-                        if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
-                            if src_idx != i && src_port_type == PortType::Output {
-                                let output_node = &self.nodes[src_idx];
-                                let input_node = &self.nodes[i];
-                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                for (port_type, count) in
+                    [(PortType::Input, node.inputs), (PortType::Output, node.outputs)]
+                {
+                    for k in 0..count {
+                        let Some((port_x, port_y)) = self.port_center(i, port_type, k) else {
+                            continue;
+                        };
+                        let dx = px - port_x;
+                        let dy = py - port_y;
+                        if dx * dx + dy * dy <= port_click_radius_sq {
+                            if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+                                // A click on the opposite port kind of ANOTHER
+                                // node completes the connection; anything else
+                                // cancels it.
+                                if src_idx != i && src_port_type != port_type {
+                                    let (out_idx, in_idx) = if port_type == PortType::Input {
+                                        (src_idx, i)
+                                    } else {
+                                        (i, src_idx)
+                                    };
+                                    let output_node = &self.nodes[out_idx];
+                                    let input_node = &self.nodes[in_idx];
+                                    self.pending_connection =
+                                        Some((input_node.id.clone(), output_node.name.clone()));
+                                }
                                 self.connecting_from = None;
                             } else {
-                                self.connecting_from = None;
+                                self.connecting_from = Some((i, port_type, k));
+                                self.current_mouse_pos = (px, py);
                             }
-                        } else {
-                            self.connecting_from = Some((i, PortType::Input, k));
-                            self.current_mouse_pos = (px, py);
+                            return true;
                         }
-                        return true;
-                    }
-                }
-
-                // Outputs (bottom edge)
-                for k in 0..node.outputs {
-                    let port_x = nx + nw * (k + 1) as f32 / (node.outputs + 1) as f32;
-                    let port_y = ny + nh;
-                    let dx = px - port_x;
-                    let dy = py - port_y;
-                    if dx * dx + dy * dy <= port_click_radius_sq {
-                        if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
-                            if src_idx != i && src_port_type == PortType::Input {
-                                let output_node = &self.nodes[i];
-                                let input_node = &self.nodes[src_idx];
-                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
-                                self.connecting_from = None;
-                            } else {
-                                self.connecting_from = None;
-                            }
-                        } else {
-                            self.connecting_from = Some((i, PortType::Output, k));
-                            self.current_mouse_pos = (px, py);
-                        }
-                        return true;
                     }
                 }
             }
@@ -966,8 +945,21 @@ impl Graph {
 
 impl GraphController for Graph {
     fn set_nodes(&mut self, nodes: &[GraphNode]) {
+        // Hover carries a node INDEX, so remap it by id across the rebuild
+        // instead of clearing — hosts (the designer) re-sync nodes on EVERY
+        // window event, so a clear here wipes the hover in the same event
+        // pass that set it and port highlights never survive to a draw.
+        // Exactly the id-remap `selected_idx` gets below.
+        self.hovered_port = self.hovered_port.take().and_then(|(idx, pt, k)| {
+            let id = &self.nodes.get(idx)?.id;
+            let new_idx = nodes.iter().position(|n| &n.id == id)?;
+            let count = match pt {
+                PortType::Input => nodes[new_idx].inputs,
+                PortType::Output => nodes[new_idx].outputs,
+            };
+            (k < count).then_some((new_idx, pt, k))
+        });
         self.nodes = nodes.to_vec();
-        self.hovered_port = None;
 
         // Sync selected_idx from selected_id
         if let Some(ref id) = self.selected_id {
@@ -1081,10 +1073,15 @@ mod tests {
         let (id, ptr) = (g.id(), g.as_ptr_mut());
         ctx.register_widget(id, ptr);
 
-        // Node a's output port sits at the bottom-center of (100,100,80,40) => (140, 140).
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 140.0, 140.0, &mut ctx));
-        // Node b's input port: node b at (200, 160, 80, 40) => top-center (240, 160).
-        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 240.0, 160.0, &mut ctx));
+        // Ports float OUTSIDE the node box (port_center): node a's output
+        // hangs below the bottom-center of (100,100,80,40), node b's input
+        // above the top-center of (200,160,80,40).
+        let (ax, ay) = g.port_center(0, PortType::Output, 0).expect("node a output port");
+        assert!(ay > 140.0, "output port sits below the node's bottom edge");
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, ax, ay, &mut ctx));
+        let (bx, by) = g.port_center(1, PortType::Input, 0).expect("node b input port");
+        assert!(by < 160.0, "input port sits above the node's top edge");
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, bx, by, &mut ctx));
 
         let pending = GraphController::take_pending_connection(&mut *g);
         assert_eq!(pending, Some(("b".to_string(), "alpha".to_string())));
