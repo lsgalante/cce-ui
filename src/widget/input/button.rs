@@ -265,7 +265,10 @@ impl Paint for Button {
         // carved groove ring with its beveled lip rising back to the surface
         // plane, face level with the surface. Transparent fills degrade to
         // edges-only inside the groove (an opaque hover_color fills the face).
-        if self.raised {
+        // List rows are exempt: they are transparent-until-hover/selected
+        // surfaces, and the edges-only groove would stack a permanent carved
+        // ring on every idle row of a list.
+        if self.raised && self.kind != ButtonKind::ListRow {
             let depth = crate::layout::bevel_width().min(h * 0.2);
             ctx.inset_plate(rect, (radius, radius, radius, radius), color, depth);
         } else
