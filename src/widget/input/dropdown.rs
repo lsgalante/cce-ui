@@ -328,19 +328,15 @@ impl Dropdown {
             let face = if raw_bg[3] > 0.001 { bg_color } else { [0.0; 4] };
             let strip = self.label_top();
             if strip > 0.0 {
-                // Labeled: the inset grows a label-width TAB (the section-
-                // title-tab idiom) — only where the label text runs does the
-                // top wall rise over the strip, widening into a long
-                // descending slope the label sits on (its inward half spans
-                // the whole strip, ending at the trigger's top edge where the
-                // lip's bevel rises back up). Right of the tab the ring keeps
-                // its normal top wall. Composed from edge-suppressed pieces,
-                // section-relief style, so walls continue across the joints.
+                // Labeled: the label sits in a CARVE-OUT tab, the section-
+                // title idiom — a flat recessed well hugging the label run,
+                // its bottom open into the trigger's groove ring below (the
+                // tab's walls: top, right, left). Right of the tab the ring
+                // keeps its normal top wall, starting at the tab's throat.
                 let g = depth * 0.5;
                 let orad = (r4[0] + g, r4[1] + g, r4[2] + g, r4[3] + g);
                 let (outer_x, outer_r) = (x - g, x + w + g);
                 let (tab_top, ring_top) = (y - strip - g, y - g);
-                let bottom = y + visual_h + g;
                 // The tab hugs the label run (drawn at x + inset): text width
                 // plus the inset each side, kept inside the trigger's span.
                 let (fam, fsize) = crate::layout::control_label_font_detached_parsed();
@@ -355,6 +351,13 @@ impl Dropdown {
                     .min(outer_r - outer_x);
                 let tab_r = outer_x + tab_w;
 
+                // The tab: bottom open into the ring.
+                ctx.recess_edges(
+                    Rect { x: outer_x, y: tab_top, width: tab_w, height: ring_top - tab_top },
+                    (orad.0, orad.1.min(strip * 0.5), 0.0, 0.0),
+                    depth,
+                    (true, true, false, true),
+                );
                 // The ring proper: right + bottom + left walls, one prim so
                 // its corners blend internally.
                 ctx.recess_edges(
@@ -372,32 +375,6 @@ impl Dropdown {
                         (true, false, false, false),
                     );
                 }
-                // Tab side walls, continuing the ring's left wall up to the
-                // tab's top corner and closing its right side.
-                ctx.recess_edges(
-                    Rect { x: outer_x, y: tab_top, width: tab_w, height: strip },
-                    (orad.0, orad.1.min(strip * 0.5), 0.0, 0.0),
-                    depth,
-                    (false, true, false, true),
-                );
-                // The wide top slope, tab width only. The slope profile
-                // straddles its boundary by ±roll/2, so the boundary sits at
-                // the MIDPOINT of the run it covers — the tab's top edge down
-                // to the trigger's top — or the outward half would climb past
-                // the inset into whatever sits above (it washed into the
-                // ramp's graph; found the hard way).
-                let span = strip + g;
-                ctx.recess_edges(
-                    Rect {
-                        x: outer_x,
-                        y: tab_top + span * 0.5,
-                        width: tab_w,
-                        height: bottom - (tab_top + span * 0.5),
-                    },
-                    (orad.0, orad.1.min(strip * 0.5), 0.0, 0.0),
-                    span,
-                    (true, false, false, false),
-                );
                 let rect = Rect { x, y, width: w, height: visual_h };
                 let rrad = (r4[0], r4[1], r4[2], r4[3]);
                 if face[3] > 0.001 {
