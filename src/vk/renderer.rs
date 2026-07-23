@@ -85,6 +85,9 @@ const FRAMES_IN_FLIGHT: usize = 2;
 /// size per frame in flight.
 pub const MAX_PLATE_FEATURES: usize = 64;
 const PLATE_FEATURE_BYTES: usize = 48;
+/// shader2d's WindowInfo UBO: [size/clip vec4][bevel-profile meta vec4]
+/// [8 vec4 of profile slope samples].
+const WINDOW_INFO_BYTES: vk::DeviceSize = 160;
 
 pub(crate) struct AllocatedBuffer {
     pub(crate) buffer: vk::Buffer,
@@ -192,6 +195,9 @@ pub struct VkRenderer {
     descriptor_set: vk::DescriptorSet,
     backdrop_sampler: vk::Sampler,
     window_info: AllocatedBuffer,
+    /// The bevel-profile generation `window_info` was last written with —
+    /// `draw_frame_2d` rewrites the UBO when the layout global moves on.
+    profile_gen: u64,
     plate_features: AllocatedBuffer,
 
     frames: Vec<Frame>,
@@ -638,7 +644,7 @@ impl VkRenderer {
         let window_info = create_cpu_buffer(
             &device,
             allocator,
-            16,
+            WINDOW_INFO_BYTES,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             "window-info",
         );
@@ -686,7 +692,7 @@ impl VkRenderer {
         let buffer_infos = [vk::DescriptorBufferInfo::default()
             .buffer(window_info.buffer)
             .offset(0)
-            .range(16)];
+            .range(WINDOW_INFO_BYTES)];
         let feature_infos = [vk::DescriptorBufferInfo::default()
             .buffer(plate_features.buffer)
             .offset(0)
@@ -776,6 +782,7 @@ impl VkRenderer {
             descriptor_set,
             backdrop_sampler,
             window_info,
+            profile_gen: 0,
             plate_features,
             frames,
             frame_index: 0,
@@ -810,14 +817,21 @@ impl VkRenderer {
     }
 
     fn write_window_info(&mut self) {
-        let data = [
-            self.extent.width as f32,
-            self.extent.height as f32,
-            self.clip_corner_radius(),
-            crate::layout::corner_shape(),
-        ];
+        // [size/clip vec4][profile meta vec4][8 vec4 of profile slope samples]
+        // — must stay in lockstep with shader2d's WindowInfo.
+        let mut data = [0.0f32; WINDOW_INFO_BYTES as usize / 4];
+        data[0] = self.extent.width as f32;
+        data[1] = self.extent.height as f32;
+        data[2] = self.clip_corner_radius();
+        data[3] = crate::layout::corner_shape();
+        if let Some(slopes) = crate::layout::bevel_profile_slopes() {
+            data[4] = 1.0;
+            data[5] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
+            data[8..8 + slopes.len()].copy_from_slice(&slopes);
+        }
+        self.profile_gen = crate::layout::bevel_profile_generation();
         if let Some(allocation) = self.window_info.allocation.as_mut() {
-            allocation.mapped_slice_mut().unwrap()[..16]
+            allocation.mapped_slice_mut().unwrap()[..WINDOW_INFO_BYTES as usize]
                 .copy_from_slice(bytemuck::cast_slice(&data));
         }
     }
@@ -1177,6 +1191,13 @@ impl VkRenderer {
             };
 
             self.core.device.reset_fences(&[in_flight]).unwrap();
+
+            // Re-upload the bevel-profile LUT when it changed (a live ramp
+            // edit). The other in-flight frame may still read the old bytes —
+            // both are valid profiles, so the one-frame mix is benign.
+            if self.profile_gen != crate::layout::bevel_profile_generation() {
+                self.write_window_info();
+            }
 
             // Upload this frame's plate carves into its slot of the feature
             // UBO (the slot's previous user has fenced, so no race).

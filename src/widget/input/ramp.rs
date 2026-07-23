@@ -241,7 +241,7 @@ impl Ramp {
         }
         self.keys[0].value
     }
-    
+
     fn sort_keys(&mut self) {
         let prev_selected_id = self.selected_key_idx.map(|idx| self.keys[idx].pos);
         self.keys.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap());
@@ -251,6 +251,73 @@ impl Ramp {
             }
         }
     }
+
+    /// Whether segments blend with smoothstep (the Bezier line type) vs linearly.
+    pub fn smooth(&self) -> bool {
+        self.line_type_dropdown.selected == 1
+    }
+
+    /// This ramp's state as the DE's ramp spec string ([`format_ramp_spec`]).
+    pub fn spec_string(&self) -> String {
+        let keys: Vec<(f32, f32)> = self.keys.iter().map(|k| (k.pos, k.value)).collect();
+        format_ramp_spec(&keys, self.smooth())
+    }
+
+    /// Apply a spec string ([`parse_ramp_spec`]); returns whether anything changed.
+    /// Unparsable specs are ignored (keeps the current curve).
+    pub fn set_spec(&mut self, spec: &str) -> bool {
+        let Some((keys, smooth)) = parse_ramp_spec(spec) else {
+            return false;
+        };
+        let new_keys: Vec<RampKey> =
+            keys.into_iter().map(|(pos, value)| RampKey { pos, value }).collect();
+        let new_line = if smooth { 1 } else { 0 };
+        let changed = self.line_type_dropdown.selected != new_line
+            || self.keys.len() != new_keys.len()
+            || self
+                .keys
+                .iter()
+                .zip(new_keys.iter())
+                .any(|(a, b)| (a.pos - b.pos).abs() > 0.0005 || (a.value - b.value).abs() > 0.0005);
+        if changed {
+            self.keys = new_keys;
+            self.line_type_dropdown.selected = new_line;
+            self.selected_key_idx = None;
+            self.preset_dropdown.selected = 0; // Custom
+            self.arrange_fields();
+        }
+        changed
+    }
+}
+
+/// Serialize ramp keys + line type as the DE's ramp spec string:
+/// `"smooth;0.000:0.500,0.200:1.000,…"` (`"linear;…"` for straight segments) —
+/// the format ramp-valued params travel in (`ParametersBg` "ramp" rows,
+/// project files, `cce_ui::layout::set_bevel_profile_keys` consumers).
+pub fn format_ramp_spec(keys: &[(f32, f32)], smooth: bool) -> String {
+    let body: Vec<String> =
+        keys.iter().map(|(p, v)| format!("{:.3}:{:.3}", p, v)).collect();
+    format!("{};{}", if smooth { "smooth" } else { "linear" }, body.join(","))
+}
+
+/// Parse a ramp spec string ([`format_ramp_spec`]) into `(keys, smooth)`.
+/// `None` for anything that doesn't yield at least two keys.
+pub fn parse_ramp_spec(spec: &str) -> Option<(Vec<(f32, f32)>, bool)> {
+    let (head, body) = spec.split_once(';')?;
+    let smooth = head.trim() == "smooth";
+    let mut keys = Vec::new();
+    for part in body.split(',') {
+        let (p, v) = part.split_once(':')?;
+        keys.push((
+            p.trim().parse::<f32>().ok()?.clamp(0.0, 1.0),
+            v.trim().parse::<f32>().ok()?.clamp(0.0, 1.0),
+        ));
+    }
+    if keys.len() < 2 {
+        return None;
+    }
+    keys.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    Some((keys, smooth))
 }
 
 
@@ -945,6 +1012,16 @@ impl Paint for Ramp {
 impl Input for Ramp {
     fn wants_tick(&self) -> bool {
         true
+    }
+
+    /// The curve as a ramp spec string ([`format_ramp_spec`]) — the value hosts
+    /// poll and persist for ramp-valued params.
+    fn value_string(&self) -> Option<String> {
+        Some(self.spec_string())
+    }
+
+    fn set_value_string(&mut self, val: &str) -> bool {
+        self.set_spec(val)
     }
 
     /// The open dropdown popover extends the hit area (the 5p Dropdown pattern).

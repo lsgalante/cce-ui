@@ -25,7 +25,7 @@ use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};
-use crate::widget::input::{Button, ColorSelector, Dropdown, Slider, Spinbox, TextBox, Toggle};
+use crate::widget::input::{Button, ColorSelector, Dropdown, Ramp, Slider, Spinbox, TextBox, Toggle};
 use crate::widget::{
     Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
     MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext,
@@ -46,6 +46,10 @@ pub struct ParametersBg {
     pub texts: Vec<Option<Adapted<TextBox>>>,
     pub toggles: Vec<Option<Adapted<Toggle>>>,
     pub colors: Vec<Option<crate::widget::Adapted<ColorSelector>>>,
+    /// Ramp-curve rows (`"ramp"` type; value = the ramp spec string). Painted
+    /// scene-path through [`ParametersBg::paint_scene_rows`] — the legacy flat
+    /// views can't carry the curve/key geometry.
+    pub ramps: Vec<Option<Adapted<Ramp>>>,
     /// Titles of the sections the user has collapsed by clicking their header. Keyed by
     /// title so it outlives the row rebuild `set_display_params` runs on every node change.
     collapsed: std::collections::HashSet<String>,
@@ -129,6 +133,7 @@ impl ParametersBg {
             texts: Vec::new(),
             toggles: Vec::new(),
             colors: Vec::new(),
+            ramps: Vec::new(),
             collapsed: std::collections::HashSet::new(),
             visible: true,
             scroll_y: 0.0,
@@ -159,6 +164,9 @@ impl ParametersBg {
             content_h.max(200.0)
         } else if p.2 == "section" {
             24.0
+        } else if p.2 == "ramp" {
+            // Label band + the ramp's graph and control strip.
+            190.0
         } else if p.2.starts_with("float3") {
             108.0
         } else if p.2.starts_with("slider") {
@@ -580,6 +588,14 @@ impl ParametersBg {
                 c.set_rect(r.0, r.1, r.2, r.3);
             }
         }
+        for (i, rp_opt) in self.ramps.iter_mut().enumerate() {
+            if let Some(rp) = rp_opt {
+                let r = rects[i];
+                // Below the 18px label band own_text_labels draws (the ramp
+                // carries no label of its own).
+                rp.set_rect(r.0, r.1 + 18.0, r.2, r.3 - 18.0);
+            }
+        }
     }
 
     /// The legacy `set_rect`/`set_display_params` tail: recompute the content height, clamp the
@@ -680,6 +696,16 @@ impl ParametersBg {
                 if let Some(c) = &self.colors[i] {
                     labels.extend(c.own_text_labels());
                 }
+            } else if ptype == "ramp" {
+                // The name label only — the ramp's own control labels ride its
+                // scene-path paint (paint_scene_rows).
+                labels.push(TextLabel {
+                    text: name.clone(),
+                    x: r.0,
+                    y: r.1,
+                    font_size: 12.0,
+                    color: [0xaa, 0xaa, 0xbb],
+                });
             } else {
                 labels.push(TextLabel {
                     text: format!("{}: {}", name, value),
@@ -695,10 +721,23 @@ impl ParametersBg {
 
     /// The dropdown rows' popover, if one is open — the widget's OWN popover surface
     /// ([`Paint::popover`]); the raw `children`'s popovers are the adapter's recursion.
+    /// The ramp rows' field dropdowns count too.
     fn choices_popover_rect(&self) -> Option<(f32, f32, f32, f32)> {
         for d_opt in &self.choices {
             if let Some(d) = d_opt {
                 if let Some(r) = d.popover_rect() {
+                    return Some(r);
+                }
+            }
+        }
+        for rp_opt in &self.ramps {
+            if let Some(rp) = rp_opt {
+                let ramp = rp.inner();
+                if let Some(r) = ramp
+                    .preset_dropdown
+                    .popover_rect()
+                    .or_else(|| ramp.line_type_dropdown.popover_rect())
+                {
                     return Some(r);
                 }
             }
@@ -1099,6 +1138,27 @@ impl ParametersBg {
         out
     }
 
+    /// The scene-path companion to the legacy views: rows whose widgets paint
+    /// prims NO flat tuple view can carry (the ramp rows' curve fill, key
+    /// circles, and field controls). A host rendering this panel through the
+    /// legacy hatches calls this with its own `PaintCtx` inside the pane's
+    /// scroll clip, after the flat chrome — or the rows draw as bare labels.
+    pub fn paint_scene_rows(&self, pc: &mut PaintCtx) {
+        if !self.visible {
+            return;
+        }
+        let hidden = self.hidden_rows();
+        let dummy = UiContext::new();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if hidden[i] || p.2 != "ramp" {
+                continue;
+            }
+            if let Some(rp) = &self.ramps[i] {
+                rp.paint_self(&dummy, pc);
+            }
+        }
+    }
+
 }
 
 impl Layout for ParametersBg {
@@ -1152,6 +1212,7 @@ impl Paint for ParametersBg {
         for (qx, qy, qw, qh, qc) in self.plain_quads() {
             ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
+        self.paint_scene_rows(ctx);
         // Scene-path hosts get the scrollbar on top (the designer instead straddles it around
         // the pane plate through `scrollbar_quads`).
         for (qx, qy, qw, qh, qc) in self.scrollbar_quads() {
@@ -1223,6 +1284,12 @@ impl Paint for ParametersBg {
         for d_opt in &self.choices {
             if let Some(d) = d_opt {
                 d.render_popover(pc);
+            }
+        }
+        for rp_opt in &self.ramps {
+            if let Some(rp) = rp_opt {
+                rp.inner().preset_dropdown.render_popover(pc);
+                rp.inner().line_type_dropdown.render_popover(pc);
             }
         }
     }
@@ -1387,6 +1454,17 @@ impl Input for ParametersBg {
                 }
             }
         }
+        // Ramp rows tick their field widgets (preset application, slider→key
+        // sync) and drain their change flag — fold the curve back into the row
+        // value when it moved.
+        for i in 0..self.ramps.len() {
+            if let Some(rp) = &mut self.ramps[i] {
+                if rp.tick(dt, &mut dummy) {
+                    self.display_params[i].1 = rp.inner().spec_string();
+                    changed = true;
+                }
+            }
+        }
         // Decay the "recently scrolled" window; keep frames coming until it expires so the
         // scrollbar's sink behind the plate actually renders.
         if self.scroll_activity > 0.0 {
@@ -1504,6 +1582,16 @@ impl Input for ParametersBg {
                         }
                     }
                 }
+                // Ramp rows: a move can drag a key — re-serialize the curve
+                // into the row value so hosts polling `node_params` see it.
+                for i in 0..self.ramps.len() {
+                    if let Some(rp) = &mut self.ramps[i] {
+                        if rp.on_cursor_moved(px, py, ui) {
+                            self.display_params[i].1 = rp.inner().spec_string();
+                            changed = true;
+                        }
+                    }
+                }
 
                 changed
             }
@@ -1606,6 +1694,23 @@ impl Input for ParametersBg {
                         }
                     }
                 }
+                // The ramp rows' field dropdowns can pop over neighboring rows too.
+                for (i, rp_opt) in self.ramps.iter_mut().enumerate() {
+                    if hidden[i] {
+                        continue;
+                    }
+                    if let Some(rp) = rp_opt {
+                        let ramp = rp.inner();
+                        if ramp.preset_dropdown.popover_rect().is_some()
+                            || ramp.line_type_dropdown.popover_rect().is_some()
+                        {
+                            if rp.mouse_input(button, state, px, py, ui) {
+                                self.display_params[i].1 = rp.inner().spec_string();
+                                return true;
+                            }
+                        }
+                    }
+                }
 
                 // 2. Propagate to our widgets
                 for (i, p) in self.display_params.iter_mut().enumerate() {
@@ -1688,6 +1793,13 @@ impl Input for ParametersBg {
                                         self.focused_param = None;
                                     }
                                 }
+                                return true;
+                            }
+                        }
+                    } else if p.2 == "ramp" {
+                        if let Some(rp) = &mut self.ramps[i] {
+                            if rp.mouse_input(button, state, px, py, ui) {
+                                p.1 = rp.inner().spec_string();
                                 return true;
                             }
                         }
@@ -2240,6 +2352,15 @@ impl ParamController for ParametersBg {
                     None
                 }
             }).collect();
+            self.ramps = self.display_params.iter().map(|p| {
+                if p.2 == "ramp" {
+                    let mut rp = Ramp::new();
+                    rp.inner_mut().set_spec(&p.1);
+                    Some(rp)
+                } else {
+                    None
+                }
+            }).collect();
         } else {
             for (i, p_new) in params.iter().enumerate() {
                 if Some(i) != self.focused_param && Some(i) != self.dragging_param {
@@ -2285,6 +2406,10 @@ impl ParamController for ParametersBg {
                     } else if let Some(ref mut c) = self.colors[i] {
                         if !c.editing {
                             c.set_value_string(&p_new.1);
+                        }
+                    } else if let Some(ref mut rp) = self.ramps[i] {
+                        if !rp.inner().is_dragging_key {
+                            rp.set_value_string(&p_new.1);
                         }
                     }
                 }
@@ -2385,6 +2510,24 @@ mod tests {
             (ROW_X_INSET, 300.0 - 2.0 * ROW_X_INSET),
             "row rect derives from the assigned rect"
         );
+    }
+
+    #[test]
+    fn ramp_row_builds_from_spec_and_edits_serialize_back() {
+        let mut ctx = UiContext::new();
+        let mut p = panel_with(&[("Bevel Profile", "smooth;0.000:0.000,1.000:1.000", "ramp")]);
+        let rp = p.ramps[0].as_ref().expect("ramp row builds a Ramp");
+        assert_eq!(rp.inner().keys.len(), 2);
+        assert!(rp.inner().smooth());
+
+        // A press inside the curve area adds a key, and the row value carries
+        // the re-serialized spec (what hosts poll and persist).
+        let (rx, ry, rw, _) = rp.rect();
+        p.mouse_input(MouseButton::Left, ElementState::Pressed, rx + rw * 0.5, ry + 40.0, &mut ctx);
+        assert_eq!(p.ramps[0].as_ref().unwrap().inner().keys.len(), 3);
+        let val = &ParamController::node_params(&*p)[0].1;
+        assert_eq!(val.split(',').count(), 3, "spec re-serialized: {val}");
+        assert!(val.starts_with("smooth;"));
     }
 
     #[test]

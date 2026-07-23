@@ -1539,6 +1539,91 @@ pub fn bevel_width() -> f32 {
     get_style_registry().read().unwrap().get_float("bevel_width").unwrap_or(9.3)
 }
 
+/// Sample count of the custom bevel profile LUT ([`set_bevel_profile_keys`]).
+pub const BEVEL_PROFILE_SAMPLES: usize = 32;
+
+/// The custom bevel/carve height profile, as the slope LUT the renderer uploads
+/// to the 2D shader: slot `i` holds `h'` at `v = (i + 0.5) / N` of the wall's
+/// height curve `h(v)` (`v` runs 0 at the surrounding plateau → 1 at the carve
+/// floor / boss crest; `h` in units of the feature's depth, so a 0→1 curve is
+/// the classic full-depth bevel and a curve ending back at its start height is
+/// a pure decorative rim). `None` = the analytic smoothstep profile.
+static BEVEL_PROFILE: std::sync::RwLock<Option<[f32; BEVEL_PROFILE_SAMPLES]>> =
+    std::sync::RwLock::new(None);
+/// Bumped on every profile change so renderers know to re-upload their LUT.
+static BEVEL_PROFILE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Evaluate a ramp key list at `t` — the same piecewise interpolation
+/// `cce_ui::widget::Ramp::get_interpolated_value` draws, so the bevel renders
+/// exactly the curve the ramp widget shows (`smooth` = the widget's Bezier line
+/// type: smoothstep blending between keys; else linear).
+pub fn sample_ramp_keys(keys: &[(f32, f32)], smooth: bool, t: f32) -> f32 {
+    let Some(first) = keys.first() else { return 0.0 };
+    let last = keys.last().unwrap();
+    if t <= first.0 {
+        return first.1;
+    }
+    if t >= last.0 {
+        return last.1;
+    }
+    for pair in keys.windows(2) {
+        let (k1, k2) = (pair[0], pair[1]);
+        if t >= k1.0 && t <= k2.0 {
+            let range = k2.0 - k1.0;
+            if range.abs() < 0.0001 {
+                return k1.1;
+            }
+            let mut w = (t - k1.0) / range;
+            if smooth {
+                w = w * w * (3.0 - 2.0 * w);
+            }
+            return k1.1 * (1.0 - w) + k2.1 * w;
+        }
+    }
+    first.1
+}
+
+/// Install a custom bevel/carve profile from ramp keys (`(pos, value)`, both
+/// 0..1, sorted by pos). Sampled into the slope LUT the shader's `carve_slope`
+/// reads in place of its analytic smoothstep — every recess/boss/ridge wall in
+/// this process restyles on the next frame. Empty or single-key lists clear
+/// back to the analytic profile ([`clear_bevel_profile`]).
+pub fn set_bevel_profile_keys(keys: &[(f32, f32)], smooth: bool) {
+    if keys.len() < 2 {
+        clear_bevel_profile();
+        return;
+    }
+    let n = BEVEL_PROFILE_SAMPLES;
+    let mut slopes = [0.0f32; BEVEL_PROFILE_SAMPLES];
+    for (i, slot) in slopes.iter_mut().enumerate() {
+        let h0 = sample_ramp_keys(keys, smooth, i as f32 / n as f32);
+        let h1 = sample_ramp_keys(keys, smooth, (i + 1) as f32 / n as f32);
+        *slot = (h1 - h0) * n as f32;
+    }
+    *BEVEL_PROFILE.write().unwrap() = Some(slopes);
+    BEVEL_PROFILE_GEN.fetch_add(1, std::sync::atomic::Ordering::Release);
+}
+
+/// Drop the custom bevel profile — walls return to the analytic smoothstep.
+pub fn clear_bevel_profile() {
+    let mut guard = BEVEL_PROFILE.write().unwrap();
+    if guard.is_some() {
+        *guard = None;
+        BEVEL_PROFILE_GEN.fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// The installed profile's slope LUT, if any — what the renderer uploads.
+pub fn bevel_profile_slopes() -> Option<[f32; BEVEL_PROFILE_SAMPLES]> {
+    *BEVEL_PROFILE.read().unwrap()
+}
+
+/// Change counter for [`bevel_profile_slopes`] — a renderer re-uploads when it
+/// differs from the generation it last wrote.
+pub fn bevel_profile_generation() -> u64 {
+    BEVEL_PROFILE_GEN.load(std::sync::atomic::Ordering::Acquire)
+}
+
 /// Padding between the window plate's edge and the objects sitting on it, in
 /// logical px (`style.surface.backplate.padding` in config.kdl). DE-wide so
 /// every app's content sits the same distance off the plate rim.
@@ -5625,6 +5710,33 @@ mod tests {
         assert_eq!(w3.y, 25.0);
         assert!((w3.w - 101.05).abs() < 0.01);
         assert!((w3.h - 82.857).abs() < 0.01);
+    }
+
+    #[test]
+    fn bevel_profile_lut_integrates_to_the_curves_net_rise() {
+        // The identity 0→1 curve: slopes sum/N to its net rise of 1 (the same
+        // total step the analytic smoothstep carries).
+        crate::layout::set_bevel_profile_keys(&[(0.0, 0.0), (1.0, 1.0)], true);
+        let slopes = crate::layout::bevel_profile_slopes().expect("profile installed");
+        let n = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
+        let rise: f32 = slopes.iter().map(|s| s / n).sum();
+        assert!((rise - 1.0).abs() < 0.001, "net rise {rise}");
+
+        // A rim curve that returns to its start height nets zero.
+        crate::layout::set_bevel_profile_keys(
+            &[(0.0, 0.5), (0.2, 1.0), (0.8, 1.0), (1.0, 0.5)],
+            false,
+        );
+        let slopes = crate::layout::bevel_profile_slopes().unwrap();
+        let rise: f32 = slopes.iter().map(|s| s / n).sum();
+        assert!(rise.abs() < 0.001, "net rise {rise}");
+
+        // Degenerate key lists clear back to the analytic profile; the
+        // generation moves on every change so renderers re-upload.
+        let gen = crate::layout::bevel_profile_generation();
+        crate::layout::set_bevel_profile_keys(&[(0.0, 1.0)], false);
+        assert!(crate::layout::bevel_profile_slopes().is_none());
+        assert!(crate::layout::bevel_profile_generation() > gen);
     }
 }
 

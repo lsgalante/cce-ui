@@ -14,6 +14,13 @@ struct WindowInfo {
     // Corner-shape exponent shared with the plates and the rounded-rect clip:
     // circular arc at 2, superellipse squircle above.
     corner_shape: f32,
+    // Custom bevel/carve profile (cce_ui::layout::set_bevel_profile_keys):
+    // x nonzero enables it, y = live sample count in `profile`.
+    profile_meta: vec4f,
+    // Slope samples of the profile's height curve h(v) (v 0 = plateau, 1 =
+    // carve floor / boss crest), sample i at v = (i + 0.5) / count, packed 4
+    // per vec4. carve_slope reads these in place of its analytic smoothstep.
+    profile: array<vec4f, 8>,
 }
 
 @group(0) @binding(2) var<uniform> window_info: WindowInfo;
@@ -193,11 +200,25 @@ fn roll_slope(f: f32) -> f32 {
 }
 
 // Slope of a carve's transition profile (0 on the surrounding plateau → 1 on
-// the carve floor) at v in [0, 1] across the wall — always >= 0, zero at both
-// ends. The profile is smoothstep normally; smootherstep (zero SECOND
-// derivative at both plateaus) under a continuous-curvature corner_shape —
-// the step's analog of the superellipse roll.
+// the carve floor) at v in [0, 1] across the wall. With a custom profile
+// installed (window_info.profile_meta.x), the slope comes from the uploaded
+// ramp LUT — it may go negative (non-monotonic curves: rims, ogees) and its
+// integral is the curve's net rise, not necessarily 1. Otherwise the analytic
+// default: smoothstep normally, smootherstep (zero SECOND derivative at both
+// plateaus) under a continuous-curvature corner_shape — the step's analog of
+// the superellipse roll.
 fn carve_slope(v: f32) -> f32 {
+    if (window_info.profile_meta.x > 0.5) {
+        let n = window_info.profile_meta.y;
+        // Samples sit at v = (i + 0.5) / n; lerp between the two neighbors.
+        let x = clamp(clamp(v, 0.0, 1.0) * n - 0.5, 0.0, n - 1.0);
+        let i0 = u32(floor(x));
+        let i1 = min(i0 + 1u, u32(n) - 1u);
+        let fr = x - floor(x);
+        let s0 = window_info.profile[i0 >> 2u][i0 & 3u];
+        let s1 = window_info.profile[i1 >> 2u][i1 & 3u];
+        return mix(s0, s1, fr);
+    }
     if (rrect_clip.rect1.w > 2.001) {
         let w = v * (1.0 - v);
         return 30.0 * w * w;
