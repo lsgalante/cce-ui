@@ -92,6 +92,14 @@ pub enum Prim {
     /// plate's face keeps the app's color. Falls back to a flat circle on the
     /// legacy (`bevel_shader 0`) path.
     Sphere { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
+    /// A concave inside-corner fillet for composed carves: a quarter-arc wall
+    /// whose centre `(cx, cy)` sits out in the corner's pocket, shaded with the
+    /// same step profile as a `Recess`/`Boss` wall (`raised` flips the sign).
+    /// `start` is the wedge's start angle (quarter span, hard-cut at the
+    /// tangent lines — the neighboring straight walls continue the profile
+    /// exactly there). Box radii can only round convex corners; this is the
+    /// missing concave piece. SDF path only (no legacy fallback).
+    ConcaveFillet { cx: f32, cy: f32, radius: f32, depth: f32, start: f32, raised: bool },
     /// Text in sRGB u8 (the `TextLabel` convention). `font` is a font string for
     /// `get_text_buffer` (family, or "family:size"); `bounds` is a logical `[l, t, r, b]` clip
     /// for the glyph pass (Phase 6: the backend renders these through glyphon when the app
@@ -366,6 +374,14 @@ impl PaintCtx {
     pub fn sphere(&mut self, cx: f32, cy: f32, radius: f32, color: [f32; 4]) {
         let (ox, oy) = self.offset;
         self.push(Prim::Sphere { cx: cx + ox, cy: cy + oy, radius, color });
+    }
+
+    /// A concave inside-corner fillet — see `Prim::ConcaveFillet`. `start` is
+    /// the quarter wedge's start angle; the arc's centre sits in the corner's
+    /// pocket and the wall descends (or rises, `raised`) away from it.
+    pub fn concave_fillet(&mut self, cx: f32, cy: f32, radius: f32, depth: f32, start: f32, raised: bool) {
+        let (ox, oy) = self.offset;
+        self.push(Prim::ConcaveFillet { cx: cx + ox, cy: cy + oy, radius, depth, start, raised });
     }
 
     pub fn border(&mut self, rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32) {

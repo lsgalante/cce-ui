@@ -257,7 +257,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // the surface tilt meets the half-vector, ~a third of the way out toward
     // the light) — and, like a plate face, the shade is expressed relative to
     // the flat face so the color at the lit center is exactly the app's.
-    if (rrect_clip.rect1.z > 4.5) {
+    if (rrect_clip.rect1.z > 4.5 && rrect_clip.rect1.z < 5.5) {
         let c = frag - rrect_clip.p_rect.xy;
         let r = max(rrect_clip.p_rect.z, 0.001);
         let dist = length(c);
@@ -329,10 +329,33 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // All profiles straddle the boundary (span [-t/2, t/2]). Darkening is exact
     // multiplicative shading (black at alpha 1 - shade); brightening is a
     // translucent white screen.
-    let u = clamp(d / t + 0.5, 0.0, 1.0);
+    //
+    // Concave fillet (mode 6 = recessed, 7 = raised): the wall follows a
+    // quarter ARC whose centre sits out in the pocket — the inside-corner
+    // rounding the box SDF cannot express. p_rect.xy = centre, .z = radius;
+    // p_radii.x = the wedge's start angle (quarter span, HARD-cut at the
+    // tangent lines — the straight walls continue the profile exactly there).
+    // Distance/gradient swap to radial; everything downstream is the shared
+    // free-carve path via `eff` (6→2, 7→3).
+    var eff = rrect_clip.rect1.z;
+    var fd = d;
+    var fgd = gd.xy;
+    var wedge = 1.0;
+    if (eff > 5.5) {
+        eff = eff - 4.0;
+        let c = frag - rrect_clip.p_rect.xy;
+        let dist = max(length(c), 1e-4);
+        fd = dist - rrect_clip.p_rect.z;
+        fgd = -c / dist;
+        let a0 = rrect_clip.p_radii.x;
+        let ang = atan2(c.y, c.x);
+        let rel = ang - a0 - floor((ang - a0) / TAU) * TAU;
+        wedge = select(0.0, 1.0, rel <= 1.5707964);
+    }
+    let u = clamp(fd / t + 0.5, 0.0, 1.0);
     var slope = 0.0;
     var curv = 0.0;
-    if (rrect_clip.rect1.z > 3.5) {
+    if (eff > 3.5) {
         // Ridge bump: the carve profile mirrored about the boundary (rising
         // outer half, falling inner half), amplitude halved so the wall tilt
         // matches a step's despite the doubled profile rate.
@@ -345,7 +368,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // tints the whole cover quad).
         curv = -rrect_clip.p_mat.w * sin(w * TAU);
     } else {
-        let dir = select(-1.0, 1.0, rrect_clip.rect1.z > 2.5);
+        let dir = select(-1.0, 1.0, eff > 2.5);
         // The profile slope is carve_slope's family: smoothstep-derived
         // normally, smootherstep (zero second derivative at the plateaus)
         // under a continuous-curvature corner_shape — shading eases in and out
@@ -356,14 +379,14 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // boss.
         curv = -dir * rrect_clip.p_mat.w * sin(u * TAU);
     }
-    let sv = gd.xy * slope;
+    let sv = fgd * slope;
     let n = normalize(vec3f(sv, 1.0));
     let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
     let spec = roll_spec(sv);
     // Fade the carve out across the host plate's perimeter roll (see p_host).
     let hb = rrect_clip.p_host;
     let host_d = min(hb.z - abs(frag.x - hb.x), hb.w - abs(frag.y - hb.y));
-    let att = clamp(host_d / t, 0.0, 1.0);
+    let att = clamp(host_d / t, 0.0, 1.0) * wedge;
     let v = (diff / flat_shade - 1.0 + curv + spec) * strength * att;
     if (v >= 0.0) {
         return vec4f(1.0, 1.0, 1.0, min(v, 1.0));

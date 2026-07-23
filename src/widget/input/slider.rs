@@ -370,9 +370,25 @@ impl Paint for Slider {
                     (true, true, false, true),
                 );
                 ctx.recess_edges(track_rect, (0.0, 0.0, radius, radius), recess_t, (false, true, true, true));
-                if g.track_x + g.track_w - tab_r > 0.5 {
+                // Concave fillet at the throat, the straight run starting a
+                // fillet radius past it (the labeled-Dropdown convention).
+                let fr = 6.0_f32.min(strip * 0.5);
+                if g.track_x + g.track_w - tab_r > fr + 4.0 {
+                    ctx.concave_fillet(
+                        tab_r + fr,
+                        g.y - fr,
+                        fr,
+                        recess_t,
+                        std::f32::consts::FRAC_PI_2,
+                        false,
+                    );
                     ctx.recess_edges(
-                        Rect { x: tab_r - recess_t, y: g.y, width: g.track_x + g.track_w - tab_r + recess_t, height: g.h },
+                        Rect {
+                            x: tab_r + fr - recess_t,
+                            y: g.y,
+                            width: g.track_x + g.track_w - tab_r - fr + recess_t,
+                            height: g.h,
+                        },
                         (0.0, radius, 0.0, 0.0),
                         recess_t,
                         (true, false, false, false),

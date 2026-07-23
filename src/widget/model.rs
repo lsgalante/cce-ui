@@ -1243,6 +1243,9 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => ctx.vector(x1, y1, x2, y2, thickness, color, cap),
                 Prim::Circle { cx, cy, radius, color } => ctx.circle(cx, cy, radius, color),
                 Prim::Sphere { cx, cy, radius, color } => ctx.sphere(cx, cy, radius, color),
+                Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
+                    ctx.concave_fillet(cx, cy, radius, depth, start, raised)
+                }
                 Prim::Image { image, rect, alpha } => ctx.image(image, rect, alpha),
             }
         }

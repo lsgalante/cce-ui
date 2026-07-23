@@ -369,12 +369,27 @@ impl Dropdown {
                     depth,
                     (false, true, true, true),
                 );
-                // Ring top wall, right of the tab (starts at the tab's throat;
-                // extended `depth` left so it crossfades against the tab's
-                // right wall instead of fading short of it).
-                if outer_r - tab_r > 0.5 {
+                // Ring top wall, right of the tab. A concave fillet rounds the
+                // throat; the straight run starts a fillet radius past it
+                // (extended `depth` left so its fade-in lands under the
+                // fillet's hard tangent cut instead of leaving a gap).
+                let fr = 6.0_f32.min(strip * 0.5);
+                if outer_r - tab_r > fr + 4.0 {
+                    ctx.concave_fillet(
+                        tab_r + fr,
+                        ring_top - fr,
+                        fr,
+                        depth,
+                        std::f32::consts::FRAC_PI_2,
+                        false,
+                    );
                     ctx.recess_edges(
-                        Rect { x: tab_r - depth, y: ring_top, width: outer_r - tab_r + depth, height: visual_h + 2.0 * g },
+                        Rect {
+                            x: tab_r + fr - depth,
+                            y: ring_top,
+                            width: outer_r - tab_r - fr + depth,
+                            height: visual_h + 2.0 * g,
+                        },
                         (0.0, orad.1, 0.0, 0.0),
                         depth,
                         (true, false, false, false),

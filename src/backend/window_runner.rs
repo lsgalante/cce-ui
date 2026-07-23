@@ -1756,6 +1756,29 @@ pub fn tessellate_display_list(
                 // Legacy path: the flat disc, exactly a Circle.
                 verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
             }
+            Prim::ConcaveFillet { cx, cy, radius, depth, start: a0, raised } if shader_plates => {
+                // A quarter-arc carve wall (shader mode 6/7): one cover quad
+                // over the wedge's reach; the wall straddles the arc by ±t/2
+                // like every carve boundary. p_rect carries centre + radius,
+                // p_radii.x the wedge start angle. Host box pushed far out —
+                // an inside-corner fillet never fades.
+                let m = *depth * 0.5 + 2.0;
+                let r = *radius + m;
+                verts.extend(quad_vertices(cx - r, cy - r, 2.0 * r, 2.0 * r, sw, sh, [0.0; 4]));
+                plate = Some(crate::vk::PlatePush {
+                    rect: [cx * scale, cy * scale, *radius * scale, 0.0],
+                    radii: [*a0, 0.0, 0.0, 0.0],
+                    light: [plate_light[0], plate_light[1], plate_light[2], *depth * scale],
+                    material: plate_mat,
+                    host: [0.0, 0.0, 1e6, 1e6],
+                    specular_tint: [1.0, 1.0, 1.0, 0.0],
+                    mode: if *raised { 7.0 } else { 6.0 },
+                    shape: crate::layout::corner_shape(),
+                });
+            }
+            // Legacy banded path has no radial wall — the composed corner
+            // stays square there (A/B comparison path only).
+            Prim::ConcaveFillet { .. } => {}
         }
         let end = verts.len() as u32;
         if end == start {

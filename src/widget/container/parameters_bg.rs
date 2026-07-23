@@ -94,6 +94,10 @@ const SECTION_R: f32 = 8.0;
 /// The throat — the concave fillet where the tab's right side turns onto the content
 /// body's top edge (the tab sits flush on the body; there is no connector neck).
 const SECTION_THROAT_R: f32 = 3.0;
+/// The relief carve's concave inside-corner radius at the tab throat
+/// (`section_fillets`) — sized against SECTION_R so inside and outside
+/// corners read as one family.
+const SECTION_FILLET_R: f32 = 6.0;
 /// Narrowest a title box may be: both its corners plus the throat fillet. Titles run
 /// wider than this in practice; it only keeps the throat clear of the corners.
 const SECTION_TITLE_MIN_W: f32 = 2.0 * SECTION_R + SECTION_THROAT_R;
@@ -1035,10 +1039,12 @@ impl ParametersBg {
                 out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
                 let throat_r = tx + tw;
                 if cx + cw > throat_r + 0.5 {
+                    // Starts a fillet radius past the throat — the concave
+                    // fillet ([`Self::section_fillets`]) carries the corner.
                     out.push((
-                        throat_r - depth,
+                        throat_r + SECTION_FILLET_R - depth,
                         cy,
-                        cx + cw - throat_r + depth,
+                        cx + cw - throat_r - SECTION_FILLET_R + depth,
                         ch,
                         (0.0, r, 0.0, 0.0),
                         depth,
@@ -1138,6 +1144,35 @@ impl ParametersBg {
                 let ty = crate::widget::label_offset(s);
                 if let Some(sphere) = s.inner().thumb_sphere(Rect { x, y: y + ty, width: w, height: h - ty }) {
                     out.push(sphere);
+                }
+            }
+        }
+        out
+    }
+
+    /// The section carves' concave inside-corner fillets — `(cx, cy, radius,
+    /// depth, start angle)` for [`crate::scene::paint::PaintCtx::concave_fillet`]
+    /// (recessed), drawn by the host AFTER [`Self::reliefs`]. The box reliefs
+    /// can only round convex corners; this rounds the throat where a tab's
+    /// right wall turns onto its body's top edge.
+    pub fn section_fillets(&self) -> Vec<(f32, f32, f32, f32, f32)> {
+        if !self.visible || !crate::layout::control_relief() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (title, content) in self.section_boxes() {
+            let (tx, _ty, tw, _th) = title;
+            if let Some((cx, cy, cw, ch)) = content {
+                let depth = crate::layout::bevel_width().min(ch * 0.2).min(CHANNEL);
+                let throat_r = tx + tw;
+                if cx + cw > throat_r + 2.0 * SECTION_FILLET_R {
+                    out.push((
+                        throat_r + SECTION_FILLET_R,
+                        cy - SECTION_FILLET_R,
+                        SECTION_FILLET_R,
+                        depth,
+                        std::f32::consts::FRAC_PI_2,
+                    ));
                 }
             }
         }
