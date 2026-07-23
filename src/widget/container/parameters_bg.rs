@@ -90,7 +90,7 @@ const CONTENT_BOX_PAD: f32 = CHANNEL;
 /// concave (inner) corners where the neck joins the title and content boxes.
 const SECTION_BORDER_COLOR: [f32; 4] = [0.18, 0.18, 0.27, 1.0];
 const SECTION_BORDER_T: f32 = 1.0;
-const SECTION_R: f32 = 4.0;
+const SECTION_R: f32 = 8.0;
 /// The throat — the concave fillet where the tab's right side turns onto the content
 /// body's top edge (the tab sits flush on the body; there is no connector neck).
 const SECTION_THROAT_R: f32 = 3.0;

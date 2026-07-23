@@ -760,6 +760,16 @@ impl Input for ColorRamp {
 }
 
 impl Ramp {
+    /// Vertical reserve under the curve area for the control strip (gap, label
+    /// tabs, controls, bottom margin) — the graph gets the rest. Sized so the
+    /// graph opening's rim shading stays clear of the label tabs' carves.
+    const STRIP_RESERVE: f32 = 82.0;
+
+    /// The curve area's height for a widget `h` tall.
+    fn graph_h(h: f32) -> f32 {
+        (h - Self::STRIP_RESERVE).max(30.0)
+    }
+
     /// The detached-label strip height the labeled dropdowns carry
     /// (`Widget::label_offset`'s formula).
     fn label_strip() -> f32 {
@@ -779,9 +789,9 @@ impl Ramp {
     /// strings and used to clip.
     fn arrange_fields(&mut self) {
         let (x, y, w, h) = (self.base.x, self.base.y, self.base.w, self.base.h);
-        let gh = (h - 70.0).max(30.0);
+        let gh = Self::graph_h(h);
         let graph_bottom = y + 10.0 + gh;
-        let ctrl_y = graph_bottom + 28.0;
+        let ctrl_y = graph_bottom + 40.0;
         let ctrl_h = 22.0;
         let strip = Self::label_strip();
         let (dd_y, dd_h) = (ctrl_y - strip, ctrl_h + strip);
@@ -862,7 +872,7 @@ impl Paint for Ramp {
         // behind the plate, with the recess wall (drawn after the content, so
         // its shading falls across the graph's edges) as the cut's bevel.
         let graph = {
-            let gh = (self.base.h - 70.0).max(30.0);
+            let gh = Self::graph_h(self.base.h);
             Rect { x: self.base.x + 10.0, y: self.base.y + 10.0, width: self.base.w - 20.0, height: gh }
         };
         let graph_radius = 6.0f32;
@@ -875,7 +885,7 @@ impl Paint for Ramp {
 
         let quads: Vec<(f32, f32, f32, f32, [f32; 4])> = {
         let mut quads = Vec::new();
-        let gh = (self.base.h - 70.0).max(30.0);
+        let gh = Self::graph_h(self.base.h);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -917,7 +927,7 @@ impl Paint for Ramp {
         // The curve itself: one anti-aliased round-capped polyline — exact
         // key-to-key segments in linear mode, dense samples under smoothstep
         // blending. Constant-value extensions reach the graph's side walls.
-        let gh = (self.base.h - 70.0).max(30.0);
+        let gh = Self::graph_h(self.base.h);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         let curve_color = [0.5, 0.75, 1.0, 1.0];
@@ -951,7 +961,7 @@ impl Paint for Ramp {
         }
         let circles: Vec<(f32, f32, f32, [f32; 4])> = {
         let mut circles = Vec::new();
-        let gh = (self.base.h - 70.0).max(30.0);
+        let gh = Self::graph_h(self.base.h);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -1077,7 +1087,7 @@ impl Input for Ramp {
             return true;
         }
         
-        let gh = (self.base.h - 70.0).max(30.0);
+        let gh = Self::graph_h(self.base.h);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
@@ -1164,7 +1174,7 @@ impl Input for Ramp {
         }
         
         let mut changed = false;
-        let gh = (self.base.h - 70.0).max(30.0);
+        let gh = Self::graph_h(self.base.h);
         let track_x = self.base.x + 10.0;
         let track_w = self.base.w - 20.0;
         
