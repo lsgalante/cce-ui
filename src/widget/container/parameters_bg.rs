@@ -69,40 +69,45 @@ pub struct ParametersBg {
 /// How long (seconds) the scrollbar stays raised after the last wheel scroll or drag release.
 const SCROLL_ACTIVE_HOLD: f32 = 0.7;
 
-/// Vertical pitch between consecutive rows.
-const ROW_GAP: f32 = 8.0;
+/// The channel: the ONLY gap a control keeps from whatever its edge meets — the
+/// neighboring control, or its section's wall. Controls pack edge-to-edge; the
+/// reliefs on either side (control bevel, section wall) shade the channel into a
+/// narrow 3D groove.
+const CHANNEL: f32 = 3.0;
+/// Vertical pitch between consecutive rows — one channel; rows abut.
+const ROW_GAP: f32 = CHANNEL;
 /// How far a section's title box overhangs its header row upward, and the box's height.
 const TITLE_BOX_INSET: f32 = 2.0;
 const TITLE_BOX_H: f32 = 22.0;
-/// How far a section's content box overhangs the first and last row it wraps.
-const CONTENT_BOX_PAD: f32 = 4.0;
+/// How far a section's content box overhangs the first and last row it wraps —
+/// one channel, so the rows abut the section's top/bottom walls too.
+const CONTENT_BOX_PAD: f32 = CHANNEL;
 /// The section outline's color, stroke width, and its corner radii: convex (outer) corners, and the
 /// concave (inner) corners where the neck joins the title and content boxes.
 const SECTION_BORDER_COLOR: [f32; 4] = [0.18, 0.18, 0.27, 1.0];
 const SECTION_BORDER_T: f32 = 1.0;
 const SECTION_R: f32 = 4.0;
-const SECTION_NECK_R: f32 = 3.0;
-/// The neck — the two sides of the outline running close together where a single connector
-/// line used to. `SECTION_NECK_X` is its left side, at the old connector's x.
-const SECTION_NECK_W: f32 = 4.0;
-const SECTION_NECK_X: f32 = 12.0;
-/// Narrowest a title box may be: both its corners, both neck fillets, and the neck between
-/// them. Titles run wider than this in practice; it only keeps the neck inside the box.
-const SECTION_TITLE_MIN_W: f32 = 2.0 * SECTION_R + 2.0 * SECTION_NECK_R + SECTION_NECK_W;
+/// The throat — the concave fillet where the tab's right side turns onto the content
+/// body's top edge (the tab sits flush on the body; there is no connector neck).
+const SECTION_THROAT_R: f32 = 3.0;
+/// Narrowest a title box may be: both its corners plus the throat fillet. Titles run
+/// wider than this in practice; it only keeps the throat clear of the corners.
+const SECTION_TITLE_MIN_W: f32 = 2.0 * SECTION_R + SECTION_THROAT_R;
 
 /// The gap between one section's bottom box edge and the next section's title box —
-/// deliberately wider than the `ROW_GAP` the title→content gap works out to, so sections
-/// read as separate blocks. Laid out from the previous block's *drawn* bottom edge (rather
+/// deliberately much wider than the channel the rows pack on, so sections read as
+/// separate blocks. Laid out from the previous block's *drawn* bottom edge (rather
 /// than the uniform row pitch, which the two boxes' overhangs eat into unequally) so the
 /// gap is exact.
-const SECTION_GAP: f32 = 2.0 * ROW_GAP;
+const SECTION_GAP: f32 = 16.0;
 
 /// Horizontal inset of a section's boxes (title tab and content body) from the pane
 /// plate's sides — deliberately the wider of the two horizontal gaps, so sections
 /// float clearly inside the plate.
 const SECTION_MARGIN: f32 = 16.0;
-/// Horizontal gap between a control row and its parent section's side walls.
-const CONTROL_INSET: f32 = 8.0;
+/// Horizontal gap between a control row and its parent section's side walls —
+/// one channel; controls abut the section's edge.
+const CONTROL_INSET: f32 = CHANNEL;
 /// A row's inset from the plate: the section margin plus the controls' inset within
 /// the section, so bare rows above the first section align with wrapped ones.
 const ROW_X_INSET: f32 = SECTION_MARGIN + CONTROL_INSET;
@@ -218,15 +223,36 @@ impl ParametersBg {
         let text_w =
             crate::widget::display::measure_text_width(&self.display_params[hdr].0, &label_family, label_size);
         let title_w = (text_w + 16.0).max(SECTION_TITLE_MIN_W).min(full_w);
-        // Collapsed, the box sits where the EXPANDED tab sits (one title-box
-        // height above where the body's top edge would be), so collapsing
-        // doesn't jump the tab — and the click-toggle hit zone follows it.
+        // The tab sits FLUSH on the content body: its bottom edge is the body's top
+        // edge, in every style (the relief carve always drew it there; the outline now
+        // fuses to it too). Collapsed, the box stays where the expanded tab sits (one
+        // title-box height above where the body's top edge would be), so collapsing
+        // doesn't jump the tab — and the click-toggle hit zone follows the ink. An
+        // expanded-but-empty section keeps the legacy header-row placement.
         let y = if self.collapsed.contains(&self.display_params[hdr].0) {
             r_hdr.1 + r_hdr.3 + ROW_GAP - CONTENT_BOX_PAD - TITLE_BOX_H
         } else {
-            r_hdr.1 - TITLE_BOX_INSET
+            match self.first_visible_row_top(hdr) {
+                Some(control_top) => control_top - CONTENT_BOX_PAD - TITLE_BOX_H,
+                None => r_hdr.1 - TITLE_BOX_INSET,
+            }
         };
         (self.rect.x + SECTION_MARGIN, y, title_w, TITLE_BOX_H)
+    }
+
+    /// The top edge of the first visible row under header `hdr` — the row the section's
+    /// content box (and so its tab) hangs from. `None` for an empty section (a header
+    /// with no rows of its own before the next header).
+    fn first_visible_row_top(&self, hdr: usize) -> Option<f32> {
+        let hidden = self.hidden_rows();
+        let rects = self.get_param_rects();
+        self.display_params
+            .iter()
+            .enumerate()
+            .skip(hdr + 1)
+            .take_while(|(_, q)| q.2 != "section")
+            .find(|(j, _)| !hidden[*j])
+            .map(|(j, _)| rects[j].1)
     }
 
     /// Each section as `(header index, its content-row range)` — the rows between a header
@@ -276,14 +302,16 @@ impl ParametersBg {
         out
     }
 
-    /// One section's outline: a SINGLE continuous border that wraps the title box, necks
-    /// down through the two close-together sides where the old connector line ran, and wraps
-    /// the content rows — as `(straight runs, corner fillets)`.
+    /// One section's outline: a SINGLE continuous border shaped like a folder tab — around
+    /// the title box, whose bottom edge is open onto the content body it sits flush on
+    /// (its right side turning onto the body's top edge through the concave throat fillet,
+    /// its left side running straight down into the body's left edge) — as
+    /// `(straight runs, corner fillets)`.
     ///
     /// Runs are `(x, y, w, h)`; fillets are `(cx, cy, radius, start, end)` for an arc stroked
     /// `SECTION_BORDER_T` inward of `radius` (the renderer's convention). Convex corners take
-    /// the stroke inside the box, so their radius is the outer one; the concave neck corners
-    /// have their centre out in the empty pocket, so theirs carries the `+ T` that puts the
+    /// the stroke inside the box, so their radius is the outer one; the concave throat corner
+    /// has its centre out in the empty pocket, so its carries the `+ T` that puts the
     /// ink on the far side. Every run stops a radius short of its corner, and each fillet
     /// picks it up there — the path closes.
     fn section_outline(
@@ -311,44 +339,32 @@ impl ParametersBg {
         let ty_b = ty + th; // the title box's bottom edge
         arcs.push((tx + r, ty + r, r, PI, PI + Q)); // title top-left
         arcs.push((tx + tw - r, ty + r, r, PI + Q, TAU)); // title top-right
-        arcs.push((tx + tw - r, ty_b - r, r, 0.0, Q)); // title bottom-right
-        arcs.push((tx + r, ty_b - r, r, Q, PI)); // title bottom-left
         hrun(&mut quads, tx + r, tx + tw - r, ty); // title top
-        vrun(&mut quads, ty + r, ty_b - r, tx + tw - t); // title right
-        vrun(&mut quads, ty + r, ty_b - r, tx); // title left
 
         let Some((cx, cy_t, cw, ch)) = content else {
             // Collapsed or empty: the title box IS the section, so it closes on itself.
-            hrun(&mut quads, tx + r, tx + tw - r, ty_b - t);
+            arcs.push((tx + tw - r, ty_b - r, r, 0.0, Q)); // title bottom-right
+            arcs.push((tx + r, ty_b - r, r, Q, PI)); // title bottom-left
+            vrun(&mut quads, ty + r, ty_b - r, tx + tw - t); // title right
+            vrun(&mut quads, ty + r, ty_b - r, tx); // title left
+            hrun(&mut quads, tx + r, tx + tw - r, ty_b - t); // title bottom
             return (quads, arcs);
         };
 
-        // The neck. Its fillets shrink if the gap is tighter than they are, and its x is
-        // clamped so it can't run out past the title box's own corners.
-        let nr = SECTION_NECK_R.min((cy_t - ty_b) / 2.0).max(0.0);
-        let lo = tx + r + nr;
-        let hi = (tx + tw - r - nr - SECTION_NECK_W).max(lo);
-        let nx0 = (tx + SECTION_NECK_X).clamp(lo, hi);
-        let nx1 = nx0 + SECTION_NECK_W;
+        // The tab sits flush on the body (`ty_b == cy_t` — `section_title_box` places it
+        // there): its bottom edge is open. The throat fillet shrinks if the tab runs
+        // close to the body's right corner.
+        let f = SECTION_THROAT_R.min((cx + cw - r - (tx + tw)).max(0.0));
+        vrun(&mut quads, ty + r, cy_t - f, tx + tw - t); // tab right side, down to the throat
+        arcs.push((tx + tw + f, cy_t - f, f + t, Q, PI)); // throat: tab side -> body top
+        hrun(&mut quads, tx + tw + f, cx + cw - r, cy_t); // body top, right of the tab
 
-        hrun(&mut quads, tx + r, nx0 - nr, ty_b - t); // title bottom, left of the neck
-        hrun(&mut quads, nx1 + nr, tx + tw - r, ty_b - t); // title bottom, right of it
-        vrun(&mut quads, ty_b + nr, cy_t - nr, nx0); // neck, left side
-        vrun(&mut quads, ty_b + nr, cy_t - nr, nx1 - t); // neck, right side
-        arcs.push((nx0 - nr, ty_b + nr, nr + t, PI + Q, TAU)); // title -> neck, left
-        arcs.push((nx1 + nr, ty_b + nr, nr + t, PI, PI + Q)); // title -> neck, right
-        arcs.push((nx0 - nr, cy_t - nr, nr + t, 0.0, Q)); // neck -> content, left
-        arcs.push((nx1 + nr, cy_t - nr, nr + t, Q, PI)); // neck -> content, right
-
-        arcs.push((cx + r, cy_t + r, r, PI, PI + Q)); // content top-left
-        arcs.push((cx + cw - r, cy_t + r, r, PI + Q, TAU)); // content top-right
-        arcs.push((cx + cw - r, cy_t + ch - r, r, 0.0, Q)); // content bottom-right
-        arcs.push((cx + r, cy_t + ch - r, r, Q, PI)); // content bottom-left
-        hrun(&mut quads, cx + r, nx0 - nr, cy_t); // content top, left of the neck
-        hrun(&mut quads, nx1 + nr, cx + cw - r, cy_t); // content top, right of it
-        vrun(&mut quads, cy_t + r, cy_t + ch - r, cx + cw - t); // content right
-        hrun(&mut quads, cx + r, cx + cw - r, cy_t + ch - t); // content bottom
-        vrun(&mut quads, cy_t + r, cy_t + ch - r, cx); // content left
+        arcs.push((cx + cw - r, cy_t + r, r, PI + Q, TAU)); // body top-right
+        arcs.push((cx + cw - r, cy_t + ch - r, r, 0.0, Q)); // body bottom-right
+        arcs.push((cx + r, cy_t + ch - r, r, Q, PI)); // body bottom-left
+        vrun(&mut quads, cy_t + r, cy_t + ch - r, cx + cw - t); // body right
+        hrun(&mut quads, cx + r, cx + cw - r, cy_t + ch - t); // body bottom
+        vrun(&mut quads, ty + r, cy_t + ch - r, tx); // tab + body left, one straight run
 
         (quads, arcs)
     }
@@ -593,38 +609,17 @@ impl ParametersBg {
                     labels.extend(f.own_text_labels());
                 }
             } else if ptype == "section" {
-                // Centered within the carve's tab itself (one title-box height
-                // atop the body's top edge); empty/collapsed sections keep the
-                // legacy offset.
+                // Centered within the tab itself — `section_title_box` is the one
+                // source for where the tab sits (flush on the body; collapsed and
+                // empty sections carry their own placements there).
                 let font_size = 13.0;
-                // The first control of THIS section only: a collapsed/empty
-                // section must not borrow the next section's rows.
-                let below = self
-                    .display_params
-                    .iter()
-                    .enumerate()
-                    .skip(i + 1)
-                    .take_while(|(_, q)| q.2 != "section")
-                    .find(|(j, _)| !hidden[*j])
-                    .map(|(j, _)| rects[j].1);
-                let y = match below {
-                    Some(control_top) => {
-                        let tab_top = control_top - CONTENT_BOX_PAD - TITLE_BOX_H;
-                        tab_top + (TITLE_BOX_H - font_size) / 2.0
-                    }
-                    // Collapsed/empty: centered in the collapsed tab, which
-                    // sits where the expanded tab would (section_title_box).
-                    _ => {
-                        let tab_top = r.1 + r.3 + ROW_GAP - CONTENT_BOX_PAD - TITLE_BOX_H;
-                        tab_top + (TITLE_BOX_H - font_size) / 2.0
-                    }
-                };
+                let (bx, by, _, _) = self.section_title_box(i, r);
                 labels.push(TextLabel {
                     text: name.clone(),
                     // 8px in from the title box's left edge — the inset
                     // `section_title_box`'s width math centers against.
-                    x: self.rect.x + SECTION_MARGIN + 8.0,
-                    y,
+                    x: bx + 8.0,
+                    y: by + (TITLE_BOX_H - font_size) / 2.0,
                     font_size,
                     color: [0xee, 0xee, 0xf0],
                 });
@@ -983,12 +978,13 @@ impl ParametersBg {
         for (title, content) in self.section_boxes() {
             let (tx, ty, tw, th) = title;
             if let Some((cx, cy, cw, ch)) = content {
-                let depth = crate::layout::bevel_width().min(ch * 0.2);
-                // Tab strip: one title-box height tall, sitting directly on the
-                // body's top edge (the header row above it stays plain plate),
-                // bottom open.
-                let tab_y = cy - TITLE_BOX_H;
-                out.push((tx, tab_y, tw, TITLE_BOX_H, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
+                // Capped at the channel: the well's wall must roll off inside the
+                // groove between it and the controls packed one CHANNEL inside,
+                // not shade across their faces.
+                let depth = crate::layout::bevel_width().min(ch * 0.2).min(CHANNEL);
+                // Tab strip: the title box itself, sitting flush on the body's top
+                // edge (the header row above it stays plain plate), bottom open.
+                out.push((tx, ty, tw, th, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
                 // Body: top open — its top wall comes from the segment beside
                 // the tab's throat.
                 out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
@@ -1006,7 +1002,7 @@ impl ParametersBg {
                     ));
                 }
             } else {
-                let depth = crate::layout::bevel_width().min(th * 0.2);
+                let depth = crate::layout::bevel_width().min(th * 0.2).min(CHANNEL);
                 out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));
             }
         }
@@ -2473,19 +2469,21 @@ mod tests {
         let content = content.expect("the section has a content box");
         let (runs, arcs) = p.section_outline(title, content.into());
 
-        // Title, neck, content: four corners each.
-        assert_eq!(arcs.len(), 12);
-        // The concave four are the ones centred out in the gap between the boxes — their
-        // centres sit in the empty pocket, which is what makes them curve the other way.
-        let (title_bottom_edge, content_top_edge) = (title.1 + title.3, content.1);
-        let concave = arcs
+        // The tab sits flush on the body — its bottom edge is the body's top edge.
+        assert_eq!(title.1 + title.3, content.1, "the tab fuses to the body");
+        // Folder-tab shape: the tab's two top corners, the concave throat where its right
+        // side turns onto the body's top edge, and the body's three remaining corners
+        // (its top-LEFT is the tab's left side running straight through).
+        assert_eq!(arcs.len(), 6);
+        let (tab_right, body_top) = (title.0 + title.2, content.1);
+        let throats = arcs
             .iter()
-            .filter(|(_, cy, ..)| *cy > title_bottom_edge && *cy < content_top_edge)
+            .filter(|(cx, cy, ..)| *cx > tab_right - 0.01 && *cy < body_top)
             .count();
-        assert_eq!(concave, 4, "the neck's inside corners");
+        assert_eq!(throats, 1, "the throat — centred out in the pocket right of the tab");
 
         // Every corner hands off to a straight run — no arc dangles. (Within a stroke width:
-        // runs and arcs are anchored on opposite ink sides at the concave corners.)
+        // runs and arcs are anchored on opposite ink sides at the concave corner.)
         let ends: Vec<(f32, f32)> = runs.iter().flat_map(|r| run_ends(r)).collect();
         for arc in &arcs {
             for (ax, ay) in arc_ends(arc) {
@@ -2497,20 +2495,30 @@ mod tests {
             }
         }
 
-        // The neck is two sides a set distance apart, spanning the title/content gap — and
-        // both boxes' edges break around it rather than running through.
-        let verticals: Vec<&(f32, f32, f32, f32)> = runs
+        // The tab's bottom edge is open (no run along it), and the body's top edge runs
+        // only right of the throat.
+        let tab_bottom = title.1 + title.3 - SECTION_BORDER_T;
+        let bottom_runs = runs
             .iter()
-            .filter(|(_, y, _, h)| *h > 0.0 && *y >= title.1 + title.3 && *y < content.1)
+            .filter(|(_, y, w, _)| (*y - tab_bottom).abs() < 0.01 && *w > SECTION_BORDER_T)
+            .count();
+        assert_eq!(bottom_runs, 0, "the tab opens onto the body");
+        let top_runs: Vec<&(f32, f32, f32, f32)> = runs
+            .iter()
+            .filter(|(_, y, w, _)| (*y - body_top).abs() < 0.01 && *w > SECTION_BORDER_T)
             .collect();
-        assert_eq!(verticals.len(), 2, "the neck's two sides");
-        let (nx0, nx1) = (verticals[0].0, verticals[1].0);
-        assert!((nx1 - nx0 - (SECTION_NECK_W - SECTION_BORDER_T)).abs() < 0.01);
-        let title_bottom = title.1 + title.3 - SECTION_BORDER_T;
-        let bottom_runs = runs.iter().filter(|(_, y, _, _)| (*y - title_bottom).abs() < 0.01).count();
-        assert_eq!(bottom_runs, 2, "the title's bottom edge splits around the neck");
-        let content_top_runs = runs.iter().filter(|(_, y, _, _)| (*y - content.1).abs() < 0.01).count();
-        assert_eq!(content_top_runs, 2, "the content box's top edge splits around the neck");
+        assert_eq!(top_runs.len(), 1, "the body's top edge starts past the tab");
+        assert!(top_runs[0].0 >= tab_right, "…right of the throat");
+
+        // The left edge is ONE straight run from the tab's top corner to the body's
+        // bottom corner.
+        let left_runs: Vec<&(f32, f32, f32, f32)> = runs
+            .iter()
+            .filter(|(x, _, _, h)| (*x - title.0).abs() < 0.01 && *h > 0.0)
+            .collect();
+        assert_eq!(left_runs.len(), 1, "tab + body share one left side");
+        assert!((left_runs[0].1 - (title.1 + SECTION_R)).abs() < 0.01);
+        assert!((left_runs[0].1 + left_runs[0].3 - (content.1 + content.3 - SECTION_R)).abs() < 0.01);
     }
 
     #[test]
@@ -2525,7 +2533,7 @@ mod tests {
     }
 
     #[test]
-    fn section_to_section_gap_is_wider_than_the_title_to_content_gap() {
+    fn rows_pack_on_the_channel_and_sections_separate_wider() {
         let p = panel_with(&[
             ("Transform", "", "section"),
             ("Size", "1.00", "slider:0:2"),
@@ -2533,14 +2541,23 @@ mod tests {
             ("On", "true", "checkbox"),
         ]);
         let rects = p.get_param_rects();
-        let title_bottom = |i: usize| rects[i].1 - TITLE_BOX_INSET + TITLE_BOX_H;
-        let content_top = |i: usize| rects[i].1 - CONTENT_BOX_PAD;
         let content_bottom = |i: usize| rects[i].1 + rects[i].3 + CONTENT_BOX_PAD;
         let title_top = |i: usize| rects[i].1 - TITLE_BOX_INSET;
 
-        assert_eq!(content_top(1) - title_bottom(0), ROW_GAP, "title -> its content box");
+        // Inside a section everything packs on the channel: each tab sits flush on its
+        // content box, and the rows keep one channel from the box's walls.
+        for (title, content) in p.section_boxes() {
+            let content = content.expect("both sections have content");
+            assert_eq!(title.1 + title.3, content.1, "tab flush on its body");
+        }
+        let (_, content0) = p.section_boxes()[0];
+        let content0 = content0.unwrap();
+        assert_eq!(rects[1].1 - content0.1, CHANNEL, "row -> its box's top wall");
+        assert_eq!(rects[1].0 - content0.0, CHANNEL, "row -> its box's side wall");
+
+        // Section to section stays far wider, so the blocks still read apart.
         assert_eq!(title_top(2) - content_bottom(1), SECTION_GAP, "section -> next section");
-        assert!(SECTION_GAP > ROW_GAP, "sections separate wider than a section's own tab");
+        assert!(SECTION_GAP > 2.0 * CHANNEL, "sections separate wider than any channel");
     }
 
     #[test]
