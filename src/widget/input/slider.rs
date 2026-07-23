@@ -144,6 +144,21 @@ impl Slider {
         Some((thumb_x + g.thumb_size / 2.0, thumb_y + g.thumb_size / 2.0, diameter / 2.0, color))
     }
 
+    /// The detached-label strip height above the content rect — a replica of
+    /// `Widget::label_offset` over the synced label (zero in side layout or
+    /// unlabeled).
+    fn label_top(&self) -> f32 {
+        if crate::layout::control_label_layout() == "side" {
+            return 0.0;
+        }
+        if self.label.is_some() {
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            font_size + crate::layout::control_label_margin()
+        } else {
+            0.0
+        }
+    }
+
     fn geom(&self, rect: Rect) -> SliderGeom {
         let side = side_offset(&self.label);
         let x = rect.x + side;
@@ -225,6 +240,12 @@ impl Adapted<Slider> {
 impl Layout for Slider {
     fn inflates_label_rect(&self) -> bool {
         false // legacy Slider::set_rect stored the assigned rect verbatim
+    }
+
+    /// Detached label x inset — keeps the label clear of its carve-out tab's
+    /// left wall (the Dropdown value).
+    fn detached_label_inset(&self) -> f32 {
+        4.0
     }
 
 
@@ -323,7 +344,40 @@ impl Paint for Slider {
         // Carve AFTER the fill so the wall's shading modulates whatever it
         // crosses — the same order TextBox uses for its edit fill.
         if self.recessed {
-            ctx.recess(track_rect, (radius, radius, radius, radius), recess_t);
+            let strip = self.label_top();
+            if strip > 0.0 {
+                // Labeled: the label sits in a CARVE-OUT tab, the section-
+                // title idiom (the labeled Dropdown's composition) — a flat
+                // recessed well hugging the label run, bottom open into the
+                // track's well; the well's top wall picks up right of the
+                // tab's throat.
+                let (fam, fsize) = crate::layout::control_label_font_detached_parsed();
+                let text_w = self
+                    .label
+                    .as_deref()
+                    .map(|l| crate::widget::display::measure_text_width(l, &fam, fsize))
+                    .unwrap_or(0.0);
+                let inset = 4.0; // Layout::detached_label_inset — the label's x offset
+                let tab_w = (text_w + 2.0 * inset).max(2.0 * radius + 8.0).min(g.track_w);
+                let tab_r = g.track_x + tab_w;
+                ctx.recess_edges(
+                    Rect { x: g.track_x, y: g.y - strip, width: tab_w, height: strip },
+                    (radius, radius.min(strip * 0.5), 0.0, 0.0),
+                    recess_t,
+                    (true, true, false, true),
+                );
+                ctx.recess_edges(track_rect, (0.0, 0.0, radius, radius), recess_t, (false, true, true, true));
+                if g.track_x + g.track_w - tab_r > 0.5 {
+                    ctx.recess_edges(
+                        Rect { x: tab_r, y: g.y, width: g.track_x + g.track_w - tab_r, height: g.h },
+                        (0.0, radius, 0.0, 0.0),
+                        recess_t,
+                        (true, false, false, false),
+                    );
+                }
+            } else {
+                ctx.recess(track_rect, (radius, radius, radius, radius), recess_t);
+            }
         }
 
         // Thumb. A real Circle prim, not a full-radius rounded rect: rounded

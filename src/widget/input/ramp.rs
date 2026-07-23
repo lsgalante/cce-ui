@@ -133,7 +133,9 @@ impl Ramp {
             RampKey { pos: 1.0, value: 0.5 },
         ];
         
-        let val_slider = Slider::new();
+        // Labeled like the dropdowns: the slider draws "Value" in its own
+        // carve-out tab.
+        let val_slider = Slider::new().with_label("Value");
         // A square x-icon button (cce-icons); label fallback if the icon set
         // is missing on this machine.
         let del_button = match crate::upload_icon("x", 32) {
@@ -331,33 +333,6 @@ pub fn parse_ramp_spec(spec: &str) -> Option<(Vec<(f32, f32)>, bool)> {
     Some((keys, smooth))
 }
 
-
-impl Ramp {
-    /// The ramp's OWN control labels — just Value-when-selected now: the
-    /// dropdowns carry real labels and draw them themselves (on the expanded
-    /// top wall of their inset). The Value label rides the same label line
-    /// (the dropdown rects' top).
-    fn own_control_labels(&self) -> Vec<(TextLabel, Option<String>)> {
-        let mut labels = Vec::new();
-        if self.selected_key_idx.is_some() {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            let label_color = colors::control_label_color_detached_u8();
-            let (val_x, _, _, _) = self.val_slider.rect();
-            let (_, dd_y, _, _) = self.preset_dropdown.rect();
-            labels.push((
-                TextLabel {
-                    text: "Value".to_string(),
-                    x: val_x + 4.0,
-                    y: dd_y,
-                    font_size,
-                    color: label_color,
-                },
-                self.val_slider.widget_font(),
-            ));
-        }
-        labels
-    }
-}
 
 
 impl ColorRamp {
@@ -824,7 +799,7 @@ impl Ramp {
             let val_w = (avail - pre_w - line_w).max(40.0);
             self.preset_dropdown.set_rect(track_x, dd_y, pre_w, dd_h);
             self.line_type_dropdown.set_rect(track_x + pre_w + gap, dd_y, line_w, dd_h);
-            self.val_slider.set_rect(track_x + pre_w + line_w + 2.0 * gap, ctrl_y, val_w, ctrl_h);
+            self.val_slider.set_rect(track_x + pre_w + line_w + 2.0 * gap, dd_y, val_w, dd_h);
             self.del_button.set_rect(track_x + track_w - del_w, ctrl_y, del_w, ctrl_h);
         } else {
             // Two columns, preset the wider share.
@@ -1008,9 +983,6 @@ impl Paint for Ramp {
         }
         let depth = crate::layout::bevel_width().min(graph.height * 0.2);
         pc.recess(graph, radii, depth);
-        for (tl, font) in self.own_control_labels() {
-            pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, None);
-        }
         let dummy = UiContext::new();
         self.preset_dropdown.paint_self(&dummy, pc);
         self.line_type_dropdown.paint_self(&dummy, pc);
