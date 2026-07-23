@@ -6,6 +6,7 @@ build:
 install: build
 	mkdir -p ~/.local/bin
 	install -m 755 ../target/release/cce-ui ~/.local/bin/cce-ui
+	install -m 755 ../target/release/cce-ramp ~/.local/bin/cce-ramp
 
 run:
 	cargo run
