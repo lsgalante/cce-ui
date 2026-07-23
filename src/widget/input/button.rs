@@ -271,26 +271,35 @@ impl Paint for Button {
         if self.raised && self.kind != ButtonKind::ListRow {
             let depth = crate::layout::bevel_width().min(h * 0.2);
             ctx.inset_plate(rect, (radius, radius, radius, radius), color, depth);
-        } else
-        // Background (+ optional configured border), split by radius exactly as the legacy
-        // `all_rounded_quads` (rounded) / `extra_quads` (square) overrides emitted it.
-        if radius > 0.0 {
-            if let Some(bc) = colors::button_border_color() {
-                ctx.rounded_rect(rect, radius, (true, true, true, true), bc);
-                ctx.rounded_rect(
-                    Rect { x: x + 1.0, y: y + 1.0, width: w - 2.0, height: h - 2.0 },
-                    (radius - 1.0).max(0.0),
-                    (true, true, true, true),
-                    color,
-                );
-            } else if color[3].abs() > 0.001 {
-                ctx.rounded_rect(rect, radius, (true, true, true, true), color);
-            }
         } else {
-            if let Some(bc) = colors::button_border_color() {
+            // ListRow also skips the border idiom below: it draws the border
+            // color as a FULL rect with the fill inset over it, which only
+            // reads as a 1px ring when the fill is opaque — a row's
+            // transparent idle fill left the whole row painted in the config
+            // button border_color (an accidental coupling).
+            let border_color = if self.kind == ButtonKind::ListRow {
+                None
+            } else {
+                colors::button_border_color()
+            };
+            // Background (+ optional configured border), split by radius exactly as the legacy
+            // `all_rounded_quads` (rounded) / `extra_quads` (square) overrides emitted it.
+            if radius > 0.0 {
+                if let Some(bc) = border_color {
+                    ctx.rounded_rect(rect, radius, (true, true, true, true), bc);
+                    ctx.rounded_rect(
+                        Rect { x: x + 1.0, y: y + 1.0, width: w - 2.0, height: h - 2.0 },
+                        (radius - 1.0).max(0.0),
+                        (true, true, true, true),
+                        color,
+                    );
+                } else if color[3].abs() > 0.001 {
+                    ctx.rounded_rect(rect, radius, (true, true, true, true), color);
+                }
+            } else if let Some(bc) = border_color {
                 ctx.quad(rect, bc);
                 ctx.quad(Rect { x: x + 1.0, y: y + 1.0, width: w - 2.0, height: h - 2.0 }, color);
-            } else {
+            } else if color[3].abs() > 0.001 {
                 ctx.quad(rect, color);
             }
         }
