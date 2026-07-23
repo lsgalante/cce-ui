@@ -1033,25 +1033,46 @@ impl ParametersBg {
                 // seam by `depth`: its fade-out then crossfades with the
                 // neighbor's fade-in instead of both dying AT the seam (which
                 // notched the walls there; found the hard way).
-                out.push((tx, ty, tw, th + depth, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
-                // Body: top open — its top wall comes from the segment beside
-                // the tab's throat.
-                out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
                 let throat_r = tx + tw;
-                if cx + cw > throat_r + 0.5 {
-                    // Starts a fillet radius past the throat — the concave
-                    // fillet ([`Self::section_fillets`]) carries the corner.
+                let rho = SECTION_FILLET_R;
+                if cx + cw > throat_r + 2.0 * rho {
+                    // Filleted throat ([`Self::section_fillets`]): the tab's
+                    // right wall must END at the fillet's vertical tangent
+                    // (crossfading out under the arc) or its straight run
+                    // ghosts through the curve — so the tab piece stops there,
+                    // and a left-only bridge carries the left wall across the
+                    // fillet span down to the body's own fade-in.
+                    out.push((tx, ty, tw, (cy - rho) - ty + depth, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
+                    out.push((tx, cy - rho, tw, rho + depth, (0.0, 0.0, 0.0, 0.0), depth, false, (false, false, false, true)));
                     out.push((
-                        throat_r + SECTION_FILLET_R - depth,
+                        throat_r + rho - depth,
                         cy,
-                        cx + cw - throat_r - SECTION_FILLET_R + depth,
+                        cx + cw - throat_r - rho + depth,
                         ch,
                         (0.0, r, 0.0, 0.0),
                         depth,
                         false,
                         (true, false, false, false),
                     ));
+                } else {
+                    // Too narrow for the fillet: the plain square throat.
+                    out.push((tx, ty, tw, th + depth, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
+                    if cx + cw > throat_r + 0.5 {
+                        out.push((
+                            throat_r - depth,
+                            cy,
+                            cx + cw - throat_r + depth,
+                            ch,
+                            (0.0, r, 0.0, 0.0),
+                            depth,
+                            false,
+                            (true, false, false, false),
+                        ));
+                    }
                 }
+                // Body: top open — its top wall comes from the segment beside
+                // the tab's throat.
+                out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
             } else {
                 let depth = crate::layout::bevel_width().min(th * 0.2).min(CHANNEL);
                 out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));

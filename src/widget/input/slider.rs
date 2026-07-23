@@ -360,20 +360,30 @@ impl Paint for Slider {
                 let inset = 4.0; // Layout::detached_label_inset — the label's x offset
                 let tab_w = (text_w + 2.0 * inset).max(2.0 * radius + 8.0).min(g.track_w);
                 let tab_r = g.track_x + tab_w;
-                // Pieces extend `recess_t` past their interior seams so the
-                // tessellator's host fade crossfades there instead of notching
-                // the walls (the labeled-Dropdown convention).
+                // The labeled-Dropdown composition: pieces extend `recess_t`
+                // past interior seams (host-fade crossfade), the tab's right
+                // wall ends at the fillet's vertical tangent (or it ghosts
+                // through the arc), and a left-only bridge carries the left
+                // wall across the fillet span.
+                let fr = 6.0_f32.min(strip * 0.5);
+                let filleted = g.track_x + g.track_w - tab_r > fr + 4.0;
+                let tab_bottom = if filleted { g.y - fr } else { g.y };
                 ctx.recess_edges(
-                    Rect { x: g.track_x, y: g.y - strip, width: tab_w, height: strip + recess_t },
+                    Rect { x: g.track_x, y: g.y - strip, width: tab_w, height: tab_bottom - (g.y - strip) + recess_t },
                     (radius, radius.min(strip * 0.5), 0.0, 0.0),
                     recess_t,
                     (true, true, false, true),
                 );
+                if filleted {
+                    ctx.recess_edges(
+                        Rect { x: g.track_x, y: g.y - fr, width: tab_w, height: fr + recess_t },
+                        (0.0, 0.0, 0.0, 0.0),
+                        recess_t,
+                        (false, false, false, true),
+                    );
+                }
                 ctx.recess_edges(track_rect, (0.0, 0.0, radius, radius), recess_t, (false, true, true, true));
-                // Concave fillet at the throat, the straight run starting a
-                // fillet radius past it (the labeled-Dropdown convention).
-                let fr = 6.0_f32.min(strip * 0.5);
-                if g.track_x + g.track_w - tab_r > fr + 4.0 {
+                if filleted {
                     ctx.concave_fillet(
                         tab_r + fr,
                         g.y - fr,
@@ -389,6 +399,13 @@ impl Paint for Slider {
                             width: g.track_x + g.track_w - tab_r - fr + recess_t,
                             height: g.h,
                         },
+                        (0.0, radius, 0.0, 0.0),
+                        recess_t,
+                        (true, false, false, false),
+                    );
+                } else if g.track_x + g.track_w - tab_r > 0.5 {
+                    ctx.recess_edges(
+                        Rect { x: tab_r - recess_t, y: g.y, width: g.track_x + g.track_w - tab_r + recess_t, height: g.h },
                         (0.0, radius, 0.0, 0.0),
                         recess_t,
                         (true, false, false, false),

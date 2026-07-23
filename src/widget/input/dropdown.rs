@@ -351,16 +351,31 @@ impl Dropdown {
                     .min(outer_r - outer_x);
                 let tab_r = outer_x + tab_w;
 
-                // The tab: bottom open into the ring. Extended `depth` past the
-                // seam so its walls' fade-out (the tessellator's host fade at a
-                // suppressed edge) crossfades with the ring's fade-in instead
-                // of both dying at the seam.
+                // The tab: bottom open into the ring, pieces extended `depth`
+                // past their interior seams so the tessellator's host fades
+                // crossfade there instead of notching the walls. With the
+                // fillet, the tab's right wall must END at the fillet's
+                // vertical tangent (crossfading out under the arc) or its
+                // straight run ghosts through the curve — the tab piece stops
+                // there and a left-only bridge carries the left wall across
+                // the fillet span down to the ring's own fade-in.
+                let fr = 6.0_f32.min(strip * 0.5);
+                let filleted = outer_r - tab_r > fr + 4.0;
+                let tab_bottom = if filleted { ring_top - fr } else { ring_top };
                 ctx.recess_edges(
-                    Rect { x: outer_x, y: tab_top, width: tab_w, height: ring_top - tab_top + depth },
+                    Rect { x: outer_x, y: tab_top, width: tab_w, height: tab_bottom - tab_top + depth },
                     (orad.0, orad.1.min(strip * 0.5), 0.0, 0.0),
                     depth,
                     (true, true, false, true),
                 );
+                if filleted {
+                    ctx.recess_edges(
+                        Rect { x: outer_x, y: ring_top - fr, width: tab_w, height: fr + depth },
+                        (0.0, 0.0, 0.0, 0.0),
+                        depth,
+                        (false, false, false, true),
+                    );
+                }
                 // The ring proper: right + bottom + left walls, one prim so
                 // its corners blend internally.
                 ctx.recess_edges(
@@ -369,12 +384,11 @@ impl Dropdown {
                     depth,
                     (false, true, true, true),
                 );
-                // Ring top wall, right of the tab. A concave fillet rounds the
-                // throat; the straight run starts a fillet radius past it
+                // Ring top wall, right of the tab. The concave fillet rounds
+                // the throat; the straight run starts a fillet radius past it
                 // (extended `depth` left so its fade-in lands under the
                 // fillet's hard tangent cut instead of leaving a gap).
-                let fr = 6.0_f32.min(strip * 0.5);
-                if outer_r - tab_r > fr + 4.0 {
+                if filleted {
                     ctx.concave_fillet(
                         tab_r + fr,
                         ring_top - fr,
@@ -390,6 +404,13 @@ impl Dropdown {
                             width: outer_r - tab_r - fr + depth,
                             height: visual_h + 2.0 * g,
                         },
+                        (0.0, orad.1, 0.0, 0.0),
+                        depth,
+                        (true, false, false, false),
+                    );
+                } else if outer_r - tab_r > 0.5 {
+                    ctx.recess_edges(
+                        Rect { x: tab_r - depth, y: ring_top, width: outer_r - tab_r + depth, height: visual_h + 2.0 * g },
                         (0.0, orad.1, 0.0, 0.0),
                         depth,
                         (true, false, false, false),
