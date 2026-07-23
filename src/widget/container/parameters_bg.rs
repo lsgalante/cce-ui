@@ -1023,16 +1023,22 @@ impl ParametersBg {
                 let depth = crate::layout::bevel_width().min(ch * 0.2).min(CHANNEL);
                 // Tab strip: the title box itself, sitting flush on the body's top
                 // edge (the header row above it stays plain plate), bottom open.
-                out.push((tx, ty, tw, th, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
+                // A wall FADES OUT over the carve width approaching a suppressed
+                // edge (the tessellator's host fade — meant for carves flush with
+                // a real plate edge), so every piece extends past its interior
+                // seam by `depth`: its fade-out then crossfades with the
+                // neighbor's fade-in instead of both dying AT the seam (which
+                // notched the walls there; found the hard way).
+                out.push((tx, ty, tw, th + depth, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
                 // Body: top open — its top wall comes from the segment beside
                 // the tab's throat.
                 out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
                 let throat_r = tx + tw;
                 if cx + cw > throat_r + 0.5 {
                     out.push((
-                        throat_r,
+                        throat_r - depth,
                         cy,
-                        cx + cw - throat_r,
+                        cx + cw - throat_r + depth,
                         ch,
                         (0.0, r, 0.0, 0.0),
                         depth,

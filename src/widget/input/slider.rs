@@ -360,8 +360,11 @@ impl Paint for Slider {
                 let inset = 4.0; // Layout::detached_label_inset — the label's x offset
                 let tab_w = (text_w + 2.0 * inset).max(2.0 * radius + 8.0).min(g.track_w);
                 let tab_r = g.track_x + tab_w;
+                // Pieces extend `recess_t` past their interior seams so the
+                // tessellator's host fade crossfades there instead of notching
+                // the walls (the labeled-Dropdown convention).
                 ctx.recess_edges(
-                    Rect { x: g.track_x, y: g.y - strip, width: tab_w, height: strip },
+                    Rect { x: g.track_x, y: g.y - strip, width: tab_w, height: strip + recess_t },
                     (radius, radius.min(strip * 0.5), 0.0, 0.0),
                     recess_t,
                     (true, true, false, true),
@@ -369,7 +372,7 @@ impl Paint for Slider {
                 ctx.recess_edges(track_rect, (0.0, 0.0, radius, radius), recess_t, (false, true, true, true));
                 if g.track_x + g.track_w - tab_r > 0.5 {
                     ctx.recess_edges(
-                        Rect { x: tab_r, y: g.y, width: g.track_x + g.track_w - tab_r, height: g.h },
+                        Rect { x: tab_r - recess_t, y: g.y, width: g.track_x + g.track_w - tab_r + recess_t, height: g.h },
                         (0.0, radius, 0.0, 0.0),
                         recess_t,
                         (true, false, false, false),

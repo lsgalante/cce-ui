@@ -351,9 +351,12 @@ impl Dropdown {
                     .min(outer_r - outer_x);
                 let tab_r = outer_x + tab_w;
 
-                // The tab: bottom open into the ring.
+                // The tab: bottom open into the ring. Extended `depth` past the
+                // seam so its walls' fade-out (the tessellator's host fade at a
+                // suppressed edge) crossfades with the ring's fade-in instead
+                // of both dying at the seam.
                 ctx.recess_edges(
-                    Rect { x: outer_x, y: tab_top, width: tab_w, height: ring_top - tab_top },
+                    Rect { x: outer_x, y: tab_top, width: tab_w, height: ring_top - tab_top + depth },
                     (orad.0, orad.1.min(strip * 0.5), 0.0, 0.0),
                     depth,
                     (true, true, false, true),
@@ -366,10 +369,12 @@ impl Dropdown {
                     depth,
                     (false, true, true, true),
                 );
-                // Ring top wall, right of the tab (starts at the tab's throat).
+                // Ring top wall, right of the tab (starts at the tab's throat;
+                // extended `depth` left so it crossfades against the tab's
+                // right wall instead of fading short of it).
                 if outer_r - tab_r > 0.5 {
                     ctx.recess_edges(
-                        Rect { x: tab_r, y: ring_top, width: outer_r - tab_r, height: visual_h + 2.0 * g },
+                        Rect { x: tab_r - depth, y: ring_top, width: outer_r - tab_r + depth, height: visual_h + 2.0 * g },
                         (0.0, orad.1, 0.0, 0.0),
                         depth,
                         (true, false, false, false),
