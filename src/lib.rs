@@ -42,6 +42,55 @@ pub fn icons_dir() -> String {
     })
 }
 
+/// Rasterize a bundled cce-icons SVG (`<name>.svg` under [`icons_dir`]) at
+/// `px` on its longer side and upload it as a renderer texture. Returns
+/// `(image id, pixel w, pixel h)` for `PaintCtx::image` / `ImageView`; cached
+/// per `(name, px)` so widget rebuilds reuse the one upload. `None` when the
+/// icon is missing or unparsable (callers keep a text fallback).
+pub fn upload_icon(name: &str, px: u32) -> Option<(u32, u32, u32)> {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<HashMap<(String, u32), Option<(u32, u32, u32)>>>> =
+        Mutex::new(None);
+    let key = (name.to_string(), px);
+    let mut guard = CACHE.lock().unwrap();
+    let cache = guard.get_or_insert_with(HashMap::new);
+    if let Some(hit) = cache.get(&key) {
+        return *hit;
+    }
+    let loaded = (|| {
+        let path = format!("{}/{name}.svg", icons_dir());
+        let data = std::fs::read(&path).ok()?;
+        let opt = resvg::usvg::Options::default();
+        let fontdb = crate::widget::get_font_db();
+        let tree = resvg::usvg::Tree::from_data(&data, &opt, fontdb).ok()?;
+        let size = tree.size();
+        let (sw, sh) = (size.width().max(1.0), size.height().max(1.0));
+        let scale = px as f32 / sw.max(sh);
+        let w = (sw * scale).round().max(1.0) as u32;
+        let h = (sh * scale).round().max(1.0) as u32;
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h)?;
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(scale, scale),
+            &mut pixmap.as_mut(),
+        );
+        // tiny-skia pixels are premultiplied; the upload path takes straight RGBA.
+        let mut rgba = pixmap.take();
+        for p in rgba.chunks_exact_mut(4) {
+            let a = p[3] as f32 / 255.0;
+            if a > 0.0 {
+                p[0] = ((p[0] as f32 / a).min(255.0)) as u8;
+                p[1] = ((p[1] as f32 / a).min(255.0)) as u8;
+                p[2] = ((p[2] as f32 / a).min(255.0)) as u8;
+            }
+        }
+        Some((crate::vk::upload_rgba(rgba, w, h), w, h))
+    })();
+    cache.insert(key, loaded);
+    loaded
+}
+
 /// Build a glyphon `FontSystem` loaded with the bundled CCE fonts (house style).
 /// System fonts are loaded only if `$CCE_LOAD_SYSTEM_FONTS` is set. Configured
 /// custom fonts are validated with a warning if missing.

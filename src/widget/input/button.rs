@@ -32,6 +32,9 @@ pub struct Button {
     pub label_color: Option<[f32; 4]>,
     pub justify: Justification,
     label: Option<String>,
+    /// Icon face: an uploaded texture `(image id, pixel w, pixel h)` drawn
+    /// centered in place of the label (see [`crate::upload_icon`]).
+    icon: Option<(u32, f32, f32)>,
     hovered: bool,
     /// Raised style: the background is an SDF-lit `Bevel` plate — fill plus a
     /// rolled, lit edge — instead of a flat fill + border stroke.
@@ -65,6 +68,7 @@ impl Button {
             label_color: None,
             justify: Justification::Center,
             label: None,
+            icon: None,
             hovered: false,
             raised: crate::layout::control_relief(),
         }
@@ -90,6 +94,11 @@ impl Button {
 
     pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
         Button::adapted(ButtonKind::CopyIcon, x, y, w, h)
+    }
+
+    /// Whether an icon face is set (hosts size icon buttons square).
+    pub fn has_icon(&self) -> bool {
+        self.icon.is_some()
     }
 
     /// Hover state, also settable by immediate-mode hosts that hit-test themselves.
@@ -124,6 +133,14 @@ impl Button {
 /// The by-value builder chain, mirrored on the wrapped type (`with_label` comes from the generic
 /// `Adapted::with_label`, which syncs the model's copy via `Paint::sync_label`).
 impl Adapted<Button> {
+
+    /// Icon face: draw this uploaded texture centered in place of a label —
+    /// pass [`crate::upload_icon`]'s `(id, w, h)`. Pairs with a plain `new()`
+    /// (no `with_label`), so the legacy label views stay empty.
+    pub fn with_icon(mut self, image: u32, w: f32, h: f32) -> Self {
+        self.icon = Some((image, w, h));
+        self
+    }
 
     /// Raised style: see the `raised` field.
     pub fn with_raised(mut self, raised: bool) -> Self {
@@ -302,6 +319,23 @@ impl Paint for Button {
             } else if color[3].abs() > 0.001 {
                 ctx.quad(rect, color);
             }
+        }
+
+        // Icon face: centered, inset one 4px margin per side from the shorter
+        // extent, native aspect kept. Replaces the label.
+        if let Some((image, iw, ih)) = self.icon {
+            let s = (w.min(h) - 8.0).max(4.0);
+            let (dw, dh) = if iw >= ih {
+                (s, s * ih / iw.max(1.0))
+            } else {
+                (s * iw / ih.max(1.0), s)
+            };
+            ctx.image(
+                image,
+                Rect { x: x + (w - dw) / 2.0, y: y + (h - dh) / 2.0, width: dw, height: dh },
+                1.0,
+            );
+            return;
         }
 
         // Label, with per-kind justification/color (legacy `text_labels`).

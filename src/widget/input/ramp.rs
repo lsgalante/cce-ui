@@ -134,7 +134,14 @@ impl Ramp {
         ];
         
         let val_slider = Slider::new();
-        let del_button = Button::new(0.0, 0.0, 64.0, 22.0).with_label("Delete");
+        // A square x-icon button (cce-icons); label fallback if the icon set
+        // is missing on this machine.
+        let del_button = match crate::upload_icon("x", 32) {
+            Some((id, w, h)) => {
+                Button::new(0.0, 0.0, 22.0, 22.0).with_icon(id, w as f32, h as f32)
+            }
+            None => Button::new(0.0, 0.0, 64.0, 22.0).with_label("Delete"),
+        };
         // Short names on purpose: the strip's columns are narrow, and these
         // render inside param rows too ("Bevel (Raised)" used to clip).
         let preset_dropdown = Dropdown::new(
@@ -802,8 +809,9 @@ impl Ramp {
         let gap = 10.0;
 
         if self.selected_key_idx.is_some() {
-            // Four columns: preset, line type, value, and the delete button.
-            let del_w: f32 = 64.0;
+            // Four columns: preset, line type, value, and the delete button —
+            // a square x-icon tile (label fallback runs wider).
+            let del_w: f32 = if self.del_button.inner().has_icon() { ctrl_h } else { 64.0 };
             let avail = (track_w - del_w - 3.0 * gap).max(120.0);
             let pre_w = (avail * 0.40).max(40.0);
             let line_w = (avail * 0.32).max(40.0);
