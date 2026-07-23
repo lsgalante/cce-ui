@@ -56,9 +56,39 @@ pub fn create_font_system_with_system_fonts() -> glyphon::FontSystem {
     build_font_system(true)
 }
 
+/// Targeted script-fallback faces loaded alongside the bundled house fonts.
+/// The bundled set covers Latin; anything else shaped to tofu unless
+/// `$CCE_LOAD_SYSTEM_FONTS` pulled in the entire system set. Probing a short
+/// list of well-known files keeps startup cheap while giving cosmic-text's
+/// unix script fallback (family names "Noto Sans CJK *", "Noto Color Emoji")
+/// real faces to land on. `$CCE_NO_FALLBACK_FONTS` opts out.
+fn load_fallback_fonts(db: &mut glyphon::cosmic_text::fontdb::Database) {
+    if std::env::var("CCE_NO_FALLBACK_FONTS").is_ok() {
+        return;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidates = [
+        // CJK (Arch noto-fonts-cjk; Debian/Fedora paths for good measure)
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc".to_string(),
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc".to_string(),
+        "/usr/share/fonts/google-noto-sans-cjk-fonts/NotoSansCJK-Regular.ttc".to_string(),
+        // emoji (Arch noto-fonts-emoji; other distros; per-user install)
+        "/usr/share/fonts/noto/NotoColorEmoji.ttf".to_string(),
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf".to_string(),
+        "/usr/share/fonts/google-noto-emoji-color-fonts/NotoColorEmoji.ttf".to_string(),
+        format!("{home}/.local/share/fonts/NotoColorEmoji.ttf"),
+    ];
+    for path in &candidates {
+        if std::path::Path::new(path).exists() {
+            let _ = db.load_font_file(path);
+        }
+    }
+}
+
 fn build_font_system(load_system_fonts: bool) -> glyphon::FontSystem {
     let mut db = glyphon::cosmic_text::fontdb::Database::new();
     db.load_fonts_dir(fonts_dir());
+    load_fallback_fonts(&mut db);
     if load_system_fonts || std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
         db.load_system_fonts();
     }
@@ -68,6 +98,24 @@ fn build_font_system(load_system_fonts: bool) -> glyphon::FontSystem {
     // root), fall back to system fonts rather than crash.
     if db.faces().next().is_none() {
         db.load_system_fonts();
+    }
+
+    // Pin the generic families to faces that actually exist. fontdb's defaults
+    // name Windows faces ("Arial"/"Times New Roman"), so Family::SansSerif /
+    // Monospace never resolved here and every glyph of generic-family text
+    // dropped into the per-glyph fallback chain — where Noto Color Emoji sits
+    // high (cosmic-text common_fallback) and hijacked spaces and digits with
+    // emoji metrics. Berkeley Mono is the house mono; Noto Sans CJK SC (the
+    // targeted fallback face above) doubles as a full Latin sans.
+    fn has_family(db: &glyphon::cosmic_text::fontdb::Database, fam: &str) -> bool {
+        db.faces()
+            .any(|f| f.families.iter().any(|(n, _)| n == fam))
+    }
+    if has_family(&db, "Berkeley Mono") {
+        db.set_monospace_family("Berkeley Mono");
+    }
+    if has_family(&db, "Noto Sans CJK SC") {
+        db.set_sans_serif_family("Noto Sans CJK SC");
     }
 
     // Validate configured custom fonts
