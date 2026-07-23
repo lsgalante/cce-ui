@@ -144,6 +144,8 @@ impl Ramp {
         };
         // Short names on purpose: the strip's columns are narrow, and these
         // render inside param rows too ("Bevel (Raised)" used to clip).
+        // Labeled: the dropdowns draw their own detached labels, sitting on
+        // the expanded top wall of their inset (the labeled-relief style).
         let preset_dropdown = Dropdown::new(
             vec![
                 "Custom".to_string(),
@@ -154,14 +156,14 @@ impl Ramp {
                 "Valley".to_string(),
             ],
             2,
-        ).with_open_upward(true);
+        ).with_open_upward(true).with_label("Preset");
         let line_type_dropdown = Dropdown::new(
             vec![
                 "Linear".to_string(),
                 "Bezier".to_string(),
             ],
             0,
-        ).with_open_upward(true);
+        ).with_open_upward(true).with_label("Line");
         
         Adapted::new(Ramp {
             base: Widget::new(),
@@ -331,37 +333,27 @@ pub fn parse_ramp_spec(spec: &str) -> Option<(Vec<(f32, f32)>, bool)> {
 
 
 impl Ramp {
-    /// The ramp's OWN control labels (Preset / Line Type / Value-when-selected), each
-    /// with its control's font — shared by the legacy fonted getter and `paint_self`.
-    /// Positions derive from the arranged column rects (`arrange_fields` is the one
-    /// source of the strip's geometry), on the label line 8px under the graph.
+    /// The ramp's OWN control labels — just Value-when-selected now: the
+    /// dropdowns carry real labels and draw them themselves (on the expanded
+    /// top wall of their inset). The Value label rides the same label line
+    /// (the dropdown rects' top).
     fn own_control_labels(&self) -> Vec<(TextLabel, Option<String>)> {
-        let gh = (self.base.h - 70.0).max(30.0);
-        let label_y = self.base.y + 10.0 + gh + 8.0;
-        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-        let label_color = colors::control_label_color_detached_u8();
-
-        let label = |x: f32, text: &str, font: Option<String>| {
-            (
+        let mut labels = Vec::new();
+        if self.selected_key_idx.is_some() {
+            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+            let label_color = colors::control_label_color_detached_u8();
+            let (val_x, _, _, _) = self.val_slider.rect();
+            let (_, dd_y, _, _) = self.preset_dropdown.rect();
+            labels.push((
                 TextLabel {
-                    text: text.to_string(),
-                    x: x + 4.0,
-                    y: label_y,
+                    text: "Value".to_string(),
+                    x: val_x + 4.0,
+                    y: dd_y,
                     font_size,
                     color: label_color,
                 },
-                font,
-            )
-        };
-
-        let mut labels = Vec::new();
-        let (pre_x, _, _, _) = self.preset_dropdown.rect();
-        labels.push(label(pre_x, "Preset", self.preset_dropdown.widget_font()));
-        let (line_x, _, _, _) = self.line_type_dropdown.rect();
-        labels.push(label(line_x, "Line", self.line_type_dropdown.widget_font()));
-        if self.selected_key_idx.is_some() {
-            let (val_x, _, _, _) = self.val_slider.rect();
-            labels.push(label(val_x, "Value", self.val_slider.widget_font()));
+                self.val_slider.widget_font(),
+            ));
         }
         labels
     }
@@ -793,17 +785,31 @@ impl Input for ColorRamp {
 }
 
 impl Ramp {
+    /// The detached-label strip height the labeled dropdowns carry
+    /// (`Widget::label_offset`'s formula).
+    fn label_strip() -> f32 {
+        if crate::layout::control_label_layout() == "side" {
+            return 0.0;
+        }
+        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+        font_size + crate::layout::control_label_margin()
+    }
+
     /// Lay out the control strip under the curve area. One rhythm: the label
     /// line sits 8px under the graph, the controls 4px under the labels, all
-    /// columns one shared height on one shared baseline. The preset column
-    /// takes the wider share — its options ("Bevel (Raised)") are the longest
-    /// strings in the strip and used to clip.
+    /// columns one shared height on one shared baseline. The labeled dropdowns
+    /// get rects that INCLUDE their label strip (the adapter carves it off the
+    /// content); the unlabeled columns get the content band only. The preset
+    /// column takes the wider share — its options are the strip's longest
+    /// strings and used to clip.
     fn arrange_fields(&mut self) {
         let (x, y, w, h) = (self.base.x, self.base.y, self.base.w, self.base.h);
         let gh = (h - 70.0).max(30.0);
         let graph_bottom = y + 10.0 + gh;
         let ctrl_y = graph_bottom + 28.0;
         let ctrl_h = 22.0;
+        let strip = Self::label_strip();
+        let (dd_y, dd_h) = (ctrl_y - strip, ctrl_h + strip);
         let track_x = x + 10.0;
         let track_w = w - 20.0;
         let gap = 10.0;
@@ -816,16 +822,16 @@ impl Ramp {
             let pre_w = (avail * 0.40).max(40.0);
             let line_w = (avail * 0.32).max(40.0);
             let val_w = (avail - pre_w - line_w).max(40.0);
-            self.preset_dropdown.set_rect(track_x, ctrl_y, pre_w, ctrl_h);
-            self.line_type_dropdown.set_rect(track_x + pre_w + gap, ctrl_y, line_w, ctrl_h);
+            self.preset_dropdown.set_rect(track_x, dd_y, pre_w, dd_h);
+            self.line_type_dropdown.set_rect(track_x + pre_w + gap, dd_y, line_w, dd_h);
             self.val_slider.set_rect(track_x + pre_w + line_w + 2.0 * gap, ctrl_y, val_w, ctrl_h);
             self.del_button.set_rect(track_x + track_w - del_w, ctrl_y, del_w, ctrl_h);
         } else {
             // Two columns, preset the wider share.
             let pre_w = ((track_w - gap) * 0.58).max(40.0);
             let line_w = (track_w - gap - pre_w).max(40.0);
-            self.preset_dropdown.set_rect(track_x, ctrl_y, pre_w, ctrl_h);
-            self.line_type_dropdown.set_rect(track_x + pre_w + gap, ctrl_y, line_w, ctrl_h);
+            self.preset_dropdown.set_rect(track_x, dd_y, pre_w, dd_h);
+            self.line_type_dropdown.set_rect(track_x + pre_w + gap, dd_y, line_w, dd_h);
             self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
         }

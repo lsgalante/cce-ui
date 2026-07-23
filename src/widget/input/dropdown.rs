@@ -326,6 +326,33 @@ impl Dropdown {
             // Flush inset plate: groove ring down, beveled lip back up, face
             // level with the surface (transparent raw fill = edges only).
             let face = if raw_bg[3] > 0.001 { bg_color } else { [0.0; 4] };
+            let strip = self.label_top();
+            if strip > 0.0 {
+                // Labeled: the inset expands upward over the label strip. The
+                // ring's top wall widens into a long descending slope whose
+                // inward half spans the whole strip — the label sits ON the
+                // slope — ending exactly at the trigger's top edge, where the
+                // lip's own bevel rises back up. The side walls run up
+                // alongside the strip to meet it.
+                let g = depth * 0.5;
+                let outer = Rect {
+                    x: x - g,
+                    y: y - strip - g,
+                    width: w + 2.0 * g,
+                    height: visual_h + strip + 2.0 * g,
+                };
+                let orad = (r4[0] + g, r4[1] + g, r4[2] + g, r4[3] + g);
+                ctx.recess_edges(outer, orad, depth, (false, true, true, true));
+                ctx.recess_edges(outer, orad, 2.0 * (strip + g), (true, false, false, false));
+                let rect = Rect { x, y, width: w, height: visual_h };
+                let rrad = (r4[0], r4[1], r4[2], r4[3]);
+                if face[3] > 0.001 {
+                    ctx.bevel(rect, rrad, face, depth);
+                } else {
+                    ctx.boss(rect, rrad, depth);
+                }
+                return;
+            }
             ctx.inset_plate(
                 Rect { x, y, width: w, height: visual_h },
                 (r4[0], r4[1], r4[2], r4[3]),
