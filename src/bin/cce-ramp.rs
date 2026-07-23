@@ -71,7 +71,7 @@ impl Application for RampPopup {
             width: 460,
             height: 340,
             fullscreen: false,
-            min_size: Some((300, 220)),
+            min_size: Some((420, 300)),
         }
     }
 

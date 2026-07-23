@@ -1,6 +1,6 @@
 use crate::colors;
 use crate::scene::layout::{Rect, Size};
-use crate::scene::paint::PaintCtx;
+use crate::scene::paint::{Cap, PaintCtx};
 use crate::widget::model::{EventCtx, Input, Layout, Paint};
 use crate::widget::*;
 use crate::widget::input::{Slider, Button};
@@ -134,13 +134,15 @@ impl Ramp {
         ];
         
         let val_slider = Slider::new();
-        let del_button = Button::new(0.0, 0.0, 70.0, 28.0).with_label("Delete Key");
+        let del_button = Button::new(0.0, 0.0, 64.0, 22.0).with_label("Delete");
+        // Short names on purpose: the strip's columns are narrow, and these
+        // render inside param rows too ("Bevel (Raised)" used to clip).
         let preset_dropdown = Dropdown::new(
             vec![
                 "Custom".to_string(),
                 "Linear".to_string(),
-                "Bevel (Raised)".to_string(),
-                "Bevel (Sunken)".to_string(),
+                "Raised".to_string(),
+                "Sunken".to_string(),
                 "Peak".to_string(),
                 "Valley".to_string(),
             ],
@@ -324,62 +326,36 @@ pub fn parse_ramp_spec(spec: &str) -> Option<(Vec<(f32, f32)>, bool)> {
 impl Ramp {
     /// The ramp's OWN control labels (Preset / Line Type / Value-when-selected), each
     /// with its control's font — shared by the legacy fonted getter and `paint_self`.
+    /// Positions derive from the arranged column rects (`arrange_fields` is the one
+    /// source of the strip's geometry), on the label line 8px under the graph.
     fn own_control_labels(&self) -> Vec<(TextLabel, Option<String>)> {
-        let mut labels = Vec::new();
-
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        let h = self.base.h;
-        let gh = (h - 70.0).max(30.0);
-        let sy = self.base.y + gh + 15.0;
-
-        let gap = 10.0;
-        let col_w = if self.selected_key_idx.is_some() {
-            let del_w = 70.0;
-            let available_for_inputs = track_w - del_w - 3.0 * gap;
-            (available_for_inputs / 3.0).max(40.0)
-        } else {
-            (track_w - gap) / 2.0
-        };
-
+        let gh = (self.base.h - 70.0).max(30.0);
+        let label_y = self.base.y + 10.0 + gh + 8.0;
         let (_, font_size) = crate::layout::control_label_font_detached_parsed();
         let label_color = colors::control_label_color_detached_u8();
 
-        labels.push((
-            TextLabel {
-                text: "Preset".to_string(),
-                x: track_x + 4.0,
-                y: sy - 2.0,
-                font_size,
-                color: label_color,
-            },
-            self.preset_dropdown.widget_font(),
-        ));
-
-        labels.push((
-            TextLabel {
-                text: "Line Type".to_string(),
-                x: track_x + col_w + gap + 4.0,
-                y: sy - 2.0,
-                font_size,
-                color: label_color,
-            },
-            self.line_type_dropdown.widget_font(),
-        ));
-
-        if self.selected_key_idx.is_some() {
-            labels.push((
+        let label = |x: f32, text: &str, font: Option<String>| {
+            (
                 TextLabel {
-                    text: "Value".to_string(),
-                    x: track_x + 2.0 * (col_w + gap) + 4.0,
-                    y: sy - 2.0,
+                    text: text.to_string(),
+                    x: x + 4.0,
+                    y: label_y,
                     font_size,
                     color: label_color,
                 },
-                self.val_slider.widget_font(),
-            ));
-        }
+                font,
+            )
+        };
 
+        let mut labels = Vec::new();
+        let (pre_x, _, _, _) = self.preset_dropdown.rect();
+        labels.push(label(pre_x, "Preset", self.preset_dropdown.widget_font()));
+        let (line_x, _, _, _) = self.line_type_dropdown.rect();
+        labels.push(label(line_x, "Line", self.line_type_dropdown.widget_font()));
+        if self.selected_key_idx.is_some() {
+            let (val_x, _, _, _) = self.val_slider.rect();
+            labels.push(label(val_x, "Value", self.val_slider.widget_font()));
+        }
         labels
     }
 }
@@ -810,39 +786,41 @@ impl Input for ColorRamp {
 }
 
 impl Ramp {
+    /// Lay out the control strip under the curve area. One rhythm: the label
+    /// line sits 8px under the graph, the controls 4px under the labels, all
+    /// columns one shared height on one shared baseline. The preset column
+    /// takes the wider share — its options ("Bevel (Raised)") are the longest
+    /// strings in the strip and used to clip.
     fn arrange_fields(&mut self) {
         let (x, y, w, h) = (self.base.x, self.base.y, self.base.w, self.base.h);
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
-        
-        
         let gh = (h - 70.0).max(30.0);
-        let sy = y + gh + 15.0;
-        
+        let graph_bottom = y + 10.0 + gh;
+        let ctrl_y = graph_bottom + 28.0;
+        let ctrl_h = 22.0;
         let track_x = x + 10.0;
         let track_w = w - 20.0;
-        
+        let gap = 10.0;
+
         if self.selected_key_idx.is_some() {
-            let gap = 10.0;
-            let del_w = 70.0;
-            let available_for_inputs = track_w - del_w - 3.0 * gap;
-            let col_w = (available_for_inputs / 3.0).max(40.0);
-            
-            self.preset_dropdown.set_rect(track_x, sy + 20.0, col_w, 20.0);
-            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy + 20.0, col_w, 20.0);
-            self.val_slider.set_rect(track_x + 2.0 * (col_w + gap), sy + 20.0, col_w, 20.0);
-            self.del_button.set_rect(track_x + track_w - del_w, sy + 12.0, del_w, 28.0);
+            // Four columns: preset, line type, value, and the delete button.
+            let del_w: f32 = 64.0;
+            let avail = (track_w - del_w - 3.0 * gap).max(120.0);
+            let pre_w = (avail * 0.40).max(40.0);
+            let line_w = (avail * 0.32).max(40.0);
+            let val_w = (avail - pre_w - line_w).max(40.0);
+            self.preset_dropdown.set_rect(track_x, ctrl_y, pre_w, ctrl_h);
+            self.line_type_dropdown.set_rect(track_x + pre_w + gap, ctrl_y, line_w, ctrl_h);
+            self.val_slider.set_rect(track_x + pre_w + line_w + 2.0 * gap, ctrl_y, val_w, ctrl_h);
+            self.del_button.set_rect(track_x + track_w - del_w, ctrl_y, del_w, ctrl_h);
         } else {
-            let gap = 10.0;
-            let col_w = (track_w - gap) / 2.0;
-            self.preset_dropdown.set_rect(track_x, sy + 20.0, col_w, 20.0);
-            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy + 20.0, col_w, 20.0);
+            // Two columns, preset the wider share.
+            let pre_w = ((track_w - gap) * 0.58).max(40.0);
+            let line_w = (track_w - gap - pre_w).max(40.0);
+            self.preset_dropdown.set_rect(track_x, ctrl_y, pre_w, ctrl_h);
+            self.line_type_dropdown.set_rect(track_x + pre_w + gap, ctrl_y, line_w, ctrl_h);
             self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
         }
-    
     }
 }
 
@@ -852,38 +830,11 @@ impl Layout for Ramp {
     }
 
     fn rect_assigned(&mut self, rect: Rect) {
-        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-        self.base.x = x;
-        self.base.y = y;
-        self.base.w = w;
-        self.base.h = h;
-        
-        
-        let gh = (h - 70.0).max(30.0);
-        let sy = y + gh + 15.0;
-        
-        let track_x = x + 10.0;
-        let track_w = w - 20.0;
-        
-        if self.selected_key_idx.is_some() {
-            let gap = 10.0;
-            let del_w = 70.0;
-            let available_for_inputs = track_w - del_w - 3.0 * gap;
-            let col_w = (available_for_inputs / 3.0).max(40.0);
-            
-            self.preset_dropdown.set_rect(track_x, sy + 20.0, col_w, 20.0);
-            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy + 20.0, col_w, 20.0);
-            self.val_slider.set_rect(track_x + 2.0 * (col_w + gap), sy + 20.0, col_w, 20.0);
-            self.del_button.set_rect(track_x + track_w - del_w, sy + 12.0, del_w, 28.0);
-        } else {
-            let gap = 10.0;
-            let col_w = (track_w - gap) / 2.0;
-            self.preset_dropdown.set_rect(track_x, sy + 20.0, col_w, 20.0);
-            self.line_type_dropdown.set_rect(track_x + col_w + gap, sy + 20.0, col_w, 20.0);
-            self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-        }
-    
+        self.base.x = rect.x;
+        self.base.y = rect.y;
+        self.base.w = rect.width;
+        self.base.h = rect.height;
+        self.arrange_fields();
     }
 
     // register_embedded_children: gone entirely (6bd self-routing): the fields need no
@@ -950,28 +901,63 @@ impl Paint for Ramp {
             quads.push((gx, self.base.y + 10.0, 1.0, gh, [0.25, 0.25, 0.28, 0.5]));
         }
         
-        // Curve area fill and outline
-        let slices = 600;
-        let slice_w = track_w / slices as f32;
+        // Curve area fill: translucent columns under the curve. The outline is
+        // a real vector polyline below — these only tint the area. Columns
+        // share exact edges (overlap double-blends a translucent fill into
+        // visible banding; found the hard way).
+        let slices = 200;
         for i in 0..slices {
             let t1 = i as f32 / slices as f32;
+            let x0 = track_x + t1 * track_w;
+            let x1 = track_x + (i + 1) as f32 / slices as f32 * track_w;
             let v1 = self.get_interpolated_value(t1);
-            let sx1 = track_x + t1 * track_w;
-            
+
             let slice_h = v1 * gh;
             let sy = self.base.y + 10.0 + gh - slice_h;
-            quads.push((sx1, sy, slice_w, slice_h, [0.3, 0.45, 0.6, 0.25]));
-            
-            let outline_h = 2.0;
-            let outline_y = self.base.y + 10.0 + gh - v1 * gh - 1.0;
-            quads.push((sx1, outline_y, slice_w, outline_h, [0.5, 0.75, 1.0, 1.0]));
+            quads.push((x0, sy, x1 - x0, slice_h, [0.3, 0.45, 0.6, 0.25]));
         }
-        
+
         quads
-    
+
         };
         for (qx, qy, qw, qh, qc) in quads {
             pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+        }
+
+        // The curve itself: one anti-aliased round-capped polyline — exact
+        // key-to-key segments in linear mode, dense samples under smoothstep
+        // blending. Constant-value extensions reach the graph's side walls.
+        let gh = (self.base.h - 70.0).max(30.0);
+        let track_x = self.base.x + 10.0;
+        let track_w = self.base.w - 20.0;
+        let curve_color = [0.5, 0.75, 1.0, 1.0];
+        let px_of = |t: f32, v: f32| {
+            (track_x + t * track_w, self.base.y + 10.0 + gh - v * gh)
+        };
+        let mut pts: Vec<(f32, f32)> = Vec::new();
+        if self.line_type_dropdown.selected == 1 {
+            let n = 64;
+            for i in 0..=n {
+                let t = i as f32 / n as f32;
+                pts.push(px_of(t, self.get_interpolated_value(t)));
+            }
+        } else {
+            if let Some(first) = self.keys.first() {
+                if first.pos > 0.0 {
+                    pts.push(px_of(0.0, first.value));
+                }
+            }
+            for k in &self.keys {
+                pts.push(px_of(k.pos, k.value));
+            }
+            if let Some(last) = self.keys.last() {
+                if last.pos < 1.0 {
+                    pts.push(px_of(1.0, last.value));
+                }
+            }
+        }
+        for pair in pts.windows(2) {
+            pc.vector(pair[0].0, pair[0].1, pair[1].0, pair[1].1, 2.0, curve_color, Cap::Round);
         }
         let circles: Vec<(f32, f32, f32, [f32; 4])> = {
         let mut circles = Vec::new();
