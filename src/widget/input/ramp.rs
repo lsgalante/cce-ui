@@ -882,21 +882,20 @@ impl Paint for Ramp {
     }
 
     fn paint(&self, _rect: Rect, pc: &mut PaintCtx) {
-        // Rounded container border + background (the legacy all_rounded_quads head).
-        let border_color = colors::ramp_border_color();
-        let bg_color = [0.15, 0.15, 0.18, 1.0];
-        let radius = 6.0f32;
+        // No container box: the controls sit directly on the host's plate, and
+        // the graph area reads as an OPENING cut through it — a dark floor
+        // behind the plate, with the recess wall (drawn after the content, so
+        // its shading falls across the graph's edges) as the cut's bevel.
+        let graph = {
+            let gh = (self.base.h - 70.0).max(30.0);
+            Rect { x: self.base.x + 10.0, y: self.base.y + 10.0, width: self.base.w - 20.0, height: gh }
+        };
+        let graph_radius = 6.0f32;
         pc.rounded_rect(
-            Rect { x: self.base.x - 1.0, y: self.base.y - 1.0, width: self.base.w + 2.0, height: self.base.h + 2.0 },
-            radius,
+            graph,
+            graph_radius,
             (true, true, true, true),
-            border_color,
-        );
-        pc.rounded_rect(
-            Rect { x: self.base.x, y: self.base.y, width: self.base.w, height: self.base.h },
-            (radius - 1.0).max(0.0),
-            (true, true, true, true),
-            bg_color,
+            [0.08, 0.08, 0.10, 1.0],
         );
 
         let quads: Vec<(f32, f32, f32, f32, [f32; 4])> = {
@@ -928,7 +927,9 @@ impl Paint for Ramp {
 
             let slice_h = v1 * gh;
             let sy = self.base.y + 10.0 + gh - slice_h;
-            quads.push((x0, sy, x1 - x0, slice_h, [0.3, 0.45, 0.6, 0.25]));
+            // Faint on purpose: the graph reads as a dark opening behind the
+            // plate — a strong fill floods the floor and flattens the depth.
+            quads.push((x0, sy, x1 - x0, slice_h, [0.25, 0.40, 0.55, 0.10]));
         }
 
         quads
@@ -996,6 +997,17 @@ impl Paint for Ramp {
         for (cx, cy, r, c) in circles {
             pc.circle(cx, cy, r, c);
         }
+        // The opening's cut edge: drawn after the graph content so the wall's
+        // shading falls across the curve and keys where they pass behind the
+        // plate's rim. Nested translucent border rings first — the contact
+        // shadow the plate casts down into the opening — then the recess wall
+        // itself as the cut's bevel.
+        let radii = (graph_radius, graph_radius, graph_radius, graph_radius);
+        for (t, a) in [(7.0, 0.08), (4.0, 0.10), (2.0, 0.14)] {
+            pc.border(graph, radii, [0.0; 4], [0.0, 0.0, 0.0, a], t);
+        }
+        let depth = crate::layout::bevel_width().min(graph.height * 0.2);
+        pc.recess(graph, radii, depth);
         for (tl, font) in self.own_control_labels() {
             pc.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font, None);
         }
