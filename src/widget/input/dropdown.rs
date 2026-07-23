@@ -343,7 +343,20 @@ impl Dropdown {
                 };
                 let orad = (r4[0] + g, r4[1] + g, r4[2] + g, r4[3] + g);
                 ctx.recess_edges(outer, orad, depth, (false, true, true, true));
-                ctx.recess_edges(outer, orad, 2.0 * (strip + g), (true, false, false, false));
+                // The slope profile straddles its boundary by ±roll/2, so the
+                // top wall's boundary sits at the MIDPOINT of the run it
+                // should cover — from the inset's top edge down to the
+                // trigger's top — or the outward half would climb past the
+                // inset into whatever sits above (it washed into the ramp's
+                // graph; found the hard way).
+                let span = strip + g;
+                let top = Rect {
+                    x: outer.x,
+                    y: outer.y + span * 0.5,
+                    width: outer.width,
+                    height: outer.height - span * 0.5,
+                };
+                ctx.recess_edges(top, orad, span, (true, false, false, false));
                 let rect = Rect { x, y, width: w, height: visual_h };
                 let rrad = (r4[0], r4[1], r4[2], r4[3]);
                 if face[3] > 0.001 {
