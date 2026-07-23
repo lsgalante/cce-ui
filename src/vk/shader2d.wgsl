@@ -210,14 +210,21 @@ fn roll_slope(f: f32) -> f32 {
 fn carve_slope(v: f32) -> f32 {
     if (window_info.profile_meta.x > 0.5) {
         let n = window_info.profile_meta.y;
+        let vc = clamp(v, 0.0, 1.0);
         // Samples sit at v = (i + 0.5) / n; lerp between the two neighbors.
-        let x = clamp(clamp(v, 0.0, 1.0) * n - 0.5, 0.0, n - 1.0);
+        let x = clamp(vc * n - 0.5, 0.0, n - 1.0);
         let i0 = u32(floor(x));
         let i1 = min(i0 + 1u, u32(n) - 1u);
         let fr = x - floor(x);
         let s0 = window_info.profile[i0 >> 2u][i0 & 3u];
         let s1 = window_info.profile[i1 >> 2u][i1 & 3u];
-        return mix(s0, s1, fr);
+        // The curve describes ONLY the wall band; the surfaces on either side
+        // are flat by definition, so taper to exactly zero at both ends
+        // (~1.5 samples). Without this every face pixel (v saturates at 1
+        // inside a feature) inherits the endpoint slope, and the SDF
+        // gradient's nearest-edge regions facet the face into triangles.
+        let win = clamp(min(vc, 1.0 - vc) * n * 0.667, 0.0, 1.0);
+        return mix(s0, s1, fr) * win;
     }
     if (rrect_clip.rect1.w > 2.001) {
         let w = v * (1.0 - v);
