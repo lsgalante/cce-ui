@@ -82,7 +82,7 @@ const CHANNEL: f32 = 3.0;
 const ROW_GAP: f32 = CHANNEL;
 /// How far a section's title box overhangs its header row upward, and the box's height.
 const TITLE_BOX_INSET: f32 = 2.0;
-const TITLE_BOX_H: f32 = 22.0;
+const TITLE_BOX_H: f32 = 28.0;
 /// How far a section's content box overhangs the first and last row it wraps —
 /// one channel, so the rows abut the section's top/bottom walls too.
 const CONTENT_BOX_PAD: f32 = CHANNEL;
@@ -90,14 +90,14 @@ const CONTENT_BOX_PAD: f32 = CHANNEL;
 /// concave (inner) corners where the neck joins the title and content boxes.
 const SECTION_BORDER_COLOR: [f32; 4] = [0.18, 0.18, 0.27, 1.0];
 const SECTION_BORDER_T: f32 = 1.0;
-const SECTION_R: f32 = 8.0;
+const SECTION_R: f32 = 13.0;
 /// The throat — the concave fillet where the tab's right side turns onto the content
 /// body's top edge (the tab sits flush on the body; there is no connector neck).
-const SECTION_THROAT_R: f32 = 3.0;
+const SECTION_THROAT_R: f32 = 5.0;
 /// The relief carve's concave inside-corner radius at the tab throat
 /// (`section_fillets`) — sized against SECTION_R so inside and outside
 /// corners read as one family.
-const SECTION_FILLET_R: f32 = 6.0;
+const SECTION_FILLET_R: f32 = 10.0;
 /// Narrowest a title box may be: both its corners plus the throat fillet. Titles run
 /// wider than this in practice; it only keeps the throat clear of the corners.
 const SECTION_TITLE_MIN_W: f32 = 2.0 * SECTION_R + SECTION_THROAT_R;
