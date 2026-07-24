@@ -190,13 +190,21 @@ fn roll_spec(sv: vec2f) -> f32 {
 // join, so the roll's shading fades into the face instead of ending on a line.
 // The slope has the closed form (f/h)^(n-1), which IS the circular formula at
 // n = 2 — the same one-exponent generalization as the plan corners.
+// The descent is truncated at ROLL_CUT of the quadrant: the roll shades as if
+// the slab's rim were cut off partway down, so the profile ends on a bounded
+// slope instead of plunging vertical at the silhouette (the full quadrant put
+// nearly all of its drop in the outer third of the roll, reading as a hard
+// dropoff line at the very edge).
+const ROLL_CUT: f32 = 0.8;
+
 fn roll_slope(f: f32) -> f32 {
     let shape = rrect_clip.rect1.w;
+    let fc = f * ROLL_CUT;
     if (shape > 2.001) {
-        let h = pow(max(1.0 - pow(f, shape), 1e-4), 1.0 / shape);
-        return pow(f / h, shape - 1.0);
+        let h = pow(max(1.0 - pow(fc, shape), 1e-4), 1.0 / shape);
+        return pow(fc / h, shape - 1.0);
     }
-    return f / sqrt(max(1.0 - f * f, 1e-4));
+    return fc / sqrt(max(1.0 - fc * fc, 1e-4));
 }
 
 // Slope of a carve's transition profile (0 on the surrounding plateau → 1 on
