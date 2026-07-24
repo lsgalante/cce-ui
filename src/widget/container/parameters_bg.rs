@@ -1526,6 +1526,19 @@ impl Input for ParametersBg {
                 }
             }
         }
+        // Color rows tick their picker-stream poll (`cce-colors --stream`
+        // lines applying live) — fold a changed value back into the row so
+        // hosts syncing off display_params see it while the picker is open.
+        for i in 0..self.colors.len() {
+            if let Some(c) = &mut self.colors[i] {
+                if c.tick(dt, &mut dummy) {
+                    if let Some(val) = c.get_value_string() {
+                        self.display_params[i].1 = val;
+                    }
+                    changed = true;
+                }
+            }
+        }
         // Decay the "recently scrolled" window; keep frames coming until it expires so the
         // scrollbar's sink behind the plate actually renders.
         if self.scroll_activity > 0.0 {

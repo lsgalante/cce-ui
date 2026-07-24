@@ -19,6 +19,12 @@ pub struct ColorSelector {
     pub editor_state: TextEditorState,
     pub just_changed: bool,
     pub with_alpha: bool,
+    /// Live color lines from the running picker (`cce-colors --stream` prints
+    /// every change), forwarded by a reader thread — the value applies while
+    /// the editor stays open instead of on exit.
+    live_rx: Option<std::sync::mpsc::Receiver<String>>,
+    /// The value at picker launch, restored when the stream reports `cancel`.
+    revert_hex: Option<String>,
 }
 
 impl Clone for ColorSelector {
@@ -37,6 +43,8 @@ impl Clone for ColorSelector {
             editor_state: self.editor_state.clone(),
             just_changed: self.just_changed,
             with_alpha: self.with_alpha,
+            live_rx: None,
+            revert_hex: None,
         }
     }
 }
@@ -57,6 +65,8 @@ impl ColorSelector {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             with_alpha: false,
+            live_rx: None,
+            revert_hex: None,
         })
     }
 
@@ -75,6 +85,8 @@ impl ColorSelector {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             with_alpha: true,
+            live_rx: None,
+            revert_hex: None,
         })
     }
 
@@ -355,23 +367,53 @@ impl Input for ColorSelector {
     }
 
     fn tick(&mut self, _dt: f32, _rect: Rect) -> bool {
+        // Apply streamed picker lines as they arrive — the color changes live
+        // while the editor stays open. The picker's Apply prints a final line
+        // (already applied here); Cancel prints `cancel`, restoring the value
+        // the picker launched with.
+        let mut redraw = false;
+        if let Some(rx) = &self.live_rx {
+            let mut lines = Vec::new();
+            let mut disconnected = false;
+            loop {
+                match rx.try_recv() {
+                    Ok(line) => lines.push(line),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+            if disconnected {
+                self.live_rx = None;
+            }
+            for line in lines {
+                let line = line.trim().to_string();
+                let target = if line == "cancel" {
+                    self.revert_hex.clone().and_then(|h| parse_hex(&h))
+                } else {
+                    parse_hex(&line)
+                };
+                if let Some(c) = target {
+                    let color = [c[0], c[1], c[2]];
+                    let alpha = if self.with_alpha { c[3] } else { 255 };
+                    if self.color != color || self.alpha != alpha {
+                        self.color = color;
+                        self.alpha = alpha;
+                        self.just_changed = true;
+                        redraw = true;
+                    }
+                }
+            }
+        }
         let mut child_opt = self.child.lock().unwrap();
         if let Some(ref mut child) = *child_opt {
             match child.try_wait() {
                 Ok(Some(_status)) => {
-                    let child = child_opt.take().unwrap();
-                    if let Ok(output) = child.wait_with_output() {
-                        let stdout_str = String::from_utf8_lossy(&output.stdout);
-                        for line in stdout_str.lines().rev() {
-                            if let Some(c) = parse_hex(line.trim()) {
-                                self.color = [c[0], c[1], c[2]];
-                                self.alpha = if self.with_alpha { c[3] } else { 255 };
-                                self.just_clicked = true;
-                                self.just_changed = true;
-                                return true;
-                            }
-                        }
-                    }
+                    // The reader thread owns stdout and has already forwarded
+                    // every line (including Apply's final one) — just reap.
+                    *child_opt = None;
                 }
                 Ok(None) => {}
                 Err(e) => {
@@ -380,8 +422,7 @@ impl Input for ColorSelector {
                 }
             }
         }
-        false
-    
+        redraw
     }
 
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
@@ -426,7 +467,25 @@ impl Input for ColorSelector {
             if self.with_alpha {
                 cmd.arg("--alpha");
             }
-            if let Ok(child) = cmd.stdout(std::process::Stdio::piped()).spawn() {
+            // Live picking: the picker streams every change on stdout; a
+            // reader thread forwards lines so `tick` applies them while the
+            // editor stays open. `cancel` restores the launch value.
+            cmd.arg("--stream");
+            if let Ok(mut child) = cmd.stdout(std::process::Stdio::piped()).spawn() {
+                if let Some(stdout) = child.stdout.take() {
+                    let (tx, rx) = std::sync::mpsc::channel::<String>();
+                    std::thread::spawn(move || {
+                        use std::io::BufRead;
+                        let reader = std::io::BufReader::new(stdout);
+                        for line in reader.lines().map_while(Result::ok) {
+                            if tx.send(line).is_err() {
+                                break;
+                            }
+                        }
+                    });
+                    self.live_rx = Some(rx);
+                    self.revert_hex = Some(hex.clone());
+                }
                 *child_guard = Some(child);
             }
                     return true;
