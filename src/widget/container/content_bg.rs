@@ -269,4 +269,5 @@ impl GraphController for ContentBg {
     fn take_pending_connection(&mut self) -> Option<(String, String)> { None }
     fn cancel_connecting(&mut self) {}
     fn is_node_rect(&self, _qx: f32, _qy: f32, _qw: f32, _qh: f32) -> bool { false }
+    fn node_at(&self, _px: f32, _py: f32) -> Option<usize> { None }
 }

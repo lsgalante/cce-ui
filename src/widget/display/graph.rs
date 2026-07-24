@@ -188,6 +188,20 @@ impl Graph {
         false
     }
 
+    /// The topmost node whose body contains (px, py), in the same
+    /// window-absolute space `node_rect` reports (grid_origin = pane + pan).
+    /// Reverse order so a later-drawn node wins where bodies overlap.
+    pub fn node_at(&self, px: f32, py: f32) -> Option<usize> {
+        for i in (0..self.nodes.len()).rev() {
+            if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
+                if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
+                    return Some(i);
+                }
+            }
+        }
+        None
+    }
+
     /// How far a port's center floats off its node edge: the connector's own
     /// radius plus a small gap, so the circle sits fully OUTSIDE the node's
     /// bounding box rather than straddling its border.
@@ -1011,6 +1025,9 @@ impl GraphController for Graph {
     }
     fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool {
         self.is_node_rect(qx, qy, qw, qh)
+    }
+    fn node_at(&self, px: f32, py: f32) -> Option<usize> {
+        self.node_at(px, py)
     }
 }
 

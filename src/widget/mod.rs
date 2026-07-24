@@ -92,6 +92,8 @@ pub enum ContextAction {
     CollapseNode,
     ExpandAll,
     CollapseAll,
+    /// Ramp: hide/show the bottom control strip, the graph claiming the space.
+    ToggleRampControls,
 }
 
 use crate::colors;
@@ -580,6 +582,8 @@ pub trait GraphController {
     fn take_pending_connection(&mut self) -> Option<(String, String)>;
     fn cancel_connecting(&mut self);
     fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool;
+    /// The topmost node whose body contains (px, py), window-absolute coords.
+    fn node_at(&self, px: f32, py: f32) -> Option<usize>;
 }
 
 pub trait SpreadsheetController {
