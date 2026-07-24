@@ -1242,12 +1242,7 @@ impl Paint for ParametersBg {
         if !self.visible {
             return [0.0, 0.0, 0.0, 0.0];
         }
-        let mut c = colors::param_bg_color();
-        c[3] *= crate::layout::plate_opacity();
-        if colors::plate_blur() {
-            c[3] = -c[3].abs();
-        }
-        c
+        colors::param_plate_fill()
     }
 
     /// The shared plate corner radius (rounded on all four corners when non-zero).

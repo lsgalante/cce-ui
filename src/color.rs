@@ -919,6 +919,20 @@ pub fn set_param_bg_color(color: [f32; 4]) {
     }
 }
 
+/// The params plate's final fill as the renderer consumes it: the tint scaled
+/// by the global plate opacity, alpha negated as the blur-behind marker when
+/// plate blur is on. The single source both `ParametersBg`'s own plate and any
+/// surface that wants to match it (the designer's node bodies) draw from, so
+/// they track a live retint / opacity / blur toggle together.
+pub fn param_plate_fill() -> [f32; 4] {
+    let mut c = param_bg_color();
+    c[3] *= crate::layout::plate_opacity();
+    if plate_blur() {
+        c[3] = -c[3].abs();
+    }
+    c
+}
+
 pub const PANEL_MENU_BG: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
 pub const PANEL_MENU_HOVER: [f32; 4] = [0.18, 0.18, 0.25, 1.0];
 pub const PANEL_MENU_FOCUSED: [f32; 4] = [0.08, 0.16, 0.28, 1.0];

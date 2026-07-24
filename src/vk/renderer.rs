@@ -1698,11 +1698,21 @@ impl VkRenderer {
                 // so blur plates sample the frame-so-far, and later blur plates
                 // sample refreshed copies that include earlier ones.
                 let mut active_set = self.descriptor_set;
+                // CONSECUTIVE blur plates share one snapshot: only a non-blur
+                // draw invalidates it. A run of blur plates (the designer's
+                // node bodies) costs one copy, not one per plate — they don't
+                // see each other, which only matters where they overlap.
+                let mut snapshot_fresh = false;
 
                 for batch in batches {
                     if batch.blur_behind {
-                        self.snapshot_frame_so_far(cmd, image_index as usize);
-                        active_set = self.descriptor_set_snapshot;
+                        if !snapshot_fresh {
+                            self.snapshot_frame_so_far(cmd, image_index as usize);
+                            active_set = self.descriptor_set_snapshot;
+                            snapshot_fresh = true;
+                        }
+                    } else if batch.start < batch.end {
+                        snapshot_fresh = false;
                     }
                     // Resolve the batch scissor; a degenerate one skips the
                     // vertex draws (images still process on their own clips).
