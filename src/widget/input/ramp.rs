@@ -924,6 +924,32 @@ impl Paint for Ramp {
             pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
 
+        // Axis numbers on the gridlines — small, dim, part of the graph
+        // floor (under the curve and keys, inside the opening).
+        let num_color = [0x84u8, 0x84, 0x92];
+        for ratio in [0.25f32, 0.5, 0.75] {
+            let gy = graph.y + graph.height * (1.0 - ratio);
+            pc.text_with(
+                format!("{ratio:.2}"),
+                graph.x + 5.0,
+                gy - 11.0,
+                9.0,
+                num_color,
+                Some("monospace".to_string()),
+                None,
+            );
+            let gx = graph.x + graph.width * ratio;
+            pc.text_with(
+                format!("{ratio:.2}"),
+                gx - 11.0,
+                graph.y + graph.height - 13.0,
+                9.0,
+                num_color,
+                Some("monospace".to_string()),
+                None,
+            );
+        }
+
         // The curve itself: one anti-aliased round-capped polyline — exact
         // key-to-key segments in linear mode, dense samples under smoothstep
         // blending. Constant-value extensions reach the graph's side walls.
