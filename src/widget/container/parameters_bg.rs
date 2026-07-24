@@ -1035,6 +1035,18 @@ impl ParametersBg {
                 // notched the walls there; found the hard way).
                 let throat_r = tx + tw;
                 let rho = SECTION_FILLET_R;
+                // Right of the throat, ONE piece owns the whole right run —
+                // top wall, top-right arc, right wall, bottom-right arc — so
+                // both right corners are real turns. (The old top-run +
+                // full-body split put the top wall and the right wall in
+                // different pieces; each faded out at the seam and the
+                // top-right corner rendered square.) A left piece carries the
+                // left wall and the bottom-left arc; the two bottom runs
+                // crossfade under the seam at the right piece's left edge.
+                let body_lr = |x_run: f32, out: &mut Vec<_>| {
+                    out.push((x_run, cy, cx + cw - x_run, ch, (0.0, r, r, 0.0), depth, false, (true, true, true, false)));
+                    out.push((cx, cy, x_run + depth - cx, ch, (0.0, 0.0, 0.0, r), depth, false, (false, false, true, true)));
+                };
                 if cx + cw > throat_r + 2.0 * rho {
                     // Filleted throat ([`Self::section_fillets`]): the tab's
                     // right wall must END at the fillet's vertical tangent
@@ -1044,35 +1056,17 @@ impl ParametersBg {
                     // fillet span down to the body's own fade-in.
                     out.push((tx, ty, tw, (cy - rho) - ty + depth, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
                     out.push((tx, cy - rho, tw, rho + depth, (0.0, 0.0, 0.0, 0.0), depth, false, (false, false, false, true)));
-                    out.push((
-                        throat_r + rho - depth,
-                        cy,
-                        cx + cw - throat_r - rho + depth,
-                        ch,
-                        (0.0, r, 0.0, 0.0),
-                        depth,
-                        false,
-                        (true, false, false, false),
-                    ));
+                    body_lr(throat_r + rho - depth, &mut out);
                 } else {
                     // Too narrow for the fillet: the plain square throat.
                     out.push((tx, ty, tw, th + depth, (r, r, 0.0, 0.0), depth, false, (true, true, false, true)));
                     if cx + cw > throat_r + 0.5 {
-                        out.push((
-                            throat_r - depth,
-                            cy,
-                            cx + cw - throat_r + depth,
-                            ch,
-                            (0.0, r, 0.0, 0.0),
-                            depth,
-                            false,
-                            (true, false, false, false),
-                        ));
+                        body_lr(throat_r - depth, &mut out);
+                    } else {
+                        // The tab spans the body: no top wall at all.
+                        out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
                     }
                 }
-                // Body: top open — its top wall comes from the segment beside
-                // the tab's throat.
-                out.push((cx, cy, cw, ch, (0.0, 0.0, r, r), depth, false, (false, true, true, true)));
             } else {
                 let depth = crate::layout::bevel_width().min(th * 0.2).min(CHANNEL);
                 out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));
