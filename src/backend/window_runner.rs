@@ -1422,6 +1422,11 @@ pub struct DlBatch {
     /// When set, this batch is one SDF-lit plate cover quad (see
     /// [`crate::vk::PlatePush`]; already in physical px). Never merged.
     pub plate: Option<crate::vk::PlatePush>,
+    /// A blur-behind plate (negative-alpha color): before drawing this batch
+    /// the renderer snapshots the swapchain-so-far into its snapshot image, so
+    /// the blur samples everything painted beneath the plate — not just the 3D
+    /// scene backdrop. Never merged.
+    pub blur_behind: bool,
 }
 
 /// An image draw from the display list: `at` is the vertex index it sorts
@@ -1476,14 +1481,22 @@ pub fn tessellate_display_list(
         let start = verts.len() as u32;
         let mut plate: Option<crate::vk::PlatePush> = None;
         let mut made_plate: Option<crate::scene::layout::Rect> = None;
+        // Blur-behind marker: a Plate/Bevel whose fill alpha is negative asks
+        // the renderer to snapshot the frame-so-far before it draws.
+        let blur_behind = matches!(
+            &item.prim,
+            crate::scene::paint::Prim::Bevel { color, .. }
+            | crate::scene::paint::Prim::Plate { color, .. } if color[3] < 0.0
+        );
         // Logical [cx, cy, r] → the physical-pixel triple the vertex attribute carries.
         let no = item
             .clip_circle
             .map(|c| [c[0] * scale, c[1] * scale, c[2] * scale])
             .unwrap_or([0.0f32, 0.0, 0.0]);
         // Fixed 16-segment fans read as polygons once a circle/arc is pane-sized; scale
-        // the fan with the radius (capped — beyond 64 the chord error is subpixel).
-        let segs = |radius: f32| -> usize { (radius as usize).clamp(16, 64) };
+        // the fan with the PHYSICAL radius (capped — beyond 128 the chord error is
+        // subpixel even on HiDPI).
+        let segs = |radius: f32| -> usize { ((radius * scale) as usize).clamp(16, 128) };
         match &item.prim {
             Prim::Text { .. } => continue, // text goes through the glyph/text-span path
             Prim::Image { image, rect, alpha } => {
@@ -1792,8 +1805,9 @@ pub fn tessellate_display_list(
             }
         }
         // Merge into the previous batch if it shares this clip pair and is contiguous.
-        // Plate batches carry per-draw push constants, so they never merge.
-        if plate.is_none() {
+        // Plate batches carry per-draw push constants, and blur-behind batches
+        // trigger the renderer's snapshot copy, so neither ever merges.
+        if plate.is_none() && !blur_behind {
             // Ordinary geometry painted after a plate ends its carve-grouping
             // window: a recess emitted later must overlay this geometry (the
             // fallback path), not shade beneath it inside the plate's draw.
@@ -1809,7 +1823,7 @@ pub fn tessellate_display_list(
                 }
             }
         }
-        batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end, plate });
+        batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end, plate, blur_behind });
         if let Some(prect) = made_plate {
             last_plate = Some((batches.len() - 1, prect));
         }
@@ -2679,7 +2693,7 @@ impl<A: Application> EngineState<A> {
         let pre_custom = verts.len() as u32;
         self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);
         if (verts.len() as u32) > pre_custom {
-            dl_batches.push(DlBatch { scissor: None, clip_rrect: None, start: pre_custom, end: verts.len() as u32, plate: None });
+            dl_batches.push(DlBatch { scissor: None, clip_rrect: None, start: pre_custom, end: verts.len() as u32, plate: None, blur_behind: false });
         }
 
         // 1b. Overlay quads (drawn after the text pass).
@@ -2818,6 +2832,7 @@ impl<A: Application> EngineState<A> {
                 start: batch.start,
                 end: batch.end,
                 plate: batch.plate,
+                blur_behind: batch.blur_behind,
             })
             .collect();
 

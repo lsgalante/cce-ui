@@ -1,9 +1,11 @@
 //! The ash renderer. One graphics queue, a classic render pass, two frames in
 //! flight, FIFO (vsync) presentation. Memory goes through gpu-allocator; the
 //! descriptor set mirrors `shader.wgsl`'s @group(0): sampled backdrop texture
-//! (binding 0), sampler (binding 1), WindowInfo uniform (binding 2). The backdrop
-//! is a 1x1 placeholder until the blur-behind path is wired to a real framebuffer
-//! copy at cutover.
+//! (binding 0), sampler (binding 1), WindowInfo uniform (binding 2). Binding 0
+//! is the scene backdrop until the first blur-behind plate: there the UI pass
+//! suspends, the frame-so-far is copied into the snapshot image, and the
+//! snapshot descriptor set takes over — so blur plates blur everything painted
+//! beneath them, not just the 3D scene.
 
 use std::ffi::c_void;
 
@@ -33,6 +35,11 @@ pub struct Batch2D {
     /// When set, this batch is a single SDF-lit plate cover quad: the params go
     /// out as push constants and shader2d's plate branch lights it per pixel.
     pub plate: Option<PlatePush>,
+    /// A blur-behind plate (negative-alpha color): the renderer suspends the UI
+    /// pass, copies the swapchain-so-far into its snapshot image, and resumes —
+    /// so the plate's blur samples everything painted beneath it (background,
+    /// widgets, wires), not just the 3D scene backdrop.
+    pub blur_behind: bool,
 }
 
 /// Push-constant block for one SDF-lit plate batch (physical px throughout).
@@ -193,6 +200,15 @@ pub struct VkRenderer {
 
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
+    /// Twin of `descriptor_set` with binding 0 pointing at `snapshot_image`
+    /// instead of the scene backdrop; bound for every draw after the first
+    /// mid-pass snapshot so blur plates sample the frame-so-far.
+    descriptor_set_snapshot: vk::DescriptorSet,
+    /// Mid-frame copy target for blur-behind plates: the swapchain content so
+    /// far, sampled by the resumed pass's blur draws. Sized with the surface.
+    snapshot_image: vk::Image,
+    snapshot_view: vk::ImageView,
+    snapshot_allocation: Option<Allocation>,
     backdrop_sampler: vk::Sampler,
     window_info: AllocatedBuffer,
     /// The bevel-profile generation `window_info` was last written with —
@@ -658,32 +674,36 @@ impl VkRenderer {
             "plate-features",
         );
 
+        // Two sets: the scene-backdrop set and its snapshot twin (binding 0
+        // differs; 1-3 alias the same sampler/uniforms).
         let pool_sizes = [
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::SAMPLED_IMAGE)
-                .descriptor_count(1),
+                .descriptor_count(2),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::SAMPLER)
-                .descriptor_count(1),
+                .descriptor_count(2),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(2),
+                .descriptor_count(4),
         ];
         let descriptor_pool = device
             .create_descriptor_pool(
                 &vk::DescriptorPoolCreateInfo::default()
-                    .max_sets(1)
+                    .max_sets(2)
                     .pool_sizes(&pool_sizes),
                 None,
             )
             .expect("Failed to create descriptor pool");
-        let descriptor_set = device
+        let both_layouts = [descriptor_set_layout, descriptor_set_layout];
+        let sets = device
             .allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::default()
                     .descriptor_pool(descriptor_pool)
-                    .set_layouts(&set_layouts),
+                    .set_layouts(&both_layouts),
             )
-            .expect("Failed to allocate descriptor set")[0];
+            .expect("Failed to allocate descriptor sets");
+        let (descriptor_set, descriptor_set_snapshot) = (sets[0], sets[1]);
 
         let image_infos = [vk::DescriptorImageInfo::default()
             .image_view(scene.backdrop_view)
@@ -716,6 +736,24 @@ impl VkRenderer {
                     .buffer_info(&buffer_infos),
                 vk::WriteDescriptorSet::default()
                     .dst_set(descriptor_set)
+                    .dst_binding(3)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(&feature_infos),
+                // Snapshot twin: bindings 1-3 alias the same objects; binding 0
+                // is written by `sync_backdrop_targets` once the snapshot image
+                // exists.
+                vk::WriteDescriptorSet::default()
+                    .dst_set(descriptor_set_snapshot)
+                    .dst_binding(1)
+                    .descriptor_type(vk::DescriptorType::SAMPLER)
+                    .image_info(&sampler_infos),
+                vk::WriteDescriptorSet::default()
+                    .dst_set(descriptor_set_snapshot)
+                    .dst_binding(2)
+                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                    .buffer_info(&buffer_infos),
+                vk::WriteDescriptorSet::default()
+                    .dst_set(descriptor_set_snapshot)
                     .dst_binding(3)
                     .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
                     .buffer_info(&feature_infos),
@@ -780,6 +818,10 @@ impl VkRenderer {
             shader_module,
             descriptor_pool,
             descriptor_set,
+            descriptor_set_snapshot,
+            snapshot_image: vk::Image::null(),
+            snapshot_view: vk::ImageView::null(),
+            snapshot_allocation: None,
             backdrop_sampler,
             window_info,
             profile_gen: 0,
@@ -905,7 +947,10 @@ impl VkRenderer {
                         .image_array_layers(1)
                         .image_usage(
                             vk::ImageUsageFlags::COLOR_ATTACHMENT
-                                | vk::ImageUsageFlags::TRANSFER_DST,
+                                | vk::ImageUsageFlags::TRANSFER_DST
+                                // Blur-behind plates copy the frame-so-far out
+                                // of the swapchain into the snapshot image.
+                                | vk::ImageUsageFlags::TRANSFER_SRC,
                         )
                         .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                         .pre_transform(caps.current_transform)
@@ -982,6 +1027,110 @@ impl VkRenderer {
         self.sync_backdrop_targets();
     }
 
+    /// Suspend the UI pass, copy the swapchain's frame-so-far into the blur
+    /// snapshot image, and resume drawing — the mechanism behind blur-behind
+    /// plates (`Batch2D::blur_behind`). Ending the pass leaves the swapchain in
+    /// its PRESENT final layout; the copy walks it through TRANSFER_SRC and
+    /// hands it back in TRANSFER_DST, which is exactly `render_pass_load`'s
+    /// expected initial layout, so the resume reuses that pass (and the shared
+    /// framebuffers). Dynamic viewport state dies with the pass and is restored;
+    /// scissor/pipeline/descriptors are re-bound per draw by the batch loop.
+    fn snapshot_frame_so_far(&self, cmd: vk::CommandBuffer, image_index: usize) {
+        let device = &self.core.device;
+        let swapchain_image = self.swapchain_images[image_index];
+        unsafe {
+            device.cmd_end_render_pass(cmd);
+            device.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[
+                    vk::ImageMemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                        .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+                        .old_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                        .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .image(swapchain_image)
+                        .subresource_range(COLOR_RANGE),
+                    // Covers the previous frame's blur reads of the snapshot.
+                    vk::ImageMemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::SHADER_READ)
+                        .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                        .old_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                        .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .image(self.snapshot_image)
+                        .subresource_range(COLOR_RANGE),
+                ],
+            );
+            let subresource = vk::ImageSubresourceLayers::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .layer_count(1);
+            device.cmd_copy_image(
+                cmd,
+                swapchain_image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                self.snapshot_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[vk::ImageCopy::default()
+                    .src_subresource(subresource)
+                    .dst_subresource(subresource)
+                    .extent(vk::Extent3D {
+                        width: self.extent.width,
+                        height: self.extent.height,
+                        depth: 1,
+                    })],
+            );
+            device.cmd_pipeline_barrier(
+                cmd,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER | vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[
+                    vk::ImageMemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                        .dst_access_mask(vk::AccessFlags::SHADER_READ)
+                        .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                        .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .image(self.snapshot_image)
+                        .subresource_range(COLOR_RANGE),
+                    vk::ImageMemoryBarrier::default()
+                        .src_access_mask(vk::AccessFlags::TRANSFER_READ)
+                        .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                        .old_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                        .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .image(swapchain_image)
+                        .subresource_range(COLOR_RANGE),
+                ],
+            );
+            device.cmd_begin_render_pass(
+                cmd,
+                &vk::RenderPassBeginInfo::default()
+                    .render_pass(self.render_pass_load)
+                    .framebuffer(self.framebuffers[image_index])
+                    .render_area(vk::Rect2D {
+                        offset: vk::Offset2D { x: 0, y: 0 },
+                        extent: self.extent,
+                    }),
+                vk::SubpassContents::INLINE,
+            );
+            device.cmd_set_viewport(cmd, 0, &[flipped_viewport(self.extent)]);
+        }
+    }
+
     /// Recreate backdrop + depth at the surface size (device must be idle),
     /// re-point the UI descriptor at the new view, and make the fresh image
     /// legal to sample.
@@ -997,16 +1146,102 @@ impl VkRenderer {
             self.core.command_pool,
             self.scene.backdrop_image,
         );
+        // The blur snapshot target tracks the surface size alongside the
+        // backdrop (same format so cmd_copy_image from the swapchain is legal).
+        unsafe {
+            let device = &self.core.device;
+            if self.snapshot_view != vk::ImageView::null() {
+                device.destroy_image_view(self.snapshot_view, None);
+                device.destroy_image(self.snapshot_image, None);
+                self.snapshot_view = vk::ImageView::null();
+                self.snapshot_image = vk::Image::null();
+            }
+            if let Some(alloc) = self.snapshot_allocation.take() {
+                let _ = self.core.allocator.as_mut().unwrap().free(alloc);
+            }
+            let device = &self.core.device;
+            let snapshot_image = device
+                .create_image(
+                    &vk::ImageCreateInfo::default()
+                        .image_type(vk::ImageType::TYPE_2D)
+                        .format(self.surface_format.format)
+                        .extent(vk::Extent3D {
+                            width: self.extent.width,
+                            height: self.extent.height,
+                            depth: 1,
+                        })
+                        .mip_levels(1)
+                        .array_layers(1)
+                        .samples(vk::SampleCountFlags::TYPE_1)
+                        .tiling(vk::ImageTiling::OPTIMAL)
+                        .usage(
+                            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
+                        )
+                        .initial_layout(vk::ImageLayout::UNDEFINED),
+                    None,
+                )
+                .expect("Failed to create snapshot image");
+            let requirements = device.get_image_memory_requirements(snapshot_image);
+            let allocation = self
+                .core
+                .allocator
+                .as_mut()
+                .unwrap()
+                .allocate(&AllocationCreateDesc {
+                    name: "blur-snapshot",
+                    requirements,
+                    location: MemoryLocation::GpuOnly,
+                    linear: false,
+                    allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+                })
+                .expect("Failed to allocate snapshot memory");
+            self.core
+                .device
+                .bind_image_memory(snapshot_image, allocation.memory(), allocation.offset())
+                .expect("Failed to bind snapshot memory");
+            let snapshot_view = self
+                .core
+                .device
+                .create_image_view(
+                    &vk::ImageViewCreateInfo::default()
+                        .image(snapshot_image)
+                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .format(self.surface_format.format)
+                        .subresource_range(COLOR_RANGE),
+                    None,
+                )
+                .expect("Failed to create snapshot view");
+            self.snapshot_image = snapshot_image;
+            self.snapshot_view = snapshot_view;
+            self.snapshot_allocation = Some(allocation);
+        }
+        // A fresh snapshot must be legal to sample before its first copy.
+        clear_image_to_shader_read(
+            &self.core.device,
+            self.core.queue,
+            self.core.command_pool,
+            self.snapshot_image,
+        );
         let image_infos = [vk::DescriptorImageInfo::default()
             .image_view(self.scene.backdrop_view)
             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let snapshot_infos = [vk::DescriptorImageInfo::default()
+            .image_view(self.snapshot_view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
         unsafe {
             self.core.device.update_descriptor_sets(
-                &[vk::WriteDescriptorSet::default()
-                    .dst_set(self.descriptor_set)
-                    .dst_binding(0)
-                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                    .image_info(&image_infos)],
+                &[
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(self.descriptor_set)
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&image_infos),
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(self.descriptor_set_snapshot)
+                        .dst_binding(0)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&snapshot_infos),
+                ],
                 &[],
             );
         }
@@ -1440,11 +1675,22 @@ impl VkRenderer {
                     start: 0,
                     end: frame.vertex_count,
                     plate: None,
+                    blur_behind: false,
                 }];
                 let batches: &[Batch2D] =
                     if frame2d.batches.is_empty() { &default_batch } else { frame2d.batches };
 
+                // Which @group(0) the vertex draws bind: the scene-backdrop set
+                // until the first blur-behind snapshot, the snapshot set after —
+                // so blur plates sample the frame-so-far, and later blur plates
+                // sample refreshed copies that include earlier ones.
+                let mut active_set = self.descriptor_set;
+
                 for batch in batches {
+                    if batch.blur_behind {
+                        self.snapshot_frame_so_far(cmd, image_index as usize);
+                        active_set = self.descriptor_set_snapshot;
+                    }
                     // Resolve the batch scissor; a degenerate one skips the
                     // vertex draws (images still process on their own clips).
                     let batch_scissor: Option<vk::Rect2D> = match batch.scissor {
@@ -1498,7 +1744,7 @@ impl VkRenderer {
                                 vk::PipelineBindPoint::GRAPHICS,
                                 self.pipeline_layout,
                                 0,
-                                &[self.descriptor_set],
+                                &[active_set],
                                 &[],
                             );
                             self.core.device
@@ -1656,6 +1902,15 @@ impl Drop for VkRenderer {
             }
 
             self.core.device.destroy_sampler(self.backdrop_sampler, None);
+            if self.snapshot_view != vk::ImageView::null() {
+                self.core.device.destroy_image_view(self.snapshot_view, None);
+                self.core.device.destroy_image(self.snapshot_image, None);
+            }
+            if let Some(alloc) = self.snapshot_allocation.take() {
+                if let Some(allocator) = self.core.allocator.as_mut() {
+                    let _ = allocator.free(alloc);
+                }
+            }
             if let Some(allocator) = self.core.allocator.as_mut() {
                 self.scene.destroy(&self.core.device, allocator);
                 self.image.destroy(&self.core.device, allocator);
