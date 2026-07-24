@@ -169,8 +169,10 @@ impl ParametersBg {
         } else if p.2 == "section" {
             24.0
         } else if p.2 == "ramp" {
-            // Label band + the ramp's graph and control strip.
-            190.0
+            // Label band + the ramp's graph and control strip. The control
+            // strip and label band are fixed, so this whole increase grows the
+            // curve plot (Ramp::graph_h = height − strip).
+            260.0
         } else if p.2.starts_with("float3") {
             108.0
         } else if p.2.starts_with("slider") {
