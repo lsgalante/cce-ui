@@ -636,6 +636,9 @@ fn parse_and_set_colors(content: &str) {
     if let Some(t) = val.pointer("/style/surface/plate/bevel_width").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = PLATE_BEVEL_WIDTH.write() { *lock = t as f32; }
     }
+    if let Some(c) = get_color("/style/surface/param/color") {
+        if let Ok(mut lock) = PARAM_BG_COLOR.write() { *lock = c; }
+    }
     if let Some(blur) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_bool()) {
         if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur; }
     } else if let Some(blur_val) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_f64()) {
@@ -898,6 +901,23 @@ pub const SPINBOX_DISPLAY: [f32; 4] = [0.12, 0.12, 0.16, 1.0];
 pub const CANVAS_BG: [f32; 4] = [0.05, 0.05, 0.10, 1.0];
 pub const VIEWPORT_BG: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 pub const PARAM_BG: [f32; 4] = [0.10, 0.10, 0.14, 0.25];
+
+/// The params pane's plate tint (linear rgba) — [`PARAM_BG`] made live:
+/// `style.surface.param.color` in config overrides it, and apps can retint at
+/// runtime (the designer's Style section "Plate Color"). Alpha doubles as the
+/// frost strength under plate blur.
+static PARAM_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(PARAM_BG);
+
+pub fn param_bg_color() -> [f32; 4] {
+    load_colors_once();
+    *PARAM_BG_COLOR.read().unwrap()
+}
+
+pub fn set_param_bg_color(color: [f32; 4]) {
+    if let Ok(mut lock) = PARAM_BG_COLOR.write() {
+        *lock = color;
+    }
+}
 
 pub const PANEL_MENU_BG: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
 pub const PANEL_MENU_HOVER: [f32; 4] = [0.18, 0.18, 0.25, 1.0];

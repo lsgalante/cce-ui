@@ -1242,7 +1242,7 @@ impl Paint for ParametersBg {
         if !self.visible {
             return [0.0, 0.0, 0.0, 0.0];
         }
-        let mut c = colors::PARAM_BG;
+        let mut c = colors::param_bg_color();
         c[3] *= crate::layout::plate_opacity();
         if colors::plate_blur() {
             c[3] = -c[3].abs();
@@ -2280,6 +2280,10 @@ fn parse_hex_to_rgb(s: &str) -> Option<[u8; 3]> {
     crate::color::parse_hex_bytes(s).map(|[r, g, b, _]| [r, g, b])
 }
 
+fn parse_hex_to_rgba(s: &str) -> Option<[u8; 4]> {
+    crate::color::parse_hex_bytes(s)
+}
+
 fn parse_spinbox_range(ptype: &str) -> (i32, i32, i32) {
     if ptype.starts_with("spinbox:") {
         let parts: Vec<&str> = ptype.split(':').collect();
@@ -2406,7 +2410,11 @@ impl ParamController for ParametersBg {
                 }
             }).collect();
             self.colors = self.display_params.iter().map(|p| {
-                if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+                if p.2 == "rgba" {
+                    // Alpha-carrying param: the full picker, 8-digit hex.
+                    let col = parse_hex_to_rgba(&p.1).unwrap_or([255, 255, 255, 255]);
+                    Some(ColorSelector::new_rgba(col).with_label(&p.0))
+                } else if p.2.starts_with("color") || p.2 == "rgb" {
                     let col = parse_hex_to_rgb(&p.1).unwrap_or([255, 255, 255]);
                     Some(ColorSelector::new(col).with_label(&p.0))
                 } else {
