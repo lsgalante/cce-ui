@@ -504,11 +504,11 @@ fn resolve_blur(pos: vec2f, color: vec4f) -> vec4f {
     var blurred = vec4f(0.0);
     var total_weight = 0.0;
 
-    // 7x7 Gaussian blur kernel, samples every 3.5 px (~±10px reach); the
+    // 7x7 Gaussian blur kernel, samples every 2.5 px (~±7.5px reach); the
     // linear sampler between taps papers over the stride.
     for (var x = -3.0; x <= 3.0; x += 1.0) {
         for (var y = -3.0; y <= 3.0; y += 1.0) {
-            let offset = vec2f(x, y) * 3.5;
+            let offset = vec2f(x, y) * 2.5;
             let sample_uv = (pos + offset) / tex_size;
             let weight = exp(-(x*x + y*y) / (2.0 * 2.0 * 2.0));
             blurred += textureSample(t_backdrop, s_backdrop, sample_uv) * weight;
