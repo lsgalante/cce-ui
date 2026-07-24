@@ -494,19 +494,21 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     return vec4f(in.color.rgb, in.color.a * clip_cov);
 }
 
-// Blur-behind resolve for a negative-alpha plate color: the (blurred) backdrop
-// mixed with the plate color at |alpha| opacity.
+// Blur-behind resolve for a negative-alpha plate color: frosted glass — the
+// FULLY blurred backdrop is the base (no clean-backdrop passthrough; mixing
+// the clean sample back in at plate opacity left translucent plates barely
+// blurred), tinted by the plate color at |alpha| opacity.
 fn resolve_blur(pos: vec2f, color: vec4f) -> vec4f {
     let tex_size = vec2f(textureDimensions(t_backdrop));
-    let clean_backdrop = textureSample(t_backdrop, s_backdrop, pos / tex_size);
 
     var blurred = vec4f(0.0);
     var total_weight = 0.0;
 
-    // 7x7 Gaussian blur kernel
+    // 7x7 Gaussian blur kernel, samples every 3.5 px (~±10px reach); the
+    // linear sampler between taps papers over the stride.
     for (var x = -3.0; x <= 3.0; x += 1.0) {
         for (var y = -3.0; y <= 3.0; y += 1.0) {
-            let offset = vec2f(x, y) * 2.0; // sample every 2 pixels for a wider blur
+            let offset = vec2f(x, y) * 3.5;
             let sample_uv = (pos + offset) / tex_size;
             let weight = exp(-(x*x + y*y) / (2.0 * 2.0 * 2.0));
             blurred += textureSample(t_backdrop, s_backdrop, sample_uv) * weight;
@@ -517,6 +519,5 @@ fn resolve_blur(pos: vec2f, color: vec4f) -> vec4f {
     let backdrop_color = blurred / total_weight;
     let opacity = -color.a;
     let plate_color = vec4f(color.rgb, 1.0);
-    let blurred_plate = mix(backdrop_color, plate_color, opacity);
-    return mix(clean_backdrop, blurred_plate, opacity);
+    return mix(backdrop_color, plate_color, opacity);
 }
