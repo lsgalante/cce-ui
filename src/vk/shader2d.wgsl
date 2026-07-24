@@ -21,6 +21,12 @@ struct WindowInfo {
     // carve floor / boss crest), sample i at v = (i + 0.5) / count, packed 4
     // per vec4. carve_slope reads these in place of its analytic smoothstep.
     profile: array<vec4f, 8>,
+    // Custom EDGE profile for the plate perimeter roll
+    // (cce_ui::layout::set_roll_profile_keys) — same encoding, read by
+    // roll_slope in place of the analytic superellipse quadrant. The curve is
+    // the roll's descent progress: 0 at the face join, 1 at the silhouette.
+    roll_meta: vec4f,
+    roll_profile: array<vec4f, 8>,
 }
 
 @group(0) @binding(2) var<uniform> window_info: WindowInfo;
@@ -198,6 +204,22 @@ fn roll_spec(sv: vec2f) -> f32 {
 const ROLL_CUT: f32 = 0.8;
 
 fn roll_slope(f: f32) -> f32 {
+    // Custom edge profile: sample the uploaded ramp LUT. Face pixels saturate
+    // at f = 0 (the roll band's interior end), so taper the slope to zero
+    // there or every face pixel would inherit the curve's start slope; the
+    // silhouette end keeps whatever slope the curve was drawn ending on.
+    if (window_info.roll_meta.x > 0.5) {
+        let n = window_info.roll_meta.y;
+        let fcl = clamp(f, 0.0, 1.0);
+        let x = clamp(fcl * n - 0.5, 0.0, n - 1.0);
+        let i0 = u32(floor(x));
+        let i1 = min(i0 + 1u, u32(n) - 1u);
+        let fr = x - floor(x);
+        let s0 = window_info.roll_profile[i0 >> 2u][i0 & 3u];
+        let s1 = window_info.roll_profile[i1 >> 2u][i1 & 3u];
+        let win = clamp(fcl * n * 0.667, 0.0, 1.0);
+        return mix(s0, s1, fr) * win;
+    }
     let shape = rrect_clip.rect1.w;
     let fc = f * ROLL_CUT;
     if (shape > 2.001) {

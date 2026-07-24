@@ -1553,6 +1553,16 @@ static BEVEL_PROFILE: std::sync::RwLock<Option<[f32; BEVEL_PROFILE_SAMPLES]>> =
 /// Bumped on every profile change so renderers know to re-upload their LUT.
 static BEVEL_PROFILE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// The custom EDGE (plate roll) profile — same slope-LUT encoding as
+/// [`BEVEL_PROFILE`], but read by the shader's `roll_slope` for the perimeter
+/// roll of widget-scale plates: `v` runs 0 at the face join → 1 at the
+/// silhouette, and the curve is the roll's descent progress (0 = face height,
+/// 1 = fully dropped), so the identity curve is a straight chamfer and `None`
+/// is the analytic superellipse quadrant.
+static ROLL_PROFILE: std::sync::RwLock<Option<[f32; BEVEL_PROFILE_SAMPLES]>> =
+    std::sync::RwLock::new(None);
+static ROLL_PROFILE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Evaluate a ramp key list at `t` — the same piecewise interpolation
 /// `cce_ui::widget::Ramp::get_interpolated_value` draws, so the bevel renders
 /// exactly the curve the ramp widget shows (`smooth` = the widget's Bezier line
@@ -1593,6 +1603,13 @@ pub fn set_bevel_profile_keys(keys: &[(f32, f32)], smooth: bool) {
         clear_bevel_profile();
         return;
     }
+    *BEVEL_PROFILE.write().unwrap() = Some(ramp_slope_lut(keys, smooth));
+    BEVEL_PROFILE_GEN.fetch_add(1, std::sync::atomic::Ordering::Release);
+}
+
+/// A ramp key list sampled into the shader's slope LUT — slot `i` holds the
+/// curve's slope at `v = (i + 0.5) / N`.
+fn ramp_slope_lut(keys: &[(f32, f32)], smooth: bool) -> [f32; BEVEL_PROFILE_SAMPLES] {
     let n = BEVEL_PROFILE_SAMPLES;
     let mut slopes = [0.0f32; BEVEL_PROFILE_SAMPLES];
     for (i, slot) in slopes.iter_mut().enumerate() {
@@ -1600,8 +1617,40 @@ pub fn set_bevel_profile_keys(keys: &[(f32, f32)], smooth: bool) {
         let h1 = sample_ramp_keys(keys, smooth, (i + 1) as f32 / n as f32);
         *slot = (h1 - h0) * n as f32;
     }
-    *BEVEL_PROFILE.write().unwrap() = Some(slopes);
-    BEVEL_PROFILE_GEN.fetch_add(1, std::sync::atomic::Ordering::Release);
+    slopes
+}
+
+/// Install a custom EDGE profile for the plate perimeter roll from ramp keys —
+/// the [`set_bevel_profile_keys`] twin for [`ROLL_PROFILE`]. The curve is the
+/// roll's descent progress from the face join (0) to the silhouette (1); the
+/// shader's `roll_slope` samples it in place of the analytic superellipse
+/// quadrant. Empty or single-key lists clear back to the analytic roll.
+pub fn set_roll_profile_keys(keys: &[(f32, f32)], smooth: bool) {
+    if keys.len() < 2 {
+        clear_roll_profile();
+        return;
+    }
+    *ROLL_PROFILE.write().unwrap() = Some(ramp_slope_lut(keys, smooth));
+    ROLL_PROFILE_GEN.fetch_add(1, std::sync::atomic::Ordering::Release);
+}
+
+/// Drop the custom edge profile — plate rolls return to the analytic quadrant.
+pub fn clear_roll_profile() {
+    let mut guard = ROLL_PROFILE.write().unwrap();
+    if guard.is_some() {
+        *guard = None;
+        ROLL_PROFILE_GEN.fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
+}
+
+/// The installed edge profile's slope LUT, if any — what the renderer uploads.
+pub fn roll_profile_slopes() -> Option<[f32; BEVEL_PROFILE_SAMPLES]> {
+    *ROLL_PROFILE.read().unwrap()
+}
+
+/// Change counter for [`roll_profile_slopes`].
+pub fn roll_profile_generation() -> u64 {
+    ROLL_PROFILE_GEN.load(std::sync::atomic::Ordering::Acquire)
 }
 
 /// Drop the custom bevel profile — walls return to the analytic smoothstep.
