@@ -633,38 +633,49 @@ impl Paint for MenuBar {
         let color_f32 = [srgb[0], srgb[1], srgb[2], 1.0];
         let font = Paint::widget_font(self);
 
+        // Both dropdown flavors paint in the Dropdown widget's popover idiom
+        // (layered soft shadows, surface border/bg, accent hover, blue
+        // selected) so menubar menus read as the DE's normal dropdowns.
+        let draw_panel = |pc: &mut dyn crate::layout::RenderTarget, dx: f32, dy: f32, dw: f32, dh: f32, hovered: Option<usize>| {
+            let theme = colors::active_theme();
+            pc.rect([0.02, 0.02, 0.05, 0.15], dx + 1.0, dy + 1.0, dw, dh);
+            pc.rect([0.02, 0.02, 0.05, 0.08], dx + 3.0, dy + 3.0, dw, dh);
+            pc.rect([0.02, 0.02, 0.05, 0.04], dx + 5.0, dy + 5.0, dw, dh);
+            pc.rect(theme.surface_border, dx, dy, dw, dh);
+            pc.rect(theme.surface_bg, dx + 1.0, dy + 1.0, dw - 2.0, dh - 2.0);
+            if let Some(di) = hovered {
+                let iy = dy + di as f32 * DROPDOWN_ITEM_H;
+                pc.rect(theme.primary_accent, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0);
+            }
+        };
+        let item_color = |hovered: bool, selected: bool| -> [f32; 4] {
+            let c: [u8; 3] = if hovered {
+                [0xff, 0xff, 0xff]
+            } else if selected {
+                [0x3a, 0x9a, 0xff]
+            } else {
+                [0xcc, 0xcc, 0xd4]
+            };
+            [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0]
+        };
+        let _ = color_f32;
+
         if self.context_dropdown_open {
             if let Some((dx, dy, dw, dh)) = self.context_popover_rect(rect) {
-                let theme = colors::active_theme();
-                pc.rect(theme.surface_border, dx, dy, dw, dh);
-                pc.rect(theme.surface_bg, dx + 1.0, dy + 1.0, dw - 2.0, dh - 2.0);
-                if let Some(di) = self.context_hovered_item {
-                    let iy = dy + di as f32 * DROPDOWN_ITEM_H;
-                    pc.rect(colors::PANEL_MENU_HOVER, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0);
-                }
-
+                draw_panel(pc, dx, dy, dw, dh, self.context_hovered_item);
                 let bounds = Some([dx, dy, dx + dw, dy + dh]);
                 for (i, option) in self.context_options.iter().enumerate() {
-                    let is_selected = self.context_selected == i;
-                    let prefix = if is_selected { "✓ " } else { "  " };
-                    let text = format!("{}{}", prefix, option);
+                    let color = item_color(self.context_hovered_item == Some(i), self.context_selected == i);
                     let iy = crate::layout::align_text_y(dy + i as f32 * DROPDOWN_ITEM_H, DROPDOWN_ITEM_H, 12.0, 0.0);
                     if let Some(ref f) = font {
-                        pc.text_with_font_and_bounds(&text, dx + 8.0, iy, 12.0, color_f32, f, bounds);
+                        pc.text_with_font_and_bounds(option, dx + 8.0, iy, 12.0, color, f, bounds);
                     } else {
-                        pc.text_with_bounds(&text, dx + 8.0, iy, 12.0, color_f32, bounds);
+                        pc.text_with_bounds(option, dx + 8.0, iy, 12.0, color, bounds);
                     }
                 }
             }
         } else if let Some((dx, dy, dw, dh)) = self.menu_dropdown_rect() {
-            let theme = colors::active_theme();
-            pc.rect(theme.surface_border, dx, dy, dw, dh);
-            pc.rect(theme.surface_bg, dx + 1.0, dy + 1.0, dw - 2.0, dh - 2.0);
-            if let Some(di) = self.hovered_dropdown_item {
-                let iy = dy + di as f32 * DROPDOWN_ITEM_H;
-                pc.rect(colors::PANEL_MENU_HOVER, dx + 2.0, iy + 2.0, dw - 4.0, DROPDOWN_ITEM_H - 4.0);
-            }
-
+            draw_panel(pc, dx, dy, dw, dh, self.hovered_dropdown_item);
             let bounds = Some([dx, dy, dx + dw, dy + dh]);
             if let Some(menu_idx) = self.menus.selected {
                 if let Some(items) = self.menu_dropdowns.get(menu_idx) {
@@ -678,11 +689,12 @@ impl Paint for MenuBar {
                             None => "",
                         };
                         let text = format!("{}{}", prefix, option);
+                        let color = item_color(self.hovered_dropdown_item == Some(i), checked == Some(true));
                         let iy = crate::layout::align_text_y(dy + i as f32 * DROPDOWN_ITEM_H, DROPDOWN_ITEM_H, 12.0, 0.0);
                         if let Some(ref f) = font {
-                            pc.text_with_font_and_bounds(&text, dx + 8.0, iy, 12.0, color_f32, f, bounds);
+                            pc.text_with_font_and_bounds(&text, dx + 8.0, iy, 12.0, color, f, bounds);
                         } else {
-                            pc.text_with_bounds(&text, dx + 8.0, iy, 12.0, color_f32, bounds);
+                            pc.text_with_bounds(&text, dx + 8.0, iy, 12.0, color, bounds);
                         }
                     }
                 }
