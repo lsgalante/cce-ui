@@ -1352,6 +1352,16 @@ impl Input for TextBox {
                 if !self.editing {
                     self.begin_editing();
                     ectx.request_focus();
+                    if self.multiline {
+                        // A multiline box is a document, not a form field: the focusing
+                        // click places the caret instead of arming select-all, so the
+                        // first keystroke can't wipe prefilled content (e.g. a reply quote).
+                        let idx = self.position_to_idx(*px, *py, true);
+                        self.cursor_idx = idx;
+                        self.select_anchor = Some(idx);
+                        self.all_selected = false;
+                        self.sync_editor_state();
+                    }
                 } else {
                     let idx = self.position_to_idx(*px, *py, true);
                     self.cursor_idx = idx;
@@ -1402,8 +1412,10 @@ impl Input for TextBox {
             Event::KeyInput(key_event) => self.handle_key(key_event),
             Event::FocusIn => {
                 // The legacy `focus()`: enter editing and claim the global slot (unless
-                // disabled — legacy early-returned before `set_focused`).
-                if !self.disabled {
+                // disabled — legacy early-returned before `set_focused`). Skipped when
+                // already editing: a press-then-set_focused sequence must not re-arm
+                // select-all over the caret the press just placed.
+                if !self.disabled && !self.editing {
                     self.begin_editing();
                     ectx.request_focus();
                 }
@@ -1546,6 +1558,34 @@ mod tests {
         assert!(!tb.editing);
         assert_eq!(tb.text, "A");
         assert!(tb.take_change());
+    }
+
+    #[test]
+    fn multiline_focus_click_places_caret_instead_of_select_all() {
+        let mut dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new("abcdef".to_string()).with_multiline(true);
+        tb.set_rect(10.0, 10.0, 200.0, 100.0);
+
+        // The focusing click must NOT arm select-all (a first keystroke would wipe
+        // prefilled content, e.g. a reply quote) — it places the caret like any click.
+        let clicked = tb.mouse_input(MouseButton::Left, ElementState::Pressed, 12.0, 20.0, &mut dummy);
+        assert!(clicked);
+        assert!(tb.editing);
+        assert!(!tb.all_selected);
+        let caret_after_click = tb.cursor_idx;
+        let key_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character("X".to_string()),
+            text: Some("X".to_string()),
+            repeat: false,
+            ctrl: false,
+            shift: false,
+        };
+        let handled = tb.keyboard_input(&key_ev, &mut dummy);
+        assert!(handled);
+        assert_eq!(tb.edit_buffer.chars().count(), 7, "typing must insert, not replace the buffer");
+        assert!(tb.edit_buffer.contains("X"));
+        assert_eq!(tb.cursor_idx, caret_after_click + 1);
     }
 
     #[test]
