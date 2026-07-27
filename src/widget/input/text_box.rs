@@ -62,6 +62,10 @@ pub struct TextBox {
     pub width: Option<f32>,
     pub is_password: bool,
     pub multiline: bool,
+    /// Per-widget wrap override; `None` defers to the global `textbox_line_wrap()`
+    /// style. Flowed-text consumers (an email body) set this to keep wrapping even
+    /// when the user's config turns multiline wrap off DE-wide.
+    pub line_wrap_override: Option<bool>,
     pub draw_bg_border: bool,
     pub text_color: Option<[u8; 3]>,
     pub font_size: f32,
@@ -108,6 +112,7 @@ impl TextBox {
             width: None,
             is_password: false,
             multiline: false,
+            line_wrap_override: None,
             draw_bg_border: true,
             text_color: None,
             font_size: style_size,
@@ -302,7 +307,7 @@ impl TextBox {
     }
 
     pub fn line_wrap_enabled(&self) -> bool {
-        self.multiline && crate::layout::textbox_line_wrap()
+        self.multiline && self.line_wrap_override.unwrap_or_else(crate::layout::textbox_line_wrap)
     }
 
     pub fn set_max_width(&mut self, max_w: Option<f32>) {
@@ -1012,6 +1017,11 @@ impl Adapted<TextBox> {
 
     pub fn with_multiline(mut self, multiline: bool) -> Self {
         self.multiline = multiline;
+        self
+    }
+
+    pub fn with_line_wrap(mut self, wrap: bool) -> Self {
+        self.line_wrap_override = Some(wrap);
         self
     }
 
