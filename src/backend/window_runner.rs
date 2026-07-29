@@ -1547,12 +1547,13 @@ pub fn tessellate_display_list(
                 made_plate = Some(*rect);
             }
             Prim::Recess { rect, radii, depth, edges, .. }
-            | Prim::Boss { rect, radii, depth, edges }
+            | Prim::Boss { rect, radii, depth, edges, .. }
             | Prim::Ridge { rect, radii, depth, edges }
                 if shader_plates =>
             {
                 let tint = match &item.prim {
                     Prim::Recess { tint, .. } => *tint,
+                    Prim::Boss { tint, .. } => *tint,
                     _ => None,
                 };
                 // Recess carves down into the surface; Boss raises a plateau out
@@ -1715,7 +1716,7 @@ pub fn tessellate_display_list(
                     EdgeKind::Step, &mut verts,
                 );
             }
-            Prim::Boss { rect, radii, depth, edges } => {
+            Prim::Boss { rect, radii, depth, edges, .. } => {
                 // Legacy raised step: the recess overlay with the light sign upright.
                 push_bevel_edge_vertices_banded(
                     rect.x, rect.y, rect.width, rect.height, *radii, *depth,

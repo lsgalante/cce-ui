@@ -1239,7 +1239,10 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                     Some(t) => ctx.recess_tinted(rect, radii, depth, t),
                     None => ctx.recess_edges(rect, radii, depth, edges),
                 },
-                Prim::Boss { rect, radii, depth, edges } => ctx.boss_edges(rect, radii, depth, edges),
+                Prim::Boss { rect, radii, depth, edges, tint } => match tint {
+                    Some(t) => ctx.boss_edges_tinted(rect, radii, depth, edges, t),
+                    None => ctx.boss_edges(rect, radii, depth, edges),
+                },
                 Prim::Ridge { rect, radii, depth, edges } => ctx.ridge_edges(rect, radii, depth, edges),
                 Prim::Plate { rect, radii, color, depth } => ctx.plate(rect, radii, color, depth),
                 Prim::Arc { cx, cy, radius, thickness, start, end, color } => ctx.arc(cx, cy, radius, thickness, start, end, color),

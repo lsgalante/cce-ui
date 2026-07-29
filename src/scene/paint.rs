@@ -71,8 +71,11 @@ pub enum Prim {
     /// untouched surface underneath — so a region outlined by raised rolled bumps
     /// keeps the backplate's own color and translucency. Same wall semantics as
     /// `Recess` (`edges` = top/right/bottom/left); the lighting is the raised sign,
-    /// so the edges facing `light_source_position` catch the light.
-    Boss { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
+    /// so the edges facing `light_source_position` catch the light. `tint` colors
+    /// the lit rim like [`Prim::Recess`]'s — the focused-pane treatment for a
+    /// rim-only pane (a fill-less surface can't carry [`Prim::Bevel`]'s tint).
+    /// Like a tinted recess it never groups into a host plate's CSG features.
+    Boss { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool), tint: Option<[f32; 3]> },
     /// A raised RIM riding the rect's boundary: a bump profile straddling the
     /// outline (span ±depth/2), rising from the surrounding surface to a crest on
     /// the boundary and falling back to the same level inside — an elevated border
@@ -435,7 +438,21 @@ impl PaintCtx {
         edges: (bool, bool, bool, bool),
     ) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Boss { rect, radii, depth, edges });
+        self.push(Prim::Boss { rect, radii, depth, edges, tint: None });
+    }
+
+    /// [`PaintCtx::boss_edges`] with a specular tint on the lit rim — see
+    /// `Prim::Boss::tint`.
+    pub fn boss_edges_tinted(
+        &mut self,
+        rect: Rect,
+        radii: Radii,
+        depth: f32,
+        edges: (bool, bool, bool, bool),
+        tint: [f32; 3],
+    ) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Boss { rect, radii, depth, edges, tint: Some(tint) });
     }
 
     /// A flush inset control: `rect`'s plate sits SUNKEN into the surface with
