@@ -104,13 +104,26 @@ impl Spreadsheet {
 impl Layout for Spreadsheet {}
 
 impl Paint for Spreadsheet {
+    /// The pane IS its own background plate, wearing the parameter plate's fill —
+    /// same tint, opacity, and blur-behind marker (`param_plate_fill`) — so it
+    /// bevels like the params plate and tracks a live retint / opacity / blur
+    /// toggle with it.
     fn color(&self) -> [f32; 4] {
-        colors::PARAM_BG
+        colors::param_plate_fill()
     }
 
+    /// The shared plate corner radius (rounded on all four corners when non-zero),
+    /// matching the rounded clip hosts carve for the pane's content.
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        // Legacy: rounded_corners override (all corners) with the WidgetHost-default 12.0 radius.
-        Some((12.0, (true, true, true, true)))
+        let r = crate::layout::plate_corner_radius();
+        let on = r > 0.0;
+        Some((r, (on, on, on, on)))
+    }
+
+    /// The shared plate border — under `control_relief` the host promotes this to
+    /// the plate bevel, like `ParametersBg`.
+    fn solid_border(&self) -> Option<([f32; 4], f32)> {
+        colors::plate_border_color().map(|bc| (bc, colors::plate_border_thickness()))
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
