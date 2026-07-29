@@ -179,9 +179,12 @@ pub struct TreeList {
     pub right_clicked_section: Option<String>,
     pub last_scroll_y: f32,
     pub scrollbar_activity_timer: f32,
-    /// Mirrors ctx focus (FocusIn/FocusOut + the grab in `mouse_body`) so `paint` —
-    /// which has no UiContext — can light the recess rim when the tree is focused.
-    focused: bool,
+    /// Lights the recess rim (`paint` has no UiContext, so this mirrors focus).
+    /// Driven by FocusIn/FocusOut by default; an app whose inline editors float
+    /// over the tree (cce-data-editor) overrides it per input event with its own
+    /// focus-within computation — those editors take ctx focus away from the
+    /// tree while still being, visually, part of the tree pane.
+    pub focused: bool,
     pub deleted_key_path: Option<String>,
     pub edit_box: crate::widget::Adapted<TextBox>,
     pub editing_key_idx: Option<usize>,

@@ -418,15 +418,19 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let host_d = min(hb.z - abs(frag.x - hb.x), hb.w - abs(frag.y - hb.y));
     let att = clamp(host_d / t, 0.0, 1.0) * wedge;
     let v = (diff / flat_shade - 1.0 + curv + spec) * strength * att;
+    // p_spec_tint.w = 1 marks a tinted carve (a focused well); plates leave w at 0.
+    let tw = rrect_clip.p_spec_tint.w;
     if (v >= 0.0) {
-        // p_spec_tint.w = 1 marks a tinted carve (a focused well): the white
-        // highlight screen mixes toward the tint color, slightly boosted so the
-        // accent reads at the rim's low alphas. Plates leave w at 0.
-        let tw = rrect_clip.p_spec_tint.w;
+        // Highlight: the white screen mixes toward the tint color, slightly
+        // boosted so the accent reads at the rim's low alphas.
         let hl = mix(vec3f(1.0), rrect_clip.p_spec_tint.rgb, tw);
         return vec4f(hl, min(v * (1.0 + 0.5 * tw), 1.0));
     }
-    return vec4f(0.0, 0.0, 0.0, min(-v, 1.0));
+    // Shadow: the complementary counter-tint (warm against a cool accent) at
+    // ~38%, so the focused rim's two sides oppose in hue as well as value —
+    // the painter's warm-light/cool-shadow trick. Untinted carves stay black.
+    let sh = (vec3f(1.0) - rrect_clip.p_spec_tint.rgb) * 0.38 * tw;
+    return vec4f(sh, min(-v * (1.0 + 0.5 * tw), 1.0));
 }
 
 struct VertexOutput {
