@@ -1546,11 +1546,15 @@ pub fn tessellate_display_list(
                 plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, true));
                 made_plate = Some(*rect);
             }
-            Prim::Recess { rect, radii, depth, edges }
+            Prim::Recess { rect, radii, depth, edges, .. }
             | Prim::Boss { rect, radii, depth, edges }
             | Prim::Ridge { rect, radii, depth, edges }
                 if shader_plates =>
             {
+                let tint = match &item.prim {
+                    Prim::Recess { tint, .. } => *tint,
+                    _ => None,
+                };
                 // Recess carves down into the surface; Boss raises a plateau out
                 // of it (same machinery, depth sign flipped); Ridge is a raised
                 // rim straddling the boundary (its own overlay profile — never
@@ -1572,8 +1576,10 @@ pub fn tessellate_display_list(
                 // the plate's whole-surface draw does not have, so grouped it
                 // smears the extended walls across the plate. Union pieces
                 // (section wells, rocker halves) are exactly these.
+                // A tinted carve also never groups: a CSG feature is geometry only,
+                // so the tint could only land on the whole plate's specular.
                 let full_ring = *edges == (true, true, true, true);
-                if let Some((bi, prect)) = last_plate.filter(|_| mode < 3.5 && full_ring) {
+                if let Some((bi, prect)) = last_plate.filter(|_| mode < 3.5 && full_ring && tint.is_none()) {
                     let inside = rect.x >= prect.x - 0.5
                         && rect.y >= prect.y - 0.5
                         && rect.x + rect.width <= prect.x + prect.width + 0.5
@@ -1643,6 +1649,11 @@ pub fn tessellate_display_list(
                 let sdf_rect = crate::scene::layout::Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
                 let mut p = plate_push_raised(&sdf_rect, *radii, *depth, scale, plate_light, plate_mat, false);
                 p.mode = mode;
+                // w = 1.0 flags the free-carve shader path to mix its white
+                // highlight screen toward the tint (plates leave w at 0.0).
+                if let Some(t) = tint {
+                    p.specular_tint = [t[0], t[1], t[2], 1.0];
+                }
                 // Host-plate box for the roll fade: a suppressed wall means the
                 // recess runs flush to the host's edge there, so that side of
                 // the box sits at the original rect edge; enabled walls face
@@ -1693,7 +1704,7 @@ pub fn tessellate_display_list(
                     sw, sh, *color, no, 1.0, &mut verts,
                 );
             }
-            Prim::Recess { rect, radii, depth, edges } => {
+            Prim::Recess { rect, radii, depth, edges, .. } => {
                 // Edges only — no fill: the shading is an overlay, so whatever is painted
                 // below (fill, rim gradient, blur) shows through the carve modulated
                 // rather than repainted. `light_sign = -1.0` shadows the lit-facing edges,

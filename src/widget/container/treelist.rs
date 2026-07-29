@@ -179,6 +179,9 @@ pub struct TreeList {
     pub right_clicked_section: Option<String>,
     pub last_scroll_y: f32,
     pub scrollbar_activity_timer: f32,
+    /// Mirrors ctx focus (FocusIn/FocusOut + the grab in `mouse_body`) so `paint` —
+    /// which has no UiContext — can light the recess rim when the tree is focused.
+    focused: bool,
     pub deleted_key_path: Option<String>,
     pub edit_box: crate::widget::Adapted<TextBox>,
     pub editing_key_idx: Option<usize>,
@@ -209,6 +212,7 @@ impl TreeList {
             right_clicked_section: None,
             last_scroll_y: 0.0,
             scrollbar_activity_timer: 0.0,
+            focused: false,
             deleted_key_path: None,
             edit_box: TextBox::new(String::new()).with_multiline(false).with_draw_bg_border(true),
             editing_key_idx: None,
@@ -701,13 +705,6 @@ impl Paint for TreeList {
         true
     }
 
-    // Legacy TreeList kept the default WidgetHost focus/hover highlight overlay (the teal
-    // wash over the focused tree, drawn by the old all_quads default) — opt back in
-    // (the 5q TextBox trap).
-    fn legacy_focus_highlight(&self) -> bool {
-        true
-    }
-
     fn prepare_text(&mut self, fs: &mut glyphon::FontSystem, _rect: Rect) {
         self.search_box.prepare_text(fs);
         self.add_key_btn.prepare_text(fs);
@@ -920,10 +917,19 @@ impl Paint for TreeList {
         }
 
         // Recessed well like a text box or list: the tree floor sits below the
-        // pane surface, its wall carved over the bg and row quads above.
+        // pane surface, its wall carved over the bg and row quads above. Focus
+        // lights the rim in the highlight accent instead of washing the tree
+        // (the retired legacy_focus_highlight overlay).
         if crate::layout::control_relief() {
             let depth = crate::layout::bevel_width().min(h * 0.2);
-            pc.recess(Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), depth);
+            let well = Rect { x, y, width: w, height: h };
+            let radii = (radius, radius, radius, radius);
+            if self.focused {
+                let hc = crate::color::highlight_primary_color();
+                pc.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);
+            } else {
+                pc.recess(well, radii, depth);
+            }
         }
 
         // Row/header labels with the legacy header/list viewport bounds.
@@ -1128,10 +1134,14 @@ impl Input for TreeList {
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
                 self.key_body(&ev, ui)
             }
+            Event::FocusIn => {
+                self.focused = true;
+                false
+            }
             Event::FocusOut => {
-        self.add_key_popover_open = false;
-        self.add_key_popover_box.unfocus();
-    
+                self.focused = false;
+                self.add_key_popover_open = false;
+                self.add_key_popover_box.unfocus();
                 false
             }
             _ => false,

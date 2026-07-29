@@ -60,7 +60,12 @@ pub enum Prim {
     /// `edges` is (top, right, bottom, left): which walls of the carve actually exist.
     /// A region flush with the plate's own edge is a step, not a trough — see
     /// `push_bevel_edge_vertices_banded`.
-    Recess { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
+    /// `tint` colors the wall's lit rim — the same focused-pane treatment as
+    /// [`Prim::Bevel`]'s tint, for carved wells instead of raised plates. A tinted
+    /// recess never groups into a host plate's CSG features (a feature carries no
+    /// color), so it always renders as the free-carve overlay. Shader-plates path
+    /// only; the legacy banded tessellation ignores it.
+    Recess { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool), tint: Option<[f32; 3]> },
     /// The inverse of [`Prim::Recess`]: a plateau RAISED out of the surface below.
     /// Like `Recess` it emits only the shaded edges, never a fill — the face is the
     /// untouched surface underneath — so a region outlined by raised rolled bumps
@@ -405,6 +410,13 @@ impl PaintCtx {
         self.recess_edges(rect, radii, depth, (true, true, true, true));
     }
 
+    /// [`PaintCtx::recess`] with the lit rim tinted — see `Prim::Recess::tint`
+    /// (the focused-well treatment).
+    pub fn recess_tinted(&mut self, rect: Rect, radii: Radii, depth: f32, tint: [f32; 3]) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Recess { rect, radii, depth, edges: (true, true, true, true), tint: Some(tint) });
+    }
+
     /// Raise a plateau out of the already-painted surface below — the inverse of
     /// [`PaintCtx::recess`]. Only the edges are shaded; the face stays the surface
     /// beneath, so the raised region inherits the backplate's color. `depth` is the
@@ -476,7 +488,7 @@ impl PaintCtx {
         edges: (bool, bool, bool, bool),
     ) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Recess { rect, radii, depth, edges });
+        self.push(Prim::Recess { rect, radii, depth, edges, tint: None });
     }
 
     /// The window's glass slab: rounded fill at full size plus a rolled, lit perimeter.

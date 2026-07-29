@@ -419,7 +419,12 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let att = clamp(host_d / t, 0.0, 1.0) * wedge;
     let v = (diff / flat_shade - 1.0 + curv + spec) * strength * att;
     if (v >= 0.0) {
-        return vec4f(1.0, 1.0, 1.0, min(v, 1.0));
+        // p_spec_tint.w = 1 marks a tinted carve (a focused well): the white
+        // highlight screen mixes toward the tint color, slightly boosted so the
+        // accent reads at the rim's low alphas. Plates leave w at 0.
+        let tw = rrect_clip.p_spec_tint.w;
+        let hl = mix(vec3f(1.0), rrect_clip.p_spec_tint.rgb, tw);
+        return vec4f(hl, min(v * (1.0 + 0.5 * tw), 1.0));
     }
     return vec4f(0.0, 0.0, 0.0, min(-v, 1.0));
 }
