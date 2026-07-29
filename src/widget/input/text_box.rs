@@ -1148,14 +1148,6 @@ impl Paint for TextBox {
         self.label = Some(label.to_string());
     }
 
-    /// Legacy TextBox kept the shared focus-highlight overlay (the focused editor's
-    /// primary-tint wash). Only single-line boxes keep it — a control-scale tint.
-    /// On a multiline editor the wash screens the whole pane (data-editor's teal
-    /// editing surface); pane-scale focus reads from the editing border instead.
-    fn legacy_focus_highlight(&self) -> bool {
-        !self.multiline
-    }
-
     fn text_bounds(&self, rect: Rect) -> Option<[f32; 4]> {
         // Legacy bounded-text getters clipped to the full base rect, inset on the left by the
         // side label.
@@ -1263,11 +1255,10 @@ impl Paint for TextBox {
                 }
             } else {
                 if self.draw_bg_border {
-                    let bg_color = if self.editing {
-                        crate::colors::textbox_background_edit_color()
-                    } else {
-                        crate::colors::textbox_background_color()
-                    };
+                    // One background regardless of focus — the focus treatment is
+                    // the tinted recess rim (rounded path) / editing border, not a
+                    // surface swap.
+                    let bg_color = crate::colors::textbox_background_color();
                     let border_color = if self.editing {
                         [0.20, 0.50, 0.85, 1.0]
                     } else if self.hovered {
@@ -1289,11 +1280,8 @@ impl Paint for TextBox {
             let x = self.rect.x + label_x;
             let w = self.rect.width - label_x;
 
-            let bg_color = if self.editing {
-                crate::colors::textbox_background_edit_color()
-            } else {
-                crate::colors::textbox_background_color()
-            };
+            // One background regardless of focus (see the flat path above).
+            let bg_color = crate::colors::textbox_background_color();
             let border_color = if self.editing {
                 [0.20, 0.50, 0.85, 1.0]
             } else if self.hovered {
@@ -1319,12 +1307,17 @@ impl Paint for TextBox {
                     );
                 }
                 if self.recessed {
+                    // Focus lights the well's rim in the highlight accent (with
+                    // the shader's complementary shadow) — the TreeList treatment.
                     let depth = crate::layout::bevel_width().min(visual_h * 0.2);
-                    ctx.recess(
-                        Rect { x, y: self.rect.y + top, width: w, height: visual_h },
-                        (radius, radius, radius, radius),
-                        depth,
-                    );
+                    let well = Rect { x, y: self.rect.y + top, width: w, height: visual_h };
+                    let radii = (radius, radius, radius, radius);
+                    if self.editing {
+                        let hc = crate::color::highlight_primary_color();
+                        ctx.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);
+                    } else {
+                        ctx.recess(well, radii, depth);
+                    }
                 }
             }
 
