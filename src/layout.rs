@@ -3355,6 +3355,33 @@ pub trait RenderTarget {
     }
     fn push_clip_rect(&mut self, _x: f32, _y: f32, _w: f32, _h: f32) {}
     fn pop_clip_rect(&mut self) {}
+    /// Whether this host renders sections as sunken wells (the designer idiom).
+    /// `SectionContext` then lays the title out left-aligned over its tab box
+    /// instead of centered on the top border.
+    fn section_relief_style(&self) -> bool {
+        false
+    }
+    /// The section frame hatch: `SectionContext::finish` offers the frame here
+    /// before falling back to the legacy 1px outline. A relief-capable host
+    /// returns true and carves the section into its plate instead (the
+    /// designer sunken-well idiom); the tuple hosts keep the default.
+    fn section_relief(&mut self, _frame: &SectionFrame) -> bool {
+        false
+    }
+}
+
+/// A section frame offered to [`RenderTarget::section_relief`]: the content
+/// body box plus, under [`RenderTarget::section_relief_style`], the title tab
+/// box the label was laid out in — the tab sits flush on the body's top edge
+/// (the designer union-carve shape).
+pub struct SectionFrame {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub tab: Option<(f32, f32, f32, f32)>,
+    pub focused: bool,
+    pub is_child: bool,
 }
 
 pub struct PopoverCollector {
@@ -4820,6 +4847,10 @@ pub struct SectionContext<'a, P> {
     pub content_y: f32,
     pub cw: f32,
     pub label_width: f32,
+    pub label_x: f32,
+    /// The title tab box (x, y, w, h) when the host's relief styling laid the
+    /// label out left-aligned — `finish` offers it with the section carve.
+    pub relief_tab: Option<(f32, f32, f32, f32)>,
     pub focused: bool,
     pub is_child: bool,
     pub grid: Grid,
@@ -4850,6 +4881,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let font_size = font_size_opt.unwrap_or(if is_child { 12.0 } else { 14.0 });
         let font_color = if is_child { [0.53, 0.53, 0.60, 1.0] } else { [0.83, 0.83, 0.83, 1.0] };
         let label_width = Self::estimate_label_width(label, font_size, &font_fam);
+        let relief_style = pc.section_relief_style();
         let label_x = if is_child {
             let base_x = match nested_section_label_alignment() {
                 0 => left + 12.0,
@@ -4858,10 +4890,24 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
                 _ => left + 12.0,
             };
             base_x + nested_section_label_offset()
+        } else if relief_style {
+            // Sunken style: the title sits in a tab flush with the body's left
+            // edge (the designer look), not centered on the border.
+            left + section_padding() + 12.0
         } else {
             left + (cw - label_width) / 2.0
         };
         pc.text_with_font(label, label_x, top, font_size, font_color, &font_fam);
+
+        // The tab wraps the label, flush on the body's top edge; clamped to the
+        // body's left edge so off-default child alignments can't push it outside.
+        let relief_tab = if relief_style && label_width > 0.0 {
+            let body_x = left + section_padding();
+            let tab_x = (label_x - 12.0).max(body_x);
+            Some((tab_x, top - 3.0, label_width + 24.0, font_size + 10.0))
+        } else {
+            None
+        };
 
         let pad = section_padding();
         let margin_x = 2.0 * pad + 12.0;
@@ -4883,6 +4929,8 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             content_y: content_start_y,
             cw,
             label_width,
+            label_x,
+            relief_tab,
             focused,
             is_child,
             grid,
@@ -5134,21 +5182,31 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let y = self.top + 7.0;
         let w = self.cw - 2.0 * pad;
         let h = self.content_y - y;
+        let extra_bottom = pad + 12.0;
+        let bottom = y + h + extra_bottom;
+
+        if let Some(tab) = self.relief_tab {
+            // Sunken style: body top edge sits at the tab's bottom (the tab is
+            // flush ON the body, the designer union shape).
+            let body_y = tab.1 + tab.3;
+            let frame = SectionFrame {
+                x,
+                y: body_y,
+                w,
+                h: bottom - body_y,
+                tab: Some(tab),
+                focused: self.focused,
+                is_child: self.is_child,
+            };
+            if self.pc.section_relief(&frame) {
+                return self.content_y + extra_bottom + 8.0;
+            }
+        }
 
         let left_edge = x;
         let right_edge = x + w;
         if self.label_width > 0.0 {
-            let label_x = if self.is_child {
-                let base_x = match nested_section_label_alignment() {
-                    0 => self.left + 12.0,
-                    1 => self.left + (self.cw - self.label_width) / 2.0,
-                    2 => self.left + self.cw - 12.0 - self.label_width,
-                    _ => self.left + 12.0,
-                };
-                base_x + nested_section_label_offset()
-            } else {
-                self.left + (self.cw - self.label_width) / 2.0
-            };
+            let label_x = self.label_x;
             let gap_margin = 6.0;
             let gap_start = label_x - gap_margin;
             let gap_end = label_x + self.label_width + gap_margin;
@@ -5162,7 +5220,6 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             self.pc.rect(border, left_edge, y, w, 1.0);
         }
 
-        let extra_bottom = pad + 12.0;
         self.pc.rect(border, x, y + h + extra_bottom, w, 1.0);
         self.pc.rect(border, x, y, 1.0, h + extra_bottom);
         self.pc.rect(border, x + w - 1.0, y, 1.0, h + extra_bottom);
