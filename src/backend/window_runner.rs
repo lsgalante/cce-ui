@@ -3008,7 +3008,6 @@ impl<A: Application> WindowHandler for EngineState<A> {
         crate::scale::set_maximized(is_max);
 
         let (w, h) = configure.new_size;
-        eprintln!("CONFIGURE_NEW_SIZE: w={:?}, h={:?}, scale={}", w, h, self.scale_factor);
         if let (Some(w), Some(h)) = (w, h) {
             let width = w.get();
             let height = h.get();
