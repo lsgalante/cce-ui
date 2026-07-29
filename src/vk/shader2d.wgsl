@@ -426,10 +426,11 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let hl = mix(vec3f(1.0), rrect_clip.p_spec_tint.rgb, tw);
         return vec4f(hl, min(v * (1.0 + 0.5 * tw), 1.0));
     }
-    // Shadow: the complementary counter-tint (warm against a cool accent) at
-    // ~38%, so the focused rim's two sides oppose in hue as well as value —
-    // the painter's warm-light/cool-shadow trick. Untinted carves stay black.
-    let sh = (vec3f(1.0) - rrect_clip.p_spec_tint.rgb) * 0.38 * tw;
+    // Shadow: the complementary counter-tint (warm against a cool accent),
+    // kept dark (~22%) so it still reads as shadow with a hue cast, not a
+    // second glow — the painter's warm-light/cool-shadow trick. Untinted
+    // carves stay black.
+    let sh = (vec3f(1.0) - rrect_clip.p_spec_tint.rgb) * 0.22 * tw;
     return vec4f(sh, min(-v * (1.0 + 0.5 * tw), 1.0));
 }
 
