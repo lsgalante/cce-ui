@@ -4891,20 +4891,23 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             };
             base_x + nested_section_label_offset()
         } else if relief_style {
-            // Sunken style: the title sits in a tab flush with the body's left
+            // Sunken style: the title sits in a tab flush with the well's left
             // edge (the designer look), not centered on the border.
-            left + section_padding() + 12.0
+            left + 12.0
         } else {
             left + (cw - label_width) / 2.0
         };
-        pc.text_with_font(label, label_x, top, font_size, font_color, &font_fam);
+        // Under relief styling the well fills the whole allocated rect (so the
+        // page's gaps and margins are the visual gaps) — the tab tops the
+        // allocation and the label centers inside it.
+        let label_y = if relief_style { top + 4.0 } else { top };
+        pc.text_with_font(label, label_x, label_y, font_size, font_color, &font_fam);
 
-        // The tab wraps the label, flush on the body's top edge; clamped to the
-        // body's left edge so off-default child alignments can't push it outside.
+        // The tab wraps the label, flush on the well's top-left corner; clamped
+        // so off-default child alignments can't push it outside the well.
         let relief_tab = if relief_style && label_width > 0.0 {
-            let body_x = left + section_padding();
-            let tab_x = (label_x - 12.0).max(body_x);
-            Some((tab_x, top - 3.0, label_width + 24.0, font_size + 10.0))
+            let tab_x = (label_x - 12.0).max(left);
+            Some((tab_x, top, label_width + 24.0, font_size + 10.0))
         } else {
             None
         };
@@ -5186,20 +5189,22 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let bottom = y + h + extra_bottom;
 
         if let Some(tab) = self.relief_tab {
-            // Sunken style: body top edge sits at the tab's bottom (the tab is
-            // flush ON the body, the designer union shape).
+            // Sunken style: the well spans the full allocated rect — body top
+            // edge at the tab's bottom (the tab is flush ON the body, the
+            // designer union shape), walls on the allocation's edges, and no
+            // trailing slack so the layout gap IS the visual gap.
             let body_y = tab.1 + tab.3;
             let frame = SectionFrame {
-                x,
+                x: self.left,
                 y: body_y,
-                w,
+                w: self.cw,
                 h: bottom - body_y,
                 tab: Some(tab),
                 focused: self.focused,
                 is_child: self.is_child,
             };
             if self.pc.section_relief(&frame) {
-                return self.content_y + extra_bottom + 8.0;
+                return self.content_y + extra_bottom;
             }
         }
 
