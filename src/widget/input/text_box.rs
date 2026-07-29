@@ -1149,9 +1149,11 @@ impl Paint for TextBox {
     }
 
     /// Legacy TextBox kept the shared focus-highlight overlay (the focused editor's
-    /// primary-tint wash — data-editor's teal editing surface).
+    /// primary-tint wash). Only single-line boxes keep it — a control-scale tint.
+    /// On a multiline editor the wash screens the whole pane (data-editor's teal
+    /// editing surface); pane-scale focus reads from the editing border instead.
     fn legacy_focus_highlight(&self) -> bool {
-        true
+        !self.multiline
     }
 
     fn text_bounds(&self, rect: Rect) -> Option<[f32; 4]> {
