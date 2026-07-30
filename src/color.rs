@@ -43,6 +43,7 @@ static BACKPLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
 static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
 static TOGGLE_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.22, 1.0]);
+static TOGGLE_BUTTON_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static LIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static LIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
 static LIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
@@ -380,6 +381,9 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/toggle/background_color").or_else(|| get_color("/layout/toggle_bg_color")) {
         if let Ok(mut lock) = TOGGLE_BG_COLOR.write() { *lock = c; }
+    }
+    if let Some(c) = get_color("/style/control/toggle/button_color") {
+        if let Ok(mut lock) = TOGGLE_BUTTON_COLOR.write() { *lock = Some(c); }
     }
     if let Some(c) = get_color("/style/control/ramp/background") {
         if let Ok(mut lock) = RAMP_BACKGROUND_COLOR.write() { *lock = c; }
@@ -1181,6 +1185,21 @@ pub fn toggle_bg_color() -> [f32; 4] {
 
 pub fn set_toggle_bg_color(color: [f32; 4]) {
     if let Ok(mut lock) = TOGGLE_BG_COLOR.write() {
+        *lock = color;
+    }
+}
+
+/// Optional dedicated fill for the slide toggle's gliding button
+/// (`style.control.toggle.button_color`). `None` → the button falls back to
+/// crossfading the on/off state colors. Only the button reads this — the
+/// track, border, and state colors are untouched.
+pub fn toggle_button_color() -> Option<[f32; 4]> {
+    load_colors_once();
+    *TOGGLE_BUTTON_COLOR.read().unwrap()
+}
+
+pub fn set_toggle_button_color(color: Option<[f32; 4]>) {
+    if let Ok(mut lock) = TOGGLE_BUTTON_COLOR.write() {
         *lock = color;
     }
 }
