@@ -105,6 +105,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.textbox.background_edit_color" | "style.textbox.background_edit_color" | "style.data.textbox.background_edit_color" => "textbox_background_edit_color",
                 "style.control.textbox.multiline.line_wrap" | "style.textbox.multiline.line_wrap" | "style.data.textbox.multiline.line_wrap" => "textbox_line_wrap",
                 "style.control.textbox.multiline.border_width" | "style.textbox.multiline.border_width" | "style.data.textbox.multiline.border_width" => "textbox_multiline_border_width",
+                "style.control.toggle.style" => "toggle_style",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
                 "style.control.toggle.disabled_color" => "toggle_disabled_color",
@@ -1755,6 +1756,19 @@ pub fn set_toggle_border_width(width: f32) {
 pub fn slider_corner_radius() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("slider_corner_radius").unwrap_or(4.0)
+}
+
+/// The toggle's render style: `style.control.toggle.style = "slide"` swaps the
+/// rocker/gradient pill for a half-width button that slides between the left
+/// (off) and right (on) ends of the widget (see `Toggle::paint`). Anything
+/// else — or unset — keeps the default look, so apps opt in per-config.
+pub fn toggle_slide() -> bool {
+    lazy_init_style_registry();
+    get_style_registry()
+        .read()
+        .unwrap()
+        .get_string("toggle_style")
+        .is_some_and(|s| s == "slide")
 }
 
 /// The slider's render style: `style.control.slider.style = "band"` swaps the

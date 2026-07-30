@@ -231,6 +231,11 @@ pub struct Toggle {
     /// (see `rocker_reliefs` and the paint impl) — and the flat style's
     /// state gradient is dropped.
     raised: bool,
+    /// The slide style's animated button position, 0 (left/off) → 1 (right/on).
+    /// Chases `toggled` in `tick` after a click; programmatic state syncs
+    /// (`set_toggled`, `set_value_string`) snap it, so only user interaction
+    /// animates.
+    slide_t: f32,
 }
 
 impl Toggle {
@@ -243,6 +248,7 @@ impl Toggle {
             focused: false,
             justify: Justification::Center,
             raised: crate::layout::control_relief(),
+            slide_t: 0.0,
         })
     }
 
@@ -252,6 +258,7 @@ impl Toggle {
 
     pub fn set_toggled(&mut self, v: bool) {
         self.toggled = v;
+        self.slide_t = if v { 1.0 } else { 0.0 };
     }
 
     pub fn toggled(&self) -> bool {
@@ -264,6 +271,37 @@ impl Toggle {
         } else {
             colors::toggle_off_color()
         }
+    }
+
+    /// The slide style's button (config `style.control.toggle.style =
+    /// "slide"`): half the widget wide, gliding between the left (off) and
+    /// right (on) ends by the animated `slide_t`. `None` when the style is
+    /// off — legacy-view hosts fall back to `rocker_reliefs`.
+    pub fn slide_button(&self, rect: Rect) -> Option<Rect> {
+        if !crate::layout::toggle_slide() {
+            return None;
+        }
+        let bw = rect.width * 0.5;
+        Some(Rect {
+            x: rect.x + self.slide_t * (rect.width - bw),
+            y: rect.y,
+            width: bw,
+            height: rect.height,
+        })
+    }
+
+    /// The slide button's face color: the off/on state colors crossfaded by
+    /// the animated position, so the fill morphs while the button glides.
+    pub fn slide_button_color(&self) -> [f32; 4] {
+        let off = colors::toggle_off_color();
+        let on = colors::toggle_on_color();
+        let t = self.slide_t;
+        [
+            off[0] + (on[0] - off[0]) * t,
+            off[1] + (on[1] - off[1]) * t,
+            off[2] + (on[2] - off[2]) * t,
+            off[3] + (on[3] - off[3]) * t,
+        ]
     }
 
     /// The rocker's two halves over `rect` as FLAT relief steps: (half rect,
@@ -380,8 +418,34 @@ impl Paint for Toggle {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         let radius = crate::layout::toggle_corner_radius();
         let bg = colors::toggle_bg_color();
+        let slide = crate::layout::toggle_slide();
 
-        if self.raised {
+        if slide {
+            // The slide style: the widget is the track; a half-width button
+            // glides between its ends with the state (animated in `tick`).
+            // Under control_relief the button is a raised plateau riding the
+            // track (its beveled edges also reach legacy-view hosts through
+            // `slide_button` — see `ParametersBg::reliefs`).
+            if bg[3] > 0.001 {
+                if radius > 0.0 {
+                    ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
+                } else {
+                    ctx.quad(rect, bg);
+                }
+            }
+            if let Some(btn) = self.slide_button(rect) {
+                let fill = self.slide_button_color();
+                if radius > 0.0 {
+                    ctx.rounded_rect(btn, radius, (true, true, true, true), fill);
+                } else {
+                    ctx.quad(btn, fill);
+                }
+                if self.raised {
+                    let depth = crate::layout::bevel_width().min(h * 0.2);
+                    ctx.boss_edges(btn, (radius, radius, radius, radius), depth, (true, true, true, true));
+                }
+            }
+        } else if self.raised {
             // The rocker: two FLAT half faces (see `rocker_reliefs`) — the
             // state half a raised plateau, the other recessed, hinge wall
             // open so they meet in a single step. Each face carries its
@@ -424,7 +488,7 @@ impl Paint for Toggle {
         // rounded corners. The band alphas follow a perceptual curve, not a straight ramp —
         // see `colors::perceptual_fade_alpha`. The bands composite onto the bg quad above,
         // so that is the backdrop the curve is solved against.
-        let grad = if self.raised { [0.0; 4] } else { self.gradient_color() };
+        let grad = if self.raised || slide { [0.0; 4] } else { self.gradient_color() };
         let half = h / 2.0;
         if half > 0.0 && grad[3] > 0.0 {
             let steps = (half.ceil() as usize).clamp(4, 32);
@@ -458,10 +522,22 @@ impl Paint for Toggle {
         if let Some(ref label) = self.label {
             let (font_fam, font_size) = crate::layout::control_label_font_parsed();
             let est_w = crate::widget::display::measure_text_width(label, &font_fam, font_size);
-            let tx = match self.justify {
-                Justification::Left => x + 8.0,
-                Justification::Right => x + w - est_w - 8.0,
-                Justification::Center => x + (w - est_w) / 2.0,
+            let tx = if slide {
+                // The label lives centered in the FREE half — the side the
+                // button has slid away from — so the two never fight. It
+                // follows the state, not the glide: the text hops at the
+                // click, the button catches up. A label wider than the half
+                // overflows AWAY from the button, never over it.
+                let half_w = w * 0.5;
+                let hx = if self.toggled { x } else { x + half_w };
+                let centered = hx + (half_w - est_w) / 2.0;
+                if self.toggled { centered.min(x + half_w - est_w - 4.0) } else { centered.max(hx + 4.0) }
+            } else {
+                match self.justify {
+                    Justification::Left => x + 8.0,
+                    Justification::Right => x + w - est_w - 8.0,
+                    Justification::Center => x + (w - est_w) / 2.0,
+                }
             };
             ctx.text(
                 label.clone(),
@@ -502,6 +578,25 @@ impl Input for Toggle {
         }
     }
 
+    /// Slide-style glide: the button position chases the state after a click
+    /// (~90ms exponential settle). Programmatic syncs snap instead — see
+    /// `set_toggled` / `set_value_string` — so only user interaction animates.
+    fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
+        if !crate::layout::toggle_slide() {
+            return false;
+        }
+        let target = if self.toggled { 1.0 } else { 0.0 };
+        let d = target - self.slide_t;
+        if d.abs() < 0.001 {
+            return false;
+        }
+        self.slide_t += d * (1.0 - (-dt * 22.0).exp());
+        if (target - self.slide_t).abs() < 0.005 {
+            self.slide_t = target;
+        }
+        true
+    }
+
     fn take_click(&mut self) -> bool {
         std::mem::take(&mut self.just_toggled)
     }
@@ -518,6 +613,7 @@ impl Input for Toggle {
         let Some(new_toggled) = parse_bool(val) else { return false };
         if self.toggled != new_toggled {
             self.toggled = new_toggled;
+            self.slide_t = if new_toggled { 1.0 } else { 0.0 };
             self.just_toggled = true;
             true
         } else {

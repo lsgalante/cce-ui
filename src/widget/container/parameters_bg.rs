@@ -1105,8 +1105,16 @@ impl ParametersBg {
                         let ty = crate::widget::label_offset(t);
                         let rect = Rect { x, y: y + ty, width: w, height: h - ty };
                         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-                        for (half, radii, walls, raised) in t.inner().rocker_reliefs(rect) {
-                            out.push((half.x, half.y, half.width, half.height, radii, depth, raised, walls));
+                        if let Some(btn) = t.inner().slide_button(rect) {
+                            // Slide style: the gliding half-width button is one
+                            // raised plateau (its fill arrives through the
+                            // rounded-quad view like the rocker's).
+                            let r = crate::layout::toggle_corner_radius();
+                            out.push((btn.x, btn.y, btn.width, btn.height, (r, r, r, r), depth, true, all));
+                        } else {
+                            for (half, radii, walls, raised) in t.inner().rocker_reliefs(rect) {
+                                out.push((half.x, half.y, half.width, half.height, radii, depth, raised, walls));
+                            }
                         }
                     }
                 }
