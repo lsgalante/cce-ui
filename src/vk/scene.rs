@@ -290,16 +290,25 @@ impl SceneStage {
             // The wireframe twin: identical but rasterized as lines. Culling
             // stays on so the wire view matches the fill's visible surface.
             // A small negative depth bias pulls the lines toward the viewer,
-            // so a wire pass drawn over its own filled mesh (the overlay
-            // mode) wins the LESS depth test instead of z-fighting the
-            // coplanar fill.
+            // and the compare is LESS_OR_EQUAL with writes off: a line
+            // fragment over its own fill interpolates the SAME plane, and on
+            // camera-facing facets (near-zero depth slope) the biased
+            // difference dips below depth precision — under strict LESS the
+            // front-center lattice z-fought the coplanar fill and LOST, wires
+            // surviving only toward the limb, which read as the mesh
+            // counter-rotating during orbits (the overlay-mode "sphere turns
+            // with the camera" illusion).
+            let depth_stencil_lines = vk::PipelineDepthStencilStateCreateInfo::default()
+                .depth_test_enable(true)
+                .depth_write_enable(false)
+                .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
             let wireframe_pipeline = wireframe_supported.then(|| {
                 let rasterization_lines = vk::PipelineRasterizationStateCreateInfo::default()
                     .polygon_mode(vk::PolygonMode::LINE)
                     .cull_mode(vk::CullModeFlags::BACK)
                     .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
                     .depth_bias_enable(true)
-                    .depth_bias_constant_factor(-2.0)
+                    .depth_bias_constant_factor(-4.0)
                     .depth_bias_slope_factor(-1.0)
                     .line_width(1.0);
                 device
@@ -312,7 +321,7 @@ impl SceneStage {
                             .viewport_state(&viewport_state)
                             .rasterization_state(&rasterization_lines)
                             .multisample_state(&multisample)
-                            .depth_stencil_state(&depth_stencil)
+                            .depth_stencil_state(&depth_stencil_lines)
                             .color_blend_state(&color_blend)
                             .dynamic_state(&dynamic_state)
                             .layout(pipeline_layout)
