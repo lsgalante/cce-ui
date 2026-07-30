@@ -528,15 +528,11 @@ impl Paint for Toggle {
             let (font_fam, font_size) = crate::layout::control_label_font_parsed();
             let est_w = crate::widget::display::measure_text_width(label, &font_fam, font_size);
             let tx = if slide {
-                // The label lives centered in the FREE half — the side the
-                // button has slid away from — so the two never fight. It
-                // follows the state, not the glide: the text hops at the
-                // click, the button catches up. A label wider than the half
-                // overflows AWAY from the button, never over it.
-                let half_w = w * 0.5;
-                let hx = if self.toggled { x } else { x + half_w };
-                let centered = hx + (half_w - est_w) / 2.0;
-                if self.toggled { centered.min(x + half_w - est_w - 4.0) } else { centered.max(hx + 4.0) }
+                // Fixed left alignment — the label never moves. When the
+                // glider covers it, the text shows through the glass: glyphs
+                // render in the engine's later text pass, over the button's
+                // mostly-transparent fill.
+                x + 8.0
             } else {
                 match self.justify {
                     Justification::Left => x + 8.0,
