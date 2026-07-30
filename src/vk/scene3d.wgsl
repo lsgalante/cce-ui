@@ -45,6 +45,10 @@ fn window_corner_distance(pos: vec2<f32>) -> f32 {
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) color: vec3f,
+    // World-space position, for the flat-shading normal; `lit` is 0 on the
+    // screen-space background quad (the z=9.99 sentinel), 1 on scene geometry.
+    @location(1) world: vec3f,
+    @location(2) lit: f32,
 };
 
 @vertex
@@ -55,10 +59,13 @@ fn vs_main(
     var out: VertexOutput;
     if (abs(position.z - 9.99) < 0.01) {
         out.position = vec4f(position.xy, 0.9999, 1.0);
+        out.lit = 0.0;
     } else {
         out.position = uniforms.mvp * vec4f(position, 1.0);
+        out.lit = 1.0;
     }
     out.color = color;
+    out.world = position;
     return out;
 }
 
@@ -71,6 +78,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     if (cov <= 0.0) {
         discard;
     }
-    let rgb = mix(in.color, uniforms.wire_tint.rgb, uniforms.wire_tint.a);
+    var rgb = mix(in.color, uniforms.wire_tint.rgb, uniforms.wire_tint.a);
+    // Flat shading off a fixed WORLD light: the facet normal comes from the
+    // screen-space derivatives of the world position, so every facet keeps a
+    // brightness pinned to its world orientation. That anchoring is what makes
+    // an orbit read as the camera moving around stationary geometry — an unlit
+    // scene's only cues are the vertex colors, and any rotationally
+    // self-similar surface (a UV sphere's lattice, especially under a
+    // wireframe overlay whose fill occludes the back wires) reads as glued to
+    // the camera without it. Two-sided so unculled back faces stay sane.
+    if (in.lit > 0.5) {
+        let n = normalize(cross(dpdx(in.world), dpdy(in.world)));
+        let l = normalize(vec3f(-0.45, 0.8, 0.35));
+        let d = abs(dot(n, l));
+        rgb = rgb * (0.62 + 0.38 * d);
+    }
     return vec4f(rgb, cov);
 }
