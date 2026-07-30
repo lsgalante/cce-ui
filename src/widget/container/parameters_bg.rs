@@ -78,6 +78,16 @@ const SCROLL_ACTIVE_HOLD: f32 = 0.7;
 /// reliefs on either side (control bevel, section wall) shade the channel into a
 /// narrow 3D groove.
 const CHANNEL: f32 = 3.0;
+
+/// The section carve's wall width: the DE relief scaled by the section depth
+/// multiplier (`style.container.section.depth`), capped against the row height
+/// (safety) and the control channel — the channel cap scales WITH the
+/// multiplier, so deepening sections is an explicit choice to let the roll
+/// cross the groove.
+fn section_carve_depth(h: f32) -> f32 {
+    let sd = crate::layout::section_depth().max(0.0);
+    (crate::layout::bevel_width() * sd).min(h * 0.2).min(CHANNEL * sd)
+}
 /// Vertical pitch between consecutive rows — one channel; rows abut.
 const ROW_GAP: f32 = CHANNEL;
 /// How far a section's title box overhangs its header row upward, and the box's height.
@@ -1030,8 +1040,10 @@ impl ParametersBg {
             if let Some((cx, cy, cw, ch)) = content {
                 // Capped at the channel: the well's wall must roll off inside the
                 // groove between it and the controls packed one CHANNEL inside,
-                // not shade across their faces.
-                let depth = crate::layout::bevel_width().min(ch * 0.2).min(CHANNEL);
+                // not shade across their faces. `section_depth` scales wall and
+                // channel cap together — past 1.0 the roll crosses the groove
+                // by choice.
+                let depth = section_carve_depth(ch);
                 // Tab strip: the title box itself, sitting flush on the body's top
                 // edge (the header row above it stays plain plate), bottom open.
                 // A wall FADES OUT over the carve width approaching a suppressed
@@ -1075,7 +1087,7 @@ impl ParametersBg {
                     }
                 }
             } else {
-                let depth = crate::layout::bevel_width().min(th * 0.2).min(CHANNEL);
+                let depth = section_carve_depth(th);
                 out.push((tx, ty, tw, th, r4(SECTION_R), depth, false, all));
             }
         }
@@ -1193,7 +1205,7 @@ impl ParametersBg {
         for (title, content) in self.section_boxes() {
             let (tx, _ty, tw, _th) = title;
             if let Some((cx, cy, cw, ch)) = content {
-                let depth = crate::layout::bevel_width().min(ch * 0.2).min(CHANNEL);
+                let depth = section_carve_depth(ch);
                 let throat_r = tx + tw;
                 if cx + cw > throat_r + 2.0 * SECTION_FILLET_R {
                     out.push((

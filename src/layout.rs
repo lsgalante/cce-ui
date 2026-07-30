@@ -114,8 +114,13 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.toggle.border_color" => "toggle_border_color",
                 "style.control.toggle.corner_radius" => "toggle_corner_radius",
                 "window_manager.light_source_position" => "light_source_position",
-                "window_manager.bevel_depth" => "bevel_depth",
-                "window_manager.bevel_width" => "bevel_width",
+                // The DE's relief material: canonical home style.surface.relief
+                // (these shade every bevel/boss/recess in the toolkit — the
+                // compositor never read them, so the old window_manager
+                // spelling survives only as a compat alias).
+                "style.surface.relief.depth" | "window_manager.bevel_depth" => "bevel_depth",
+                "style.surface.relief.width" | "window_manager.bevel_width" => "bevel_width",
+                "style.container.section.depth" => "section_depth",
                 "window_manager.bevel_shader" => "bevel_shader",
                 "window_manager.control_relief" => "control_relief",
                 "window_manager.corner_shape" => "corner_shape",
@@ -1402,6 +1407,17 @@ pub fn set_control_panel_gap(gap: f32) {
     if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
         *lock = gap;
     }
+}
+
+/// The section carves' depth multiplier (`style.container.section.depth`,
+/// default 1.0): scales the params pane's section-well wall — width and step
+/// together — relative to the DE-wide relief material, so sections can read
+/// deeper or shallower than the controls around them. Values past 1.0 let the
+/// roll widen across the channel groove between the well wall and its packed
+/// controls; tune to taste.
+pub fn section_depth() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("section_depth").unwrap_or(1.0)
 }
 
 pub fn section_padding() -> f32 {
