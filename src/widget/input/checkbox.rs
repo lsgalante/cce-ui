@@ -290,26 +290,25 @@ impl Toggle {
         })
     }
 
-    /// The slide button's face color: the off/on state colors crossfaded by
-    /// the animated position, so the fill morphs while the button glides —
-    /// then knocked down to a mostly-transparent glass tint
-    /// (`style.control.toggle.button_opacity`): the beveled edges carry the
-    /// button's read, the fill is a whisper over the track.
-    /// `style.control.toggle.button_color` replaces the crossfaded base with
-    /// a fixed color (opacity still applies) — it recolors ONLY the button.
+    /// The slide button's face color. `style.control.toggle.button_color`
+    /// (rgba) is used verbatim when set — its alpha channel IS the button's
+    /// opacity, and it recolors ONLY the button. Unset, the off/on state
+    /// colors crossfade by the animated position, knocked down to a glass
+    /// tint by `style.control.toggle.button_opacity`: the beveled edges
+    /// carry the button's read, the fill is a whisper over the track.
     pub fn slide_button_color(&self) -> [f32; 4] {
-        let base = colors::toggle_button_color().unwrap_or_else(|| {
-            let off = colors::toggle_off_color();
-            let on = colors::toggle_on_color();
-            let t = self.slide_t;
-            [
-                off[0] + (on[0] - off[0]) * t,
-                off[1] + (on[1] - off[1]) * t,
-                off[2] + (on[2] - off[2]) * t,
-                off[3] + (on[3] - off[3]) * t,
-            ]
-        });
-        [base[0], base[1], base[2], base[3] * crate::layout::toggle_button_opacity()]
+        if let Some(c) = colors::toggle_button_color() {
+            return c;
+        }
+        let off = colors::toggle_off_color();
+        let on = colors::toggle_on_color();
+        let t = self.slide_t;
+        [
+            off[0] + (on[0] - off[0]) * t,
+            off[1] + (on[1] - off[1]) * t,
+            off[2] + (on[2] - off[2]) * t,
+            (off[3] + (on[3] - off[3]) * t) * crate::layout::toggle_button_opacity(),
+        ]
     }
 
     /// The rocker's two halves over `rect` as FLAT relief steps: (half rect,
