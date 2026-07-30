@@ -2184,7 +2184,28 @@ impl Input for ParametersBg {
                     if p.2.starts_with("slider") {
                         let r = rects[i];
                         let row_y = r.1;
-                        if py >= row_y - 2.0 && py <= row_y + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
+                        // Band style: the capture zone is the slider's own
+                        // shape halo (`Slider::scroll_hit` — the band plus the
+                        // traveling bulge, inset), so scrolls off the shape
+                        // fall through to the pane's viewport scroll below.
+                        // The default style keeps the whole-row strip.
+                        let in_zone = if crate::layout::slider_band() {
+                            self.sliders[i].as_ref().map_or(false, |s| {
+                                let (sx, sy, sw, sh) = s.rect();
+                                let ty = crate::widget::label_offset(s);
+                                s.inner().scroll_hit(
+                                    Rect { x: sx, y: sy + ty, width: sw, height: sh - ty },
+                                    px,
+                                    py,
+                                )
+                            })
+                        } else {
+                            py >= row_y - 2.0
+                                && py <= row_y + r.3
+                                && px >= self.rect.x
+                                && px <= self.rect.x + self.rect.width
+                        };
+                        if in_zone {
                             if let Some(s) = &mut self.sliders[i] {
                                 let was_scroll = s.scroll_enabled;
                                 s.set_scroll(true);

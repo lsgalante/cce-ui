@@ -186,6 +186,41 @@ impl Slider {
         SliderGeom { x, y: rect.y, w, h: rect.height, track_x, track_w, thumb_size: rect.height * 0.9 }
     }
 
+    /// The band style's height profile at `x`: the flat band thickness, rising
+    /// through the cosine bell around the value position. The single source
+    /// both the paint and the wheel-capture halo (`scroll_hit`) measure from,
+    /// so the halo always conforms to the drawn shape.
+    fn band_height_at(&self, g: &SliderGeom, x: f32) -> f32 {
+        let band_t = crate::layout::slider_band_thickness().max(0.5);
+        let bulge_h = crate::layout::slider_bulge_height().clamp(band_t, g.h);
+        let bulge_w = crate::layout::slider_bulge_width().max(2.0);
+        let vx = g.track_x + self.value * g.track_w;
+        let t = ((x - vx) / bulge_w).clamp(-1.0, 1.0);
+        let bell = 0.5 * (1.0 + (std::f32::consts::PI * t).cos());
+        band_t + (bulge_h - band_t) * bell.powf(1.35)
+    }
+
+    /// The wheel-capture zone. Band style: an inset halo around the DRAWN
+    /// shape — the thin band and the bulge, which travels with the value — so
+    /// a scroll near the visible slider adjusts it while the rest of the row
+    /// stays the host pane's to scroll. Otherwise: plain rect containment.
+    pub fn scroll_hit(&self, rect: Rect, px: f32, py: f32) -> bool {
+        if !crate::layout::slider_band() {
+            return px >= rect.x
+                && px <= rect.x + rect.width
+                && py >= rect.y
+                && py <= rect.y + rect.height;
+        }
+        const SCROLL_INSET: f32 = 8.0;
+        let g = self.geom(rect);
+        if px < g.track_x - SCROLL_INSET || px > g.track_x + g.track_w + SCROLL_INSET {
+            return false;
+        }
+        let cy = g.y + g.h * 0.5;
+        let x = px.clamp(g.track_x, g.track_x + g.track_w);
+        (py - cy).abs() <= self.band_height_at(&g, x) * 0.5 + SCROLL_INSET
+    }
+
     /// The band style's geometry: a thin band spanning the whole track, swelling
     /// smoothly around the value position — a cosine bell sampled as ~1px column
     /// quads, so the swell reads as one continuous surface (the snake that
@@ -222,9 +257,7 @@ impl Slider {
         let step_w = span / steps as f32;
         for i in 0..steps {
             let x = b0 + i as f32 * step_w;
-            let t = ((x + step_w * 0.5 - vx) / bulge_w).clamp(-1.0, 1.0);
-            let bell = 0.5 * (1.0 + (std::f32::consts::PI * t).cos());
-            let h = band_t + (bulge_h - band_t) * bell.powf(1.35);
+            let h = self.band_height_at(g, x + step_w * 0.5);
             // A hair of overlap between columns so AA seams can't open.
             ctx.quad(Rect { x, y: cy - h * 0.5, width: step_w + 0.3, height: h }, color);
         }
@@ -545,7 +578,7 @@ impl Input for Slider {
                         return false;
                     }
                     let r = ectx.rect;
-                    if *px >= r.x && *px <= r.x + r.width && *py >= r.y && *py <= r.y + r.height {
+                    if self.scroll_hit(r, *px, *py) {
                         if ui.scroll_gesture_new {
                             ui.scroll_initiate_widget_id = Some(ectx.id);
                         }
