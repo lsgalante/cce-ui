@@ -291,7 +291,10 @@ impl Toggle {
     }
 
     /// The slide button's face color: the off/on state colors crossfaded by
-    /// the animated position, so the fill morphs while the button glides.
+    /// the animated position, so the fill morphs while the button glides —
+    /// then knocked down to a mostly-transparent glass tint
+    /// (`style.control.toggle.button_opacity`): the beveled edges carry the
+    /// button's read, the fill is a whisper over the track.
     pub fn slide_button_color(&self) -> [f32; 4] {
         let off = colors::toggle_off_color();
         let on = colors::toggle_on_color();
@@ -300,7 +303,7 @@ impl Toggle {
             off[0] + (on[0] - off[0]) * t,
             off[1] + (on[1] - off[1]) * t,
             off[2] + (on[2] - off[2]) * t,
-            off[3] + (on[3] - off[3]) * t,
+            (off[3] + (on[3] - off[3]) * t) * crate::layout::toggle_button_opacity(),
         ]
     }
 
@@ -435,15 +438,17 @@ impl Paint for Toggle {
             }
             if let Some(btn) = self.slide_button(rect) {
                 let fill = self.slide_button_color();
-                if radius > 0.0 {
-                    ctx.rounded_rect(btn, radius, (true, true, true, true), fill);
-                } else {
-                    ctx.quad(btn, fill);
+                if fill[3] > 0.003 {
+                    if radius > 0.0 {
+                        ctx.rounded_rect(btn, radius, (true, true, true, true), fill);
+                    } else {
+                        ctx.quad(btn, fill);
+                    }
                 }
-                if self.raised {
-                    let depth = crate::layout::bevel_width().min(h * 0.2);
-                    ctx.boss_edges(btn, (radius, radius, radius, radius), depth, (true, true, true, true));
-                }
+                // The beveled rim is the style's defining edge — the glass
+                // fill alone wouldn't read — so it draws in both DE styles.
+                let depth = crate::layout::bevel_width().min(h * 0.2);
+                ctx.boss_edges(btn, (radius, radius, radius, radius), depth, (true, true, true, true));
             }
         } else if self.raised {
             // The rocker: two FLAT half faces (see `rocker_reliefs`) — the

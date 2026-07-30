@@ -106,6 +106,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.textbox.multiline.line_wrap" | "style.textbox.multiline.line_wrap" | "style.data.textbox.multiline.line_wrap" => "textbox_line_wrap",
                 "style.control.textbox.multiline.border_width" | "style.textbox.multiline.border_width" | "style.data.textbox.multiline.border_width" => "textbox_multiline_border_width",
                 "style.control.toggle.style" => "toggle_style",
+                "style.control.toggle.button_opacity" => "toggle_button_opacity",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
                 "style.control.toggle.disabled_color" => "toggle_disabled_color",
@@ -1769,6 +1770,14 @@ pub fn toggle_slide() -> bool {
         .unwrap()
         .get_string("toggle_style")
         .is_some_and(|s| s == "slide")
+}
+
+/// The slide toggle button's fill opacity (`style.control.toggle.button_opacity`):
+/// a mostly-transparent glass tint over the track — the beveled rim carries the
+/// button's read.
+pub fn toggle_button_opacity() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("toggle_button_opacity").unwrap_or(0.25)
 }
 
 /// The slider's render style: `style.control.slider.style = "band"` swaps the
