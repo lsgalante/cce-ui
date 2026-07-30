@@ -290,16 +290,12 @@ impl Toggle {
         })
     }
 
-    /// The slide button's face color. `style.control.toggle.button_color`
-    /// (rgba) is used verbatim when set — its alpha channel IS the button's
-    /// opacity, and it recolors ONLY the button. Unset, the off/on state
-    /// colors crossfade by the animated position, knocked down to a glass
-    /// tint by `style.control.toggle.button_opacity`: the beveled edges
-    /// carry the button's read, the fill is a whisper over the track.
+    /// The slide button's face color: the disabled/enabled state colors
+    /// (rgba) crossfaded by the animated position, so the fill morphs while
+    /// the button glides. The colors are used verbatim — their alpha channel
+    /// IS the button's opacity, so a glass tint is a low-alpha state color
+    /// (the beveled edges carry the button's read either way).
     pub fn slide_button_color(&self) -> [f32; 4] {
-        if let Some(c) = colors::toggle_button_color() {
-            return c;
-        }
         let off = colors::toggle_off_color();
         let on = colors::toggle_on_color();
         let t = self.slide_t;
@@ -307,7 +303,7 @@ impl Toggle {
             off[0] + (on[0] - off[0]) * t,
             off[1] + (on[1] - off[1]) * t,
             off[2] + (on[2] - off[2]) * t,
-            (off[3] + (on[3] - off[3]) * t) * crate::layout::toggle_button_opacity(),
+            off[3] + (on[3] - off[3]) * t,
         ]
     }
 
