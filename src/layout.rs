@@ -88,6 +88,10 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.label.layout" => "control_label_layout",
                 "style.control.slider.height" => "slider_height",
                 "style.control.slider.corner_radius" => "slider_corner_radius",
+                "style.control.slider.style" => "slider_style",
+                "style.control.slider.band_thickness" => "slider_band_thickness",
+                "style.control.slider.bulge_width" => "slider_bulge_width",
+                "style.control.slider.bulge_height" => "slider_bulge_height",
                 "style.control.progressbar.height" => "progressbar_height",
                 "style.control.rangeslider.height" => "rangeslider_height",
                 "style.control.rangeslider.corner_radius" | "style.rangeslider.corner_radius" => "rangeslider_corner_radius",
@@ -1751,6 +1755,36 @@ pub fn set_toggle_border_width(width: f32) {
 pub fn slider_corner_radius() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("slider_corner_radius").unwrap_or(4.0)
+}
+
+/// The slider's render style: `style.control.slider.style = "band"` swaps the
+/// track/fill/thumb for a thin full-range band that inflates smoothly at the
+/// value (see `Slider::paint`). Anything else — or unset — keeps the default
+/// look, so apps opt in per-config.
+pub fn slider_band() -> bool {
+    lazy_init_style_registry();
+    get_style_registry()
+        .read()
+        .unwrap()
+        .get_string("slider_style")
+        .is_some_and(|s| s == "band")
+}
+
+/// Band-style knobs (`style.control.slider.*`): the flat band's thickness, and
+/// the bulge's half-span / peak height around the value position.
+pub fn slider_band_thickness() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("slider_band_thickness").unwrap_or(2.0)
+}
+
+pub fn slider_bulge_width() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("slider_bulge_width").unwrap_or(26.0)
+}
+
+pub fn slider_bulge_height() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("slider_bulge_height").unwrap_or(14.0)
 }
 
 pub fn set_slider_corner_radius(radius: f32) {

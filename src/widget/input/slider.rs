@@ -112,12 +112,25 @@ impl Slider {
         }
     }
 
+    /// The "band" style (config `style.control.slider.style = "band"`): a thin
+    /// full-range band that inflates smoothly at the value — no track fill, no
+    /// thumb ball, no carve.
+    fn band(&self) -> bool {
+        crate::layout::slider_band()
+    }
+
+    /// The width the value maps over: the full track under the band style
+    /// (there is no thumb to keep inside the ends), thumb-inset otherwise.
+    fn value_span(&self, g: &SliderGeom) -> f32 {
+        if self.band() { g.track_w } else { g.track_w - g.thumb_size }
+    }
+
     /// The recessed track's carve for hosts that draw this control through the
     /// legacy flat views (see `ParametersBg::reliefs`): (x, y, w, h, radius,
     /// depth) over the widget's assigned `rect`, or None when the style is off.
     /// The same geometry `paint` carves.
     pub fn track_relief(&self, rect: Rect) -> Option<(f32, f32, f32, f32, f32, f32)> {
-        if !self.recessed {
+        if !self.recessed || self.band() {
             return None;
         }
         let g = self.geom(rect);
@@ -132,7 +145,7 @@ impl Slider {
     /// it. None under the square style, whose quad thumb already reaches the
     /// plain-quad view. The same geometry `paint` draws.
     pub fn thumb_sphere(&self, rect: Rect) -> Option<(f32, f32, f32, [f32; 4])> {
-        if crate::layout::slider_corner_radius() <= 0.0 {
+        if crate::layout::slider_corner_radius() <= 0.0 || self.band() {
             return None;
         }
         let g = self.geom(rect);
@@ -171,6 +184,50 @@ impl Slider {
             (x, w)
         };
         SliderGeom { x, y: rect.y, w, h: rect.height, track_x, track_w, thumb_size: rect.height * 0.9 }
+    }
+
+    /// The band style's geometry: a thin band spanning the whole track, swelling
+    /// smoothly around the value position — a cosine bell sampled as ~1px column
+    /// quads, so the swell reads as one continuous surface (the snake that
+    /// swallowed the rodent), not a marker riding a rail. Emitted as `Prim::Quad`s
+    /// so legacy plain-quad hosts (`ParametersBg::extra_quads`) carry it verbatim.
+    fn paint_band(&self, g: &SliderGeom, ctx: &mut PaintCtx) {
+        let band_t = crate::layout::slider_band_thickness().max(0.5);
+        let bulge_h = crate::layout::slider_bulge_height().clamp(band_t, g.h);
+        let bulge_w = crate::layout::slider_bulge_width().max(2.0);
+        let color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
+        let cy = g.y + g.h * 0.5;
+        let vx = g.track_x + self.value * g.track_w;
+
+        // Flat runs outside the bulge span.
+        let l0 = g.track_x;
+        let r1 = g.track_x + g.track_w;
+        let b0 = (vx - bulge_w).max(l0);
+        let b1 = (vx + bulge_w).min(r1);
+        if b0 > l0 {
+            ctx.quad(Rect { x: l0, y: cy - band_t * 0.5, width: b0 - l0, height: band_t }, color);
+        }
+        if r1 > b1 {
+            ctx.quad(Rect { x: b1, y: cy - band_t * 0.5, width: r1 - b1, height: band_t }, color);
+        }
+
+        // The swell: symmetric about the band's centerline. The bell is raised
+        // to a power so the flanks taper long and the crest stays plump —
+        // mid-digestion, not a triangle.
+        let span = b1 - b0;
+        if span <= 0.0 {
+            return;
+        }
+        let steps = (span.ceil() as i32).max(1);
+        let step_w = span / steps as f32;
+        for i in 0..steps {
+            let x = b0 + i as f32 * step_w;
+            let t = ((x + step_w * 0.5 - vx) / bulge_w).clamp(-1.0, 1.0);
+            let bell = 0.5 * (1.0 + (std::f32::consts::PI * t).cos());
+            let h = band_t + (bulge_h - band_t) * bell.powf(1.35);
+            // A hair of overlap between columns so AA seams can't open.
+            ctx.quad(Rect { x, y: cy - h * 0.5, width: step_w + 0.3, height: h }, color);
+        }
     }
 
     fn scaled_string(&self) -> String {
@@ -291,12 +348,14 @@ impl Paint for Slider {
 
         // Track. Recessed style draws no background at all — the plate below
         // is the well's floor (the TextBox bare-recess look), and the carve
-        // emitted after the fill defines the channel.
+        // emitted after the fill defines the channel. The band style draws
+        // neither: the band IS the whole control.
+        let band = self.band();
         let track_rect = Rect { x: g.track_x, y: g.y, width: g.track_w, height: g.h };
         // Carve wall width, the TextBox formula: capped against the bar height
         // (the wall straddles the track boundary, intruding half its width).
         let recess_t = crate::layout::bevel_width().min(g.h * 0.2);
-        if !self.recessed {
+        if !self.recessed && !band {
             rrect(track_rect, radius, rc, colors::slider_track(), ctx);
         }
 
@@ -323,6 +382,13 @@ impl Paint for Slider {
 
             let text = if self.editing { self.edit_buffer.clone() } else { self.scaled_string() };
             ctx.text(text, rx + 8.0, crate::layout::align_text_y(g.y, g.h, 12.0, 0.0), 12.0, [0xee, 0xee, 0xf0]);
+        }
+
+        // Band style: the full-range band with its value swell replaces fill,
+        // carve, and thumb outright.
+        if band {
+            self.paint_band(&g, ctx);
+            return;
         }
 
         // Fill up to the thumb center. Recessed style insets the fill onto the
@@ -458,7 +524,7 @@ impl Input for Slider {
                 }
                 match state {
                     ElementState::Pressed => {
-                        let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
+                        let thumb_x = g.track_x + self.value * self.value_span(&g);
                         if *px >= g.track_x && *px <= g.track_x + g.track_w && *py >= g.y && *py <= g.y + g.h {
                             self.dragging = true;
                             self.drag_offset = px - thumb_x;
@@ -555,12 +621,12 @@ impl Input for Slider {
     fn drag_begin(&mut self, px: f32, _py: f32, rect: Rect) {
         self.dragging = true;
         let g = self.geom(rect);
-        let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
+        let thumb_x = g.track_x + self.value * self.value_span(&g);
         self.drag_offset = px - thumb_x;
     }
     fn drag_update(&mut self, px: f32, _py: f32, rect: Rect) -> bool {
         let g = self.geom(rect);
-        let range = g.track_w - g.thumb_size;
+        let range = self.value_span(&g);
         if range > 0.0 {
             let new_val = ((px - self.drag_offset - g.track_x) / range).clamp(0.0, 1.0);
             return self.set_value_marking(new_val);
