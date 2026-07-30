@@ -211,7 +211,7 @@ impl Slider {
                 && py >= rect.y
                 && py <= rect.y + rect.height;
         }
-        const SCROLL_INSET: f32 = 8.0;
+        const SCROLL_INSET: f32 = 14.0;
         let g = self.geom(rect);
         if px < g.track_x - SCROLL_INSET || px > g.track_x + g.track_w + SCROLL_INSET {
             return false;
@@ -642,7 +642,14 @@ impl Input for Slider {
                         return false;
                     }
                     let r = ectx.rect;
-                    if self.scroll_hit(r, *px, *py) {
+                    // Band: spatial acquisition + gesture LATCH. The halo travels
+                    // with the bulge, so adjusting slides it away from the pointer
+                    // — without the latch the value moves a little and stalls
+                    // mid-scroll. Once a gesture engages this slider it keeps it
+                    // until the gesture ends; a new gesture re-acquires by halo.
+                    let latched =
+                        band && !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(ectx.id);
+                    if latched || self.scroll_hit(r, *px, *py) {
                         if band || ui.scroll_gesture_new {
                             ui.scroll_initiate_widget_id = Some(ectx.id);
                         }

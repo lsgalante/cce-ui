@@ -771,6 +771,31 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
             ctx,
         )
     }
+
+    /// [`Self::mouse_wheel`] WITHOUT the adapter's rect hit-gate: straight to the
+    /// widget's `Input::on_event`. For hosts that already zone-gated the wheel
+    /// themselves against a capture region LARGER than the widget rect — the
+    /// band slider's shape-conforming halo extends past the row rect, and the
+    /// rect gate would clip exactly the fringe the halo exists to catch
+    /// (`ParametersBg`'s slider forwarding). The widget's own on_event still
+    /// applies its fine-grained zone test.
+    pub fn mouse_wheel_ungated(
+        &mut self,
+        delta: &crate::widget::MouseScrollDelta,
+        px: f32,
+        py: f32,
+        ctx: &mut UiContext,
+    ) -> bool {
+        let rect = self.content_rect();
+        let id = self.base.id();
+        let self_ptr = self.as_ptr_mut();
+        let mut ectx = EventCtx { rect, id, ui: Some(ctx), self_ptr: Some(self_ptr) };
+        Input::on_event(
+            &mut self.inner,
+            &Event::MouseWheel { delta: *delta, x: px, y: py, local_x: px, local_y: py },
+            &mut ectx,
+        )
+    }
     pub fn keyboard_input(&mut self, event: &crate::widget::KeyEvent, ctx: &mut UiContext) -> bool {
         self.handle_event(&Event::KeyInput(event.clone()), ctx)
     }
@@ -1226,6 +1251,13 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // (re-deriving would flatten a composite's mixed child fonts to widget_font).
         let subtree = Paint::paints_own_subtree(&self.inner);
         for item in tmp.finish().items {
+            // Re-emitting through ctx re-records clip state, so restore the
+            // circular clip the widget authored the prim under (Ramp's
+            // foam-cell fills) — it would otherwise be dropped here.
+            let clip_circle = item.clip_circle;
+            if let Some(c) = clip_circle {
+                ctx.push_clip_circle(c);
+            }
             match item.prim {
                 Prim::Text { text, x, y, font_size, color, font, bounds, .. } if subtree => {
                     ctx.text_with(text, x, y, font_size, color, font, bounds)
@@ -1246,6 +1278,9 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 Prim::Ridge { rect, radii, depth, edges } => ctx.ridge_edges(rect, radii, depth, edges),
                 Prim::Plate { rect, radii, color, depth } => ctx.plate(rect, radii, color, depth),
                 Prim::Arc { cx, cy, radius, thickness, start, end, color } => ctx.arc(cx, cy, radius, thickness, start, end, color),
+                Prim::ArcShaded { cx, cy, radius, thickness, start, end, inner, crest, outer } => {
+                    ctx.arc_shaded(cx, cy, radius, thickness, start, end, inner, crest, outer)
+                }
                 Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => ctx.vector(x1, y1, x2, y2, thickness, color, cap),
                 Prim::Circle { cx, cy, radius, color } => ctx.circle(cx, cy, radius, color),
                 Prim::Sphere { cx, cy, radius, color } => ctx.sphere(cx, cy, radius, color),
@@ -1253,6 +1288,9 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                     ctx.concave_fillet(cx, cy, radius, depth, start, raised)
                 }
                 Prim::Image { image, rect, alpha } => ctx.image(image, rect, alpha),
+            }
+            if clip_circle.is_some() {
+                ctx.pop_clip_circle();
             }
         }
         // The legacy default `paint_self` drained `all_quads`, which carries the focus

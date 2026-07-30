@@ -2191,13 +2191,20 @@ impl Input for ParametersBg {
                         // The default style keeps the whole-row strip.
                         let in_zone = if crate::layout::slider_band() {
                             self.sliders[i].as_ref().map_or(false, |s| {
+                                // The same gesture latch the slider's own wheel
+                                // test applies: mid-gesture the slider that
+                                // acquired the scroll keeps it (its halo travels
+                                // away from the pointer as the value moves).
+                                let latched = !ui.scroll_gesture_new
+                                    && ui.scroll_initiate_widget_id == Some(s.base().id());
                                 let (sx, sy, sw, sh) = s.rect();
                                 let ty = crate::widget::label_offset(s);
-                                s.inner().scroll_hit(
-                                    Rect { x: sx, y: sy + ty, width: sw, height: sh - ty },
-                                    px,
-                                    py,
-                                )
+                                latched
+                                    || s.inner().scroll_hit(
+                                        Rect { x: sx, y: sy + ty, width: sw, height: sh - ty },
+                                        px,
+                                        py,
+                                    )
                             })
                         } else {
                             py >= row_y - 2.0
@@ -2209,7 +2216,10 @@ impl Input for ParametersBg {
                             if let Some(s) = &mut self.sliders[i] {
                                 let was_scroll = s.scroll_enabled;
                                 s.set_scroll(true);
-                                if s.mouse_wheel(delta, px, py, ui) {
+                                // Ungated: the in_zone halo above already gated
+                                // spatially, and the adapter's rect gate would
+                                // clip the halo's fringe outside the row rect.
+                                if s.mouse_wheel_ungated(delta, px, py, ui) {
                                     let (min, max) = parse_slider_range(&p.2);
                                     let new_val = min + s.value * (max - min);
                                     let old_val = &p.1;
