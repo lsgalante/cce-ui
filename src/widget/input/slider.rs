@@ -234,6 +234,62 @@ impl Slider {
         let cy = g.y + g.h * 0.5;
         let vx = g.track_x + self.value * g.track_w;
 
+        // The well: the band appears INSET — a carve whose contour follows the
+        // drawn shape (band + traveling bulge) a small gap outside it. The rect
+        // recess prims can't follow a bell, so the walls are hand-shaded per
+        // column from the same `band_height_at` profile the fill samples: a
+        // shadow band hugging the top contour, a lit band along the bottom
+        // (the DE light sits upper-left), stepped alphas like the legacy
+        // banded bevels, amplitude riding `bevel_depth` like the rocker's
+        // `face_light`.
+        const WELL_GAP: f32 = 4.0;
+        const WELL_WALL: f32 = 3.0;
+        const WALL_STEPS: usize = 3;
+        let strength = (crate::layout::bevel_depth() / 0.15).clamp(0.0, 2.0);
+        let a_dark = 0.32 * strength;
+        let a_light = 0.16 * strength;
+        let wx0 = g.track_x - WELL_GAP;
+        let wx1 = g.track_x + g.track_w + WELL_GAP;
+        // 1px columns, EXACT widths: translucent shading quads must not
+        // overlap (a seam double-blends into a visible tick) — unlike the
+        // opaque fill columns below, which overlap on purpose against AA gaps.
+        let cols = (wx1 - wx0).ceil().max(1.0) as i32;
+        let colw = (wx1 - wx0) / cols as f32;
+        let sub = WELL_WALL / WALL_STEPS as f32;
+        for i in 0..cols {
+            let x = wx0 + i as f32 * colw;
+            let xm = (x + colw * 0.5).clamp(g.track_x, g.track_x + g.track_w);
+            let c = self.band_height_at(g, xm) * 0.5 + WELL_GAP;
+            for k in 0..WALL_STEPS {
+                let fade = 1.0 - k as f32 / WALL_STEPS as f32;
+                // Shadow INSIDE the well below the top contour; the lit lip
+                // OUTSIDE below the bottom contour — the textbox-recess read.
+                ctx.quad(
+                    Rect { x, y: cy - c + k as f32 * sub, width: colw, height: sub },
+                    [0.0, 0.0, 0.0, a_dark * fade],
+                );
+                ctx.quad(
+                    Rect { x, y: cy + c + k as f32 * sub, width: colw, height: sub },
+                    [1.0, 1.0, 1.0, a_light * fade],
+                );
+            }
+        }
+        // End walls close the well: shadow inside the left end, the lit lip
+        // outside the right, same light.
+        let c0 = self.band_height_at(g, g.track_x) * 0.5 + WELL_GAP;
+        let c1 = self.band_height_at(g, g.track_x + g.track_w) * 0.5 + WELL_GAP;
+        for k in 0..WALL_STEPS {
+            let fade = 1.0 - k as f32 / WALL_STEPS as f32;
+            ctx.quad(
+                Rect { x: wx0 + k as f32 * sub, y: cy - c0, width: sub, height: 2.0 * c0 },
+                [0.0, 0.0, 0.0, a_dark * fade],
+            );
+            ctx.quad(
+                Rect { x: wx1 + k as f32 * sub, y: cy - c1, width: sub, height: 2.0 * c1 },
+                [1.0, 1.0, 1.0, a_light * fade],
+            );
+        }
+
         // Flat runs outside the bulge span.
         let l0 = g.track_x;
         let r1 = g.track_x + g.track_w;
