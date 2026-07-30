@@ -2282,7 +2282,8 @@ impl Input for ParametersBg {
 
                 // The legacy tail's `self.hit_test(px, py, ctx)`: occlusion via the adapter's
                 // address, then rect-or-popover containment.
-                if !changed && !ui.is_coordinate_covered(self_id, px, py) {
+                let mut swallowed = changed;
+                if !ui.is_coordinate_covered(self_id, px, py) {
                     let in_rect = px >= self.rect.x
                         && px <= self.rect.x + self.rect.width
                         && py >= self.rect.y
@@ -2291,24 +2292,33 @@ impl Input for ParametersBg {
                         px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
                     });
                     if in_rect || in_popover {
-                        let scroll_speed = 24.0;
-                        let dy = match delta {
-                            MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
-                            MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
-                        };
-                        let old_scroll = self.scroll_y;
-                        let max_scroll = (self.content_h - self.rect.height).max(0.0);
-                        self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
-                        if (self.scroll_y - old_scroll).abs() > 0.01 {
-                            self.update_slider_rects();
-                            self.scroll_activity = SCROLL_ACTIVE_HOLD;
-                            self.recompute_scrollbar_raised();
-                            changed = true;
+                        if !changed {
+                            let scroll_speed = 24.0;
+                            let dy = match delta {
+                                MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
+                                MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
+                            };
+                            let old_scroll = self.scroll_y;
+                            let max_scroll = (self.content_h - self.rect.height).max(0.0);
+                            self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
+                            if (self.scroll_y - old_scroll).abs() > 0.01 {
+                                self.update_slider_rects();
+                                self.scroll_activity = SCROLL_ACTIVE_HOLD;
+                                self.recompute_scrollbar_raised();
+                            }
                         }
+                        // An opaque pane swallows EVERY wheel over it, whether
+                        // anything moved or not: returning false would hand the
+                        // event to whatever lies BEHIND the plate — the designer
+                        // routes unhandled wheels to the 3D viewport, whose rect
+                        // is the whole window in the floating layout, so a
+                        // near-miss on a slider would orbit the camera through
+                        // the pane.
+                        swallowed = true;
                     }
                 }
 
-                changed
+                swallowed
             }
             _ => false,
         }
