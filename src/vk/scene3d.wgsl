@@ -89,9 +89,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     // the camera without it. Two-sided so unculled back faces stay sane.
     if (in.lit > 0.5) {
         let n = normalize(cross(dpdx(in.world), dpdy(in.world)));
-        let l = normalize(vec3f(-0.45, 0.8, 0.35));
-        let d = abs(dot(n, l));
-        rgb = rgb * (0.62 + 0.38 * d);
+        // A strongly AZIMUTHAL light, wrap-shaded. A near-vertical light (or a
+        // two-sided |dot|) yields a latitude-dominated / 180-degree-symmetric
+        // brightness pattern — invariant under a yaw orbit, which reads as the
+        // scene turning with the camera. The horizontal component pins the lit
+        // side to a world azimuth the orbit visibly sweeps across; the wrap
+        // term keeps a soft floor without |dot|'s ambiguity (the fill pass
+        // culls to front faces, so the derivative normal's sign is stable).
+        let l = normalize(vec3f(-0.55, 0.45, 0.7));
+        let d = clamp(dot(n, l) * 0.5 + 0.5, 0.0, 1.0);
+        rgb = rgb * (0.55 + 0.45 * d);
     }
     return vec4f(rgb, cov);
 }
