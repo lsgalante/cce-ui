@@ -628,14 +628,22 @@ impl Input for Slider {
                 if !self.scroll_enabled {
                     return false;
                 }
-                // Scroll-gesture gating: only the widget that initiated the gesture keeps it.
                 if let Some(ui) = ectx.ui.as_deref_mut() {
-                    if !ui.scroll_gesture_new && ui.scroll_initiate_widget_id != Some(ectx.id) {
+                    // Band style: recognition is purely SPATIAL — anywhere in
+                    // the shape halo adjusts, mid-gesture included. Trackpad
+                    // swipes are one long gesture (kinetic tail included), so
+                    // the initiator gate below would reject every event whose
+                    // gesture began outside the halo no matter where the
+                    // pointer is now — the "slider won't take my scroll" feel.
+                    // The default style keeps the gate: only the widget that
+                    // initiated a gesture keeps it.
+                    let band = crate::layout::slider_band();
+                    if !band && !ui.scroll_gesture_new && ui.scroll_initiate_widget_id != Some(ectx.id) {
                         return false;
                     }
                     let r = ectx.rect;
                     if self.scroll_hit(r, *px, *py) {
-                        if ui.scroll_gesture_new {
+                        if band || ui.scroll_gesture_new {
                             ui.scroll_initiate_widget_id = Some(ectx.id);
                         }
                         let scroll_amount = match delta {
