@@ -32,8 +32,8 @@ pub struct MeshId(usize);
 pub struct SceneDraw {
     pub mesh: MeshId,
     pub mvp: [[f32; 4]; 4],
-    /// Rasterize as lines (PolygonMode::LINE) instead of filled triangles.
-    /// Falls back to filled when the device lacks fillModeNonSolid.
+    /// Rasterize through the line pipeline (LINE_LIST topology): the mesh
+    /// must be an EDGE mesh (vertex pairs), not the triangle fill mesh.
     pub wireframe: bool,
     /// rgb + mix: the fragment color is mixed toward `wire_tint.rgb` by
     /// `wire_tint[3]`. Zero = vertex colors untouched (the default draw).
@@ -44,6 +44,19 @@ pub struct SceneDraw {
     /// Whole-draw alpha multiplier (1.0 = opaque). The pass blends with
     /// straight alpha, so translucent draws show whatever rendered beneath.
     pub opacity: f32,
+    /// Rasterized line width in framebuffer pixels for wireframe draws
+    /// (ignored on fills). Clamped to the device's wideLines cap — 1.0
+    /// everywhere when the feature is absent.
+    pub line_width: f32,
+    /// FILL draws only: the width of a wire pass that will ride on this
+    /// fill (0 = none). The fill is pushed back by its own slope-scaled
+    /// polygon offset sized to that width, so the coplanar wires win the
+    /// depth test solidly: a w-px line samples the fill's plane up to
+    /// (w/2 + 0.5) px off the true edge, and biasing the LINE can't cover
+    /// that (its own depth slope is along-axis — near zero for
+    /// contour-following wires) while the fill's slope is exactly the
+    /// quantity needed.
+    pub wire_base_width: f32,
 }
 
 /// shader_3d.wgsl's uniform block.
@@ -56,7 +69,11 @@ struct SceneUniforms {
     corner_shape: f32,
     wire_tint: [f32; 4],
     opacity: f32,
-    _pad: [f32; 3],
+    /// 1.0 on wireframe draws: the fragment shader skips the derivative-
+    /// normal flat shading, whose screen-space derivatives are degenerate on
+    /// line fragments (along-axis only) and light the wires with noise.
+    is_wire: f32,
+    _pad: [f32; 2],
 }
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
@@ -83,6 +100,8 @@ pub(crate) struct SceneStage {
     /// PolygonMode::LINE twin of `pipeline` — None when the device lacks
     /// fillModeNonSolid (wireframe draws then fall back to the fill pipeline).
     wireframe_pipeline: Option<vk::Pipeline>,
+    /// Device cap for `SceneDraw::line_width` (1.0 without wideLines).
+    max_line_width: f32,
     pipeline_layout: vk::PipelineLayout,
     descriptor_set_layout: vk::DescriptorSetLayout,
     descriptor_pool: vk::DescriptorPool,
@@ -114,7 +133,7 @@ impl SceneStage {
         extent: vk::Extent2D,
         frames_in_flight: usize,
         min_uniform_align: vk::DeviceSize,
-        wireframe_supported: bool,
+        max_line_width: f32,
     ) -> Self {
         unsafe {
             // Offscreen pass: color -> TRANSFER_SRC (copied to the swapchain
@@ -246,11 +265,14 @@ impl SceneStage {
                 .scissor_count(1);
             // wgpu pipeline_3d: CCW front, back-face culling. Winding survives
             // because the renderer flips Y via negative viewport height (like
-            // wgpu-hal), not in the shader.
+            // wgpu-hal), not in the shader. Depth bias is enabled but DYNAMIC
+            // (zero for ordinary fills): fills carrying a wire overlay are
+            // pushed back per `SceneDraw::wire_base_width`.
             let rasterization = vk::PipelineRasterizationStateCreateInfo::default()
                 .polygon_mode(vk::PolygonMode::FILL)
                 .cull_mode(vk::CullModeFlags::BACK)
                 .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+                .depth_bias_enable(true)
                 .line_width(1.0);
             let multisample = vk::PipelineMultisampleStateCreateInfo::default()
                 .rasterization_samples(vk::SampleCountFlags::TYPE_1);
@@ -269,7 +291,11 @@ impl SceneStage {
                 .color_write_mask(vk::ColorComponentFlags::RGBA)];
             let color_blend = vk::PipelineColorBlendStateCreateInfo::default()
                 .attachments(&blend_attachments);
-            let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+            let dynamic_states = [
+                vk::DynamicState::VIEWPORT,
+                vk::DynamicState::SCISSOR,
+                vk::DynamicState::DEPTH_BIAS,
+            ];
             let dynamic_state =
                 vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
             let pipeline = device
@@ -292,53 +318,69 @@ impl SceneStage {
                 )
                 .expect("Failed to create 3D pipeline")[0];
 
-            // The wireframe twin: identical but rasterized as lines, and
-            // culling OFF. Culling cannot be trusted here: winding is
-            // evaluated in framebuffer space, and with the negative-height
-            // viewport at least some drivers skip the Y-mirror for LINE
-            // polygon mode — the wire pass then selects the OPPOSITE facet
-            // set from the fill (observed live: pure-wireframe spheres drew
-            // only the far hemisphere's interior, near cap absent). With cull
-            // NONE the wire view is driver-independent: pure wireframe is the
-            // full cage, and in overlay mode the DEPTH test — not culling —
-            // hides the far side (far wires fail LESS_OR_EQUAL against the
-            // near fill).
-            // The compare is LESS_OR_EQUAL with writes off, plus a bias
-            // tiebreaker sized to the actual error source: a line fragment
-            // samples up to ~half a pixel off the fill's pixel centers, so
-            // its depth misses the fill's by ≤ 0.5 × the facet's depth slope
-            // — slope factor -0.5 covers exactly that, and -1 constant
-            // covers rounding. NO MORE: the old -4/-1 was strong enough to
-            // punch FAR-side wires through the near fill (with the culled-
-            // facet flip above, those far wires were the only wires — the
-            // overlay's whole lattice was the back side showing through,
-            // which read as the mesh counter-rotating during orbits).
+            // The wireframe twin draws LINE_LIST edge meshes, NOT the fill
+            // mesh through PolygonMode::LINE. Polygon-mode lines proved
+            // driver-broken twice on Mesa ANV with the negative-height
+            // viewport: triangle winding is evaluated without the
+            // framebuffer Y-mirror (CCW-front selected the FAR facet set —
+            // wireframe spheres drew only the far hemisphere's interior,
+            // pole-fan forensics), and vertex-attribute sourcing fetches
+            // from the wrong vertices (wires aligned to the mesh but carried
+            // colors from a rotated region — the sphere's symmetry masked
+            // the misplacement geometrically). Real line primitives take the
+            // ordinary, well-tested raster path: no facet culling exists, so
+            // hidden-wire removal is the DEPTH test against the fill, which
+            // `SceneDraw::wire_base_width` pushes back.
+            // The compare is LESS_OR_EQUAL with writes off, and the wires
+            // carry NO bias — the tiebreak lives on the FILL side
+            // (`SceneDraw::wire_base_width` pushes the fill back by its own
+            // slope-scaled polygon offset). Biasing the line cannot work for
+            // wide wires: a w-px line's fragments sample the fill's plane up
+            // to (w/2 + 0.5) px off the true edge, but the hardware scales a
+            // line's slope bias by its ALONG-AXIS depth slope — near zero
+            // for contour-following wires — while strong constant terms
+            // punch FAR-side wires through the near fill (the old -4/-1 did
+            // exactly that; with the culled-facet flip above those far wires
+            // were the only wires, and the overlay's whole lattice was the
+            // back side showing through, which read as the mesh
+            // counter-rotating during orbits).
             let depth_stencil_lines = vk::PipelineDepthStencilStateCreateInfo::default()
                 .depth_test_enable(true)
                 .depth_write_enable(false)
                 .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
-            let wireframe_pipeline = wireframe_supported.then(|| {
+            let wireframe_pipeline = Some({
+                let input_assembly_lines = vk::PipelineInputAssemblyStateCreateInfo::default()
+                    .topology(vk::PrimitiveTopology::LINE_LIST);
                 let rasterization_lines = vk::PipelineRasterizationStateCreateInfo::default()
-                    .polygon_mode(vk::PolygonMode::LINE)
+                    .polygon_mode(vk::PolygonMode::FILL)
                     .cull_mode(vk::CullModeFlags::NONE)
                     .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
                     .depth_bias_enable(true)
-                    .depth_bias_constant_factor(-1.0)
-                    .depth_bias_slope_factor(-0.5)
                     .line_width(1.0);
+                // Line width is dynamic (SceneDraw::line_width); depth bias
+                // is dynamic on both pipelines and set to zero for wires —
+                // see the comment above.
+                let dynamic_states_lines = [
+                    vk::DynamicState::VIEWPORT,
+                    vk::DynamicState::SCISSOR,
+                    vk::DynamicState::LINE_WIDTH,
+                    vk::DynamicState::DEPTH_BIAS,
+                ];
+                let dynamic_state_lines = vk::PipelineDynamicStateCreateInfo::default()
+                    .dynamic_states(&dynamic_states_lines);
                 device
                     .create_graphics_pipelines(
                         vk::PipelineCache::null(),
                         &[vk::GraphicsPipelineCreateInfo::default()
                             .stages(&stages)
                             .vertex_input_state(&vertex_input)
-                            .input_assembly_state(&input_assembly)
+                            .input_assembly_state(&input_assembly_lines)
                             .viewport_state(&viewport_state)
                             .rasterization_state(&rasterization_lines)
                             .multisample_state(&multisample)
                             .depth_stencil_state(&depth_stencil_lines)
                             .color_blend_state(&color_blend)
-                            .dynamic_state(&dynamic_state)
+                            .dynamic_state(&dynamic_state_lines)
                             .layout(pipeline_layout)
                             .render_pass(render_pass)
                             .subpass(0)],
@@ -390,6 +432,7 @@ impl SceneStage {
                 render_pass,
                 pipeline,
                 wireframe_pipeline,
+                max_line_width,
                 pipeline_layout,
                 descriptor_set_layout,
                 descriptor_pool,
@@ -692,7 +735,8 @@ impl SceneStage {
                 corner_shape,
                 wire_tint: draw.wire_tint,
                 opacity: draw.opacity,
-                _pad: [0.0; 3],
+                is_wire: if draw.wireframe { 1.0 } else { 0.0 },
+                _pad: [0.0; 2],
             };
             let offset = (self.uniform_stride as usize) * i;
             mapped[offset..offset + UNIFORM_SIZE as usize]
@@ -775,6 +819,22 @@ impl SceneStage {
                 if wanted != bound {
                     device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, wanted);
                     bound = wanted;
+                }
+                if draw.wireframe && self.wireframe_pipeline.is_some() {
+                    device.cmd_set_line_width(cmd, draw.line_width.clamp(1.0, self.max_line_width));
+                    device.cmd_set_depth_bias(cmd, 0.0, 0.0, 0.0);
+                } else if draw.wire_base_width > 0.0 {
+                    // Push this fill behind its coming wire overlay. The
+                    // slope term must cover not just the wires' across-width
+                    // sampling offset (w/2 px) but the NEIGHBOR facet's
+                    // plane: a wire lies on edge A|B and its fragments carry
+                    // A's plane depth, while the fill under the far half of
+                    // the wire is B's plane, which on a convex surface tilts
+                    // closer — hence the extra pixel of slope headroom.
+                    let w = draw.wire_base_width.clamp(1.0, self.max_line_width);
+                    device.cmd_set_depth_bias(cmd, 2.0, 0.0, 1.5 + w);
+                } else {
+                    device.cmd_set_depth_bias(cmd, 0.0, 0.0, 0.0);
                 }
                 device.cmd_bind_descriptor_sets(
                     cmd,

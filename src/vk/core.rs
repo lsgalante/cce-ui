@@ -61,9 +61,9 @@ pub struct VkCore {
     pub(crate) min_uniform_align: vk::DeviceSize,
     /// minAccelerationStructureScratchOffsetAlignment; 1 when no ray-query stack.
     pub(crate) as_scratch_align: vk::DeviceSize,
-    /// fillModeNonSolid was available and enabled — the scene stage may build
-    /// its wireframe (PolygonMode::LINE) pipeline.
-    pub(crate) wireframe_supported: bool,
+    /// Widest rasterizable line (device lineWidthRange cap); 1.0 when the
+    /// wideLines feature is absent or disabled.
+    pub(crate) max_line_width: f32,
 }
 
 /// The process-wide Vulkan entry + instance every [`VkCore`] hangs off.
@@ -370,15 +370,22 @@ impl VkCore {
         let mut as_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
             .acceleration_structure(true);
         let mut rq_features = vk::PhysicalDeviceRayQueryFeaturesKHR::default().ray_query(true);
-        // Non-solid fill (PolygonMode::LINE) for the scene stage's wireframe
-        // pipeline — enabled when the device offers it; consumers check
-        // `wireframe_supported`.
-        let wireframe_supported = instance
-            .get_physical_device_features(physical_device)
-            .fill_mode_non_solid
-            == vk::TRUE;
+        // wideLines for adjustable wire thickness (the scene stage's dynamic
+        // line width); without it widths clamp to 1.0. (PolygonMode::LINE /
+        // fillModeNonSolid is deliberately NOT used — wires are LINE_LIST
+        // edge meshes; see the scene stage's wireframe pipeline comment.)
+        let supported_features = instance.get_physical_device_features(physical_device);
+        let wide_lines_supported = supported_features.wide_lines == vk::TRUE;
+        let max_line_width = if wide_lines_supported {
+            instance
+                .get_physical_device_properties(physical_device)
+                .limits
+                .line_width_range[1]
+        } else {
+            1.0
+        };
         let enabled_features =
-            vk::PhysicalDeviceFeatures::default().fill_mode_non_solid(wireframe_supported);
+            vk::PhysicalDeviceFeatures::default().wide_lines(wide_lines_supported);
         let mut device_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_infos)
             .enabled_features(&enabled_features);
@@ -445,7 +452,7 @@ impl VkCore {
                 instance,
                 min_uniform_align,
                 as_scratch_align,
-                wireframe_supported,
+                max_line_width,
             },
             surface,
         )
