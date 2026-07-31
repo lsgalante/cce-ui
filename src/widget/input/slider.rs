@@ -11,7 +11,7 @@ use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
-    MouseScrollDelta, NamedKey, Paint, TextEditorState,
+    NamedKey, Paint, TextEditorState,
 };
 
 /// The track/readout/thumb geometry shared by the paint and input paths, derived from the
@@ -653,10 +653,7 @@ impl Input for Slider {
                         if band || ui.scroll_gesture_new {
                             ui.scroll_initiate_widget_id = Some(ectx.id);
                         }
-                        let scroll_amount = match delta {
-                            MouseScrollDelta::LineDelta(_x, y) => *y,
-                            MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
-                        };
+                        let scroll_amount = delta.notches_y();
                         let new_val = (self.value - scroll_amount * 0.02).clamp(0.0, 1.0);
                         self.set_value_marking(new_val);
                         return true;
@@ -910,10 +907,7 @@ impl Input for RangeSlider {
                     let center_high = x + self.value_high * range + thumb_size / 2.0;
                     let dist_low = (px - center_low).abs();
                     let dist_high = (px - center_high).abs();
-                    let scroll_amount = match delta {
-                        MouseScrollDelta::LineDelta(_x, y) => *y,
-                        MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
-                    };
+                    let scroll_amount = delta.notches_y();
                     let step = 0.02;
                     let adjust_low = if dist_low < dist_high {
                         true
@@ -1012,7 +1006,7 @@ impl Input for RangeSlider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{WidgetHost, UiContext};
+    use crate::widget::{MouseScrollDelta, WidgetHost, UiContext};
 
     /// The legacy rangeslider interaction test, driven through the WidgetHost drag forwards
     /// (hosts call these directly): thumb selection by proximity, constrained updates.

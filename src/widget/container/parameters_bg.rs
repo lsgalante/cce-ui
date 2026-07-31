@@ -2241,10 +2241,7 @@ impl Input for ParametersBg {
                                 for j in 0..3 {
                                     let r_inner = rects_inner[j];
                                     if py >= r_inner.1 && py <= r_inner.1 + r_inner.3 {
-                                        let scroll_amount = match delta {
-                                            MouseScrollDelta::LineDelta(_x, y) => *y,
-                                            MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 120.0,
-                                        };
+                                        let scroll_amount = delta.notches_y();
                                         let step = 0.02;
                                         let new_val = (f.values[j] - scroll_amount * step).clamp(0.0, 1.0);
                                         if (new_val - f.values[j]).abs() > 0.0001 {
