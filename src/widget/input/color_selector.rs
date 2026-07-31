@@ -462,6 +462,32 @@ impl Input for ColorSelector {
                 self.command.clone()
             };
 
+            // Ask the compositor to open the picker at this control instead of
+            // its remembered position: the pointer is on the swatch right now,
+            // so its location IS the control's location. One-shot, best-effort
+            // (`place-next` consumed at the picker's map; ignored off-cce).
+            if let Ok(reply) = crate::ipc::send_command("cce", "pointer-location") {
+                let mut px = None;
+                let mut py = None;
+                for tok in reply.split_whitespace() {
+                    if let Some(v) = tok.strip_prefix("x=") {
+                        px = v.parse::<f64>().ok();
+                    } else if let Some(v) = tok.strip_prefix("y=") {
+                        py = v.parse::<f64>().ok();
+                    }
+                }
+                if let (Some(x), Some(y)) = (px, py) {
+                    let app_id = std::path::Path::new(&self.command)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| self.command.clone());
+                    let _ = crate::ipc::send_command(
+                        "cce",
+                        &format!("place-next {} {:.0} {:.0}", app_id, x, y),
+                    );
+                }
+            }
+
             let mut cmd = std::process::Command::new(&cmd_path);
             cmd.arg(&hex);
             if self.with_alpha {
