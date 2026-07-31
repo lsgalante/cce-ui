@@ -2326,6 +2326,9 @@ impl Input for ParametersBg {
                     });
                     if in_rect || in_popover {
                         if !changed && !wheel_taken {
+                            if crate::scroll_debug() {
+                                eprintln!("[scroll] params: PANE-SCROLL fallback at ({px:.0},{py:.0})");
+                            }
                             let scroll_speed = 24.0;
                             let dy = match delta {
                                 MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
@@ -2529,18 +2532,37 @@ impl ParamController for ParametersBg {
                 if Some(i) != self.focused_param && Some(i) != self.dragging_param {
                     self.display_params[i].1 = p_new.1.clone();
                     if let Some(ref mut s) = self.sliders[i] {
-                        let val = p_new.1.parse::<f32>().unwrap_or(0.0);
                         let (min, max) = parse_slider_range(&p_new.2);
-                        let t = if max - min != 0.0 {
-                            ((val - min) / (max - min)).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        };
-                        s.set_value(t);
+                        // Idempotence guard: hosts push params straight back
+                        // after every sync, and re-seeding from the 2-decimal
+                        // string quantizes away the slider's sub-tick state —
+                        // mid-scroll that snaps the value BACKWARD between
+                        // wheel events/glide ticks (visible as jitter). Only
+                        // re-seed when the incoming string says something the
+                        // current value doesn't (a genuinely external change).
+                        let cur_str = format!("{:.2}", min + s.value * (max - min));
+                        if cur_str != p_new.1 {
+                            let val = p_new.1.parse::<f32>().unwrap_or(0.0);
+                            let t = if max - min != 0.0 {
+                                ((val - min) / (max - min)).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            s.set_value(t);
+                        }
                     } else if let Some(ref mut f) = self.float3s[i] {
                         let (min, max) = parse_slider_range(&p_new.2);
-                        let vals = parse_float3_value(&p_new.1, min, max);
-                        f.set_values(vals);
+                        // Same round-trip guard as the slider row.
+                        let cur_str = format!(
+                            "{:.2}:{:.2}:{:.2}",
+                            min + f.values[0] * (max - min),
+                            min + f.values[1] * (max - min),
+                            min + f.values[2] * (max - min)
+                        );
+                        if cur_str != p_new.1 {
+                            let vals = parse_float3_value(&p_new.1, min, max);
+                            f.set_values(vals);
+                        }
                     } else if let Some(ref mut sb) = self.spinboxes[i] {
                         if !sb.editing {
                             let (min, _max, _step) = parse_spinbox_range(&p_new.2);

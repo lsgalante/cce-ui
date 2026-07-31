@@ -650,6 +650,12 @@ impl Input for Slider {
                     // initiated a gesture keeps it.
                     let band = crate::layout::slider_band();
                     if !band && !ui.scroll_gesture_new && ui.scroll_initiate_widget_id != Some(ectx.id) {
+                        if crate::scroll_debug() {
+                            eprintln!(
+                                "[scroll] slider {:?}: GATE reject (gesture_new=false, initiator={:?}, me={:?})",
+                                self.label, ui.scroll_initiate_widget_id, ectx.id
+                            );
+                        }
                         return false;
                     }
                     let r = ectx.rect;
@@ -685,7 +691,19 @@ impl Input for Slider {
                         } else {
                             self.scroll_vel * 0.65 + (applied / idt) * 0.35
                         };
+                        if crate::scroll_debug() {
+                            eprintln!(
+                                "[scroll] slider {:?}: APPLY notches={scroll_amount:.3} applied={applied:.4} value={new_val:.4} idt={idt:.3} vel={:.3}",
+                                self.label, self.scroll_vel
+                            );
+                        }
                         return true;
+                    }
+                    if crate::scroll_debug() {
+                        eprintln!(
+                            "[scroll] slider {:?}: MISS scroll_hit at ({px:.0},{py:.0}) rect={:?}",
+                            self.label, ectx.rect
+                        );
                     }
                 }
                 false
@@ -753,6 +771,12 @@ impl Input for Slider {
         if self.scroll_vel.abs() > 0.02 && !self.dragging && !self.editing {
             let new_val = (self.value + self.scroll_vel * dt).clamp(0.0, 1.0);
             let moved = self.set_value_marking(new_val);
+            if crate::scroll_debug() {
+                eprintln!(
+                    "[scroll] slider {:?}: GLIDE dt={dt:.3} vel={:.3} value={new_val:.4}",
+                    self.label, self.scroll_vel
+                );
+            }
             if new_val == 0.0 || new_val == 1.0 {
                 self.scroll_vel = 0.0;
                 self.last_wheel = None;

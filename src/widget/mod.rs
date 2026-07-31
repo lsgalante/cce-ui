@@ -27,15 +27,20 @@ pub enum MouseScrollDelta {
 }
 
 impl MouseScrollDelta {
-    /// Vertical scroll in wheel-notch equivalents. Pixel (trackpad) deltas
-    /// convert at the DE's 15-axis-units-per-notch convention (see `ccectl
-    /// pointer-scroll`: "15 = one notch") — NOT the 120-unit wheel standard,
-    /// which makes value widgets feel dead under trackpad swipes (a full
-    /// slider sweep would take ~6000px of finger travel).
+    /// Vertical scroll in wheel-notch equivalents for VALUE widgets (sliders,
+    /// float3 rows). The pixel divisor is calibrated against a measured
+    /// trackpad stream, not a notch convention: a real two-finger swipe
+    /// delivers 10–20 axis units per event at 6–8ms intervals (~2000
+    /// units/sec sustained). At 60 units per notch-equivalent (0.02 of the
+    /// range each), that sustains ~0.6 range/sec — a full sweep is a couple
+    /// of committed swipes, while slow fine-tuning events (2–5 units) move
+    /// well under one readout tick. 15 (the DE's hardware-notch unit) slams
+    /// bound-to-bound in ~150ms; 120 (the wheel standard) needs ~6000px of
+    /// finger travel per sweep.
     pub fn notches_y(&self) -> f32 {
         match self {
             MouseScrollDelta::LineDelta(_x, y) => *y,
-            MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 15.0,
+            MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 60.0,
         }
     }
 }

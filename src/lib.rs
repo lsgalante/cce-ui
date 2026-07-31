@@ -24,6 +24,14 @@ pub mod colors {
 pub static IS_VERTICAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static BAR_THICKNESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(24);
 
+/// `CCE_SCROLL_DEBUG=1` traces the wheel pipeline to stderr: raw coalesced
+/// axis input (runner), routing decisions (ParametersBg), slider gate/value
+/// steps, and glide ticks. Diagnostic-only; checked once per process.
+pub fn scroll_debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("CCE_SCROLL_DEBUG").is_some())
+}
+
 /// Directory bundled fonts are loaded from: `$CCE_FONTS_DIR`, else `~/Dropbox/Fonts`.
 /// Resolving via `$HOME` keeps the existing location without a hardcoded username.
 pub fn fonts_dir() -> String {

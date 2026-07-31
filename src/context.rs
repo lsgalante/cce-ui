@@ -136,6 +136,12 @@ impl UiContext {
                 } else {
                     self.scroll_gesture_new = false;
                 }
+                if crate::scroll_debug() {
+                    eprintln!(
+                        "[scroll] router: gap={elapsed_ms}ms new_gesture={is_new_gesture} initiator={:?}",
+                        self.scroll_initiate_widget_id
+                    );
+                }
                 self.last_scroll_time = Some(now);
             }
         }

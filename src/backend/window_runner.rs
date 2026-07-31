@@ -3458,6 +3458,14 @@ impl<A: Application> PointerHandler for EngineState<A> {
                 let v_lines = if discrete_v != 0 { discrete_v as f32 } else { coalesced_v as f32 / 10.0 };
                 MouseScrollDelta::LineDelta(-h_lines * factors.mouse as f32, -v_lines * factors.mouse as f32)
             };
+            if crate::scroll_debug() {
+                static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+                let t = T0.get_or_init(std::time::Instant::now).elapsed().as_millis();
+                eprintln!(
+                    "[scroll {t}ms] runner: coalesced=({coalesced_h:.2},{coalesced_v:.2}) discrete=({discrete_h},{discrete_v}) factors=(tp {:.2}, m {:.2}) -> {delta:?} at ({last_lx:.0},{last_ly:.0})",
+                    factors.trackpad, factors.mouse
+                );
+            }
             let mut rebuild = false;
             if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
                 ctx.ctrl_pressed = self.ctrl_pressed;
