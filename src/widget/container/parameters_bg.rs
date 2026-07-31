@@ -1543,7 +1543,7 @@ impl Input for ParametersBg {
                 }
             }
         }
-        // Color rows tick their picker-stream poll (`cce-colors --stream`
+        // Color rows tick their picker-stream poll (`cce-color-editor --stream`
         // lines applying live) — fold a changed value back into the row so
         // hosts syncing off display_params see it while the picker is open.
         for i in 0..self.colors.len() {

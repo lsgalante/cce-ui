@@ -19,7 +19,7 @@ pub struct ColorSelector {
     pub editor_state: TextEditorState,
     pub just_changed: bool,
     pub with_alpha: bool,
-    /// Live color lines from the running picker (`cce-colors --stream` prints
+    /// Live color lines from the running picker (`cce-color-editor --stream` prints
     /// every change), forwarded by a reader thread — the value applies while
     /// the editor stays open instead of on exit.
     live_rx: Option<std::sync::mpsc::Receiver<String>>,
@@ -59,7 +59,7 @@ impl ColorSelector {
             edit_buffer: String::new(),
             cursor_idx: 0,
             font_family: crate::layout::color_selector_font(),
-            command: "cce-colors".to_string(),
+            command: "cce-color-editor".to_string(),
             hovered: false,
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: TextEditorState::new(String::new()),
@@ -79,7 +79,7 @@ impl ColorSelector {
             edit_buffer: String::new(),
             cursor_idx: 0,
             font_family: crate::layout::color_selector_font(),
-            command: "cce-colors".to_string(),
+            command: "cce-color-editor".to_string(),
             hovered: false,
             child: std::sync::Arc::new(std::sync::Mutex::new(None)),
             editor_state: TextEditorState::new(String::new()),
