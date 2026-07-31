@@ -985,6 +985,14 @@ impl ParametersBg {
                 if let Some(d) = &self.choices[i] {
                     out.extend(d.all_rounded_quads(ctx));
                 }
+            } else if p.2.starts_with("spinbox") {
+                // The spinbox's whole chrome (frame, display well, +/- button
+                // wells) is modern rounded-rect paint — its legacy color() is
+                // transparent and it has no extra_quads, so skipping it here
+                // renders the row as bare text.
+                if let Some(sb) = &self.spinboxes[i] {
+                    out.extend(sb.all_rounded_quads(ctx));
+                }
             } else if p.2 == "button" {
                 if let Some(b) = &self.buttons[i] {
                     out.extend(b.all_rounded_quads(ctx));
