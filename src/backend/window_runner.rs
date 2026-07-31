@@ -3684,6 +3684,18 @@ impl<A: Application> EngineState<A> {
             ctx.logo_pressed = self.logo_pressed;
         }
 
+        // Escape dismisses the shared context menu before app dispatch — the
+        // toolkit-wide default, mirroring the click-outside dismissal. Consumed:
+        // while a menu is open, Escape means "close it", nothing else.
+        if state == ElementState::Pressed
+            && custom_event.logical_key == Key::Named(NamedKey::Escape)
+            && crate::widget::context_menu::is_visible()
+        {
+            crate::widget::context_menu::hide();
+            self.redraw = true;
+            return;
+        }
+
         let mut rebuild = false;
         if let Some(msg) = self.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut rebuild) {
             let mut update_rebuild = false;
