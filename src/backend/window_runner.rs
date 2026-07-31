@@ -2406,6 +2406,16 @@ pub trait Application: Sized + 'static {
     fn handle_pointer_move(&mut self, pos: LogicalPosition, needs_rebuild: &mut bool);
     fn handle_mouse_input(&mut self, button: MouseButton, state: ElementState, pos: LogicalPosition, needs_rebuild: &mut bool) -> Option<Self::Message>;
     fn handle_mouse_wheel(&mut self, delta: &MouseScrollDelta, pos: LogicalPosition, needs_rebuild: &mut bool);
+    /// Trackpad pinch (zwp_pointer_gestures pinch). `factor` is the scale
+    /// change SINCE THE LAST update (1.0 = no change, >1 = fingers spreading),
+    /// so direct-manipulation zoom is `content_scale *= factor`. Return true
+    /// to consume; returning false falls back to the engine's legacy
+    /// synthesis — a ctrl+wheel PixelDelta sized for the graph's zoom mapping
+    /// (`y = (factor-1)/0.015`) — so ctrl-scroll-zoom surfaces keep working
+    /// without implementing this.
+    fn handle_pinch(&mut self, _factor: f32, _pos: LogicalPosition, _needs_rebuild: &mut bool) -> bool {
+        false
+    }
     fn handle_key_input(&mut self, event: &KeyEvent, needs_rebuild: &mut bool) -> Option<Self::Message>;
     /// Keyboard focus entered/left the window (the compositor keyboard-focuses
     /// the focused window, so this is the "am I the focused window" signal —
@@ -3778,6 +3788,16 @@ impl<A: Application> wayland_client::Dispatch<ZwpPointerGesturePinchV1, ()> for 
 
                 let (px, py) = state.cursor_pos;
                 let mut rebuild = false;
+
+                // First offer the gesture as-is: apps with true pinch
+                // surfaces (the designer's 3D viewport) consume it here at
+                // 1:1 scale instead of through the wheel synthesis below.
+                if state.inner.as_mut().unwrap().handle_pinch(factor, LogicalPosition::new(px, py), &mut rebuild) {
+                    if rebuild {
+                        state.redraw = true;
+                    }
+                    return;
+                }
 
                 // Calculate the y_delta for PixelDelta mapping.
                 // Since cce-graph interprets factor = 1.0 + y_delta * 0.015, we reverse it:
