@@ -1747,6 +1747,9 @@ pub fn tessellate_display_list(
             Prim::Arc { cx, cy, radius, thickness, start: sa, end: ea, color } => {
                 push_arc_background_vertices(*cx, *cy, *radius, *thickness, *sa, *ea, sw, sh, *color, segs(*radius), no, &mut verts);
             }
+            Prim::ArcShaded { cx, cy, radius, thickness, start: sa, end: ea, inner, crest, outer } => {
+                push_arc_shaded_vertices(*cx, *cy, *radius, *thickness, *sa, *ea, sw, sh, *inner, *crest, *outer, segs(*radius), no, &mut verts);
+            }
             Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => {
                 let lc = match cap {
                     Cap::Flat => LineCap::Flat,
@@ -2231,6 +2234,58 @@ pub fn push_arc_background_vertices(
         out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
         out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
         out.push(Vertex { position: [ndc_x3, ndc_y3], color, clip_circle });
+    }
+}
+
+/// A ring band with radial Gouraud shading: two sub-bands (inner rim → crest
+/// centerline, crest → outer rim) whose vertex colors interpolate across the
+/// stroke — the rounded-bevel profile — plus the half-px alpha feathers at
+/// both true rims (colors matched to the adjacent band, so no seams).
+#[allow(clippy::too_many_arguments)]
+pub fn push_arc_shaded_vertices(
+    cx: f32, cy: f32, r: f32,
+    thickness: f32,
+    start_angle: f32, end_angle: f32,
+    sw: f32, sh: f32,
+    inner: [f32; 4], crest: [f32; 4], outer: [f32; 4],
+    segments: usize,
+    clip_circle: [f32; 3],
+    out: &mut Vec<Vertex>,
+) {
+    let f = 0.5f32.min(thickness * 0.25);
+    let r_out = r;
+    let r_in = (r - thickness).max(0.0);
+    let r_mid = (r_in + r_out) / 2.0;
+    let fade_in = [inner[0], inner[1], inner[2], 0.0];
+    let fade_out = [outer[0], outer[1], outer[2], 0.0];
+    // (inner radius, outer radius, color at inner edge, color at outer edge)
+    let bands = [
+        ((r_in - f).max(0.0), r_in + f, fade_in, inner),
+        (r_in + f, r_mid, inner, crest),
+        (r_mid, r_out - f, crest, outer),
+        (r_out - f, r_out + f, outer, fade_out),
+    ];
+    for i in 0..segments {
+        let theta1 = start_angle + (i as f32) * (end_angle - start_angle) / (segments as f32);
+        let theta2 = start_angle + ((i + 1) as f32) * (end_angle - start_angle) / (segments as f32);
+        let (c1, s1) = (theta1.cos(), theta1.sin());
+        let (c2, s2) = (theta2.cos(), theta2.sin());
+        for &(ra, rb, ca, cb) in &bands {
+            if rb <= ra {
+                continue;
+            }
+            let p = |rad: f32, c: f32, s: f32| -> [f32; 2] {
+                [((cx + rad * c) / sw) * 2.0 - 1.0, 1.0 - ((cy + rad * s) / sh) * 2.0]
+            };
+            let (i1, o1) = (p(ra, c1, s1), p(rb, c1, s1));
+            let (i2, o2) = (p(ra, c2, s2), p(rb, c2, s2));
+            out.push(Vertex { position: i1, color: ca, clip_circle });
+            out.push(Vertex { position: o1, color: cb, clip_circle });
+            out.push(Vertex { position: o2, color: cb, clip_circle });
+            out.push(Vertex { position: i1, color: ca, clip_circle });
+            out.push(Vertex { position: o2, color: cb, clip_circle });
+            out.push(Vertex { position: i2, color: ca, clip_circle });
+        }
     }
 }
 

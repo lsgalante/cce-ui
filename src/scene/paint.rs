@@ -91,6 +91,10 @@ pub enum Prim {
     /// offset (the shading amplitude is the DE-wide `bevel_depth`).
     Plate { rect: Rect, radii: Radii, color: [f32; 4], depth: f32 },
     Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
+    /// A ring band with radial color interpolation — inner rim → crest
+    /// (centerline) → outer rim — for rounded rim bevels (the Ramp's key
+    /// rings). `radius` is the stroke's outer edge, like `Arc`.
+    ArcShaded { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, inner: [f32; 4], crest: [f32; 4], outer: [f32; 4] },
     Vector { x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap },
     Circle { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
     /// A `Circle` lit as a ball: the disc is shaded per pixel as a hemisphere
@@ -519,6 +523,34 @@ impl PaintCtx {
     pub fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {
         let (ox, oy) = self.offset;
         self.push(Prim::Arc { cx: cx + ox, cy: cy + oy, radius, thickness, start, end, color });
+    }
+
+    /// A radially-shaded ring band — see [`Prim::ArcShaded`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn arc_shaded(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        thickness: f32,
+        start: f32,
+        end: f32,
+        inner: [f32; 4],
+        crest: [f32; 4],
+        outer: [f32; 4],
+    ) {
+        let (ox, oy) = self.offset;
+        self.push(Prim::ArcShaded {
+            cx: cx + ox,
+            cy: cy + oy,
+            radius,
+            thickness,
+            start,
+            end,
+            inner,
+            crest,
+            outer,
+        });
     }
 
     pub fn text(&mut self, text: impl Into<String>, x: f32, y: f32, font_size: f32, color: [u8; 3]) {
