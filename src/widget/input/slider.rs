@@ -59,6 +59,8 @@ pub struct Slider {
     /// exponential decay instead of stopping dead.
     scroll_vel: f32,
     last_wheel: Option<std::time::Instant>,
+    /// Readout / edit-buffer display precision (decimal places).
+    decimals: usize,
 }
 
 impl Slider {
@@ -79,6 +81,7 @@ impl Slider {
             recessed: crate::layout::control_relief(),
             scroll_vel: 0.0,
             last_wheel: None,
+            decimals: 2,
         })
     }
 
@@ -328,7 +331,7 @@ impl Slider {
     }
 
     fn scaled_string(&self) -> String {
-        format!("{:.2}", self.min + self.value * (self.max - self.min))
+        format!("{:.*}", self.decimals, self.min + self.value * (self.max - self.min))
     }
 
     fn set_value_marking(&mut self, new_val: f32) -> bool {
@@ -387,6 +390,12 @@ impl Adapted<Slider> {
 
     pub fn with_readout(mut self, enabled: bool) -> Self {
         self.show_readout = enabled;
+        self
+    }
+
+    /// Readout display precision in decimal places (default 2).
+    pub fn with_decimals(mut self, decimals: usize) -> Self {
+        self.decimals = decimals;
         self
     }
 }

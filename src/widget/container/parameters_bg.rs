@@ -790,7 +790,7 @@ impl ParametersBg {
                         s.unfocus();
                         let (min, max) = parse_slider_range(&p.2);
                         let new_val = min + s.value * (max - min);
-                        p.1 = format!("{:.2}", new_val);
+                        p.1 = format!("{:.*}", slider_decimals(&p.2), new_val);
                     }
                 } else if p.2.starts_with("float3") {
                     if let Some(f) = &mut self.float3s[idx] {
@@ -1476,7 +1476,7 @@ impl Input for ParametersBg {
                     let (min, max) = parse_slider_range(&self.display_params[i].2);
                     let new_val = min + s.value * (max - min);
                     let old_val = &self.display_params[i].1;
-                    let new_val_str = format!("{:.2}", new_val);
+                    let new_val_str = format!("{:.*}", slider_decimals(&self.display_params[i].2), new_val);
                     if *old_val != new_val_str {
                         self.display_params[i].1 = new_val_str;
                         return true;
@@ -1540,7 +1540,7 @@ impl Input for ParametersBg {
                 if s.tick(dt, &mut dummy) {
                     let (min, max) = parse_slider_range(&self.display_params[i].2);
                     let new_val = min + s.value * (max - min);
-                    let new_val_str = format!("{:.2}", new_val);
+                    let new_val_str = format!("{:.*}", slider_decimals(&self.display_params[i].2), new_val);
                     if self.display_params[i].1 != new_val_str {
                         self.display_params[i].1 = new_val_str;
                     }
@@ -2148,7 +2148,7 @@ impl Input for ParametersBg {
                                 if s.keyboard_input(event, ui) {
                                     let (min, max) = parse_slider_range(&p.2);
                                     let new_val = min + s.value * (max - min);
-                                    p.1 = format!("{:.2}", new_val);
+                                    p.1 = format!("{:.*}", slider_decimals(&p.2), new_val);
                                     if !s.editing {
                                         self.focused_param = None;
                                     }
@@ -2247,7 +2247,7 @@ impl Input for ParametersBg {
                                     let (min, max) = parse_slider_range(&p.2);
                                     let new_val = min + s.value * (max - min);
                                     let old_val = &p.1;
-                                    let new_val_str = format!("{:.2}", new_val);
+                                    let new_val_str = format!("{:.*}", slider_decimals(&p.2), new_val);
                                     if *old_val != new_val_str {
                                         p.1 = new_val_str;
                                         changed = true;
@@ -2361,6 +2361,13 @@ impl Input for ParametersBg {
     }
 }
 
+/// Display precision for a slider row from the type string's optional 4th
+/// segment (`slider:min:max:decimals`); 2 when absent — the pane-wide
+/// historical default.
+fn slider_decimals(ptype: &str) -> usize {
+    ptype.split(':').nth(3).and_then(|s| s.parse().ok()).unwrap_or(2)
+}
+
 fn parse_slider_range(ptype: &str) -> (f32, f32) {
     if ptype.starts_with("slider:") || ptype.starts_with("float3:") {
         let parts: Vec<&str> = ptype.split(':').collect();
@@ -2447,7 +2454,7 @@ impl ParamController for ParametersBg {
                     } else {
                         0.0
                     };
-                    Some(Slider::new().with_value(t).with_range(min, max).with_readout(true).with_label(&p.0))
+                    Some(Slider::new().with_value(t).with_range(min, max).with_readout(true).with_decimals(slider_decimals(&p.2)).with_label(&p.0))
                 } else {
                     None
                 }
@@ -2540,7 +2547,7 @@ impl ParamController for ParametersBg {
                         // wheel events/glide ticks (visible as jitter). Only
                         // re-seed when the incoming string says something the
                         // current value doesn't (a genuinely external change).
-                        let cur_str = format!("{:.2}", min + s.value * (max - min));
+                        let cur_str = format!("{:.*}", slider_decimals(&p_new.2), min + s.value * (max - min));
                         if cur_str != p_new.1 {
                             let val = p_new.1.parse::<f32>().unwrap_or(0.0);
                             let t = if max - min != 0.0 {
