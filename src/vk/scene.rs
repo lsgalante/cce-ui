@@ -41,6 +41,9 @@ pub struct SceneDraw {
     /// lines inherit the mesh's colors and would otherwise vanish into the
     /// identical fill beneath.
     pub wire_tint: [f32; 4],
+    /// Whole-draw alpha multiplier (1.0 = opaque). The pass blends with
+    /// straight alpha, so translucent draws show whatever rendered beneath.
+    pub opacity: f32,
 }
 
 /// shader_3d.wgsl's uniform block.
@@ -52,6 +55,8 @@ struct SceneUniforms {
     window_radius: f32,
     corner_shape: f32,
     wire_tint: [f32; 4],
+    opacity: f32,
+    _pad: [f32; 3],
 }
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
@@ -686,6 +691,8 @@ impl SceneStage {
                 window_radius: corner_radius_px,
                 corner_shape,
                 wire_tint: draw.wire_tint,
+                opacity: draw.opacity,
+                _pad: [0.0; 3],
             };
             let offset = (self.uniform_stride as usize) * i;
             mapped[offset..offset + UNIFORM_SIZE as usize]

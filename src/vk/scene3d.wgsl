@@ -9,6 +9,8 @@ struct Uniforms {
     // colors untouched; a wireframe pass overlaid on its own filled mesh
     // sets it so the lines separate from the identical fill beneath.
     wire_tint: vec4<f32>,
+    // Whole-draw alpha multiplier (straight-alpha blend): 1 = opaque.
+    opacity: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -100,5 +102,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         let d = clamp(dot(n, l) * 0.5 + 0.5, 0.0, 1.0);
         rgb = rgb * (0.55 + 0.45 * d);
     }
-    return vec4f(rgb, cov);
+    return vec4f(rgb, cov * uniforms.opacity);
 }
