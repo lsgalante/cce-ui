@@ -53,6 +53,12 @@ pub struct Slider {
     /// channel, and with a transparent track color the plate itself is its
     /// floor.
     recessed: bool,
+    /// Wheel-scroll glide velocity (normalized value units/sec) and the last
+    /// wheel-event instant — the Ramp hover-scroll idiom: when the event
+    /// stream stops (fingers lifted), `tick` keeps the value coasting with
+    /// exponential decay instead of stopping dead.
+    scroll_vel: f32,
+    last_wheel: Option<std::time::Instant>,
 }
 
 impl Slider {
@@ -71,6 +77,8 @@ impl Slider {
             just_changed: false,
             label: None,
             recessed: crate::layout::control_relief(),
+            scroll_vel: 0.0,
+            last_wheel: None,
         })
     }
 
@@ -617,6 +625,9 @@ impl Input for Slider {
                         if *px >= g.track_x && *px <= g.track_x + g.track_w && *py >= g.y && *py <= g.y + g.h {
                             self.dragging = true;
                             self.drag_offset = px - thumb_x;
+                            // A grab overrides any wheel glide in flight.
+                            self.scroll_vel = 0.0;
+                            self.last_wheel = None;
                             return true;
                         }
                         false
@@ -655,7 +666,25 @@ impl Input for Slider {
                         }
                         let scroll_amount = delta.notches_y();
                         let new_val = (self.value - scroll_amount * 0.02).clamp(0.0, 1.0);
+                        let applied = new_val - self.value;
                         self.set_value_marking(new_val);
+                        // Velocity estimate for the release glide (the Ramp
+                        // hover-scroll idiom): EMA of applied delta over
+                        // inter-event time. A leisurely wheel produces
+                        // negligible velocity (big gaps clamp to 0.1s); fast
+                        // trackpad streams build real speed. Hitting an end
+                        // stops dead — no glide pinned at the bounds.
+                        let now = std::time::Instant::now();
+                        let idt = self
+                            .last_wheel
+                            .map_or(0.1, |l| now.duration_since(l).as_secs_f32())
+                            .clamp(0.008, 0.1);
+                        self.last_wheel = Some(now);
+                        self.scroll_vel = if new_val == 0.0 || new_val == 1.0 {
+                            0.0
+                        } else {
+                            self.scroll_vel * 0.65 + (applied / idt) * 0.35
+                        };
                         return true;
                     }
                 }
@@ -713,6 +742,31 @@ impl Input for Slider {
         true
     }
 
+    /// Wheel-glide inertia: once the event stream stops (>60ms), the value
+    /// coasts on the estimated velocity with exponential decay — the same
+    /// release feel as the pane scrolls and the Ramp's hover-scroll.
+    fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
+        let Some(last) = self.last_wheel else { return false };
+        if last.elapsed().as_secs_f32() <= 0.06 {
+            return false;
+        }
+        if self.scroll_vel.abs() > 0.02 && !self.dragging && !self.editing {
+            let new_val = (self.value + self.scroll_vel * dt).clamp(0.0, 1.0);
+            let moved = self.set_value_marking(new_val);
+            if new_val == 0.0 || new_val == 1.0 {
+                self.scroll_vel = 0.0;
+                self.last_wheel = None;
+            } else {
+                self.scroll_vel *= (-5.0 * dt).exp();
+            }
+            moved
+        } else {
+            self.scroll_vel = 0.0;
+            self.last_wheel = None;
+            false
+        }
+    }
+
     fn draggable(&self, _rect: Rect) -> bool {
         true
     }
@@ -721,6 +775,9 @@ impl Input for Slider {
     }
     fn drag_begin(&mut self, px: f32, _py: f32, rect: Rect) {
         self.dragging = true;
+        // A grab overrides any wheel glide in flight.
+        self.scroll_vel = 0.0;
+        self.last_wheel = None;
         let g = self.geom(rect);
         let thumb_x = g.track_x + self.value * self.value_span(&g);
         self.drag_offset = px - thumb_x;

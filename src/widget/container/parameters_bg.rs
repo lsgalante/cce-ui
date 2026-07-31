@@ -1532,6 +1532,22 @@ impl Input for ParametersBg {
                 }
             }
         }
+        // Slider rows tick their wheel-glide inertia — fold a coasting value
+        // back into the row string so hosts syncing off display_params apply
+        // it, exactly like a live wheel event would.
+        for i in 0..self.sliders.len() {
+            if let Some(s) = &mut self.sliders[i] {
+                if s.tick(dt, &mut dummy) {
+                    let (min, max) = parse_slider_range(&self.display_params[i].2);
+                    let new_val = min + s.value * (max - min);
+                    let new_val_str = format!("{:.2}", new_val);
+                    if self.display_params[i].1 != new_val_str {
+                        self.display_params[i].1 = new_val_str;
+                    }
+                    changed = true;
+                }
+            }
+        }
         // Ramp rows tick their field widgets (preset application, slider→key
         // sync) and drain their change flag — fold the curve back into the row
         // value when it moved.
@@ -2179,6 +2195,13 @@ impl Input for ParametersBg {
                     return false;
                 };
                 let mut changed = false;
+                // A value row that took the wheel (slider/float3/spinbox),
+                // whether or not its 2-decimal string ticked over. Gating the
+                // pane's viewport-scroll fallback on the STRING (`changed`)
+                // let every sub-tick trackpad event scroll the pane instead —
+                // a slider-vs-pane tug-of-war that shifted the rows under the
+                // pointer mid-adjust.
+                let mut wheel_taken = false;
                 let rects = self.get_param_rects();
                 for (i, p) in self.display_params.iter_mut().enumerate() {
                     if p.2.starts_with("slider") {
@@ -2220,6 +2243,7 @@ impl Input for ParametersBg {
                                 // spatially, and the adapter's rect gate would
                                 // clip the halo's fringe outside the row rect.
                                 if s.mouse_wheel_ungated(delta, px, py, ui) {
+                                    wheel_taken = true;
                                     let (min, max) = parse_slider_range(&p.2);
                                     let new_val = min + s.value * (max - min);
                                     let old_val = &p.1;
@@ -2241,6 +2265,7 @@ impl Input for ParametersBg {
                                 for j in 0..3 {
                                     let r_inner = rects_inner[j];
                                     if py >= r_inner.1 && py <= r_inner.1 + r_inner.3 {
+                                        wheel_taken = true;
                                         let scroll_amount = delta.notches_y();
                                         let step = 0.02;
                                         let new_val = (f.values[j] - scroll_amount * step).clamp(0.0, 1.0);
@@ -2269,6 +2294,7 @@ impl Input for ParametersBg {
                         let row_y = r.1;
                         if py >= row_y && py <= row_y + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
                             if let Some(sb) = &mut self.spinboxes[i] {
+                                wheel_taken = true;
                                 let scroll_amount = match delta {
                                     MouseScrollDelta::LineDelta(_x, y) => *y as i32,
                                     MouseScrollDelta::PixelDelta(pos) => {
@@ -2289,7 +2315,7 @@ impl Input for ParametersBg {
 
                 // The legacy tail's `self.hit_test(px, py, ctx)`: occlusion via the adapter's
                 // address, then rect-or-popover containment.
-                let mut swallowed = changed;
+                let mut swallowed = changed || wheel_taken;
                 if !ui.is_coordinate_covered(self_id, px, py) {
                     let in_rect = px >= self.rect.x
                         && px <= self.rect.x + self.rect.width
@@ -2299,7 +2325,7 @@ impl Input for ParametersBg {
                         px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
                     });
                     if in_rect || in_popover {
-                        if !changed {
+                        if !changed && !wheel_taken {
                             let scroll_speed = 24.0;
                             let dy = match delta {
                                 MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
