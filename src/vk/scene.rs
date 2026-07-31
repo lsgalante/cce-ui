@@ -287,17 +287,27 @@ impl SceneStage {
                 )
                 .expect("Failed to create 3D pipeline")[0];
 
-            // The wireframe twin: identical but rasterized as lines. Culling
-            // stays on so the wire view matches the fill's visible surface.
-            // A small negative depth bias pulls the lines toward the viewer,
-            // and the compare is LESS_OR_EQUAL with writes off: a line
-            // fragment over its own fill interpolates the SAME plane, and on
-            // camera-facing facets (near-zero depth slope) the biased
-            // difference dips below depth precision — under strict LESS the
-            // front-center lattice z-fought the coplanar fill and LOST, wires
-            // surviving only toward the limb, which read as the mesh
-            // counter-rotating during orbits (the overlay-mode "sphere turns
-            // with the camera" illusion).
+            // The wireframe twin: identical but rasterized as lines, and
+            // culling OFF. Culling cannot be trusted here: winding is
+            // evaluated in framebuffer space, and with the negative-height
+            // viewport at least some drivers skip the Y-mirror for LINE
+            // polygon mode — the wire pass then selects the OPPOSITE facet
+            // set from the fill (observed live: pure-wireframe spheres drew
+            // only the far hemisphere's interior, near cap absent). With cull
+            // NONE the wire view is driver-independent: pure wireframe is the
+            // full cage, and in overlay mode the DEPTH test — not culling —
+            // hides the far side (far wires fail LESS_OR_EQUAL against the
+            // near fill).
+            // The compare is LESS_OR_EQUAL with writes off, plus a bias
+            // tiebreaker sized to the actual error source: a line fragment
+            // samples up to ~half a pixel off the fill's pixel centers, so
+            // its depth misses the fill's by ≤ 0.5 × the facet's depth slope
+            // — slope factor -0.5 covers exactly that, and -1 constant
+            // covers rounding. NO MORE: the old -4/-1 was strong enough to
+            // punch FAR-side wires through the near fill (with the culled-
+            // facet flip above, those far wires were the only wires — the
+            // overlay's whole lattice was the back side showing through,
+            // which read as the mesh counter-rotating during orbits).
             let depth_stencil_lines = vk::PipelineDepthStencilStateCreateInfo::default()
                 .depth_test_enable(true)
                 .depth_write_enable(false)
@@ -305,11 +315,11 @@ impl SceneStage {
             let wireframe_pipeline = wireframe_supported.then(|| {
                 let rasterization_lines = vk::PipelineRasterizationStateCreateInfo::default()
                     .polygon_mode(vk::PolygonMode::LINE)
-                    .cull_mode(vk::CullModeFlags::BACK)
+                    .cull_mode(vk::CullModeFlags::NONE)
                     .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
                     .depth_bias_enable(true)
-                    .depth_bias_constant_factor(-4.0)
-                    .depth_bias_slope_factor(-1.0)
+                    .depth_bias_constant_factor(-1.0)
+                    .depth_bias_slope_factor(-0.5)
                     .line_width(1.0);
                 device
                     .create_graphics_pipelines(
