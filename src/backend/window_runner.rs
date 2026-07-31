@@ -2640,23 +2640,35 @@ impl<A: Application> EngineState<A> {
         self.logical_height = height_logical;
     }
 
+    /// Buffer scale and physical extent for a logical size under the current
+    /// scale factor: rounded, then snapped up so the extent divides by the
+    /// buffer scale (a wl_surface requirement). In forced-scale mode the
+    /// surface stays at buffer_scale 1 (the compositor believes scale 1).
+    ///
+    /// This is the single source of the buffer-size formula: `resize` sizes
+    /// the swapchain with it and `render` refuses to present any extent that
+    /// disagrees with it — a mispaired buffer/scale commit is how the resume
+    /// output bounce halved even-sized windows (buffer at the old scale's
+    /// size, new scale latched; the compositor reads it as a self-resize).
+    fn buffer_geometry(scale_factor: f64, w: f32, h: f32) -> (i32, u32, u32) {
+        let s = if crate::scale::forced_scale().is_some() {
+            1
+        } else {
+            (scale_factor.round() as i32).max(1)
+        };
+        let su = s as u32;
+        let pw = ((w as f64 * scale_factor).round() as u32).max(1).div_ceil(su) * su;
+        let ph = ((h as f64 * scale_factor).round() as u32).max(1).div_ceil(su) * su;
+        (s, pw, ph)
+    }
+
     pub fn resize(&mut self, w: f32, h: f32) {
         let (w, h) = self.inner.as_ref().unwrap().adjust_size(w, h);
         if w > 0.0 && h > 0.0 {
             self.logical_width = w;
             self.logical_height = h;
+            let (_, pw, ph) = Self::buffer_geometry(self.scale_factor, w, h);
             if let Some(ref mut renderer) = self.renderer {
-                // wl_surface requires buffer dimensions divisible by the buffer
-                // scale; snap up so a fractional logical size can't queue an
-                // illegal swapchain extent. In forced-scale mode the surface
-                // stays at buffer_scale 1 (the compositor believes scale 1).
-                let s = if crate::scale::forced_scale().is_some() {
-                    1
-                } else {
-                    (self.scale_factor.round() as u32).max(1)
-                };
-                let pw = ((w as f64 * self.scale_factor).round() as u32).max(1).div_ceil(s) * s;
-                let ph = ((h as f64 * self.scale_factor).round() as u32).max(1).div_ceil(s) * s;
                 renderer.resize(pw, ph);
             }
             let scale = self.scale_factor;
@@ -2920,34 +2932,31 @@ impl<A: Application> EngineState<A> {
         // Commit the buffer scale together with a buffer it is legal for: the
         // present inside draw_frame_2d is the only commit on this surface, so
         // sending the request here orders it right before a matching-size
-        // attach+commit. Skipped while the pending extent isn't divisible (a
-        // transition frame) — the old committed scale stays legal for it.
+        // attach+commit.
+        //
+        // Present only the EXACT extent the current logical size and scale
+        // call for. Divisibility is not enough: mid scale-transition (the
+        // resume output bounce) the pending extent can belong to the other
+        // scale, and an even-sized old-scale buffer divides cleanly by the
+        // new scale — the commit is protocol-legal, so the compositor reads
+        // it as a self-resize to half/double and reconfigures the window to
+        // match (how the color editor came back from suspend at exactly half
+        // size with the divisibility guard green). Odd sizes at least die
+        // loudly (invalid_size). On mismatch, re-request the right extent
+        // and skip — before the frame-callback request below, so the loop
+        // isn't left waiting on a callback no commit will ever latch.
         if let Some(ref surface) = self.surface {
-            let s = if crate::scale::forced_scale().is_some() {
-                1
-            } else {
-                (self.scale_factor.round() as i32).max(1)
-            };
+            let (s, epw, eph) =
+                Self::buffer_geometry(self.scale_factor, self.logical_width, self.logical_height);
             let e = renderer.pending_extent();
-            if s != self.committed_buffer_scale
-                && e.width % s as u32 == 0
-                && e.height % s as u32 == 0
-            {
-                surface.set_buffer_scale(s);
-                self.committed_buffer_scale = s;
-            }
-            // Never present a buffer the latching scale can't legally
-            // describe: mid scale-transition (resume output bounce) the
-            // extent can belong to the other scale, and committing it is a
-            // fatal invalid_size for odd sizes and a half/double-size window
-            // for even ones. Skip the frame — before the frame-callback
-            // request below, so the loop isn't left waiting on a callback no
-            // commit will ever latch; the next resize/scale event re-syncs
-            // extent and scale and redraws.
-            let latching = self.committed_buffer_scale.max(1) as u32;
-            if e.width % latching != 0 || e.height % latching != 0 {
+            if e.width != epw || e.height != eph {
+                renderer.resize(epw, eph);
                 self.redraw = true;
                 return;
+            }
+            if s != self.committed_buffer_scale {
+                surface.set_buffer_scale(s);
+                self.committed_buffer_scale = s;
             }
         }
 
@@ -2965,14 +2974,21 @@ impl<A: Application> EngineState<A> {
             self.redraw = true;
         }
 
-        renderer.draw_frame_2d(Frame2D {
+        if !renderer.draw_frame_2d(Frame2D {
             verts: &verts,
             batches: &batches,
             overlay_verts: &overlay_verts,
             images: &image_quads,
             plate_features: &plate_features,
             clear_color,
-        });
+        }) {
+            // No present happened (swapchain out-of-date, or the created
+            // swapchain didn't match the requested extent). The frame
+            // callback requested above will never latch without a commit —
+            // clear it or the demand-driven loop stalls waiting forever.
+            self.frame_callback_pending = false;
+            self.redraw = true;
+        }
     }
 }
 

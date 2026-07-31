@@ -976,10 +976,26 @@ impl VkRenderer {
                 self.swapchain_loader.destroy_swapchain(old_swapchain, None);
             }
             self.extent = extent;
-            // Keep the two in step so a rebuild queued for a non-resize reason
-            // (suboptimal/out-of-date) doesn't hand `pending_extent` a stale or
-            // unclamped size.
-            self.desired_extent = extent;
+            if extent.width == self.desired_extent.width && extent.height == self.desired_extent.height {
+                // Keep the two in step so a rebuild queued for a non-resize
+                // reason (suboptimal/out-of-date) doesn't hand
+                // `pending_extent` a stale or unclamped size.
+                self.desired_extent = extent;
+            } else {
+                // The surface capabilities overrode the requested size (seen
+                // on suspend/resume, when caps briefly lag the real surface
+                // state). Presenting this swapchain would commit a buffer the
+                // caller never approved — paired with the wrong buffer scale
+                // that reads as a self-resize and half/double-sizes the
+                // window. Keep the request, requeue the rebuild, and let
+                // draw_frame skip the present until caps agree.
+                log::warn!(
+                    "swapchain extent {}x{} != requested {}x{}; skipping present until they agree",
+                    extent.width, extent.height,
+                    self.desired_extent.width, self.desired_extent.height,
+                );
+                self.swapchain_dirty = true;
+            }
 
             let images = self
                 .swapchain_loader
@@ -1402,6 +1418,12 @@ impl VkRenderer {
         if self.swapchain_dirty {
             self.swapchain_dirty = false;
             self.recreate_swapchain();
+            if self.swapchain_dirty {
+                // The rebuild couldn't honor the requested extent (surface
+                // caps disagree, e.g. mid suspend/resume) — presenting it
+                // would commit a wrong-size buffer. Skip; the caller redraws.
+                return false;
+            }
         }
 
         unsafe {
