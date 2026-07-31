@@ -2520,6 +2520,17 @@ pub struct EngineState<A: Application> {
     /// paired with the present that commits a matching-size buffer — never on
     /// the scale event itself, which races in-flight presents of old buffers.
     pub committed_buffer_scale: i32,
+    /// Outputs the surface has entered and not left. Used by
+    /// `scale_factor_changed` to reject the SCTK no-outputs fallback: on
+    /// suspend/resume the DRM connector is destroyed and re-created, the
+    /// surface briefly sits on zero (live) outputs, and SCTK reports scale 1.
+    /// Acting on that report rebuilds the buffer at scale-1 size while the
+    /// surface's latched scale can still be 2 — a fatal `invalid_size`
+    /// protocol error for odd-sized surfaces (the status bar crash-loop on
+    /// every resume) and a silently HALF-SIZE window for even-sized ones
+    /// (the compositor reads buffer/scale as a self-resize and the halving
+    /// sticks, compounding per resume).
+    pub entered_outputs: Vec<wl_output::WlOutput>,
     pub logical_width: f32,
     pub logical_height: f32,
     
@@ -2851,11 +2862,6 @@ impl<A: Application> EngineState<A> {
         let cc = self.inner.as_ref().unwrap().clear_color();
         let clear_color = [cc[0].powf(2.2), cc[1].powf(2.2), cc[2].powf(2.2), cc[3]];
 
-        if let Some(ref surface) = self.surface {
-            let _callback = surface.frame(&self.qh, ());
-            self.frame_callback_pending = true;
-        }
-
         // Commit the buffer scale together with a buffer it is legal for: the
         // present inside draw_frame_2d is the only commit on this surface, so
         // sending the request here orders it right before a matching-size
@@ -2875,6 +2881,24 @@ impl<A: Application> EngineState<A> {
                 surface.set_buffer_scale(s);
                 self.committed_buffer_scale = s;
             }
+            // Never present a buffer the latching scale can't legally
+            // describe: mid scale-transition (resume output bounce) the
+            // extent can belong to the other scale, and committing it is a
+            // fatal invalid_size for odd sizes and a half/double-size window
+            // for even ones. Skip the frame — before the frame-callback
+            // request below, so the loop isn't left waiting on a callback no
+            // commit will ever latch; the next resize/scale event re-syncs
+            // extent and scale and redraws.
+            let latching = self.committed_buffer_scale.max(1) as u32;
+            if e.width % latching != 0 || e.height % latching != 0 {
+                self.redraw = true;
+                return;
+            }
+        }
+
+        if let Some(ref surface) = self.surface {
+            let _callback = surface.frame(&self.qh, ());
+            self.frame_callback_pending = true;
         }
 
         // Direct renderer staging (3D scenes, RT panes, app-shaped text).
@@ -2920,6 +2944,20 @@ impl<A: Application> CompositorHandler for EngineState<A> {
             // not clobber the override.
             return;
         }
+        // Resume bounce: when the surface sits on no LIVE output (the DRM
+        // connector was destroyed and not yet re-created), the reported
+        // factor is SCTK's no-outputs fallback, not information — hold the
+        // last real scale. When the reborn output arrives, surface enter
+        // recomputes and this handler runs again with a live output backing
+        // it. Liveness matters (not just enter/leave counting): the leave
+        // for a destroyed output may never be delivered.
+        let on_live_output = self
+            .entered_outputs
+            .iter()
+            .any(|o| self.output_state.info(o).is_some());
+        if !on_live_output && (scale_factor as f64) < self.scale_factor {
+            return;
+        }
         self.scale_factor = scale_factor as f64;
         self.resize(self.logical_width, self.logical_height);
         self.redraw = true;
@@ -2946,18 +2984,28 @@ impl<A: Application> CompositorHandler for EngineState<A> {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
-        _output: &wl_output::WlOutput,
+        output: &wl_output::WlOutput,
     ) {
+        if !self.entered_outputs.contains(output) {
+            self.entered_outputs.push(output.clone());
+        }
+        // Dead entries (destroyed outputs never send leave) are harmless —
+        // the liveness check in scale_factor_changed skips them — but drop
+        // them here so the list doesn't grow across suspend cycles.
+        self.entered_outputs
+            .retain(|o| self.output_state.info(o).is_some());
         self.redraw = true;
     }
-    
+
     fn surface_leave(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _surface: &wl_surface::WlSurface,
-        _output: &wl_output::WlOutput,
-    ) {}
+        output: &wl_output::WlOutput,
+    ) {
+        self.entered_outputs.retain(|o| o != output);
+    }
 }
 
 impl<A: Application> OutputHandler for EngineState<A> {
@@ -3702,6 +3750,7 @@ pub fn run<A: Application>() {
         swash_cache: glyphon::SwashCache::new(),
         scale_factor: 1.0,
         committed_buffer_scale: 1,
+        entered_outputs: Vec::new(),
         logical_width: 0.0,
         logical_height: 0.0,
         exit: false,
