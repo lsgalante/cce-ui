@@ -2407,6 +2407,10 @@ pub trait Application: Sized + 'static {
     fn handle_mouse_input(&mut self, button: MouseButton, state: ElementState, pos: LogicalPosition, needs_rebuild: &mut bool) -> Option<Self::Message>;
     fn handle_mouse_wheel(&mut self, delta: &MouseScrollDelta, pos: LogicalPosition, needs_rebuild: &mut bool);
     fn handle_key_input(&mut self, event: &KeyEvent, needs_rebuild: &mut bool) -> Option<Self::Message>;
+    /// Keyboard focus entered/left the window (the compositor keyboard-focuses
+    /// the focused window, so this is the "am I the focused window" signal —
+    /// e.g. for focus-dependent chrome). Default: ignore.
+    fn handle_focus_change(&mut self, _focused: bool, _needs_rebuild: &mut bool) {}
 
     fn custom_vertices(&mut self, _verts: &mut Vec<Vertex>, _size: LogicalSize, _scale: f64) {}
 
@@ -3493,8 +3497,14 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         _serial: u32,
         _raw_modifiers: &[u32],
         _keysyms: &[xkeysym::Keysym],
-    ) {}
-    
+    ) {
+        let mut rebuild = false;
+        self.inner.as_mut().unwrap().handle_focus_change(true, &mut rebuild);
+        if rebuild {
+            self.redraw = true;
+        }
+    }
+
     fn leave(
         &mut self,
         _conn: &Connection,
@@ -3506,6 +3516,11 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         self.pressed_key = None;
         self.ctrl_pressed = false;
         self.shift_pressed = false;
+        let mut rebuild = false;
+        self.inner.as_mut().unwrap().handle_focus_change(false, &mut rebuild);
+        if rebuild {
+            self.redraw = true;
+        }
     }
     
     fn press_key(
