@@ -4914,8 +4914,12 @@ pub struct SectionContext<'a, P> {
     pub cw: f32,
     pub label_width: f32,
     pub label_x: f32,
+    /// Whether the host renders sections as sunken wells (`section_relief_style`).
+    pub relief_style: bool,
     /// The title tab box (x, y, w, h) when the host's relief styling laid the
     /// label out left-aligned — `finish` offers it with the section carve.
+    /// None under relief styling means a label-less section: the well carves
+    /// tabless, flush with the allocation top.
     pub relief_tab: Option<(f32, f32, f32, f32)>,
     pub focused: bool,
     pub is_child: bool,
@@ -4999,6 +5003,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             cw,
             label_width,
             label_x,
+            relief_style,
             relief_tab,
             focused,
             is_child,
@@ -5018,9 +5023,11 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     /// bottom) under relief styling, the outline's border line otherwise. Lets
     /// a page place content at an exact inset from the well's walls.
     pub fn well_top(&self) -> f32 {
-        self.relief_tab
-            .map(|t| t.1 + t.3)
-            .unwrap_or(self.top + 7.0)
+        if self.relief_style {
+            self.relief_tab.map(|t| t.1 + t.3).unwrap_or(self.top)
+        } else {
+            self.top + 7.0
+        }
     }
 
     pub fn set_row_gap(&mut self, gap: f32) {
@@ -5263,18 +5270,19 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         let extra_bottom = pad + 12.0;
         let bottom = y + h + extra_bottom;
 
-        if let Some(tab) = self.relief_tab {
+        if self.relief_style {
             // Sunken style: the well spans the full allocated rect — body top
             // edge at the tab's bottom (the tab is flush ON the body, the
-            // designer union shape), walls on the allocation's edges, and no
+            // designer union shape; label-less sections carve tabless from the
+            // allocation top), walls on the allocation's edges, and no
             // trailing slack so the layout gap IS the visual gap.
-            let body_y = tab.1 + tab.3;
+            let body_y = self.relief_tab.map(|t| t.1 + t.3).unwrap_or(self.top);
             let frame = SectionFrame {
                 x: self.left,
                 y: body_y,
                 w: self.cw,
                 h: bottom - body_y,
-                tab: Some(tab),
+                tab: self.relief_tab,
                 focused: self.focused,
                 is_child: self.is_child,
             };
