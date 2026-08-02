@@ -14,7 +14,7 @@ use smithay_client_toolkit::{
     shell::{
         xdg::{
             window::{Window as XdgWindow, WindowConfigure, WindowHandler, WindowDecorations},
-            XdgShell,
+            XdgShell, XdgSurface as XdgSurfaceExt,
         },
         wlr_layer::{LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
         WaylandSurface,
@@ -2441,6 +2441,21 @@ pub trait Application: Sized + 'static {
         None
     }
 
+    /// Transparent overflow rim, in logical px, on every side of the window.
+    /// Non-zero opts into buffer-larger-than-geometry mode: the runner sizes
+    /// the surface `margin` wider on each side than the configured window
+    /// size, publishes the inner rect as the xdg window geometry (what the
+    /// compositor tiles, borders, and snaps) and as the input region (clicks
+    /// on the rim fall through to whatever is behind). The app draws in FULL
+    /// surface coordinates — [`WindowSettings`] width/height and configure
+    /// sizes stay window-frame sizes, but `display_list` and input coords
+    /// cover the whole surface, so content painted within the rim renders
+    /// outside the window frame instead of clipping at the buffer edge.
+    /// xdg toplevels only (layer surfaces ignore it).
+    fn overflow_margin(&self) -> u32 {
+        0
+    }
+
     fn desired_size(&self) -> Option<(u32, u32)> {
         None
     }
@@ -2759,6 +2774,31 @@ impl<A: Application> EngineState<A> {
             }
             let scale = self.scale_factor;
             self.inner.as_mut().unwrap().handle_resize(w, h, scale);
+            self.publish_window_geometry();
+        }
+    }
+
+    /// Overflow-margin mode ([`Application::overflow_margin`]): re-publish the
+    /// window frame — the surface rect inset by the margin — as the xdg window
+    /// geometry and the input region. Applied on every resize; a no-op for
+    /// margin-0 apps and layer surfaces. (Both are double-buffered surface
+    /// state, latched by the next commit.)
+    fn publish_window_geometry(&mut self) {
+        let m = self.inner.as_ref().unwrap().overflow_margin() as f32;
+        if m <= 0.0 {
+            return;
+        }
+        let Some(ref window) = self.window else { return };
+        let gw = ((self.logical_width - 2.0 * m) as i32).max(1);
+        let gh = ((self.logical_height - 2.0 * m) as i32).max(1);
+        let mi = m as i32;
+        window.xdg_surface().set_window_geometry(mi, mi, gw, gh);
+        if let Some(ref surface) = self.surface {
+            let compositor = self.compositor_state.wl_compositor();
+            let wl_region = compositor.create_region(&self.qh, ());
+            wl_region.add(mi, mi, gw, gh);
+            surface.set_input_region(Some(&wl_region));
+            wl_region.destroy();
         }
     }
     
@@ -3225,17 +3265,20 @@ impl<A: Application> WindowHandler for EngineState<A> {
         crate::scale::set_maximized(is_max);
 
         let (w, h) = configure.new_size;
+        // Configure sizes are window-geometry sizes; with an overflow margin
+        // the surface is a rim larger on every side.
+        let rim = 2.0 * self.inner.as_ref().unwrap().overflow_margin() as f32;
         if let (Some(w), Some(h)) = (w, h) {
             let width = w.get();
             let height = h.get();
             // Forced mode: the compositor's logical size is really physical
             // pixels (scale-1 output); divide to get the app's logical space.
             let f = crate::scale::forced_scale().unwrap_or(1.0);
-            self.resize(width as f32 / f, height as f32 / f);
+            self.resize(width as f32 / f + rim, height as f32 / f + rim);
         } else {
             let settings = self.inner.as_ref().unwrap().settings();
-            let w = settings.width as f32;
-            let h = settings.height as f32;
+            let w = settings.width as f32 + rim;
+            let h = settings.height as f32 + rim;
             self.resize(w, h);
         }
         self.redraw = true;
@@ -4043,7 +4086,11 @@ pub fn run<A: Application>() {
     }
     engine_state.surface = Some(surface);
 
-    engine_state.init_gpu(&conn, settings.width as f32, settings.height as f32);
+    // Overflow-margin mode: the surface (and so the GPU swapchain) is a rim
+    // larger than the window frame on every side; geometry/input-region are
+    // published per-resize.
+    let rim = 2.0 * engine_state.inner.as_ref().unwrap().overflow_margin() as f32;
+    engine_state.init_gpu(&conn, settings.width as f32 + rim, settings.height as f32 + rim);
     engine_state
         .inner
         .as_mut()
@@ -4107,8 +4154,12 @@ pub fn run<A: Application>() {
 
         if !just_configured {
             if let Some((w, h)) = engine_state.inner.as_ref().unwrap().desired_size() {
-                if (engine_state.logical_width - w as f32).abs() > 0.001 || (engine_state.logical_height - h as f32).abs() > 0.001 {
-                    engine_state.resize(w as f32, h as f32);
+                // desired_size is a window-frame size; the surface adds the
+                // overflow rim (0 for margin-less apps).
+                let rim = 2.0 * engine_state.inner.as_ref().unwrap().overflow_margin() as f32;
+                let (w, h) = (w as f32 + rim, h as f32 + rim);
+                if (engine_state.logical_width - w).abs() > 0.001 || (engine_state.logical_height - h).abs() > 0.001 {
+                    engine_state.resize(w, h);
                     engine_state.redraw = true;
                 }
             }
