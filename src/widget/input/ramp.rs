@@ -942,7 +942,7 @@ impl Ramp {
 
     /// The detached-label strip height the labeled dropdowns carry
     /// (`Widget::label_offset`'s formula).
-    fn label_strip() -> f32 {
+    pub fn label_strip() -> f32 {
         if crate::layout::control_label_layout() == "side" {
             return 0.0;
         }
