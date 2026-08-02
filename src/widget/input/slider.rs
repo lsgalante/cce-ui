@@ -239,7 +239,6 @@ impl Slider {
     /// so legacy plain-quad hosts (`ParametersBg::extra_quads`) carry it verbatim.
     fn paint_band(&self, g: &SliderGeom, ctx: &mut PaintCtx) {
         let band_t = crate::layout::slider_band_thickness().max(0.5);
-        let bulge_h = crate::layout::slider_bulge_height().clamp(band_t, g.h);
         let bulge_w = crate::layout::slider_bulge_width().max(2.0);
         let color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
         let cy = g.y + g.h * 0.5;
