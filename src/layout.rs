@@ -5014,6 +5014,15 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         self
     }
 
+    /// The section's content-box top edge: the body well's top (the tab's
+    /// bottom) under relief styling, the outline's border line otherwise. Lets
+    /// a page place content at an exact inset from the well's walls.
+    pub fn well_top(&self) -> f32 {
+        self.relief_tab
+            .map(|t| t.1 + t.3)
+            .unwrap_or(self.top + 7.0)
+    }
+
     pub fn set_row_gap(&mut self, gap: f32) {
         self.row_gap = gap;
     }
