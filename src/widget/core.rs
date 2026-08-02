@@ -431,6 +431,8 @@ pub mod context_menu {
                                         "Expand All" => Some(CA::ExpandAll),
                                         "Collapse All" => Some(CA::CollapseAll),
                                         "Copy Path" => Some(CA::CopyPath),
+                                        // The Ramp toggle carries its check state in the label.
+                                        "✓ Collapse controls" | "Collapse controls" => Some(CA::ToggleRampControls),
                                         _ => None,
                                     };
                                     if let Some(action) = action {

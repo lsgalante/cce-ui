@@ -3,7 +3,7 @@ use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::{Cap, PaintCtx};
 use crate::widget::model::{EventCtx, Input, Layout, Paint};
 use crate::widget::*;
-use crate::widget::input::{Slider, Button};
+use crate::widget::input::{Slider, Slider2D, Button};
 
 // ==========================================
 // 1. Color Ramp (renamed from Ramp)
@@ -115,13 +115,26 @@ pub struct Ramp {
     pub selected_key_idx: Option<usize>,
     pub is_dragging_key: bool,
     pub just_changed: bool,
-    
-    // Child controls for value editing & deletion
-    pub val_slider: Adapted<Slider>,
+    /// The key latched by the current hover-scroll gesture: a trackpad
+    /// scroll starting over a key steers that key until the fingers lift
+    /// (a >250ms pause reads as a new gesture and re-latches by hover).
+    scroll_key_idx: Option<usize>,
+    /// Context-menu toggle: hide the bottom control strip and let the graph
+    /// claim its space.
+    pub controls_collapsed: bool,
+    /// Hover-scroll glide velocity (plot units/sec, applied-delta signs) and
+    /// the last scroll-event instant: when the event stream stops, the tick
+    /// keeps the latched key coasting with exponential decay.
+    scroll_vel: (f32, f32),
+    last_key_scroll: Option<std::time::Instant>,
+
+    // Child controls for key editing & deletion. The key pad is a 2-axis
+    // slider driving the selected key's position (x) and value (y).
+    pub key_pad: Adapted<Slider2D>,
     pub del_button: Adapted<Button>,
     pub preset_dropdown: Adapted<Dropdown>,
     pub line_type_dropdown: Adapted<Dropdown>,
-    
+
 }
 
 impl Ramp {
@@ -133,9 +146,9 @@ impl Ramp {
             RampKey { pos: 1.0, value: 0.5 },
         ];
         
-        // Labeled like the dropdowns: the slider draws "Value" in its own
-        // carve-out tab.
-        let val_slider = Slider::new().with_label("Value");
+        // The key pad: a 2-axis slider driving the selected key's position
+        // (x) and value (y), labeled like the dropdowns.
+        let key_pad = Slider2D::new().with_label("Key");
         // A square x-icon button (cce-icons); label fallback if the icon set
         // is missing on this machine.
         let del_button = match crate::upload_icon("x", 32) {
@@ -173,7 +186,11 @@ impl Ramp {
             selected_key_idx: None,
             is_dragging_key: false,
             just_changed: false,
-            val_slider,
+            scroll_key_idx: None,
+            controls_collapsed: false,
+            scroll_vel: (0.0, 0.0),
+            last_key_scroll: None,
+            key_pad,
             del_button,
             preset_dropdown,
             line_type_dropdown,
@@ -253,16 +270,6 @@ impl Ramp {
             }
         }
         self.keys[0].value
-    }
-
-    fn sort_keys(&mut self) {
-        let prev_selected_id = self.selected_key_idx.map(|idx| self.keys[idx].pos);
-        self.keys.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap());
-        if let Some(pos) = prev_selected_id {
-            if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - pos).abs() < 0.0001) {
-                self.selected_key_idx = Some(new_idx);
-            }
-        }
     }
 
     /// Whether segments blend with smoothstep (the Bezier line type) vs linearly.
@@ -760,14 +767,177 @@ impl Input for ColorRamp {
 }
 
 impl Ramp {
-    /// Vertical reserve under the curve area for the control strip (gap, label
-    /// tabs, controls, bottom margin) — the graph gets the rest. Sized so the
-    /// graph opening's rim shading stays clear of the label tabs' carves.
-    const STRIP_RESERVE: f32 = 82.0;
+    /// The one spacing value the whole control strip uses — matching the
+    /// visible gap between the graph opening and the window's top edge (the
+    /// widget's 10px graph inset plus the host plate's padding).
+    const STRIP_GAP: f32 = 18.0;
 
-    /// The curve area's height for a widget `h` tall.
-    fn graph_h(h: f32) -> f32 {
-        (h - Self::STRIP_RESERVE).max(30.0)
+    /// The key pad's square well side.
+    const PAD_SIDE: f32 = 64.0;
+
+    /// Vertical reserve under the curve area — the strip stack at the
+    /// uniform STRIP_GAP rhythm (labeled dropdown row, labeled pad row),
+    /// closed by a bottom margin sized so the VISIBLE bottom gap (widget
+    /// margin + host plate padding, ~8) lands on STRIP_GAP as well.
+    fn strip_reserve() -> f32 {
+        let strip = Self::label_strip();
+        10.0 + Self::STRIP_GAP + strip + 22.0
+            + Self::STRIP_GAP + strip + Self::PAD_SIDE
+            + 10.0
+    }
+
+    /// Key peg ring stroke centerline radius (the 2px stroke spans ±1px).
+    /// Paint and the grab hit-test share it: a press anywhere inside a ring
+    /// lands on that key.
+    const KEY_RING_R: f32 = 26.0;
+
+    /// Inner margin between the graph opening's walls and the plotted 0..1
+    /// domain, so the 0 and 1 gridlines (and their axis numbers) sit visibly
+    /// inside the opening instead of on the walls.
+    const PLOT_INSET: f32 = 22.0;
+
+    /// The plot rect: where the ramp's 0..1 × 0..1 domain maps on screen —
+    /// the graph opening inset by [`PLOT_INSET`](Self::PLOT_INSET). Every
+    /// t/value ↔ pixel mapping (paint and input alike) goes through this.
+    fn plot_rect(&self) -> Rect {
+        let gh = self.graph_h();
+        Rect {
+            x: self.base.x + 10.0 + Self::PLOT_INSET,
+            y: self.base.y + 10.0 + Self::PLOT_INSET,
+            width: (self.base.w - 20.0 - 2.0 * Self::PLOT_INSET).max(1.0),
+            height: (gh - 2.0 * Self::PLOT_INSET).max(1.0),
+        }
+    }
+
+    /// Neighbor resistance (drag), in track units: the soft wall starts
+    /// RESIST_ZONE before a neighbor's position, and pushing the cursor
+    /// RESIST_BREAK past the neighbor breaks through.
+    const RESIST_ZONE: f32 = 0.10;
+    const RESIST_BREAK: f32 = 0.16;
+
+    /// Where a drag whose cursor sits at `t_raw` actually puts key `idx`:
+    /// 1:1 tracking until the cursor enters a neighbor's resistance zone,
+    /// then the key compresses toward the neighbor with growing resistance
+    /// (slope 1 at the zone edge, flattening at the wall), and once the
+    /// cursor overshoots the neighbor by RESIST_BREAK the key pops through —
+    /// the crossing completes and tracking is free again.
+    fn resisted_pos(&self, idx: usize, t_raw: f32) -> f32 {
+        let cur = self.keys[idx].pos;
+        if t_raw > cur {
+            if let Some(next) = self.keys.get(idx + 1) {
+                return Self::soft_wall(t_raw, next.pos, 1.0);
+            }
+        } else if idx > 0 {
+            return Self::soft_wall(t_raw, self.keys[idx - 1].pos, -1.0);
+        }
+        t_raw
+    }
+
+    /// Restore sort order after `keys[i]` changed position, by adjacent
+    /// swaps, and return the key's new index. Exact identity tracking —
+    /// `sort_keys`' float-pos re-match misidentifies the selection when the
+    /// dragged key sits within ε of the key it is passing (leftward
+    /// crossings flipped the selection onto the passed key).
+    fn resettle_key(&mut self, mut i: usize) -> usize {
+        while i + 1 < self.keys.len() && self.keys[i].pos > self.keys[i + 1].pos {
+            self.keys.swap(i, i + 1);
+            i += 1;
+        }
+        while i > 0 && self.keys[i].pos < self.keys[i - 1].pos {
+            self.keys.swap(i, i - 1);
+            i -= 1;
+        }
+        i
+    }
+
+    /// A key's rolled edge: the disc's own surface curving away at the
+    /// perimeter — NOT a separate border. Each sub-arc blends radially from
+    /// the surface color at the band's inner edge (continuing the flat top
+    /// seamlessly), through a half-rolled tint, to the silhouette — which
+    /// leans toward the light on the lit side and falls into shadow opposite,
+    /// and runs denser than the top the way a glass edge reads. `r` is the
+    /// outer-edge radius; `base`/`top_alpha` are the disc's surface color.
+    #[allow(clippy::too_many_arguments)]
+    fn rolled_rim_arc(
+        pc: &mut PaintCtx,
+        cx: f32,
+        cy: f32,
+        r: f32,
+        thickness: f32,
+        start: f32,
+        end: f32,
+        az: f32,
+        base: [f32; 3],
+        top_alpha: f32,
+    ) {
+        let sweep = end - start;
+        let steps = ((sweep.abs() / 0.18).ceil() as usize).max(1);
+        let tint = |sv: f32, k: f32| -> [f32; 3] {
+            [
+                (base[0] + k * sv).clamp(0.0, 1.0),
+                (base[1] + k * sv).clamp(0.0, 1.0),
+                (base[2] + k * sv).clamp(0.0, 1.0),
+            ]
+        };
+        for i in 0..steps {
+            let a0 = start + sweep * i as f32 / steps as f32;
+            let a1 = start + sweep * (i + 1) as f32 / steps as f32;
+            let sv = ((a0 + a1) / 2.0 + az).cos();
+            let mid = tint(sv, 0.20);
+            let edge = tint(sv, 0.38);
+            let mid_a = (top_alpha + 0.78) / 2.0;
+            pc.arc_shaded(
+                cx,
+                cy,
+                r,
+                thickness,
+                a0,
+                a1,
+                [base[0], base[1], base[2], top_alpha],
+                [mid[0], mid[1], mid[2], mid_a],
+                [edge[0], edge[1], edge[2], 0.78],
+            );
+        }
+    }
+
+    /// Apply the key pad's two axes to the selected key: x is the key's
+    /// track position (order restored by adjacent swaps), y its value.
+    fn apply_pad_to_selected(&mut self) {
+        let Some(idx) = self.selected_key_idx else { return };
+        self.keys[idx].pos = self.key_pad.inner().value_x();
+        self.keys[idx].value = self.key_pad.inner().value_y();
+        let settled = self.resettle_key(idx);
+        self.selected_key_idx = Some(settled);
+        self.preset_dropdown.selected = 0; // Custom
+        self.just_changed = true;
+    }
+
+    /// One soft wall at `wall`, approached along direction `s` (±1). Maps the
+    /// cursor's depth into the zone onto the zone's width with an ease that
+    /// reaches the wall exactly at breakthrough depth — continuous at the
+    /// zone edge, asymptotically stiff at the wall, then a `RESIST_BREAK`
+    /// pop as the mapping hands back to 1:1 tracking.
+    fn soft_wall(t_raw: f32, wall: f32, s: f32) -> f32 {
+        let entry = wall - s * Self::RESIST_ZONE;
+        let depth = s * (t_raw - entry);
+        let full = Self::RESIST_ZONE + Self::RESIST_BREAK;
+        if depth <= 0.0 || depth >= full {
+            return t_raw; // outside the zone, or broken through
+        }
+        let k = full / Self::RESIST_ZONE;
+        let g = 1.0 - (1.0 - depth / full).powf(k);
+        entry + s * Self::RESIST_ZONE * g
+    }
+
+    /// The curve area's height: the widget minus the control strip — or,
+    /// with the controls collapsed (context-menu toggle), minus just the
+    /// top/bottom insets, the graph claiming the strip's space.
+    fn graph_h(&self) -> f32 {
+        if self.controls_collapsed {
+            (self.base.h - 20.0).max(30.0)
+        } else {
+            (self.base.h - Self::strip_reserve()).max(30.0)
+        }
     }
 
     /// The detached-label strip height the labeled dropdowns carry
@@ -781,43 +951,59 @@ impl Ramp {
     }
 
     /// Lay out the control strip under the curve area. One rhythm: the label
-    /// line sits 8px under the graph, the controls 4px under the labels, all
-    /// columns one shared height on one shared baseline. The labeled dropdowns
+    /// tabs sit STRIP_GAP under the graph and every other gap shares the
+    /// same rhythm, all columns one shared height on one shared baseline. The labeled dropdowns
     /// get rects that INCLUDE their label strip (the adapter carves it off the
     /// content); the unlabeled columns get the content band only. The preset
     /// column takes the wider share — its options are the strip's longest
     /// strings and used to clip.
     fn arrange_fields(&mut self) {
         let (x, y, w, h) = (self.base.x, self.base.y, self.base.w, self.base.h);
-        let gh = Self::graph_h(h);
+        if self.controls_collapsed {
+            self.preset_dropdown.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            self.line_type_dropdown.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            self.key_pad.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            let _ = (x, y, w, h);
+            return;
+        }
+        let gh = self.graph_h();
         let graph_bottom = y + 10.0 + gh;
-        let ctrl_y = graph_bottom + 40.0;
         let ctrl_h = 22.0;
         let strip = Self::label_strip();
+        let gap = Self::STRIP_GAP;
+        // One rhythm: every gap in the strip — graph to label tab, row to
+        // row, columns, pad to button — is STRIP_GAP.
+        let ctrl_y = graph_bottom + gap + strip;
         let (dd_y, dd_h) = (ctrl_y - strip, ctrl_h + strip);
         let track_x = x + 10.0;
         let track_w = w - 20.0;
-        let gap = 10.0;
 
         if self.selected_key_idx.is_some() {
-            // Four columns: preset, line type, value, and the delete button —
-            // a square x-icon tile (label fallback runs wider).
+            // Selected: the dropdowns keep their full-width row, and a second
+            // row below carries the square key pad (pos × value) with the
+            // delete button beside it, centered on the pad's well.
+            let pad_side = Self::PAD_SIDE;
             let del_w: f32 = if self.del_button.inner().has_icon() { ctrl_h } else { 64.0 };
-            let avail = (track_w - del_w - 3.0 * gap).max(120.0);
-            let pre_w = (avail * 0.40).max(40.0);
-            let line_w = (avail * 0.32).max(40.0);
-            let val_w = (avail - pre_w - line_w).max(40.0);
+            let pre_w = ((track_w - gap) * 0.58).max(40.0);
+            let line_w = (track_w - gap - pre_w).max(40.0);
             self.preset_dropdown.set_rect(track_x, dd_y, pre_w, dd_h);
             self.line_type_dropdown.set_rect(track_x + pre_w + gap, dd_y, line_w, dd_h);
-            self.val_slider.set_rect(track_x + pre_w + line_w + 2.0 * gap, dd_y, val_w, dd_h);
-            self.del_button.set_rect(track_x + track_w - del_w, ctrl_y, del_w, ctrl_h);
+            let row2_y = ctrl_y + ctrl_h + gap;
+            self.key_pad.set_rect(track_x, row2_y, pad_side, pad_side + strip);
+            self.del_button.set_rect(
+                track_x + pad_side + gap,
+                row2_y + strip + (pad_side - ctrl_h) / 2.0,
+                del_w,
+                ctrl_h,
+            );
         } else {
             // Two columns, preset the wider share.
             let pre_w = ((track_w - gap) * 0.58).max(40.0);
             let line_w = (track_w - gap - pre_w).max(40.0);
             self.preset_dropdown.set_rect(track_x, dd_y, pre_w, dd_h);
             self.line_type_dropdown.set_rect(track_x + pre_w + gap, dd_y, line_w, dd_h);
-            self.val_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            self.key_pad.set_rect(-1000.0, -1000.0, 0.0, 0.0);
             self.del_button.set_rect(-1000.0, -1000.0, 0.0, 0.0);
         }
     }
@@ -872,7 +1058,7 @@ impl Paint for Ramp {
         // behind the plate, with the recess wall (drawn after the content, so
         // its shading falls across the graph's edges) as the cut's bevel.
         let graph = {
-            let gh = Self::graph_h(self.base.h);
+            let gh = self.graph_h();
             Rect { x: self.base.x + 10.0, y: self.base.y + 10.0, width: self.base.w - 20.0, height: gh }
         };
         let graph_radius = 6.0f32;
@@ -885,20 +1071,17 @@ impl Paint for Ramp {
 
         let quads: Vec<(f32, f32, f32, f32, [f32; 4])> = {
         let mut quads = Vec::new();
-        let gh = Self::graph_h(self.base.h);
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        
-        // Draw grid lines
-        for ratio in [0.25, 0.5, 0.75] {
-            let gy = self.base.y + 10.0 + gh * (1.0 - ratio);
-            quads.push((track_x, gy, track_w, 1.0, [0.25, 0.25, 0.28, 0.5]));
+        let plot = self.plot_rect();
+
+        // Grid lines over the plotted 0..1 domain — 0 and 1 included, sitting
+        // inside the opening (the plot is inset from the walls).
+        for ratio in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let gy = plot.y + plot.height * (1.0 - ratio);
+            quads.push((plot.x, gy, plot.width, 1.0, [0.25, 0.25, 0.28, 0.5]));
+            let gx = plot.x + plot.width * ratio;
+            quads.push((gx, plot.y, 1.0, plot.height, [0.25, 0.25, 0.28, 0.5]));
         }
-        for ratio in [0.25, 0.5, 0.75] {
-            let gx = track_x + track_w * ratio;
-            quads.push((gx, self.base.y + 10.0, 1.0, gh, [0.25, 0.25, 0.28, 0.5]));
-        }
-        
+
         // Curve area fill: translucent columns under the curve. The outline is
         // a real vector polyline below — these only tint the area. Columns
         // share exact edges (overlap double-blends a translucent fill into
@@ -906,12 +1089,12 @@ impl Paint for Ramp {
         let slices = 200;
         for i in 0..slices {
             let t1 = i as f32 / slices as f32;
-            let x0 = track_x + t1 * track_w;
-            let x1 = track_x + (i + 1) as f32 / slices as f32 * track_w;
+            let x0 = plot.x + t1 * plot.width;
+            let x1 = plot.x + (i + 1) as f32 / slices as f32 * plot.width;
             let v1 = self.get_interpolated_value(t1);
 
-            let slice_h = v1 * gh;
-            let sy = self.base.y + 10.0 + gh - slice_h;
+            let slice_h = v1 * plot.height;
+            let sy = plot.y + plot.height - slice_h;
             // Faint on purpose: the graph reads as a dark opening behind the
             // plate — a strong fill floods the floor and flattens the depth.
             quads.push((x0, sy, x1 - x0, slice_h, [0.25, 0.40, 0.55, 0.10]));
@@ -925,10 +1108,12 @@ impl Paint for Ramp {
         }
 
         // Axis numbers on the gridlines — small, dim, part of the graph
-        // floor (under the curve and keys, inside the opening).
+        // floor (under the curve and keys, inside the opening). They sit in
+        // the wall-side gutters the plot inset leaves free.
+        let plot = self.plot_rect();
         let num_color = [0x84u8, 0x84, 0x92];
-        for ratio in [0.25f32, 0.5, 0.75] {
-            let gy = graph.y + graph.height * (1.0 - ratio);
+        for ratio in [0.0f32, 0.25, 0.5, 0.75, 1.0] {
+            let gy = plot.y + plot.height * (1.0 - ratio);
             pc.text_with(
                 format!("{ratio:.2}"),
                 graph.x + 5.0,
@@ -938,7 +1123,7 @@ impl Paint for Ramp {
                 Some("monospace".to_string()),
                 None,
             );
-            let gx = graph.x + graph.width * ratio;
+            let gx = plot.x + plot.width * ratio;
             pc.text_with(
                 format!("{ratio:.2}"),
                 gx - 11.0,
@@ -952,13 +1137,10 @@ impl Paint for Ramp {
 
         // The curve itself: one anti-aliased round-capped polyline — exact
         // key-to-key segments in linear mode, dense samples under smoothstep
-        // blending. Constant-value extensions reach the graph's side walls.
-        let gh = Self::graph_h(self.base.h);
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
+        // blending. Constant-value extensions reach the plot's 0/1 edges.
         let curve_color = [0.5, 0.75, 1.0, 1.0];
         let px_of = |t: f32, v: f32| {
-            (track_x + t * track_w, self.base.y + 10.0 + gh - v * gh)
+            (plot.x + t * plot.width, plot.y + plot.height * (1.0 - v))
         };
         let mut pts: Vec<(f32, f32)> = Vec::new();
         if self.line_type_dropdown.selected == 1 {
@@ -985,28 +1167,168 @@ impl Paint for Ramp {
         for pair in pts.windows(2) {
             pc.vector(pair[0].0, pair[0].1, pair[1].0, pair[1].1, 2.0, curve_color, Cap::Round);
         }
-        let circles: Vec<(f32, f32, f32, [f32; 4])> = {
-        let mut circles = Vec::new();
-        let gh = Self::graph_h(self.base.h);
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        
-        for (idx, key) in self.keys.iter().enumerate() {
-            let cx = track_x + key.pos * track_w;
-            let cy = self.base.y + 10.0 + gh - key.value * gh;
-            
-            circles.push((cx, cy, 7.0, [0.0, 0.0, 0.0, 0.8]));
-            circles.push((cx, cy, 5.0, [0.5, 0.75, 1.0, 1.0]));
-            if Some(idx) == self.selected_key_idx {
-                circles.push((cx, cy, 9.0, [0.49, 1.0, 1.0, 0.5]));
+        // Key pegs: glassy translucent fills (solid when selected) in thin
+        // white rings. Overlapping pegs render as foam cells: each pair's
+        // shared wall is the chord through the two points where the ring
+        // circles cross (equal radii, so it lies on the perpendicular
+        // bisector of the centers); rings are cut at the wall, the wall is
+        // stroked once, and each fill keeps to its own side.
+        {
+            let plot = self.plot_rect();
+            let ring_r = Self::KEY_RING_R; // roll-band centerline
+            // The disc surface: flat top out to the roll band's inner edge,
+            // then the rolled perimeter out to ring_r + 2.5.
+            let base = [0.5f32, 0.75, 1.0];
+            let fill_r = ring_r - 3.0;
+            let rim_t = 6.0f32;
+            // Bevel light: the DE light azimuth the plate shading uses.
+            let az = crate::layout::light_source_position();
+            let tau = std::f32::consts::TAU;
+
+            let centers: Vec<(f32, f32)> = self
+                .keys
+                .iter()
+                .map(|k| (plot.x + k.pos * plot.width, plot.y + plot.height * (1.0 - k.value)))
+                .collect();
+
+            // Every intersecting pair: wall midpoint M + unit normal n toward
+            // the neighbor per key, and the chord endpoints once per pair.
+            let mut cuts: Vec<Vec<((f32, f32), (f32, f32))>> = vec![Vec::new(); centers.len()];
+            let mut walls: Vec<((f32, f32), (f32, f32), (f32, f32))> = Vec::new();
+            for i in 0..centers.len() {
+                for j in (i + 1)..centers.len() {
+                    let (dx, dy) = (centers[j].0 - centers[i].0, centers[j].1 - centers[i].1);
+                    let d = (dx * dx + dy * dy).sqrt();
+                    if d < 1e-3 || d >= 2.0 * ring_r {
+                        continue;
+                    }
+                    let n = (dx / d, dy / d);
+                    let m =
+                        ((centers[i].0 + centers[j].0) / 2.0, (centers[i].1 + centers[j].1) / 2.0);
+                    cuts[i].push((m, n));
+                    cuts[j].push((m, (-n.0, -n.1)));
+                    let h = (ring_r * ring_r - (d / 2.0) * (d / 2.0)).sqrt();
+                    walls.push((
+                        (m.0 - h * n.1, m.1 + h * n.0),
+                        (m.0 + h * n.1, m.1 - h * n.0),
+                        n,
+                    ));
+                }
             }
-        }
-        
-        circles
-    
-        };
-        for (cx, cy, r, c) in circles {
-            pc.circle(cx, cy, r, c);
+
+            // Fills. Uncut: one disc. Cut: the cell — vertical strips bounded
+            // by the wall half-planes, the round edge from the circle clip.
+            for (idx, &(cx, cy)) in centers.iter().enumerate() {
+                let selected = Some(idx) == self.selected_key_idx;
+                let fill = [base[0], base[1], base[2], if selected { 0.85 } else { 0.22 }];
+                if cuts[idx].is_empty() {
+                    pc.circle(cx, cy, fill_r, fill);
+                    continue;
+                }
+                pc.push_clip_circle([cx, cy, fill_r]);
+                let step = 1.5f32;
+                let mut x = cx - fill_r;
+                while x < cx + fill_r {
+                    let mid = x + step / 2.0;
+                    let (mut ylo, mut yhi) = (cy - fill_r, cy + fill_r);
+                    let mut visible = true;
+                    for &((mx, my), (nx, ny)) in &cuts[idx] {
+                        // Keep (p − M)·n ≤ 0 — this key's side of the wall.
+                        let c = nx * (mid - mx);
+                        if ny.abs() < 1e-4 {
+                            if c > 0.0 {
+                                visible = false;
+                                break;
+                            }
+                        } else {
+                            let yb = my - c / ny;
+                            if ny > 0.0 {
+                                yhi = yhi.min(yb);
+                            } else {
+                                ylo = ylo.max(yb);
+                            }
+                        }
+                    }
+                    if visible && ylo < yhi {
+                        pc.quad(Rect { x, y: ylo, width: step, height: yhi - ylo }, fill);
+                    }
+                    x += step;
+                }
+                pc.pop_clip_circle();
+            }
+
+            // Walls: the shared boundary as the surface rolling into the
+            // seam and back out — surface-tinted slopes (lit side leans to
+            // the light, far side into shadow) around a slightly lifted
+            // crest, in the discs\' own color like the rims.
+            let (lx, ly) = (az.cos(), -az.sin());
+            let wall_tint = |sv: f32, k: f32| -> [f32; 3] {
+                [
+                    (base[0] + k * sv).clamp(0.0, 1.0),
+                    (base[1] + k * sv).clamp(0.0, 1.0),
+                    (base[2] + k * sv).clamp(0.0, 1.0),
+                ]
+            };
+            for &((x1, y1), (x2, y2), (nx, ny)) in &walls {
+                let facing = nx * lx + ny * ly;
+                let cp = wall_tint(facing, 0.38);
+                let cm = wall_tint(-facing, 0.38);
+                let cc = wall_tint(facing, 0.12);
+                pc.vector(
+                    x1 + nx * 1.6, y1 + ny * 1.6, x2 + nx * 1.6, y2 + ny * 1.6,
+                    1.6, [cp[0], cp[1], cp[2], 0.78], Cap::Round,
+                );
+                pc.vector(
+                    x1 - nx * 1.6, y1 - ny * 1.6, x2 - nx * 1.6, y2 - ny * 1.6,
+                    1.6, [cm[0], cm[1], cm[2], 0.78], Cap::Round,
+                );
+                pc.vector(x1, y1, x2, y2, 1.8, [cc[0], cc[1], cc[2], 0.85], Cap::Round);
+            }
+
+            // Rims: beveled circles minus the angular span facing each wall
+            // (no drawn border — the shaded edge IS the ring).
+            for (idx, &(cx, cy)) in centers.iter().enumerate() {
+                let top_a = if Some(idx) == self.selected_key_idx { 0.85 } else { 0.22 };
+                if cuts[idx].is_empty() {
+                    Self::rolled_rim_arc(pc, cx, cy, ring_r + 2.5, rim_t, 0.0, tau, az, base, top_a);
+                    continue;
+                }
+                // Excluded spans [θ−α, θ+α] toward each neighbor, normalized
+                // into [0, τ) (wrapping spans split), then merged.
+                let mut segs: Vec<(f32, f32)> = Vec::new();
+                for &((mx, my), (nx, ny)) in &cuts[idx] {
+                    let theta = ny.atan2(nx);
+                    let half = (mx - cx) * nx + (my - cy) * ny;
+                    let alpha = (half / ring_r).clamp(-1.0, 1.0).acos();
+                    let (a, b) = ((theta - alpha).rem_euclid(tau), (theta + alpha).rem_euclid(tau));
+                    if a <= b {
+                        segs.push((a, b));
+                    } else {
+                        segs.push((a, tau));
+                        segs.push((0.0, b));
+                    }
+                }
+                segs.sort_by(|p, q| p.0.partial_cmp(&q.0).unwrap());
+                let mut merged: Vec<(f32, f32)> = Vec::new();
+                for s in segs {
+                    match merged.last_mut() {
+                        Some(last) if s.0 <= last.1 => last.1 = last.1.max(s.1),
+                        _ => merged.push(s),
+                    }
+                }
+                // Stroke the complement (the two pieces meeting at θ=0 join
+                // seamlessly when no span covers 0).
+                let mut prev = 0.0f32;
+                for &(a, b) in &merged {
+                    if a > prev + 1e-3 {
+                        Self::rolled_rim_arc(pc, cx, cy, ring_r + 2.5, rim_t, prev, a, az, base, top_a);
+                    }
+                    prev = prev.max(b);
+                }
+                if prev < tau - 1e-3 {
+                    Self::rolled_rim_arc(pc, cx, cy, ring_r + 2.5, rim_t, prev, tau, az, base, top_a);
+                }
+            }
         }
         // The opening's cut edge: drawn after the graph content so the wall's
         // shading falls across the curve and keys where they pass behind the
@@ -1019,12 +1341,14 @@ impl Paint for Ramp {
         }
         let depth = crate::layout::bevel_width().min(graph.height * 0.2);
         pc.recess(graph, radii, depth);
-        let dummy = UiContext::new();
-        self.preset_dropdown.paint_self(&dummy, pc);
-        self.line_type_dropdown.paint_self(&dummy, pc);
-        if self.selected_key_idx.is_some() {
-            self.val_slider.paint_self(&dummy, pc);
-            self.del_button.paint_self(&dummy, pc);
+        if !self.controls_collapsed {
+            let dummy = UiContext::new();
+            self.preset_dropdown.paint_self(&dummy, pc);
+            self.line_type_dropdown.paint_self(&dummy, pc);
+            if self.selected_key_idx.is_some() {
+                self.key_pad.paint_self(&dummy, pc);
+                self.del_button.paint_self(&dummy, pc);
+            }
         }
     }
 }
@@ -1032,6 +1356,35 @@ impl Paint for Ramp {
 impl Input for Ramp {
     fn wants_tick(&self) -> bool {
         true
+    }
+
+    /// The graph context menu's actions. Overriding loses the trait-default
+    /// clipboard arms, so Copy/Paste (the spec string) are restated here.
+    fn context_action(&mut self, action: ContextAction) -> bool {
+        match action {
+            ContextAction::ToggleRampControls => {
+                self.controls_collapsed = !self.controls_collapsed;
+                self.just_changed = true;
+                self.arrange_fields();
+                true
+            }
+            ContextAction::Copy => {
+                crate::widget::clipboard::copy_to_clipboard(&self.spec_string());
+                true
+            }
+            ContextAction::Paste => {
+                if let Some(text) = crate::widget::clipboard::read_from_clipboard() {
+                    let changed = self.set_spec(&text);
+                    if changed {
+                        self.just_changed = true;
+                    }
+                    changed
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
     }
 
     /// The curve as a ramp spec string ([`format_ramp_spec`]) — the value hosts
@@ -1066,7 +1419,32 @@ impl Input for Ramp {
         };
         let mut changed = self.just_changed;
         self.just_changed = false;
-        
+
+        // Hover-scroll inertia: once the finger stream stops (>60ms without
+        // an event), the latched key coasts on the estimated velocity with
+        // exponential decay, still resettling and syncing like live scrolls.
+        if let (Some(idx), Some(last)) = (self.scroll_key_idx, self.last_key_scroll) {
+            if last.elapsed().as_secs_f32() > 0.06 && idx < self.keys.len() {
+                let (vx, vy) = self.scroll_vel;
+                if vx.abs() > 0.02 || vy.abs() > 0.02 {
+                    self.keys[idx].pos = (self.keys[idx].pos + vx * dt).clamp(0.0, 1.0);
+                    self.keys[idx].value = (self.keys[idx].value + vy * dt).clamp(0.0, 1.0);
+                    let settled = self.resettle_key(idx);
+                    self.scroll_key_idx = Some(settled);
+                    self.selected_key_idx = Some(settled);
+                    self.key_pad
+                        .set_values(self.keys[settled].pos, self.keys[settled].value);
+                    self.preset_dropdown.selected = 0; // Custom
+                    let f = (-5.0 * dt).exp();
+                    self.scroll_vel = (vx * f, vy * f);
+                    changed = true;
+                } else {
+                    self.scroll_vel = (0.0, 0.0);
+                    self.last_key_scroll = None;
+                }
+            }
+        }
+
         if self.preset_dropdown.tick(dt, ui) {
             let idx = self.preset_dropdown.selected;
             self.apply_preset(idx);
@@ -1078,11 +1456,8 @@ impl Input for Ramp {
         }
         
         if self.selected_key_idx.is_some() {
-            if self.val_slider.tick(dt, ui) {
-                if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].value = self.val_slider.inner().value();
-                    self.preset_dropdown.selected = 0; // Custom
-                }
+            if self.key_pad.tick(dt, ui) {
+                self.apply_pad_to_selected();
                 changed = true;
             }
             if self.del_button.tick(dt, ui) {
@@ -1098,9 +1473,25 @@ impl Input for Ramp {
         match event {
             Event::MouseButton { button, state, x, y, .. } => {
                 let (button, state, px, py_event) = (*button, *state, *x, *y);
+                // Right-press in the graph opening → the shared context menu
+                // (the key-crossing toggle lives there). Before the ui borrow:
+                // open_context_menu needs the whole EventCtx.
+                if button == MouseButton::Right {
+                    if state == ElementState::Pressed {
+                        let gh = self.graph_h();
+                        let gx = self.base.x + 10.0;
+                        let gw = self.base.w - 20.0;
+                        let gy = self.base.y + 10.0;
+                        if px >= gx && px <= gx + gw && py_event >= gy && py_event <= gy + gh {
+                            ectx.open_context_menu(px, py_event);
+                            return true;
+                        }
+                    }
+                    return false;
+                }
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false; };
         if button != MouseButton::Left { return false; }
-        
+
         if self.preset_dropdown.mouse_input(button, state, px, py_event, ui) {
             if self.preset_dropdown.take_change() {
                 let idx = self.preset_dropdown.selected;
@@ -1113,44 +1504,61 @@ impl Input for Ramp {
             return true;
         }
         
-        let gh = Self::graph_h(self.base.h);
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        
+        let gh = self.graph_h();
+        let plot = self.plot_rect();
+
         if state == ElementState::Pressed {
+            // Any press cancels a hover-scroll glide in progress.
+            self.scroll_vel = (0.0, 0.0);
+            self.scroll_key_idx = None;
+            self.last_key_scroll = None;
+            // Grab the NEAREST key whose ring contains the press — the rings
+            // are the pegs' visual extent, and nearest-center also matches the
+            // foam walls (perpendicular bisectors) where rings overlap.
+            let hit_r = Self::KEY_RING_R + 2.5;
+            let mut best: Option<(usize, f32)> = None;
             for (idx, key) in self.keys.iter().enumerate() {
-                let cx = track_x + key.pos * track_w;
-                let cy = self.base.y + 10.0 + gh - key.value * gh;
+                let cx = plot.x + key.pos * plot.width;
+                let cy = plot.y + plot.height * (1.0 - key.value);
                 let dx = px - cx;
                 let dy = py_event - cy;
-                if (dx*dx + dy*dy) <= 64.0 {
-                    self.selected_key_idx = Some(idx);
-                    self.is_dragging_key = true;
-                    self.val_slider.set_value(key.value);
-                    self.arrange_fields();
-                    return true;
+                let d2 = dx * dx + dy * dy;
+                if d2 <= hit_r * hit_r && best.is_none_or(|(_, bd)| d2 < bd) {
+                    best = Some((idx, d2));
                 }
             }
-            
-            if px >= track_x && px <= track_x + track_w && py_event >= self.base.y + 10.0 && py_event <= self.base.y + 10.0 + gh {
-                let t = (px - track_x) / track_w;
-                let val = 1.0 - (py_event - (self.base.y + 10.0)) / gh;
+            if let Some((idx, _)) = best {
+                self.selected_key_idx = Some(idx);
+                self.is_dragging_key = true;
+                self.key_pad.set_values(self.keys[idx].pos, self.keys[idx].value);
+                self.arrange_fields();
+                return true;
+            }
+
+            // Creation accepts the whole opening (the inset gutters included);
+            // the domain mapping clamps to the plot's 0..1.
+            if px >= self.base.x + 10.0 && px <= self.base.x + self.base.w - 10.0 && py_event >= self.base.y + 10.0 && py_event <= self.base.y + 10.0 + gh {
+                let t = ((px - plot.x) / plot.width).clamp(0.0, 1.0);
+                let val = (1.0 - (py_event - plot.y) / plot.height).clamp(0.0, 1.0);
                 let new_key = RampKey { pos: t, value: val };
                 self.keys.push(new_key);
-                self.sort_keys();
+                let new_idx = self.resettle_key(self.keys.len() - 1);
                 self.preset_dropdown.selected = 0; // Custom
                 self.just_changed = true;
-                
-                if let Some(new_idx) = self.keys.iter().position(|k| (k.pos - t).abs() < 0.0001) {
-                    self.selected_key_idx = Some(new_idx);
-                    self.val_slider.set_value(val);
-                }
+                self.selected_key_idx = Some(new_idx);
+                self.key_pad.set_values(t, val);
+                // Arm the drag: a fresh key follows the pointer until release,
+                // so create-and-place is one gesture (the grab-branch behavior).
+                self.is_dragging_key = true;
                 self.arrange_fields();
                 return true;
             }
             
             if self.selected_key_idx.is_some() {
-                if self.val_slider.mouse_input(button, state, px, py_event, ui) { return true; }
+                if self.key_pad.mouse_input(button, state, px, py_event, ui) {
+                    self.apply_pad_to_selected();
+                    return true;
+                }
                 if self.del_button.mouse_input(button, state, px, py_event, ui) {
                     if self.del_button.take_click() {
                         if let Some(idx) = self.selected_key_idx {
@@ -1169,7 +1577,7 @@ impl Input for Ramp {
         } else {
             self.is_dragging_key = false;
             if self.selected_key_idx.is_some() {
-                self.val_slider.mouse_input(button, state, px, py_event, ui);
+                self.key_pad.mouse_input(button, state, px, py_event, ui);
                 if self.del_button.mouse_input(button, state, px, py_event, ui) {
                     if self.del_button.take_click() {
                         if let Some(idx) = self.selected_key_idx {
@@ -1200,30 +1608,27 @@ impl Input for Ramp {
         }
         
         let mut changed = false;
-        let gh = Self::graph_h(self.base.h);
-        let track_x = self.base.x + 10.0;
-        let track_w = self.base.w - 20.0;
-        
+        let plot = self.plot_rect();
+
         if self.is_dragging_key {
             if let Some(idx) = self.selected_key_idx {
-                let t = ((px - track_x) / track_w).clamp(0.0, 1.0);
-                let val = (1.0 - (py_event - (self.base.y + 10.0)) / gh).clamp(0.0, 1.0);
+                let t_raw = ((px - plot.x) / plot.width).clamp(0.0, 1.0);
+                let t = self.resisted_pos(idx, t_raw);
+                let val = (1.0 - (py_event - plot.y) / plot.height).clamp(0.0, 1.0);
                 self.keys[idx].pos = t;
                 self.keys[idx].value = val;
-                self.val_slider.set_value(val);
-                self.sort_keys();
+                self.key_pad.set_values(t, val);
+                let settled = self.resettle_key(idx);
+                self.selected_key_idx = Some(settled);
                 self.preset_dropdown.selected = 0; // Custom
                 changed = true;
             }
         }
         
         if self.selected_key_idx.is_some() {
-            if self.val_slider.cursor_moved(px, py_event, ui) {
-                if let Some(idx) = self.selected_key_idx {
-                    self.keys[idx].value = self.val_slider.inner().value();
-                    self.preset_dropdown.selected = 0; // Custom
-                    changed = true;
-                }
+            if self.key_pad.cursor_moved(px, py_event, ui) {
+                self.apply_pad_to_selected();
+                changed = true;
             }
             if self.del_button.cursor_moved(px, py_event, ui) {
                 changed = true;
@@ -1250,12 +1655,75 @@ impl Input for Ramp {
                 if self.line_type_dropdown.mouse_wheel(&delta, px, py, ui) {
                     return true;
                 }
-                if self.selected_key_idx.is_some() && self.val_slider.mouse_wheel(&delta, px, py, ui) {
-                    if let Some(idx) = self.selected_key_idx {
-                        self.keys[idx].value = self.val_slider.inner().value();
-                        self.preset_dropdown.selected = 0; // Custom
+                // Hover-scroll: a gesture STARTING over a key latches it and
+                // steers it on both axes — following the fingers like a drag
+                // — until the stream pauses (fingers lifted). Mid-gesture the
+                // latch holds even if the key slides out from under the
+                // cursor. Latching also selects the key, so the pad tracks.
+                let plot = self.plot_rect();
+                if ui.scroll_gesture_new {
+                    let hit_r = Self::KEY_RING_R + 2.5;
+                    let mut best: Option<(usize, f32)> = None;
+                    for (idx, key) in self.keys.iter().enumerate() {
+                        let cx = plot.x + key.pos * plot.width;
+                        let cy = plot.y + plot.height * (1.0 - key.value);
+                        let dx = px - cx;
+                        let dy = py - cy;
+                        let d2 = dx * dx + dy * dy;
+                        if d2 <= hit_r * hit_r && best.is_none_or(|(_, bd)| d2 < bd) {
+                            best = Some((idx, d2));
+                        }
                     }
-                    self.just_changed = true;
+                    self.scroll_key_idx = best.map(|(i, _)| i);
+                    self.scroll_vel = (0.0, 0.0);
+                }
+                if let Some(idx) = self.scroll_key_idx {
+                    if idx < self.keys.len() {
+                        ui.scroll_initiate_widget_id = Some(ectx.id);
+                        // Damped well below 1:1 — hover-scroll is for fine
+                        // adjustment; the drag paths cover coarse moves.
+                        let (dx, dy) = match &delta {
+                            MouseScrollDelta::LineDelta(x, y) => (*x * 0.005, *y * 0.005),
+                            MouseScrollDelta::PixelDelta(pos) => (
+                                0.2 * pos.x as f32 / plot.width,
+                                0.2 * pos.y as f32 / plot.height,
+                            ),
+                        };
+                        // Direct manipulation: the key moves WITH the scroll
+                        // (runner deltas are content-motion negated, so both
+                        // axes flip): scroll right → key right, down → down.
+                        self.keys[idx].pos = (self.keys[idx].pos - dx).clamp(0.0, 1.0);
+                        self.keys[idx].value = (self.keys[idx].value + dy).clamp(0.0, 1.0);
+                        // Velocity estimate for the release glide: EMA of
+                        // applied delta over inter-event time. A leisurely
+                        // wheel produces negligible velocity (big gaps clamp
+                        // to 0.1s); fast trackpad streams build real speed.
+                        let now = std::time::Instant::now();
+                        let dt_ev = self
+                            .last_key_scroll
+                            .map(|t| now.duration_since(t).as_secs_f32())
+                            .unwrap_or(0.016)
+                            .clamp(0.004, 0.1);
+                        self.last_key_scroll = Some(now);
+                        let (ivx, ivy) = (-dx / dt_ev, dy / dt_ev);
+                        self.scroll_vel = (
+                            self.scroll_vel.0 * 0.65 + ivx * 0.35,
+                            self.scroll_vel.1 * 0.65 + ivy * 0.35,
+                        );
+                        let settled = self.resettle_key(idx);
+                        self.scroll_key_idx = Some(settled);
+                        self.selected_key_idx = Some(settled);
+                        self.key_pad
+                            .set_values(self.keys[settled].pos, self.keys[settled].value);
+                        self.preset_dropdown.selected = 0; // Custom
+                        self.just_changed = true;
+                        self.arrange_fields();
+                        return true;
+                    }
+                    self.scroll_key_idx = None;
+                }
+                if self.selected_key_idx.is_some() && self.key_pad.mouse_wheel(&delta, px, py, ui) {
+                    self.apply_pad_to_selected();
                     return true;
                 }
                 false
@@ -1273,7 +1741,7 @@ impl Input for Ramp {
                     (*self_ptr).line_type_dropdown.as_ptr_mut(),
                 ];
                 if (*self_ptr).selected_key_idx.is_some() {
-                    list.push((*self_ptr).val_slider.as_ptr_mut());
+                    list.push((*self_ptr).key_pad.as_ptr_mut());
                     list.push((*self_ptr).del_button.as_ptr_mut());
                 }
                 list
@@ -1310,8 +1778,8 @@ impl Input for Ramp {
         if ui.is_focused(&self.line_type_dropdown) {
             return self.line_type_dropdown.keyboard_input(event, ui);
         }
-        if ui.is_focused(&self.val_slider) {
-            return self.val_slider.keyboard_input(event, ui);
+        if ui.is_focused(&self.key_pad) {
+            return self.key_pad.keyboard_input(event, ui);
         }
         if ui.is_focused(&self.del_button) {
             return self.del_button.keyboard_input(event, ui);
@@ -1329,7 +1797,7 @@ impl Input for Ramp {
         self.base.focused = false;
         self.preset_dropdown.unfocus();
         self.line_type_dropdown.unfocus();
-        self.val_slider.unfocus();
+        self.key_pad.unfocus();
         self.del_button.unfocus();
     
                 false
@@ -1341,27 +1809,20 @@ impl Input for Ramp {
     // Field-slider drags forward through the composite (6bd self-routing), with the key
     // value sync the old descent path never ran mid-drag.
     fn draggable(&self, _rect: Rect) -> bool {
-        self.is_dragging_key || self.val_slider.is_dragging()
+        self.is_dragging_key || self.key_pad.is_dragging()
     }
     fn is_dragging(&self) -> bool {
-        self.is_dragging_key || self.val_slider.is_dragging()
+        self.is_dragging_key || self.key_pad.is_dragging()
     }
     fn drag_update(&mut self, px: f32, py: f32, _rect: Rect) -> bool {
-        let mut changed = false;
-        if self.val_slider.is_dragging() && self.val_slider.drag_update(px, py) {
-            if let Some(idx) = self.selected_key_idx {
-                self.keys[idx].value = self.val_slider.inner().value();
-                self.preset_dropdown.selected = 0; // Custom
-            }
-            changed = true;
+        if self.key_pad.is_dragging() && self.key_pad.drag_update(px, py) {
+            self.apply_pad_to_selected();
+            return true;
         }
-        if changed {
-            self.just_changed = true;
-        }
-        changed
+        false
     }
     fn drag_end(&mut self) {
-        self.val_slider.drag_end();
+        self.key_pad.drag_end();
         self.is_dragging_key = false;
     }
 }

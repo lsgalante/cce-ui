@@ -14,6 +14,11 @@ use cce_ui::widget::{
 };
 use wayland_client::QueueHandle;
 
+/// Transparent rim between the surface edge and the plate: room for the ramp's
+/// key pegs (r=28, +45 selected halo) to render outside the window frame
+/// instead of being clipped at the buffer edge.
+const OVERFLOW_MARGIN: f32 = 40.0;
+
 #[derive(Debug, Clone)]
 enum RampMsg {
     Exit,
@@ -56,12 +61,19 @@ impl Application for RampPopup {
             ramp,
             last_spec,
             ui_context: cce_ui::context::UiContext::new(),
-            width: 460,
-            height: 340,
+            width: 540,
+            height: 420,
             scale_factor: 1.0,
             needs_rebuild: true,
             registered: false,
         }
+    }
+
+    // Buffer-larger-than-geometry mode: the runner publishes the plate rect
+    // as the xdg window geometry + input region, so key pegs painted on the
+    // rim render outside the window frame and clicks there fall through.
+    fn overflow_margin(&self) -> u32 {
+        OVERFLOW_MARGIN as u32
     }
 
     fn settings(&self) -> WindowSettings {
@@ -83,6 +95,8 @@ impl Application for RampPopup {
 
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool) {
         if self.ui_context.tick(dt) {
+            // Tick-driven edits (hover-scroll glide) log their spec too.
+            self.drain_changes();
             *needs_rebuild = true;
             self.needs_rebuild = true;
         }
@@ -105,8 +119,11 @@ impl Application for RampPopup {
             self.scale_factor = scale;
             cce_ui::scale::set_scale_factor(scale as f32);
 
-            // One widget, one rect: the ramp fills the plate inside the DE pad.
-            let pad = cce_ui::layout::backplate_padding();
+            // One widget, one rect: the ramp fills the plate inside half the
+            // DE pad (this popup runs tighter than a full client). The plate
+            // itself is inset by OVERFLOW_MARGIN so key pegs can render past
+            // the window frame into the transparent surface rim.
+            let pad = OVERFLOW_MARGIN + cce_ui::layout::backplate_padding() / 2.0;
             self.ramp.set_rect(
                 pad,
                 pad,
@@ -127,15 +144,19 @@ impl Application for RampPopup {
         let (w, h) = (self.width as f32, self.height as f32);
 
         // The window plate (the DemoApp idiom): page-low color at the configured
-        // opacity, config corner radius, rolled perimeter.
+        // opacity, config corner radius, rolled perimeter — inset by the
+        // overflow margin so widget content (the ramp's key pegs) can spill
+        // past the frame onto the transparent rim.
         let mut plate = cce_ui::color::page_low_color();
         if plate[3] > 0.001 {
-            plate[3] = cce_ui::color::active_backplate_opacity();
+            // Half the DE opacity: this popup reads better mostly-glass.
+            plate[3] = cce_ui::color::active_backplate_opacity() * 0.5;
         }
         let radius = cce_ui::colors::backplate_corner_radius();
         let bevel = cce_ui::layout::bevel_width();
+        let m = OVERFLOW_MARGIN;
         pc.plate(
-            Rect { x: 0.0, y: 0.0, width: w, height: h },
+            Rect { x: m, y: m, width: w - 2.0 * m, height: h - 2.0 * m },
             (radius, radius, radius, radius),
             plate,
             bevel,
@@ -162,6 +183,25 @@ impl Application for RampPopup {
             }
         }
 
+        // The shared context menu (right-click on the graph), drawn last, on
+        // top of everything. Its labels carry the menu rect as bounds — the
+        // runner exempts them from the menu's own text occlusion that way.
+        if self.ui_context.is_context_menu_visible() {
+            for (qx, qy, qw, qh, c) in self.ui_context.context_menu_quads() {
+                pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, c);
+            }
+            let (mx, my, mw, mh) = (
+                cce_ui::widget::context_menu::x(),
+                cce_ui::widget::context_menu::y(),
+                cce_ui::widget::context_menu::w(),
+                cce_ui::widget::context_menu::h(),
+            );
+            let bounds = Some([mx, my, mx + mw, my + mh]);
+            for l in self.ui_context.context_menu_labels() {
+                pc.text_with(l.text, l.x, l.y, l.font_size, l.color, None, bounds);
+            }
+        }
+
         Some(pc.finish())
     }
 
@@ -182,6 +222,10 @@ impl Application for RampPopup {
     }
 
     fn handle_pointer_move(&mut self, pos: LogicalPosition, needs_rebuild: &mut bool) {
+        if self.ui_context.cursor_moved_context_menu(pos.x, pos.y) {
+            *needs_rebuild = true;
+            self.needs_rebuild = true;
+        }
         let ev = Event::PointerMove { x: pos.x, y: pos.y, local_x: pos.x, local_y: pos.y };
         let changed = self.ui_context.propagate_event(&ev, self.ramp.id());
         self.drain_changes();
@@ -198,6 +242,13 @@ impl Application for RampPopup {
         pos: LogicalPosition,
         needs_rebuild: &mut bool,
     ) -> Option<Self::Message> {
+        // The open context menu owns the press (item dispatch / dismiss).
+        if self.ui_context.mouse_input_context_menu(button, state, pos.x, pos.y) {
+            self.drain_changes();
+            *needs_rebuild = true;
+            self.needs_rebuild = true;
+            return None;
+        }
         let ev = Event::MouseButton {
             button,
             state,

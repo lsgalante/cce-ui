@@ -720,6 +720,18 @@ impl UiContext {
             }
         } else if name == "Breadcrumb" {
             options.push("Copy Path".to_string());
+        } else if name == "Ramp" {
+            // The graph's menu: the controls-collapse toggle (check state in
+            // the label), then the spec-string clipboard pair.
+            let collapsed = unsafe {
+                (*target)
+                    .as_any()
+                    .downcast_ref::<crate::widget::input::Ramp>()
+                    .map(|r| r.controls_collapsed)
+                    .unwrap_or(false)
+            };
+            options.push(if collapsed { "✓ Collapse controls" } else { "Collapse controls" }.to_string());
+            options.extend(vec!["Copy".to_string(), "Paste".to_string()]);
         } else {
             options.extend(vec!["Copy".to_string(), "Paste".to_string()]);
         }
