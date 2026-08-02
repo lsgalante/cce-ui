@@ -1,6 +1,7 @@
 pub mod button;
 pub mod checkbox;
 pub mod slider;
+pub mod slider2d;
 pub mod spinbox;
 pub mod color_selector;
 pub mod dropdown;
@@ -14,6 +15,7 @@ pub mod ramp;
 pub use button::{Button, ButtonKind, PageButton};
 pub use checkbox::{Checkbox, Toggle};
 pub use slider::{Slider, RangeSlider, ActiveThumb};
+pub use slider2d::Slider2D;
 pub use spinbox::Spinbox;
 pub use color_selector::ColorSelector;
 pub use dropdown::Dropdown;
