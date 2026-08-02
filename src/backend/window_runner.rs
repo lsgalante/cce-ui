@@ -530,16 +530,61 @@ pub fn vector_vertices(
             verts.push(Vertex { position: [ndc_w2x, ndc_w2y], color: c, clip_circle });
         }
         LineCap::Round => {
-            verts.extend_from_slice(&line_vertices(x1, y1, x2, y2, thickness, sw, sh, c));
+            push_feathered_line_vertices(x1, y1, x2, y2, thickness, sw, sh, c, &mut verts);
             let clip_circle = [0.0, 0.0, 0.0];
             verts.extend(circle_vertices(x2, y2, thickness / 2.0, sw, sh, c, 16, clip_circle));
         }
         LineCap::Flat => {
-            verts.extend_from_slice(&line_vertices(x1, y1, x2, y2, thickness, sw, sh, c));
+            push_feathered_line_vertices(x1, y1, x2, y2, thickness, sw, sh, c, &mut verts);
         }
     }
-    
+
     verts
+}
+
+/// `line_vertices` with a half-px alpha ramp along each long edge (the arc
+/// tessellator's poor-man's AA) — diagonal strokes resolve smoothly instead of
+/// stair-stepping. Axis-aligned strokes keep the crisp single-quad path:
+/// feathering a pixel-snapped hairline would only blur it.
+fn push_feathered_line_vertices(
+    x1: f32, y1: f32, x2: f32, y2: f32,
+    thickness: f32,
+    sw: f32, sh: f32,
+    c: [f32; 4],
+    out: &mut Vec<Vertex>,
+) {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 0.001 || dx.abs() < 0.01 || dy.abs() < 0.01 {
+        out.extend_from_slice(&line_vertices(x1, y1, x2, y2, thickness, sw, sh, c));
+        return;
+    }
+    let (nx, ny) = (-dy / len, dx / len);
+    let f = 0.5f32.min(thickness * 0.25);
+    let half = thickness * 0.5;
+    // (offset at band start, offset at band end, alpha at start, alpha at end)
+    let bands = [
+        (-half - f, -half + f, 0.0, c[3]),
+        (-half + f, half - f, c[3], c[3]),
+        (half - f, half + f, c[3], 0.0),
+    ];
+    for &(oa, ob, aa, ab) in &bands {
+        let ca = [c[0], c[1], c[2], aa];
+        let cb = [c[0], c[1], c[2], ab];
+        let p = |x: f32, y: f32, o: f32| -> [f32; 2] {
+            [((x + nx * o) / sw) * 2.0 - 1.0, 1.0 - ((y + ny * o) / sh) * 2.0]
+        };
+        let clip_circle = [0.0, 0.0, 0.0];
+        let (a1, b1) = (p(x1, y1, oa), p(x1, y1, ob));
+        let (a2, b2) = (p(x2, y2, oa), p(x2, y2, ob));
+        out.push(Vertex { position: a1, color: ca, clip_circle });
+        out.push(Vertex { position: b1, color: cb, clip_circle });
+        out.push(Vertex { position: b2, color: cb, clip_circle });
+        out.push(Vertex { position: a1, color: ca, clip_circle });
+        out.push(Vertex { position: b2, color: cb, clip_circle });
+        out.push(Vertex { position: a2, color: ca, clip_circle });
+    }
 }
 
 pub fn rounded_rect_vertices_corners(
@@ -1510,7 +1555,9 @@ pub fn tessellate_display_list(
                 continue;
             }
             Prim::Quad { rect, color } => {
-                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                // Quads honor an active circle clip like circles/arcs do (the
+                // Ramp's foam-cell fills draw as clipped strips).
+                verts.extend(quad_vertices_with_clip(rect.x, rect.y, rect.width, rect.height, sw, sh, *color, no));
             }
             Prim::RoundedRect { rect, radius, corners, color } => {
                 let radii = crate::widget::CornerRadii::new(
@@ -1759,7 +1806,19 @@ pub fn tessellate_display_list(
                 verts.extend(vector_vertices(*x1, *y1, *x2, *y2, *thickness, sw, sh, *color, lc));
             }
             Prim::Circle { cx, cy, radius, color } => {
-                verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
+                if item.clip_circle.is_none() && *radius > 1.5 {
+                    // Cover quad with the disc itself as the (feathered) circle
+                    // clip: a per-pixel smooth silhouette instead of a hard-edged
+                    // fan. The quad overhangs by 1px for the feather. Only when
+                    // no ancestor clip holds the slot — then it's the fan path.
+                    let own = [cx * scale, cy * scale, radius * scale];
+                    let d = *radius + 1.0;
+                    verts.extend(quad_vertices_with_clip(
+                        cx - d, cy - d, 2.0 * d, 2.0 * d, sw, sh, *color, own,
+                    ));
+                } else {
+                    verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
+                }
             }
             Prim::Sphere { cx, cy, radius, color } if shader_plates => {
                 // A hemisphere lit per pixel by the plate branch (mode 5): one
@@ -2198,45 +2257,6 @@ pub fn arc_background_vertices(
     verts
 }
 
-pub fn push_arc_background_vertices(
-    cx: f32, cy: f32, r: f32,
-    thickness: f32,
-    start_angle: f32, end_angle: f32,
-    sw: f32, sh: f32,
-    color: [f32; 4],
-    segments: usize,
-    clip_circle: [f32; 3],
-    out: &mut Vec<Vertex>,
-) {
-    for i in 0..segments {
-        let theta1 = start_angle + (i as f32) * (end_angle - start_angle) / (segments as f32);
-        let theta2 = start_angle + ((i + 1) as f32) * (end_angle - start_angle) / (segments as f32);
-        
-        let x0 = cx + (r - thickness) * theta1.cos();
-        let y0 = cy + (r - thickness) * theta1.sin();
-        let x1 = cx + r * theta1.cos();
-        let y1 = cy + r * theta1.sin();
-        
-        let x2 = cx + r * theta2.cos();
-        let y2 = cy + r * theta2.sin();
-        let x3 = cx + (r - thickness) * theta2.cos();
-        let y3 = cy + (r - thickness) * theta2.sin();
-        
-        let ndc_x0 = (x0 / sw) * 2.0 - 1.0; let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
-        let ndc_x1 = (x1 / sw) * 2.0 - 1.0; let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
-        let ndc_x2 = (x2 / sw) * 2.0 - 1.0; let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
-        let ndc_x3 = (x3 / sw) * 2.0 - 1.0; let ndc_y3 = 1.0 - (y3 / sh) * 2.0;
-        
-        out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
-        out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
-        out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
-        
-        out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
-        out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
-        out.push(Vertex { position: [ndc_x3, ndc_y3], color, clip_circle });
-    }
-}
-
 /// A ring band with radial Gouraud shading: two sub-bands (inner rim → crest
 /// centerline, crest → outer rim) whose vertex colors interpolate across the
 /// stroke — the rounded-bevel profile — plus the half-px alpha feathers at
@@ -2274,6 +2294,53 @@ pub fn push_arc_shaded_vertices(
             if rb <= ra {
                 continue;
             }
+            let p = |rad: f32, c: f32, s: f32| -> [f32; 2] {
+                [((cx + rad * c) / sw) * 2.0 - 1.0, 1.0 - ((cy + rad * s) / sh) * 2.0]
+            };
+            let (i1, o1) = (p(ra, c1, s1), p(rb, c1, s1));
+            let (i2, o2) = (p(ra, c2, s2), p(rb, c2, s2));
+            out.push(Vertex { position: i1, color: ca, clip_circle });
+            out.push(Vertex { position: o1, color: cb, clip_circle });
+            out.push(Vertex { position: o2, color: cb, clip_circle });
+            out.push(Vertex { position: i1, color: ca, clip_circle });
+            out.push(Vertex { position: o2, color: cb, clip_circle });
+            out.push(Vertex { position: i2, color: ca, clip_circle });
+        }
+    }
+}
+
+pub fn push_arc_background_vertices(
+    cx: f32, cy: f32, r: f32,
+    thickness: f32,
+    start_angle: f32, end_angle: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    segments: usize,
+    clip_circle: [f32; 3],
+    out: &mut Vec<Vertex>,
+) {
+    // The stroke band [r - thickness, r], with a half-px alpha ramp on each rim
+    // (Gouraud across thin edge bands) so curved edges resolve smoothly instead
+    // of hard-stepping — the poor-man's AA the flat pipeline doesn't provide.
+    let f = 0.5f32.min(thickness * 0.25);
+    let r_in = (r - thickness).max(0.0);
+    // (inner radius, outer radius, alpha at inner rim, alpha at outer rim)
+    let bands = [
+        ((r_in - f).max(0.0), r_in + f, 0.0, color[3]),
+        (r_in + f, r - f, color[3], color[3]),
+        (r - f, r + f, color[3], 0.0),
+    ];
+    for i in 0..segments {
+        let theta1 = start_angle + (i as f32) * (end_angle - start_angle) / (segments as f32);
+        let theta2 = start_angle + ((i + 1) as f32) * (end_angle - start_angle) / (segments as f32);
+        let (c1, s1) = (theta1.cos(), theta1.sin());
+        let (c2, s2) = (theta2.cos(), theta2.sin());
+        for &(ra, rb, aa, ab) in &bands {
+            if rb <= ra {
+                continue;
+            }
+            let ca = [color[0], color[1], color[2], aa];
+            let cb = [color[0], color[1], color[2], ab];
             let p = |rad: f32, c: f32, s: f32| -> [f32; 2] {
                 [((cx + rad * c) / sw) * 2.0 - 1.0, 1.0 - ((cy + rad * s) / sh) * 2.0]
             };

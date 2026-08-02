@@ -495,10 +495,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     if (clip_cov <= 0.0) {
         discard;
     }
+    // Circular clip: ~1px feather folded into the coverage (mirroring the
+    // rounded-rect clip below) — a clipped edge doubles as the silhouette AA
+    // for circle prims drawn as cover quads.
     if (in.clip_circle.z > 0.0) {
         let dx = in.clip_position.x - in.clip_circle.x;
         let dy = in.clip_position.y - in.clip_circle.y;
-        if (dx * dx + dy * dy > in.clip_circle.z * in.clip_circle.z) {
+        let dist = sqrt(dx * dx + dy * dy);
+        clip_cov *= 1.0 - smoothstep(in.clip_circle.z - 0.5, in.clip_circle.z + 0.5, dist);
+        if (clip_cov <= 0.0) {
             discard;
         }
     }
