@@ -119,6 +119,10 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 // spelling survives only as a compat alias).
                 "style.surface.relief.depth" | "window_manager.bevel_depth" => "bevel_depth",
                 "style.surface.relief.width" | "window_manager.bevel_width" => "bevel_width",
+                // Ramp-spec strings for the custom wall/roll profiles
+                // (written by cce-bevel, installed by reload_config).
+                "style.surface.relief.profile" => "bevel_profile_spec",
+                "style.surface.relief.edge_profile" => "roll_profile_spec",
                 "style.container.section.depth" => "section_depth",
                 "window_manager.bevel_shader" => "bevel_shader",
                 "window_manager.control_relief" => "control_relief",
@@ -1108,7 +1112,42 @@ pub fn reload_config() {
         if let Ok(raw_kdl) = std::fs::read_to_string(crate::config::get_config_path()) {
             crate::color::reload_colors(&raw_kdl);
         }
+        // The configured relief profiles, applied last so every process (not
+        // just the editor that wrote them) starts with the styled walls.
+        apply_relief_profile_config();
     }
+}
+
+/// The untouched editor curve — the "analytic" sentinel in the config'd
+/// profile specs (cce-designer's Edge Profile convention). For the wall curve
+/// identity-smooth IS the analytic smoothstep, so skipping it changes
+/// nothing; for the roll it would be a straight chamfer, not the analytic
+/// superellipse quadrant, so it must read as "no custom profile".
+pub const RELIEF_PROFILE_IDENTITY_SPEC: &str = "smooth;0.000:0.000,1.000:1.000";
+
+/// Parse-and-install the relief profiles config carries as ramp specs
+/// (`style.surface.relief.profile` / `edge_profile` → the style registry's
+/// `bevel_profile_spec` / `roll_profile_spec`). Absent, identity, or
+/// unparseable specs clear back to the analytic profiles.
+fn apply_relief_profile_config() {
+    let (wall, edge) = {
+        let reg = get_style_registry().read().unwrap();
+        (reg.get_string("bevel_profile_spec"), reg.get_string("roll_profile_spec"))
+    };
+    match parse_relief_profile_spec(wall.as_deref()) {
+        Some((keys, smooth)) => set_bevel_profile_keys(&keys, smooth),
+        None => clear_bevel_profile(),
+    }
+    match parse_relief_profile_spec(edge.as_deref()) {
+        Some((keys, smooth)) => set_roll_profile_keys(&keys, smooth),
+        None => clear_roll_profile(),
+    }
+}
+
+/// A config'd profile spec → installable keys. `None` (falling back to the
+/// analytic profile) for absent, identity-sentinel, or unparseable specs.
+fn parse_relief_profile_spec(spec: Option<&str>) -> Option<(Vec<(f32, f32)>, bool)> {
+    spec.filter(|s| *s != RELIEF_PROFILE_IDENTITY_SPEC).and_then(crate::widget::parse_ramp_spec)
 }
 
 fn mod_rest(rest: &str) -> &str {
@@ -5931,6 +5970,32 @@ mod tests {
         crate::layout::set_bevel_profile_keys(&[(0.0, 1.0)], false);
         assert!(crate::layout::bevel_profile_slopes().is_none());
         assert!(crate::layout::bevel_profile_generation() > gen);
+    }
+
+    #[test]
+    fn relief_profile_specs_parse_with_identity_sentinel() {
+        // Absent and identity-smooth mean "analytic" — nothing to install.
+        assert!(crate::layout::parse_relief_profile_spec(None).is_none());
+        assert!(crate::layout::parse_relief_profile_spec(Some(
+            crate::layout::RELIEF_PROFILE_IDENTITY_SPEC
+        ))
+        .is_none());
+        // Garbage falls back to analytic instead of poisoning the walls.
+        assert!(crate::layout::parse_relief_profile_spec(Some("not a spec")).is_none());
+        // A real curve installs: keys and line type round-trip.
+        let (keys, smooth) = crate::layout::parse_relief_profile_spec(Some(
+            "linear;0.000:0.200,0.500:1.000,1.000:0.800",
+        ))
+        .expect("custom spec parses");
+        assert!(!smooth);
+        assert_eq!(keys.len(), 3);
+        assert!((keys[1].0 - 0.5).abs() < 0.001 && (keys[1].1 - 1.0).abs() < 0.001);
+        // Identity under a LINEAR line type is a real profile (a straight
+        // chamfer), not the sentinel — only the smooth spelling is analytic.
+        assert!(crate::layout::parse_relief_profile_spec(Some(
+            "linear;0.000:0.000,1.000:1.000"
+        ))
+        .is_some());
     }
 }
 

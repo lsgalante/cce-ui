@@ -308,7 +308,7 @@ const PROP_NODES: &[&str] = &[
     "gestures", "key_bindings", "pointer_bind", "gesture_bind",
     "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
     "status", "overlay", "backplate", "desktop", "list", "section", "textbox", "multiline", "editor", "tree",
-    "menubar", "statusbar", "node"
+    "menubar", "statusbar", "node", "relief"
 ];
 
 fn get_or_create_node_mut<'a>(doc: &'a mut kdl::KdlDocument, path: &[&str]) -> Option<&'a mut kdl::KdlNode> {
@@ -700,6 +700,30 @@ mod tests {
         let node_val = sec_val.get(&node).unwrap();
         let prop_val = node_val.get(prop.as_ref().unwrap()).unwrap();
         assert_eq!(prop_val.as_f64().unwrap(), 0.75);
+    }
+
+    #[test]
+    fn relief_keys_write_as_properties_and_round_trip() {
+        // `relief` is a PROP_NODES member: style.surface.relief.* must land as
+        // properties on the existing relief node (the config.kdl shape), not
+        // as duplicate child nodes shadowing the depth=/width= properties.
+        let content = "style {\n    surface {\n        relief depth=(f64)0.15 width=(f64)9.3\n    }\n}\n";
+        let mut doc = content.parse::<kdl::KdlDocument>().unwrap();
+        let spec = "smooth;0.000:0.500,0.400:1.000,1.000:0.000";
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.profile", spec, "style"));
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.depth", "0.3", "style"));
+        let out = doc.to_string();
+        // Still one relief node, no child block grown under it.
+        assert_eq!(out.matches("relief").count(), 1, "out: {out}");
+        assert!(!out.contains("relief {"), "out: {out}");
+
+        // The reload path reads through parse_kdl_to_json: the new property
+        // must surface at the same dotted path the style registry maps.
+        let val = parse_kdl_to_json(&out);
+        let relief = val.get("style").unwrap().get("surface").unwrap().get("relief").unwrap();
+        assert_eq!(relief.get("profile").unwrap().as_str().unwrap(), spec);
+        assert_eq!(relief.get("depth").unwrap().as_f64().unwrap(), 0.3);
+        assert_eq!(relief.get("width").unwrap().as_f64().unwrap(), 9.3);
     }
 
     #[test]
