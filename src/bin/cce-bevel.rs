@@ -20,8 +20,8 @@ use cce_ui::layout::RELIEF_PROFILE_IDENTITY_SPEC as IDENTITY_SPEC;
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{Cap, DisplayList, PaintCtx};
 use cce_ui::widget::{
-    Adapted, Button, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, Slider,
-    WidgetHost, WidgetId,
+    Adapted, Button, Dropdown, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta,
+    Slider, WidgetHost, WidgetId,
 };
 use wayland_client::QueueHandle;
 
@@ -128,6 +128,8 @@ impl ProfileKnobs {
 }
 
 struct BevelPopup {
+    /// Which profile the single section shows/edits: 0 = wall, 1 = edge.
+    profile_dropdown: Adapted<Dropdown>,
     /// The carve wall — what `carve_slope` renders on every
     /// recess/boss/ridge in the DE.
     wall: ProfileKnobs,
@@ -145,11 +147,8 @@ struct BevelPopup {
     scale_factor: f64,
     needs_rebuild: bool,
     registered: bool,
-    wall_header: (f32, f32),
-    edge_header: (f32, f32),
     status_pos: (f32, f32),
-    wall_rect: Rect,
-    edge_rect: Rect,
+    cut_rect: Rect,
 }
 
 /// Parse a saved "shoulder,base,bias" knob triple.
@@ -252,8 +251,9 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
 }
 
 impl BevelPopup {
-    fn root_ids(&self) -> [WidgetId; 10] {
+    fn root_ids(&self) -> [WidgetId; 11] {
         [
+            self.profile_dropdown.id(),
             self.wall.shoulder.id(),
             self.wall.base.id(),
             self.wall.bias.id(),
@@ -267,8 +267,9 @@ impl BevelPopup {
         ]
     }
 
-    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 10] {
+    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 11] {
         [
+            self.profile_dropdown.as_ptr_mut(),
             self.wall.shoulder.as_ptr_mut(),
             self.wall.base.as_ptr_mut(),
             self.wall.bias.as_ptr_mut(),
@@ -285,6 +286,11 @@ impl BevelPopup {
     /// `take_*` plumbing after any routed dispatch — state-gated, so it does
     /// not matter which propagate call consumed the event.
     fn drain_widget_changes(&mut self) {
+        if self.profile_dropdown.take_change() {
+            // Switch which profile the section shows — re-arrange parks the
+            // other set's knobs off-screen.
+            self.needs_rebuild = true;
+        }
         if self.wall.take_change() {
             self.wall.custom = true;
             let keys = self.wall.keys();
@@ -404,6 +410,14 @@ impl Application for BevelPopup {
         let (dmin, dmax) = DEPTH_RANGE;
         let (wmin, wmax) = WIDTH_RANGE;
         Self {
+            profile_dropdown: Dropdown::new(
+                vec![
+                    "Wall — recess & boss carves".to_string(),
+                    "Edge — plate perimeter roll".to_string(),
+                ],
+                0,
+            )
+            .with_label("Profile"),
             wall: ProfileKnobs::new(wall_seed),
             edge: ProfileKnobs::new(edge_seed),
             depth_slider: Slider::new()
@@ -427,15 +441,12 @@ impl Application for BevelPopup {
             status: "Edits apply live; Save writes config.kdl.".to_string(),
             ui_context: cce_ui::context::UiContext::new(),
             width: 520,
-            height: 620,
+            height: 480,
             scale_factor: 1.0,
             needs_rebuild: true,
             registered: false,
-            wall_header: (0.0, 0.0),
-            edge_header: (0.0, 0.0),
             status_pos: (0.0, 0.0),
-            wall_rect: Rect::ZERO,
-            edge_rect: Rect::ZERO,
+            cut_rect: Rect::ZERO,
         }
     }
 
@@ -444,9 +455,9 @@ impl Application for BevelPopup {
             title: "Bevel".to_string(),
             app_id: "cce-bevel".to_string(),
             width: 520,
-            height: 620,
+            height: 480,
             fullscreen: false,
-            min_size: Some((440, 540)),
+            min_size: Some((440, 420)),
         }
     }
 
@@ -485,12 +496,12 @@ impl Application for BevelPopup {
             self.scale_factor = scale;
             cce_ui::scale::set_scale_factor(scale as f32);
 
-            // Manual column layout: per section a header, the cutaway, and
-            // the three knobs on one row; then the global rows.
+            // Manual column layout: the profile selector, ONE cutaway, the
+            // selected profile's knobs, then the global rows. The unselected
+            // profile's knobs park off-screen.
             let pad = cce_ui::layout::backplate_padding();
             let x = pad;
             let w = (self.width as f32 - 2.0 * pad).max(0.0);
-            let header_h = HEADER_FONT_SIZE + 7.0;
             let gap = 14.0;
             let strip = {
                 let (_, fsize) = cce_ui::layout::control_label_font_detached_parsed();
@@ -499,9 +510,11 @@ impl Application for BevelPopup {
             let knob_h = 22.0 + strip;
             let button_h = 26.0;
             let status_h = HEADER_FONT_SIZE + 4.0;
-            let fixed = 2.0 * (header_h + gap + knob_h + gap) + knob_h + gap + button_h + 8.0
-                + status_h;
-            let cut_h = ((self.height as f32 - 2.0 * pad - fixed) / 2.0).clamp(90.0, 200.0);
+            let fixed = knob_h + gap + knob_h + gap + knob_h + gap + button_h + 8.0 + status_h
+                + 3.0 * gap;
+            // The cutaway is the hero: it absorbs whatever height the window
+            // has beyond the fixed rows.
+            let cut_h = (self.height as f32 - 2.0 * pad - fixed).max(90.0);
 
             let kw = (w - 2.0 * gap) / 3.0;
             let knob_row = |k: &mut ProfileKnobs, x: f32, y: f32| {
@@ -509,19 +522,24 @@ impl Application for BevelPopup {
                 k.base.set_rect(x + kw + gap, y, kw, knob_h);
                 k.bias.set_rect(x + 2.0 * (kw + gap), y, kw, knob_h);
             };
+            let park = |k: &mut ProfileKnobs| {
+                k.shoulder.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+                k.base.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+                k.bias.set_rect(-1000.0, -1000.0, 0.0, 0.0);
+            };
 
             let mut y = pad;
-            self.wall_header = (x, y);
-            y += header_h;
-            self.wall_rect = Rect { x, y, width: w, height: cut_h };
-            y += cut_h + gap;
-            knob_row(&mut self.wall, x, y);
+            self.profile_dropdown.set_rect(x, y, (w * 0.62).max(220.0).min(w), knob_h);
             y += knob_h + gap;
-            self.edge_header = (x, y);
-            y += header_h;
-            self.edge_rect = Rect { x, y, width: w, height: cut_h };
+            self.cut_rect = Rect { x, y, width: w, height: cut_h };
             y += cut_h + gap;
-            knob_row(&mut self.edge, x, y);
+            if self.profile_dropdown.selected == 0 {
+                knob_row(&mut self.wall, x, y);
+                park(&mut self.edge);
+            } else {
+                knob_row(&mut self.edge, x, y);
+                park(&mut self.wall);
+            }
             y += knob_h + gap;
             let half = (w - gap) / 2.0;
             self.depth_slider.set_rect(x, y, half, knob_h);
@@ -534,6 +552,11 @@ impl Application for BevelPopup {
 
             self.needs_rebuild = false;
             self.ui_context.rebuild_spatial_grid();
+        }
+
+        self.ui_context.clear_popovers();
+        if self.profile_dropdown.popover_rect().is_some() {
+            self.ui_context.register_popover(&mut self.profile_dropdown);
         }
 
         let mut pc = PaintCtx::new();
@@ -555,38 +578,52 @@ impl Application for BevelPopup {
             bevel,
         );
 
-        let header = |pc: &mut PaintCtx, text: &str, pos: (f32, f32)| {
-            pc.text_with(
-                text.to_string(),
-                pos.0,
-                pos.1,
-                HEADER_FONT_SIZE,
-                HEADER_COLOR,
-                Some("monospace".to_string()),
-                None,
-            );
-        };
-        header(&mut pc, "Wall profile — recess & boss carves", self.wall_header);
-        header(&mut pc, "Edge profile — plate perimeter roll", self.edge_header);
-        header(&mut pc, &self.status, self.status_pos);
+        pc.text_with(
+            self.status.clone(),
+            self.status_pos.0,
+            self.status_pos.1,
+            HEADER_FONT_SIZE,
+            HEADER_COLOR,
+            Some("monospace".to_string()),
+            None,
+        );
 
-        draw_section(&mut pc, self.wall_rect, &self.wall, true);
-        draw_section(&mut pc, self.edge_rect, &self.edge, false);
+        let wall_active = self.profile_dropdown.selected == 0;
+        let active = if wall_active { &self.wall } else { &self.edge };
+        draw_section(&mut pc, self.cut_rect, active, wall_active);
 
+        let knobs = if wall_active { &self.wall } else { &self.edge };
         for s in [
-            &self.wall.shoulder,
-            &self.wall.base,
-            &self.wall.bias,
-            &self.edge.shoulder,
-            &self.edge.base,
-            &self.edge.bias,
+            &knobs.shoulder,
+            &knobs.base,
+            &knobs.bias,
             &self.depth_slider,
             &self.width_slider,
         ] {
             cce_ui::scene::painter::paint_root_into(&self.ui_context, s, &mut pc);
         }
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.profile_dropdown, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.save_button, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.reset_button, &mut pc);
+
+        // The selector's popover, drawn into the frame on top of everything
+        // below it (its labels carry the popover rect as bounds).
+        if let Some((px, py, pw, ph)) = self.profile_dropdown.popover_rect() {
+            let mut coll = cce_ui::layout::PopoverCollector::new();
+            self.profile_dropdown.render_popover(&mut coll);
+            for &(c, x, y, qw, qh) in &coll.rects {
+                pc.quad(Rect { x, y, width: qw, height: qh }, c);
+            }
+            let bounds = Some([px, py, px + pw, py + ph]);
+            for (content, size, tx, ty, color, font, _b) in coll.texts {
+                let color_u8 = [
+                    (color[0] * 255.0).clamp(0.0, 255.0) as u8,
+                    (color[1] * 255.0).clamp(0.0, 255.0) as u8,
+                    (color[2] * 255.0).clamp(0.0, 255.0) as u8,
+                ];
+                pc.text_with(content, tx, ty, size, color_u8, font, bounds);
+            }
+        }
 
         // The shared context menu (slider Copy/Paste), last, on top.
         if self.ui_context.is_context_menu_visible() {
