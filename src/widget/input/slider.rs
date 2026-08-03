@@ -212,7 +212,17 @@ impl Slider {
         let vx = g.track_x + self.value * g.track_w;
         let t = ((x - vx) / bulge_w).clamp(-1.0, 1.0);
         let bell = 0.5 * (1.0 + (std::f32::consts::PI * t).cos());
-        band_t + (bulge_h - band_t) * bell.powf(1.35)
+        let h = band_t + (bulge_h - band_t) * bell.powf(1.35);
+        // Capsule tips: the profile shrinks over a circular cap inside each
+        // track end — the band ends round, not square-cut, and the well
+        // contour and wheel halo (both measured from here) round with it.
+        let d = (x - g.track_x).min(g.track_x + g.track_w - x);
+        let r = (h * 0.5).max(0.5);
+        if d < r {
+            let t = ((r - d.max(0.0)) / r).min(1.0);
+            return h * (1.0 - t * t).max(0.0).sqrt();
+        }
+        h
     }
 
     /// The wheel-capture zone. Band style: an inset halo around the DRAWN
@@ -272,8 +282,19 @@ impl Slider {
         let sub = WELL_WALL / WALL_STEPS as f32;
         for i in 0..cols {
             let x = wx0 + i as f32 * colw;
-            let xm = (x + colw * 0.5).clamp(g.track_x, g.track_x + g.track_w);
-            let c = self.band_height_at(g, xm) * 0.5 + WELL_GAP;
+            let xm = x + colw * 0.5;
+            // Inside the track the contour rides the band profile; past the
+            // tips it wraps around them on a WELL_GAP circle — rounded well
+            // ends, not square-cut walls.
+            let c = if xm < g.track_x {
+                let e = g.track_x - xm;
+                (WELL_GAP * WELL_GAP - e * e).max(0.0).sqrt()
+            } else if xm > g.track_x + g.track_w {
+                let e = xm - (g.track_x + g.track_w);
+                (WELL_GAP * WELL_GAP - e * e).max(0.0).sqrt()
+            } else {
+                self.band_height_at(g, xm) * 0.5 + WELL_GAP
+            };
             for k in 0..WALL_STEPS {
                 let fade = 1.0 - k as f32 / WALL_STEPS as f32;
                 // Shadow INSIDE the well below the top contour; the lit lip
@@ -288,32 +309,36 @@ impl Slider {
                 );
             }
         }
-        // End walls close the well: shadow inside the left end, the lit lip
-        // outside the right, same light.
-        let c0 = self.band_height_at(g, g.track_x) * 0.5 + WELL_GAP;
-        let c1 = self.band_height_at(g, g.track_x + g.track_w) * 0.5 + WELL_GAP;
-        for k in 0..WALL_STEPS {
-            let fade = 1.0 - k as f32 / WALL_STEPS as f32;
-            ctx.quad(
-                Rect { x: wx0 + k as f32 * sub, y: cy - c0, width: sub, height: 2.0 * c0 },
-                [0.0, 0.0, 0.0, a_dark * fade],
-            );
-            ctx.quad(
-                Rect { x: wx1 + k as f32 * sub, y: cy - c1, width: sub, height: 2.0 * c1 },
-                [1.0, 1.0, 1.0, a_light * fade],
-            );
-        }
-
-        // Flat runs outside the bulge span.
+        // Flat runs outside the bulge span: one long quad each, except the
+        // capsule-tip regions, which sample the rounded profile per column.
         let l0 = g.track_x;
         let r1 = g.track_x + g.track_w;
         let b0 = (vx - bulge_w).max(l0);
         let b1 = (vx + bulge_w).min(r1);
+        let tip_columns = |ctx: &mut PaintCtx, from: f32, to: f32| {
+            let steps = ((to - from).ceil() as i32).max(1);
+            let sw = (to - from) / steps as f32;
+            for i in 0..steps {
+                let x = from + i as f32 * sw;
+                let h = self.band_height_at(g, x + sw * 0.5);
+                ctx.quad(Rect { x, y: cy - h * 0.5, width: sw + 0.3, height: h }, color);
+            }
+        };
         if b0 > l0 {
-            ctx.quad(Rect { x: l0, y: cy - band_t * 0.5, width: b0 - l0, height: band_t }, color);
+            let flat_start = (l0 + band_t).min(b0);
+            tip_columns(ctx, l0, flat_start);
+            ctx.quad(
+                Rect { x: flat_start, y: cy - band_t * 0.5, width: b0 - flat_start, height: band_t },
+                color,
+            );
         }
         if r1 > b1 {
-            ctx.quad(Rect { x: b1, y: cy - band_t * 0.5, width: r1 - b1, height: band_t }, color);
+            let flat_end = (r1 - band_t).max(b1);
+            ctx.quad(
+                Rect { x: b1, y: cy - band_t * 0.5, width: flat_end - b1, height: band_t },
+                color,
+            );
+            tip_columns(ctx, flat_end, r1);
         }
 
         // The swell: symmetric about the band's centerline. The bell is raised
