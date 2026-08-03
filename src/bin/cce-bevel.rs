@@ -60,7 +60,11 @@ impl ProfileKnobs {
     fn new(seed: Option<(f32, f32, f32)>) -> Self {
         let (s, b, c) = seed.unwrap_or((0.5, 0.5, 0.5));
         let knob = |v: f32, label: &str| {
-            Slider::new().with_label(label).with_value(v.clamp(0.0, 1.0)).with_scroll(true)
+            Slider::new()
+                .with_label(label)
+                .with_value(v.clamp(0.0, 1.0))
+                .with_scroll(true)
+                .with_band(true)
         };
         let mut this = Self {
             shoulder: knob(s, "Shoulder"),
@@ -408,14 +412,16 @@ impl Application for BevelPopup {
                 .with_value(((depth - dmin) / (dmax - dmin)).clamp(0.0, 1.0))
                 .with_readout(true)
                 .with_decimals(2)
-                .with_scroll(true),
+                .with_scroll(true)
+                .with_band(true),
             width_slider: Slider::new()
                 .with_label("Width")
                 .with_range(wmin, wmax)
                 .with_value(((width - wmin) / (wmax - wmin)).clamp(0.0, 1.0))
                 .with_readout(true)
                 .with_decimals(1)
-                .with_scroll(true),
+                .with_scroll(true)
+                .with_band(true),
             save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
             reset_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Reset"),
             status: "Edits apply live; Save writes config.kdl.".to_string(),

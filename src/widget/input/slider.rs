@@ -61,6 +61,9 @@ pub struct Slider {
     last_wheel: Option<std::time::Instant>,
     /// Readout / edit-buffer display precision (decimal places).
     decimals: usize,
+    /// Per-widget band-style override; `None` follows the DE config
+    /// (`style.control.slider.style`).
+    band_override: Option<bool>,
 }
 
 impl Slider {
@@ -82,6 +85,7 @@ impl Slider {
             scroll_vel: 0.0,
             last_wheel: None,
             decimals: 2,
+            band_override: None,
         })
     }
 
@@ -127,7 +131,7 @@ impl Slider {
     /// full-range band that inflates smoothly at the value — no track fill, no
     /// thumb ball, no carve.
     fn band(&self) -> bool {
-        crate::layout::slider_band()
+        self.band_override.unwrap_or_else(crate::layout::slider_band)
     }
 
     /// The width the value maps over: the full track under the band style
@@ -395,6 +399,14 @@ impl Adapted<Slider> {
     /// Readout display precision in decimal places (default 2).
     pub fn with_decimals(mut self, decimals: usize) -> Self {
         self.decimals = decimals;
+        self
+    }
+
+    /// Force the band style (the thin full-range band swelling at the value)
+    /// on or off for this slider, regardless of the DE-wide
+    /// `style.control.slider.style` setting.
+    pub fn with_band(mut self, band: bool) -> Self {
+        self.band_override = Some(band);
         self
     }
 }
