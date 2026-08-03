@@ -149,14 +149,11 @@ struct BevelPopup {
     width_slider: Adapted<Slider>,
     save_button: Adapted<Button>,
     reset_button: Adapted<Button>,
-    /// The transparency dialog: a raised plate floated over the popup with
-    /// one slider driving the window plate's alpha, toggled by its button.
-    opacity_button: Adapted<Button>,
-    opacity_slider: Adapted<Slider>,
-    opacity_open: bool,
+    /// The window plate's alpha — seeded from this app's own config
+    /// (`~/.config/cce/cce-bevel/config.kdl`, `window { opacity }`), falling
+    /// back to the DE backplate opacity. Edited on the file directly, the
+    /// DE way — no dedicated control.
     plate_opacity: f32,
-    dialog_rect: Rect,
-    opacity_btn_rect: Rect,
     /// Status line under the buttons: what the last save/reset did.
     status: String,
     ui_context: cce_ui::context::UiContext,
@@ -317,10 +314,8 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
 }
 
 impl BevelPopup {
-    fn root_ids(&self) -> [WidgetId; 13] {
+    fn root_ids(&self) -> [WidgetId; 11] {
         [
-            self.opacity_slider.id(),
-            self.opacity_button.id(),
             self.profile_dropdown.id(),
             self.wall.shoulder.id(),
             self.wall.base.id(),
@@ -335,10 +330,8 @@ impl BevelPopup {
         ]
     }
 
-    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 13] {
+    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 11] {
         [
-            self.opacity_slider.as_ptr_mut(),
-            self.opacity_button.as_ptr_mut(),
             self.profile_dropdown.as_ptr_mut(),
             self.wall.shoulder.as_ptr_mut(),
             self.wall.base.as_ptr_mut(),
@@ -403,35 +396,6 @@ impl BevelPopup {
             self.reset_live();
             self.needs_rebuild = true;
         }
-        if self.opacity_button.take_click() {
-            self.opacity_open = !self.opacity_open;
-            if !self.opacity_open {
-                self.persist_opacity();
-            }
-            self.needs_rebuild = true;
-        }
-        if self.opacity_slider.take_change() {
-            self.plate_opacity = self.opacity_slider.inner().value();
-            println!("opacity {:.2}", self.plate_opacity);
-            self.needs_rebuild = true;
-        }
-    }
-
-    /// Persist the plate opacity to THIS APP's config
-    /// (`~/.config/cce/cce-bevel/config.kdl`, `window { opacity }`) — a
-    /// per-popup look, not the DE-wide material, so it deliberately does not
-    /// touch the shared config.kdl. Runs when the dialog closes and on Save.
-    fn persist_opacity(&mut self) {
-        let path = cce_ui::config::get_app_config_path("cce-bevel");
-        let p = path.to_string_lossy().into_owned();
-        if cce_ui::config::write_config_value(
-            &p,
-            "window.opacity",
-            &format!("{:.3}", self.plate_opacity),
-            "window",
-        ) {
-            println!("opacity-saved {p}");
-        }
     }
 
     /// Persist the current material to the shared config
@@ -462,7 +426,6 @@ impl BevelPopup {
         } else {
             "Save FAILED — see config.kdl permissions.".to_string()
         };
-        self.persist_opacity();
     }
 
     /// Back to the analytic material, live only (Save persists it): knobs to
@@ -549,18 +512,7 @@ impl Application for BevelPopup {
                 .with_band(true),
             save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
             reset_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Reset"),
-            opacity_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Opacity"),
-            opacity_slider: Slider::new()
-                .with_label("Opacity")
-                .with_value(plate_opacity)
-                .with_readout(true)
-                .with_decimals(2)
-                .with_scroll(true)
-                .with_band(true),
-            opacity_open: false,
             plate_opacity,
-            dialog_rect: Rect::ZERO,
-            opacity_btn_rect: Rect::ZERO,
             status: "Edits apply live; Save writes config.kdl.".to_string(),
             ui_context: cce_ui::context::UiContext::new(),
             width: 520,
@@ -676,34 +628,8 @@ impl Application for BevelPopup {
             y += knob_h + gap;
             self.save_button.set_rect(x, y, 96.0, button_h);
             self.reset_button.set_rect(x + 96.0 + 12.0, y, 96.0, button_h);
-            self.opacity_btn_rect = Rect { x: x + 2.0 * (96.0 + 12.0), y, width: 96.0, height: button_h };
-            self.opacity_button.set_rect(
-                self.opacity_btn_rect.x,
-                self.opacity_btn_rect.y,
-                self.opacity_btn_rect.width,
-                self.opacity_btn_rect.height,
-            );
             y += button_h + 8.0;
             self.status_pos = (x, y);
-
-            // The transparency dialog floats centered over the cutaway; its
-            // slider parks off-screen while closed.
-            self.dialog_rect = Rect {
-                x: x + (w - 300.0).max(0.0) / 2.0,
-                y: self.cut_rect.y + (self.cut_rect.height - 92.0).max(0.0) / 2.0,
-                width: 300.0f32.min(w),
-                height: 92.0,
-            };
-            if self.opacity_open {
-                self.opacity_slider.set_rect(
-                    self.dialog_rect.x + 18.0,
-                    self.dialog_rect.y + (92.0 - knob_h) / 2.0 + 4.0,
-                    self.dialog_rect.width - 36.0,
-                    knob_h,
-                );
-            } else {
-                self.opacity_slider.set_rect(-1000.0, -1000.0, 0.0, 0.0);
-            }
 
             self.needs_rebuild = false;
             self.ui_context.rebuild_spatial_grid();
@@ -758,17 +684,6 @@ impl Application for BevelPopup {
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.profile_dropdown, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.save_button, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.reset_button, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.opacity_button, &mut pc);
-
-        // The transparency dialog: a raised plate floated over the cutaway,
-        // its own alpha pinned readable so the slider stays usable at glassy
-        // window settings.
-        if self.opacity_open {
-            let mut dc = cce_ui::color::page_low_color();
-            dc[3] = 0.96;
-            pc.plate(self.dialog_rect, (10.0, 10.0, 10.0, 10.0), dc, bevel * 0.75);
-            cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.opacity_slider, &mut pc);
-        }
 
         // The selector's popover, drawn into the frame on top of everything
         // below it (its labels carry the popover rect as bounds).
@@ -858,22 +773,6 @@ impl Application for BevelPopup {
             self.needs_rebuild = true;
             return None;
         }
-        // A press outside the open transparency dialog dismisses it (presses
-        // on its toggle button fall through — the button click handles it).
-        if self.opacity_open && state == ElementState::Pressed {
-            let d = self.dialog_rect;
-            let b = self.opacity_btn_rect;
-            let inside = |r: Rect| {
-                pos.x >= r.x && pos.x <= r.x + r.width && pos.y >= r.y && pos.y <= r.y + r.height
-            };
-            if !inside(d) && !inside(b) {
-                self.opacity_open = false;
-                self.persist_opacity();
-                *needs_rebuild = true;
-                self.needs_rebuild = true;
-                return None;
-            }
-        }
         let ev = Event::MouseButton {
             button,
             state,
@@ -929,19 +828,12 @@ impl Application for BevelPopup {
     ) -> Option<Self::Message> {
         use cce_ui::widget::{Key, NamedKey};
         if event.state == ElementState::Pressed {
-            // Escape closes the transparency dialog first, then the context
-            // menu (toolkit-wide default), and only then exits.
-            if event.logical_key == Key::Named(NamedKey::Escape) {
-                if self.opacity_open {
-                    self.opacity_open = false;
-                    self.persist_opacity();
-                    *needs_rebuild = true;
-                    self.needs_rebuild = true;
-                    return None;
-                }
-                if !self.ui_context.is_context_menu_visible() {
-                    return Some(BevelMsg::Exit);
-                }
+            // Escape exits — unless the context menu is up (the toolkit-wide
+            // Escape-dismiss should win the first press).
+            if event.logical_key == Key::Named(NamedKey::Escape)
+                && !self.ui_context.is_context_menu_visible()
+            {
+                return Some(BevelMsg::Exit);
             }
             if event.ctrl {
                 if let Key::Character(ref c) = event.logical_key {
