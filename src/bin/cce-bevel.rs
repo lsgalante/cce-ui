@@ -38,6 +38,16 @@ const WIDTH_RANGE: (f32, f32) = (2.0, 24.0);
 /// renderer LUT sees the curve, few enough that the config line stays sane.
 const SPEC_SAMPLES: usize = 17;
 
+/// Cutaway metrics, shared by `draw_section` and the layout's shrink-wrap:
+/// inner margin, the axis gutters (depth numbers left of the slab's cut
+/// face, run numbers under its underside), the plateau/floor minimum band,
+/// and the slab's underside room.
+const CUT_MARGIN: f32 = 8.0;
+const GUTTER_L: f32 = 34.0;
+const GUTTER_B: f32 = 16.0;
+const MIN_BAND: f32 = 36.0;
+const UNDERSIDE: f32 = 18.0;
+
 #[derive(Debug, Clone)]
 enum BevelMsg {
     Exit,
@@ -178,23 +188,18 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
     // whatever shape the opening is — so a 45° chamfer draws at 45°. The
     // plateau/floor bands absorb leftover width and the section centers
     // vertically; the window's shape never distorts the curve.
-    let m = 12.0f32;
-    // Axis gutters: depth numbers left of the slab's cut face, run numbers
-    // under the slab's underside.
-    let gutter_l = 34.0f32;
-    let gutter_b = 16.0f32;
-    let x_l = rect.x + m + gutter_l;
+    let m = CUT_MARGIN;
+    let x_l = rect.x + m + GUTTER_L;
     let x_r = rect.x + rect.width - m;
-    let min_band = 36.0f32;
     let avail_w = x_r - x_l;
     // stroke + slab-underside room, plus the bottom gutter
-    let avail_h = rect.height - 2.0 * m - 18.0 - gutter_b;
-    let drop = avail_h.min(avail_w - 2.0 * min_band).max(24.0);
+    let avail_h = rect.height - 2.0 * m - UNDERSIDE - GUTTER_B;
+    let drop = avail_h.min(avail_w - 2.0 * MIN_BAND).max(24.0);
     let wall_w = drop;
-    let leftover = (avail_w - wall_w).max(2.0 * min_band);
+    let leftover = (avail_w - wall_w).max(2.0 * MIN_BAND);
     let plateau_frac = if has_floor { 0.45 } else { 0.62 };
     let plateau_w = leftover * plateau_frac;
-    let y_top = rect.y + ((rect.height - drop - 18.0 - gutter_b) / 2.0).max(m);
+    let y_top = rect.y + ((rect.height - drop - UNDERSIDE - GUTTER_B) / 2.0).max(m);
     let y_bot = y_top + drop;
     let x0 = x_l + plateau_w;
     let x1 = x0 + wall_w;
@@ -565,9 +570,15 @@ impl Application for BevelPopup {
             let status_h = HEADER_FONT_SIZE + 4.0;
             let fixed = knob_h + gap + knob_h + gap + knob_h + gap + button_h + 8.0 + status_h
                 + 3.0 * gap;
-            // The cutaway is the hero: it absorbs whatever height the window
-            // has beyond the fixed rows.
-            let cut_h = (self.height as f32 - 2.0 * pad - fixed).max(90.0);
+            // The cutaway absorbs spare height — but only up to its NATURAL
+            // height for this width (the proportional square domain plus
+            // gutters), so the opening shrink-wraps the section instead of
+            // floating it in dark space.
+            let natural = (w - 2.0 * CUT_MARGIN - GUTTER_L - 2.0 * MIN_BAND)
+                + 2.0 * CUT_MARGIN
+                + UNDERSIDE
+                + GUTTER_B;
+            let cut_h = (self.height as f32 - 2.0 * pad - fixed).min(natural).max(90.0);
 
             let kw = (w - 2.0 * gap) / 3.0;
             let knob_row = |k: &mut ProfileKnobs, x: f32, y: f32| {
