@@ -179,20 +179,48 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
     // plateau/floor bands absorb leftover width and the section centers
     // vertically; the window's shape never distorts the curve.
     let m = 12.0f32;
-    let x_l = rect.x + m;
+    // Axis gutters: depth numbers left of the slab's cut face, run numbers
+    // under the slab's underside.
+    let gutter_l = 34.0f32;
+    let gutter_b = 16.0f32;
+    let x_l = rect.x + m + gutter_l;
     let x_r = rect.x + rect.width - m;
     let min_band = 36.0f32;
     let avail_w = x_r - x_l;
-    let avail_h = rect.height - 2.0 * m - 18.0; // stroke + slab-underside room
+    // stroke + slab-underside room, plus the bottom gutter
+    let avail_h = rect.height - 2.0 * m - 18.0 - gutter_b;
     let drop = avail_h.min(avail_w - 2.0 * min_band).max(24.0);
     let wall_w = drop;
     let leftover = (avail_w - wall_w).max(2.0 * min_band);
     let plateau_frac = if has_floor { 0.45 } else { 0.62 };
     let plateau_w = leftover * plateau_frac;
-    let y_top = rect.y + ((rect.height - drop - 18.0) / 2.0).max(m);
+    let y_top = rect.y + ((rect.height - drop - 18.0 - gutter_b) / 2.0).max(m);
     let y_bot = y_top + drop;
     let x0 = x_l + plateau_w;
     let x1 = x0 + wall_w;
+
+    // The axes: faint gridlines over the wall's square 0..1 × 0..1 domain,
+    // drawn before the slab so the material occludes them (grid in the void
+    // only), with the numbers in the gutters. x is the wall's run, y its
+    // depth — 0 at the plateau, 1 at the floor.
+    let grid = [0.25f32, 0.25, 0.28, 0.6];
+    let num_color = [0x84u8, 0x84, 0x92];
+    for i in 0..=4 {
+        let r = i as f32 / 4.0;
+        let gx = x0 + r * wall_w;
+        let gy = y_top + r * drop;
+        pc.quad(Rect { x: gx, y: y_top, width: 1.0, height: drop }, grid);
+        pc.quad(Rect { x: x0, y: gy, width: wall_w, height: 1.0 }, grid);
+        pc.text_with(
+            format!("{r:.2}"),
+            rect.x + m + 2.0,
+            gy - 5.0,
+            10.0,
+            num_color,
+            Some("monospace".to_string()),
+            None,
+        );
+    }
 
     // Surface height at a section x.
     let surface_y = |x: f32| -> Option<f32> {
@@ -224,6 +252,20 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
             pc.quad(Rect { x, y: sy, width: w, height: (slab_bot - sy).max(0.0) }, slab);
         }
         x += step;
+    }
+
+    // Run numbers under the slab's underside, on the wall-domain ticks.
+    for i in 0..=4 {
+        let r = i as f32 / 4.0;
+        pc.text_with(
+            format!("{r:.2}"),
+            x0 + r * wall_w - 11.0,
+            slab_bot + 3.0,
+            10.0,
+            num_color,
+            Some("monospace".to_string()),
+            None,
+        );
     }
 
     // The surface stroke, lit per segment: outward normal (material below)
