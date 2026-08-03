@@ -2705,10 +2705,13 @@ pub struct EngineState<A: Application> {
     /// Serial of the most recent pointer press, kept for
     /// [`Application::take_window_action`] move/resize grabs.
     pub last_press_serial: Option<u32>,
-    /// Mouse buttons currently held (tracked Press/Release pairs). Gates the
-    /// Leave hover-clear: mid-drag the compositor may unfocus the surface
-    /// (pointer past the input region), and the synthetic off-screen move
-    /// would corrupt the drag (a ramp key snapped to the graph corner).
+    /// Mouse buttons currently held, as a bitmask (1 Left / 2 Right /
+    /// 4 Middle). On pointer Leave mid-gesture the real Release goes to
+    /// whatever surface takes the pointer next (fullscreen switches, layout
+    /// animations), so Leave synthesizes releases for the held set — a drag
+    /// must end, not stay armed and steered by later motion — and only then
+    /// runs the off-screen hover-clear (which would otherwise corrupt the
+    /// drag: a ramp key snapped to the graph corner).
     pub buttons_down: u32,
     /// This frame's display-list text, shaped and held here so the glyphon `TextArea`s built
     /// in the render pass can borrow the buffers (Phase 6 —
@@ -3423,15 +3426,45 @@ impl<A: Application> PointerHandler for EngineState<A> {
                 }
                 PointerEventKind::Leave { .. } => {
                     self.current_cursor_icon = None;
-                    // Clear hover with an off-screen move — but not while a
-                    // button is held: a drag in progress must not see the
-                    // sentinel position as cursor motion.
-                    if self.buttons_down == 0 {
-                        let mut rebuild = false;
-                        self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
-                        if rebuild {
-                            self.redraw = true;
+                    // Focus can move mid-gesture (a fullscreen switch, a
+                    // relayout sliding the window away): the real Release
+                    // then lands on another surface, and an armed drag would
+                    // live forever, steered by whatever motion arrives next.
+                    // End held gestures with synthetic releases at the last
+                    // known cursor position before anything else.
+                    if self.buttons_down != 0 {
+                        let (px, py) = self.cursor_pos;
+                        for (bit, btn) in
+                            [(1u32, MouseButton::Left), (2, MouseButton::Right), (4, MouseButton::Middle)]
+                        {
+                            if self.buttons_down & bit == 0 {
+                                continue;
+                            }
+                            let mut rebuild = false;
+                            if let Some(msg) = self.inner.as_mut().unwrap().handle_mouse_input(
+                                btn,
+                                ElementState::Released,
+                                LogicalPosition::new(px, py),
+                                &mut rebuild,
+                            ) {
+                                let mut update_rebuild = false;
+                                self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
+                                if update_rebuild {
+                                    rebuild = true;
+                                }
+                            }
+                            if rebuild {
+                                self.redraw = true;
+                            }
                         }
+                        self.buttons_down = 0;
+                    }
+                    // Then clear hover with an off-screen move — safe now
+                    // that no drag is held.
+                    let mut rebuild = false;
+                    self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(-10000.0, -10000.0), &mut rebuild);
+                    if rebuild {
+                        self.redraw = true;
                     }
                 }
                 PointerEventKind::Motion { .. } => {
@@ -3458,7 +3491,11 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         _ => continue,
                     };
                     self.last_press_serial = Some(*serial);
-                    self.buttons_down = self.buttons_down.saturating_add(1);
+                    self.buttons_down |= match btn {
+                        MouseButton::Left => 1,
+                        MouseButton::Right => 2,
+                        _ => 4,
+                    };
 
                     // Client-Side Decorations (CSD) Drag & Resize Handling
                     let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
@@ -3548,7 +3585,11 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         274 => MouseButton::Middle,
                         _ => continue,
                     };
-                    self.buttons_down = self.buttons_down.saturating_sub(1);
+                    self.buttons_down &= !match btn {
+                        MouseButton::Left => 1,
+                        MouseButton::Right => 2,
+                        _ => 4,
+                    };
                     let mut rebuild = false;
                     if let Some(msg) = self.inner.as_mut().unwrap().handle_mouse_input(btn, ElementState::Released, LogicalPosition::new(lx, ly), &mut rebuild) {
                         let mut update_rebuild = false;
