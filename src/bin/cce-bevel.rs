@@ -173,15 +173,24 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
     pc.rounded_rect(rect, radius, (true, true, true, true), [0.08, 0.08, 0.10, 1.0]);
 
     // The section geometry: plateau band, then the wall over `wall_w`, then
-    // (carve only) the floor band. Vertical span is the feature depth.
+    // (carve only) the floor band. PROPORTIONAL AXES: the wall's 0..1 × 0..1
+    // domain renders square — one unit of run is one unit of drop in pixels,
+    // whatever shape the opening is — so a 45° chamfer draws at 45°. The
+    // plateau/floor bands absorb leftover width and the section centers
+    // vertically; the window's shape never distorts the curve.
     let m = 12.0f32;
-    let y_top = rect.y + 16.0;
-    let y_bot = rect.y + rect.height - 22.0;
-    let drop = y_bot - y_top;
     let x_l = rect.x + m;
     let x_r = rect.x + rect.width - m;
-    let plateau_w = (x_r - x_l) * 0.16;
-    let wall_w = (x_r - x_l) * if has_floor { 0.56 } else { 0.68 };
+    let min_band = 36.0f32;
+    let avail_w = x_r - x_l;
+    let avail_h = rect.height - 2.0 * m - 18.0; // stroke + slab-underside room
+    let drop = avail_h.min(avail_w - 2.0 * min_band).max(24.0);
+    let wall_w = drop;
+    let leftover = (avail_w - wall_w).max(2.0 * min_band);
+    let plateau_frac = if has_floor { 0.45 } else { 0.62 };
+    let plateau_w = leftover * plateau_frac;
+    let y_top = rect.y + ((rect.height - drop - 18.0) / 2.0).max(m);
+    let y_bot = y_top + drop;
     let x0 = x_l + plateau_w;
     let x1 = x0 + wall_w;
 
@@ -203,7 +212,9 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
     // ramp-fill rule keeps seams clean under AA).
     let mut slab = cce_ui::color::page_low_color();
     slab = [slab[0] * 1.25 + 0.03, slab[1] * 1.25 + 0.03, slab[2] * 1.25 + 0.03, 1.0];
-    let slab_bot = rect.y + rect.height - 10.0;
+    // A fixed slab thickness under the lowest surface, so vertical centering
+    // doesn't grow a bottomless block of material.
+    let slab_bot = (y_bot + 16.0).min(rect.y + rect.height - 8.0);
     let step = 2.0f32;
     let mut x = x_l;
     while x < x_r {
