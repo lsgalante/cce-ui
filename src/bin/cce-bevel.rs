@@ -405,12 +405,32 @@ impl BevelPopup {
         }
         if self.opacity_button.take_click() {
             self.opacity_open = !self.opacity_open;
+            if !self.opacity_open {
+                self.persist_opacity();
+            }
             self.needs_rebuild = true;
         }
         if self.opacity_slider.take_change() {
             self.plate_opacity = self.opacity_slider.inner().value();
             println!("opacity {:.2}", self.plate_opacity);
             self.needs_rebuild = true;
+        }
+    }
+
+    /// Persist the plate opacity to THIS APP's config
+    /// (`~/.config/cce/cce-bevel/config.kdl`, `window { opacity }`) — a
+    /// per-popup look, not the DE-wide material, so it deliberately does not
+    /// touch the shared config.kdl. Runs when the dialog closes and on Save.
+    fn persist_opacity(&mut self) {
+        let path = cce_ui::config::get_app_config_path("cce-bevel");
+        let p = path.to_string_lossy().into_owned();
+        if cce_ui::config::write_config_value(
+            &p,
+            "window.opacity",
+            &format!("{:.3}", self.plate_opacity),
+            "window",
+        ) {
+            println!("opacity-saved {p}");
         }
     }
 
@@ -442,6 +462,7 @@ impl BevelPopup {
         } else {
             "Save FAILED — see config.kdl permissions.".to_string()
         };
+        self.persist_opacity();
     }
 
     /// Back to the analytic material, live only (Save persists it): knobs to
@@ -488,6 +509,17 @@ impl Application for BevelPopup {
         let width = cce_ui::layout::bevel_width();
         let (dmin, dmax) = DEPTH_RANGE;
         let (wmin, wmax) = WIDTH_RANGE;
+        // The persisted per-app plate opacity, falling back to the DE look.
+        let plate_opacity = std::fs::read_to_string(cce_ui::config::get_app_config_path("cce-bevel"))
+            .ok()
+            .map(|c| cce_ui::config::parse_kdl_to_json(&c))
+            .and_then(|v| {
+                v.get("window")
+                    .and_then(|w| w.get("opacity"))
+                    .and_then(|o| o.as_f64())
+                    .map(|f| (f as f32).clamp(0.0, 1.0))
+            })
+            .unwrap_or_else(|| cce_ui::color::active_backplate_opacity());
         Self {
             profile_dropdown: Dropdown::new(
                 vec![
@@ -520,13 +552,13 @@ impl Application for BevelPopup {
             opacity_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Opacity"),
             opacity_slider: Slider::new()
                 .with_label("Opacity")
-                .with_value(cce_ui::color::active_backplate_opacity().clamp(0.0, 1.0))
+                .with_value(plate_opacity)
                 .with_readout(true)
                 .with_decimals(2)
                 .with_scroll(true)
                 .with_band(true),
             opacity_open: false,
-            plate_opacity: cce_ui::color::active_backplate_opacity(),
+            plate_opacity,
             dialog_rect: Rect::ZERO,
             opacity_btn_rect: Rect::ZERO,
             status: "Edits apply live; Save writes config.kdl.".to_string(),
@@ -836,6 +868,7 @@ impl Application for BevelPopup {
             };
             if !inside(d) && !inside(b) {
                 self.opacity_open = false;
+                self.persist_opacity();
                 *needs_rebuild = true;
                 self.needs_rebuild = true;
                 return None;
@@ -901,6 +934,7 @@ impl Application for BevelPopup {
             if event.logical_key == Key::Named(NamedKey::Escape) {
                 if self.opacity_open {
                     self.opacity_open = false;
+                    self.persist_opacity();
                     *needs_rebuild = true;
                     self.needs_rebuild = true;
                     return None;
