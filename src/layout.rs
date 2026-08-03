@@ -123,6 +123,10 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 // (written by cce-bevel, installed by reload_config).
                 "style.surface.relief.profile" => "bevel_profile_spec",
                 "style.surface.relief.edge_profile" => "roll_profile_spec",
+                // cce-bevel's slider positions behind those specs
+                // ("shoulder,base,bias" — only the editor reads these).
+                "style.surface.relief.profile_knobs" => "bevel_profile_knobs",
+                "style.surface.relief.edge_knobs" => "roll_profile_knobs",
                 "style.container.section.depth" => "section_depth",
                 "window_manager.bevel_shader" => "bevel_shader",
                 "window_manager.control_relief" => "control_relief",
