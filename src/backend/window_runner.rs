@@ -2688,6 +2688,9 @@ pub struct EngineState<A: Application> {
     pub exit: bool,
     pub redraw: bool,
     pub frame_callback_pending: bool,
+    /// When the pending frame callback was armed — the starvation fallback's
+    /// clock (see the render gate in `run`).
+    pub frame_callback_armed_at: Option<std::time::Instant>,
     pub first_configure_received: bool,
     pub ctrl_pressed: bool,
     pub shift_pressed: bool,
@@ -3092,6 +3095,7 @@ impl<A: Application> EngineState<A> {
         if let Some(ref surface) = self.surface {
             let _callback = surface.frame(&self.qh, ());
             self.frame_callback_pending = true;
+            self.frame_callback_armed_at = Some(std::time::Instant::now());
         }
 
         // Direct renderer staging (3D scenes, RT panes, app-shaped text).
@@ -4045,6 +4049,7 @@ pub fn run<A: Application>() {
         exit: false,
         redraw: false,
         frame_callback_pending: false,
+        frame_callback_armed_at: None,
         first_configure_received: false,
         ctrl_pressed: false,
         shift_pressed: false,
@@ -4248,6 +4253,22 @@ pub fn run<A: Application>() {
                 window.commit();
             }
             last_title = current_title;
+        }
+
+        // Frame-callback starvation fallback: the compositor only sends
+        // frame-done for surfaces it actually renders, so a callback armed
+        // while the window sat off-viewport (or the scene went static) may
+        // never fire — and the vsync gate below then freezes the app forever
+        // with a perfectly live event loop (input processes, state changes,
+        // nothing repaints). If a redraw has been waiting on a callback well
+        // past any real vsync interval, stop waiting and draw.
+        if engine_state.redraw
+            && engine_state.frame_callback_pending
+            && engine_state
+                .frame_callback_armed_at
+                .is_none_or(|t| t.elapsed().as_millis() > 250)
+        {
+            engine_state.frame_callback_pending = false;
         }
 
         if engine_state.redraw && !engine_state.frame_callback_pending {
