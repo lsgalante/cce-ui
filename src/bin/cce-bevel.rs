@@ -5,7 +5,9 @@
 //! instead of a free-form ramp. Every edit applies live to this process (the
 //! popup's own plate, wells, and buttons ARE the preview) and logs the
 //! sampled spec to stdout; Save persists to `~/.config/cce/config.kdl`
-//! (`style.surface.relief`) so every cce app starts with the material.
+//! (`style.surface.relief`) so every cce app starts with the material —
+//! or, with `--config <path>`, to that file instead (a per-app override
+//! like cce-designer's), which also seeds the knobs/depth/width on open.
 //!
 //! The curve family is the two-exponent rational ease
 //! `h(w) = w^a / (w^a + (1-w)^b)` over a bias pre-warp `w = v^g` — monotone,
@@ -146,6 +148,13 @@ struct BevelPopup {
     plate_opacity: f32,
     /// Status line under the buttons: what the last save/reset did.
     status: String,
+    /// Save/seed target: `--config <path>` retargets the editor at a
+    /// specific config file (a per-app override like cce-designer's), else
+    /// the shared config.kdl. Knob/depth/width seeds prefer this file.
+    config_path: std::path::PathBuf,
+    /// Short label for a retargeted config ("cce-designer"), shown in the
+    /// title and status so it's obvious which material is being edited.
+    target_label: Option<String>,
     ui_context: cce_ui::context::UiContext,
     width: u32,
     height: u32,
@@ -386,8 +395,7 @@ impl BevelPopup {
     /// Untouched sections write the identity sentinel (= analytic); the knob
     /// triples ride along so this editor reopens where you left it.
     fn save_to_config(&mut self) {
-        let path = cce_ui::config::get_config_path();
-        let p = path.to_string_lossy().into_owned();
+        let p = self.config_path.to_string_lossy().into_owned();
         let depth = format!("{:.3}", self.depth_slider.inner().get_scaled_value());
         let width = format!("{:.2}", self.width_slider.inner().get_scaled_value());
         let knob_str = |k: &ProfileKnobs| {
@@ -397,12 +405,17 @@ impl BevelPopup {
         let w = &mut |key: &str, value: &str| {
             cce_ui::config::write_config_value(&p, key, value, "style")
         };
+        // The knob keys carry the (bevel) type explicitly, so a config that
+        // never had them gains the annotation (and its editors' previews).
+        let wb = |key: &str, value: &str| {
+            cce_ui::config::write_config_value_typed(&p, key, value, "style", Some("bevel"))
+        };
         let ok = w("style.surface.relief.depth", &depth)
             & w("style.surface.relief.width", &width)
             & w("style.surface.relief.profile", &self.wall.last_spec)
             & w("style.surface.relief.edge_profile", &self.edge.last_spec)
-            & w("style.surface.relief.profile_knobs", &knob_str(&self.wall))
-            & w("style.surface.relief.edge_knobs", &knob_str(&self.edge));
+            & wb("style.surface.relief.profile_knobs", &knob_str(&self.wall))
+            & wb("style.surface.relief.edge_knobs", &knob_str(&self.edge));
         self.status = if ok {
             println!("saved {p}");
             "Saved — apps pick the material up on start.".to_string()
@@ -443,16 +456,60 @@ impl Application for BevelPopup {
         // strings are read directly (no getter wraps them), so nothing else
         // has triggered it yet this early in startup.
         cce_ui::layout::lazy_init_style_registry();
+
+        // `--config <path>`: retarget Save (and the seeds below) at a
+        // specific config file instead of the shared config.kdl.
+        let shared_path = cce_ui::config::get_config_path();
+        let mut config_path = shared_path.clone();
+        let args: Vec<String> = std::env::args().collect();
+        let mut i = 1;
+        while i < args.len() {
+            if args[i] == "--config" && i + 1 < args.len() {
+                config_path = std::path::PathBuf::from(&args[i + 1]);
+                i += 1;
+            }
+            i += 1;
+        }
+        let target_label = (config_path != shared_path).then(|| {
+            // An app override (~/.config/cce/<app>/config.kdl) reads best as
+            // the app name; anything else as the file name.
+            let parent = config_path.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned());
+            match parent {
+                Some(dir) if dir.starts_with("cce-") => dir,
+                _ => config_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| config_path.display().to_string()),
+            }
+        });
+
+        // Seeds prefer the target file's own relief keys, falling back to
+        // the DE-wide registry for anything it lacks.
+        let target_relief = target_label
+            .is_some()
+            .then(|| std::fs::read_to_string(&config_path).ok())
+            .flatten()
+            .map(|c| cce_ui::config::parse_kdl_to_json(&c))
+            .and_then(|v| v.pointer("/style/surface/relief").cloned());
+        let rel_str = |k: &str| {
+            target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_str().map(String::from))
+        };
+        let rel_f32 = |k: &str| {
+            target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_f64()).map(|f| f as f32)
+        };
         let (wall_seed, edge_seed) = {
             let reg = cce_ui::layout::get_style_registry().read().unwrap();
             (
-                reg.get_string("bevel_profile_knobs").as_deref().and_then(parse_knobs),
-                reg.get_string("roll_profile_knobs").as_deref().and_then(parse_knobs),
+                rel_str("profile_knobs")
+                    .as_deref()
+                    .and_then(parse_knobs)
+                    .or_else(|| reg.get_string("bevel_profile_knobs").as_deref().and_then(parse_knobs)),
+                rel_str("edge_knobs")
+                    .as_deref()
+                    .and_then(parse_knobs)
+                    .or_else(|| reg.get_string("roll_profile_knobs").as_deref().and_then(parse_knobs)),
             )
         };
 
-        let depth = cce_ui::layout::bevel_depth();
-        let width = cce_ui::layout::bevel_width();
+        let depth = rel_f32("depth").unwrap_or_else(cce_ui::layout::bevel_depth);
+        let width = rel_f32("width").unwrap_or_else(cce_ui::layout::bevel_width);
         let (dmin, dmax) = DEPTH_RANGE;
         let (wmin, wmax) = WIDTH_RANGE;
         // The persisted per-app plate opacity, falling back to the DE look.
@@ -496,7 +553,12 @@ impl Application for BevelPopup {
             save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
             reset_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Reset"),
             plate_opacity,
-            status: "Edits apply live; Save writes config.kdl.".to_string(),
+            status: match &target_label {
+                Some(l) => format!("Edits apply live; Save writes {l}'s config."),
+                None => "Edits apply live; Save writes config.kdl.".to_string(),
+            },
+            config_path,
+            target_label,
             ui_context: cce_ui::context::UiContext::new(),
             width: 520,
             height: 480,
@@ -510,7 +572,10 @@ impl Application for BevelPopup {
 
     fn settings(&self) -> WindowSettings {
         WindowSettings {
-            title: "Bevel".to_string(),
+            title: match &self.target_label {
+                Some(l) => format!("Bevel — {l}"),
+                None => "Bevel".to_string(),
+            },
             app_id: "cce-bevel".to_string(),
             width: 520,
             height: 480,

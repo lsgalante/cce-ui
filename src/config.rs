@@ -345,7 +345,16 @@ fn get_node_ref<'a>(doc: &'a kdl::KdlDocument, path: &[&str]) -> Option<&'a kdl:
     }
 }
 
-pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, _default_section: &str) -> bool {
+pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, default_section: &str) -> bool {
+    update_kdl_in_memory_typed(doc, key, value, default_section, None)
+}
+
+/// [`update_kdl_in_memory`] with an explicit type annotation for the written
+/// entry. `forced_ty` overrides both the value-shape inference and the
+/// preserved existing annotation — how a writer ESTABLISHES a custom type
+/// (e.g. cce-bevel writing `(bevel)` knob keys into a config that never had
+/// them; preservation alone can't create the annotation).
+pub fn update_kdl_in_memory_typed(doc: &mut kdl::KdlDocument, key: &str, value: &str, _default_section: &str, forced_ty: Option<&str>) -> bool {
     let parts: Vec<&str> = key.split('.').collect();
     if parts.is_empty() {
         return false;
@@ -397,6 +406,9 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
         if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") || ext_ty == "vec2i" || ext_ty == "radian" || ext_ty == "bevel" || ext_ty == "keybind" {
             kdl_ty = Some(ext_ty.clone());
         }
+    }
+    if let Some(f) = forced_ty {
+        kdl_ty = Some(f.to_string());
     }
 
     if let Some(prop_name) = target_prop {
@@ -609,13 +621,19 @@ pub(crate) fn safe_write(path: &str, content: &str) -> bool {
 }
 
 pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &str) -> bool {
+    write_config_value_typed(path, key, value, default_section, None)
+}
+
+/// [`write_config_value`] with an explicit type annotation — see
+/// [`update_kdl_in_memory_typed`].
+pub fn write_config_value_typed(path: &str, key: &str, value: &str, default_section: &str, forced_ty: Option<&str>) -> bool {
     let content = fs::read_to_string(path).unwrap_or_default();
     let mut doc = match content.parse::<kdl::KdlDocument>() {
         Ok(d) => d,
         Err(_) => kdl::KdlDocument::new(),
     };
-    
-    if update_kdl_in_memory(&mut doc, key, value, default_section) {
+
+    if update_kdl_in_memory_typed(&mut doc, key, value, default_section, forced_ty) {
         let updated_str = doc.to_string();
         return safe_write(path, &updated_str);
     }
