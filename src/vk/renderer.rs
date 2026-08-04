@@ -1363,8 +1363,15 @@ impl VkRenderer {
     /// lazily on the next `draw_frame`.
     pub fn resize(&mut self, width: u32, height: u32) {
         let extent = vk::Extent2D { width: width.max(1), height: height.max(1) };
+        // Record the request unconditionally, not just when it differs from the
+        // live extent: with a rebuild already queued (`swapchain_dirty`), a
+        // request that returns to the live size must overwrite the queued one.
+        // Otherwise `desired_extent` stays wedged at the intermediate size, the
+        // caller's `pending_extent` gate never matches, and no frame presents
+        // again — a resume scale bounce (2→1→2 before any draw) froze the
+        // status-bar clock exactly this way.
+        self.desired_extent = extent;
         if extent.width != self.extent.width || extent.height != self.extent.height {
-            self.desired_extent = extent;
             self.swapchain_dirty = true;
         }
     }

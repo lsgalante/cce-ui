@@ -2738,6 +2738,10 @@ pub struct EngineState<A: Application> {
     /// When the pending frame callback was armed — the starvation fallback's
     /// clock (see the render gate in `run`).
     pub frame_callback_armed_at: Option<std::time::Instant>,
+    /// Consecutive renders skipped by the extent gate (pending swapchain size
+    /// != the size the current logical size and scale call for). Normally 0 or
+    /// 1; a persistent count means no frame is presenting and deserves a warn.
+    pub extent_gate_skips: u32,
     pub first_configure_received: bool,
     pub ctrl_pressed: bool,
     pub shift_pressed: bool,
@@ -3130,9 +3134,20 @@ impl<A: Application> EngineState<A> {
             let e = renderer.pending_extent();
             if e.width != epw || e.height != eph {
                 renderer.resize(epw, eph);
+                self.extent_gate_skips += 1;
+                // ~5s of continuous skipping at the 16ms loop cadence: nothing
+                // is presenting and nothing else will say so — this is the
+                // only witness to a wedged pending extent.
+                if self.extent_gate_skips % 300 == 0 {
+                    log::warn!(
+                        "[window_runner] extent gate: pending {}x{} != expected {}x{} for {} consecutive renders; no frame is presenting",
+                        e.width, e.height, epw, eph, self.extent_gate_skips,
+                    );
+                }
                 self.redraw = true;
                 return;
             }
+            self.extent_gate_skips = 0;
             if s != self.committed_buffer_scale {
                 surface.set_buffer_scale(s);
                 self.committed_buffer_scale = s;
@@ -4097,6 +4112,7 @@ pub fn run<A: Application>() {
         redraw: false,
         frame_callback_pending: false,
         frame_callback_armed_at: None,
+        extent_gate_skips: 0,
         first_configure_received: false,
         ctrl_pressed: false,
         shift_pressed: false,
