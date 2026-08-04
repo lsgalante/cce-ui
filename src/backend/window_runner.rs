@@ -3355,7 +3355,7 @@ impl<A: Application> WindowHandler for EngineState<A> {
         self.first_configure_received = true;
         self.just_configured = true;
     }
-    
+
     fn request_close(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _window: &XdgWindow) {
         self.exit = true;
     }
@@ -4325,8 +4325,20 @@ pub fn run<A: Application>() {
         // with a perfectly live event loop (input processes, state changes,
         // nothing repaints). If a redraw has been waiting on a callback well
         // past any real vsync interval, stop waiting and draw.
+        //
+        // Gated on the renderer's present mode: forcing a present past a
+        // dead callback is only safe under MAILBOX (the present replaces the
+        // queued buffer). Under FIFO the driver's throttle waits on the
+        // previous present's frame event, so the forced present itself
+        // blocks forever inside the driver — the exact freeze this fallback
+        // exists to prevent. There the gate stays closed: pixels may stale
+        // until the next frame-done/configure, but the loop stays alive.
         if engine_state.redraw
             && engine_state.frame_callback_pending
+            && engine_state
+                .renderer
+                .as_ref()
+                .is_some_and(|r| r.forced_present_safe())
             && engine_state
                 .frame_callback_armed_at
                 .is_none_or(|t| t.elapsed().as_millis() > 250)

@@ -231,6 +231,8 @@ pub struct VkRenderer {
     desired_extent: vk::Extent2D,
     corner_radius_px: f32,
     swapchain_dirty: bool,
+    present_mode: vk::PresentModeKHR,
+    present_debug_count: u64,
 
     // Declared last: everything above must be destroyed before the device/
     // instance the core tears down in its own Drop.
@@ -839,6 +841,8 @@ impl VkRenderer {
             desired_extent: vk::Extent2D { width: width.max(1), height: height.max(1) },
             corner_radius_px,
             swapchain_dirty: false,
+            present_mode: vk::PresentModeKHR::FIFO,
+            present_debug_count: 0,
             core,
         };
         log::debug!("[timing] VkRenderer pipelines/stages: {:?}", t_rest.elapsed());
@@ -945,6 +949,25 @@ impl VkRenderer {
             .find(|&mode| caps.supported_composite_alpha.contains(mode))
             .unwrap_or(vk::CompositeAlphaFlagsKHR::OPAQUE);
 
+            // MAILBOX when the driver offers it (Mesa Wayland always does):
+            // FIFO's present throttle waits on the PREVIOUS present's frame
+            // callback, and a surface the compositor never renders (off the
+            // viewport) never gets one — the second-ever present then blocks
+            // forever inside queue_present with the whole event loop behind
+            // it. MAILBOX just replaces the queued buffer, so presenting to
+            // an invisible surface is always safe. The demand-driven loop's
+            // frame-callback gate keeps MAILBOX from free-running.
+            let modes = self
+                .core
+                .surface_loader
+                .get_physical_device_surface_present_modes(self.core.physical_device, self.surface)
+                .unwrap_or_default();
+            self.present_mode = if modes.contains(&vk::PresentModeKHR::MAILBOX) {
+                vk::PresentModeKHR::MAILBOX
+            } else {
+                vk::PresentModeKHR::FIFO
+            };
+
             let old_swapchain = self.swapchain;
             self.swapchain = self
                 .swapchain_loader
@@ -966,7 +989,7 @@ impl VkRenderer {
                         .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                         .pre_transform(caps.current_transform)
                         .composite_alpha(composite_alpha)
-                        .present_mode(vk::PresentModeKHR::FIFO)
+                        .present_mode(self.present_mode)
                         .clipped(true)
                         .old_swapchain(old_swapchain),
                     None,
@@ -1353,6 +1376,15 @@ impl VkRenderer {
         self.rt.as_ref().is_some_and(|rt| rt.accumulating())
     }
 
+    /// Whether presenting past an unacknowledged frame callback is safe.
+    /// True under MAILBOX (the present replaces the queued buffer). Under
+    /// FIFO the driver's present throttle waits on the previous present's
+    /// frame event, so a forced present to a surface the compositor isn't
+    /// rendering blocks forever — the caller must not force one.
+    pub fn forced_present_safe(&self) -> bool {
+        self.present_mode == vk::PresentModeKHR::MAILBOX
+    }
+
     /// The extent the next `draw_frame` will render at: the pending size when a
     /// swapchain rebuild is queued, otherwise the live one.
     pub fn pending_extent(&self) -> vk::Extent2D {
@@ -1443,6 +1475,9 @@ impl VkRenderer {
                 .wait_for_fences(&[in_flight], true, u64::MAX)
                 .expect("Fence wait failed");
 
+            if present_debug() {
+                eprintln!("[vk] frame {} acquire...", self.present_debug_count);
+            }
             let image_index = match self.swapchain_loader.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
@@ -1911,6 +1946,9 @@ impl VkRenderer {
                 .wait_semaphores(&signal_semaphores)
                 .swapchains(&swapchains)
                 .image_indices(&image_indices);
+            if present_debug() {
+                eprintln!("[vk] frame {} present img {}...", self.present_debug_count, image_index);
+            }
             match self.swapchain_loader.queue_present(self.core.queue, &present) {
                 Ok(suboptimal) => {
                     if suboptimal {
@@ -1923,10 +1961,24 @@ impl VkRenderer {
                 Err(e) => log::error!("queue_present failed: {e:?}"),
             }
 
+            if present_debug() {
+                eprintln!("[vk] frame {} presented", self.present_debug_count);
+                self.present_debug_count += 1;
+            }
             self.frame_index = (self.frame_index + 1) % FRAMES_IN_FLIGHT;
         }
         true
     }
+}
+
+/// `CCE_PRESENT_DEBUG=1` traces every acquire/present to stderr — the
+/// diagnostic for present-pipeline stalls (a present that logs `acquire...`
+/// or `present img N...` with no matching completion line is blocked inside
+/// the driver; see the off-viewport freeze notes on the present-mode choice
+/// in `create_swapchain`).
+fn present_debug() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("CCE_PRESENT_DEBUG").is_some())
 }
 
 impl Drop for VkRenderer {
