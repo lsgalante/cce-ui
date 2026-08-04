@@ -11,6 +11,7 @@ pub mod font_selector;
 pub mod button_strip;
 pub mod keybind_recorder;
 pub mod ramp;
+pub mod bevel_preview;
 
 pub use button::{Button, ButtonKind, PageButton};
 pub use checkbox::{Checkbox, Toggle};
@@ -25,6 +26,7 @@ pub use font_selector::FontSelector;
 pub use button_strip::ButtonStrip;
 pub use keybind_recorder::KeybindRecorder;
 pub use ramp::{Ramp, RampKey, ColorRamp, ColorRampKey, format_ramp_spec, parse_ramp_spec};
+pub use bevel_preview::{BevelPreview, bevel_ease, parse_bevel_knobs};
 
 pub const BREADCRUMB_PADDING: f32 = 8.0;
 pub const SEGMENT_GAP: f32 = 4.0;

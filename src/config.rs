@@ -394,7 +394,7 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
     };
 
     if let Some(ref ext_ty) = existing_ty {
-        if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") || ext_ty == "vec2i" || ext_ty == "radian" {
+        if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") || ext_ty == "vec2i" || ext_ty == "radian" || ext_ty == "bevel" || ext_ty == "keybind" {
             kdl_ty = Some(ext_ty.clone());
         }
     }

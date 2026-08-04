@@ -91,21 +91,11 @@ impl ProfileKnobs {
         (self.shoulder.inner().value(), self.base.inner().value(), self.bias.inner().value())
     }
 
-    /// The section's height curve `h(v)`: bias pre-warp, then the rational
-    /// two-exponent ease. Exponents run 0.5 (sharp crease) → 2 (smoothstep,
-    /// the midpoint) → 8 (wide round-over); bias skews the drop early/late.
+    /// The section's height curve `h(v)` — the shared `(bevel)` curve family
+    /// (`cce_ui::widget::bevel_ease`; the BevelPreview swatch draws the same).
     fn eval(&self, v: f32) -> f32 {
         let (s, b, c) = self.values();
-        let a = 2.0 * 4f32.powf(2.0 * s - 1.0);
-        let be = 2.0 * 4f32.powf(2.0 * b - 1.0);
-        let g = 4f32.powf(2.0 * c - 1.0);
-        let w = v.clamp(0.0, 1.0).powf(g);
-        let num = w.powf(a);
-        let den = num + (1.0 - w).powf(be);
-        if den <= f32::EPSILON {
-            return if w > 0.5 { 1.0 } else { 0.0 };
-        }
-        (num / den).clamp(0.0, 1.0)
+        cce_ui::widget::bevel_ease(s, b, c, v)
     }
 
     /// The curve sampled as linear ramp-spec keys — what the renderer LUT
@@ -166,16 +156,9 @@ struct BevelPopup {
     cut_rect: Rect,
 }
 
-/// Parse a saved "shoulder,base,bias" knob triple.
-fn parse_knobs(s: &str) -> Option<(f32, f32, f32)> {
-    let mut it = s.split(',').map(|p| p.trim().parse::<f32>());
-    match (it.next(), it.next(), it.next()) {
-        (Some(Ok(a)), Some(Ok(b)), Some(Ok(c))) => {
-            Some((a.clamp(0.0, 1.0), b.clamp(0.0, 1.0), c.clamp(0.0, 1.0)))
-        }
-        _ => None,
-    }
-}
+/// Parse a saved "shoulder,base,bias" knob triple — the `(bevel)` value
+/// format, shared with the BevelPreview swatch.
+use cce_ui::widget::parse_bevel_knobs as parse_knobs;
 
 /// Draw one profile as a lit cutaway: the material slab (plate color) inside
 /// a dark opening, its surface stroked with segment lighting from the DE's
