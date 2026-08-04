@@ -1505,7 +1505,19 @@ pub fn tessellate_display_list(
     // they group into: the most recent Plate/Bevel batch, provided only Text
     // and Image prims (which draw through separate paths anyway) intervene.
     let mut features: Vec<[f32; 12]> = Vec::new();
-    let mut last_plate: Option<(usize, crate::scene::layout::Rect)> = None;
+    // Open carve-host plates, in emission order (innermost candidates last).
+    // A STACK, not a single slot: a sibling plate emitted between a backplate
+    // and its later carves (a hovered button's opaque fill among transparent
+    // ones) must not sever those carves from the backplate they are carved
+    // into — that severing rendered every button after the hovered one
+    // through the visually-different overlay fallback. Ordinary geometry
+    // still closes every open plate (the draw-order rule below).
+    let mut plate_stack: Vec<(usize, crate::scene::layout::Rect)> = Vec::new();
+    // Which plate last appended a carve feature: a plate's features are
+    // addressed as one contiguous [offset, count] run (PlatePush::host), so a
+    // plate may only receive MORE features while no other plate has appended
+    // any since.
+    let mut last_feature_plate: Option<usize> = None;
 
     // SDF-lit plate path (shader2d's plate branch) vs the legacy banded vertex
     // shading, plus the frame-constant lighting inputs it pushes per plate.
@@ -1627,12 +1639,46 @@ pub fn tessellate_display_list(
                 // A tinted carve also never groups: a CSG feature is geometry only,
                 // so the tint could only land on the whole plate's specular.
                 let full_ring = *edges == (true, true, true, true);
-                if let Some((bi, prect)) = last_plate.filter(|_| mode < 3.5 && full_ring && tint.is_none()) {
-                    let inside = rect.x >= prect.x - 0.5
-                        && rect.y >= prect.y - 0.5
-                        && rect.x + rect.width <= prect.x + prect.width + 0.5
-                        && rect.y + rect.height <= prect.y + prect.height + 0.5;
-                    if inside && features.len() < crate::vk::MAX_PLATE_FEATURES {
+                let host_plate = if mode < 3.5 && full_ring && tint.is_none() && features.len() < crate::vk::MAX_PLATE_FEATURES {
+                    // The carve's shaded region, for the occlusion test below
+                    // (the overlay path's cover-quad inflation).
+                    let infl = *depth * 0.5 + 2.0;
+                    let (sx0, sy0) = (rect.x - infl, rect.y - infl);
+                    let (sx1, sy1) = (rect.x + rect.width + infl, rect.y + rect.height + infl);
+                    plate_stack
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find(|(si, (bi, prect))| {
+                            let inside = rect.x >= prect.x - 0.5
+                                && rect.y >= prect.y - 0.5
+                                && rect.x + rect.width <= prect.x + prect.width + 0.5
+                                && rect.y + rect.height <= prect.y + prect.height + 0.5;
+                            if !inside {
+                                return false;
+                            }
+                            // Pixels drawn since this plate (a LATER plate in the
+                            // stack) must not overlap the carve — its shading would
+                            // land beneath them in this plate's earlier draw.
+                            if plate_stack[si + 1..].iter().any(|(_, orect)| {
+                                sx0 < orect.x + orect.width
+                                    && sx1 > orect.x
+                                    && sy0 < orect.y + orect.height
+                                    && sy1 > orect.y
+                            }) {
+                                return false;
+                            }
+                            // Contiguity: only the last feature-receiving plate (or
+                            // one with no features yet) may take another.
+                            batches[*bi].plate.as_ref().map_or(false, |p| p.host[1] == 0.0)
+                                || last_feature_plate == Some(*bi)
+                        })
+                        .map(|(_, &(bi, _))| bi)
+                } else {
+                    None
+                };
+                if let Some(bi) = host_plate {
+                    {
                         // A wall the carve shares with the plate's edge extends
                         // past the plate, so the carve has no wall there.
                         let ext = *depth + 4.0;
@@ -1658,6 +1704,7 @@ pub fn tessellate_display_list(
                             }
                             p.host[1] += 1.0;
                         }
+                        last_feature_plate = Some(bi);
                         features.push([
                             (x0 + x1) * 0.5 * scale,
                             (y0 + y1) * 0.5 * scale,
@@ -1885,7 +1932,7 @@ pub fn tessellate_display_list(
             // Ordinary geometry painted after a plate ends its carve-grouping
             // window: a recess emitted later must overlay this geometry (the
             // fallback path), not shade beneath it inside the plate's draw.
-            last_plate = None;
+            plate_stack.clear();
             if let Some(last) = batches.last_mut() {
                 if last.plate.is_none()
                     && last.scissor == item.clip
@@ -1899,7 +1946,7 @@ pub fn tessellate_display_list(
         }
         batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end, plate, blur_behind });
         if let Some(prect) = made_plate {
-            last_plate = Some((batches.len() - 1, prect));
+            plate_stack.push((batches.len() - 1, prect));
         }
     }
 
