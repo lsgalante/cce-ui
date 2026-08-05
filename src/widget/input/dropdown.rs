@@ -280,8 +280,24 @@ impl Dropdown {
         content.width.max(self.content_width())
     }
 
-    /// The popover box actually drawn this frame: the full geometry with the
-    /// height revealed — and the width grown out of the trigger — by the eased
+    /// The ONE continuous surface drawn while open: the trigger band unioned
+    /// with the revealed menu area — the status-interface treatment, where the
+    /// module box literally grows into its menu instead of spawning a detached
+    /// popover plate.
+    fn unified_geom_drawn(&self, content: Rect) -> (f32, f32, f32, f32) {
+        let (ax, ay, aw, ah) = self.popover_geom_drawn(content);
+        let label_x = side_offset(&self.label);
+        let (tx, ty) = (content.x + label_x, content.y);
+        let (tw, th) = ((content.width - label_x).max(0.0), content.height);
+        let x0 = tx.min(ax);
+        let y0 = ty.min(ay);
+        let x1 = (tx + tw).max(ax + aw);
+        let y1 = (ty + th).max(ay + ah);
+        (x0, y0, x1 - x0, y1 - y0)
+    }
+
+    /// The menu box revealed this frame: the full geometry with the height
+    /// revealed — and the width grown out of the trigger — by the eased
     /// progress (cubic-out, the status-interface module-menu curve). Rows keep
     /// their final positions and slide into view under the traveling edge; an
     /// upward popover anchors its bottom edge to the trigger instead.
@@ -894,11 +910,12 @@ impl Paint for Dropdown {
 
     fn popover(&self, rect: Rect) -> Option<(f32, f32, f32, f32)> {
         if self.open {
-            // The ANIMATED box, not the full geometry: hosts replay popover text
-            // with bounds derived from this rect (and the dl-text occlusion
-            // clamp reads it), so reporting the drawn box keeps labels clipped
-            // to the traveling edge everywhere without per-app changes.
-            Some(self.popover_geom_drawn(rect))
+            // The ANIMATED unified box (trigger band + revealed menu), not the
+            // full menu geometry: hosts replay popover text with bounds derived
+            // from this rect (and the dl-text occlusion clamp reads it), so
+            // reporting the drawn surface keeps labels — the band's included —
+            // clipped to the traveling edge everywhere without per-app changes.
+            Some(self.unified_geom_drawn(rect))
         } else {
             None
         }
@@ -909,14 +926,18 @@ impl Paint for Dropdown {
             return;
         }
 
-        // Rows sit at their FINAL positions (from the full geometry) and slide
-        // into view as the animated box's traveling edge reveals them — the
-        // status-interface module-menu treatment. Row geometry is clipped to
-        // the animated box by hand (RenderTarget carries no clip stack); text
-        // clips through its bounds.
+        // ONE continuous surface in the status-interface manner: the trigger
+        // band grows into the menu — no detached popover plate, no drop
+        // shadows. The unified box spans the trigger and the revealed menu;
+        // the trigger's display text is redrawn on top of its band. Rows sit
+        // at their FINAL positions (from the full geometry) and slide into
+        // view as the traveling edge reveals them, clipped to the menu area by
+        // hand (RenderTarget carries no clip stack); text clips through its
+        // bounds.
         let (rx, ry, rw, _rh) = self.popover_geom(rect);
         let (ax, ay, aw, ah) = self.popover_geom_drawn(rect);
         if aw <= 0.5 || ah <= 0.5 {
+            // Nothing revealed yet — the plain trigger stands alone.
             return;
         }
         let clip = |x: f32, y: f32, w: f32, h: f32| -> Option<(f32, f32, f32, f32)> {
@@ -927,18 +948,41 @@ impl Paint for Dropdown {
             if x1 > x0 && y1 > y0 { Some((x0, y0, x1 - x0, y1 - y0)) } else { None }
         };
 
-        // 1. Soft layered drop shadows
-        pc.rect([0.02, 0.02, 0.05, 0.15], ax + 1.0, ay + 1.0, aw, ah);
-        pc.rect([0.02, 0.02, 0.05, 0.08], ax + 3.0, ay + 3.0, aw, ah);
-        pc.rect([0.02, 0.02, 0.05, 0.04], ax + 5.0, ay + 5.0, aw, ah);
-
         let theme = colors::active_theme();
+        let (ux, uy, uw, uh) = self.unified_geom_drawn(rect);
 
-        // 2. High-contrast premium outer border
-        pc.rect(theme.surface_border, ax, ay, aw, ah);
+        // The unified box: border + fill, trigger band through menu bottom.
+        pc.rect(theme.surface_border, ux, uy, uw, uh);
+        pc.rect(theme.surface_bg, ux + 1.0, uy + 1.0, uw - 2.0, uh - 2.0);
 
-        // 3. Frosted glass background
-        pc.rect(theme.surface_bg, ax + 1.0, ay + 1.0, aw - 2.0, ah - 2.0); // bg
+        // Trigger content redrawn over its band (the box covers the widget-pass
+        // trigger paint) — display text left, ▼ right, the paint_text palette.
+        {
+            let label_x = side_offset(&self.label);
+            let (tx, ty) = (rect.x + label_x, rect.y);
+            let (tw, th) = ((rect.width - label_x).max(0.0), rect.height);
+            let band_bounds = Some([ux, uy, ux + uw, uy + uh]);
+            let font = crate::layout::control_label_font_detached();
+            let text_y = crate::layout::align_text_y(ty, th, 12.0, 0.0);
+            pc.text_with_font_and_bounds(
+                &self.display_text(),
+                tx + 8.0,
+                text_y,
+                12.0,
+                [0.8, 0.8, 0.85, 1.0],
+                &font,
+                band_bounds,
+            );
+            pc.text_with_font_and_bounds(
+                "▼",
+                tx + tw - 18.0,
+                crate::layout::center_text_y(ty, th, 10.0),
+                10.0,
+                [0x83 as f32 / 255.0, 0x83 as f32 / 255.0, 0x8a as f32 / 255.0, 1.0],
+                &font,
+                band_bounds,
+            );
+        }
 
         if let Some(h_idx) = self.hovered_item {
             let iy = ry + h_idx as f32 * 24.0;
@@ -1425,8 +1469,8 @@ mod tests {
         // popover_rect reports the ANIMATED box — land the expansion first.
         dd.land_anim_for_test();
         let (rx, ry, rw, rh) = WidgetHost::popover_rect(&dd).expect("open dropdown registers its popover");
-        assert_eq!((rx, ry), (10.0, 34.0), "popover opens under the trigger");
-        assert!(rw >= 100.0 && rh == 48.0);
+        assert_eq!((rx, ry), (10.0, 10.0), "the unified surface starts at the trigger band");
+        assert!(rw >= 100.0 && rh == 72.0, "trigger band (24) + menu (2 * 24) as one box");
 
         // An outside press closes it (ungated presses — `gates_presses` is false).
         let closed = dd.mouse_input(MouseButton::Left, ElementState::Pressed, 500.0, 500.0, &mut dummy);
