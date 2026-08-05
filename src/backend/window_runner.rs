@@ -4257,6 +4257,15 @@ pub fn run<A: Application>() {
         if rebuild {
             engine_state.redraw = true;
         }
+        // Tick the app's retained UiContext (widget tick_receivers — e.g. an
+        // animating Dropdown popover) for apps that expose it. Apps that also
+        // tick it themselves are safe to double-tick: receivers' animations are
+        // wall-clock-based, so an extra tick only re-reports "changed".
+        if let Some(ctx) = engine_state.inner.as_mut().unwrap().ui_context_mut() {
+            if ctx.tick(dt) {
+                engine_state.redraw = true;
+            }
+        }
 
         let just_configured = engine_state.just_configured;
         engine_state.just_configured = false;

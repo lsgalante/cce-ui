@@ -112,6 +112,16 @@ pub struct Dropdown {
     /// Raised style: the closed control's background is an SDF-lit `Bevel`
     /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
     raised: bool,
+    /// Expand/contract animation (the status-interface module-menu feel).
+    /// WALL-CLOCK, not dt-stepped: progress runs from `anim_from` at
+    /// `anim_start` toward 1 (or 0 while `closing`) over [`Self::ANIM_S`], read
+    /// at draw time — so an app that never ticks its UiContext can never strand
+    /// the popover mid-size; ticks only drive redraws and settle a landed
+    /// close. `closing` keeps `open` (and the shrinking popover) alive while
+    /// everything interactive gates on `!closing`.
+    anim_from: f32,
+    anim_start: Option<std::time::Instant>,
+    closing: bool,
 }
 
 impl Dropdown {
@@ -131,6 +141,9 @@ impl Dropdown {
             hovered: false,
             corner_frame: None,
             raised: crate::layout::control_relief(),
+            anim_from: 0.0,
+            anim_start: None,
+            closing: false,
         })
     }
 
@@ -201,8 +214,91 @@ impl Dropdown {
         }
     }
 
+    /// Expansion/contraction duration — the status-interface module-menu pace.
+    const ANIM_S: f32 = 0.14;
+
+    /// Current animation progress in [0, 1], wall-clock from the last
+    /// transition. 1 = fully open, 0 = fully contracted.
+    fn anim_progress(&self) -> f32 {
+        let Some(start) = self.anim_start else {
+            return if self.open && !self.closing { 1.0 } else { 0.0 };
+        };
+        let el = start.elapsed().as_secs_f32() / Self::ANIM_S;
+        if self.closing {
+            (self.anim_from - el).clamp(0.0, 1.0)
+        } else {
+            (self.anim_from + el).clamp(0.0, 1.0)
+        }
+    }
+
+    fn begin_open(&mut self) {
+        self.anim_from = self.anim_progress();
+        self.anim_start = Some(std::time::Instant::now());
+        self.open = true;
+        self.closing = false;
+    }
+
+    fn begin_close(&mut self) {
+        if !self.open || self.closing {
+            return;
+        }
+        self.anim_from = self.anim_progress();
+        self.anim_start = Some(std::time::Instant::now());
+        self.closing = true;
+    }
+
+    /// Fold finished animations back into settled state (draw paths are `&self`,
+    /// so this runs from the mutation entry points: `tick` and `on_event`). Also
+    /// heals an externally forced `open = false` (a direct field write skips the
+    /// animation; reset so the next open still animates).
+    fn settle_anim(&mut self) {
+        if self.closing {
+            if self.anim_progress() <= 0.0 {
+                self.closing = false;
+                self.open = false;
+                self.anim_start = None;
+                self.hovered_item = None;
+            }
+        } else if self.open {
+            if self.anim_progress() >= 1.0 {
+                self.anim_start = None;
+            }
+        } else {
+            self.anim_start = None;
+        }
+    }
+
+    /// Land an in-flight open or close instantly (tests can't wait out the
+    /// wall clock).
+    #[cfg(test)]
+    fn land_anim_for_test(&mut self) {
+        self.anim_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        self.settle_anim();
+    }
+
     fn popover_width(&self, content: Rect) -> f32 {
         content.width.max(self.content_width())
+    }
+
+    /// The popover box actually drawn this frame: the full geometry with the
+    /// height revealed — and the width grown out of the trigger — by the eased
+    /// progress (cubic-out, the status-interface module-menu curve). Rows keep
+    /// their final positions and slide into view under the traveling edge; an
+    /// upward popover anchors its bottom edge to the trigger instead.
+    fn popover_geom_drawn(&self, content: Rect) -> (f32, f32, f32, f32) {
+        let (rx, ry, rw, rh) = self.popover_geom(content);
+        let a = self.anim_progress();
+        if a >= 1.0 {
+            return (rx, ry, rw, rh);
+        }
+        let t = 1.0 - (1.0 - a) * (1.0 - a) * (1.0 - a);
+        let base_y = content.y - self.label_top();
+        let open_upward = self.open_upward.unwrap_or(base_y > 400.0);
+        let w0 = content.width.min(rw);
+        let aw = w0 + (rw - w0) * t;
+        let ah = rh * t;
+        let ay = if open_upward { ry + rh - ah } else { ry };
+        (rx, ay, aw, ah)
     }
 
     /// Popover geometry against the laid-out content rect — the legacy `get_popover_geom`,
@@ -263,7 +359,7 @@ impl Dropdown {
     }
 
     fn border_color(&self) -> [f32; 4] {
-        if self.open {
+        if self.open && !self.closing {
             [0.30, 0.50, 0.32, 1.0]
         } else if self.hovered {
             let bc = colors::dropdown_border_color();
@@ -631,9 +727,9 @@ impl Dropdown {
         if event.state != ElementState::Pressed {
             return false;
         }
-        if !self.open {
+        if !self.open || self.closing {
             if let Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) = event.logical_key {
-                self.open = true;
+                self.begin_open();
                 let mut start_idx = self.selected;
                 if start_idx < self.options.len() && self.options[start_idx] == "-" {
                     for i in 0..self.options.len() {
@@ -681,13 +777,13 @@ impl Dropdown {
                             self.selected = idx;
                             self.just_changed = true;
                         }
-                        self.open = false;
+                        self.begin_close();
                     }
                 }
                 true
             }
             Key::Named(NamedKey::Escape) => {
-                self.open = false;
+                self.begin_close();
                 true
             }
             _ => false,
@@ -798,7 +894,11 @@ impl Paint for Dropdown {
 
     fn popover(&self, rect: Rect) -> Option<(f32, f32, f32, f32)> {
         if self.open {
-            Some(self.popover_geom(rect))
+            // The ANIMATED box, not the full geometry: hosts replay popover text
+            // with bounds derived from this rect (and the dl-text occlusion
+            // clamp reads it), so reporting the drawn box keeps labels clipped
+            // to the traveling edge everywhere without per-app changes.
+            Some(self.popover_geom_drawn(rect))
         } else {
             None
         }
@@ -809,32 +909,52 @@ impl Paint for Dropdown {
             return;
         }
 
-        let (rx, ry, rw, rh) = self.popover_geom(rect);
+        // Rows sit at their FINAL positions (from the full geometry) and slide
+        // into view as the animated box's traveling edge reveals them — the
+        // status-interface module-menu treatment. Row geometry is clipped to
+        // the animated box by hand (RenderTarget carries no clip stack); text
+        // clips through its bounds.
+        let (rx, ry, rw, _rh) = self.popover_geom(rect);
+        let (ax, ay, aw, ah) = self.popover_geom_drawn(rect);
+        if aw <= 0.5 || ah <= 0.5 {
+            return;
+        }
+        let clip = |x: f32, y: f32, w: f32, h: f32| -> Option<(f32, f32, f32, f32)> {
+            let x0 = x.max(ax);
+            let y0 = y.max(ay);
+            let x1 = (x + w).min(ax + aw);
+            let y1 = (y + h).min(ay + ah);
+            if x1 > x0 && y1 > y0 { Some((x0, y0, x1 - x0, y1 - y0)) } else { None }
+        };
 
         // 1. Soft layered drop shadows
-        pc.rect([0.02, 0.02, 0.05, 0.15], rx + 1.0, ry + 1.0, rw, rh);
-        pc.rect([0.02, 0.02, 0.05, 0.08], rx + 3.0, ry + 3.0, rw, rh);
-        pc.rect([0.02, 0.02, 0.05, 0.04], rx + 5.0, ry + 5.0, rw, rh);
+        pc.rect([0.02, 0.02, 0.05, 0.15], ax + 1.0, ay + 1.0, aw, ah);
+        pc.rect([0.02, 0.02, 0.05, 0.08], ax + 3.0, ay + 3.0, aw, ah);
+        pc.rect([0.02, 0.02, 0.05, 0.04], ax + 5.0, ay + 5.0, aw, ah);
 
         let theme = colors::active_theme();
 
         // 2. High-contrast premium outer border
-        pc.rect(theme.surface_border, rx, ry, rw, rh);
+        pc.rect(theme.surface_border, ax, ay, aw, ah);
 
         // 3. Frosted glass background
-        pc.rect(theme.surface_bg, rx + 1.0, ry + 1.0, rw - 2.0, rh - 2.0); // bg
+        pc.rect(theme.surface_bg, ax + 1.0, ay + 1.0, aw - 2.0, ah - 2.0); // bg
 
         if let Some(h_idx) = self.hovered_item {
             let iy = ry + h_idx as f32 * 24.0;
             // 4. Vibrantly colored translucent selection highlight
-            pc.rect(theme.primary_accent, rx + 2.0, iy + 2.0, rw - 4.0, 20.0);
+            if let Some((cx, cy, cw, ch)) = clip(rx + 2.0, iy + 2.0, rw - 4.0, 20.0) {
+                pc.rect(theme.primary_accent, cx, cy, cw, ch);
+            }
         }
 
         for (idx, opt) in self.options.iter().enumerate() {
             let iy = crate::layout::align_text_y(ry + idx as f32 * 24.0, 24.0, 12.0, 0.0);
 
             if opt == "-" {
-                pc.rect(theme.surface_border, rx + 8.0, ry + idx as f32 * 24.0 + 11.5, rw - 16.0, 1.0);
+                if let Some((cx, cy, cw, ch)) = clip(rx + 8.0, ry + idx as f32 * 24.0 + 11.5, rw - 16.0, 1.0) {
+                    pc.rect(theme.surface_border, cx, cy, cw, ch);
+                }
                 continue;
             }
 
@@ -853,7 +973,7 @@ impl Paint for Dropdown {
                 1.0,
             ];
 
-            let bounds = Some([rx, ry, rx + rw, ry + rh]);
+            let bounds = Some([ax, ay, ax + aw, ay + ah]);
             let font = crate::layout::control_label_font_detached();
             pc.text_with_font_and_bounds(opt, rx + 8.0, iy, 12.0, color_f32, &font, bounds);
         }
@@ -869,7 +989,7 @@ impl Input for Dropdown {
         }
         let hit_trigger =
             x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
-        if self.open {
+        if self.open && !self.closing {
             let top = self.label_top();
             let content = Rect { x: rect.x, y: rect.y + top, width: rect.width, height: rect.height - top };
             let (rx, ry, rw, rh) = self.popover_geom(content);
@@ -890,7 +1010,17 @@ impl Input for Dropdown {
         false
     }
 
+    /// Wall-clock animation bookkeeping: report "changed" while a transition is
+    /// in flight (drives redraws where the app's UiContext gets ticked) and
+    /// settle a landed close.
+    fn tick(&mut self, _dt: f32, _rect: Rect) -> bool {
+        let animating = self.anim_start.is_some();
+        self.settle_anim();
+        animating
+    }
+
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
+        self.settle_anim();
         match event {
             Event::MouseButton {
                 button: MouseButton::Left,
@@ -905,8 +1035,9 @@ impl Input for Dropdown {
                 let (rx, ry, rw, rh) = self.popover_geom(content);
 
                 let inside_trigger = *px >= bx && *px <= bx + bw && *py >= by && *py <= by + bh;
-                let inside_popover =
-                    self.open && *px >= rx && *px <= rx + rw && *py >= ry && *py <= ry + rh;
+                let inside_popover = self.open
+                    && !self.closing
+                    && *px >= rx && *px <= rx + rw && *py >= ry && *py <= ry + rh;
 
                 if inside_popover {
                     let idx = ((py - ry) / 24.0) as usize;
@@ -919,21 +1050,27 @@ impl Input for Dropdown {
                             self.just_changed = true;
                         }
                     }
-                    self.open = false;
+                    self.begin_close();
                     return true;
                 }
 
                 if inside_trigger {
-                    self.open = !self.open;
-                    if self.open {
+                    if self.open && !self.closing {
+                        self.begin_close();
+                    } else {
+                        self.begin_open();
+                        // Animation frames arrive through the ctx tick loop.
+                        if let Some(ui) = ectx.ui.as_deref_mut() {
+                            ui.register_tick_receiver(ectx.id);
+                        }
                         // Legacy `focus()` claimed only the global slot.
                         ectx.request_focus();
                     }
                     return true;
                 }
 
-                if self.open {
-                    self.open = false;
+                if self.open && !self.closing {
+                    self.begin_close();
                     return true;
                 }
 
@@ -944,7 +1081,7 @@ impl Input for Dropdown {
                 // is the adapter's bookkeeping (MouseEnter/MouseLeave below).
                 let was_hovered_item = self.hovered_item;
                 self.hovered_item = None;
-                if self.open {
+                if self.open && !self.closing {
                     let (rx, ry, rw, rh) = self.popover_geom(ectx.rect);
                     if *px >= rx && *px <= rx + rw && *py >= ry && *py <= ry + rh {
                         let idx = ((py - ry) / 24.0) as usize;
@@ -963,7 +1100,15 @@ impl Input for Dropdown {
                 self.hovered = false;
                 true
             }
-            Event::KeyInput(key_event) => self.handle_key(key_event),
+            Event::KeyInput(key_event) => {
+                let handled = self.handle_key(key_event);
+                if self.open {
+                    if let Some(ui) = ectx.ui.as_deref_mut() {
+                        ui.register_tick_receiver(ectx.id);
+                    }
+                }
+                handled
+            }
             Event::FocusIn => {
                 // Legacy `focus()` claimed the global focus slot on every direct call
                 // (test-interface focuses the ramp's preset dropdown this way).
@@ -972,7 +1117,7 @@ impl Input for Dropdown {
             }
             Event::FocusOut => {
                 // Legacy `unfocus` closed the dropdown.
-                self.open = false;
+                self.begin_close();
                 false
             }
             _ => false,
@@ -1053,9 +1198,11 @@ mod tests {
         assert!(move_changed);
         assert_eq!(dd.hovered_item, Some(1));
 
-        // 4. Click option B selects it and closes dropdown
+        // 4. Click option B selects it and starts the animated close
         let select_changed = dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 70.0, &mut dummy);
         assert!(select_changed);
+        assert!(dd.closing, "selection starts the animated contraction");
+        dd.land_anim_for_test();
         assert!(!dd.open);
         assert_eq!(dd.selected, 1);
         assert!(dd.take_change());
@@ -1275,6 +1422,8 @@ mod tests {
 
         dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0, &mut dummy);
         assert!(dd.open);
+        // popover_rect reports the ANIMATED box — land the expansion first.
+        dd.land_anim_for_test();
         let (rx, ry, rw, rh) = WidgetHost::popover_rect(&dd).expect("open dropdown registers its popover");
         assert_eq!((rx, ry), (10.0, 34.0), "popover opens under the trigger");
         assert!(rw >= 100.0 && rh == 48.0);
@@ -1282,6 +1431,8 @@ mod tests {
         // An outside press closes it (ungated presses — `gates_presses` is false).
         let closed = dd.mouse_input(MouseButton::Left, ElementState::Pressed, 500.0, 500.0, &mut dummy);
         assert!(closed);
+        assert!(dd.closing, "outside press starts the animated contraction");
+        dd.land_anim_for_test();
         assert!(!dd.open);
         assert!(!dd.take_change(), "outside close does not report a change");
     }
