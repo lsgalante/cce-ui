@@ -952,6 +952,43 @@ impl Paint for TreeList {
             pc.text_with(l.text, l.x, l.y, l.font_size, l.color, font.clone(), b);
         }
 
+        // Section chevrons: image icons in the slot own_labels leaves open,
+        // clipped to the list viewport like the row text.
+        {
+            let (_, tree_font_size) = crate::layout::tree_font_parsed();
+            let list_left = self.scroll_box.base.x;
+            let list_top = self.scroll_box.viewport_y;
+            let list_bottom = list_top + self.scroll_box.viewport_h;
+            let viewport = Rect {
+                x: list_left,
+                y: list_top,
+                width: self.scroll_box.base.w,
+                height: self.scroll_box.viewport_h,
+            };
+            pc.clip(viewport, |pc| {
+                for (i, item) in self.items.iter().enumerate() {
+                    let row_y = list_top + i as f32 * self.item_height - self.scroll_box.scroll_y;
+                    if row_y + self.item_height < list_top || row_y > list_bottom {
+                        continue;
+                    }
+                    if let TreeElement::Section { indent, collapsed, .. } = item {
+                        if self.editing_key_idx == Some(i) {
+                            continue;
+                        }
+                        if let Some((id, _, _)) = Self::chevron_icon(*collapsed) {
+                            let s = tree_font_size;
+                            pc.image(id, Rect {
+                                x: list_left + 8.0 + *indent as f32 * 12.0,
+                                y: row_y + 7.0,
+                                width: s,
+                                height: s,
+                            }, 1.0);
+                        }
+                    }
+                }
+            });
+        }
+
         // Field children, in the legacy children() order.
         let dummy = UiContext::new();
         self.search_box.paint_self(&dummy, pc);
@@ -1511,6 +1548,12 @@ impl TreeList {
     /// column ends (None = only the shared list/header bounds apply). Key and
     /// Type cells clip at their separators so text can't bleed into the next
     /// column; sections span the whole row.
+    /// The section-row chevron (cce-icons), cached per size by `upload_icon`;
+    /// `None` when the icon set is missing (rows fall back to text triangles).
+    fn chevron_icon(collapsed: bool) -> Option<(u32, u32, u32)> {
+        crate::upload_icon(if collapsed { "chevron-right" } else { "chevron-down" }, 32)
+    }
+
     pub(crate) fn own_labels(&self) -> Vec<(TextLabel, Option<f32>)> {
         let f32_to_rgb = |c: [f32; 4]| -> [u8; 3] {
             [
@@ -1563,10 +1606,18 @@ impl TreeList {
             match item {
                 TreeElement::Section { name, indent, collapsed, .. } => {
                     if self.editing_key_idx != Some(i) {
-                        let display_text = format!("{} {}", if *collapsed { "▶" } else { "▼" }, name);
+                        let sx = list_left + 8.0 + *indent as f32 * 12.0;
+                        // Chevron icons (cce-icons) replace the text triangles
+                        // when available — paint() draws the image in the slot
+                        // this leaves open. Text triangles are the fallback.
+                        let (text, tx) = if Self::chevron_icon(*collapsed).is_some() {
+                            (name.clone(), sx + tree_font_size + 6.0)
+                        } else {
+                            (format!("{} {}", if *collapsed { "▶" } else { "▼" }, name), sx)
+                        };
                         labels.push((TextLabel {
-                            text: display_text,
-                            x: list_left + 8.0 + *indent as f32 * 12.0,
+                            text,
+                            x: tx,
                             y: row_y + 6.0,
                             font_size: tree_font_size,
                             color: f32_to_rgb(crate::color::tree_section_text_color()),

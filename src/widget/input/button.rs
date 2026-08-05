@@ -93,7 +93,13 @@ impl Button {
     }
 
     pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
-        Button::adapted(ButtonKind::CopyIcon, x, y, w, h)
+        let b = Button::adapted(ButtonKind::CopyIcon, x, y, w, h);
+        // Copy icon face (cce-icons); label fallback if the icon set is
+        // missing on this machine.
+        match crate::upload_icon("copy", 32) {
+            Some((id, iw, ih)) => b.with_icon(id, iw as f32, ih as f32),
+            None => b.with_label("📋"),
+        }
     }
 
     /// Whether an icon face is set (hosts size icon buttons square).
