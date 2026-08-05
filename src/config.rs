@@ -498,9 +498,26 @@ static CONFIG_CACHE: std::sync::RwLock<ConfigCache> = std::sync::RwLock::new(Con
 
 /// The cce config parsed to JSON, cached on the config file's mtime (per process).
 /// Re-reads and re-parses only when `get_config_path()`'s modification time changes.
+/// The newest mtime across the shared config and the calling app's override
+/// file — the cache key for [`cached_config`], and what apps should poll for
+/// live-reload triggers. Compared by EQUALITY, so an app-file deletion (max
+/// drops back to the shared mtime) also invalidates.
+pub fn config_files_modified() -> Option<std::time::SystemTime> {
+    let shared = std::fs::metadata(get_config_path()).ok().and_then(|m| m.modified().ok());
+    let app = get_app_name()
+        .and_then(|n| std::fs::metadata(get_app_config_path(&n)).ok())
+        .and_then(|m| m.modified().ok());
+    match (shared, app) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    }
+}
+
 pub fn cached_config() -> serde_json::Value {
     let path = get_config_path();
-    let current_modified = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+    // Both files participate in the parse (parse_kdl_to_json merges the
+    // per-app override), so both participate in the cache key.
+    let current_modified = config_files_modified();
 
     if let Ok(cache) = CONFIG_CACHE.read() {
         if cache.last_modified.is_some() && cache.last_modified == current_modified {
