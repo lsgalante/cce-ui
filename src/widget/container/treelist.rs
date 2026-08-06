@@ -434,7 +434,15 @@ impl TreeList {
         let list_top = self.scroll_box.viewport_y;
         let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;
 
-        if button == MouseButton::Left && state == ElementState::Pressed {
+        // The tree receives every press UNGATED (see gates_presses) for its
+        // dismiss/commit semantics, which skips the router's popover-coverage
+        // check — honor it here for row interactions, or a click on a menu
+        // floating over the tree (the File dropdown) also selects the row
+        // beneath it. The dismiss paths above deliberately stay: a covered
+        // press IS an outside press for the rename editor and add-key popover.
+        let covered = ui.is_coordinate_covered(host_id, px, py);
+
+        if button == MouseButton::Left && state == ElementState::Pressed && !covered {
             let on_scrollbar = self.scroll_box.hit_test_scrollbar(px, py) || self.scroll_box.scrollbar_dragging;
             if !on_scrollbar && px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
                 if let Some(h) = host { ui.set_focused_ptr(h); }
@@ -512,7 +520,7 @@ impl TreeList {
             }
         }
 
-        if button == MouseButton::Right && state == ElementState::Pressed {
+        if button == MouseButton::Right && state == ElementState::Pressed && !covered {
             if px >= list_left && px <= list_left + list_width && py >= list_top && py <= list_bottom {
                 if let Some(h) = host { ui.set_focused_ptr(h); }
                 let relative_y = py - list_top + self.scroll_box.scroll_y;
