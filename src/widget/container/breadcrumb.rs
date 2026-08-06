@@ -160,13 +160,25 @@ impl Breadcrumb {
             .and_then(|s| s.logical)
     }
 
-    /// The per-segment button boxes as laid out for `rect`: (x, y, w, h). For flat-path
-    /// hosts (cce-files) that mirror each segment's beveled plate app-side — the
-    /// render_widget geometry path drops relief prims, same as the dropdown's inset.
+    /// Vertical margin between the widget's recessed well and each raised
+    /// segment button inside it.
+    const SEG_INSET_Y: f32 = 3.0;
+
+    /// The per-segment button boxes as laid out for `rect`: (x, y, w, h), inset
+    /// vertically so the raised plates sit within the widget's full-width well.
+    /// For flat-path hosts (cce-files) that mirror the plates app-side — the
+    /// render_widget geometry path drops relief prims, same as the dropdown's.
     pub fn segment_boxes(&self, rect: Rect) -> Vec<(f32, f32, f32, f32)> {
         self.visible_segs(rect)
             .iter()
-            .map(|vs| (vs.x, rect.y, vs.w, rect.height))
+            .map(|vs| {
+                (
+                    vs.x,
+                    rect.y + Self::SEG_INSET_Y,
+                    vs.w,
+                    (rect.height - 2.0 * Self::SEG_INSET_Y).max(0.0),
+                )
+            })
             .collect()
     }
 
@@ -195,21 +207,26 @@ impl Paint for Breadcrumb {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // Each segment is its own button with beveled edges: under
-        // control_relief the DE's flush inset plate (groove ring + beveled
-        // lip, face level with the surface — the Button treatment); in the
-        // flat fallback a rounded fill per segment.
-        let radius = crate::layout::breadcrumb_corner_radius().min(rect.height * 0.5);
+        // The full-width recessed well defines the bar (as it always did);
+        // each segment is a RAISED button plate within it — the dropdown
+        // pairing (recessed surround + raised face), per-segment.
+        let radius = crate::layout::breadcrumb_corner_radius();
         let relief = crate::layout::control_relief();
-        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        let segs = self.visible_segs(rect);
+        if relief {
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            ctx.recess(rect, (radius, radius, radius, radius), depth);
+        }
 
-        for vs in &segs {
-            let seg_rect = Rect { x: vs.x, y: rect.y, width: vs.w, height: rect.height };
+        let segs = self.visible_segs(rect);
+        let boxes = self.segment_boxes(rect);
+        for (vs, &(sx, sy, sw, sh)) in segs.iter().zip(boxes.iter()) {
+            let seg_rect = Rect { x: sx, y: sy, width: sw, height: sh };
+            let r = radius.min(sh * 0.5);
             if relief {
-                ctx.inset_plate(seg_rect, (radius, radius, radius, radius), [0.0; 4], depth);
+                let seg_depth = crate::layout::bevel_width().min(sh * 0.2);
+                ctx.boss(seg_rect, (r, r, r, r), seg_depth);
             } else {
-                ctx.rounded_rect(seg_rect, radius, (true, true, true, true), self.bg_color());
+                ctx.rounded_rect(seg_rect, r, (true, true, true, true), self.bg_color());
             }
             if vs.logical.is_some() && vs.logical == self.hovered_seg {
                 ctx.quad(seg_rect, [1.0, 1.0, 1.0, 0.06]);
