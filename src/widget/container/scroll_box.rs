@@ -300,6 +300,49 @@ impl ScrollBox {
         quads
     }
 
+    /// The scrollbar in the DE's relief language: the track a carved groove
+    /// ([`PaintCtx::recess`]), the thumb a raised rounded plate riding in it
+    /// ([`PaintCtx::bevel`] with the configured thumb color) — the
+    /// highlight/shadow bevel treatment. The flat-quad view stays available
+    /// through [`extra_quads`](Self::extra_quads) for legacy paths.
+    pub fn paint_scrollbar_relief(&self, pc: &mut crate::scene::paint::PaintCtx) {
+        if self.content_h <= self.viewport_h {
+            return;
+        }
+        let sb_w = crate::layout::scrollbar_width();
+        let sb_x = self.base.x + self.base.w - sb_w - 4.0;
+        let sb_track_h = self.viewport_h - 8.0;
+        let sb_track_y = self.viewport_y + 4.0;
+
+        let visible_ratio = self.viewport_h / self.content_h;
+        let thumb_h = if sb_track_h <= 20.0 {
+            sb_track_h
+        } else {
+            (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+        };
+        let max_scroll = (self.content_h - self.viewport_h).max(0.0);
+        let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
+        let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
+
+        // Pill radii; the roll width scales to the bar (the DE bevel width
+        // would swallow a 14px-wide thumb whole).
+        let r = sb_w * 0.5;
+        let depth = crate::layout::bevel_width().min(sb_w * 0.35);
+        let radii = (r, r, r, r);
+        use crate::scene::layout::Rect;
+        pc.recess(
+            Rect { x: sb_x, y: sb_track_y, width: sb_w, height: sb_track_h },
+            radii,
+            depth,
+        );
+        pc.bevel(
+            Rect { x: sb_x, y: thumb_y, width: sb_w, height: thumb_h },
+            radii,
+            crate::color::scrollbar_thumb_color(),
+            depth,
+        );
+    }
+
     pub fn keyboard_input(&mut self, event: &KeyEvent, ctx: &mut UiContext) -> bool {
         // Focus never lands on the box itself (post-6av it is not an `WidgetHost`), and its id is
         // never a tree ancestor of the focused widget — like the legacy address walk, this

@@ -789,10 +789,17 @@ impl Paint for TreeList {
         };
 
         let show_on_top = self.scrollbar_activity_timer > 0.0;
+        let relief_scrollbar = crate::layout::control_relief();
 
-        // If NOT on top, draw scrollbar first (behind items)
+        // If NOT on top, draw scrollbar first (behind items). Relief style
+        // emits prims directly — they land before the quads flush below, so
+        // the ordering matches the flat path.
         if !show_on_top {
-            quads.extend(get_scrollbar_quads());
+            if relief_scrollbar {
+                self.scroll_box.paint_scrollbar_relief(pc);
+            } else {
+                quads.extend(get_scrollbar_quads());
+            }
         }
 
         // 2. Draw items (row backgrounds, separator lines, color previews)
@@ -915,8 +922,9 @@ impl Paint for TreeList {
             }
         }
 
-        // If on top, draw scrollbar last
-        if show_on_top {
+        // If on top (scroll activity), the scrollbar draws after the rows —
+        // the relief prims are emitted after the quads flush below.
+        if show_on_top && !relief_scrollbar {
             quads.extend(get_scrollbar_quads());
         }
         for (qx, qy, qw, qh, qr, qc, qcorners) in quads {
@@ -925,6 +933,9 @@ impl Paint for TreeList {
             } else {
                 pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
             }
+        }
+        if show_on_top && relief_scrollbar {
+            self.scroll_box.paint_scrollbar_relief(pc);
         }
 
         // Recessed well like a text box or list: the tree floor sits below the
