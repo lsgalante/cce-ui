@@ -7,6 +7,55 @@
 
 use crate::widget::*;
 
+/// Shared relief-scrollbar painter: the track a carved groove
+/// ([`crate::scene::paint::PaintCtx::recess`]), the thumb a raised rounded
+/// plate riding in it ([`crate::scene::paint::PaintCtx::bevel`], configured
+/// thumb color) — the DE highlight/shadow bevel treatment. `viewport` is the
+/// scrolling area's box; the bar hugs its right edge. No-op while the content
+/// fits.
+pub fn paint_relief_scrollbar(
+    pc: &mut crate::scene::paint::PaintCtx,
+    viewport: crate::scene::layout::Rect,
+    content_h: f32,
+    scroll_y: f32,
+) {
+    if content_h <= viewport.height {
+        return;
+    }
+    let sb_w = crate::layout::scrollbar_width();
+    let sb_x = viewport.x + viewport.width - sb_w - 4.0;
+    let sb_track_h = viewport.height - 8.0;
+    let sb_track_y = viewport.y + 4.0;
+
+    let visible_ratio = viewport.height / content_h;
+    let thumb_h = if sb_track_h <= 20.0 {
+        sb_track_h
+    } else {
+        (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
+    };
+    let max_scroll = (content_h - viewport.height).max(0.0);
+    let scroll_ratio = if max_scroll > 0.0 { scroll_y / max_scroll } else { 0.0 };
+    let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
+
+    // Pill radii; the roll width scales to the bar (the DE bevel width would
+    // swallow a 14px-wide thumb whole).
+    let r = sb_w * 0.5;
+    let depth = crate::layout::bevel_width().min(sb_w * 0.35);
+    let radii = (r, r, r, r);
+    use crate::scene::layout::Rect;
+    pc.recess(
+        Rect { x: sb_x, y: sb_track_y, width: sb_w, height: sb_track_h },
+        radii,
+        depth,
+    );
+    pc.bevel(
+        Rect { x: sb_x, y: thumb_y, width: sb_w, height: thumb_h },
+        radii,
+        crate::color::scrollbar_thumb_color(),
+        depth,
+    );
+}
+
 #[derive(Debug, Clone)]
 pub struct ScrollBox {
     pub base: Widget,
@@ -300,46 +349,20 @@ impl ScrollBox {
         quads
     }
 
-    /// The scrollbar in the DE's relief language: the track a carved groove
-    /// ([`PaintCtx::recess`]), the thumb a raised rounded plate riding in it
-    /// ([`PaintCtx::bevel`] with the configured thumb color) — the
-    /// highlight/shadow bevel treatment. The flat-quad view stays available
-    /// through [`extra_quads`](Self::extra_quads) for legacy paths.
+    /// The scrollbar in the DE's relief language — see
+    /// [`paint_relief_scrollbar`]. The flat-quad view stays available through
+    /// [`extra_quads`](Self::extra_quads) for legacy paths.
     pub fn paint_scrollbar_relief(&self, pc: &mut crate::scene::paint::PaintCtx) {
-        if self.content_h <= self.viewport_h {
-            return;
-        }
-        let sb_w = crate::layout::scrollbar_width();
-        let sb_x = self.base.x + self.base.w - sb_w - 4.0;
-        let sb_track_h = self.viewport_h - 8.0;
-        let sb_track_y = self.viewport_y + 4.0;
-
-        let visible_ratio = self.viewport_h / self.content_h;
-        let thumb_h = if sb_track_h <= 20.0 {
-            sb_track_h
-        } else {
-            (sb_track_h * visible_ratio).clamp(20.0, sb_track_h)
-        };
-        let max_scroll = (self.content_h - self.viewport_h).max(0.0);
-        let scroll_ratio = if max_scroll > 0.0 { self.scroll_y / max_scroll } else { 0.0 };
-        let thumb_y = sb_track_y + scroll_ratio * (sb_track_h - thumb_h);
-
-        // Pill radii; the roll width scales to the bar (the DE bevel width
-        // would swallow a 14px-wide thumb whole).
-        let r = sb_w * 0.5;
-        let depth = crate::layout::bevel_width().min(sb_w * 0.35);
-        let radii = (r, r, r, r);
-        use crate::scene::layout::Rect;
-        pc.recess(
-            Rect { x: sb_x, y: sb_track_y, width: sb_w, height: sb_track_h },
-            radii,
-            depth,
-        );
-        pc.bevel(
-            Rect { x: sb_x, y: thumb_y, width: sb_w, height: thumb_h },
-            radii,
-            crate::color::scrollbar_thumb_color(),
-            depth,
+        paint_relief_scrollbar(
+            pc,
+            crate::scene::layout::Rect {
+                x: self.base.x,
+                y: self.viewport_y,
+                width: self.base.w,
+                height: self.viewport_h,
+            },
+            self.content_h,
+            self.scroll_y,
         );
     }
 

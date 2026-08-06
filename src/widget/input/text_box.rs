@@ -1326,6 +1326,27 @@ impl Paint for TextBox {
             for (qx, qy, qw, qh, qc) in quads {
                 ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
             }
+
+            // Relief scrollbar for overflowing multiline content — the shared
+            // groove + raised-pill painter (the TreeList treatment), persistent
+            // rather than activity-faded: an editor keeps its position
+            // indicator. Content height mirrors clamp_scroll's math (8px pad
+            // top and bottom), so the thumb tracks the scroll range exactly.
+            if self.multiline {
+                let line_height = self.line_height();
+                let max_chars = if self.line_wrap_enabled() {
+                    (((self.rect.width - 16.0) / self.char_width()).floor() as usize).max(1)
+                } else {
+                    999999
+                };
+                let content_h = self.wrap_text(max_chars).0.len() as f32 * line_height;
+                crate::widget::container::scroll_box::paint_relief_scrollbar(
+                    ctx,
+                    Rect { x, y: self.rect.y + top, width: w, height: visual_h },
+                    content_h + 16.0,
+                    self.scroll_y,
+                );
+            }
         }
 
         for tl in self.value_labels() {
