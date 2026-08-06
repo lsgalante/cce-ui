@@ -16,8 +16,15 @@ use crate::widget::{
 /// the two stay in lockstep.
 const BREADCRUMB_FONT_SIZE: f32 = 12.0;
 
-/// A segment as actually laid out for painting/hit-testing: its text, left edge, width, and
-/// logical index in [`Breadcrumb::virtual_segs`] (`None` for the leading "…/" ellipsis marker).
+/// Gap between segment buttons.
+const SEG_GAP: f32 = 6.0;
+
+/// Horizontal text inset inside each segment button.
+const SEG_PAD_X: f32 = 8.0;
+
+/// A segment as actually laid out for painting/hit-testing: its text, its BUTTON BOX's left
+/// edge and width (text sits `SEG_PAD_X` in), and logical index in
+/// [`Breadcrumb::virtual_segs`] (`None` for the leading "…" ellipsis marker).
 struct VisibleSeg {
     text: String,
     x: f32,
@@ -65,11 +72,12 @@ impl Breadcrumb {
         path_str
     }
 
-    /// The displayed segments: a root "/" then each path component with a trailing slash.
+    /// The displayed segments: a root "/" then each path component. No trailing slashes —
+    /// each segment renders as its own button, so the boxes are the separators.
     fn virtual_segs(&self) -> Vec<String> {
         let mut segs = vec!["/".to_string()];
         for s in &self.path {
-            segs.push(format!("{}/", s));
+            segs.push(s.clone());
         }
         segs
     }
@@ -84,68 +92,60 @@ impl Breadcrumb {
         (family, size.unwrap_or(BREADCRUMB_FONT_SIZE))
     }
 
-    /// The segments to actually paint, each with left edge, width, and its *logical* index
-    /// (position in [`virtual_segs`]; `None` marks the leading "…/" ellipsis). This is the
-    /// one source for hit-testing, the hover overlay, and the text run.
+    /// The segments to actually paint, each with its BUTTON BOX left edge/width and its
+    /// *logical* index (position in [`virtual_segs`]; `None` marks the leading "…" ellipsis).
+    /// This is the one source for hit-testing, the hover overlay, the plates, and the text
+    /// run.
     ///
-    /// Segments abut with no inter-segment gap so the path renders as one continuous string.
-    /// Widths come from measuring the *cumulative* prefix rather than each segment alone:
-    /// `measure_text_width` reports an ink box (narrower than the glyph advance by the first/
-    /// last side bearings), and every segment ends in `/`, so a segment's width taken as the
-    /// difference of two consecutive prefix measurements has those bearings cancel out —
-    /// yielding the exact advance for proportional and monospace fonts alike. Measuring each
-    /// segment in isolation instead left segments overlapping (advance underestimated) or,
-    /// with a fixed per-char advance on a proportional font, unevenly gapped.
+    /// Each segment is its own button: box width = the segment's measured ink width plus
+    /// `SEG_PAD_X` each side, boxes separated by `SEG_GAP`. (The old abutting-text layout
+    /// measured cumulative prefixes so glyph side bearings cancelled; per-box padding
+    /// absorbs the bearings instead, so per-segment measurement is enough.)
     ///
-    /// When the full path is wider than the container, leading segments are dropped and
-    /// replaced with a "…/" marker, so the trailing (current) segments stay visible. The
-    /// last segment is always kept.
+    /// When the full run is wider than the container, leading segments are dropped and
+    /// replaced with a "…" marker button, so the trailing (current) segments stay visible.
+    /// The last segment is always kept.
     fn visible_segs(&self, rect: Rect) -> Vec<VisibleSeg> {
         let all = self.virtual_segs();
         let avail = (rect.width - 2.0 * BREADCRUMB_PADDING).max(0.0);
 
         let (font, size) = Self::font_and_size();
-        let measure = |s: &str| crate::widget::display::measure_text_width(s, &font, size);
+        let box_w =
+            |s: &str| crate::widget::display::measure_text_width(s, &font, size) + 2.0 * SEG_PAD_X;
 
-        // Lay a list of (text, logical index) out left-to-right from the widget's left edge.
-        // Each segment's x/width is derived from the measured width of the concatenated prefix
-        // up to and including it, so abutting segments reproduce a single-string layout.
+        // Lay a list of (text, logical index) out left-to-right from the widget's left edge,
+        // one button box per segment.
         let place = |items: Vec<(String, Option<usize>)>| -> Vec<VisibleSeg> {
-            let mut prefix = String::new();
-            let mut prev = 0.0f32;
+            let mut x = rect.x + BREADCRUMB_PADDING;
             items
                 .into_iter()
                 .map(|(text, logical)| {
-                    let x = rect.x + BREADCRUMB_PADDING + prev;
-                    prefix.push_str(&text);
-                    let cum = measure(&prefix);
-                    let w = (cum - prev).max(0.0);
-                    prev = cum;
-                    VisibleSeg { text, x, w, logical }
+                    let w = box_w(&text);
+                    let vs = VisibleSeg { text, x, w, logical };
+                    x += w + SEG_GAP;
+                    vs
                 })
                 .collect()
         };
 
-        // Total width of the whole path measured as one string.
-        let full = measure(&all.concat());
+        let full: f32 = all.iter().map(|s| box_w(s)).sum::<f32>()
+            + SEG_GAP * all.len().saturating_sub(1) as f32;
 
         if full <= avail || all.len() <= 1 {
             return place(all.into_iter().enumerate().map(|(i, s)| (s, Some(i))).collect());
         }
 
-        // Keep the last segment, then add trailing segments while the "…/" marker plus the
-        // kept run still fits (measured as the actual concatenated string); finally prepend
-        // the marker and restore left-to-right order.
-        let ell = "…/".to_string();
+        // Keep the last segment, then add trailing segments while the "…" marker button plus
+        // the kept run still fits; finally prepend the marker and restore left-to-right order.
+        let ell = "…".to_string();
+        let mut used = box_w(&ell);
         let mut kept: Vec<(String, Option<usize>)> = Vec::new();
         for i in (0..all.len()).rev() {
-            let trial: String = std::iter::once(ell.as_str())
-                .chain(std::iter::once(all[i].as_str()))
-                .chain(kept.iter().rev().map(|(t, _): &(String, Option<usize>)| t.as_str()))
-                .collect();
-            if !kept.is_empty() && measure(&trial) > avail {
+            let w = SEG_GAP + box_w(&all[i]);
+            if !kept.is_empty() && used + w > avail {
                 break;
             }
+            used += w;
             kept.push((all[i].clone(), Some(i)));
         }
         kept.push((ell, None));
@@ -160,6 +160,16 @@ impl Breadcrumb {
             .and_then(|s| s.logical)
     }
 
+    /// The per-segment button boxes as laid out for `rect`: (x, y, w, h). For flat-path
+    /// hosts (cce-files) that mirror each segment's beveled plate app-side — the
+    /// render_widget geometry path drops relief prims, same as the dropdown's inset.
+    pub fn segment_boxes(&self, rect: Rect) -> Vec<(f32, f32, f32, f32)> {
+        self.visible_segs(rect)
+            .iter()
+            .map(|vs| (vs.x, rect.y, vs.w, rect.height))
+            .collect()
+    }
+
     fn bg_color(&self) -> [f32; 4] {
         let c = crate::color::breadcrumb_bg_color();
         [c[0], c[1], c[2], self.network_opacity]
@@ -170,16 +180,9 @@ impl Layout for Breadcrumb {}
 
 impl Paint for Breadcrumb {
     fn color(&self) -> [f32; 4] {
-        // Relief style: no fill — the recessed carve alone defines the bar.
-        if crate::layout::control_relief() {
-            [0.0; 4]
-        } else {
-            self.bg_color()
-        }
-    }
-
-    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        Some((crate::layout::breadcrumb_corner_radius(), (true, true, false, false)))
+        // No whole-widget fill in either style: each segment draws its own
+        // button plate in paint().
+        [0.0; 4]
     }
 
     fn widget_font(&self) -> Option<String> {
@@ -192,39 +195,42 @@ impl Paint for Breadcrumb {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        let radius = crate::layout::breadcrumb_corner_radius();
-        if crate::layout::control_relief() {
-            // Recessed well, no fill: the carve alone defines the bar — the
-            // surface below is its floor (the text-box bare idiom).
-            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            ctx.recess(rect, (radius, radius, radius, radius), depth);
-        } else if radius <= 0.1 {
-            // Background, top corners rounded — replicating the legacy render
-            // path's corner resolution (a radius at or below 0.1 rendered sharp).
-            ctx.quad(rect, self.bg_color());
-        } else {
-            ctx.rounded_rect(rect, radius, (true, true, false, false), self.bg_color());
-        }
-
+        // Each segment is its own button with beveled edges: under
+        // control_relief the DE's flush inset plate (groove ring + beveled
+        // lip, face level with the surface — the Button treatment); in the
+        // flat fallback a rounded fill per segment.
+        let radius = crate::layout::breadcrumb_corner_radius().min(rect.height * 0.5);
+        let relief = crate::layout::control_relief();
+        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
         let segs = self.visible_segs(rect);
-        if let Some(vs) =
-            self.hovered_seg.and_then(|i| segs.iter().find(|s| s.logical == Some(i)))
-        {
-            ctx.quad(
-                Rect { x: vs.x, y: rect.y, width: vs.w, height: rect.height },
-                [1.0, 1.0, 1.0, 0.06],
-            );
+
+        for vs in &segs {
+            let seg_rect = Rect { x: vs.x, y: rect.y, width: vs.w, height: rect.height };
+            if relief {
+                ctx.inset_plate(seg_rect, (radius, radius, radius, radius), [0.0; 4], depth);
+            } else {
+                ctx.rounded_rect(seg_rect, radius, (true, true, true, true), self.bg_color());
+            }
+            if vs.logical.is_some() && vs.logical == self.hovered_seg {
+                ctx.quad(seg_rect, [1.0, 1.0, 1.0, 0.06]);
+            }
         }
 
         // The current directory (last logical segment) is drawn brightly; everything else,
-        // including the "…/" ellipsis marker, is dimmed. Paint at the configured font size so
+        // including the "…" ellipsis marker, is dimmed. Paint at the configured font size so
         // the glyph run matches the widths `visible_segs` measured (and thus its x positions).
         let (_, size) = Self::font_and_size();
         let last_logical = self.virtual_segs().len().saturating_sub(1);
         for vs in segs {
             let color =
                 if vs.logical == Some(last_logical) { [0xcc, 0xcc, 0xd4] } else { [0x88, 0x88, 0x99] };
-            ctx.text(vs.text, vs.x, rect.y + 6.0, size, color);
+            ctx.text(
+                vs.text,
+                vs.x + SEG_PAD_X,
+                crate::layout::center_text_y(rect.y, rect.height, size),
+                size,
+                color,
+            );
         }
     }
 }
@@ -387,14 +393,14 @@ mod tests {
 
         let segs = breadcrumb.visible_segs(Rect { x: 0.0, y: 0.0, width: 160.0, height: 24.0 });
 
-        // First visible segment is the "…/" ellipsis marker (no logical index → not a link).
-        assert_eq!(segs.first().map(|s| s.text.as_str()), Some("…/"));
+        // First visible segment is the "…" ellipsis marker (no logical index → not a link).
+        assert_eq!(segs.first().map(|s| s.text.as_str()), Some("…"));
         assert_eq!(segs.first().and_then(|s| s.logical), None);
 
         // The current directory (last logical segment) is always visible.
         let last_logical = breadcrumb.path.len(); // "/" is index 0, so path.len() == last idx
         assert_eq!(segs.last().and_then(|s| s.logical), Some(last_logical));
-        assert_eq!(segs.last().map(|s| s.text.as_str()), Some("cce-ui/"));
+        assert_eq!(segs.last().map(|s| s.text.as_str()), Some("cce-ui"));
 
         // Everything painted stays within the container's right edge.
         for s in &segs {
