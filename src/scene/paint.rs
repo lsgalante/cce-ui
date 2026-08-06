@@ -335,6 +335,20 @@ impl PaintCtx {
     }
 
     /// Run `f` with an additional translation applied to all emitted coordinates.
+    /// Imperative translate pair for spans too large to wrap in
+    /// [`translate`](Self::translate)'s closure (an app bracketing its whole
+    /// frame in the overflow-margin shift). Must balance before `finish`.
+    pub fn push_translate(&mut self, dx: f32, dy: f32) {
+        self.offset_stack.push(self.offset);
+        self.offset.0 += dx;
+        self.offset.1 += dy;
+    }
+
+    /// See [`push_translate`](Self::push_translate).
+    pub fn pop_translate(&mut self) {
+        self.offset = self.offset_stack.pop().expect("translate stack underflow");
+    }
+
     pub fn translate<R>(&mut self, dx: f32, dy: f32, f: impl FnOnce(&mut Self) -> R) -> R {
         self.offset_stack.push(self.offset);
         self.offset = (self.offset.0 + dx, self.offset.1 + dy);
