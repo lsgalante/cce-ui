@@ -122,6 +122,14 @@ pub struct Dropdown {
     anim_from: f32,
     anim_start: Option<std::time::Instant>,
     closing: bool,
+    /// Per-frame SNAPSHOT of the wall-clock progress, refreshed in `tick`
+    /// (before each render) and on every routed event. All geometry readers —
+    /// popover_rect at registration, draw_popover, the engine's occlusion
+    /// clamp — use this one value, so the animated rect is stable within a
+    /// frame: the clamp's exact-match overlay-text exemption compares text
+    /// bounds against popover_rect evaluated later in the same pass, and a
+    /// live clock read there would never match.
+    anim_snap: f32,
 }
 
 impl Dropdown {
@@ -144,6 +152,7 @@ impl Dropdown {
             anim_from: 0.0,
             anim_start: None,
             closing: false,
+            anim_snap: 0.0,
         })
     }
 
@@ -217,9 +226,10 @@ impl Dropdown {
     /// Expansion/contraction duration — the status-interface module-menu pace.
     const ANIM_S: f32 = 0.14;
 
-    /// Current animation progress in [0, 1], wall-clock from the last
-    /// transition. 1 = fully open, 0 = fully contracted.
-    fn anim_progress(&self) -> f32 {
+    /// LIVE animation progress in [0, 1], wall-clock from the last transition.
+    /// 1 = fully open, 0 = fully contracted. Geometry never reads this
+    /// directly — it reads the per-frame `anim_snap` (see the field docs).
+    fn anim_progress_now(&self) -> f32 {
         let Some(start) = self.anim_start else {
             return if self.open && !self.closing { 1.0 } else { 0.0 };
         };
@@ -232,40 +242,44 @@ impl Dropdown {
     }
 
     fn begin_open(&mut self) {
-        self.anim_from = self.anim_progress();
+        self.anim_from = self.anim_progress_now();
         self.anim_start = Some(std::time::Instant::now());
         self.open = true;
         self.closing = false;
+        self.anim_snap = self.anim_from;
     }
 
     fn begin_close(&mut self) {
         if !self.open || self.closing {
             return;
         }
-        self.anim_from = self.anim_progress();
+        self.anim_from = self.anim_progress_now();
         self.anim_start = Some(std::time::Instant::now());
         self.closing = true;
+        self.anim_snap = self.anim_from;
     }
 
-    /// Fold finished animations back into settled state (draw paths are `&self`,
-    /// so this runs from the mutation entry points: `tick` and `on_event`). Also
-    /// heals an externally forced `open = false` (a direct field write skips the
+    /// Fold finished animations back into settled state and refresh the
+    /// per-frame progress snapshot (draw paths are `&self`, so this runs from
+    /// the mutation entry points: `tick` and `on_event`). Also heals an
+    /// externally forced `open = false` (a direct field write skips the
     /// animation; reset so the next open still animates).
     fn settle_anim(&mut self) {
         if self.closing {
-            if self.anim_progress() <= 0.0 {
+            if self.anim_progress_now() <= 0.0 {
                 self.closing = false;
                 self.open = false;
                 self.anim_start = None;
                 self.hovered_item = None;
             }
         } else if self.open {
-            if self.anim_progress() >= 1.0 {
+            if self.anim_progress_now() >= 1.0 {
                 self.anim_start = None;
             }
         } else {
             self.anim_start = None;
         }
+        self.anim_snap = self.anim_progress_now();
     }
 
     /// Land an in-flight open or close instantly (tests can't wait out the
@@ -303,7 +317,7 @@ impl Dropdown {
     /// upward popover anchors its bottom edge to the trigger instead.
     fn popover_geom_drawn(&self, content: Rect) -> (f32, f32, f32, f32) {
         let (rx, ry, rw, rh) = self.popover_geom(content);
-        let a = self.anim_progress();
+        let a = self.anim_snap;
         if a >= 1.0 {
             return (rx, ry, rw, rh);
         }
@@ -951,9 +965,30 @@ impl Paint for Dropdown {
         let theme = colors::active_theme();
         let (ux, uy, uw, uh) = self.unified_geom_drawn(rect);
 
-        // The unified box: border + fill, trigger band through menu bottom.
-        pc.rect(theme.surface_border, ux, uy, uw, uh);
-        pc.rect(theme.surface_bg, ux + 1.0, uy + 1.0, uw - 2.0, uh - 2.0);
+        // The ACTUAL button surface, expanded: the raised trigger's flush
+        // inset plate grown over the unified box (real relief prims on a
+        // PaintCtx-backed target; collector hosts degrade to a rounded fill).
+        // The trigger's configured fill is usually transparent — the window
+        // plate IS its face — so the expansion substitutes the opaque plate
+        // color: the menu must cover the content beneath it.
+        let radius = crate::layout::dropdown_corner_radius();
+        let raw_bg = colors::dropdown_background_color();
+        let face = if raw_bg[3] > 0.001 {
+            let mut c = raw_bg;
+            c[3] = 1.0;
+            c
+        } else {
+            let mut c = crate::color::page_low_color();
+            c[3] = 1.0;
+            c
+        };
+        if self.raised {
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            pc.inset_plate(face, ux, uy, uw, uh, radius, depth);
+        } else {
+            pc.rect_with_radius(self.border_color(), ux, uy, uw, uh, radius);
+            pc.rect_with_radius(face, ux + 1.0, uy + 1.0, uw - 2.0, uh - 2.0, (radius - 1.0).max(0.0));
+        }
 
         // Trigger content redrawn over its band (the box covers the widget-pass
         // trigger paint) — display text left, ▼ right, the paint_text palette.
@@ -1017,7 +1052,10 @@ impl Paint for Dropdown {
                 1.0,
             ];
 
-            let bounds = Some([ax, ay, ax + aw, ay + ah]);
+            // Bounds = the unified popover rect EXACTLY (not the menu sub-box):
+            // the dl-text occlusion clamp exempts only exact-match overlay
+            // labels, and the unified box's traveling edge clips identically.
+            let bounds = Some([ux, uy, ux + uw, uy + uh]);
             let font = crate::layout::control_label_font_detached();
             pc.text_with_font_and_bounds(opt, rx + 8.0, iy, 12.0, color_f32, &font, bounds);
         }

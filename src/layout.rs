@@ -3464,6 +3464,13 @@ pub trait RenderTarget {
     }
     fn push_clip_rect(&mut self, _x: f32, _y: f32, _w: f32, _h: f32) {}
     fn pop_clip_rect(&mut self) {}
+    /// A flush inset control plate ([`PaintCtx::inset_plate`]) — the raised
+    /// control surface (groove ring down, beveled lip back up). Lets a popover
+    /// draw the ACTUAL widget surface expanded (the Dropdown's grown trigger).
+    /// Hosts without relief prims degrade to a flat rounded fill.
+    fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, _depth: f32) {
+        self.rect_with_radius(color, x, y, w, h, radius);
+    }
     /// Whether this host renders sections as sunken wells (the designer idiom).
     /// `SectionContext` then lays the title out left-aligned over its tab box
     /// instead of centered on the top border.

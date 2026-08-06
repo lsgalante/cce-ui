@@ -662,6 +662,58 @@ impl PaintCtx {
     }
 }
 
+/// `PaintCtx` as a popover render target: display-list hosts pass their frame
+/// ctx straight into `render_popover`, so popovers draw REAL prims — relief
+/// plates, rounded rects, bounded text — instead of the flattened
+/// `PopoverCollector` view (which stays for legacy tuple hosts).
+impl crate::layout::RenderTarget for PaintCtx {
+    fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
+        self.quad(Rect { x, y, width: w, height: h }, color);
+    }
+    fn rect_with_radius(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32) {
+        self.rounded_rect(Rect { x, y, width: w, height: h }, radius, (true, true, true, true), color);
+    }
+    fn rect_with_radius_corners(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, corners: (bool, bool, bool, bool)) {
+        self.rounded_rect(Rect { x, y, width: w, height: h }, radius, corners, color);
+    }
+    fn text(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4]) {
+        let c = [
+            (color[0] * 255.0).clamp(0.0, 255.0) as u8,
+            (color[1] * 255.0).clamp(0.0, 255.0) as u8,
+            (color[2] * 255.0).clamp(0.0, 255.0) as u8,
+        ];
+        PaintCtx::text(self, content, x, y, size, c);
+    }
+    fn text_with_font(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], font: &str) {
+        crate::layout::RenderTarget::text_with_font_and_bounds(self, content, x, y, size, color, font, None);
+    }
+    fn text_with_bounds(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], bounds: Option<[f32; 4]>) {
+        let c = [
+            (color[0] * 255.0).clamp(0.0, 255.0) as u8,
+            (color[1] * 255.0).clamp(0.0, 255.0) as u8,
+            (color[2] * 255.0).clamp(0.0, 255.0) as u8,
+        ];
+        self.text_with(content, x, y, size, c, None, bounds);
+    }
+    fn text_with_font_and_bounds(&mut self, content: &str, x: f32, y: f32, size: f32, color: [f32; 4], font: &str, bounds: Option<[f32; 4]>) {
+        let c = [
+            (color[0] * 255.0).clamp(0.0, 255.0) as u8,
+            (color[1] * 255.0).clamp(0.0, 255.0) as u8,
+            (color[2] * 255.0).clamp(0.0, 255.0) as u8,
+        ];
+        self.text_with(content, x, y, size, c, Some(font.to_string()), bounds);
+    }
+    fn push_clip_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        self.push_clip(Rect { x, y, width: w, height: h });
+    }
+    fn pop_clip_rect(&mut self) {
+        self.pop_clip();
+    }
+    fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32) {
+        PaintCtx::inset_plate(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), color, depth);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
