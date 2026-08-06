@@ -2488,21 +2488,23 @@ pub trait Application: Sized + 'static {
         None
     }
 
-    /// Transparent overflow rim, in logical px, on every side of the window.
-    /// Non-zero opts into buffer-larger-than-geometry mode: the runner sizes
-    /// the surface `margin` wider on each side than the configured window
-    /// size, publishes the inner rect as the xdg window geometry (what the
-    /// compositor tiles, borders, and snaps) and as the input region — frame
-    /// plus any open popover rects, so an overhanging menu stays clickable
-    /// while empty rim falls through to whatever is behind.
+    /// Transparent overflow rim, in logical px, on the RIGHT and BOTTOM of
+    /// the window. Non-zero opts into buffer-larger-than-geometry mode: the
+    /// runner sizes the surface `margin` wider/taller than the configured
+    /// window size, publishes the top-left rect as the xdg window geometry
+    /// (what the compositor tiles, borders, and snaps) and an input region of
+    /// the frame plus any open popover rects — an overhanging menu stays
+    /// clickable while empty rim falls through to whatever is behind.
     ///
-    /// The app STAYS IN WINDOW-FRAME COORDINATES: input events are translated
-    /// by the rim before dispatch, and the app's only obligation is to draw
-    /// its display list through a `(+margin, +margin)` translate
-    /// (`PaintCtx::push_translate`) and lay out against the frame size
-    /// (`display_list`'s `size` minus twice the margin). Content emitted at
-    /// negative frame coords or past the frame edge then renders in the rim
-    /// instead of clipping at the buffer edge.
+    /// Right/bottom ONLY, deliberately: the surface grows away from its
+    /// origin, so the frame never moves relative to the surface and pointer
+    /// coordinates stay valid across the resize (a leading rim shifts the
+    /// surface under an unmoved cursor, and the compositor's stale pointer
+    /// state then drops the very next click). Frame coords == surface coords:
+    /// no input translation, no paint shift — the app's only obligation is to
+    /// lay out against the frame (`display_list`'s `size` minus the margin);
+    /// content emitted past the frame edge renders in the rim instead of
+    /// clipping at the buffer edge.
     ///
     /// The value may change at runtime (return the popover overhang while a
     /// menu is open, 0 otherwise): the engine re-derives the surface from the
@@ -2878,16 +2880,16 @@ impl<A: Application> EngineState<A> {
             }
             return;
         }
-        let gw = ((self.logical_width - 2.0 * m) as i32).max(1);
-        let gh = ((self.logical_height - 2.0 * m) as i32).max(1);
-        let mi = m as i32;
-        window.xdg_surface().set_window_geometry(mi, mi, gw, gh);
+        // Right/bottom rim: the frame keeps the surface origin — no offset,
+        // frame coords == surface coords.
+        let gw = ((self.logical_width - m) as i32).max(1);
+        let gh = ((self.logical_height - m) as i32).max(1);
+        window.xdg_surface().set_window_geometry(0, 0, gw, gh);
         if let Some(ref surface) = self.surface {
             let compositor = self.compositor_state.wl_compositor();
             let wl_region = compositor.create_region(&self.qh, ());
-            wl_region.add(mi, mi, gw, gh);
-            // Open popovers, app frame coords -> surface coords (+m), clamped
-            // to the surface.
+            wl_region.add(0, 0, gw, gh);
+            // Open popovers, clamped to the surface.
             if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
                 for (_id, ptr) in ctx.tree.iter_registered() {
                     unsafe {
@@ -2896,10 +2898,10 @@ impl<A: Application> EngineState<A> {
                             continue;
                         }
                         let Some((px, py, pw, ph)) = w.popover_rect() else { continue };
-                        let x0 = (px + m).max(0.0) as i32;
-                        let y0 = (py + m).max(0.0) as i32;
-                        let x1 = ((px + pw + m).min(self.logical_width)) as i32;
-                        let y1 = ((py + ph + m).min(self.logical_height)) as i32;
+                        let x0 = px.max(0.0) as i32;
+                        let y0 = py.max(0.0) as i32;
+                        let x1 = ((px + pw).min(self.logical_width)) as i32;
+                        let y1 = ((py + ph).min(self.logical_height)) as i32;
                         if x1 > x0 && y1 > y0 {
                             wl_region.add(x0, y0, x1 - x0, y1 - y0);
                         }
@@ -3038,18 +3040,13 @@ impl<A: Application> EngineState<A> {
         // All text is display-list text now (the legacy text_items/text_areas path is gone):
         // map each dl Text prim with the default mapping (scale + surface clamp) plus the
         // popover-occlusion clamp against the app's registered popovers.
-        // Overlay rects compare against display-list text bounds, which an
-        // overflow-margin app emits through its +margin translate — offset the
-        // frame-coord popover rects the same way so the exact-match overlay
-        // exemption still holds.
-        let om = self.applied_margin;
         let mut dl_overlay_rects: Vec<(f32, f32, f32, f32)> = Vec::new();
         if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
             for &pop_id in &ctx.active_popovers {
                 if let Some(ptr) = ctx.tree.get_ptr(pop_id) {
                     unsafe {
                         if let Some((x, y, w, h)) = (*ptr).popover_rect() {
-                            dl_overlay_rects.push((x + om, y + om, w, h));
+                            dl_overlay_rects.push((x, y, w, h));
                         }
                     }
                 }
@@ -3061,8 +3058,8 @@ impl<A: Application> EngineState<A> {
         // to the rect.
         if crate::widget::context_menu::is_visible() {
             dl_overlay_rects.push((
-                crate::widget::context_menu::x() + om,
-                crate::widget::context_menu::y() + om,
+                crate::widget::context_menu::x(),
+                crate::widget::context_menu::y(),
                 crate::widget::context_menu::w(),
                 crate::widget::context_menu::h(),
             ));
@@ -3392,9 +3389,8 @@ impl<A: Application> WindowHandler for EngineState<A> {
 
         let (w, h) = configure.new_size;
         // Configure sizes are window-geometry sizes; with an overflow margin
-        // the surface is a rim larger on every side.
+        // the surface is a rim larger on the right and bottom.
         let m = self.inner.as_ref().unwrap().overflow_margin() as f32;
-        let rim = 2.0 * m;
         if let (Some(w), Some(h)) = (w, h) {
             let width = w.get();
             let height = h.get();
@@ -3403,12 +3399,12 @@ impl<A: Application> WindowHandler for EngineState<A> {
             let f = crate::scale::forced_scale().unwrap_or(1.0);
             self.frame_logical = (width as f32 / f, height as f32 / f);
             self.applied_margin = m;
-            self.resize(width as f32 / f + rim, height as f32 / f + rim);
+            self.resize(width as f32 / f + m, height as f32 / f + m);
         } else {
             let settings = self.inner.as_ref().unwrap().settings();
             self.frame_logical = (settings.width as f32, settings.height as f32);
             self.applied_margin = m;
-            self.resize(settings.width as f32 + rim, settings.height as f32 + rim);
+            self.resize(settings.width as f32 + m, settings.height as f32 + m);
         }
         self.redraw = true;
         self.frame_callback_pending = false;
@@ -3528,11 +3524,10 @@ impl<A: Application> PointerHandler for EngineState<A> {
         let forced = crate::scale::forced_scale().unwrap_or(1.0);
         for event in events {
             let (x, y) = event.position;
-            // Overflow-margin mode: pointer coords arrive surface-local; the
-            // app lives in window-frame coords (it draws through a +margin
-            // translate), so shift by the rim the surface was sized with.
-            let lx = x as f32 / forced - self.applied_margin;
-            let ly = y as f32 / forced - self.applied_margin;
+            // Overflow-margin mode needs no translation: the rim is
+            // right/bottom-only, so frame coords == surface coords.
+            let lx = x as f32 / forced;
+            let ly = y as f32 / forced;
 
             self.cursor_pos = (lx, ly);
             match &event.kind {
@@ -4348,10 +4343,9 @@ pub fn run<A: Application>() {
         if !just_configured {
             if let Some((w, h)) = engine_state.inner.as_ref().unwrap().desired_size() {
                 // desired_size is a window-frame size; the surface adds the
-                // overflow rim (0 for margin-less apps).
+                // right/bottom overflow rim (0 for margin-less apps).
                 let m = engine_state.inner.as_ref().unwrap().overflow_margin() as f32;
-                let rim = 2.0 * m;
-                let (sw, sh) = (w as f32 + rim, h as f32 + rim);
+                let (sw, sh) = (w as f32 + m, h as f32 + m);
                 if (engine_state.logical_width - sw).abs() > 0.001 || (engine_state.logical_height - sh).abs() > 0.001 {
                     engine_state.frame_logical = (w as f32, h as f32);
                     engine_state.applied_margin = m;
@@ -4371,7 +4365,7 @@ pub fn run<A: Application>() {
             if (m_now - engine_state.applied_margin).abs() > 0.001 && engine_state.frame_logical.0 > 0.0 {
                 engine_state.applied_margin = m_now;
                 let (fw, fh) = engine_state.frame_logical;
-                engine_state.resize(fw + 2.0 * m_now, fh + 2.0 * m_now);
+                engine_state.resize(fw + m_now, fh + m_now);
                 engine_state.redraw = true;
             }
             if engine_state.applied_margin > 0.0 || engine_state.overflow_was_active {
