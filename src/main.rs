@@ -433,21 +433,10 @@ impl Application for DemoApp {
         // where it hit-tests. Labels carry bounds equal to the popover rect: that clips
         // them to the plate AND exempts them from the occlusion clamp (text whose bounds
         // equal an overlay rect is treated as the overlay's own).
-        if let Some((px, py, pw, ph)) = self.theme_dropdown.popover_rect() {
-            let mut coll = cce_ui::layout::PopoverCollector::new();
-            self.theme_dropdown.render_popover(&mut coll);
-            for &(c, x, y, qw, qh) in &coll.rects {
-                pc.quad(Rect { x, y, width: qw, height: qh }, c);
-            }
-            let bounds = Some([px, py, px + pw, py + ph]);
-            for (content, size, tx, ty, color, font, _b) in coll.texts {
-                let color_u8 = [
-                    (color[0] * 255.0).clamp(0.0, 255.0) as u8,
-                    (color[1] * 255.0).clamp(0.0, 255.0) as u8,
-                    (color[2] * 255.0).clamp(0.0, 255.0) as u8,
-                ];
-                pc.text_with(content, tx, ty, size, color_u8, font, bounds);
-            }
+        if self.theme_dropdown.popover_rect().is_some() {
+            // PaintCtx is a RenderTarget: the popover draws its real prims (the
+            // dropdown's expanded inset-plate surface) with its own bounds.
+            self.theme_dropdown.render_popover(&mut pc);
         }
 
         Some(pc.finish())
@@ -460,6 +449,11 @@ impl Application for DemoApp {
 
     fn ui_context(&self) -> Option<&cce_ui::context::UiContext> {
         Some(&self.ui_context)
+    }
+
+    // Engine-driven animation frames for the dropdown expand/contract.
+    fn ui_context_mut(&mut self) -> Option<&mut cce_ui::context::UiContext> {
+        Some(&mut self.ui_context)
     }
 
     /// Window dragging for a dissolved root: the surface is the movable plate; drag
