@@ -3632,6 +3632,15 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         }
                     }
 
+                    // Outside-press close for open popovers, BEFORE the app's
+                    // dispatch: apps commonly region-gate their routing, so an
+                    // open menu's owner may never hear about a press elsewhere.
+                    if btn == MouseButton::Left {
+                        if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
+                            ctx.close_popovers_missed_by_press(lx, ly);
+                        }
+                    }
+
                     let mut rebuild = false;
                     if let Some(msg) = self.inner.as_mut().unwrap().handle_mouse_input(btn, ElementState::Pressed, LogicalPosition::new(lx, ly), &mut rebuild) {
                         let mut update_rebuild = false;

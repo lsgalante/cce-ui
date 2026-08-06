@@ -3633,6 +3633,21 @@ pub fn render_popovers(pc: &mut dyn RenderTarget, ctx: &UiContext) {
             }
         }
     }
+    // Registry sweep for open popovers the app never registered (popover
+    // registration is optional and spotty) — the same fallback the coverage
+    // check and the engine's outside-press close use.
+    for (id, ptr) in ctx.tree.iter_registered() {
+        if ctx.active_popovers.contains(&id) {
+            continue;
+        }
+        unsafe {
+            if let Some(w) = ptr.as_ref() {
+                if w.visible() && w.popover_rect().is_some() {
+                    w.render_popover(pc);
+                }
+            }
+        }
+    }
 }
 
 pub fn partition_concentric_corners(

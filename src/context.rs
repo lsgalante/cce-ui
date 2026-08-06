@@ -561,6 +561,45 @@ impl UiContext {
         self.active_popovers.clear();
     }
 
+    /// Close any open popover whose owner the press MISSED — the engine calls
+    /// this on every Left press before the app's dispatch, so an outside click
+    /// always reaches an open menu even in apps that region-gate their event
+    /// routing (a canvas click never reaching a sidebar dropdown's root).
+    /// Scans the whole registry (like `is_coordinate_covered`'s fallback) —
+    /// popover registration is optional and spotty across apps. A press ON the
+    /// owner (trigger or popover) is left entirely to the app's own dispatch:
+    /// its `take_change` plumbing is gated on that delivery. Owners receive the
+    /// real press event, so their ordinary outside-press handling runs; a
+    /// second delivery through the app's own dispatch is idempotent (a closing
+    /// dropdown ignores further presses).
+    pub fn close_popovers_missed_by_press(&mut self, x: f32, y: f32) {
+        let owners: Vec<WidgetId> = self
+            .tree
+            .iter_registered()
+            .filter_map(|(id, ptr)| unsafe {
+                ptr.as_ref().and_then(|w| {
+                    (w.visible() && w.popover_rect().is_some()).then_some(id)
+                })
+            })
+            .collect();
+        for id in owners {
+            let Some(ptr) = self.tree.get_ptr(id) else { continue };
+            unsafe {
+                if !(*ptr).hit_test(x, y, self) {
+                    let ev = Event::MouseButton {
+                        button: crate::widget::MouseButton::Left,
+                        state: crate::widget::ElementState::Pressed,
+                        x,
+                        y,
+                        local_x: x,
+                        local_y: y,
+                    };
+                    (*ptr).handle_event(&ev, self);
+                }
+            }
+        }
+    }
+
     /// Register an open popover. Takes `&mut` so the registry can be refreshed with the
     /// pointer we are handed (the occlusion walks resolve the stored id through the tree).
     pub fn register_popover(&mut self, w: &mut (dyn WidgetHost + 'static)) {
