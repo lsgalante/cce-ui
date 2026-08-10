@@ -961,7 +961,22 @@ impl Paint for TreeList {
         let search_h = 26.0;
         let offset_y = search_h + 2.0 * search_margin_y;
         let header_h = 26.0;
-        let list_bounds = Some([self.scroll_box.base.x, self.scroll_box.viewport_y, self.scroll_box.base.x + self.scroll_box.base.w, self.scroll_box.viewport_y + self.scroll_box.viewport_h]);
+        // Labels and chevrons paint over the recessed well's wall (the recess
+        // is shading-only and already drawn), so cut them at the wall's inner
+        // edge — content slides under the bevel instead of sitting on it. The
+        // top stays at the viewport: the wall there is behind the search/header
+        // strip, outside the scroll area.
+        let wall = if crate::layout::control_relief() {
+            crate::layout::bevel_width().min(rect.height * 0.2)
+        } else {
+            0.0
+        };
+        let list_bounds = Some([
+            self.scroll_box.base.x + wall,
+            self.scroll_box.viewport_y,
+            self.scroll_box.base.x + self.scroll_box.base.w - wall,
+            self.scroll_box.viewport_y + self.scroll_box.viewport_h - wall,
+        ]);
         let header_bounds = Some([x, y + offset_y, x + w, y + offset_y + header_h]);
         for (idx, (l, col_max_x)) in self.own_labels().into_iter().enumerate() {
             let mut b = if idx < 3 { header_bounds } else { list_bounds };
@@ -972,17 +987,18 @@ impl Paint for TreeList {
         }
 
         // Section chevrons: image icons in the slot own_labels leaves open,
-        // clipped to the list viewport like the row text.
+        // clipped like the row text — to the list viewport shrunk by the
+        // well wall, so arrows are cut off by the bevel, never drawn on it.
         {
             let (_, tree_font_size) = crate::layout::tree_font_parsed();
             let list_left = self.scroll_box.base.x;
             let list_top = self.scroll_box.viewport_y;
             let list_bottom = list_top + self.scroll_box.viewport_h;
             let viewport = Rect {
-                x: list_left,
+                x: list_left + wall,
                 y: list_top,
-                width: self.scroll_box.base.w,
-                height: self.scroll_box.viewport_h,
+                width: self.scroll_box.base.w - 2.0 * wall,
+                height: self.scroll_box.viewport_h - wall,
             };
             pc.clip(viewport, |pc| {
                 for (i, item) in self.items.iter().enumerate() {
