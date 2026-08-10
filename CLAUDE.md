@@ -120,7 +120,7 @@ adding anything to this trait.
 **Runtime verification matters here.** Several scene changes are "compiles + tests pass; runtime
 verification pending" per the RFC — the headless tests can't catch paint/event regressions. When
 changing scene wiring, `cargo run` a real client (cce-files, cce-designer, cce-graph,
-cce-system-settings) to confirm behavior, not just the test suite.
+cce-system-interface) to confirm behavior, not just the test suite.
 
 ## Module map (where things live)
 

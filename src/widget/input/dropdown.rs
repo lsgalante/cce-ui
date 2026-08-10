@@ -13,7 +13,7 @@
 //! - The row-rect hit expansion (`base.row_x/row_w`) is dropped, consistent with every other
 //!   migrated control: `Input::hit` tests the widget rect plus the open popover.
 //! - `Layout::intrinsic_measure_width` (new hook) preserves the `auto_width` measure behavior
-//!   (cce-system-settings sizes its page dropdown from `WidgetHost::measure`).
+//!   (cce-system-interface sizes its page dropdown from `WidgetHost::measure`).
 
 use crate::colors;
 use crate::scene::layout::{Rect, Size};

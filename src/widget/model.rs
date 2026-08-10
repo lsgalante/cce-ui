@@ -65,7 +65,7 @@ pub trait Layout {
 
     /// Whether `WidgetHost::measure` should prefer [`intrinsic_size`](Layout::intrinsic_size)'s
     /// width over the current rect width (Dropdown's `auto_width` measure override — hosts size
-    /// it from `measure`, e.g. cce-system-settings' page dropdown). Default: keep the legacy
+    /// it from `measure`, e.g. cce-system-interface' page dropdown). Default: keep the legacy
     /// `WidgetHost::measure` width (the current rect's).
     fn intrinsic_measure_width(&self) -> bool {
         false
