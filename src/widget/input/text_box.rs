@@ -1564,6 +1564,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = tb.keyboard_input(&key_ev, &mut dummy);
         assert!(handled);
@@ -1578,6 +1579,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled_enter = tb.keyboard_input(&enter_ev, &mut dummy);
         assert!(handled_enter);
@@ -1606,6 +1608,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = tb.keyboard_input(&key_ev, &mut dummy);
         assert!(handled);
@@ -1655,6 +1658,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: true,
+            alt: false,
         };
         let handled = tb.keyboard_input(&left_shift_ev, &mut dummy);
         assert!(handled);
@@ -1669,6 +1673,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = tb.keyboard_input(&left_ev, &mut dummy);
         assert!(handled);
@@ -1683,6 +1688,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: true,
+            alt: false,
         };
         let handled = tb.keyboard_input(&up_shift_ev, &mut dummy);
         assert!(handled);
@@ -1697,6 +1703,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = tb.keyboard_input(&rust_ev, &mut dummy);
         assert!(handled);

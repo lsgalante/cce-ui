@@ -3830,6 +3830,7 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
         self.pressed_key = None;
         self.ctrl_pressed = false;
         self.shift_pressed = false;
+        self.alt_pressed = false;
         let mut rebuild = false;
         self.inner.as_mut().unwrap().handle_focus_change(false, &mut rebuild);
         if rebuild {
@@ -3952,6 +3953,7 @@ impl<A: Application> EngineState<A> {
             repeat: false,
             ctrl: self.ctrl_pressed,
             shift: self.shift_pressed,
+            alt: self.alt_pressed,
         };
 
         if state == ElementState::Pressed {
@@ -4386,6 +4388,7 @@ pub fn run<A: Application>() {
                         repeat: true,
                         ctrl: engine_state.ctrl_pressed,
                         shift: engine_state.shift_pressed,
+                        alt: engine_state.alt_pressed,
                     };
 
                     if let Some(ctx) = engine_state.inner.as_mut().unwrap().ui_context_mut() {

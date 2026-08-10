@@ -82,6 +82,7 @@ pub struct KeyEvent {
     pub repeat: bool,
     pub ctrl: bool,
     pub shift: bool,
+    pub alt: bool,
 }
 
 /// Text justification for widget labels/content (shared by Button, cce-files' row

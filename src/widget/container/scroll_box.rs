@@ -509,6 +509,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         assert!(sb.keyboard_input(&event_down, &mut ctx));
         assert_eq!(sb.scroll_y, 24.0);
@@ -521,6 +522,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         assert!(sb.keyboard_input(&event_pgdown, &mut ctx));
         assert_eq!(sb.scroll_y, 124.0);
@@ -533,6 +535,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         assert!(sb.keyboard_input(&event_end, &mut ctx));
         assert_eq!(sb.scroll_y, 200.0); // clamps at max_scroll = 200.0
@@ -545,6 +548,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         assert!(sb.keyboard_input(&event_pgup, &mut ctx));
         assert_eq!(sb.scroll_y, 100.0);
@@ -557,6 +561,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         assert!(sb.keyboard_input(&event_home, &mut ctx));
         assert_eq!(sb.scroll_y, 0.0);
@@ -577,6 +582,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
 
         // Cursor away from the box, nothing focused: keys are ignored.

@@ -1350,6 +1350,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         dd.keyboard_input(&key_up, &mut dummy);
         assert_eq!(dd.hovered_item, Some(0));

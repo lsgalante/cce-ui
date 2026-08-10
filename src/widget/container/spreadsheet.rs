@@ -453,6 +453,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         assert!(s.keyboard_input(&end, &mut ctx));
         let g = s.inner().geom(rect).unwrap();

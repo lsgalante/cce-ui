@@ -662,6 +662,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = cs.keyboard_input(&backspace_ev, &mut dummy);
         assert!(handled);
@@ -676,6 +677,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = cs.keyboard_input(&left_ev, &mut dummy);
         assert!(handled);
@@ -695,6 +697,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = cs.keyboard_input(&right_ev, &mut dummy);
         assert!(handled);
@@ -708,6 +711,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         // Move cursor to index 3
         let handled = cs.keyboard_input(&left_ev, &mut dummy); // 4
@@ -729,6 +733,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = cs.keyboard_input(&type_b_ev, &mut dummy);
         assert!(handled);
@@ -748,6 +753,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = cs.keyboard_input(&type_c_ev, &mut dummy);
         assert!(handled);
@@ -762,6 +768,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         // Move to index 5
         for _ in 0..4 {
@@ -779,6 +786,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let handled = cs.keyboard_input(&enter_ev, &mut dummy);
         assert!(handled);
@@ -807,6 +815,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         let backspace_ev = KeyEvent {
             state: ElementState::Pressed,
@@ -815,6 +824,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         cs.keyboard_input(&backspace_ev, &mut dummy);
         cs.keyboard_input(&backspace_ev, &mut dummy);
@@ -827,6 +837,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         cs.keyboard_input(&type_a_ev, &mut dummy);
         cs.keyboard_input(&type_b_ev, &mut dummy);
@@ -839,6 +850,7 @@ mod tests {
             repeat: false,
             ctrl: false,
             shift: false,
+            alt: false,
         };
         cs.keyboard_input(&enter_ev, &mut dummy);
         assert!(!cs.editing);
