@@ -1769,6 +1769,31 @@ impl VkRenderer {
                 let mut snapshot_fresh = false;
 
                 for batch in batches {
+                    // Images due at this batch's boundary draw first: they sit
+                    // beneath the batch's geometry, and a blur snapshot taken
+                    // for this batch must capture them (an image whose
+                    // `z_before` equals the batch start would otherwise slip
+                    // to after the snapshot and never be frosted).
+                    while let Some(&k) = order.get(img_i) {
+                        let q = &images[k];
+                        if q.z_before > batch.start {
+                            break;
+                        }
+                        img_i += 1;
+                        let img_scissor = match q.clip {
+                            Some((cx, cy, cw, ch)) => vk::Rect2D {
+                                offset: vk::Offset2D { x: cx as i32, y: cy as i32 },
+                                extent: vk::Extent2D {
+                                    width: cw.min(self.extent.width.saturating_sub(cx)),
+                                    height: ch.min(self.extent.height.saturating_sub(cy)),
+                                },
+                            },
+                            None => full_scissor,
+                        };
+                        self.core.device.cmd_set_scissor(cmd, 0, &[img_scissor]);
+                        self.image.record_quad(&self.core.device, cmd, frame_index, k, q.image);
+                        snapshot_fresh = false;
+                    }
                     if batch.blur_behind {
                         if !snapshot_fresh {
                             self.snapshot_frame_so_far(cmd, image_index as usize);
