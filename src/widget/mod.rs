@@ -659,19 +659,23 @@ pub fn match_key_shortcut(event: &KeyEvent, shortcut_str: &str) -> bool {
     
     let mut req_ctrl = false;
     let mut req_shift = false;
+    let mut req_alt = false;
     let mut req_key = "";
-    
+
     for part in parts {
         match part {
             "ctrl" | "control" => req_ctrl = true,
             "shift" => req_shift = true,
-            "super" | "win" | "logo" | "alt" | "meta" => {}
+            "alt" | "meta" => req_alt = true,
+            // Super chords belong to the compositor; a client never sees them.
+            "super" | "win" | "logo" => {}
             k => req_key = k,
         }
     }
-    
+
     if event.ctrl != req_ctrl { return false; }
     if event.shift != req_shift { return false; }
+    if event.alt != req_alt { return false; }
     
     if let Key::Character(ref ch) = event.logical_key {
         let ch_lower = ch.to_lowercase();
