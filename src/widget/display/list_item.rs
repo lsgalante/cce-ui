@@ -137,12 +137,15 @@ impl Input for InteractiveListItem {
                 std::mem::take(&mut self.pressed)
             }
             Event::MouseEnter => {
+                // Hover flips are visual changes: report them handled so the
+                // demand-driven frame loop repaints now — returning false left
+                // the highlight waiting for the next unrelated rebuild.
                 self.hovered = true;
-                false
+                true
             }
             Event::MouseLeave => {
                 self.hovered = false;
-                false
+                true
             }
             _ => false,
         }
