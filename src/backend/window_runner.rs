@@ -3212,6 +3212,10 @@ impl<A: Application> EngineState<A> {
             let _callback = surface.frame(&self.qh, ());
             self.frame_callback_pending = true;
             self.frame_callback_armed_at = Some(std::time::Instant::now());
+            if std::env::var("CCE_PRESENT_DEBUG").is_ok() {
+                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() % 100000;
+                eprintln!("[vk] t={} armed frame callback", t);
+            }
         }
 
         // Direct renderer staging (3D scenes, RT panes, app-shaped text).
@@ -4063,6 +4067,11 @@ impl<A: Application> wayland_client::Dispatch<wl_callback::WlCallback, ()> for E
     ) {
         if let wl_callback::Event::Done { .. } = event {
             state.frame_callback_pending = false;
+            if std::env::var("CCE_PRESENT_DEBUG").is_ok() {
+                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() % 100000;
+                let waited = state.frame_callback_armed_at.map(|a| a.elapsed().as_millis()).unwrap_or(0);
+                eprintln!("[vk] t={} frame-done (waited {}ms)", t, waited);
+            }
         }
     }
 }
@@ -4447,6 +4456,10 @@ pub fn run<A: Application>() {
                 .is_none_or(|t| t.elapsed().as_millis() > 250)
         {
             engine_state.frame_callback_pending = false;
+            if std::env::var("CCE_PRESENT_DEBUG").is_ok() {
+                let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() % 100000;
+                eprintln!("[vk] t={} starvation fallback fired (callback never came)", t);
+            }
         }
 
         if engine_state.redraw && !engine_state.frame_callback_pending {
