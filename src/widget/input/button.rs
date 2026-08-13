@@ -8,8 +8,8 @@ use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
-    Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Justification, Layout,
-    MouseButton, Paint,
+    Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Justification, Key, Layout,
+    MouseButton, NamedKey, Paint,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +36,10 @@ pub struct Button {
     /// centered in place of the label (see [`crate::upload_icon`]).
     icon: Option<(u32, f32, f32)>,
     hovered: bool,
+    /// Keyboard focus, tracked from `FocusIn`/`FocusOut` the way Checkbox does —
+    /// `Paint` never sees the `Widget` base, so the flag has to live here to be
+    /// paintable. Drives the focus ring and gates Enter/Space activation.
+    focused: bool,
     /// Raised style: the background is an SDF-lit `Bevel` plate — fill plus a
     /// rolled, lit edge — instead of a flat fill + border stroke.
     raised: bool,
@@ -70,6 +74,7 @@ impl Button {
             label: None,
             icon: None,
             hovered: false,
+            focused: false,
             raised: crate::layout::control_relief(),
         }
     }
@@ -300,7 +305,13 @@ impl Paint for Button {
             // reads as a 1px ring when the fill is opaque — a row's
             // transparent idle fill left the whole row painted in the config
             // button border_color (an accidental coupling).
-            let border_color = if self.kind == ButtonKind::ListRow {
+            // Keyboard focus reuses the border the button already draws, tinted with
+            // the DE's existing focus-border colour — no new geometry, and nothing
+            // changes for a button that is not focused. It overrides the ListRow
+            // opt-out too: a focused row must show the ring, which is the whole point.
+            let border_color = if self.focused {
+                Some(colors::tree_border_focus_color())
+            } else if self.kind == ButtonKind::ListRow {
                 None
             } else {
                 colors::button_border_color()
@@ -409,6 +420,32 @@ impl Input for Button {
             Event::MouseLeave => {
                 self.hovered = false;
                 false
+            }
+            Event::FocusIn => {
+                self.focused = true;
+                false
+            }
+            Event::FocusOut => {
+                self.focused = false;
+                false
+            }
+            Event::KeyInput(key_event) => {
+                // Enter/Space activate a focused button, the same chord Dropdown
+                // and Menu use. Routed through `just_clicked` + `on_click_cb` so a
+                // keyboard press is indistinguishable downstream from a mouse one.
+                if !self.focused || key_event.state != ElementState::Pressed {
+                    return false;
+                }
+                match key_event.logical_key {
+                    Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                        self.just_clicked = true;
+                        if let Some(ref cb) = self.on_click_cb {
+                            cb();
+                        }
+                        true
+                    }
+                    _ => false,
+                }
             }
             _ => false,
         }
