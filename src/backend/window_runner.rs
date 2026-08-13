@@ -4314,12 +4314,43 @@ pub fn run<A: Application>() {
     const KEY_REPEAT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
     const KEY_REPEAT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
+    /// Same switch as the renderer's present tracer, resolved once — this sits
+    /// in the per-iteration path, so a `std::env::var` call here would be I/O
+    /// on the loop that is under measurement.
+    fn loop_debug() -> bool {
+        static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *FLAG.get_or_init(|| std::env::var_os("CCE_PRESENT_DEBUG").is_some())
+    }
+
     let mut last_title = settings.title.clone();
     let mut last_tick = std::time::Instant::now();
     loop {
+        // Frame callbacks arrive with a p50 of 0ms but a ~0.5s tail, while the
+        // compositor's own trace shows it firing them within one or two vsyncs
+        // of the arm. Tracing each iteration bisects that: if this loop keeps
+        // turning at ~16ms all through a long wait, the event was not there to
+        // read, and the delay is upstream rather than in dispatching it.
+        let iter_start = if loop_debug() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         if let Err(e) = event_loop.dispatch(std::time::Duration::from_millis(16), &mut engine_state) {
             log::error!("[window_runner] Event loop error: {:?}", e);
             break;
+        }
+        if let Some(start) = iter_start {
+            let t = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                % 100000;
+            eprintln!(
+                "[vk] t={} loop dispatch={}us pending_cb={}",
+                t,
+                start.elapsed().as_micros(),
+                engine_state.frame_callback_pending
+            );
         }
         // A protocol error kills the connection permanently, but it surfaces
         // through queue flushes whose errors calloop's WaylandSource swallows
