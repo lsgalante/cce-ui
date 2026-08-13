@@ -59,6 +59,18 @@ pub struct UiContext {
     pub focused_widget: Option<WidgetId>,
     /// Open-popover registrations, id-keyed like focus (Phase 6bc slice 2).
     pub active_popovers: Vec<WidgetId>,
+    /// Memo for `is_coordinate_covered` at a single cursor position: the ids of
+    /// every widget whose popover rect contains it. That query scans the entire
+    /// registry, and `hit_test` calls it — so dispatching one PointerMove to N
+    /// roots cost N×N `popover_rect()` calls (the 1359-row Packages list: 1.85M
+    /// per motion event, ~14ms, which starved the whole frame loop). Every one
+    /// of those queries shares the same point and differs only in which id it
+    /// excludes, so the scan runs once per position and each caller then asks
+    /// whether some *other* id covers it. Invalidated whenever the registry
+    /// changes or a frame's registration is reset.
+    /// `RefCell` because `hit_test` receives `&UiContext` — the memo is an
+    /// implementation detail of a read-only query, not shared state.
+    covered_cache: std::cell::RefCell<(Option<(f32, f32)>, Vec<WidgetId>)>,
     pub hover_state: HoverState,
     pub cursor_pos: (f32, f32),
     pub context_menu: ContextMenuState,
@@ -84,6 +96,7 @@ impl UiContext {
             tree: crate::scene::WidgetTree::new(),
             focused_widget: None,
             active_popovers: Vec::new(),
+            covered_cache: std::cell::RefCell::new((None, Vec::new())),
             hover_state: HoverState::new(),
             cursor_pos: (0.0, 0.0),
             context_menu: ContextMenuState::new(),
@@ -533,6 +546,10 @@ impl UiContext {
 
     pub fn register_widget(&mut self, id: WidgetId, ptr: *mut (dyn WidgetHost + 'static)) {
         self.tree.register(id, ptr);
+        // A newcomer may itself have a popover rect, so the coverage memo can no
+        // longer be trusted. Pages that re-register a whole list do it before
+        // dispatching, so the memo is rebuilt once and then serves every root.
+        self.invalidate_coverage_cache();
         unsafe {
             if !ptr.is_null() && (*ptr).wants_tick() {
                 self.register_tick_receiver(id);
@@ -554,11 +571,13 @@ impl UiContext {
 
     pub fn clear_hierarchy(&mut self) {
         self.tree.clear_all();
+        self.invalidate_coverage_cache();
     }
 
     // --- Popovers ---
     pub fn clear_popovers(&mut self) {
         self.active_popovers.clear();
+        self.invalidate_coverage_cache();
     }
 
     /// Close any open popover whose owner the press MISSED — the engine calls
@@ -608,43 +627,56 @@ impl UiContext {
         if !self.active_popovers.contains(&id) {
             self.active_popovers.push(id);
         }
+        self.invalidate_coverage_cache();
     }
 
     /// Whether `(px, py)` is covered by an open popover or a popover-carrying widget other
     /// than `query_id` (the querying widget excludes itself). Every widget has a base id
     /// now (the flip) — the old `WidgetId(0)` no-base sentinel is gone.
+    /// Is `(px, py)` covered by some widget's popover rect other than `query_id`?
+    ///
+    /// The covering set depends only on the point, so it is computed once and
+    /// memoized; `query_id` is applied afterwards as an exclusion. See the
+    /// `covered_at` field for why the previous per-call registry scan mattered.
     pub fn is_coordinate_covered(&self, query_id: WidgetId, px: f32, py: f32) -> bool {
-        for &pop_id in self.active_popovers.iter() {
-            if pop_id == query_id {
-                continue;
-            }
-            if let Some(ptr) = self.tree.get_ptr(pop_id) {
-                unsafe {
-                    if let Some((x, y, width, height)) = (*ptr).popover_rect() {
-                        if px >= x && px <= x + width && py >= y && py <= y + height {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        for (id, ptr) in self.tree.iter_registered() {
-            if id == query_id {
-                continue;
-            }
-            unsafe {
-                if let Some(w) = ptr.as_ref() {
-                    if w.visible() {
-                        if let Some((x, y, width, height)) = w.popover_rect() {
+        let mut cache = self.covered_cache.borrow_mut();
+        if cache.0 != Some((px, py)) {
+            cache.1.clear();
+            for &pop_id in self.active_popovers.iter() {
+                if let Some(ptr) = self.tree.get_ptr(pop_id) {
+                    unsafe {
+                        if let Some((x, y, width, height)) = (*ptr).popover_rect() {
                             if px >= x && px <= x + width && py >= y && py <= y + height {
-                                return true;
+                                cache.1.push(pop_id);
                             }
                         }
                     }
                 }
             }
+            for (id, ptr) in self.tree.iter_registered() {
+                unsafe {
+                    if let Some(w) = ptr.as_ref() {
+                        if w.visible() {
+                            if let Some((x, y, width, height)) = w.popover_rect() {
+                                if px >= x && px <= x + width && py >= y && py <= y + height {
+                                    cache.1.push(id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            cache.0 = Some((px, py));
         }
-        false
+        cache.1.iter().any(|&id| id != query_id)
+    }
+
+    /// Drop the `is_coordinate_covered` memo — whenever the registry changes or
+    /// a popover's geometry may have moved under a stationary cursor.
+    pub fn invalidate_coverage_cache(&self) {
+        let mut cache = self.covered_cache.borrow_mut();
+        cache.0 = None;
+        cache.1.clear();
     }
 
     // --- Hover State ---
