@@ -2761,6 +2761,13 @@ pub struct EngineState<A: Application> {
     /// When the pending frame callback was armed — the starvation fallback's
     /// clock (see the render gate in `run`).
     pub frame_callback_armed_at: Option<std::time::Instant>,
+    /// Keep rendering (vsync-paced) briefly after the last genuine dirty frame.
+    /// Sparse, isolated commits get their frame callbacks serviced multiple
+    /// compositor frames late (measured 22-128ms on cce-fx, growing per sparse
+    /// commit), while a continuously committing surface is serviced in one
+    /// frame (~16ms). A short warm-down keeps interactive sequences (hover,
+    /// typing, scrolling) in the healthy continuous regime; idle still idles.
+    pub warm_until: Option<std::time::Instant>,
     /// Consecutive renders skipped by the extent gate (pending swapchain size
     /// != the size the current logical size and scale call for). Normally 0 or
     /// 1; a persistent count means no frame is presenting and deserves a warn.
@@ -4193,6 +4200,7 @@ pub fn run<A: Application>() {
         redraw: false,
         frame_callback_pending: false,
         frame_callback_armed_at: None,
+        warm_until: None,
         extent_gate_skips: 0,
         first_configure_received: false,
         ctrl_pressed: false,
@@ -4462,8 +4470,24 @@ pub fn run<A: Application>() {
             }
         }
 
+        if engine_state.redraw {
+            // Genuine dirt (input, app state, animation) extends the warm window;
+            // warm-down renders below do NOT, so idle decays in one window.
+            engine_state.warm_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_millis(200));
+        }
         if engine_state.redraw && !engine_state.frame_callback_pending {
             engine_state.redraw = false;
+            if engine_state.first_configure_received {
+                engine_state.render();
+            }
+        } else if !engine_state.redraw
+            && !engine_state.frame_callback_pending
+            && engine_state
+                .warm_until
+                .is_some_and(|t| std::time::Instant::now() < t)
+        {
+            // Warm-down re-render of the cached frame, paced by frame callbacks.
             if engine_state.first_configure_received {
                 engine_state.render();
             }
