@@ -1101,8 +1101,15 @@ Constraint respected: **each crate still builds standalone** — the new core is
     held (ctrl+j arrived as Character("\n")) — settings' ctrl-nav could never
     have fired from real hardware either. With the keysym preferred under Ctrl,
     ctrl+j/k cycle the section highlight and ctrl+i/u descend/ascend
-    (audio-page border diffs). NB accounts/storage take `_sec_focused` and
-    render no highlight — ctrl-nav is invisible on those two pages.
+    (audio-page border diffs). ~~NB accounts/storage take `_sec_focused` and
+    render no highlight — ctrl-nav is invisible on those two pages.~~ FIXED
+    2026-08-13 (cce-system-interface@`573bf43`): both pages now thread
+    `sec_focused` into their `view()` and pass it per section instead of a
+    hardcoded `false`. Live-verified — storage cycles the highlight
+    Local Storage → Memory on successive ctrl+j, accounts highlights its single
+    section (42,513 px changed in a rectangle-outline distribution: dense at the
+    well's top and bottom edges, constant down the sides). All 14 pages now
+    consume `sec_focused`; none takes it as `_sec_focused`.
     Re-verified on the LIVE session (2026-07-13, after the compositor restarted
     onto the 114ef89 binary — the restart was the only reason this had been
     nested-rig-only): ctrl+j → j → k and ctrl+i → u on the audio page, both
