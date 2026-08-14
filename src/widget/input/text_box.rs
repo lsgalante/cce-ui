@@ -1375,24 +1375,26 @@ impl Input for TextBox {
             }
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x: px, y: py, .. } => {
                 if self.disabled { return false; }
-                if !self.editing {
+                // A click aims into the field: it places the caret where it landed,
+                // whether or not it is the click that focuses. Only KEYBOARD focus
+                // (`Event::FocusIn` -> `begin_editing`) arms select-all. That split is
+                // the convention everywhere — tabbing selects a field, clicking points
+                // into it — and it is what a prefilled box needs: select-all on the
+                // focusing click meant the first keystroke wiped the whole value, which
+                // is wrong for the ~26 prefilled single-line boxes across the fleet
+                // (login username, reply subject, a unit's ExecStart, a config value).
+                // This used to be carved out for multiline only; both arms now agree.
+                let focusing = !self.editing;
+                if focusing {
                     self.begin_editing();
                     ectx.request_focus();
-                    if self.multiline {
-                        // A multiline box is a document, not a form field: the focusing
-                        // click places the caret instead of arming select-all, so the
-                        // first keystroke can't wipe prefilled content (e.g. a reply quote).
-                        let idx = self.position_to_idx(*px, *py, true);
-                        self.cursor_idx = idx;
-                        self.select_anchor = Some(idx);
-                        self.all_selected = false;
-                        self.sync_editor_state();
-                    }
-                } else {
-                    let idx = self.position_to_idx(*px, *py, true);
-                    self.cursor_idx = idx;
-                    self.select_anchor = Some(idx);
-                    self.all_selected = false;
+                }
+                let idx = self.position_to_idx(*px, *py, true);
+                self.cursor_idx = idx;
+                self.select_anchor = Some(idx);
+                self.all_selected = false;
+                if focusing {
+                    self.sync_editor_state();
                 }
                 true
             }
@@ -1549,9 +1551,9 @@ mod tests {
         assert!(!tb.editing);
         assert!(!tb.all_selected);
 
-        // 2. Click focuses and triggers highlighting
-        let clicked = tb.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0, &mut dummy);
-        assert!(clicked);
+        // 2. Keyboard focus triggers highlighting. (A CLICK deliberately does not
+        //    — it places the caret; see `prefilled_single_line_click_does_not_wipe_the_value`.)
+        tb.focus();
         assert!(tb.editing);
         assert!(tb.all_selected);
         assert_eq!(tb.edit_buffer, "Initial Text");
@@ -1586,6 +1588,54 @@ mod tests {
         assert!(!tb.editing);
         assert_eq!(tb.text, "A");
         assert!(tb.take_change());
+    }
+
+    /// The other half of the click change: keyboard focus must still arm
+    /// select-all, so tabbing into a field and typing replaces it. Losing this
+    /// would make every form field tedious to retype.
+    #[test]
+    fn keyboard_focus_still_selects_all() {
+        let mut tb = TextBox::new("imap.example.org:993".to_string());
+        tb.set_rect(10.0, 10.0, 200.0, 30.0);
+
+        tb.focus();
+
+        assert!(tb.editing);
+        assert!(tb.all_selected, "tabbing in selects the whole value");
+        assert_eq!(tb.select_anchor, Some(0));
+        assert_eq!(tb.cursor_idx, "imap.example.org:993".chars().count());
+    }
+
+    /// A prefilled single-line box is the case that motivated the change: the
+    /// focusing click must leave the value intact so the first keystroke edits
+    /// rather than erases. Same guarantee the multiline test below asserts.
+    #[test]
+    fn prefilled_single_line_click_does_not_wipe_the_value() {
+        let mut dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new("imap.example.org:993".to_string());
+        tb.set_rect(10.0, 10.0, 300.0, 30.0);
+
+        let click_x = 10.0 + 8.0 + 4.0 * tb.char_width();
+        assert!(tb.mouse_input(MouseButton::Left, ElementState::Pressed, click_x, 20.0, &mut dummy));
+        assert!(tb.editing);
+        assert!(!tb.all_selected);
+
+        let key_ev = KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character("X".to_string()),
+            text: Some("X".to_string()),
+            repeat: false,
+            ctrl: false,
+            shift: false,
+            alt: false,
+        };
+        assert!(tb.keyboard_input(&key_ev, &mut dummy));
+        assert_eq!(
+            tb.edit_buffer.chars().count(),
+            21,
+            "typing must insert into the prefilled value, not replace it"
+        );
+        assert!(tb.edit_buffer.starts_with("imap"), "the existing value survives the first keystroke");
     }
 
     #[test]
@@ -1623,15 +1673,19 @@ mod tests {
         let mut tb = TextBox::new("Hello World".to_string());
         tb.set_rect(10.0, 10.0, 200.0, 30.0);
 
-        // 1. Initial click focuses and selects all
-        let pressed = tb.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 20.0, &mut dummy);
+        // 1. Initial click focuses and places the caret where it landed — it does
+        //    NOT select all. Selecting all belongs to keyboard focus (see
+        //    `keyboard_focus_still_selects_all`).
+        let click_x3 = 10.0 + 8.0 + 3.0 * tb.char_width();
+        let pressed = tb.mouse_input(MouseButton::Left, ElementState::Pressed, click_x3, 20.0, &mut dummy);
         assert!(pressed);
-        let released = tb.mouse_input(MouseButton::Left, ElementState::Released, 50.0, 20.0, &mut dummy);
+        let released = tb.mouse_input(MouseButton::Left, ElementState::Released, click_x3, 20.0, &mut dummy);
         assert!(released);
         assert!(tb.editing);
-        assert!(tb.all_selected);
-        assert_eq!(tb.cursor_idx, 11);
-        assert_eq!(tb.select_anchor, Some(0));
+        assert!(!tb.all_selected);
+        assert_eq!(tb.cursor_idx, 3);
+        // The release collapses the zero-width selection the press opened.
+        assert_eq!(tb.select_anchor, None);
 
         // 2. Click inside placed caret at index 5
         let click_x5 = 10.0 + 8.0 + 5.0 * tb.char_width();
