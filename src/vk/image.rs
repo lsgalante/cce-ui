@@ -71,6 +71,19 @@ struct ImageVertex {
     clip_extents: [f32; 2],
 }
 
+// The pipeline below hardcodes one offset per shader location. Pin the struct to
+// them so adding, reordering, or resizing a field fails the build instead of
+// silently feeding the shader mis-aligned attributes — the drift that left
+// location 4 undescribed. `text.rs` pins `GlyphVertex` to the same layout.
+const _: () = {
+    assert!(std::mem::size_of::<ImageVertex>() == 52);
+    assert!(std::mem::offset_of!(ImageVertex, position) == 0);
+    assert!(std::mem::offset_of!(ImageVertex, uv) == 8);
+    assert!(std::mem::offset_of!(ImageVertex, color) == 16);
+    assert!(std::mem::offset_of!(ImageVertex, clip_circle) == 32);
+    assert!(std::mem::offset_of!(ImageVertex, clip_extents) == 44);
+};
+
 struct GpuImage {
     image: vk::Image,
     view: vk::ImageView,

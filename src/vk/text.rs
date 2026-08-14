@@ -65,6 +65,17 @@ struct GlyphVertex {
     clip_extents: [f32; 2],
 }
 
+// See the matching block in `image.rs`: both pipelines feed the same glyph
+// shader (locations 0..=4), so both vertex structs must hold this exact layout.
+const _: () = {
+    assert!(std::mem::size_of::<GlyphVertex>() == 52);
+    assert!(std::mem::offset_of!(GlyphVertex, position) == 0);
+    assert!(std::mem::offset_of!(GlyphVertex, uv) == 8);
+    assert!(std::mem::offset_of!(GlyphVertex, color) == 16);
+    assert!(std::mem::offset_of!(GlyphVertex, clip_circle) == 32);
+    assert!(std::mem::offset_of!(GlyphVertex, clip_extents) == 44);
+};
+
 #[derive(Clone, Copy)]
 struct GlyphEntry {
     /// Atlas texel rect.
