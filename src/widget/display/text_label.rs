@@ -74,6 +74,6 @@ impl TextLabel {
     }
 }
 
-pub(crate) fn make_widget_text_buffer(fs: &mut glyphon::FontSystem, text: &str, size: f32, font_family: &str) -> glyphon::Buffer {
+pub(crate) fn make_widget_text_buffer(fs: &mut cosmic_text::FontSystem, text: &str, size: f32, font_family: &str) -> cosmic_text::Buffer {
     crate::backend::window_runner::get_text_buffer(fs, text, size, Some(font_family))
 }

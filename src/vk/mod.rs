@@ -11,8 +11,8 @@
 //!   quads with circle clipping, the wavy-blob sentinel, window-corner
 //!   rounding (radius 0 disables), and blur-behind plates (negative alpha)
 //!   sampling the renderer-managed backdrop.
-//! - **Text** (`glyph.wgsl` + [`TextSpan`]): cosmic-text shaping (via glyphon's
-//!   re-export) + swash rasterization into a self-managed glyph atlas, with
+//! - **Text** (`glyph.wgsl` + [`TextSpan`]): cosmic-text shaping (a direct dependency since the
+//!   wgpu path retired) + swash rasterization into a self-managed glyph atlas, with
 //!   per-span bounds clipping, rotation, and circle clipping.
 //! - **3D** (`scene3d.wgsl` + [`SceneDraw`]): handle-based [`Vertex3D`] meshes
 //!   with a depth buffer, rendered into the full-size backdrop image

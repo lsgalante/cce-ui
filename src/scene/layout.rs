@@ -20,7 +20,7 @@
 //! Layout modes ([`LayoutMode`]): **Flex** (row/column with grow/shrink, gap, padding, main/cross
 //! alignment incl. stretch), **Stack** (Z-overlay with per-axis alignment), and **Grid** (fixed
 //! column count with uniform column width and per-row heights). Deferred to later increments:
-//! wrapping, percentage lengths, width-dependent adaptive grids, and the glyphon text-measure
+//! wrapping, percentage lengths, width-dependent adaptive grids, and the cosmic-text text-measure
 //! hook for real leaf widgets (that lands with Phase 2b integration).
 
 use crate::scene::arena::{Arena, NodeId};

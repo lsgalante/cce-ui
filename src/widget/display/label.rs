@@ -117,10 +117,10 @@ mod tests {
 // Styled label builder with optional strikethrough
 #[derive(Debug)]
 pub struct StyledLabel {
-    pub buffer: glyphon::Buffer,
+    pub buffer: cosmic_text::Buffer,
     pub w: f32,
     pub color: [f32; 4],
-    pub g_color: glyphon::Color,
+    pub g_color: cosmic_text::Color,
     pub strikethrough: bool,
     pub strikethrough_color: Option<[f32; 4]>,
     // Source retained so the label can be re-emitted as a display-list Text prim (Phase 6ak):
@@ -146,11 +146,11 @@ pub struct LabelPrim {
 }
 
 impl StyledLabel {
-    pub fn new(fs: &mut glyphon::FontSystem, text: &str, size: f32, color: [f32; 4]) -> Self {
+    pub fn new(fs: &mut cosmic_text::FontSystem, text: &str, size: f32, color: [f32; 4]) -> Self {
         Self::new_with_family(fs, text, size, color, "sans-serif")
     }
 
-    pub fn new_with_family(fs: &mut glyphon::FontSystem, text: &str, size: f32, color: [f32; 4], family: &str) -> Self {
+    pub fn new_with_family(fs: &mut cosmic_text::FontSystem, text: &str, size: f32, color: [f32; 4], family: &str) -> Self {
         let scale = crate::scale::scale_factor();
         let mut final_text = text.to_string();
         let is_vert = crate::IS_VERTICAL.load(std::sync::atomic::Ordering::Relaxed);
@@ -162,7 +162,7 @@ impl StyledLabel {
             let bar_thickness = crate::BAR_THICKNESS.load(std::sync::atomic::Ordering::Relaxed) as f32;
             buffer.set_size(fs, Some(bar_thickness * scale as f32), None);
             for line in &mut buffer.lines {
-                line.set_align(Some(glyphon::cosmic_text::Align::Center));
+                line.set_align(Some(cosmic_text::Align::Center));
             }
             buffer.shape_until_scroll(fs, true);
         }
@@ -171,7 +171,7 @@ impl StyledLabel {
             let num_lines = buffer.layout_runs().count();
             w = num_lines as f32 * size * 1.05;
         }
-        let g_color = glyphon::Color::rgb(
+        let g_color = cosmic_text::Color::rgb(
             (color[0] * 255.0) as u8,
             (color[1] * 255.0) as u8,
             (color[2] * 255.0) as u8,

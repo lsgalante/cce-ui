@@ -716,7 +716,7 @@ impl Paint for TreeList {
         true
     }
 
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem, _rect: Rect) {
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
         self.search_box.prepare_text(fs);
         self.add_key_btn.prepare_text(fs);
         if self.add_key_popover_open {

@@ -3,7 +3,7 @@
 //! statusbar color/text-color/blur and derives its rounded corners from where it sits against
 //! the parent's edges ([`Paint::corner_style`] + the corners walk). Two text paths: the
 //! [`Paint::paint`] prim (carrying the configured statusbar font — the legacy default-font
-//! behavior on this path dropped the family and rendered sans), and pre-shaped glyphon
+//! behavior on this path dropped the family and rendered sans), and pre-shaped cosmic-text
 //! buffers through [`Paint::text_items`] (new with this migration) for manual hosts —
 //! cce-status-interface calls `prepare_text` then `get_text_items` into its own paint.
 
@@ -16,7 +16,7 @@ use crate::widget::{Adapted, Input, Layout, Paint};
 pub struct StatusBar {
     rect: Rect,
     pub text: String,
-    pub text_buf: Option<glyphon::Buffer>,
+    pub text_buf: Option<cosmic_text::Buffer>,
     pub text_offset_x: Option<f32>,
     pub text_color: Option<[f32; 4]>,
     pub bg_color: Option<[f32; 4]>,
@@ -178,7 +178,7 @@ impl Paint for StatusBar {
         Some(crate::layout::statusbar_font())
     }
 
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem, _rect: Rect) {
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
         if !self.text.is_empty() && self.text_buf.is_none() {
             let (font_fam, font_size) = crate::layout::statusbar_font_parsed();
             let size = if font_size > 0.0 { font_size } else { 12.0 };
@@ -205,7 +205,7 @@ mod tests {
     /// deleted; the bar's rendered text is the `Paint::paint` prim.)
     #[test]
     fn manual_host_text_pipeline() {
-        let mut fs = glyphon::FontSystem::new();
+        let mut fs = cosmic_text::FontSystem::new();
         // Pin the flat style: the bg-quad bridge under test is skipped by the
         // config-default recessed band.
         let mut bar = StatusBar::new().with_text("hello").with_text_offset_x(15.0).with_recess(false);

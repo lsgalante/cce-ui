@@ -114,7 +114,7 @@ pub enum Prim {
     ConcaveFillet { cx: f32, cy: f32, radius: f32, depth: f32, start: f32, raised: bool },
     /// Text in sRGB u8 (the `TextLabel` convention). `font` is a font string for
     /// `get_text_buffer` (family, or "family:size"); `bounds` is a logical `[l, t, r, b]` clip
-    /// for the glyph pass (Phase 6: the backend renders these through glyphon when the app
+    /// for the glyph pass (Phase 6: the backend renders these through the glyph pass when the app
     /// opts in via `Application::display_list_text`; the paint walk's clip additionally
     /// applies through the item's `clip`). `attrs` carries the optional shaping attributes
     /// beyond family+size (the font picker's italic/weight preview variants). `layout`, when
@@ -130,7 +130,7 @@ pub enum Prim {
 }
 
 /// Horizontal alignment of laid-out (boxed) text — the toolkit-plain mirror of
-/// `glyphon::cosmic_text::Align`, mapped at shape time.
+/// `cosmic_text::Align`, mapped at shape time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum AlignH {
     #[default]
@@ -162,8 +162,8 @@ pub struct TextLayout {
 
 /// Optional shaping attributes for a [`Prim::Text`] — the subset a widget can request beyond
 /// family + size. `weight` is the OpenType weight (400 regular, 700 bold); `None` leaves the
-/// family default. Kept toolkit-plain (no glyphon types) like the rest of the scene layer;
-/// the backend maps them onto `glyphon::Style`/`Weight` at shape time.
+/// family default. Kept toolkit-plain (no cosmic-text types) like the rest of the scene layer;
+/// the backend maps them onto `cosmic_text::Style`/`Weight` at shape time.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct TextAttrs {
     pub italic: bool,

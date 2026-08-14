@@ -1,4 +1,4 @@
-//! `TextItem` (retained glyphon buffer holder, unchanged) and the narrow-trait
+//! `TextItem` (retained cosmic-text buffer holder, unchanged) and the narrow-trait
 //! `InteractiveListItem` (Phase 5j): Button-style press/release with themed
 //! selected/hover/press overlays and title/subtitle text.
 
@@ -9,10 +9,10 @@ use crate::widget::{Adapted, ElementState, Event, EventCtx, Input, Layout, Mouse
 
 #[derive(Debug, Clone)]
 pub struct TextItem {
-    pub buffer: glyphon::Buffer,
+    pub buffer: cosmic_text::Buffer,
     pub x: f32,
     pub y: f32,
-    pub color: glyphon::Color,
+    pub color: cosmic_text::Color,
     pub bounds: Option<[f32; 4]>,
     /// Optional circular clip `[cx, cy, r]` in logical pixels (a display-list item's
     /// `clip_circle` carried through to the glyph pass). `None` for ordinary labels.
@@ -24,12 +24,12 @@ pub struct TextItem {
 
 impl TextItem {
     pub fn new(
-        fs: &mut glyphon::FontSystem,
+        fs: &mut cosmic_text::FontSystem,
         text: &str,
         size: f32,
         x: f32,
         y: f32,
-        color: glyphon::Color,
+        color: cosmic_text::Color,
         font: Option<&str>,
         bounds: Option<[f32; 4]>,
     ) -> Self {

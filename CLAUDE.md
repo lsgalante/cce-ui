@@ -17,8 +17,11 @@ set outright.
 - **Transport**: raw `wayland-client` 0.31 + `smithay-client-toolkit` 0.19, driven by a `calloop`
   event loop. Clients are real Wayland surfaces (xdg toplevels, xdg popups, and `wlr-layer-shell`
   layer surfaces), not toolkit-owned windows.
-- **Rendering**: **wgpu 24** for all geometry through a single `src/shader.wgsl` pipeline, and
-  **glyphon** for text. There is no HTML/DOM — the UI is GPU primitives (quads, rounded rects with
+- **Rendering**: raw Vulkan via **ash** (`src/vk/`, `VkRenderer`) for all geometry, and
+  **cosmic-text** + swash for text (shaped into a self-managed glyph atlas by `src/vk/text.rs`).
+  The wgpu path is retired; cosmic-text used to be reached through **glyphon**, which is gone
+  too — every `glyphon::` item used here was a cosmic-text re-export, and dropping it takes
+  wgpu out of the build. There is no HTML/DOM — the UI is GPU primitives (quads, rounded rects with
   per-corner radii, vectors with caps, arcs, circles, bevels). Tessellators live in
   `backend/window_runner.rs` and are re-exported through `src/engine.rs`.
 - It is **both a library and a binary.** `src/lib.rs` is the toolkit; `src/main.rs` is
@@ -125,7 +128,7 @@ cce-system-interface) to confirm behavior, not just the test suite.
 ## Module map (where things live)
 
 - `layout.rs` (largest file, ~5.7k lines) — fonts + sizing; many `*_font_parsed()` getters and
-  the `read_preferred_fonts` / font-family resolution used by the glyphon text path.
+  the `read_preferred_fonts` / font-family resolution used by the cosmic-text path.
 - `color.rs` — color model and named colors (`colors` re-export module in `lib.rs`).
 - `config.rs` — KDL loading and `kdl_to_json` conversion (see workspace `CLAUDE.md` for paths).
 - `context.rs` — `UiContext`: the retained widget tree, event routing, spatial grid, dirty
@@ -143,7 +146,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
 
 ## Fonts & assets
 
-`lib.rs` builds the glyphon `FontSystem`. Bundled fonts load from `$CCE_FONTS_DIR` (else
+`lib.rs` builds the cosmic-text `FontSystem` (re-exported as `cce_ui::cosmic_text` so clients
+need no text dependency of their own). Bundled fonts load from `$CCE_FONTS_DIR` (else
 `~/Dropbox/Fonts`); bundled icons from `$CCE_ICONS_DIR` (else `~/Dropbox/cce/cce-icons/svg`).
 System fonts are loaded only when `$CCE_LOAD_SYSTEM_FONTS` is set (or via
 `create_font_system_with_system_fonts()`, used by the font picker). Configured custom font

@@ -478,7 +478,7 @@ pub trait WidgetHost {
     fn focused(&self, ctx: &UiContext) -> bool {
         ctx.is_focused_id(self.base().id())
     }
-    fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem) {}
+    fn prepare_text(&mut self, _fs: &mut cosmic_text::FontSystem) {}
 
     fn set_visible(&mut self, _visible: bool) {}
     fn visible(&self) -> bool { true }

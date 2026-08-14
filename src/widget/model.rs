@@ -252,7 +252,7 @@ pub trait Paint {
     /// overrides). TextBox measures its glyph advances here — load-bearing for cursor↔pixel
     /// mapping, not just a render cache. Receives the laid-out content rect. Default: nothing
     /// to shape.
-    fn prepare_text(&mut self, _fs: &mut glyphon::FontSystem, _rect: Rect) {}
+    fn prepare_text(&mut self, _fs: &mut cosmic_text::FontSystem, _rect: Rect) {}
 
     /// Whether [`paint`](Paint::paint) emits the widget's ENTIRE subtree, so the paint walk
     /// must not also descend into its (ctx-linked) children — the legacy
@@ -1101,7 +1101,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         Layout::register_embedded_children(&mut self.inner, host_id, ctx);
     }
 
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem) {
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem) {
         if self.visible() {
             let rect = self.content_rect();
             Paint::prepare_text(&mut self.inner, fs, rect);

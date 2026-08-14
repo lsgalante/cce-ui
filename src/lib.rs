@@ -20,6 +20,13 @@ pub mod colors {
     pub use crate::color::*;
 }
 
+/// The text-shaping library, re-exported so clients need no text dependency of
+/// their own: `cce_ui::cosmic_text::FontSystem` rather than a per-crate
+/// `cosmic-text` (previously `glyphon`) entry in every client's Cargo.toml.
+/// Re-exporting also keeps every client on the one version cce-ui shapes with —
+/// a `FontSystem` handed across the boundary must be the same type.
+pub use cosmic_text;
+
 
 pub static IS_VERTICAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static BAR_THICKNESS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(24);
@@ -109,17 +116,17 @@ pub fn rasterize_svg(data: &[u8], px: u32) -> Option<(Vec<u8>, u32, u32)> {
     Some((rgba, w, h))
 }
 
-/// Build a glyphon `FontSystem` loaded with the bundled CCE fonts (house style).
+/// Build a cosmic-text `FontSystem` loaded with the bundled CCE fonts (house style).
 /// System fonts are loaded only if `$CCE_LOAD_SYSTEM_FONTS` is set. Configured
 /// custom fonts are validated with a warning if missing.
-pub fn create_font_system() -> glyphon::FontSystem {
+pub fn create_font_system() -> cosmic_text::FontSystem {
     build_font_system(false)
 }
 
 /// Like [`create_font_system`] but always also loads installed system fonts, for
 /// apps that must see every font on the system (e.g. the font picker) or want
 /// them as fallbacks. Additive — bundled CCE fonts are still loaded.
-pub fn create_font_system_with_system_fonts() -> glyphon::FontSystem {
+pub fn create_font_system_with_system_fonts() -> cosmic_text::FontSystem {
     build_font_system(true)
 }
 
@@ -129,7 +136,7 @@ pub fn create_font_system_with_system_fonts() -> glyphon::FontSystem {
 /// list of well-known files keeps startup cheap while giving cosmic-text's
 /// unix script fallback (family names "Noto Sans CJK *", "Noto Color Emoji")
 /// real faces to land on. `$CCE_NO_FALLBACK_FONTS` opts out.
-fn load_fallback_fonts(db: &mut glyphon::cosmic_text::fontdb::Database) {
+fn load_fallback_fonts(db: &mut cosmic_text::fontdb::Database) {
     if std::env::var("CCE_NO_FALLBACK_FONTS").is_ok() {
         return;
     }
@@ -152,8 +159,8 @@ fn load_fallback_fonts(db: &mut glyphon::cosmic_text::fontdb::Database) {
     }
 }
 
-fn build_font_system(load_system_fonts: bool) -> glyphon::FontSystem {
-    let mut db = glyphon::cosmic_text::fontdb::Database::new();
+fn build_font_system(load_system_fonts: bool) -> cosmic_text::FontSystem {
+    let mut db = cosmic_text::fontdb::Database::new();
     db.load_fonts_dir(fonts_dir());
     load_fallback_fonts(&mut db);
     if load_system_fonts || std::env::var("CCE_LOAD_SYSTEM_FONTS").is_ok() {
@@ -174,7 +181,7 @@ fn build_font_system(load_system_fonts: bool) -> glyphon::FontSystem {
     // high (cosmic-text common_fallback) and hijacked spaces and digits with
     // emoji metrics. Berkeley Mono is the house mono; Noto Sans CJK SC (the
     // targeted fallback face above) doubles as a full Latin sans.
-    fn has_family(db: &glyphon::cosmic_text::fontdb::Database, fam: &str) -> bool {
+    fn has_family(db: &cosmic_text::fontdb::Database, fam: &str) -> bool {
         db.faces()
             .any(|f| f.families.iter().any(|(n, _)| n == fam))
     }
@@ -222,7 +229,7 @@ fn build_font_system(load_system_fonts: bool) -> glyphon::FontSystem {
         }
     }
 
-    glyphon::FontSystem::new_with_locale_and_db("en-US".to_string(), db)
+    cosmic_text::FontSystem::new_with_locale_and_db("en-US".to_string(), db)
 }
 
 

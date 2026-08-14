@@ -12,7 +12,7 @@
 //! zero constructors workspace-wide (dead code).
 //!
 //! Dropped with the migration: the `title_buf`/`curved_title_char_bufs`/`context_item_bufs`
-//! glyphon caches — `get_text_items` always returned empty, so `prepare_text` built buffers
+//! cosmic-text caches — `get_text_items` always returned empty, so `prepare_text` built buffers
 //! nothing ever read (an abandoned optimization). Also gone: the legacy `rect()` override's
 //! vertical-mode dynamic height (`with_vertical` has no callers workspace-wide; the vertical
 //! label/title geometry is kept for the strip's rotated mode, but the widget rect is the

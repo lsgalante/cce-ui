@@ -1160,7 +1160,7 @@ impl Paint for TextBox {
 
     /// The legacy `prepare_text`: sync font family/size with the live config defaults, then
     /// shape the display text and record per-glyph advances (`map_x_to_idx` reads them).
-    fn prepare_text(&mut self, fs: &mut glyphon::FontSystem, _rect: Rect) {
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
         let (style_family, style_size) = crate::layout::control_label_font_detached_parsed();
         if self.font_size == self.default_font_size {
             self.font_size = style_size;

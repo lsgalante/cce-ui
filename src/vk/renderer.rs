@@ -1422,11 +1422,11 @@ impl VkRenderer {
 
     /// Stage text for the next `draw_frame`: shape-cache misses are rasterized
     /// into the glyph atlas and vertices are built against the current extent.
-    /// Mirrors `glyphon::TextRenderer::prepare`.
+    /// Mirrors what was `glyphon::TextRenderer::prepare`.
     pub fn prepare_text(
         &mut self,
-        font_system: &mut glyphon::FontSystem,
-        swash_cache: &mut glyphon::SwashCache,
+        font_system: &mut cosmic_text::FontSystem,
+        swash_cache: &mut cosmic_text::SwashCache,
         spans: &[TextSpan<'_>],
     ) {
         // Against the extent this frame will actually be drawn at: `resize` is

@@ -6,7 +6,7 @@
 //! 1. **One paint path.** The whole frame — geometry AND text — is built in
 //!    [`Application::display_list`] as prims on a [`PaintCtx`], with
 //!    [`Application::display_list_text`] returning `true`. There is no `view*`/`text_items`
-//!    pair, no app-side `FontSystem`, no glyphon buffers: text is a `Prim::Text` shaped by
+//!    pair, no app-side `FontSystem`, no cosmic-text buffers: text is a `Prim::Text` shaped by
 //!    the engine's shared cache.
 //! 2. **Layout via the scene solver.** The frame is a plain `Arena<LayoutBox>` tree the
 //!    app builds and solves with [`compute_layout`]; widgets get their rects from the

@@ -11,8 +11,15 @@ path = "src/lib.rs"
 raw-window-handle = "0.6"
 glam = "0.29"
 bytemuck = { version = "1", features = ["derive"] }
-glyphon = "0.8"
-# Raw-Vulkan backend (versions match what wgpu 24 already pulls in).
+# Text shaping. This was reached through glyphon until the wgpu path was retired;
+# every `glyphon::` item cce-ui ever used was a cosmic-text re-export (the sole
+# exception, `TextBounds`, is now defined in backend/window_runner.rs), so depending
+# on cosmic-text directly drops glyphon, wgpu and 17 more crates from the build —
+# the rest of wgpu's tree stays only because naga/ash below already pull it.
+# Pinned to the exact version glyphon 0.8 resolved to, so shaping does not change:
+# verified by diffing shaped glyph ids/advances both ways over 288 runs.
+cosmic-text = "=0.12.1"
+# Raw-Vulkan backend (versions match what wgpu 24 already pulled in).
 ash = "0.38"
 gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"] }
 naga = { version = "24", features = ["wgsl-in", "spv-out"] }

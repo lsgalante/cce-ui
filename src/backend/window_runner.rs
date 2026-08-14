@@ -35,10 +35,7 @@ pub use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_to
 pub use smithay_client_toolkit::seat::pointer::CursorIcon as PointerCursorIcon;
 use calloop::EventLoop;
 use calloop_wayland_source::WaylandSource;
-use glyphon::{
-    FontSystem,
-    TextBounds, Buffer, Attrs, Metrics,
-};
+use cosmic_text::{FontSystem, Buffer, Attrs, Metrics};
 use crate::widget::{WidgetHost, TextItem, MouseButton, ElementState, MouseScrollDelta, KeyEvent, Key, NamedKey, Position};
 use crate::wayland::detect_scale_factor;
 use crate::vk::{Batch2D, Frame2D, TextSpan, VkRenderer};
@@ -153,57 +150,57 @@ pub fn get_text_buffer_attrs(
             "monospace" => {
                 if !mono_fallback.is_empty() {
                     if let Some(ref cased) = resolved_storage {
-                        glyphon::Family::Name(cased)
+                        cosmic_text::Family::Name(cased)
                     } else {
-                        glyphon::Family::Name(crate::layout::get_system_monospace_font())
+                        cosmic_text::Family::Name(crate::layout::get_system_monospace_font())
                     }
                 } else {
-                    glyphon::Family::Name(crate::layout::get_system_monospace_font())
+                    cosmic_text::Family::Name(crate::layout::get_system_monospace_font())
                 }
             }
             "sans-serif" => {
                 if !sans_fallback.is_empty() {
                     if let Some(ref cased) = resolved_storage {
-                        glyphon::Family::Name(cased)
+                        cosmic_text::Family::Name(cased)
                     } else {
-                        glyphon::Family::SansSerif
+                        cosmic_text::Family::SansSerif
                     }
                 } else {
-                    glyphon::Family::SansSerif
+                    cosmic_text::Family::SansSerif
                 }
             }
             "serif" => {
                 if !serif_fallback.is_empty() {
                     if let Some(ref cased) = resolved_storage {
-                        glyphon::Family::Name(cased)
+                        cosmic_text::Family::Name(cased)
                     } else {
-                        glyphon::Family::Serif
+                        cosmic_text::Family::Serif
                     }
                 } else {
-                    glyphon::Family::Serif
+                    cosmic_text::Family::Serif
                 }
             }
-            name => glyphon::Family::Name(name),
+            name => cosmic_text::Family::Name(name),
         }
     } else {
         if !sans_fallback.is_empty() {
             if let Some(ref cased) = resolved_sans {
-                glyphon::Family::Name(cased)
+                cosmic_text::Family::Name(cased)
             } else {
-                glyphon::Family::SansSerif
+                cosmic_text::Family::SansSerif
             }
         } else {
-            glyphon::Family::SansSerif
+            cosmic_text::Family::SansSerif
         }
     };
     attrs = attrs.family(family);
     if text_attrs.italic {
-        attrs = attrs.style(glyphon::Style::Italic);
+        attrs = attrs.style(cosmic_text::Style::Italic);
     }
     if let Some(w) = text_attrs.weight {
-        attrs = attrs.weight(glyphon::Weight(w));
+        attrs = attrs.weight(cosmic_text::Weight(w));
     }
-    buf.set_text(fs, text, attrs, glyphon::Shaping::Advanced);
+    buf.set_text(fs, text, attrs, cosmic_text::Shaping::Advanced);
     buf.shape_until_scroll(fs, true);
 
     BUFFER_CACHE.with(|cache| {
@@ -260,9 +257,9 @@ pub fn get_text_buffer_laid_out(
     buf.set_size(fs, layout.wrap_width.map(|w| w * scale), Some(layout.box_height * scale));
 
     let align = match layout.align_h {
-        AlignH::Left => glyphon::cosmic_text::Align::Left,
-        AlignH::Center => glyphon::cosmic_text::Align::Center,
-        AlignH::Right => glyphon::cosmic_text::Align::Right,
+        AlignH::Left => cosmic_text::Align::Left,
+        AlignH::Center => cosmic_text::Align::Center,
+        AlignH::Right => cosmic_text::Align::Right,
     };
     for line in &mut buf.lines {
         line.set_align(Some(align));
@@ -278,6 +275,18 @@ pub fn get_text_buffer_laid_out(
         AlignV::Bottom => (layout.box_height - total_h).max(0.0),
     };
     (buf, voff)
+}
+
+/// A text item's clip rect in physical pixels. This was `glyphon::TextBounds` — the one
+/// glyphon-owned type cce-ui ever used, everything else being a cosmic-text re-export — so
+/// it is defined here now that the dependency is cosmic-text directly. Same plain
+/// four-`i32` layout; it is only an intermediate on the way to `TextSpan::bounds`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TextBounds {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
 }
 
 /// The popover-occlusion clamp shared by the default [`Application::text_areas`] mapping and
@@ -2576,7 +2585,7 @@ pub trait Application: Sized + 'static {
         None
     }
 
-    /// Opt in to render the display list's `Prim::Text` items through the glyphon pass
+    /// Opt in to render the display list's `Prim::Text` items through the glyph pass
     /// (shaped via the shared buffer cache, clipped to the item clip ∩ the prim bounds). An
     /// app's ENTIRE frame — geometry and text — is then one
     /// [`display_list`](Application::display_list). Default `false` draws no text (an app that
@@ -2723,7 +2732,7 @@ pub struct EngineState<A: Application> {
     
     pub renderer: Option<VkRenderer>,
     pub font_system: Option<FontSystem>,
-    pub swash_cache: glyphon::SwashCache,
+    pub swash_cache: cosmic_text::SwashCache,
     
     pub scale_factor: f64,
     /// The buffer scale last sent to the surface. Updated in [`Self::render`],
@@ -2797,7 +2806,7 @@ pub struct EngineState<A: Application> {
     /// runs the off-screen hover-clear (which would otherwise corrupt the
     /// drag: a ramp key snapped to the graph corner).
     pub buttons_down: u32,
-    /// This frame's display-list text, shaped and held here so the glyphon `TextArea`s built
+    /// This frame's display-list text, shaped and held here so the `TextSpan`s built
     /// in the render pass can borrow the buffers (Phase 6 —
     /// [`Application::display_list_text`]).
     pub dl_text_items: Vec<TextItem>,
@@ -2985,7 +2994,7 @@ impl<A: Application> EngineState<A> {
             .unwrap_or_else(|| crate::scene::paint::PaintCtx::new().finish());
 
         // 1a. Phase 6 display-list text: shape the list's Text prims through the shared buffer
-        // cache and hold them for the glyphon pass (the TextAreas built below borrow these).
+        // cache and hold them for the glyph pass (the TextSpans built below borrow these).
         // Clip = the paint walk's item clip ∩ the prim's own bounds, in logical space.
         self.dl_text_items.clear();
         if self.inner.as_ref().unwrap().display_list_text() {
@@ -3008,7 +3017,7 @@ impl<A: Application> EngineState<A> {
                         buffer,
                         x: *x,
                         y: *y + y_off,
-                        color: glyphon::Color::rgba(
+                        color: cosmic_text::Color::rgba(
                             color[0],
                             color[1],
                             color[2],
@@ -4312,7 +4321,7 @@ fn run_session<'l, A: Application>(
         inner: None,
         renderer: None,
         font_system: None,
-        swash_cache: glyphon::SwashCache::new(),
+        swash_cache: cosmic_text::SwashCache::new(),
         scale_factor: 1.0,
         committed_buffer_scale: 1,
         entered_outputs: Vec::new(),

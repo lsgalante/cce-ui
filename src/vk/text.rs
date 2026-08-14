@@ -1,11 +1,11 @@
-//! Text on ash: cosmic-text shaping (reached through glyphon's re-export, so the
-//! shaping behavior and fonts are byte-identical to the wgpu path) + swash
-//! rasterization into a self-managed RGBA glyph atlas, drawn by the glyph.wgsl
-//! pipeline inside the renderer's render pass.
+//! Text on ash: cosmic-text shaping + swash rasterization into a self-managed
+//! RGBA glyph atlas, drawn by the glyph.wgsl pipeline inside the renderer's
+//! render pass. (cosmic-text used to be reached through glyphon's re-export;
+//! the dependency is direct now that the wgpu path is gone, pinned to the same
+//! version, so shaping behavior and fonts are unchanged.)
 //!
-//! `TextSpan` mirrors `glyphon::TextArea` (buffer + position + scale + bounds +
-//! default color) so the eventual cutover from `text_renderer.prepare(...)` is
-//! mechanical.
+//! `TextSpan` mirrors what was `glyphon::TextArea` (buffer + position + scale +
+//! bounds + default color) — the shape the wgpu-era cutover was written against.
 //!
 //! Atlas strategy: shelf packing into a 1024² RGBA8 image with a CPU mirror.
 //! When new glyphs land, the whole mirror is re-uploaded before the next render
@@ -22,8 +22,8 @@ use gpu_allocator::vulkan::{
 };
 use gpu_allocator::MemoryLocation;
 
-use glyphon::cosmic_text::{Buffer as TextBuffer, CacheKey, SwashContent};
-use glyphon::{FontSystem, SwashCache};
+use cosmic_text::{Buffer as TextBuffer, CacheKey, SwashContent};
+use cosmic_text::{FontSystem, SwashCache};
 
 use super::renderer::{create_cpu_buffer, destroy_cpu_buffer, AllocatedBuffer};
 
@@ -32,7 +32,7 @@ const ATLAS_PAD: u32 = 1;
 
 /// One shaped text run to draw. `left`/`top` are physical pixels and `scale`
 /// multiplies the shaped (logical) glyph positions — the same contract as
-/// glyphon::TextArea, where callers pass `label.x * scale`.
+/// the old glyphon::TextArea, where callers pass `label.x * scale`.
 pub struct TextSpan<'a> {
     pub buffer: &'a TextBuffer,
     pub left: f32,
@@ -543,7 +543,7 @@ impl TextStage {
                         continue;
                     }
 
-                    // glyphon's placement formula, physical pixels.
+                    // glyphon's placement formula (kept verbatim), physical pixels.
                     let mut x0 = (physical.x + entry.left) as f32;
                     let mut y0 = (line_y + physical.y - entry.top) as f32;
                     let mut x1 = x0 + entry.w as f32;
