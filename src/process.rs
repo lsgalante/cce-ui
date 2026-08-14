@@ -91,6 +91,13 @@ pub struct CloudPopupTracker {
     active_source: Option<String>,
 }
 
+/// Basename of a `/proc/<pid>/exe` link, with the `" (deleted)"` marker the
+/// kernel appends once the binary has been unlinked stripped off.
+fn exe_basename(exe: &std::path::Path) -> Option<&str> {
+    let name = exe.file_name()?.to_str()?;
+    Some(name.strip_suffix(" (deleted)").unwrap_or(name))
+}
+
 impl CloudPopupTracker {
     pub fn new() -> Self {
         Self::default()
@@ -98,10 +105,22 @@ impl CloudPopupTracker {
 
     /// The tracked popup's pid, if that process is still alive and still a
     /// `cce-cloud` (guards against pid reuse).
+    ///
+    /// Identity comes from the exe link, not `/proc/<pid>/comm`: comm is capped
+    /// at 15 characters, so it silently truncates for over half the cce
+    /// binaries (all three `cce-keyring-unlock*` collapse onto one string).
+    /// `cce-cloud` fits today, which is the only reason a comm comparison
+    /// worked — a rename to anything longer would have quietly made this always
+    /// return `None`, leaving the tracker convinced no popup is ever open.
+    ///
+    /// The exe link needs the `" (deleted)"` suffix stripped: `ccebuild install`
+    /// unlinks before writing, so every popup running across a reinstall reads
+    /// as `cce-cloud (deleted)` — the one case where comm was the more forgiving
+    /// of the two.
     fn running_pid(&self) -> Option<u32> {
         let pid = self.active_pid?;
-        let comm = std::fs::read_to_string(format!("/proc/{}/comm", pid)).ok()?;
-        (comm.trim() == "cce-cloud").then_some(pid)
+        let exe = std::fs::read_link(format!("/proc/{}/exe", pid)).ok()?;
+        (exe_basename(&exe) == Some("cce-cloud")).then_some(pid)
     }
 
     /// Whether the tracked popup is currently running.
@@ -271,6 +290,33 @@ mod tests {
         let cmd = Command::new("true");
         assert!(spawn_tracked(cmd).is_ok());
         cleanup_spawned_processes();
+    }
+
+    #[test]
+    fn exe_basename_strips_the_deleted_marker() {
+        use std::path::Path;
+        assert_eq!(exe_basename(Path::new("/home/u/.local/bin/cce-cloud")), Some("cce-cloud"));
+        // `ccebuild install` unlinks before writing, so a popup that outlives a
+        // reinstall reads like this — still a cce-cloud, and the tracker must
+        // keep recognizing it or it loses the ability to close its own popup.
+        assert_eq!(
+            exe_basename(Path::new("/home/u/.local/bin/cce-cloud (deleted)")),
+            Some("cce-cloud")
+        );
+        assert_eq!(exe_basename(Path::new("/usr/bin/foot")), Some("foot"));
+    }
+
+    #[test]
+    fn running_pid_rejects_a_live_process_that_is_not_cce_cloud() {
+        // The state-machine tests below use pids that are almost certainly
+        // dead, so `running_pid` returns None for want of a process at all.
+        // This one adopts a pid that definitely IS alive — the test runner —
+        // to show the gate is identity, not mere liveness. (Only `is_open` is
+        // called here: it never signals, so the runner is in no danger.)
+        let mut t = CloudPopupTracker::new();
+        assert_eq!(t.click("layout"), CloudPopupClick::Open);
+        t.on_spawned(std::process::id(), "layout");
+        assert!(!t.is_open(), "a live non-cce-cloud pid must not count as an open popup");
     }
 
     // --- CloudPopupTracker state machine ---
