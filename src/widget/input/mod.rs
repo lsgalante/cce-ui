@@ -28,5 +28,6 @@ pub use keybind_recorder::KeybindRecorder;
 pub use ramp::{Ramp, RampKey, ColorRamp, ColorRampKey, format_ramp_spec, parse_ramp_spec};
 pub use bevel_preview::{BevelPreview, bevel_ease, parse_bevel_knobs};
 
-pub const BREADCRUMB_PADDING: f32 = 8.0;
-pub const SEGMENT_GAP: f32 = 4.0;
+// `BREADCRUMB_PADDING` / `SEGMENT_GAP` lived here and had exactly one consumer
+// between them. The breadcrumb owns its own spacing now (`Breadcrumb::SEG_INSET`,
+// `SEG_GAP`), where it sits next to the geometry that has to agree with it.

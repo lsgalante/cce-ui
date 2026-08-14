@@ -7,7 +7,6 @@
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
-use crate::widget::input::BREADCRUMB_PADDING;
 use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint, PathController,
 };
@@ -118,7 +117,7 @@ impl Breadcrumb {
     /// The last segment is always kept.
     fn visible_segs(&self, rect: Rect) -> Vec<VisibleSeg> {
         let all = self.virtual_segs();
-        let avail = (rect.width - 2.0 * BREADCRUMB_PADDING).max(0.0);
+        let avail = (rect.width - 2.0 * Self::SEG_INSET).max(0.0);
 
         let (font, size) = Self::font_and_size();
         let box_w =
@@ -127,7 +126,7 @@ impl Breadcrumb {
         // Lay a list of (text, logical index) out left-to-right from the widget's left edge,
         // one button box per segment.
         let place = |items: Vec<(String, Option<usize>)>| -> Vec<VisibleSeg> {
-            let mut x = rect.x + BREADCRUMB_PADDING;
+            let mut x = rect.x + Self::SEG_INSET;
             items
                 .into_iter()
                 .map(|(text, logical)| {
@@ -186,9 +185,16 @@ impl Breadcrumb {
         None
     }
 
-    /// Vertical margin between the widget's recessed well and the raised
-    /// segment plate inside it.
-    const SEG_INSET_Y: f32 = 3.0;
+    /// Margin between the widget's recessed well and the raised segment plate
+    /// inside it. The SAME on the left, top and bottom, so the plate's rolled
+    /// edge lands against the well's carved one on every side it reaches —
+    /// asymmetric insets read as the plate sitting off-centre in its own well.
+    ///
+    /// The RIGHT is not an inset but a limit: the run ends where its content
+    /// ends, leaving well floor beyond it. `avail` reserves this much there
+    /// too, so a run long enough to be elided stops flush against the bevel on
+    /// that side rather than running under it.
+    const SEG_INSET: f32 = 3.0;
 
     /// Width of a seam's flat floor in px. Zero would meet the two walls in a
     /// perfect V; a hair of floor keeps the crease from aliasing into a dotted
@@ -200,7 +206,7 @@ impl Breadcrumb {
 
     /// The plate band inside the well: (y, height).
     fn plate_band(rect: Rect) -> (f32, f32) {
-        (rect.y + Self::SEG_INSET_Y, (rect.height - 2.0 * Self::SEG_INSET_Y).max(0.0))
+        (rect.y + Self::SEG_INSET, (rect.height - 2.0 * Self::SEG_INSET).max(0.0))
     }
 
     /// The ONE raised plate the whole segment run shares — (x, y, w, h), inset
@@ -497,9 +503,16 @@ mod tests {
         assert_eq!(segs.last().and_then(|s| s.logical), Some(last_logical));
         assert_eq!(segs.last().map(|s| s.text.as_str()), Some("cce-ui"));
 
-        // Everything painted stays within the container's right edge.
+        // The run hugs the well's bevel on the left and never crosses the
+        // mirrored limit on the right — a segment may reach that edge, but it
+        // stops flush against it rather than running under the bevel.
+        assert_eq!(segs[0].x, Breadcrumb::SEG_INSET);
         for s in &segs {
-            assert!(s.x + s.w <= 160.0 + 0.01, "segment {:?} overflows", s.text);
+            assert!(
+                s.x + s.w <= 160.0 - Breadcrumb::SEG_INSET + 0.01,
+                "segment {:?} crosses the right inset",
+                s.text
+            );
         }
 
         // A kept trailing segment still hit-tests to its original logical index, so clicking
