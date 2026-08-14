@@ -557,6 +557,22 @@ impl UiContext {
         }
     }
 
+    /// Drop `id`'s registration. **Apps that rebuild a `Vec` of widgets must call this for the
+    /// outgoing ids**, because `WidgetId`s are globally monotonic (`NEXT_WIDGET_ID.fetch_add`)
+    /// and are never reused: the replacements register under *new* ids, so re-registering does
+    /// not overwrite the old entries. Those keep raw pointers into the freed Vec, and several
+    /// paths walk the whole registry and dereference — `close_popovers_missed_by_press` runs on
+    /// every left press (`backend/window_runner.rs`), and `is_coordinate_covered` falls back to a
+    /// full scan — so a stale entry is a use-after-free, not just a leak.
+    ///
+    /// Apps that call [`clear_hierarchy`](Self::clear_hierarchy) every rebuild do not need this;
+    /// the wipe already drops the outgoing ids.
+    pub fn unregister_widget(&mut self, id: WidgetId) {
+        self.tree.remove(id);
+        self.unregister_tick_receiver(id);
+        self.invalidate_coverage_cache();
+    }
+
     pub fn link_ids(&mut self, parent: WidgetId, child: WidgetId) {
         self.tree.link(parent, child);
     }
