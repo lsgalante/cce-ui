@@ -112,6 +112,23 @@ pub enum Prim {
     /// exactly there). Box radii can only round convex corners; this is the
     /// missing concave piece. SDF path only (no legacy fallback).
     ConcaveFillet { cx: f32, cy: f32, radius: f32, depth: f32, start: f32, raised: bool },
+    /// An engraved line: a groove of half-width `width / 2` running along the
+    /// segment `a`–`b`, cut into whatever is painted beneath. Like [`Prim::Recess`]
+    /// it emits only shading, never a fill — but its shape is a SLAB (a band about
+    /// an arbitrary line) rather than a box, which is what lets it run at an angle.
+    /// A box SDF can only carve axis-aligned walls; this is the diagonal case.
+    ///
+    /// Both walls come from ONE profile evaluation on `|distance to the line|`, so
+    /// the groove carries a single specular/shoulder term — the same reason
+    /// [`Prim::Ridge`] exists instead of stacking a boss on a recess.
+    /// `width` 0 makes the two walls meet in a V.
+    ///
+    /// `depth` is the transition width in px (the wall's run), matching
+    /// [`Prim::Recess`]. `host` is the surface the groove is engraved into: the
+    /// shading fades out across that box's perimeter roll, so a seam cut across a
+    /// plate dies into the plate's own rolled edge instead of ending on a hard line.
+    /// SDF path only — the legacy banded tessellation draws nothing (like `Ridge`).
+    Groove { a: (f32, f32), b: (f32, f32), width: f32, depth: f32, host: Rect },
     /// Text in sRGB u8 (the `TextLabel` convention). `font` is a font string for
     /// `get_text_buffer` (family, or "family:size"); `bounds` is a logical `[l, t, r, b]` clip
     /// for the glyph pass (Phase 6: the backend renders these through the glyph pass when the app
@@ -408,6 +425,19 @@ impl PaintCtx {
     pub fn concave_fillet(&mut self, cx: f32, cy: f32, radius: f32, depth: f32, start: f32, raised: bool) {
         let (ox, oy) = self.offset;
         self.push(Prim::ConcaveFillet { cx: cx + ox, cy: cy + oy, radius, depth, start, raised });
+    }
+
+    /// An engraved line from `a` to `b` cut into `host` — see [`Prim::Groove`].
+    pub fn groove(&mut self, a: (f32, f32), b: (f32, f32), width: f32, depth: f32, host: Rect) {
+        let (ox, oy) = self.offset;
+        let host = self.apply_offset(host);
+        self.push(Prim::Groove {
+            a: (a.0 + ox, a.1 + oy),
+            b: (b.0 + ox, b.1 + oy),
+            width,
+            depth,
+            host,
+        });
     }
 
     pub fn border(&mut self, rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32) {

@@ -16,11 +16,22 @@ use crate::widget::{
 /// the two stay in lockstep.
 const BREADCRUMB_FONT_SIZE: f32 = 12.0;
 
-/// Gap between segment buttons.
-const SEG_GAP: f32 = 6.0;
+/// Gap between segment buttons. Zero: the segments ABUT, and the boundary
+/// between two of them is a single slanted seam (see [`SEG_SLANT`]) rather than
+/// a strip of the well floor showing through.
+const SEG_GAP: f32 = 0.0;
 
-/// Horizontal text inset inside each segment button.
-const SEG_PAD_X: f32 = 8.0;
+/// Lean of a seam, as horizontal run per unit of height — the boundary's top is
+/// this fraction of the plate height to the RIGHT of its bottom, so it reads as
+/// a "/" cut between two segments. 0.36 ≈ 20°, the slope of a "/" glyph in the
+/// mono faces the breadcrumb is set in.
+const SEG_SLANT: f32 = 0.36;
+
+/// Horizontal text inset inside each segment button. Wider than the gapped
+/// layout needed: a seam leans ±`SEG_SLANT * h / 2` about its mid-height, so the
+/// padding has to clear the seam at the plate's top and bottom edges too, not
+/// just beside the text.
+const SEG_PAD_X: f32 = 11.0;
 
 /// A segment as actually laid out for painting/hit-testing: its text, its BUTTON BOX's left
 /// edge and width (text sits `SEG_PAD_X` in), and logical index in
@@ -153,32 +164,77 @@ impl Breadcrumb {
         place(kept)
     }
 
-    fn seg_at(&self, rect: Rect, px: f32) -> Option<usize> {
-        self.visible_segs(rect)
-            .iter()
-            .find(|s| px >= s.x && px < s.x + s.w)
-            .and_then(|s| s.logical)
+    /// The segment under `px` at height `py`. The interior boundaries LEAN
+    /// (see [`SEG_SLANT`]), so the hit zones are parallelograms, not columns —
+    /// testing x alone would put the top-left corner of a segment in its
+    /// neighbor, exactly where the seam is drawn furthest from the nominal edge.
+    fn seg_at(&self, rect: Rect, px: f32, py: f32) -> Option<usize> {
+        let segs = self.visible_segs(rect);
+        let (py0, ph) = Self::plate_band(rect);
+        let mid = py0 + ph * 0.5;
+        // Only interior edges lean; the run's two outer ends stay upright.
+        let lean = |i: usize| -> f32 {
+            if i == 0 || i >= segs.len() { 0.0 } else { SEG_SLANT * (mid - py) }
+        };
+        for (i, s) in segs.iter().enumerate() {
+            let left = s.x + lean(i);
+            let right = s.x + s.w + lean(i + 1);
+            if px >= left && px < right {
+                return s.logical;
+            }
+        }
+        None
     }
 
-    /// Vertical margin between the widget's recessed well and each raised
-    /// segment button inside it.
+    /// Vertical margin between the widget's recessed well and the raised
+    /// segment plate inside it.
     const SEG_INSET_Y: f32 = 3.0;
 
-    /// The per-segment button boxes as laid out for `rect`: (x, y, w, h), inset
-    /// vertically so the raised plates sit within the widget's full-width well.
-    /// For flat-path hosts (cce-files) that mirror the plates app-side — the
+    /// Width of a seam's flat floor in px. Zero would meet the two walls in a
+    /// perfect V; a hair of floor keeps the crease from aliasing into a dotted
+    /// line as the seam's subpixel position drifts with the path text. Public
+    /// because flat-path hosts engrave the seams themselves — see [`seams`].
+    ///
+    /// [`seams`]: Breadcrumb::seams
+    pub const SEAM_WIDTH: f32 = 0.75;
+
+    /// The plate band inside the well: (y, height).
+    fn plate_band(rect: Rect) -> (f32, f32) {
+        (rect.y + Self::SEG_INSET_Y, (rect.height - 2.0 * Self::SEG_INSET_Y).max(0.0))
+    }
+
+    /// The ONE raised plate the whole segment run shares — (x, y, w, h), inset
+    /// vertically inside the widget's well — or `None` when nothing is laid out.
+    ///
+    /// The run is a single plate, not a plate per segment: with the segments
+    /// abutting, per-segment plates would put a boss wall falling and another
+    /// rising within a pixel of each other at every boundary, which stacks two
+    /// lighting evaluations and reads far hotter than one seam (the same reason
+    /// `Prim::Ridge` exists). The divisions are engraved instead — see [`seams`].
+    ///
+    /// For flat-path hosts (cce-files) that mirror the relief app-side — the
     /// render_widget geometry path drops relief prims, same as the dropdown's.
-    pub fn segment_boxes(&self, rect: Rect) -> Vec<(f32, f32, f32, f32)> {
-        self.visible_segs(rect)
-            .iter()
-            .map(|vs| {
-                (
-                    vs.x,
-                    rect.y + Self::SEG_INSET_Y,
-                    vs.w,
-                    (rect.height - 2.0 * Self::SEG_INSET_Y).max(0.0),
-                )
-            })
+    ///
+    /// [`seams`]: Breadcrumb::seams
+    pub fn run_box(&self, rect: Rect) -> Option<(f32, f32, f32, f32)> {
+        let segs = self.visible_segs(rect);
+        let first = segs.first()?;
+        let last = segs.last()?;
+        let (y, h) = Self::plate_band(rect);
+        Some((first.x, y, last.x + last.w - first.x, h))
+    }
+
+    /// The seam between each pair of abutting segments, as (top, bottom) line
+    /// endpoints. Each leans right at the top by [`SEG_SLANT`], so it reads as a
+    /// "/" between the two names. Only interior boundaries appear here — the
+    /// run's outer ends are the plate's own upright edges.
+    pub fn seams(&self, rect: Rect) -> Vec<((f32, f32), (f32, f32))> {
+        let segs = self.visible_segs(rect);
+        let (y, h) = Self::plate_band(rect);
+        let run = SEG_SLANT * h * 0.5;
+        segs.iter()
+            .skip(1)
+            .map(|s| ((s.x + run, y), (s.x - run, y + h)))
             .collect()
     }
 
@@ -207,9 +263,10 @@ impl Paint for Breadcrumb {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // The full-width recessed well defines the bar (as it always did);
-        // each segment is a RAISED button plate within it — the dropdown
-        // pairing (recessed surround + raised face), per-segment.
+        // The full-width recessed well defines the bar (as it always did); the
+        // segment run is ONE raised plate within it — the dropdown pairing
+        // (recessed surround + raised face) — divided into segments by seams
+        // engraved across it at a "/" lean.
         let radius = crate::layout::breadcrumb_corner_radius();
         let relief = crate::layout::control_relief();
         if relief {
@@ -218,18 +275,38 @@ impl Paint for Breadcrumb {
         }
 
         let segs = self.visible_segs(rect);
-        let boxes = self.segment_boxes(rect);
-        for (vs, &(sx, sy, sw, sh)) in segs.iter().zip(boxes.iter()) {
-            let seg_rect = Rect { x: sx, y: sy, width: sw, height: sh };
-            let r = radius.min(sh * 0.5);
+        if let Some((rx, ry, rw, rh)) = self.run_box(rect) {
+            let run_rect = Rect { x: rx, y: ry, width: rw, height: rh };
+            let r = radius.min(rh * 0.5);
             if relief {
-                let seg_depth = crate::layout::bevel_width().min(sh * 0.2);
-                ctx.boss(seg_rect, (r, r, r, r), seg_depth);
+                let depth = crate::layout::bevel_width().min(rh * 0.2);
+                ctx.boss(run_rect, (r, r, r, r), depth);
+                for (a, b) in self.seams(rect) {
+                    ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);
+                }
             } else {
-                ctx.rounded_rect(seg_rect, r, (true, true, true, true), self.bg_color());
+                ctx.rounded_rect(run_rect, r, (true, true, true, true), self.bg_color());
+                for (a, b) in self.seams(rect) {
+                    ctx.vector(a.0, a.1, b.0, b.1, 1.0, [0.0, 0.0, 0.0, 0.25], crate::scene::paint::Cap::Flat);
+                }
             }
-            if vs.logical.is_some() && vs.logical == self.hovered_seg {
-                ctx.quad(seg_rect, [1.0, 1.0, 1.0, 0.06]);
+        }
+        // Hover tint. The segment is a parallelogram but the tint is the
+        // axis-aligned box inset to the seam's furthest lean, so it never
+        // crosses a boundary — a slanted fill would need a primitive of its own
+        // for a 6% wash.
+        if let Some(hovered) = self.hovered_seg {
+            let (hy, hh) = Self::plate_band(rect);
+            let run = SEG_SLANT * hh * 0.5;
+            if let Some(vs) = segs.iter().find(|s| s.logical == Some(hovered)) {
+                let first = segs.first().map(|s| s.x) == Some(vs.x);
+                let last = segs.last().map(|s| s.x + s.w) == Some(vs.x + vs.w);
+                let l = vs.x + if first { 0.0 } else { run };
+                let r = vs.x + vs.w - if last { 0.0 } else { run };
+                ctx.quad(
+                    Rect { x: l, y: hy, width: (r - l).max(0.0), height: hh },
+                    [1.0, 1.0, 1.0, 0.06],
+                );
             }
         }
 
@@ -261,7 +338,7 @@ impl Input for Breadcrumb {
                 self.hovered =
                     *px >= r.x && *px <= r.x + r.width && *py >= r.y && *py <= r.y + r.height;
                 let old = self.hovered_seg;
-                self.hovered_seg = if self.hovered { self.seg_at(r, *px) } else { None };
+                self.hovered_seg = if self.hovered { self.seg_at(r, *px, *py) } else { None };
                 was != self.hovered || old != self.hovered_seg
             }
             Event::MouseLeave => {
@@ -280,7 +357,7 @@ impl Input for Breadcrumb {
                 // Record the segment first: the shared menu's header reads it (via the
                 // `as_any` downcast in `UiContext::handle_right_click`) to title itself with
                 // that segment's path, and "Copy Path" copies it.
-                self.right_clicked_seg = self.seg_at(ectx.rect, *px);
+                self.right_clicked_seg = self.seg_at(ectx.rect, *px, *py);
                 ectx.open_context_menu(*px, *py);
                 true
             }
@@ -288,9 +365,10 @@ impl Input for Breadcrumb {
                 button: MouseButton::Left,
                 state: ElementState::Pressed,
                 x: px,
+                y: py,
                 ..
             } => {
-                if let Some(i) = self.seg_at(ectx.rect, *px) {
+                if let Some(i) = self.seg_at(ectx.rect, *px, *py) {
                     if i < self.path.len() {
                         self.clicked_seg = Some(i);
                         return true;
@@ -427,8 +505,11 @@ mod tests {
         // A kept trailing segment still hit-tests to its original logical index, so clicking
         // it navigates to the correct path.
         let visible_seg = segs.iter().rev().nth(1).unwrap();
-        let hit = breadcrumb
-            .seg_at(Rect { x: 0.0, y: 0.0, width: 160.0, height: 24.0 }, visible_seg.x + 1.0);
+        let hit = breadcrumb.seg_at(
+            Rect { x: 0.0, y: 0.0, width: 160.0, height: 24.0 },
+            visible_seg.x + 6.0,
+            12.0,
+        );
         assert_eq!(hit, visible_seg.logical);
     }
 
@@ -443,6 +524,83 @@ mod tests {
         assert_eq!(segs.len(), 3);
         assert!(segs.iter().all(|s| s.logical.is_some()));
         assert_eq!(segs[0].text, "/");
+    }
+
+    /// The seams lean like "/" — top edge to the RIGHT of the bottom — and there
+    /// is exactly one per interior boundary, sitting on the shared edge at
+    /// mid-height. The run plate spans all of them.
+    #[test]
+    fn seams_lean_right_at_the_top() {
+        let mut breadcrumb = Breadcrumb::new();
+        breadcrumb.set_path(&["home".to_string(), "lsgalante".to_string()]);
+        let rect = Rect { x: 10.0, y: 20.0, width: 300.0, height: 24.0 };
+        breadcrumb.set_rect(rect.x, rect.y, rect.width, rect.height);
+
+        let segs = breadcrumb.visible_segs(rect);
+        let seams = breadcrumb.seams(rect);
+        // Root + two components ⇒ two interior boundaries.
+        assert_eq!(seams.len(), 2);
+        assert_eq!(seams.len(), segs.len() - 1);
+
+        for (i, ((tx, ty), (bx, by))) in seams.iter().enumerate() {
+            assert!(tx > bx, "seam {i} must lean right at the top");
+            assert!(ty < by, "seam {i} top must be above its bottom");
+            // Centered on the boundary it divides.
+            let edge = segs[i + 1].x;
+            assert!(((tx + bx) * 0.5 - edge).abs() < 0.01);
+        }
+
+        // One plate under the lot, spanning first edge to last.
+        let (rx, _, rw, _) = breadcrumb.run_box(rect).expect("run laid out");
+        assert_eq!(rx, segs[0].x);
+        assert!((rx + rw - (segs[2].x + segs[2].w)).abs() < 0.01);
+    }
+
+    /// A point in a segment's top-left corner belongs to the segment on the
+    /// LEFT: the seam has leaned right there, so the boundary is no longer the
+    /// nominal edge. This is what an x-only hit test got wrong.
+    #[test]
+    fn hit_test_follows_the_seam_lean() {
+        let mut breadcrumb = Breadcrumb::new();
+        breadcrumb.set_path(&["home".to_string(), "lsgalante".to_string()]);
+        let rect = Rect { x: 10.0, y: 20.0, width: 300.0, height: 24.0 };
+        breadcrumb.set_rect(rect.x, rect.y, rect.width, rect.height);
+
+        let segs = breadcrumb.visible_segs(rect);
+        let (y, h) = Breadcrumb::plate_band(rect);
+        let edge = segs[1].x; // boundary between "/" and "home"
+        let lean = SEG_SLANT * h * 0.5;
+        assert!(lean > 1.0, "the test needs a lean wide enough to probe");
+
+        // Just right of the nominal edge, at the TOP: still segment 0.
+        assert_eq!(breadcrumb.seg_at(rect, edge + lean * 0.5, y + 0.5), Some(0));
+        // The same x at the BOTTOM, where the seam has leaned left: segment 1.
+        assert_eq!(breadcrumb.seg_at(rect, edge + lean * 0.5, y + h - 0.5), Some(1));
+        // At mid-height the seam sits on the nominal edge.
+        assert_eq!(breadcrumb.seg_at(rect, edge + 0.5, y + h * 0.5), Some(1));
+        assert_eq!(breadcrumb.seg_at(rect, edge - 0.5, y + h * 0.5), Some(0));
+    }
+
+    /// The run's outer ends stay upright — only edges that face another segment
+    /// lean, so the first segment's left edge is a plain vertical boundary.
+    #[test]
+    fn outer_ends_do_not_lean() {
+        let mut breadcrumb = Breadcrumb::new();
+        breadcrumb.set_path(&["home".to_string()]);
+        let rect = Rect { x: 10.0, y: 20.0, width: 300.0, height: 24.0 };
+        breadcrumb.set_rect(rect.x, rect.y, rect.width, rect.height);
+
+        let segs = breadcrumb.visible_segs(rect);
+        let (y, h) = Breadcrumb::plate_band(rect);
+        let left = segs[0].x;
+        let right = segs[1].x + segs[1].w;
+
+        for py in [y + 0.5, y + h * 0.5, y + h - 0.5] {
+            assert_eq!(breadcrumb.seg_at(rect, left + 0.5, py), Some(0));
+            assert_eq!(breadcrumb.seg_at(rect, left - 0.5, py), None);
+            assert_eq!(breadcrumb.seg_at(rect, right - 0.5, py), Some(1));
+            assert_eq!(breadcrumb.seg_at(rect, right + 0.5, py), None);
+        }
     }
 
     #[test]

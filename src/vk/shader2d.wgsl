@@ -371,7 +371,21 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     var fd = d;
     var fgd = gd.xy;
     var wedge = 1.0;
-    if (eff > 5.5) {
+    // Groove (mode 8): a SLAB carve — the band of half-width p_rect.z about the
+    // line through p_rect.xy with unit normal p_radii.xy. Distance is |signed
+    // distance to that line| minus the half-width, so ONE profile evaluation
+    // yields both walls (the gradient flips sign across the centre line, tilting
+    // them apart) and the groove costs a single specular term. The box SDF is
+    // axis-aligned by construction; this is how a mark runs at an angle.
+    // Rejoins the shared free-carve path as a recess (eff = 2).
+    if (eff > 7.5) {
+        let nrm = rrect_clip.p_radii.xy;
+        let c = frag - rrect_clip.p_rect.xy;
+        let s = dot(c, nrm);
+        fd = abs(s) - rrect_clip.p_rect.z;
+        fgd = nrm * select(-1.0, 1.0, s >= 0.0);
+        eff = 2.0;
+    } else if (eff > 5.5) {
         eff = eff - 4.0;
         let c = frag - rrect_clip.p_rect.xy;
         let dist = max(length(c), 1e-4);

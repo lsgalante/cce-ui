@@ -1922,6 +1922,48 @@ pub fn tessellate_display_list(
             // Legacy banded path has no radial wall — the composed corner
             // stays square there (A/B comparison path only).
             Prim::ConcaveFillet { .. } => {}
+            Prim::Groove { a, b, width, depth, host } if shader_plates => {
+                // A slab carve about the line a–b (shader mode 8): the cover
+                // quad is the segment's bounding box grown by the groove's own
+                // half-width plus the wall's reach. Off-band corners of that
+                // box sit at u = 1 (plateau), so the box overhang shades
+                // nothing — the slab is what bounds the mark, not the quad.
+                let m = *width * 0.5 + *depth * 0.5 + 2.0;
+                let (x0, x1) = (a.0.min(b.0) - m, a.0.max(b.0) + m);
+                let (y0, y1) = (a.1.min(b.1) - m, a.1.max(b.1) + m);
+                verts.extend(quad_vertices(x0, y0, x1 - x0, y1 - y0, sw, sh, [0.0; 4]));
+                // Unit normal of the line — the direction the slab's distance is
+                // measured along. A degenerate segment falls back to vertical so
+                // a zero-length groove is a no-op wall rather than a NaN.
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let len = (dx * dx + dy * dy).sqrt();
+                let n = if len > 1e-4 { (-dy / len, dx / len) } else { (1.0, 0.0) };
+                plate = Some(crate::vk::PlatePush {
+                    // Centre + slab half-width in physical px; .w unused.
+                    rect: [
+                        (a.0 + b.0) * 0.5 * scale,
+                        (a.1 + b.1) * 0.5 * scale,
+                        *width * 0.5 * scale,
+                        0.0,
+                    ],
+                    radii: [n.0, n.1, 0.0, 0.0],
+                    light: [plate_light[0], plate_light[1], plate_light[2], *depth * scale],
+                    material: plate_mat,
+                    host: [
+                        (host.x + host.width * 0.5) * scale,
+                        (host.y + host.height * 0.5) * scale,
+                        host.width * 0.5 * scale,
+                        host.height * 0.5 * scale,
+                    ],
+                    specular_tint: [1.0, 1.0, 1.0, 0.0],
+                    mode: 8.0,
+                    shape: crate::layout::corner_shape(),
+                });
+            }
+            // No legacy banded equivalent — the banded tessellators walk box
+            // edges, which is exactly the axis-aligned assumption a groove
+            // exists to escape. Same omission as `Ridge`/`ConcaveFillet`.
+            Prim::Groove { .. } => {}
         }
         let end = verts.len() as u32;
         if end == start {

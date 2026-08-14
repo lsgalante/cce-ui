@@ -64,7 +64,10 @@ pub struct PlatePush {
     /// RGB multiplies the roll's specular color (w unused). Neutral white
     /// normally; the focused-pane bevel carries the highlight color here.
     pub specular_tint: [f32; 4],
-    /// 1.0 = raised lit plate, 2.0 = recess overlay.
+    /// 1.0 = raised lit plate, 2.0 = recess overlay, 3.0 = boss, 4.0 = ridge,
+    /// 5.0 = sphere, 6.0/7.0 = concave fillet (recessed/raised), 8.0 = groove
+    /// (slab carve about a line: `rect` = [cx, cy, half-width, _], `radii.xy` =
+    /// the line's unit normal, `host` = the surface it is engraved into).
     pub mode: f32,
     /// Corner shape exponent: 2.0 = circular arcs, > 2 = superellipse
     /// (continuous-curvature) corners — see shader2d's `plate_sdf_grad`.

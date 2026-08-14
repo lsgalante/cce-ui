@@ -1287,6 +1287,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
                 Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
                     ctx.concave_fillet(cx, cy, radius, depth, start, raised)
                 }
+                Prim::Groove { a, b, width, depth, host } => ctx.groove(a, b, width, depth, host),
                 Prim::Image { image, rect, alpha } => ctx.image(image, rect, alpha),
             }
             if clip_circle.is_some() {
