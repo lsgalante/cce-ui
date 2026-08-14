@@ -3,9 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 > This is the `cce-ui` crate. It lives inside the larger **`cce` Cargo workspace** — read the
-> workspace-root `../CLAUDE.md` first for the multi-repo layout, the standalone-build rule (no
-> `[workspace.dependencies]`), the KDL config system, and the Unix-socket IPC convention. This
-> file covers only what is specific to `cce-ui`.
+> workspace guide `../cce-compositor/WORKSPACE.md` first for the multi-repo layout, the
+> standalone-build rule (no `[workspace.dependencies]`), the KDL config system, and the
+> Unix-socket IPC convention. This file covers only what is specific to `cce-ui`.
 
 ## What this crate is
 
