@@ -58,11 +58,17 @@ pub fn free_image(id: u32) {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+/// Must match `GlyphVertex` field-for-field: both pipelines are fed by the same
+/// glyph shader, whose vertex entry point declares locations 0..=4. Omitting
+/// `clip_extents` here left location 4 with no `VkVertexInputAttributeDescription`,
+/// which the validation layer flags (VUID-VkGraphicsPipelineCreateInfo-Input-07904)
+/// and which reads undefined data without `vertexAttributeRobustness`.
 struct ImageVertex {
     position: [f32; 2],
     uv: [f32; 2],
     color: [f32; 4],
     clip_circle: [f32; 3],
+    clip_extents: [f32; 2],
 }
 
 struct GpuImage {
@@ -160,6 +166,13 @@ impl ImageStage {
                     .binding(0)
                     .format(vk::Format::R32G32B32_SFLOAT)
                     .offset(32),
+                // Location 4 is declared by the shared glyph shader; without this
+                // entry the pipeline is invalid and the attribute reads undefined.
+                vk::VertexInputAttributeDescription::default()
+                    .location(4)
+                    .binding(0)
+                    .format(vk::Format::R32G32_SFLOAT)
+                    .offset(44),
             ];
             let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
                 .vertex_binding_descriptions(&vertex_bindings)
@@ -495,10 +508,14 @@ impl ImageStage {
             let ndc = |px: f32, py: f32| [(px / sw) * 2.0 - 1.0, 1.0 - (py / sh) * 2.0];
             let color = [1.0, 1.0, 1.0, q.alpha];
             let clip_circle = [0.0; 3];
-            let tl = ImageVertex { position: ndc(x, y), uv: [0.0, 0.0], color, clip_circle };
-            let tr = ImageVertex { position: ndc(x + w, y), uv: [1.0, 0.0], color, clip_circle };
-            let bl = ImageVertex { position: ndc(x, y + h), uv: [0.0, 1.0], color, clip_circle };
-            let br = ImageVertex { position: ndc(x + w, y + h), uv: [1.0, 1.0], color, clip_circle };
+            // Zero extents = the shader's plain-circle clip degenerate case. Inert
+            // while clip_circle.z is 0 (the clip branch never runs), but it must be
+            // a defined value, not whatever the missing attribute used to read.
+            let clip_extents = [0.0; 2];
+            let tl = ImageVertex { position: ndc(x, y), uv: [0.0, 0.0], color, clip_circle, clip_extents };
+            let tr = ImageVertex { position: ndc(x + w, y), uv: [1.0, 0.0], color, clip_circle, clip_extents };
+            let bl = ImageVertex { position: ndc(x, y + h), uv: [0.0, 1.0], color, clip_circle, clip_extents };
+            let br = ImageVertex { position: ndc(x + w, y + h), uv: [1.0, 1.0], color, clip_circle, clip_extents };
             verts.extend([tl, tr, bl, tr, br, bl]);
         }
         let bytes: &[u8] = bytemuck::cast_slice(&verts);
