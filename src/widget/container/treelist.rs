@@ -1106,6 +1106,7 @@ impl Input for TreeList {
     /// adapter on commit), and runs the scrollbar activity fade.
     fn tick_ctx(&mut self, dt: f32, ectx: &mut EventCtx) -> bool {
         let host = ectx.host_ptr();
+        let host_id = ectx.id;
         let Some(ui) = ectx.ui.as_deref_mut() else {
             return false;
         };
@@ -1167,6 +1168,17 @@ impl Input for TreeList {
                     }
                 }
                 self.editing_key_idx = None;
+                // Undo the register+link done when editing began (see `mouse_body`). The paint
+                // (`if self.editing_key_idx.is_some()`) and the `set_rect` beside it are both
+                // gated on editing, but the tree link was not — so leaving it attached parked a
+                // 170x24 child at the last-edited row's screen coordinates that kept its stale
+                // rect, kept hit-testing (visible, gates_presses default true) and swallowed the
+                // press before `mouse_body` ever ran: an invisible dead zone that ate row clicks
+                // and silently re-entered editing on an unpainted box. Each rename also minted a
+                // fresh TextBox id into the same field, so the child list grew monotonically.
+                let eb_id = self.edit_box.base().id();
+                ui.unlink_child(host_id, eb_id);
+                ui.unregister_widget(eb_id);
                 if let Some(h) = host { ui.set_focused_ptr(h); }
                 changed = true;
             }
