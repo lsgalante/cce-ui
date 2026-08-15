@@ -1514,6 +1514,21 @@ pub struct DlImage {
 /// which is why `plate_stack` is a stack (see its comment below).
 ///
 /// Off by default and read once; the classification below runs only when set.
+/// Prim discriminant name, for `CCE_PLATE_DEBUG` reporting only.
+fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
+    use crate::scene::paint::Prim as P;
+    match p {
+        P::Quad { .. } => "Quad", P::RoundedRect { .. } => "RoundedRect",
+        P::Border { .. } => "Border", P::Bevel { .. } => "Bevel",
+        P::Recess { .. } => "Recess", P::Boss { .. } => "Boss",
+        P::Ridge { .. } => "Ridge", P::Plate { .. } => "Plate",
+        P::Arc { .. } => "Arc", P::ArcShaded { .. } => "ArcShaded",
+        P::Vector { .. } => "Vector", P::Circle { .. } => "Circle",
+        P::Sphere { .. } => "Sphere", P::ConcaveFillet { .. } => "ConcaveFillet",
+        P::Groove { .. } => "Groove", P::Text { .. } => "Text", P::Image { .. } => "Image",
+    }
+}
+
 fn plate_debug() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("CCE_PLATE_DEBUG").is_ok_and(|v| v != "0"))
@@ -1550,6 +1565,11 @@ pub fn tessellate_display_list(
     let dbg_plates = plate_debug();
     let mut dbg_grouped = 0usize;
     let mut dbg_fell_back: Vec<String> = Vec::new();
+    let mut dbg_opened = 0usize;
+    // Which prim kind closed a still-open grouping window, and how many plates
+    // it closed — the answer to "why was there no enclosing plate?".
+    let mut dbg_closed_by: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
 
     // SDF-lit plate path (shader2d's plate branch) vs the legacy banded vertex
     // shading, plus the frame-constant lighting inputs it pushes per plate.
@@ -2098,6 +2118,9 @@ pub fn tessellate_display_list(
             // Ordinary geometry painted after a plate ends its carve-grouping
             // window: a recess emitted later must overlay this geometry (the
             // fallback path), not shade beneath it inside the plate's draw.
+            if dbg_plates && !plate_stack.is_empty() {
+                *dbg_closed_by.entry(prim_kind(&item.prim)).or_insert(0) += plate_stack.len();
+            }
             plate_stack.clear();
             if let Some(last) = batches.last_mut() {
                 if last.plate.is_none()
@@ -2113,6 +2136,9 @@ pub fn tessellate_display_list(
         batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end, plate, blur_behind });
         if let Some(prect) = made_plate {
             plate_stack.push((batches.len() - 1, prect));
+            if dbg_plates {
+                dbg_opened += 1;
+            }
         }
     }
 
@@ -2121,6 +2147,18 @@ pub fn tessellate_display_list(
             "plate-dbg: {} carves — {dbg_grouped} grouped (exact CSG), {} overlay fallback",
             dbg_grouped + dbg_fell_back.len(),
             dbg_fell_back.len(),
+        );
+        eprintln!(
+            "plate-dbg:   {dbg_opened} grouping window(s) opened by a filled plate; closed early by {}",
+            if dbg_closed_by.is_empty() {
+                "nothing".to_string()
+            } else {
+                dbg_closed_by
+                    .iter()
+                    .map(|(k, n)| format!("{k}x{n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
         );
         for line in &dbg_fell_back {
             eprintln!("plate-dbg: {line}");
