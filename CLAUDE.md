@@ -154,3 +154,21 @@ need no text dependency of their own). Bundled fonts load from `$CCE_FONTS_DIR` 
 System fonts are loaded only when `$CCE_LOAD_SYSTEM_FONTS` is set (or via
 `create_font_system_with_system_fonts()`, used by the font picker). Configured custom font
 families are validated at startup with a warning if missing.
+
+## Debug environment variables
+
+All opt-in, all read once, all quiet when unset — set one and run any client.
+
+- `CCE_PLATE_DEBUG=1` — per frame, how many relief carves grouped into their host plate
+  as exact CSG features vs fell back to standalone overlay shading, and for each fallback
+  **why** (one of six rules: ridge, edge-suppressed, tinted, feature budget, no enclosing
+  plate, host's feature run closed). The two paths shade junctions differently, and three
+  of those rules are dynamic, so this is the answer to "why does this widget's carve look
+  different here?". Note what it reveals: grouping is *rare* — the reference demo groups
+  2 of 10, cce-files 0 of 7, because any ordinary geometry painted after a plate closes
+  its grouping window (correctly — the carve's shading is baked into the plate's earlier
+  draw).
+- `CCE_PRESENT_DEBUG=1` — swapchain present/acquire tracing.
+- `CCE_VK_DEVICE=<substring>` — force a physical device; `CCE_VK_RT=0` disables ray tracing.
+- `CCE_FORCE_SCALE=<f>` — override HiDPI scale detection.
+- `CCE_UI_FAULT_RECONNECT=1` — exercise the Wayland reconnect path.

@@ -1500,6 +1500,25 @@ pub struct DlImage {
 /// logical surface dimensions (as everywhere else); `scale` is the HiDPI factor, needed because an
 /// item's circular clip rides the vertices in PHYSICAL pixels. Consecutive prims sharing a clip are
 /// merged into one batch (the circle clip is per-vertex, so it never splits batches).
+/// `CCE_PLATE_DEBUG=1` — trace which carves group into their host plate as exact
+/// CSG features and which fall back to the standalone overlay shading.
+///
+/// The two paths do NOT look the same: a grouped carve is part of the plate's
+/// single height field, so its wall meets the plate's rolled perimeter as a real
+/// junction, while the fallback approximates that with the host-box fade. Six
+/// conditions decide it, three of them dynamic (draw order, neighbouring plates,
+/// whether another carve already claimed the host's feature run), so the SAME
+/// widget can render either way depending on what is around it — and it does so
+/// silently. That has already shipped as a bug once: a hovered button's opaque
+/// fill used to sever every later button from the backplate they carve into,
+/// which is why `plate_stack` is a stack (see its comment below).
+///
+/// Off by default and read once; the classification below runs only when set.
+fn plate_debug() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CCE_PLATE_DEBUG").is_ok_and(|v| v != "0"))
+}
+
 pub fn tessellate_display_list(
     dl: &crate::scene::paint::DisplayList,
     sw: f32,
@@ -1527,6 +1546,10 @@ pub fn tessellate_display_list(
     // plate may only receive MORE features while no other plate has appended
     // any since.
     let mut last_feature_plate: Option<usize> = None;
+    // `CCE_PLATE_DEBUG` bookkeeping — see `plate_debug`.
+    let dbg_plates = plate_debug();
+    let mut dbg_grouped = 0usize;
+    let mut dbg_fell_back: Vec<String> = Vec::new();
 
     // SDF-lit plate path (shader2d's plate branch) vs the legacy banded vertex
     // shading, plus the frame-constant lighting inputs it pushes per plate.
@@ -1686,6 +1709,58 @@ pub fn tessellate_display_list(
                 } else {
                     None
                 };
+                if dbg_plates {
+                    match host_plate {
+                        Some(_) => dbg_grouped += 1,
+                        None => {
+                            // Re-derive WHY, in the same order the guard tests
+                            // them. Debug-only: the hot path above is untouched.
+                            let kind = match &item.prim {
+                                Prim::Boss { .. } => "boss",
+                                Prim::Ridge { .. } => "ridge",
+                                _ => "recess",
+                            };
+                            let infl = *depth * 0.5 + 2.0;
+                            let (sx0, sy0) = (rect.x - infl, rect.y - infl);
+                            let (sx1, sy1) = (rect.x + rect.width + infl, rect.y + rect.height + infl);
+                            let enclosing: Vec<usize> = plate_stack
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, (_, p))| {
+                                    rect.x >= p.x - 0.5
+                                        && rect.y >= p.y - 0.5
+                                        && rect.x + rect.width <= p.x + p.width + 0.5
+                                        && rect.y + rect.height <= p.y + p.height + 0.5
+                                })
+                                .map(|(si, _)| si)
+                                .collect();
+                            let occluded = |si: usize| {
+                                plate_stack[si + 1..].iter().any(|(_, o)| {
+                                    sx0 < o.x + o.width && sx1 > o.x && sy0 < o.y + o.height && sy1 > o.y
+                                })
+                            };
+                            let why = if mode >= 3.5 {
+                                "ridge — never groups (its bump profile is not a monotonic step)".into()
+                            } else if !full_ring {
+                                format!("edge-suppressed {edges:?} — the extended wall would smear across the host")
+                            } else if tint.is_some() {
+                                "tinted — a CSG feature is geometry only, it carries no color".into()
+                            } else if features.len() >= crate::vk::MAX_PLATE_FEATURES {
+                                format!("feature budget full ({} used)", features.len())
+                            } else if enclosing.is_empty() {
+                                format!("no enclosing plate ({} open)", plate_stack.len())
+                            } else if enclosing.iter().all(|&si| occluded(si)) {
+                                "a later plate overlaps this carve's shaded region".into()
+                            } else {
+                                "host plate's feature run is closed (another carve appended since)".into()
+                            };
+                            dbg_fell_back.push(format!(
+                                "  overlay: {kind} ({:.0},{:.0} {:.0}x{:.0}) — {why}",
+                                rect.x, rect.y, rect.width, rect.height
+                            ));
+                        }
+                    }
+                }
                 if let Some(bi) = host_plate {
                     {
                         // A wall the carve shares with the plate's edge extends
@@ -2038,6 +2113,17 @@ pub fn tessellate_display_list(
         batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end, plate, blur_behind });
         if let Some(prect) = made_plate {
             plate_stack.push((batches.len() - 1, prect));
+        }
+    }
+
+    if dbg_plates && (dbg_grouped > 0 || !dbg_fell_back.is_empty()) {
+        eprintln!(
+            "plate-dbg: {} carves — {dbg_grouped} grouped (exact CSG), {} overlay fallback",
+            dbg_grouped + dbg_fell_back.len(),
+            dbg_fell_back.len(),
+        );
+        for line in &dbg_fell_back {
+            eprintln!("plate-dbg: {line}");
         }
     }
 
