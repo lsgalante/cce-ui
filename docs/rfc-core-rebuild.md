@@ -50,7 +50,7 @@ methods spanning layout, paint, hit-testing, clipboard, tree expand/collapse, an
   long-lived, geometry is re-emitted each frame into one shared vertex buffer and one shader
   pipeline. We are not throwing this out.
 - **The primitive tessellators** (rounded rects with per-corner radii, vectors with caps,
-  arcs, circles, bevels) are solid and reusable as-is.
+  arcs, circles, relief primitives) are solid and reusable as-is.
 
 ---
 

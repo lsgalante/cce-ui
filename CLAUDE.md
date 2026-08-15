@@ -22,7 +22,9 @@ set outright.
   The wgpu path is retired; cosmic-text used to be reached through **glyphon**, which is gone
   too — every `glyphon::` item used here was a cosmic-text re-export, and dropping it takes
   wgpu out of the build. There is no HTML/DOM — the UI is GPU primitives (quads, rounded rects with
-  per-corner radii, vectors with caps, arcs, circles, bevels). Tessellators live in
+  per-corner radii, vectors with caps, arcs, circles, and the **relief primitives** — the
+  lit-surface family: bevels, plates, recesses, bosses, ridges, fillets, grooves; see the
+  `Prim` enum doc in `src/scene/paint.rs`). Tessellators live in
   `backend/window_runner.rs` and are re-exported through `src/engine.rs`.
 - It is **both a library and a binary.** `src/lib.rs` is the toolkit; `src/main.rs` is
   `DemoApp`, the reference `Application` — a small widget gallery on the Phase 6 target

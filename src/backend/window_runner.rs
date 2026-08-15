@@ -1065,7 +1065,7 @@ const DARK_GAIN: f32 = 3.0;
 
 /// A shading value (already scaled by `bevel_depth`) as the two overlay passes: the lit
 /// pass is translucent white, the shadow pass translucent black. Painting the
-/// *modulation* instead of a resolved surface color is what lets bevels compose — a step
+/// *modulation* instead of a resolved surface color is what lets relief primitives compose — a step
 /// crossing a rim shades the rim's gradient instead of stamping a flat band over it, a
 /// lip on a translucent plate no longer doubles its opacity, and a recess needs no
 /// knowledge of the surface color it carves.
@@ -1299,7 +1299,7 @@ const FACE_RATIO: f32 = 0.35;
 /// under directional light is never uniform, and a perfectly flat fill makes the eye
 /// read the (much smaller) edge shading as frame decoration rather than shape.
 ///
-/// Emitted as the same two-pass white/black overlays as the bevels (see
+/// Emitted as the same two-pass white/black overlays as the relief primitives (see
 /// [`overlay_light`]/[`overlay_dark`]): fixed RGB per pass, per-corner alphas clamped at
 /// the terminator, bilinear across the quad. The quad is square — its corners poke past
 /// a rounded plate's arcs — but the compositor clips the window surface to the same

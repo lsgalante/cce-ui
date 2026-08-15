@@ -330,7 +330,7 @@ impl Toggle {
     }
 
     /// A rocker face's UNIFORM lighting overlay, evaluated under the SAME DE
-    /// light the bevels answer to: `light_source_position` through the plate
+    /// light the relief primitives answer to: `light_source_position` through the plate
     /// model (shader2d's `plate_shade` — ambient floor, diffuse off the
     /// normal, expressed relative to the flat face). The rocker reads as a
     /// bent plate: the state half tilts OUT toward the viewer, the other IN,

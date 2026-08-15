@@ -1587,9 +1587,11 @@ pub fn corner_span_factor() -> f32 {
     }
 }
 
-/// Whether plates/bevels/recesses render through shader2d's per-pixel SDF-lit
-/// plate branch (the default) or the legacy banded vertex shading. `bevel_shader 0`
-/// in config flips back to the old look for A/B comparison.
+/// Whether the relief primitives (see `scene::paint::Prim`) render through
+/// shader2d's per-pixel SDF-lit branch (the default) or the legacy banded vertex
+/// shading. `bevel_shader 0` in config flips back to the old look for A/B
+/// comparison — the key keeps the bevel name because it selects how the shared
+/// lit EDGE is computed, not which shapes exist.
 pub fn bevel_shader() -> bool {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("bevel_shader").map(|v| v != 0.0).unwrap_or(true)

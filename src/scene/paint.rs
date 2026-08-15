@@ -33,6 +33,30 @@ pub enum Cap {
 /// `CornerRadii` order.
 pub type Radii = (f32, f32, f32, f32);
 
+/// The **relief primitives** are the members of this enum that describe a lit
+/// surface rather than a flat fill: [`Prim::Bevel`], [`Prim::Plate`],
+/// [`Prim::Recess`], [`Prim::Boss`], [`Prim::Ridge`], [`Prim::ConcaveFillet`],
+/// [`Prim::Groove`] and [`Prim::Sphere`]. They share one lighting model — the
+/// DE's light vector, roll width and profile, per-pixel through shader2d's
+/// SDF branch (see `crate::layout::bevel_shader`) — and split in two:
+///
+/// - **plates** carry their own fill: `Bevel`, `Plate`. Shader mode 1.
+/// - **carves** emit shading ONLY, no fill, over whatever is already painted
+///   beneath: `Recess`, `Boss`, `Ridge`, `ConcaveFillet`, `Groove`. Modes 2-4
+///   and 6-8. (`Sphere`, mode 5, is neither — a lit ball under the same model.)
+///
+/// That split is load-bearing for flat-path hosts, which need one list for the
+/// faces and another for the edges drawn over them (cce-files' `rects` vs
+/// `reliefs`).
+///
+/// Call the family **relief primitives**, not "bevel primitives": `Bevel` is one
+/// specific member — a filled rounded rect plus a lit roll on its lip — and a
+/// groove, a fillet or a sphere is not a bevel in any sense. "Relief" is also
+/// what the rest of the stack already says: `layout::control_relief` gates the
+/// whole family, and the config node is `relief`. The name **bevel** is reserved
+/// for two things: the `Bevel` prim, and the shared *edge treatment* every
+/// relief primitive is shaded with (`bevel_width`, `bevel_depth`,
+/// `bevel_shader`, `bevel_profile` — the lit roll, not the shape).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prim {
     Quad { rect: Rect, color: [f32; 4] },

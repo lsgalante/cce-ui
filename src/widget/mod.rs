@@ -371,7 +371,7 @@ pub trait WidgetHost {
     /// Emit this widget's OWN primitives (non-recursive) into the single paint pass (Phase 3).
     /// The default composes the pieces the legacy recursive `all_*` emit for one node: rounded
     /// background, plain/decoration quads, circles, and own text. Widgets with richer painting
-    /// (borders, bevels, arcs, vectors, SVGs) can override. Recursion into children and clipping
+    /// (borders, relief primitives, arcs, vectors, SVGs) can override. Recursion into children and clipping
     /// are handled by the paint walk (`scene::painter`), not here.
     fn paint_self(&self, ui: &UiContext, ctx: &mut crate::scene::paint::PaintCtx) {
         use crate::scene::layout::Rect;
