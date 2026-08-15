@@ -1258,37 +1258,16 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
             if let Some(c) = clip_circle {
                 ctx.push_clip_circle(c);
             }
-            match item.prim {
-                Prim::Text { text, x, y, font_size, color, font, bounds, .. } if subtree => {
-                    ctx.text_with(text, x, y, font_size, color, font, bounds)
+            // `replay` emits every prim but Text and hands Text back — the two
+            // callers disagree about it. A subtree painter authored its own text
+            // (per-child fonts and clips) so that passes through verbatim;
+            // otherwise it is dropped in favour of the own-labels bridge below.
+            if let Some(Prim::Text { text, x, y, font_size, color, font, bounds, .. }) =
+                ctx.replay(item.prim)
+            {
+                if subtree {
+                    ctx.text_with(text, x, y, font_size, color, font, bounds);
                 }
-                Prim::Text { .. } => {}
-                Prim::Quad { rect, color } => ctx.quad(rect, color),
-                Prim::RoundedRect { rect, radius, corners, color } => ctx.rounded_rect(rect, radius, corners, color),
-                Prim::Border { rect, radii, fill, border, thickness } => ctx.border(rect, radii, fill, border, thickness),
-                Prim::Bevel { rect, radii, color, depth, tint } => ctx.bevel_tinted(rect, radii, color, depth, tint),
-                Prim::Recess { rect, radii, depth, edges, tint } => match tint {
-                    Some(t) => ctx.recess_tinted(rect, radii, depth, t),
-                    None => ctx.recess_edges(rect, radii, depth, edges),
-                },
-                Prim::Boss { rect, radii, depth, edges, tint } => match tint {
-                    Some(t) => ctx.boss_edges_tinted(rect, radii, depth, edges, t),
-                    None => ctx.boss_edges(rect, radii, depth, edges),
-                },
-                Prim::Ridge { rect, radii, depth, edges } => ctx.ridge_edges(rect, radii, depth, edges),
-                Prim::Plate { rect, radii, color, depth } => ctx.plate(rect, radii, color, depth),
-                Prim::Arc { cx, cy, radius, thickness, start, end, color } => ctx.arc(cx, cy, radius, thickness, start, end, color),
-                Prim::ArcShaded { cx, cy, radius, thickness, start, end, inner, crest, outer } => {
-                    ctx.arc_shaded(cx, cy, radius, thickness, start, end, inner, crest, outer)
-                }
-                Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => ctx.vector(x1, y1, x2, y2, thickness, color, cap),
-                Prim::Circle { cx, cy, radius, color } => ctx.circle(cx, cy, radius, color),
-                Prim::Sphere { cx, cy, radius, color } => ctx.sphere(cx, cy, radius, color),
-                Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
-                    ctx.concave_fillet(cx, cy, radius, depth, start, raised)
-                }
-                Prim::Groove { a, b, width, depth, host } => ctx.groove(a, b, width, depth, host),
-                Prim::Image { image, rect, alpha } => ctx.image(image, rect, alpha),
             }
             if clip_circle.is_some() {
                 ctx.pop_clip_circle();

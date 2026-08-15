@@ -451,6 +451,62 @@ impl PaintCtx {
         self.push(Prim::ConcaveFillet { cx: cx + ox, cy: cy + oy, radius, depth, start, raised });
     }
 
+    /// Re-emit an already-built [`Prim`] through this context, so it re-records the
+    /// current clip and translate state. This is the **single** place that has to
+    /// learn a new `Prim` variant: a nested paint walk builds a scratch list and
+    /// replays it into the real one, and that forwarding match used to exist
+    /// verbatim in two crates ([`crate::widget::model`] and cce-cloud's
+    /// `json_layout`) — adding `Prim::Groove` compiled against one and broke the
+    /// other, caught only by a full workspace build.
+    ///
+    /// [`Prim::Text`] is NOT emitted: it is returned untouched, because the two
+    /// callers disagree about it (a subtree painter authors its own text and wants
+    /// it forwarded; everyone else drops it in favour of the widget's own label
+    /// bridge). Every other variant is emitted and `None` comes back.
+    #[must_use = "a returned Text prim was not emitted — drop or forward it explicitly"]
+    pub fn replay(&mut self, prim: Prim) -> Option<Prim> {
+        match prim {
+            Prim::Text { .. } => return Some(prim),
+            Prim::Quad { rect, color } => self.quad(rect, color),
+            Prim::RoundedRect { rect, radius, corners, color } => {
+                self.rounded_rect(rect, radius, corners, color)
+            }
+            Prim::Border { rect, radii, fill, border, thickness } => {
+                self.border(rect, radii, fill, border, thickness)
+            }
+            Prim::Bevel { rect, radii, color, depth, tint } => {
+                self.bevel_tinted(rect, radii, color, depth, tint)
+            }
+            Prim::Recess { rect, radii, depth, edges, tint } => match tint {
+                Some(t) => self.recess_tinted(rect, radii, depth, t),
+                None => self.recess_edges(rect, radii, depth, edges),
+            },
+            Prim::Boss { rect, radii, depth, edges, tint } => match tint {
+                Some(t) => self.boss_edges_tinted(rect, radii, depth, edges, t),
+                None => self.boss_edges(rect, radii, depth, edges),
+            },
+            Prim::Ridge { rect, radii, depth, edges } => self.ridge_edges(rect, radii, depth, edges),
+            Prim::Plate { rect, radii, color, depth } => self.plate(rect, radii, color, depth),
+            Prim::Arc { cx, cy, radius, thickness, start, end, color } => {
+                self.arc(cx, cy, radius, thickness, start, end, color)
+            }
+            Prim::ArcShaded { cx, cy, radius, thickness, start, end, inner, crest, outer } => {
+                self.arc_shaded(cx, cy, radius, thickness, start, end, inner, crest, outer)
+            }
+            Prim::Vector { x1, y1, x2, y2, thickness, color, cap } => {
+                self.vector(x1, y1, x2, y2, thickness, color, cap)
+            }
+            Prim::Circle { cx, cy, radius, color } => self.circle(cx, cy, radius, color),
+            Prim::Sphere { cx, cy, radius, color } => self.sphere(cx, cy, radius, color),
+            Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
+                self.concave_fillet(cx, cy, radius, depth, start, raised)
+            }
+            Prim::Groove { a, b, width, depth, host } => self.groove(a, b, width, depth, host),
+            Prim::Image { image, rect, alpha } => self.image(image, rect, alpha),
+        }
+        None
+    }
+
     /// An engraved line from `a` to `b` cut into `host` — see [`Prim::Groove`].
     pub fn groove(&mut self, a: (f32, f32), b: (f32, f32), width: f32, depth: f32, host: Rect) {
         let (ox, oy) = self.offset;

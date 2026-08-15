@@ -1960,10 +1960,50 @@ pub fn tessellate_display_list(
                     shape: crate::layout::corner_shape(),
                 });
             }
-            // No legacy banded equivalent — the banded tessellators walk box
-            // edges, which is exactly the axis-aligned assumption a groove
-            // exists to escape. Same omission as `Ridge`/`ConcaveFillet`.
-            Prim::Groove { .. } => {}
+            Prim::Groove { a, b, width, depth, host: _ } => {
+                // Legacy approximation. The banded tessellators walk BOX edges —
+                // exactly the axis-aligned assumption a groove exists to escape —
+                // so the walls are drawn directly as two feathered lines meeting
+                // at the centerline: the engraved-line fake, one half in shadow
+                // and one lit. Coarser than the SDF (no profile curve, no host
+                // fade), but this path exists for A/B comparison, and drawing
+                // NOTHING would silently delete the mark rather than degrade it
+                // — see `Prim::Ridge` above, which accepts a hot crest for the
+                // same reason.
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let len = (dx * dx + dy * dy).sqrt();
+                if len < 0.001 {
+                    continue;
+                }
+                let n = (-dy / len, dx / len);
+                // Same convention as `push_bevel_edge_vertices_banded`: the
+                // light folded through `light_sign` (-1.0 — a groove is a
+                // carve), dotted with each wall's OUTWARD normal, amplitude on
+                // `bevel_depth`. So a groove re-lights with the DE's light
+                // instead of hardcoding which side is dark.
+                let rad = crate::layout::light_source_position();
+                let (lx, ly) = (-rad.cos(), rad.sin());
+                let v = crate::layout::bevel_depth() * (n.0 * lx + n.1 * ly);
+                // Each wall covers its own half, centreline to outer edge —
+                // abutting rather than overlapping. The SDF gets away with
+                // walls that overlap across a sub-pixel floor because it is one
+                // evaluation of |distance|; two opposite-signed overlays would
+                // just blend to mud.
+                let half = (*width * 0.5 + *depth * 0.5).max(0.5);
+                for side in [1.0f32, -1.0] {
+                    let sv = v * side;
+                    let c = if sv >= 0.0 { overlay_light(sv) } else { overlay_dark(sv) };
+                    if c[3] <= 0.0 {
+                        continue;
+                    }
+                    let off = side * half * 0.5;
+                    push_feathered_line_vertices(
+                        a.0 + n.0 * off, a.1 + n.1 * off,
+                        b.0 + n.0 * off, b.1 + n.1 * off,
+                        half, sw, sh, c, &mut verts,
+                    );
+                }
+            }
         }
         let end = verts.len() as u32;
         if end == start {
