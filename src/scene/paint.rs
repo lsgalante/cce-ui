@@ -108,6 +108,25 @@ pub enum Prim {
     /// a Boss plus an inset Recess stacks two shading passes (double specular /
     /// shoulder terms at the crest) and reads far hotter than a plate edge.
     Ridge { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
+    /// The sunken twin of [`Prim::Ridge`]: a VALLEY riding the rect's boundary —
+    /// a bump profile straddling the outline (span ±depth/2), falling from the
+    /// surrounding surface to a trough on the boundary and rising back to the
+    /// same level inside, so both faces sit at the underlying surface's own
+    /// level. This is the seam a flush inset control leaves ([`PaintCtx::inset_plate`]).
+    ///
+    /// Same reason to exist as `Ridge`, measured: building this from a `Recess`
+    /// on an outset rect plus a `Boss` on the rect (what `inset_plate` used to
+    /// emit) stacks two independent shading passes. At depth 4.8 that read as a
+    /// band 15px wide instead of 8 with THREE lobes — bright, dark, brighter —
+    /// because the recess ring's own lit rim lands ~depth outside the control
+    /// instead of merging into one wall, and the highlight peaked 22% hotter
+    /// than a single evaluation of the same depth. It looked like two concentric
+    /// rings, which is what it was.
+    ///
+    /// `edges` and the host-box fade behave exactly as [`Prim::Recess`]'s.
+    /// SDF path only; the legacy banded tessellation approximates it with the
+    /// old two-step stack (like `Ridge`, which approximates itself there).
+    Trough { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
     /// The window's glass slab: a rounded fill plus a rolled, lit edge around its whole
     /// perimeter, drawn at full size. Distinct from `Bevel`, which insets its fill by
     /// `depth` — a plate must fill the window exactly, or the compositor's rounded window
@@ -486,6 +505,7 @@ impl PaintCtx {
                 None => self.boss_edges(rect, radii, depth, edges),
             },
             Prim::Ridge { rect, radii, depth, edges } => self.ridge_edges(rect, radii, depth, edges),
+            Prim::Trough { rect, radii, depth, edges } => self.trough_edges(rect, radii, depth, edges),
             Prim::Plate { rect, radii, color, depth } => self.plate(rect, radii, color, depth),
             Prim::Arc { cx, cy, radius, thickness, start, end, color } => {
                 self.arc(cx, cy, radius, thickness, start, end, color)
@@ -584,29 +604,54 @@ impl PaintCtx {
     }
 
     /// A flush inset control: `rect`'s plate sits SUNKEN into the surface with
-    /// its face level with it — a groove ring carved around the control (the
-    /// outward wall steps down) and the control's own beveled lip rising back
-    /// up inside. Two opposite-facing bevels; the face never leaves the
-    /// surface plane. An opaque `color` fills the face (Bevel); transparent
-    /// degrades to edges-only (Boss), the surface below showing through as
-    /// the face. `depth` is the roll width of both walls; the ring is
-    /// expanded by depth/2, so the descending wall meets the rising lip in a
-    /// tight V-groove with no flat floor between them.
+    /// its face level with it — a valley seam runs the boundary, the surface
+    /// falling into it on the way out and the control's own face rising back
+    /// out of it inside. The face never leaves the surface plane; the seam is
+    /// the only thing saying it is a separate part. `depth` is the full width
+    /// of that valley, which straddles the boundary by ±depth/2.
+    ///
+    /// One [`Prim::Trough`] — ONE lighting evaluation. This used to emit a
+    /// `Recess` on a rect outset by depth/2 plus a `Boss` on the rect, whose
+    /// walls overlapped over half their width and shaded twice; see
+    /// `Prim::Trough` for what that measured as. Do not re-expand this into its
+    /// parts.
+    ///
+    /// An opaque `color` fills the face; transparent leaves the surface below
+    /// showing through as the face.
     pub fn inset_plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
-        let g = depth * 0.5;
-        let outer = Rect {
-            x: rect.x - g,
-            y: rect.y - g,
-            width: rect.width + 2.0 * g,
-            height: rect.height + 2.0 * g,
-        };
-        let (r1, r2, r3, r4) = radii;
-        self.recess(outer, (r1 + g, r2 + g, r3 + g, r4 + g), depth);
         if color[3] > 0.001 {
-            self.bevel(rect, radii, color, depth);
-        } else {
-            self.boss(rect, radii, depth);
+            // Flat fill only — the relief is the trough's, so the face must not
+            // carry a lip of its own (that lip WAS the second wall).
+            //
+            // Deliberately a zero-stroke `Border` and NOT `rounded_rect`: this
+            // fill used to be a `Bevel`, and the legacy reverse bridges
+            // (`all_rounded_quads` and friends in `widget/model.rs`) extract
+            // `Prim::RoundedRect` but neither `Bevel` nor `Border`. Emitting a
+            // RoundedRect here would newly leak every raised control's face into
+            // those getters — a change to the legacy surface that has nothing to
+            // do with the relief. Border also keeps all four radii, which
+            // `Prim::RoundedRect`'s single radius cannot.
+            self.border(rect, radii, color, [0.0; 4], 0.0);
         }
+        self.trough(rect, radii, depth);
+    }
+
+    /// Sink a valley along `rect`'s boundary — see [`Prim::Trough`]. `depth` is
+    /// the full width of the seam (it straddles the outline by ±depth/2).
+    pub fn trough(&mut self, rect: Rect, radii: Radii, depth: f32) {
+        self.trough_edges(rect, radii, depth, (true, true, true, true));
+    }
+
+    /// [`PaintCtx::trough`] with only some of the walls — see [`Prim::Trough`].
+    pub fn trough_edges(
+        &mut self,
+        rect: Rect,
+        radii: Radii,
+        depth: f32,
+        edges: (bool, bool, bool, bool),
+    ) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Trough { rect, radii, depth, edges });
     }
 
     /// Raise a rim along `rect`'s boundary — see `Prim::Ridge`. `depth` is the

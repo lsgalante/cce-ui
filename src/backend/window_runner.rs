@@ -1521,7 +1521,7 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Quad { .. } => "Quad", P::RoundedRect { .. } => "RoundedRect",
         P::Border { .. } => "Border", P::Bevel { .. } => "Bevel",
         P::Recess { .. } => "Recess", P::Boss { .. } => "Boss",
-        P::Ridge { .. } => "Ridge", P::Plate { .. } => "Plate",
+        P::Ridge { .. } => "Ridge", P::Trough { .. } => "Trough", P::Plate { .. } => "Plate",
         P::Arc { .. } => "Arc", P::ArcShaded { .. } => "ArcShaded",
         P::Vector { .. } => "Vector", P::Circle { .. } => "Circle",
         P::Sphere { .. } => "Sphere", P::ConcaveFillet { .. } => "ConcaveFillet",
@@ -1660,6 +1660,7 @@ pub fn tessellate_display_list(
             Prim::Recess { rect, radii, depth, edges, .. }
             | Prim::Boss { rect, radii, depth, edges, .. }
             | Prim::Ridge { rect, radii, depth, edges }
+            | Prim::Trough { rect, radii, depth, edges }
                 if shader_plates =>
             {
                 let tint = match &item.prim {
@@ -1669,11 +1670,13 @@ pub fn tessellate_display_list(
                 };
                 // Recess carves down into the surface; Boss raises a plateau out
                 // of it (same machinery, depth sign flipped); Ridge is a raised
-                // rim straddling the boundary (its own overlay profile — never
-                // grouped, the CSG features only model monotonic steps).
+                // rim straddling the boundary and Trough the sunken valley twin
+                // (their own overlay profiles — never grouped, the CSG features
+                // only model monotonic steps).
                 let mode = match &item.prim {
                     Prim::Boss { .. } => 3.0f32,
                     Prim::Ridge { .. } => 4.0,
+                    Prim::Trough { .. } => 9.0,
                     _ => 2.0,
                 };
                 let raised = mode > 2.5;
@@ -1738,6 +1741,7 @@ pub fn tessellate_display_list(
                             let kind = match &item.prim {
                                 Prim::Boss { .. } => "boss",
                                 Prim::Ridge { .. } => "ridge",
+                                Prim::Trough { .. } => "trough",
                                 _ => "recess",
                             };
                             let infl = *depth * 0.5 + 2.0;
@@ -1939,6 +1943,27 @@ pub fn tessellate_display_list(
                     rect.width - *depth, rect.height - *depth,
                     (ir, ir, ir, ir), half,
                     sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(half), *edges,
+                    EdgeKind::Step, &mut verts,
+                );
+            }
+            Prim::Trough { rect, radii, depth, edges } => {
+                // Legacy approximation, the Ridge arm's two steps with the light
+                // signs swapped: down at the boundary, back up half a width in.
+                // The banded machinery has no valley profile, so this is the old
+                // stacked look — accepted here, as the legacy path exists only
+                // for A/B comparison against the SDF one.
+                let half = *depth * 0.5;
+                push_bevel_edge_vertices_banded(
+                    rect.x, rect.y, rect.width, rect.height, *radii, half,
+                    sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(half), *edges,
+                    EdgeKind::Step, &mut verts,
+                );
+                let ir = (radii.0 - half).max(0.0);
+                push_bevel_edge_vertices_banded(
+                    rect.x + half, rect.y + half,
+                    rect.width - *depth, rect.height - *depth,
+                    (ir, ir, ir, ir), half,
+                    sw, sh, [0.0; 4], no, 1.0, default_bevel_bands(half), *edges,
                     EdgeKind::Step, &mut verts,
                 );
             }

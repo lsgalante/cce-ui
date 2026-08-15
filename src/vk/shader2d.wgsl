@@ -128,6 +128,7 @@ const MODE_SPHERE: i32 = 5;       // hemisphere-lit disc
 const MODE_FILLET_DOWN: i32 = 6;  // concave inside-corner wall, recessed
 const MODE_FILLET_UP: i32 = 7;    // concave inside-corner wall, raised
 const MODE_GROOVE: i32 = 8;       // slab carve about an arbitrary line
+const MODE_TROUGH: i32 = 9;       // sunken valley straddling the boundary
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -375,7 +376,9 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // the same wall with the height sign flipped. MODE_RIDGE is a
     // raised bump straddling the boundary, both sides at the base level — ONE
     // profile evaluation, so its crest carries a single specular/shoulder term
-    // instead of a boss+recess double-stack.
+    // instead of a boss+recess double-stack. MODE_TROUGH is that bump inverted
+    // (a valley), for the same reason: it replaced the recess-ring+boss stack
+    // `inset_plate` used to emit for every flush control in the DE.
     // All profiles straddle the boundary (span [-t/2, t/2]). Darkening is exact
     // multiplicative shading (black at alpha 1 - shade); brightening is a
     // translucent white screen.
@@ -419,18 +422,25 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let u = clamp(fd / t + 0.5, 0.0, 1.0);
     var slope = 0.0;
     var curv = 0.0;
-    if (eff == MODE_RIDGE) {
+    if (eff == MODE_RIDGE || eff == MODE_TROUGH) {
         // Ridge bump: the carve profile mirrored about the boundary (rising
         // outer half, falling inner half), amplitude halved so the wall tilt
-        // matches a step's despite the doubled profile rate.
+        // matches a step's despite the doubled profile rate. MODE_TROUGH is the
+        // same profile inverted — falling outer half, rising inner half — the
+        // valley a flush inset control leaves. Sharing this branch is the point:
+        // both get ONE evaluation, so neither can drift into the two-pass
+        // double-shading the stacked form had.
         let w = clamp(select(2.0 * u, 2.0 - 2.0 * u, u > 0.5), 0.0, 1.0);
-        let rising = select(-1.0, 1.0, u <= 0.5);
+        let up = select(-1.0, 1.0, eff == MODE_RIDGE);
+        let rising = select(-1.0, 1.0, u <= 0.5) * up;
         slope = rising * 0.5 * RECESS_DEPTH * 2.0 * carve_slope(w);
         // Each half-wall is a boss wall: concave fillet at its base, convex
         // shoulder toward the crest — and ZERO at the plateaus and crest, so
         // flat ground composites to exactly nothing (a constant term here
-        // tints the whole cover quad).
-        curv = -rrect_clip.p_mat.w * sin(w * TAU);
+        // tints the whole cover quad). A trough's curvature flips with it: the
+        // convex shoulders sit at the plateau lips, the concave fillet at the
+        // floor.
+        curv = -up * rrect_clip.p_mat.w * sin(w * TAU);
     } else {
         let dir = select(-1.0, 1.0, eff == MODE_BOSS);
         // The profile slope is carve_slope's family: smoothstep-derived
