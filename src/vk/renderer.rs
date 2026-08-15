@@ -42,6 +42,34 @@ pub struct Batch2D {
     pub blur_behind: bool,
 }
 
+/// Floats in the fragment push-constant block: the rounded-rect clip (`rect0`,
+/// `rect1` — 6 clip/flag floats plus the plate mode and corner shape) followed
+/// by [`PlatePush`]'s six vec4s. Field for field, this is shader2d's `RRectClip`.
+pub(crate) const PUSH_CONSTANT_FLOATS: usize = 32;
+
+/// The block in bytes. **This is exactly `maxPushConstantsSize`'s
+/// Vulkan-guaranteed minimum, so the budget is full** — every one of the 32
+/// slots is written. That is why a new SDF mode reinterprets existing fields per
+/// mode (5 reads `p_rect` as centre + radius, 6/7 as centre + radius + wedge
+/// angle, 8 as centre + half-width with `p_radii.xy` a normal) instead of adding
+/// one: there is nothing left to add.
+///
+/// A block over 128 bytes is not portable by construction — 128 is the floor
+/// every conformant implementation must offer, and plenty of drivers offer no
+/// more. So growing this means querying `limits.max_push_constants_size` at
+/// device init and having a real fallback (a uniform buffer, or splitting the
+/// block), not just raising the number. The assertion below is the tripwire: a
+/// runtime check would be dead code today, because at exactly 128 it can never
+/// fire on a conformant device.
+pub(crate) const PUSH_CONSTANT_BYTES: u32 = (PUSH_CONSTANT_FLOATS * 4) as u32;
+
+const _: () = assert!(
+    PUSH_CONSTANT_BYTES <= 128,
+    "the push-constant block has outgrown the 128-byte Vulkan-guaranteed minimum: \
+     query limits.max_push_constants_size at device init and add a fallback path \
+     before raising PUSH_CONSTANT_FLOATS"
+);
+
 /// Push-constant block for one SDF-lit plate batch (physical px throughout).
 /// Mirrors the `p_*` fields of shader2d's `RRectClip`.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -532,12 +560,12 @@ impl VkRenderer {
         let set_layouts = [descriptor_set_layout];
         // Push constants: the per-batch rounded-rect clip plus the SDF-lit
         // plate block (eight vec4s, matching shader2d's `RRectClip`), read by
-        // shader2d's fragment stage. 128 bytes — exactly the Vulkan-guaranteed
-        // minimum budget.
+        // shader2d's fragment stage. See `PUSH_CONSTANT_BYTES` — the block is
+        // exactly the Vulkan-guaranteed minimum and completely full.
         let push_ranges = [vk::PushConstantRange::default()
             .stage_flags(vk::ShaderStageFlags::FRAGMENT)
             .offset(0)
-            .size(128)];
+            .size(PUSH_CONSTANT_BYTES)];
         let pipeline_layout = device
             .create_pipeline_layout(
                 &vk::PipelineLayoutCreateInfo::default()
@@ -1870,7 +1898,7 @@ impl VkRenderer {
                             // batch is a plate cover quad.
                             let rr = batch.clip_rrect.unwrap_or([0.0; 5]);
                             let enabled = if batch.clip_rrect.is_some() { 1.0f32 } else { 0.0 };
-                            let mut pc = [0.0f32; 32];
+                            let mut pc = [0.0f32; PUSH_CONSTANT_FLOATS];
                             pc[..5].copy_from_slice(&rr);
                             pc[5] = enabled;
                             pc[7] = clip_shape;
@@ -1938,7 +1966,7 @@ impl VkRenderer {
                     .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
                 // Push constants persist across binds — clear any batch's
                 // rounded clip and plate mode.
-                let pc = [0.0f32; 32];
+                let pc = [0.0f32; PUSH_CONSTANT_FLOATS];
                 self.core.device.cmd_push_constants(
                     cmd,
                     self.pipeline_layout,

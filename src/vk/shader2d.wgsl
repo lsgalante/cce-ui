@@ -113,6 +113,24 @@ struct RRectClip {
 }
 var<push_constant> rrect_clip: RRectClip;
 
+// Plate modes, as carried in rect1.z (see PlatePush::mode). Compared by EQUALITY
+// on a rounded int, never by range: the ranges these replaced were ordered, and
+// the order was load-bearing without saying so — mode 8's branch had to precede
+// the `> 5.5` fillet branch or the fillet arm would have swallowed it, taken 4
+// off, and drawn every groove as a ridge. Equality makes a new mode inert
+// wherever it is added rather than silently captured by a neighbour.
+const MODE_NONE: i32 = 0;         // not a plate batch
+const MODE_PLATE: i32 = 1;        // raised lit plate: fill + rolled perimeter + CSG carves
+const MODE_RECESS: i32 = 2;       // free carve, interior one step DOWN
+const MODE_BOSS: i32 = 3;         // free carve, interior one step UP
+const MODE_RIDGE: i32 = 4;        // raised rim straddling the boundary
+const MODE_SPHERE: i32 = 5;       // hemisphere-lit disc
+const MODE_FILLET_DOWN: i32 = 6;  // concave inside-corner wall, recessed
+const MODE_FILLET_UP: i32 = 7;    // concave inside-corner wall, raised
+const MODE_GROOVE: i32 = 8;       // slab carve about an arbitrary line
+// Fillet modes rejoin the shared free-carve path as their flat equivalents.
+const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
+
 const TAU: f32 = 6.28318530718;
 // Ambient floor of the plate lighting model: the fraction of illumination that
 // arrives from everywhere rather than from the directional light. Keeps shadow
@@ -279,15 +297,17 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let l = rrect_clip.p_light.xyz;
     let strength = rrect_clip.p_mat.x;
     let flat_shade = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * l.z;
+    // The mode arrives as a float only because the push block is all f32.
+    let mode = i32(round(rrect_clip.rect1.z));
 
-    // Mode 5: a sphere-lit disc (the slider thumb). p_rect.xy is the center,
+    // MODE_SPHERE: a sphere-lit disc (the slider thumb). p_rect.xy is the center,
     // p_rect.z the radius, physical px. The disc is shaded as a hemisphere
     // under the same light/material as the plates — ambient floor, diffuse off
     // the sphere normal, the decoupled roll specular (its glint lands where
     // the surface tilt meets the half-vector, ~a third of the way out toward
     // the light) — and, like a plate face, the shade is expressed relative to
     // the flat face so the color at the lit center is exactly the app's.
-    if (rrect_clip.rect1.z > 4.5 && rrect_clip.rect1.z < 5.5) {
+    if (mode == MODE_SPHERE) {
         let c = frag - rrect_clip.p_rect.xy;
         let r = max(rrect_clip.p_rect.z, 0.001);
         let dist = length(c);
@@ -307,7 +327,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let d = -gd.z; // positive inside the plate, in px
     let t = max(rrect_clip.p_light.w, 0.001);
 
-    if (rrect_clip.rect1.z < 1.5) {
+    if (mode == MODE_PLATE) {
         let aa = clamp(d + 0.5, 0.0, 1.0); // 1px silhouette anti-aliasing
         if (aa <= 0.0) {
             discard;
@@ -351,8 +371,8 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // e.g. in a widget's own paint): an overlay over whatever is painted
     // beneath — no fill, no silhouette. Junction behavior here is the heuristic
     // host-box fade; grouped features get the exact CSG above.
-    // Mode 2 = recess (interior one step DOWN), mode 3 = boss (interior one
-    // step UP) — the same wall with the height sign flipped. Mode 4 = ridge: a
+    // MODE_RECESS = interior one step DOWN, MODE_BOSS = interior one step UP —
+    // the same wall with the height sign flipped. MODE_RIDGE is a
     // raised bump straddling the boundary, both sides at the base level — ONE
     // profile evaluation, so its crest carries a single specular/shoulder term
     // instead of a boss+recess double-stack.
@@ -360,33 +380,33 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // multiplicative shading (black at alpha 1 - shade); brightening is a
     // translucent white screen.
     //
-    // Concave fillet (mode 6 = recessed, 7 = raised): the wall follows a
+    // Concave fillet (MODE_FILLET_DOWN / MODE_FILLET_UP): the wall follows a
     // quarter ARC whose centre sits out in the pocket — the inside-corner
     // rounding the box SDF cannot express. p_rect.xy = centre, .z = radius;
     // p_radii.x = the wedge's start angle (quarter span, HARD-cut at the
     // tangent lines — the straight walls continue the profile exactly there).
     // Distance/gradient swap to radial; everything downstream is the shared
-    // free-carve path via `eff` (6→2, 7→3).
-    var eff = rrect_clip.rect1.z;
+    // free-carve path via `eff` (minus FILLET_TO_STEP: 6→RECESS, 7→BOSS).
+    var eff = mode;
     var fd = d;
     var fgd = gd.xy;
     var wedge = 1.0;
-    // Groove (mode 8): a SLAB carve — the band of half-width p_rect.z about the
+    // MODE_GROOVE: a SLAB carve — the band of half-width p_rect.z about the
     // line through p_rect.xy with unit normal p_radii.xy. Distance is |signed
     // distance to that line| minus the half-width, so ONE profile evaluation
     // yields both walls (the gradient flips sign across the centre line, tilting
     // them apart) and the groove costs a single specular term. The box SDF is
     // axis-aligned by construction; this is how a mark runs at an angle.
     // Rejoins the shared free-carve path as a recess (eff = 2).
-    if (eff > 7.5) {
+    if (mode == MODE_GROOVE) {
         let nrm = rrect_clip.p_radii.xy;
         let c = frag - rrect_clip.p_rect.xy;
         let s = dot(c, nrm);
         fd = abs(s) - rrect_clip.p_rect.z;
         fgd = nrm * select(-1.0, 1.0, s >= 0.0);
-        eff = 2.0;
-    } else if (eff > 5.5) {
-        eff = eff - 4.0;
+        eff = MODE_RECESS;
+    } else if (mode == MODE_FILLET_DOWN || mode == MODE_FILLET_UP) {
+        eff = mode - FILLET_TO_STEP;
         let c = frag - rrect_clip.p_rect.xy;
         let dist = max(length(c), 1e-4);
         fd = dist - rrect_clip.p_rect.z;
@@ -399,7 +419,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let u = clamp(fd / t + 0.5, 0.0, 1.0);
     var slope = 0.0;
     var curv = 0.0;
-    if (eff > 3.5) {
+    if (eff == MODE_RIDGE) {
         // Ridge bump: the carve profile mirrored about the boundary (rising
         // outer half, falling inner half), amplitude halved so the wall tilt
         // matches a step's despite the doubled profile rate.
@@ -412,7 +432,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // tints the whole cover quad).
         curv = -rrect_clip.p_mat.w * sin(w * TAU);
     } else {
-        let dir = select(-1.0, 1.0, eff > 2.5);
+        let dir = select(-1.0, 1.0, eff == MODE_BOSS);
         // The profile slope is carve_slope's family: smoothstep-derived
         // normally, smootherstep (zero second derivative at the plateaus)
         // under a continuous-curvature corner_shape — shading eases in and out
@@ -538,7 +558,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     }
 
     // SDF-lit plate batch (mode in the push constants; see plate_shade).
-    if (rrect_clip.rect1.z > 0.5) {
+    if (i32(round(rrect_clip.rect1.z)) != MODE_NONE) {
         let c = plate_shade(in.clip_position.xy, in.color);
         return vec4f(c.rgb, c.a * clip_cov);
     }
