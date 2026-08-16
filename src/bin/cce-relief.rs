@@ -70,6 +70,41 @@ const UNDERSIDE: f32 = 18.0;
 /// the shape will actually LOOK like, as opposed to what it is.
 const SHADE_STRIP_H: f32 = 14.0;
 
+/// The height this window WANTS at a given width: every fixed row, plus the
+/// cutaway at its natural (shrink-wrapped) height.
+///
+/// The window is CONTENT-SIZED. There is nothing here to drag to a different
+/// shape — the rows are fixed and the cutaway shrink-wraps its section — so a
+/// user-chosen height only ever adds dark space or squeezes the section's wall
+/// to a sliver, because the proportional axes are height-bound. Kept as one
+/// function so `settings()` asks for the same number the layout will use.
+///
+/// (The compositor may still restore a saved size over this; see the Utility
+/// window-mode proposal. Until then the request is only a request.)
+fn content_height(width: f32) -> f32 {
+    let pad = cce_ui::layout::backplate_padding();
+    let w = (width - 2.0 * pad).max(0.0);
+    let gap = 14.0;
+    let strip = {
+        let (_, fsize) = cce_ui::layout::control_label_font_detached_parsed();
+        fsize + cce_ui::layout::control_label_margin()
+    };
+    let knob_h = 22.0 + strip;
+    let button_h = 26.0;
+    let status_h = HEADER_FONT_SIZE + 4.0;
+    let fixed = knob_h + gap
+        + 5.0 * (knob_h + gap)
+        + button_h + 8.0 + status_h + 2.0 * gap;
+    let natural = (w - 2.0 * CUT_MARGIN - GUTTER_L - 2.0 * MIN_BAND)
+        + 2.0 * CUT_MARGIN
+        + UNDERSIDE
+        + GUTTER_B
+        + 2.0 * SHADE_STRIP_H
+        + 6.0
+        + GUTTER_B;
+    2.0 * pad + fixed + natural
+}
+
 #[derive(Debug, Clone)]
 enum BevelMsg {
     Exit,
@@ -1166,13 +1201,13 @@ impl Application for BevelPopup {
             },
             app_id: "cce-relief".to_string(),
             width: 520,
-            // Taller than the old cce-bevel default: the opening now carries
-            // the section PLUS the predicted and real shading bands, and a
-            // short window squeezes the section's wall to a sliver because the
-            // proportional axes are height-bound.
-            height: 700,
+            // Asked for, not guessed: the exact height the content occupies at
+            // this width (see `content_height`).
+            height: content_height(520.0).round() as u32,
             fullscreen: false,
-            min_size: Some((440, 420)),
+            // The floor is the same content height — this window has no useful
+            // smaller shape, and shrinking it only eats the cutaway.
+            min_size: Some((440, content_height(440.0).round() as u32)),
         }
     }
 
@@ -1225,8 +1260,14 @@ impl Application for BevelPopup {
             let knob_h = 22.0 + strip;
             let button_h = 26.0;
             let status_h = HEADER_FONT_SIZE + 4.0;
-            let fixed = knob_h + gap + knob_h + gap + knob_h + gap + button_h + 8.0 + status_h
-                + 3.0 * gap;
+            // Rows above/below the cutaway: the selector row, then FIVE
+            // stacked sliders, then buttons and status. Stacked rather than
+            // gridded because a slider's label and readout want the full width
+            // — three to a row truncated both, and the two-wide Depth/Width row
+            // set a different rhythm again for no reason.
+            let fixed = knob_h + gap                      // selector row
+                + 5.0 * (knob_h + gap)                    // Shoulder..Width
+                + button_h + 8.0 + status_h + 2.0 * gap;  // buttons + status
             // The cutaway absorbs spare height — but only up to its NATURAL
             // height for this width (the proportional square domain plus
             // gutters), so the opening shrink-wraps the section instead of
@@ -1240,11 +1281,10 @@ impl Application for BevelPopup {
                 + GUTTER_B;
             let cut_h = (self.height as f32 - 2.0 * pad - fixed).min(natural).max(90.0);
 
-            let kw = (w - 2.0 * gap) / 3.0;
             let knob_row = |k: &mut ProfileKnobs, x: f32, y: f32| {
-                k.shoulder.set_rect(x, y, kw, knob_h);
-                k.base.set_rect(x + kw + gap, y, kw, knob_h);
-                k.bias.set_rect(x + 2.0 * (kw + gap), y, kw, knob_h);
+                k.shoulder.set_rect(x, y, w, knob_h);
+                k.base.set_rect(x, y + (knob_h + gap), w, knob_h);
+                k.bias.set_rect(x, y + 2.0 * (knob_h + gap), w, knob_h);
             };
             let park = |k: &mut ProfileKnobs| {
                 k.shoulder.set_rect(-1000.0, -1000.0, 0.0, 0.0);
@@ -1274,10 +1314,10 @@ impl Application for BevelPopup {
                 knob_row(&mut self.edge, x, y);
                 park(&mut self.wall);
             }
+            y += 3.0 * (knob_h + gap);
+            self.depth_slider.set_rect(x, y, w, knob_h);
             y += knob_h + gap;
-            let half = (w - gap) / 2.0;
-            self.depth_slider.set_rect(x, y, half, knob_h);
-            self.width_slider.set_rect(x + half + gap, y, half, knob_h);
+            self.width_slider.set_rect(x, y, w, knob_h);
             y += knob_h + gap;
             self.save_button.set_rect(x, y, 96.0, button_h);
             self.reset_button.set_rect(x + 96.0 + 12.0, y, 96.0, button_h);
