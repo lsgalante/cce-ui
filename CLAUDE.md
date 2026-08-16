@@ -144,6 +144,10 @@ cce-system-interface) to confirm behavior, not just the test suite.
   `CloudPopup` (one blocking `run_json`/`run_dmenu` invocation) and `CloudPopupTracker`
   (an app's single-active-popup toggle state; see cce-status-interface for the
   canonical usage).
+- `icon.rs` — XDG icon-theme lookup: a `.desktop` `Icon=` key (or an SNI tray icon
+  name) → a file on disk, plus `upload_themed` to rasterize/decode and upload it.
+  **Not** `lib.rs`'s `upload_icon`, which loads a *bundled* cce-icons glyph by its
+  own name for in-widget use; this one resolves names any installed app may ship.
 - `file_dialog.rs` (rfd), `scale.rs` (HiDPI), `wayland.rs` (surface/scale detection).
 
 ## Fonts & assets

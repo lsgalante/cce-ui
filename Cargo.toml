@@ -34,6 +34,8 @@ wayland-scanner = "0.31"
 bitflags = "2"
 xkeysym = "0.2"
 resvg = "0.41.0"
+# App/tray icon themes are overwhelmingly PNG; resvg covers only the SVG half.
+png = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 kdl = "4.6"

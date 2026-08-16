@@ -12,6 +12,7 @@ pub mod context;
 pub mod scene;
 pub mod process;
 pub mod file_dialog;
+pub mod icon;
 pub mod ipc;
 pub mod mcp;
 pub mod vk;
