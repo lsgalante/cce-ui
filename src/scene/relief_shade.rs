@@ -1,6 +1,9 @@
-//! The relief shading model in Rust — the arithmetic `shader2d.wgsl`'s
-//! free-carve branch performs per pixel, so code outside the GPU can PREDICT
-//! the pixels instead of sketching them.
+//! The relief shading model in Rust — the arithmetic `shader2d.wgsl` performs
+//! per pixel, so code outside the GPU can PREDICT the pixels instead of
+//! sketching them. Both branches: the free carves ([`carve_shade`]) and the
+//! plate's own perimeter roll ([`plate_surface`]), which do not composite the
+//! same way — a carve is a translucent overlay, a plate is a multiply on its
+//! own fill plus an additive specular.
 //!
 //! This exists because `cce-relief` drew its cross-sections with a stand-in
 //! (`lit = dot(normal, light) * 0.35`) that shares nothing with the shader but
@@ -19,9 +22,15 @@ pub const PLATE_AMBIENT: f32 = 0.55;
 /// Recess depth as a fraction of the roll width. Mirrors `RECESS_DEPTH`.
 pub const RECESS_DEPTH: f32 = 0.6;
 
-/// The free-carve modes, matching the shader's `MODE_*` for the branch this
-/// module reproduces. The plate's own perimeter roll (mode 1) is a different
-/// branch and is deliberately not modelled here.
+/// Amplitude of the bright crest hugging a raised plate's silhouette.
+/// Mirrors `PLATE_CREST`.
+pub const PLATE_CREST: f32 = 0.25;
+/// The roll's descent is truncated at this fraction of the quadrant, so the
+/// profile ends on a bounded slope instead of plunging vertical at the
+/// silhouette. Mirrors `ROLL_CUT`.
+pub const ROLL_CUT: f32 = 0.8;
+
+/// The free-carve modes, matching the shader's `MODE_*`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CarveMode {
     Recess,
@@ -157,6 +166,61 @@ pub fn carve_shade(
     (diff / flat_shade(light) - 1.0 + curv + spec) * mat.strength
 }
 
+/// The analytic roll slope at `f` (0 where the roll meets the face, 1 at the
+/// silhouette). Mirrors `roll_slope`'s analytic branch: the one-exponent
+/// generalisation of the circular quadrant, truncated at [`ROLL_CUT`].
+pub fn analytic_roll_slope(f: f32) -> f32 {
+    let shape = crate::layout::corner_shape();
+    let fc = f * ROLL_CUT;
+    if shape > 2.001 {
+        let h = (1.0 - fc.powf(shape)).max(1e-4).powf(1.0 / shape);
+        (fc / h).powf(shape - 1.0)
+    } else {
+        fc / (1.0 - fc * fc).max(1e-4).sqrt()
+    }
+}
+
+/// The plate's own surface colour across its perimeter roll — mode 1, which is
+/// NOT the free-carve branch and does not composite like one.
+///
+/// A carve emits a translucent overlay; a plate emits its material directly, as
+/// a MULTIPLY on the face colour plus an additive specular. Expressed relative
+/// to the flat face (shade 1.0, specular 0.0) so the face keeps exactly the
+/// app's chosen colour — which is why a plate can be tinted freely and a carve
+/// cannot.
+///
+/// `f` is 0 where the roll meets the face and 1 at the silhouette. Returns
+/// `None` past the silhouette, where the shader discards.
+pub fn plate_surface(
+    base: [f32; 3],
+    f: f32,
+    facing: [f32; 2],
+    roll_slope_at: &dyn Fn(f32) -> f32,
+    light: [f32; 3],
+    mat: &Material,
+) -> Option<[f32; 3]> {
+    if !(0.0..=1.0).contains(&f) {
+        return None;
+    }
+    let slope = roll_slope_at(f);
+    let sv = [facing[0] * slope, facing[1] * slope];
+    let n = {
+        let len = (sv[0] * sv[0] + sv[1] * sv[1] + 1.0).sqrt();
+        [sv[0] / len, sv[1] / len, 1.0 / len]
+    };
+    let ndl = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]).max(0.0);
+    let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * ndl;
+    // The crest: the ambient-catching convex rim that makes glass read as glass.
+    let extra = PLATE_CREST * f * f * f;
+    let shade = 1.0 + (diff / flat_shade(light) - 1.0 + extra) * mat.strength;
+    let spec = roll_spec(sv, light, mat) * mat.strength;
+    Some([
+        (base[0] * shade + spec).clamp(0.0, 1.0),
+        (base[1] * shade + spec).clamp(0.0, 1.0),
+        (base[2] * shade + spec).clamp(0.0, 1.0),
+    ])
+}
+
 /// Composite one carve's shading over what is already there, the way the
 /// renderer's alpha blend does.
 ///
@@ -196,6 +260,21 @@ mod tests {
     fn constants_match_the_shader() {
         assert_eq!(wgsl_const("PLATE_AMBIENT"), PLATE_AMBIENT);
         assert_eq!(wgsl_const("RECESS_DEPTH"), RECESS_DEPTH);
+        assert_eq!(wgsl_const("PLATE_CREST"), PLATE_CREST);
+        assert_eq!(wgsl_const("ROLL_CUT"), ROLL_CUT);
+    }
+
+    /// The plate's face must come through as exactly the app's colour, or a
+    /// plate silently recolours whatever it is filled with.
+    #[test]
+    fn plate_face_is_untouched() {
+        let light = light_vector();
+        let mat = Material::from_style();
+        let base = [0.3f32, 0.4, 0.5];
+        let out = plate_surface(base, 0.0, [-1.0, 0.0], &analytic_roll_slope, light, &mat).unwrap();
+        for i in 0..3 {
+            assert!((out[i] - base[i]).abs() < 1e-4, "face channel {i}: {} vs {}", out[i], base[i]);
+        }
     }
 
     /// A flat surface must composite to nothing, or the cover quad tints

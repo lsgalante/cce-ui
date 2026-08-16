@@ -608,13 +608,21 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
         let walls = shape.walls();
         let light = relief_shade::light_vector();
         let mat = relief_shade::Material::from_style();
-        // The installed profile's slope, so the strip follows the knobs: the
-        // renderer differentiates the same height curve into its LUT.
-        let slope_at = |v: f32| -> f32 {
+        // Follow the knobs ONLY when a custom profile is actually installed.
+        // Until one is, the shader runs its analytic branch, and predicting
+        // from the knob curve instead quietly disagrees with it. The carve case
+        // hides this — the knob midpoints ARE the analytic smoothstep — but the
+        // roll's analytic form is a superellipse quadrant, nothing like the
+        // knob family, and there the two differ by ~20 grey levels.
+        let custom = profile.custom;
+        let knob_slope = |v: f32| -> f32 {
             let d = 1.0 / 32.0;
             let (a, b) = ((v - d * 0.5).clamp(0.0, 1.0), (v + d * 0.5).clamp(0.0, 1.0));
             let taper = (v.min(1.0 - v) * 32.0 * 0.667).clamp(0.0, 1.0);
             if b <= a { 0.0 } else { (profile.eval(b) - profile.eval(a)) / (b - a) * taper }
+        };
+        let slope_at = |v: f32| -> f32 {
+            if custom { knob_slope(v) } else { relief_shade::analytic_carve_slope(v) }
         };
         // The DE's own plate colour, NOT a swatch grey. The composite is
         // asymmetric — brightening screens toward white, darkening multiplies
@@ -643,6 +651,48 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
             } else {
                 t_of(x)
             };
+            // The plate's edge roll is the OTHER shader branch: it emits its
+            // own material rather than an overlay, and it ends at a silhouette
+            // rather than a floor, so past f = 1 there is nothing to draw.
+            if matches!(shape, Shape::EdgeRoll) {
+                let roll_slope_at = |f: f32| -> f32 {
+                    if !custom {
+                        return relief_shade::analytic_roll_slope(f);
+                    }
+                    let d = 1.0 / 32.0;
+                    let (a, b) = ((f - d * 0.5).clamp(0.0, 1.0), (f + d * 0.5).clamp(0.0, 1.0));
+                    // Taper at the FACE end only; the silhouette keeps whatever
+                    // slope the curve was drawn ending on (roll_slope's `win`).
+                    let taper = (f * 32.0 * 0.667).clamp(0.0, 1.0);
+                    if b <= a { 0.0 } else { (profile.eval(b) - profile.eval(a)) / (b - a) * taper }
+                };
+                // Past the silhouette (f > 1) there is nothing; INSIDE the
+                // face (f < 0) there is the plate's own colour, untouched —
+                // that is the whole point of expressing plate shading relative
+                // to the flat face. Drawing nothing there, as the first cut
+                // did, leaves the band empty over most of its length and looks
+                // like the model failing.
+                //
+                // The section draws this shape with the face on the plateau
+                // side and AIR past the wall — so the outward normal at the
+                // drawn silhouette points along +x, which is the direction fed
+                // to the model here.
+                let c = if t < 0.0 {
+                    Some(surface)
+                } else {
+                    relief_shade::plate_surface(surface, t, [1.0, 0.0], &roll_slope_at, light, &mat)
+                };
+                if let Some(c) = c {
+                    let band = if horiz {
+                        Rect { x: x_l, y: x, width: x_r - x_l, height: step.min(scan_hi - x) }
+                    } else {
+                        Rect { x, y: strip_y, width: step.min(scan_hi - x), height: strip_h }
+                    };
+                    pc.quad(band, [c[0], c[1], c[2], 1.0]);
+                }
+                x += step;
+                continue;
+            }
             let mut c = surface;
             for (mode, w0, w1) in &walls {
                 let u = if horiz { t } else { (t - w0) / (w1 - w0) };
@@ -689,10 +739,17 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
                 // over the near-black opening that lands ~4 grey levels below
                 // the predicted band, which then reads as a constant model
                 // error it is not. The two bands must differ ONLY by shading.
-                pc.quad(
-                    Rect { x: x_l, y: swatch_y, width: x_r - x_l, height: strip_h },
-                    [plate[0], plate[1], plate[2], 1.0],
-                );
+                // A carve needs a surface to cut into; a PLATE brings its own
+                // fill and ends at a silhouette. Backing the plate with a full
+                // band of its own colour paints over the air past that
+                // silhouette, so the band reads as uniform material and the
+                // roll vanishes — the swatch has to be left empty for it.
+                if !matches!(shape, Shape::EdgeRoll) {
+                    pc.quad(
+                        Rect { x: x_l, y: swatch_y, width: x_r - x_l, height: strip_h },
+                        [plate[0], plate[1], plate[2], 1.0],
+                    );
+                }
                 // The box is placed so the SELECTED wall is the one crossing
                 // the band, and its other three edges are pushed far outside
                 // it. For a horizontal wall the box spans the band's width and
@@ -745,14 +802,23 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
                         );
                         pc.boss(inner, sq, unit);
                     }
-                    Shape::EdgeRoll => pc.plate(tall, sq, plate, unit),
+                    // A plate's roll runs INWARD from its silhouette, where a
+                    // carve's wall straddles its edge — so this box is placed
+                    // by its silhouette at the section's x1, not by a wall
+                    // centre at edge_x. Half a roll of misalignment otherwise.
+                    Shape::EdgeRoll => pc.plate(
+                        Rect { x: x1 - 4000.0, y: swatch_y - 400.0, width: 4000.0, height: strip_h + 800.0 },
+                        sq,
+                        [plate[0], plate[1], plate[2], 1.0],
+                        unit,
+                    ),
                 }
             },
         );
 
         if walls.is_empty() {
             pc.text_with(
-                "plate branch — predicted band is blank; the swatch is real".to_string(),
+                "".to_string(),
                 x_l + 4.0,
                 strip_y + 1.0,
                 10.0,
