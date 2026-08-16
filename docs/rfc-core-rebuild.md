@@ -649,7 +649,7 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `Element::tick` and `Element::layout`, the legacy cadence. **`Paint::
     aggregates_child_extra_quads`** — legacy container `extra_quads` served the CHILDREN's
     chrome only, while the widget's own background quad lived in `all_quads` alone;
-    cce-email and cce-layout-interface render the tab column through `extra_quads` over
+    cce-mail and cce-layout-interface render the tab column through `extra_quads` over
     their own backgrounds (emitting the bg there would double-blend), and cce-test-interface
     renders through `all_quads` (dropping the bg there would blank it). The adapter's
     `all_quads` now draws own prims from a shared `own_plain_quads()` helper instead of
@@ -1263,7 +1263,7 @@ Constraint respected: **each crate still builds standalone** — the new core is
     last app is across," and it is not:
     - The `view*`/`text_items` paths CANNOT be deleted yet: SIX apps still
       implement them — cce-test-interface (2.1k), cce-authenticator (0.9k),
-      cce-display-manager (1.5k), cce-email (2.5k), cce-layout-interface
+      cce-display-manager (1.5k), cce-mail (2.5k), cce-layout-interface
       (3.8k), cce-status-interface (4.2k). Each needs its own Phase-6-style
       migration (display-list flip at minimum; dissolutions as found).
       Suggested order: smallest/least-critical first (test-interface,
@@ -1316,7 +1316,7 @@ Constraint respected: **each crate still builds standalone** — the new core is
     exit 144, left the tree clean at the old file) — had to re-apply and commit
     immediately. Verify `git log`/`grep display_list` actually stuck before
     moving on.
-  - **6ai — cce-email across (4 of 6); the flip FIXED invisible list/detail text.
+  - **6ai — cce-mail across (4 of 6); the flip FIXED invisible list/detail text.
     DONE (live-verified: inbox list of 3 emails, detail placeholder, and on click
     the full detail view — subject/From/To/Date/body + Reply/Delete/Mark-Unread
     toolbar).** view() body (all plain quads) → display_list() via a small

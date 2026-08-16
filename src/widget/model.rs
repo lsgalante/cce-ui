@@ -277,7 +277,7 @@ pub trait Paint {
     /// serves the visible children's `extra_quads` — and ONLY those, like the legacy container
     /// overrides (Paginator returned its strip's + selected page's chrome; its own background
     /// quad lived in `all_quads` alone). Hosts that render a container through the plain
-    /// `extra_quads` getter (cce-email's and cce-layout-interface's sidebar draw) read exactly
+    /// `extra_quads` getter (cce-mail's and cce-layout-interface's sidebar draw) read exactly
     /// this view. The widget's own [`paint`](Paint::paint) prims still reach `all_quads` and
     /// the scene walk. Default: off (a leaf's `extra_quads` is its own prims).
     fn aggregates_child_extra_quads(&self) -> bool {

@@ -453,9 +453,9 @@ cce-files {
         // Not overridden: falls back to cce-ui.
         assert_eq!(c.resolve("cce-files", "close_search").unwrap().chord, "escape");
         // Unknown app: pure cce-ui fallback.
-        assert_eq!(c.resolve("cce-email", "open_search").unwrap().chord, "ctrl+f");
+        assert_eq!(c.resolve("cce-mail", "open_search").unwrap().chord, "ctrl+f");
         // Nowhere: compiled-in default.
-        assert_eq!(c.resolve_chord("cce-email", "save", "ctrl+s"), "ctrl+s");
+        assert_eq!(c.resolve_chord("cce-mail", "save", "ctrl+s"), "ctrl+s");
     }
 
     const SETTINGS_SAMPLE: &str = r#"
@@ -514,9 +514,9 @@ cce-files {
         };
         assert_eq!(f("cce-files", "trackpad"), Some(0.6));
         assert_eq!(f("cce-files", "mouse"), Some(0.8)); // generic app value
-        assert_eq!(f("cce-email", "trackpad"), Some(1.25)); // cce-ui fallback
+        assert_eq!(f("cce-mail", "trackpad"), Some(1.25)); // cce-ui fallback
         // The global input block is not in the client chain.
-        assert_eq!(c.resolve_setting("cce-email", "mouse", "accel_speed"), None);
+        assert_eq!(c.resolve_setting("cce-mail", "mouse", "accel_speed"), None);
     }
 
     #[test]

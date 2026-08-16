@@ -9,7 +9,7 @@
 //!   the ctx registry every frame — load-bearing for the spatial grid (the registered strip is
 //!   what makes the sidebar block backplate drags).
 //! - [`Paint::aggregates_child_extra_quads`] + [`Paint::forwarded_highlight`]: legacy
-//!   `extra_quads` served the strip's chrome only (cce-email and cce-layout-interface render
+//!   `extra_quads` served the strip's chrome only (cce-mail and cce-layout-interface render
 //!   the tab column through that getter — the paginator's own background quads live in
 //!   `all_quads` alone), and legacy `highlight_quad` forwarded to the strip's (the hovered-tab
 //!   tint cce-layout-interface draws directly).
@@ -197,7 +197,7 @@ impl Paint for Paginator {
         }
     }
 
-    /// Legacy `extra_quads` served the strip's + selected page's chrome only — cce-email and
+    /// Legacy `extra_quads` served the strip's + selected page's chrome only — cce-mail and
     /// cce-layout-interface draw the tab column through this getter, over their own backgrounds.
     fn aggregates_child_extra_quads(&self) -> bool {
         true
