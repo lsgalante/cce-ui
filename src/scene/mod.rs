@@ -10,6 +10,7 @@ pub mod arena;
 pub mod layout;
 pub mod paint;
 pub mod painter;
+pub mod relief_shade;
 pub mod tree;
 
 pub use arena::{Arena, Node, NodeId};

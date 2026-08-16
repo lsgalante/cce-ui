@@ -1574,17 +1574,16 @@ pub fn tessellate_display_list(
     // SDF-lit plate path (shader2d's plate branch) vs the legacy banded vertex
     // shading, plus the frame-constant lighting inputs it pushes per plate.
     let shader_plates = crate::layout::bevel_shader();
-    let plate_light = {
-        let az = crate::layout::light_source_position();
-        let el = std::f32::consts::FRAC_PI_4; // light elevation above the screen plane
-        [az.cos() * el.cos(), -az.sin() * el.cos(), el.sin()]
-    };
+    // Light and material come from `scene::relief_shade`, which is also what
+    // cce-relief predicts pixels with — one definition, so the editor cannot
+    // draw a different material than the renderer applies.
+    let plate_light = crate::scene::relief_shade::light_vector();
     // [shading strength (1.0 at the default bevel_depth), specular strength,
     // shininess, curvature/AO strength] — the plastic material. Curvature is
     // kept near the raised path's crest amplitude: the recess shoulder's
     // brightening lands on the same pixels as its specular line, and the two
     // stack — at 0.5 the step read several times hotter than a plate roll.
-    let plate_mat = [crate::layout::bevel_depth() / 0.15, 0.4, 24.0, 0.2];
+    let plate_mat = crate::scene::relief_shade::Material::from_style().to_array();
 
     for item in &dl.items {
         let start = verts.len() as u32;

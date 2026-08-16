@@ -9,7 +9,16 @@
 //! reserves "bevel" for the `Bevel` prim and the shared edge treatment, and
 //! calls the family relief primitives — which is also what `control_relief`
 //! gates and what the `relief` config node is called. This was `cce-bevel`
-//! until the shape picker landed and made the mismatch untenable. Every edit applies live to this process (the
+//! until the shape picker landed and made the mismatch untenable.
+//!
+//! Under the section runs the SHADING STRIP: the same shape put through
+//! `scene::relief_shade`, the shader's own arithmetic in Rust, composited one
+//! carve at a time in emission order. The section says what the shape is; the
+//! strip says what it will look like. A composed shape gets one pass per carve
+//! there, which is how a stack whose geometry looks reasonable can still read
+//! hot.
+//!
+//! Every edit applies live to this process (the
 //! popup's own plate, wells, and buttons ARE the preview) and logs the
 //! sampled spec to stdout; Save persists to `~/.config/cce/config.kdl`
 //! (`style.surface.relief`) so every cce app starts with the material —
@@ -28,6 +37,7 @@ use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, Win
 use cce_ui::layout::RELIEF_PROFILE_IDENTITY_SPEC as IDENTITY_SPEC;
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{Cap, DisplayList, PaintCtx};
+use cce_ui::scene::relief_shade::{self, CarveMode};
 use cce_ui::widget::{
     Adapted, Button, Dropdown, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta,
     Slider, WidgetHost, WidgetId,
@@ -56,6 +66,9 @@ const GUTTER_L: f32 = 34.0;
 const GUTTER_B: f32 = 16.0;
 const MIN_BAND: f32 = 36.0;
 const UNDERSIDE: f32 = 18.0;
+/// Height of the shading strip under the section — the band that shows what
+/// the shape will actually LOOK like, as opposed to what it is.
+const SHADE_STRIP_H: f32 = 14.0;
 
 #[derive(Debug, Clone)]
 enum BevelMsg {
@@ -200,6 +213,34 @@ impl Shape {
             // middle half, which is where the old code shaded twice.
             Shape::InsetStacked => h(t) - h(t - 0.5),
         })
+    }
+
+    /// The carve(s) this shape emits, as (mode, run start, run end). The
+    /// shading strip composites these IN ORDER, exactly as the renderer
+    /// composites one prim's cover quad over another's — which is the whole
+    /// reason a stacked shape can read hot while its geometry looks fine.
+    ///
+    /// The plate's edge roll returns nothing: it is the shader's plate branch
+    /// (fill + roll + CSG features), not the free-carve branch this models, so
+    /// the strip says so rather than inventing a number.
+    fn walls(self) -> Vec<(CarveMode, f32, f32)> {
+        match self {
+            Shape::Recess => vec![(CarveMode::Recess, 0.0, 1.0)],
+            Shape::Boss => vec![(CarveMode::Boss, 0.0, 1.0)],
+            Shape::Ridge => vec![(CarveMode::Ridge, 0.0, 1.0)],
+            Shape::Trough | Shape::InsetPlate => vec![(CarveMode::Trough, 0.0, 1.0)],
+            // The groove rejoins the free-carve path as a recess on |distance to
+            // the line| - halfwidth; across the section that is a trough spread
+            // over the wider run.
+            Shape::Groove => vec![(CarveMode::Trough, 0.0, 1.0 + GROOVE_FLOOR)],
+            // The fillet rejoins the shared path as its flat equivalent.
+            Shape::Fillet => vec![(CarveMode::Recess, 0.0, 1.0)],
+            Shape::EdgeRoll => Vec::new(),
+            // The pre-35f5183 pair, in emission order.
+            Shape::InsetStacked => {
+                vec![(CarveMode::Recess, 0.0, 1.0), (CarveMode::Boss, 0.5, 1.5)]
+            }
+        }
     }
 
     /// For a composed shape, the run interval where TWO walls are live at once
@@ -361,8 +402,14 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
     let x_l = rect.x + m + GUTTER_L;
     let x_r = rect.x + rect.width - m;
     let avail_w = x_r - x_l;
+    // The shading strip owns a reserved band along the bottom of the opening,
+    // and the SECTION lays out in what is left. Reserving it up front is what
+    // keeps the slab from expanding over it — the slab grows to the bottom of
+    // whatever area it is given.
+    let strip_band = SHADE_STRIP_H + 4.0;
+    let sec_h = rect.height - strip_band;
     // stroke + slab-underside room, plus the bottom gutter
-    let avail_h = rect.height - 2.0 * m - UNDERSIDE - GUTTER_B;
+    let avail_h = sec_h - 2.0 * m - UNDERSIDE - GUTTER_B;
 
     let run = shape.run();
     // Vertical extent of THIS shape, sampled — a ridge lives above the surface,
@@ -388,7 +435,7 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
     // y of h = 0 (the surrounding surface), placed so the whole excursion fits.
     let drawn_h = h_span * unit;
     let y_zero = rect.y
-        + ((rect.height - drawn_h - UNDERSIDE - GUTTER_B) / 2.0).max(m)
+        + ((sec_h - drawn_h - UNDERSIDE - GUTTER_B) / 2.0).max(m)
         - h_lo * unit;
     let y_top = y_zero + h_lo * unit;
     let y_bot = y_zero + h_hi * unit;
@@ -459,7 +506,7 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
     slab = [slab[0] * 1.25 + 0.03, slab[1] * 1.25 + 0.03, slab[2] * 1.25 + 0.03, 1.0];
     // A fixed slab thickness under the lowest surface, so vertical centering
     // doesn't grow a bottomless block of material.
-    let slab_bot = (y_bot + 16.0).min(rect.y + rect.height - 8.0);
+    let slab_bot = (y_bot + 16.0).min(rect.y + sec_h - 8.0);
     let step = 2.0f32;
     let mut x = x_l;
     while x < x_r {
@@ -486,6 +533,76 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
             None,
         );
         rt += 0.25;
+    }
+
+    // THE SHADING STRIP: what the shader will actually put on screen along
+    // this section, as opposed to the geometry drawn above it.
+    //
+    // Each of the shape's carves is evaluated with the real model and
+    // composited in emission order onto the surface colour, so a shape that
+    // emits two overlapping walls gets two passes here exactly as it would in
+    // the frame. That is the difference the geometry cannot show: the stacked
+    // inset's dip is only half again as deep as the trough's, but its strip is
+    // visibly hotter, because the overlap region is lit twice.
+    let strip_h = SHADE_STRIP_H;
+    let strip_y = rect.y + rect.height - strip_band + 2.0;
+    {
+        let walls = shape.walls();
+        let light = relief_shade::light_vector();
+        let mat = relief_shade::Material::from_style();
+        // The installed profile's slope, so the strip follows the knobs: the
+        // renderer differentiates the same height curve into its LUT.
+        let slope_at = |v: f32| -> f32 {
+            let d = 1.0 / 32.0;
+            let (a, b) = ((v - d * 0.5).clamp(0.0, 1.0), (v + d * 0.5).clamp(0.0, 1.0));
+            let taper = (v.min(1.0 - v) * 32.0 * 0.667).clamp(0.0, 1.0);
+            if b <= a { 0.0 } else { (profile.eval(b) - profile.eval(a)) / (b - a) * taper }
+        };
+        // The DE's own plate colour, NOT a swatch grey. The composite is
+        // asymmetric — brightening screens toward white, darkening multiplies
+        // toward black — so which lobe dominates depends on how light the
+        // surface under it is, and it INVERTS between a dark plate and a light
+        // one. Drawn over the wrong base the strip reverses the very thing you
+        // came to judge: on this plate a wall's bright side out-measures its
+        // dark side about 4:1, and over a pale swatch it reads the other way.
+        let plate = cce_ui::color::page_low_color();
+        let surface = [plate[0], plate[1], plate[2]];
+        let step = 1.0f32;
+        let mut x = x_l;
+        while x < x_r {
+            let t = (x - x0) / unit;
+            let mut c = surface;
+            for (mode, w0, w1) in &walls {
+                let u = (t - w0) / (w1 - w0);
+                if !(-0.02..=1.02).contains(&u) {
+                    continue;
+                }
+                // Facing: the SDF gradient along the section, pointing out of
+                // the carve. The section is drawn descending to the right, so
+                // that is -x. The OTHER three walls of a real rect face other
+                // ways and shade differently — the same profile reads brighter
+                // on one side of a control than the other, which is why a
+                // seam's two rims never match.
+                let v = relief_shade::carve_shade(*mode, u, [-1.0, 0.0], &slope_at, light, &mat);
+                c = relief_shade::composite(c, v);
+            }
+            pc.quad(
+                Rect { x, y: strip_y, width: step.min(x_r - x), height: strip_h },
+                [c[0], c[1], c[2], 1.0],
+            );
+            x += step;
+        }
+        if walls.is_empty() {
+            pc.text_with(
+                "plate branch — not the free-carve model".to_string(),
+                x_l + 4.0,
+                strip_y + 1.0,
+                10.0,
+                num_color,
+                Some("monospace".to_string()),
+                None,
+            );
+        }
     }
 
     // The surface stroke, lit per segment: outward normal (material below)
@@ -524,6 +641,20 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
 }
 
 impl BevelPopup {
+    /// The selected shape. The dropdown index is the ONLY source; read it
+    /// through here so layout and paint cannot disagree about it.
+    fn active_shape(&self) -> Shape {
+        Shape::ALL
+            .get(self.profile_dropdown.selected)
+            .copied()
+            .unwrap_or(Shape::Recess)
+    }
+
+    /// The curve the knobs are editing for the selected shape.
+    fn active_curve(&self) -> Curve {
+        self.active_shape().curve()
+    }
+
     fn root_ids(&self) -> [WidgetId; 11] {
         [
             self.profile_dropdown.id(),
@@ -860,6 +991,8 @@ impl Application for BevelPopup {
             let natural = (w - 2.0 * CUT_MARGIN - GUTTER_L - 2.0 * MIN_BAND)
                 + 2.0 * CUT_MARGIN
                 + UNDERSIDE
+                + GUTTER_B
+                + SHADE_STRIP_H
                 + GUTTER_B;
             let cut_h = (self.height as f32 - 2.0 * pad - fixed).min(natural).max(90.0);
 
@@ -880,7 +1013,12 @@ impl Application for BevelPopup {
             y += knob_h + gap;
             self.cut_rect = Rect { x, y, width: w, height: cut_h };
             y += cut_h + gap;
-            if self.profile_dropdown.selected == 0 {
+            // Keyed off the SHAPE's curve, never the dropdown index — several
+            // shapes share the Wall curve, and this has to agree with the paint
+            // side's `wall_active` or the row is laid out for one set and drawn
+            // from the other, which parks every knob off-screen and looks like
+            // the sliders vanished.
+            if self.active_curve() == Curve::Wall {
                 knob_row(&mut self.wall, x, y);
                 park(&mut self.edge);
             } else {
@@ -933,10 +1071,7 @@ impl Application for BevelPopup {
             None,
         );
 
-        let shape = Shape::ALL
-            .get(self.profile_dropdown.selected)
-            .copied()
-            .unwrap_or(Shape::Recess);
+        let shape = self.active_shape();
         let wall_active = shape.curve() == Curve::Wall;
         let active = if wall_active { &self.wall } else { &self.edge };
         draw_section(&mut pc, self.cut_rect, active, shape);
