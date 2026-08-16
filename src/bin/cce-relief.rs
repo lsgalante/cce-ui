@@ -85,6 +85,50 @@ enum Curve {
     Edge,
 }
 
+/// Which wall of the rect the section is taken through.
+///
+/// Not cosmetic. A carve's shading depends on the angle between the wall's
+/// outward normal and the DE light, so ONE profile reads four different ways
+/// around a control — the reason a seam's two rims never match (measured on
+/// cce-files' pane gap: 187 grey one side, 125 the other, same carve).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl Edge {
+    const ALL: [Edge; 4] = [Edge::Left, Edge::Right, Edge::Top, Edge::Bottom];
+
+    fn label(self) -> &'static str {
+        match self {
+            Edge::Left => "Left wall",
+            Edge::Right => "Right wall",
+            Edge::Top => "Top wall",
+            Edge::Bottom => "Bottom wall",
+        }
+    }
+
+    /// The SDF gradient at the wall: the unit vector pointing OUT of the carve.
+    fn facing(self) -> [f32; 2] {
+        match self {
+            Edge::Left => [-1.0, 0.0],
+            Edge::Right => [1.0, 0.0],
+            Edge::Top => [0.0, -1.0],
+            Edge::Bottom => [0.0, 1.0],
+        }
+    }
+
+    /// Does the wall run horizontally? Then its shading varies DOWN the band
+    /// rather than along it, and both bands must be sampled that way to stay
+    /// comparable to each other.
+    fn horizontal_wall(self) -> bool {
+        matches!(self, Edge::Top | Edge::Bottom)
+    }
+}
+
 /// A relief shape, as a cross-section. This is the `Prim` family from
 /// `scene::paint` — the point of the picker is that the section shows the shape
 /// you will actually emit, not an idealised wall standing in for all of them.
@@ -340,8 +384,10 @@ impl ProfileKnobs {
 }
 
 struct BevelPopup {
-    /// Which profile the single section shows/edits: 0 = wall, 1 = edge.
+    /// Which SHAPE the section shows; the curve it edits follows from it.
     profile_dropdown: Adapted<Dropdown>,
+    /// Which wall of the rect the section is through — see [`Edge`].
+    edge_dropdown: Adapted<Dropdown>,
     /// The carve wall — what `carve_slope` renders on every
     /// recess/boss/ridge in the DE.
     wall: ProfileKnobs,
@@ -385,7 +431,7 @@ use cce_ui::widget::parse_bevel_knobs as parse_knobs;
 /// light azimuth. `has_floor` distinguishes the carve (wall meets a floor
 /// inside the material) from the roll (the surface drops to the silhouette
 /// and the material simply ends — air beyond the edge).
-fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Shape) {
+fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Shape, edge: Edge) {
     let has_floor = shape.has_floor();
     let radius = 6.0f32;
     let radii = (radius, radius, radius, radius);
@@ -470,13 +516,25 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
         gt += 0.25;
     }
 
+    // A Right or Bottom wall genuinely draws MIRRORED: a wall's outward normal
+    // always points at its plateau, so "plateau on the left" IS the left/top
+    // wall. Flipping the run keeps the drawing, the predicted band and the real
+    // swatch all describing the same physical wall — without it the prediction
+    // and the swatch disagree by a reflection, which reads as a shading bug.
+    let flip = matches!(edge, Edge::Right | Edge::Bottom);
+    let t_of = |x: f32| -> f32 {
+        if flip { (x1 - x) / unit } else { (x - x0) / unit }
+    };
+
     // Surface height at a section x.
     let surface_y = |x: f32| -> Option<f32> {
-        if x <= x0 {
+        let inside = if flip { x >= x0 } else { x <= x1 };
+        let outside = if flip { x >= x1 } else { x <= x0 };
+        if outside {
             Some(y_zero)
-        } else if x <= x1 {
+        } else if inside {
             shape
-                .height(profile, (x - x0) / unit)
+                .height(profile, t_of(x))
                 .map(|hv| y_zero + hv * unit)
         } else if has_floor {
             shape.height(profile, run).map(|hv| y_zero + hv * unit)
@@ -525,7 +583,7 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
     while rt <= run + 1e-3 {
         pc.text_with(
             format!("{rt:.2}"),
-            x0 + rt * unit - 11.0,
+            (if flip { x1 - rt * unit } else { x0 + rt * unit }) - 11.0,
             slab_bot + 3.0,
             10.0,
             num_color,
@@ -567,29 +625,42 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
         // dark side about 4:1, and over a pale swatch it reads the other way.
         let plate = cce_ui::color::page_low_color();
         let surface = [plate[0], plate[1], plate[2]];
+        // A HORIZONTAL wall's shading varies down the band, not along it: the
+        // run axis is y there, so the band becomes rows of one colour rather
+        // than columns. Both bands do this, so they still compare to each
+        // other — and at 14px the vertical version is roughly life size, since
+        // a real wall is 4.8-9.3 logical px.
+        let horiz = edge.horizontal_wall();
         let step = 1.0f32;
-        let mut x = x_l;
-        while x < x_r {
-            let t = (x - x0) / unit;
+        let (scan_lo, scan_hi) = if horiz { (strip_y, strip_y + strip_h) } else { (x_l, x_r) };
+        let mut x = scan_lo;
+        while x < scan_hi {
+            let t = if horiz {
+                // One wall across the band's height, centred like the swatch's.
+                // Bottom mirrors for the same reason Right does.
+                let raw = (x - (strip_y + strip_h * 0.5)) / strip_h + 0.5;
+                if flip { 1.0 - raw } else { raw }
+            } else {
+                t_of(x)
+            };
             let mut c = surface;
             for (mode, w0, w1) in &walls {
-                let u = (t - w0) / (w1 - w0);
+                let u = if horiz { t } else { (t - w0) / (w1 - w0) };
                 if !(-0.02..=1.02).contains(&u) {
                     continue;
                 }
-                // Facing: the SDF gradient along the section, pointing out of
-                // the carve. The section is drawn descending to the right, so
-                // that is -x. The OTHER three walls of a real rect face other
-                // ways and shade differently — the same profile reads brighter
-                // on one side of a control than the other, which is why a
-                // seam's two rims never match.
-                let v = relief_shade::carve_shade(*mode, u, [-1.0, 0.0], &slope_at, light, &mat);
+                // Facing: the SDF gradient at this wall, pointing out of the
+                // carve. THIS is what the edge selector changes, and it is the
+                // whole of the difference between the four walls.
+                let v = relief_shade::carve_shade(*mode, u, edge.facing(), &slope_at, light, &mat);
                 c = relief_shade::composite(c, v);
             }
-            pc.quad(
-                Rect { x, y: strip_y, width: step.min(x_r - x), height: strip_h },
-                [c[0], c[1], c[2], 1.0],
-            );
+            let band = if horiz {
+                Rect { x: x_l, y: x, width: x_r - x_l, height: step.min(scan_hi - x) }
+            } else {
+                Rect { x, y: strip_y, width: step.min(scan_hi - x), height: strip_h }
+            };
+            pc.quad(band, [c[0], c[1], c[2], 1.0]);
             x += step;
         }
         // THE LIVE SWATCH, directly under the prediction and on the same
@@ -622,12 +693,30 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
                     Rect { x: x_l, y: swatch_y, width: x_r - x_l, height: strip_h },
                     [plate[0], plate[1], plate[2], 1.0],
                 );
-                let tall = Rect {
-                    x: edge_x,
-                    y: swatch_y - 400.0,
-                    width: 4000.0,
-                    height: strip_h + 800.0,
+                // The box is placed so the SELECTED wall is the one crossing
+                // the band, and its other three edges are pushed far outside
+                // it. For a horizontal wall the box spans the band's width and
+                // its top/bottom edge sits at the band's mid-height, so the
+                // wall runs across the band at depth = strip_h.
+                let (tall, d_sw) = match edge {
+                    Edge::Left => (
+                        Rect { x: edge_x, y: swatch_y - 400.0, width: 4000.0, height: strip_h + 800.0 },
+                        unit,
+                    ),
+                    Edge::Right => (
+                        Rect { x: edge_x - 4000.0, y: swatch_y - 400.0, width: 4000.0, height: strip_h + 800.0 },
+                        unit,
+                    ),
+                    Edge::Top => (
+                        Rect { x: x_l - 400.0, y: swatch_y + strip_h * 0.5, width: (x_r - x_l) + 800.0, height: 4000.0 },
+                        strip_h,
+                    ),
+                    Edge::Bottom => (
+                        Rect { x: x_l - 400.0, y: swatch_y + strip_h * 0.5 - 4000.0, width: (x_r - x_l) + 800.0, height: 4000.0 },
+                        strip_h,
+                    ),
                 };
+                let unit = d_sw;
                 let sq = (0.0, 0.0, 0.0, 0.0);
                 match shape {
                     Shape::Recess | Shape::Fillet => pc.recess(tall, sq, unit),
@@ -719,14 +808,20 @@ impl BevelPopup {
             .unwrap_or(Shape::Recess)
     }
 
+    /// The wall the section is taken through.
+    fn active_edge(&self) -> Edge {
+        Edge::ALL.get(self.edge_dropdown.selected).copied().unwrap_or(Edge::Left)
+    }
+
     /// The curve the knobs are editing for the selected shape.
     fn active_curve(&self) -> Curve {
         self.active_shape().curve()
     }
 
-    fn root_ids(&self) -> [WidgetId; 11] {
+    fn root_ids(&self) -> [WidgetId; 12] {
         [
             self.profile_dropdown.id(),
+            self.edge_dropdown.id(),
             self.wall.shoulder.id(),
             self.wall.base.id(),
             self.wall.bias.id(),
@@ -740,9 +835,10 @@ impl BevelPopup {
         ]
     }
 
-    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 11] {
+    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 12] {
         [
             self.profile_dropdown.as_ptr_mut(),
+            self.edge_dropdown.as_ptr_mut(),
             self.wall.shoulder.as_ptr_mut(),
             self.wall.base.as_ptr_mut(),
             self.wall.bias.as_ptr_mut(),
@@ -759,6 +855,9 @@ impl BevelPopup {
     /// `take_*` plumbing after any routed dispatch — state-gated, so it does
     /// not matter which propagate call consumed the event.
     fn drain_widget_changes(&mut self) {
+        if self.edge_dropdown.take_change() {
+            self.needs_rebuild = true;
+        }
         if self.profile_dropdown.take_change() {
             // Switch which profile the section shows — re-arrange parks the
             // other set's knobs off-screen.
@@ -950,6 +1049,11 @@ impl Application for BevelPopup {
                 0,
             )
             .with_label("Shape"),
+            edge_dropdown: Dropdown::new(
+                Edge::ALL.iter().map(|e| e.label().to_string()).collect(),
+                0,
+            )
+            .with_label("Edge"),
             wall: ProfileKnobs::new(wall_seed),
             edge: ProfileKnobs::new(edge_seed),
             depth_slider: Slider::new()
@@ -996,7 +1100,11 @@ impl Application for BevelPopup {
             },
             app_id: "cce-relief".to_string(),
             width: 520,
-            height: 480,
+            // Taller than the old cce-bevel default: the opening now carries
+            // the section PLUS the predicted and real shading bands, and a
+            // short window squeezes the section's wall to a sliver because the
+            // proportional axes are height-bound.
+            height: 700,
             fullscreen: false,
             min_size: Some((440, 420)),
         }
@@ -1061,7 +1169,8 @@ impl Application for BevelPopup {
                 + 2.0 * CUT_MARGIN
                 + UNDERSIDE
                 + GUTTER_B
-                + SHADE_STRIP_H
+                + 2.0 * SHADE_STRIP_H
+                + 6.0
                 + GUTTER_B;
             let cut_h = (self.height as f32 - 2.0 * pad - fixed).min(natural).max(90.0);
 
@@ -1078,7 +1187,12 @@ impl Application for BevelPopup {
             };
 
             let mut y = pad;
-            self.profile_dropdown.set_rect(x, y, (w * 0.62).max(220.0).min(w), knob_h);
+            // Shape takes the row's left portion, Edge the rest — one row,
+            // because the cutaway is what should get the spare height.
+            let edge_w = (w * 0.32).max(120.0).min(w * 0.5);
+            let shape_w = (w - edge_w - gap).max(140.0);
+            self.profile_dropdown.set_rect(x, y, shape_w, knob_h);
+            self.edge_dropdown.set_rect(x + shape_w + gap, y, edge_w, knob_h);
             y += knob_h + gap;
             self.cut_rect = Rect { x, y, width: w, height: cut_h };
             y += cut_h + gap;
@@ -1108,9 +1222,18 @@ impl Application for BevelPopup {
             self.ui_context.rebuild_spatial_grid();
         }
 
+        // BOTH selectors, not just the shape one. A dropdown whose popover is
+        // neither registered nor rendered still OPENS on a press — it just
+        // opens invisibly, so its items cannot be hit and the widget reads as
+        // completely dead. That is what adding the Edge selector looked like
+        // until this list grew: paint, layout, registration and routing were
+        // all correct and the thing still did nothing.
         self.ui_context.clear_popovers();
         if self.profile_dropdown.popover_rect().is_some() {
             self.ui_context.register_popover(&mut self.profile_dropdown);
+        }
+        if self.edge_dropdown.popover_rect().is_some() {
+            self.ui_context.register_popover(&mut self.edge_dropdown);
         }
 
         let mut pc = PaintCtx::new();
@@ -1143,7 +1266,7 @@ impl Application for BevelPopup {
         let shape = self.active_shape();
         let wall_active = shape.curve() == Curve::Wall;
         let active = if wall_active { &self.wall } else { &self.edge };
-        draw_section(&mut pc, self.cut_rect, active, shape);
+        draw_section(&mut pc, self.cut_rect, active, shape, self.active_edge());
 
         let knobs = if wall_active { &self.wall } else { &self.edge };
         for s in [
@@ -1155,6 +1278,7 @@ impl Application for BevelPopup {
         ] {
             cce_ui::scene::painter::paint_root_into(&self.ui_context, s, &mut pc);
         }
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.edge_dropdown, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.profile_dropdown, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.save_button, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.reset_button, &mut pc);
@@ -1165,6 +1289,9 @@ impl Application for BevelPopup {
             // PaintCtx is a RenderTarget: the popover draws its real prims (the
             // dropdown's expanded inset-plate surface) with its own bounds.
             self.profile_dropdown.render_popover(&mut pc);
+        }
+        if self.edge_dropdown.popover_rect().is_some() {
+            self.edge_dropdown.render_popover(&mut pc);
         }
 
         // The shared context menu (slider Copy/Paste), last, on top.
