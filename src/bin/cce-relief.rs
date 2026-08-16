@@ -406,7 +406,7 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
     // and the SECTION lays out in what is left. Reserving it up front is what
     // keeps the slab from expanding over it — the slab grows to the bottom of
     // whatever area it is given.
-    let strip_band = SHADE_STRIP_H + 4.0;
+    let strip_band = 2.0 * SHADE_STRIP_H + 6.0;
     let sec_h = rect.height - strip_band;
     // stroke + slab-underside room, plus the bottom gutter
     let avail_h = sec_h - 2.0 * m - UNDERSIDE - GUTTER_B;
@@ -592,9 +592,78 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
             );
             x += step;
         }
+        // THE LIVE SWATCH, directly under the prediction and on the same
+        // x-scale: the shape emitted as REAL prims, through the same PaintCtx
+        // as everything else, so the renderer draws it with the actual shader.
+        //
+        // The two bands are the anti-drift device with teeth. A shared constant
+        // and a parsing test say the numbers agree; these say the PICTURES do.
+        // Any divergence between them is either a bug in relief_shade or a
+        // change in the shader that relief_shade has not tracked, and it shows
+        // up as a visible seam between the bands rather than as silence.
+        //
+        // Alignment: a carve's wall straddles its box edge by ±depth/2, so
+        // emitting at depth = `unit` with the edge at the section's own wall
+        // centre puts the real wall over the predicted one, column for column.
+        let swatch_y = strip_y + strip_h + 2.0;
+        let edge_x = x0 + unit * 0.5;
+        // Tall and wide: only the LEFT wall is meant to land in the band, so
+        // the box's other three edges are pushed well outside it. The clip is
+        // what keeps the cover quad — which inflates past the box — off the
+        // section above and the sliders below.
+        pc.clip(
+            Rect { x: x_l, y: swatch_y, width: x_r - x_l, height: strip_h },
+            |pc| {
+                // OPAQUE: page_low_color carries the plate's own alpha, and
+                // over the near-black opening that lands ~4 grey levels below
+                // the predicted band, which then reads as a constant model
+                // error it is not. The two bands must differ ONLY by shading.
+                pc.quad(
+                    Rect { x: x_l, y: swatch_y, width: x_r - x_l, height: strip_h },
+                    [plate[0], plate[1], plate[2], 1.0],
+                );
+                let tall = Rect {
+                    x: edge_x,
+                    y: swatch_y - 400.0,
+                    width: 4000.0,
+                    height: strip_h + 800.0,
+                };
+                let sq = (0.0, 0.0, 0.0, 0.0);
+                match shape {
+                    Shape::Recess | Shape::Fillet => pc.recess(tall, sq, unit),
+                    Shape::Boss => pc.boss(tall, sq, unit),
+                    Shape::Ridge => pc.ridge(tall, sq, unit),
+                    Shape::Trough => pc.trough(tall, sq, unit),
+                    Shape::InsetPlate => pc.inset_plate(tall, sq, [0.0; 4], unit),
+                    Shape::Groove => {
+                        let cx = x0 + unit * (0.5 + GROOVE_FLOOR * 0.5);
+                        pc.groove(
+                            (cx, swatch_y - 400.0),
+                            (cx, swatch_y + strip_h + 400.0),
+                            GROOVE_FLOOR * unit,
+                            unit,
+                            tall,
+                        );
+                    }
+                    // The pair as inset_plate used to emit it, in order.
+                    Shape::InsetStacked => {
+                        let g = unit * 0.5;
+                        let inner = Rect { x: edge_x + g, ..tall };
+                        pc.recess(
+                            Rect { x: inner.x - g, y: inner.y, width: inner.width + 2.0 * g, height: inner.height },
+                            sq,
+                            unit,
+                        );
+                        pc.boss(inner, sq, unit);
+                    }
+                    Shape::EdgeRoll => pc.plate(tall, sq, plate, unit),
+                }
+            },
+        );
+
         if walls.is_empty() {
             pc.text_with(
-                "plate branch — not the free-carve model".to_string(),
+                "plate branch — predicted band is blank; the swatch is real".to_string(),
                 x_l + 4.0,
                 strip_y + 1.0,
                 10.0,
