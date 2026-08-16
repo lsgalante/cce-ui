@@ -1,8 +1,15 @@
-//! `cce-bevel` — the relief-material control interface. Each profile (the
-//! wall curve every recess/boss carve renders, and the plate perimeter's
-//! roll) is shown as a lit CROSS-SECTION of the actual edge — plateau, wall,
-//! floor — and shaped by three semantic sliders (Shoulder / Base / Bias)
-//! instead of a free-form ramp. Every edit applies live to this process (the
+//! `cce-relief` — the relief-material control interface. A SHAPE from the
+//! `scene::paint` relief family (recess, boss, ridge, trough, groove, fillet,
+//! plate edge roll, and the composed inset plate) is shown as a lit
+//! CROSS-SECTION of the actual edge, and the curve its walls are cut with is
+//! shaped by three semantic sliders (Shoulder / Base / Bias) instead of a
+//! free-form ramp.
+//!
+//! Named for the family, not for one member: `scene::paint`'s `Prim` doc
+//! reserves "bevel" for the `Bevel` prim and the shared edge treatment, and
+//! calls the family relief primitives — which is also what `control_relief`
+//! gates and what the `relief` config node is called. This was `cce-bevel`
+//! until the shape picker landed and made the mismatch untenable. Every edit applies live to this process (the
 //! popup's own plate, wells, and buttons ARE the preview) and logs the
 //! sampled spec to stdout; Save persists to `~/.config/cce/config.kdl`
 //! (`style.surface.relief`) so every cce app starts with the material —
@@ -54,6 +61,168 @@ const UNDERSIDE: f32 = 18.0;
 enum BevelMsg {
     Exit,
 }
+
+/// Which of the two profile curves a shape's walls are drawn with — the thing
+/// the knobs actually edit. Several shapes share one curve (every box carve and
+/// both straddling shapes are the Wall curve), so the picker selects a SHAPE and
+/// the curve follows; the caption says which one you are editing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Curve {
+    Wall,
+    Edge,
+}
+
+/// A relief shape, as a cross-section. This is the `Prim` family from
+/// `scene::paint` — the point of the picker is that the section shows the shape
+/// you will actually emit, not an idealised wall standing in for all of them.
+///
+/// Two of these are COMPOSED rather than primitive, and they are the reason the
+/// picker exists: `InsetPlate` is what `PaintCtx::inset_plate` emits today (one
+/// `Trough`), and `InsetStacked` is what it emitted before cce-ui@`35f5183` (a
+/// `Recess` on an outset rect plus a `Boss` on the rect). Put them side by side
+/// and the old one's fault is visible as geometry: same dip depth, 1.5× the run,
+/// and a flat floor where the single evaluation comes to a point.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    Recess,
+    Boss,
+    EdgeRoll,
+    Ridge,
+    Trough,
+    Groove,
+    Fillet,
+    InsetPlate,
+    InsetStacked,
+}
+
+impl Shape {
+    const ALL: [Shape; 9] = [
+        Shape::Recess,
+        Shape::Boss,
+        Shape::EdgeRoll,
+        Shape::Ridge,
+        Shape::Trough,
+        Shape::Groove,
+        Shape::Fillet,
+        Shape::InsetPlate,
+        Shape::InsetStacked,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Shape::Recess => "Recess — carve, interior one step down",
+            Shape::Boss => "Boss — plateau, interior one step up",
+            Shape::EdgeRoll => "Plate edge — perimeter roll to the silhouette",
+            Shape::Ridge => "Ridge — raised crest on the boundary",
+            Shape::Trough => "Trough — sunken valley on the boundary",
+            Shape::Groove => "Groove — slab valley (width 0 = a V)",
+            Shape::Fillet => "Fillet — concave inside corner",
+            Shape::InsetPlate => "Inset plate — flush control seam",
+            Shape::InsetStacked => "Inset plate, STACKED (pre-35f5183)",
+        }
+    }
+
+    /// The curve whose knobs shape this section.
+    fn curve(self) -> Curve {
+        match self {
+            Shape::EdgeRoll => Curve::Edge,
+            _ => Curve::Wall,
+        }
+    }
+
+    /// Does the section end in a floor (material continues), or in air (past a
+    /// silhouette)? Only the plate's edge roll ends in air.
+    fn has_floor(self) -> bool {
+        self != Shape::EdgeRoll
+    }
+
+    /// The run the shape's walls occupy, in WALL WIDTHS. Everything but the
+    /// stacked inset is one wall wide; the stack is 1.5 because its two walls
+    /// only overlap by half.
+    fn run(self) -> f32 {
+        match self {
+            Shape::InsetStacked => 1.5,
+            Shape::Groove => 1.0 + GROOVE_FLOOR,
+            _ => 1.0,
+        }
+    }
+
+    /// Surface height at run position `t` (in wall widths, 0 at the first wall's
+    /// start). Units: 1.0 = one full wall drop DOWN into the material, negative
+    /// = up out of it, 0 = the surrounding surface. `None` is air.
+    fn height(self, p: &ProfileKnobs, t: f32) -> Option<f32> {
+        // The profile's height curve, clamped to its plateaus.
+        let h = |u: f32| -> f32 {
+            if u <= 0.0 {
+                0.0
+            } else if u >= 1.0 {
+                1.0
+            } else {
+                p.eval(u)
+            }
+        };
+        // A bump straddling the run: up the first half, back down the second,
+        // amplitude halved — the shader's ridge/trough construction, where one
+        // profile evaluation on the folded coordinate yields both walls.
+        let bump = |t: f32| -> f32 {
+            let w = (2.0 * t).min(2.0 - 2.0 * t).clamp(0.0, 1.0);
+            0.5 * h(w)
+        };
+        Some(match self {
+            Shape::Recess => h(t),
+            Shape::Boss => -h(t),
+            Shape::EdgeRoll => {
+                if t > 1.0 {
+                    return None;
+                }
+                h(t)
+            }
+            Shape::Ridge => -bump(t),
+            Shape::Trough | Shape::InsetPlate => bump(t),
+            Shape::Groove => {
+                // The trough with a flat floor of GROOVE_FLOOR spliced in at the
+                // bottom — `width` in `Prim::Groove`, which is 0 for a pure V.
+                if t < 0.5 {
+                    bump(t)
+                } else if t < 0.5 + GROOVE_FLOOR {
+                    0.5 * h(1.0)
+                } else {
+                    bump(t - GROOVE_FLOOR)
+                }
+            }
+            // Quarter arc, concave: the inside corner a box SDF cannot express.
+            Shape::Fillet => {
+                let u = t.clamp(0.0, 1.0);
+                1.0 - (1.0 - u * u).max(0.0).sqrt()
+            }
+            // The composed stack: a recess wall stepping DOWN over [0,1] and a
+            // boss wall stepping UP over [0.5,1.5]. They overlap across the
+            // middle half, which is where the old code shaded twice.
+            Shape::InsetStacked => h(t) - h(t - 0.5),
+        })
+    }
+
+    /// For a composed shape, the run interval where TWO walls are live at once
+    /// — the band that gets two lighting evaluations instead of one, and so the
+    /// band that reads hot. `None` for a primitive shape, which has one wall
+    /// everywhere by construction.
+    ///
+    /// Drawn as a band rather than as the two contributing curves on purpose:
+    /// plotted raw, the second wall's own excursion runs a full drop the other
+    /// way and leaves the section entirely, which forces the view to zoom out
+    /// far enough to shrink the composite you actually came to look at.
+    fn overlap(self) -> Option<(f32, f32)> {
+        match self {
+            Shape::InsetStacked => Some((0.5, 1.0)),
+            _ => None,
+        }
+    }
+}
+
+/// Flat floor spliced into the `Groove` section, in wall widths — `Prim::Groove`'s
+/// `width`, shown non-zero so the knob's effect is visible (0 would render as a V
+/// identical to `Trough`, whose difference is the slab SDF, not the section).
+const GROOVE_FLOOR: f32 = 0.45;
 
 /// One profile section's shape state: the three knob sliders plus whether
 /// the profile has diverged from the analytic default.
@@ -142,7 +311,8 @@ struct BevelPopup {
     save_button: Adapted<Button>,
     reset_button: Adapted<Button>,
     /// The window plate's alpha — seeded from this app's own config
-    /// (`~/.config/cce/cce-bevel/config.kdl`, `window { opacity }`), falling
+    /// (`~/.config/cce/cce-relief/config.kdl`, `window { opacity }`, falling
+    /// back to the pre-rename `cce-bevel` path), falling
     /// back to the DE backplate opacity. Edited on the file directly, the
     /// DE way — no dedicated control.
     plate_opacity: f32,
@@ -174,47 +344,69 @@ use cce_ui::widget::parse_bevel_knobs as parse_knobs;
 /// light azimuth. `has_floor` distinguishes the carve (wall meets a floor
 /// inside the material) from the roll (the surface drops to the silhouette
 /// and the material simply ends — air beyond the edge).
-fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor: bool) {
+fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Shape) {
+    let has_floor = shape.has_floor();
     let radius = 6.0f32;
     let radii = (radius, radius, radius, radius);
     pc.rounded_rect(rect, radius, (true, true, true, true), [0.08, 0.08, 0.10, 1.0]);
 
-    // The section geometry: plateau band, then the wall over `wall_w`, then
-    // (carve only) the floor band. PROPORTIONAL AXES: the wall's 0..1 × 0..1
-    // domain renders square — one unit of run is one unit of drop in pixels,
-    // whatever shape the opening is — so a 45° chamfer draws at 45°. The
-    // plateau/floor bands absorb leftover width and the section centers
-    // vertically; the window's shape never distorts the curve.
+    // The section geometry: a flat band, the shape's walls over `run` wall
+    // widths, then a closing band. PROPORTIONAL AXES: one unit of run is one
+    // unit of drop in pixels, whatever the shape or the window — so a 45°
+    // chamfer draws at 45°, and a shape whose run is 1.5 wall widths draws
+    // half again as wide as one that runs 1. That comparison is the whole
+    // point of putting the composed shapes in here, so the scale must not be
+    // renormalised per shape.
     let m = CUT_MARGIN;
     let x_l = rect.x + m + GUTTER_L;
     let x_r = rect.x + rect.width - m;
     let avail_w = x_r - x_l;
     // stroke + slab-underside room, plus the bottom gutter
     let avail_h = rect.height - 2.0 * m - UNDERSIDE - GUTTER_B;
-    let drop = avail_h.min(avail_w - 2.0 * MIN_BAND).max(24.0);
-    let wall_w = drop;
+
+    let run = shape.run();
+    // Vertical extent of THIS shape, sampled — a ridge lives above the surface,
+    // a recess below, a trough only half a drop down.
+    let (mut h_lo, mut h_hi) = (0.0f32, 0.0f32);
+    for i in 0..=64 {
+        let t = run * i as f32 / 64.0;
+        if let Some(hv) = shape.height(profile, t) {
+            h_lo = h_lo.min(hv);
+            h_hi = h_hi.max(hv);
+        }
+    }
+    let h_span = (h_hi - h_lo).max(0.25);
+
+    // One scale for both axes (see above), the binding constraint whichever it is.
+    let unit = ((avail_w - 2.0 * MIN_BAND) / run)
+        .min(avail_h / h_span)
+        .max(16.0);
+    let wall_w = run * unit;
     let leftover = (avail_w - wall_w).max(2.0 * MIN_BAND);
     let plateau_frac = if has_floor { 0.45 } else { 0.62 };
     let plateau_w = leftover * plateau_frac;
-    let y_top = rect.y + ((rect.height - drop - UNDERSIDE - GUTTER_B) / 2.0).max(m);
-    let y_bot = y_top + drop;
+    // y of h = 0 (the surrounding surface), placed so the whole excursion fits.
+    let drawn_h = h_span * unit;
+    let y_zero = rect.y
+        + ((rect.height - drawn_h - UNDERSIDE - GUTTER_B) / 2.0).max(m)
+        - h_lo * unit;
+    let y_top = y_zero + h_lo * unit;
+    let y_bot = y_zero + h_hi * unit;
     let x0 = x_l + plateau_w;
     let x1 = x0 + wall_w;
 
-    // The axes: faint gridlines over the wall's square 0..1 × 0..1 domain,
-    // drawn before the slab so the material occludes them (grid in the void
-    // only), with the numbers in the gutters. x is the wall's run, y its
-    // depth — 0 at the plateau, 1 at the floor.
+    // The axes: faint gridlines over the shape's run × depth domain, drawn
+    // before the slab so the material occludes them (grid in the void only),
+    // with the numbers in the gutters. x is run in wall widths, y is depth in
+    // drops — 0 at the surrounding surface, positive down into the material.
     let grid = [0.25f32, 0.25, 0.28, 0.6];
     let num_color = [0x84u8, 0x84, 0x92];
-    for i in 0..=4 {
-        let r = i as f32 / 4.0;
-        let gx = x0 + r * wall_w;
-        let gy = y_top + r * drop;
-        pc.quad(Rect { x: gx, y: y_top, width: 1.0, height: drop }, grid);
+    let mut gh = (h_lo / 0.25).round() * 0.25;
+    while gh <= h_hi + 1e-3 {
+        let gy = y_zero + gh * unit;
         pc.quad(Rect { x: x0, y: gy, width: wall_w, height: 1.0 }, grid);
         pc.text_with(
-            format!("{r:.2}"),
+            format!("{gh:.2}"),
             rect.x + m + 2.0,
             gy - 5.0,
             10.0,
@@ -222,20 +414,43 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
             Some("monospace".to_string()),
             None,
         );
+        gh += 0.25;
+    }
+    let mut gt = 0.0f32;
+    while gt <= run + 1e-3 {
+        let gx = x0 + gt * unit;
+        pc.quad(Rect { x: gx, y: y_top, width: 1.0, height: (y_bot - y_top).max(1.0) }, grid);
+        gt += 0.25;
     }
 
     // Surface height at a section x.
     let surface_y = |x: f32| -> Option<f32> {
         if x <= x0 {
-            Some(y_top)
+            Some(y_zero)
         } else if x <= x1 {
-            Some(y_top + profile.eval((x - x0) / wall_w) * drop)
+            shape
+                .height(profile, (x - x0) / unit)
+                .map(|hv| y_zero + hv * unit)
         } else if has_floor {
-            Some(y_bot)
+            shape.height(profile, run).map(|hv| y_zero + hv * unit)
         } else {
             None // past the silhouette: air
         }
     };
+
+    // A composed shape's double-shaded band: where two walls are live at once.
+    // Drawn under the slab so the material still occludes it, like the grid.
+    if let Some((ot0, ot1)) = shape.overlap() {
+        pc.quad(
+            Rect {
+                x: x0 + ot0 * unit,
+                y: y_top,
+                width: (ot1 - ot0) * unit,
+                height: (y_bot - y_top).max(1.0),
+            },
+            [0.55, 0.30, 0.30, 0.30],
+        );
+    }
 
     // The slab: the plate material itself, filled from the surface down to
     // the cut's bottom edge. Columns share exact edges (opaque fill, but the
@@ -256,18 +471,21 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, has_floor
         x += step;
     }
 
-    // Run numbers under the slab's underside, on the wall-domain ticks.
-    for i in 0..=4 {
-        let r = i as f32 / 4.0;
+    // Run numbers under the slab's underside, in wall widths — so a 1.5-wide
+    // shape reads "…1.25 1.50" and its extra run is a number, not just a
+    // feeling.
+    let mut rt = 0.0f32;
+    while rt <= run + 1e-3 {
         pc.text_with(
-            format!("{r:.2}"),
-            x0 + r * wall_w - 11.0,
+            format!("{rt:.2}"),
+            x0 + rt * unit - 11.0,
             slab_bot + 3.0,
             10.0,
             num_color,
             Some("monospace".to_string()),
             None,
         );
+        rt += 0.25;
     }
 
     // The surface stroke, lit per segment: outward normal (material below)
@@ -513,7 +731,10 @@ impl Application for BevelPopup {
         let (dmin, dmax) = DEPTH_RANGE;
         let (wmin, wmax) = WIDTH_RANGE;
         // The persisted per-app plate opacity, falling back to the DE look.
-        let plate_opacity = std::fs::read_to_string(cce_ui::config::get_app_config_path("cce-bevel"))
+        // New path first, then the pre-rename one, so an existing opacity
+        // setting keeps working without a migration step.
+        let plate_opacity = std::fs::read_to_string(cce_ui::config::get_app_config_path("cce-relief"))
+            .or_else(|_| std::fs::read_to_string(cce_ui::config::get_app_config_path("cce-bevel")))
             .ok()
             .map(|c| cce_ui::config::parse_kdl_to_json(&c))
             .and_then(|v| {
@@ -525,13 +746,10 @@ impl Application for BevelPopup {
             .unwrap_or_else(|| cce_ui::color::active_backplate_opacity());
         Self {
             profile_dropdown: Dropdown::new(
-                vec![
-                    "Wall — recess & boss carves".to_string(),
-                    "Edge — plate perimeter roll".to_string(),
-                ],
+                Shape::ALL.iter().map(|s| s.label().to_string()).collect(),
                 0,
             )
-            .with_label("Profile"),
+            .with_label("Shape"),
             wall: ProfileKnobs::new(wall_seed),
             edge: ProfileKnobs::new(edge_seed),
             depth_slider: Slider::new()
@@ -573,10 +791,10 @@ impl Application for BevelPopup {
     fn settings(&self) -> WindowSettings {
         WindowSettings {
             title: match &self.target_label {
-                Some(l) => format!("Bevel — {l}"),
-                None => "Bevel".to_string(),
+                Some(l) => format!("Relief — {l}"),
+                None => "Relief".to_string(),
             },
-            app_id: "cce-bevel".to_string(),
+            app_id: "cce-relief".to_string(),
             width: 520,
             height: 480,
             fullscreen: false,
@@ -715,9 +933,13 @@ impl Application for BevelPopup {
             None,
         );
 
-        let wall_active = self.profile_dropdown.selected == 0;
+        let shape = Shape::ALL
+            .get(self.profile_dropdown.selected)
+            .copied()
+            .unwrap_or(Shape::Recess);
+        let wall_active = shape.curve() == Curve::Wall;
         let active = if wall_active { &self.wall } else { &self.edge };
-        draw_section(&mut pc, self.cut_rect, active, wall_active);
+        draw_section(&mut pc, self.cut_rect, active, shape);
 
         let knobs = if wall_active { &self.wall } else { &self.edge };
         for s in [

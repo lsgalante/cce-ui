@@ -352,7 +352,7 @@ pub fn update_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str, value: &str, 
 /// [`update_kdl_in_memory`] with an explicit type annotation for the written
 /// entry. `forced_ty` overrides both the value-shape inference and the
 /// preserved existing annotation — how a writer ESTABLISHES a custom type
-/// (e.g. cce-bevel writing `(bevel)` knob keys into a config that never had
+/// (e.g. cce-relief writing `(bevel)` knob keys into a config that never had
 /// them; preservation alone can't create the annotation).
 pub fn update_kdl_in_memory_typed(doc: &mut kdl::KdlDocument, key: &str, value: &str, _default_section: &str, forced_ty: Option<&str>) -> bool {
     let parts: Vec<&str> = key.split('.').collect();

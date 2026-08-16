@@ -2,14 +2,14 @@
 //! lit cross-section of a relief profile (plateau → wall → floor), shaped by
 //! a "shoulder,base,bias" knob triple. Read-only: it exists to SHOW the
 //! current material and take a click, which hosts (cce-data-editor) answer
-//! by opening the full `cce-bevel` editor. The curve family and knob
-//! semantics are cce-bevel's — see [`bevel_ease`].
+//! by opening the full `cce-relief` editor. The curve family and knob
+//! semantics are cce-relief's — see [`bevel_ease`].
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::{Cap, PaintCtx};
 use crate::widget::{Adapted, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
-/// The relief profile curve family shared by `cce-bevel` and this preview:
+/// The relief profile curve family shared by `cce-relief` and this preview:
 /// the two-exponent rational ease `h(w) = w^a / (w^a + (1-w)^b)` over a bias
 /// pre-warp `w = v^g`. Monotone and endpoint-exact; slider midpoints
 /// (0.5, 0.5, 0.5) give a=b=2, g=1 — the analytic smoothstep. Exponents run
@@ -28,7 +28,7 @@ pub fn bevel_ease(shoulder: f32, base: f32, bias: f32, v: f32) -> f32 {
 }
 
 /// Parse a "shoulder,base,bias" knob triple (the `(bevel)` value format, and
-/// what cce-bevel persists as `profile_knobs` / `edge_knobs`).
+/// what cce-relief persists as `profile_knobs` / `edge_knobs`).
 pub fn parse_bevel_knobs(s: &str) -> Option<(f32, f32, f32)> {
     let mut it = s.split(',').map(|p| p.trim().parse::<f32>());
     match (it.next(), it.next(), it.next()) {
@@ -80,7 +80,7 @@ impl Paint for BevelPreview {
         ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
 
         // Mini cutaway: plateau band, the wall over a square-ish domain, then
-        // the floor — cce-bevel's `draw_section` reduced to swatch scale.
+        // the floor — cce-relief's `draw_section` reduced to swatch scale.
         let m = 3.0f32;
         let x_l = rect.x + m;
         let x_r = rect.x + rect.width - m;

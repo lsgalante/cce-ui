@@ -120,10 +120,10 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.relief.depth" | "window_manager.bevel_depth" => "bevel_depth",
                 "style.surface.relief.width" | "window_manager.bevel_width" => "bevel_width",
                 // Ramp-spec strings for the custom wall/roll profiles
-                // (written by cce-bevel, installed by reload_config).
+                // (written by cce-relief, installed by reload_config).
                 "style.surface.relief.profile" => "bevel_profile_spec",
                 "style.surface.relief.edge_profile" => "roll_profile_spec",
-                // cce-bevel's slider positions behind those specs
+                // cce-relief's slider positions behind those specs
                 // ("shoulder,base,bias" — only the editor reads these).
                 "style.surface.relief.profile_knobs" => "bevel_profile_knobs",
                 "style.surface.relief.edge_knobs" => "roll_profile_knobs",
