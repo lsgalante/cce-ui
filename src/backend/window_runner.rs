@@ -2718,6 +2718,18 @@ pub trait Application: Sized + 'static {
     fn layer(&self) -> Option<LayerSettings> {
         None
     }
+    /// Declare the window a UTILITY window: a tool whose shape is decided by
+    /// its contents. The compositor then never dictates a size to it (every
+    /// configure is the "you choose" 0x0 — [`WindowSettings::width`]/`height`
+    /// become the surface's own initial size), offers no resize affordance
+    /// (the whole border band moves the window), and never saves geometry
+    /// for it, so a stale remembered size can't be restored over what the
+    /// app asks for. Declared over the cce window-management protocol at
+    /// window creation; on a compositor too old to know the request this is
+    /// silently a plain floating window. Defaults to `false`.
+    fn utility(&self) -> bool {
+        false
+    }
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
     /// On-top overlay quads drawn after the display list and its text (e.g. the status bar's
@@ -3023,6 +3035,9 @@ pub struct EngineState<A: Application> {
     pub just_configured: bool,
     pub pointer_gestures: Option<ZwpPointerGesturesV1>,
     pub pinch_gesture: Option<ZwpPointerGesturePinchV1>,
+    /// The cce window-management toplevel handle, held for the window's
+    /// lifetime once [`Application::utility`] declared the mode.
+    pub cce_toplevel: Option<crate::protocol::cce_window_management_v1::zcce_toplevel_v1::ZcceToplevelV1>,
     pub last_pinch_scale: f32,
     pub cursor_pos: (f32, f32),
     /// Serial of the most recent pointer press, kept for
@@ -4280,6 +4295,71 @@ impl<A: Application> wayland_client::Dispatch<crate::protocol::zcce_inspector_v1
     ) {}
 }
 
+impl<A: Application> wayland_client::Dispatch<crate::protocol::cce_window_management_v1::zcce_window_manager_v1::ZcceWindowManagerV1, ()> for EngineState<A> {
+    fn event(
+        _state: &mut Self,
+        _proxy: &crate::protocol::cce_window_management_v1::zcce_window_manager_v1::ZcceWindowManagerV1,
+        _event: crate::protocol::cce_window_management_v1::zcce_window_manager_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {}
+
+    wayland_client::event_created_child!(
+        EngineState<A>,
+        crate::protocol::cce_window_management_v1::zcce_window_manager_v1::ZcceWindowManagerV1,
+        [
+            6 => (crate::protocol::cce_window_management_v1::zcce_window_v1::ZcceWindowV1, ()),
+            7 => (crate::protocol::cce_window_management_v1::zcce_output_v1::ZcceOutputV1, ()),
+            8 => (crate::protocol::cce_window_management_v1::zcce_seat_v1::ZcceSeatV1, ()),
+        ]
+    );
+}
+
+impl<A: Application> wayland_client::Dispatch<crate::protocol::cce_window_management_v1::zcce_window_v1::ZcceWindowV1, ()> for EngineState<A> {
+    fn event(
+        _state: &mut Self,
+        _proxy: &crate::protocol::cce_window_management_v1::zcce_window_v1::ZcceWindowV1,
+        _event: crate::protocol::cce_window_management_v1::zcce_window_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {}
+}
+
+impl<A: Application> wayland_client::Dispatch<crate::protocol::cce_window_management_v1::zcce_output_v1::ZcceOutputV1, ()> for EngineState<A> {
+    fn event(
+        _state: &mut Self,
+        _proxy: &crate::protocol::cce_window_management_v1::zcce_output_v1::ZcceOutputV1,
+        _event: crate::protocol::cce_window_management_v1::zcce_output_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {}
+}
+
+impl<A: Application> wayland_client::Dispatch<crate::protocol::cce_window_management_v1::zcce_seat_v1::ZcceSeatV1, ()> for EngineState<A> {
+    fn event(
+        _state: &mut Self,
+        _proxy: &crate::protocol::cce_window_management_v1::zcce_seat_v1::ZcceSeatV1,
+        _event: crate::protocol::cce_window_management_v1::zcce_seat_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {}
+}
+
+impl<A: Application> wayland_client::Dispatch<crate::protocol::cce_window_management_v1::zcce_toplevel_v1::ZcceToplevelV1, ()> for EngineState<A> {
+    fn event(
+        _state: &mut Self,
+        _proxy: &crate::protocol::cce_window_management_v1::zcce_toplevel_v1::ZcceToplevelV1,
+        _event: crate::protocol::cce_window_management_v1::zcce_toplevel_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {}
+}
+
 delegate_compositor!(@<A: Application> EngineState<A>);
 delegate_xdg_shell!(@<A: Application> EngineState<A>);
 delegate_xdg_window!(@<A: Application> EngineState<A>);
@@ -4578,6 +4658,7 @@ fn run_session<'l, A: Application>(
         just_configured: false,
         pointer_gestures,
         pinch_gesture: None,
+        cce_toplevel: None,
         last_pinch_scale: 1.0,
         cursor_pos: (0.0, 0.0),
         last_press_serial: None,
@@ -4651,6 +4732,24 @@ fn run_session<'l, A: Application>(
         }
         if let Some((min_w, min_h)) = settings.min_size {
             window.set_min_size(Some((min_w, min_h)));
+        }
+        if engine_state.inner.as_ref().unwrap().utility() {
+            // Declared BEFORE the initial commit so the mode is set by the
+            // time the compositor maps (and would otherwise restore) the
+            // window. Manager version 5 is where set_utility appeared; on an
+            // older compositor the declaration is skipped and the app runs
+            // as a plain floating window rather than dying on an unknown
+            // opcode.
+            match globals.bind::<crate::protocol::cce_window_management_v1::zcce_window_manager_v1::ZcceWindowManagerV1, _, _>(&qh, 5..=5, ()) {
+                Ok(cce_wm) => {
+                    let toplevel = cce_wm.get_cce_toplevel(&surface, &qh, ());
+                    toplevel.set_utility();
+                    engine_state.cce_toplevel = Some(toplevel);
+                }
+                Err(e) => {
+                    log::warn!("[window_runner] utility window declaration unavailable: {e}");
+                }
+            }
         }
         window.commit();
         engine_state.window = Some(window);

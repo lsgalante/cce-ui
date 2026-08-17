@@ -1211,6 +1211,13 @@ impl Application for BevelPopup {
         }
     }
 
+    /// The motivating case for the mode: this window's shape IS
+    /// `content_height`, so nothing — not a drag, not a remembered size —
+    /// should ever dictate a different one.
+    fn utility(&self) -> bool {
+        true
+    }
+
     fn update(&mut self, msg: Self::Message, _needs_rebuild: &mut bool, exit: &mut bool) {
         match msg {
             BevelMsg::Exit => *exit = true,
