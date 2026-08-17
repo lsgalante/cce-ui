@@ -350,15 +350,27 @@ struct ProfileKnobs {
     shoulder: Adapted<Slider>,
     base: Adapted<Slider>,
     bias: Adapted<Slider>,
-    /// False until a knob moves (or config carried saved knobs): the DE
-    /// renders its analytic profile and Save writes the identity sentinel.
+    /// False until a knob moves or config installed a real (non-identity)
+    /// profile for this section: the DE renders its analytic profile and
+    /// Save writes the identity sentinel.
     custom: bool,
     /// Last spec applied+logged.
     last_spec: String,
 }
 
 impl ProfileKnobs {
-    fn new(seed: Option<(f32, f32, f32)>) -> Self {
+    /// `installed` is whether the live material actually carries a custom
+    /// LUT for this profile (`layout::*_profile_slopes().is_some()` — the
+    /// shader's own condition). It is NOT the same as "config carried saved
+    /// knobs": Save writes the knob triples as a ride-along even for an
+    /// untouched section (so the editor reopens where it was left), while
+    /// writing the identity SPEC — which installs nothing. Seeding `custom`
+    /// from the knobs' presence made the prediction follow the knob curve
+    /// while the renderer ran analytic. The wall curve hid it (the knob
+    /// midpoints ARE the analytic smoothstep); the roll exposed it (the knob
+    /// family is nothing like the superellipse quadrant) — and a Save from
+    /// that state would have installed a smoothstep roll DE-wide unasked.
+    fn new(seed: Option<(f32, f32, f32)>, installed: bool) -> Self {
         let (s, b, c) = seed.unwrap_or((0.5, 0.5, 0.5));
         let knob = |v: f32, label: &str| {
             Slider::new()
@@ -371,7 +383,7 @@ impl ProfileKnobs {
             shoulder: knob(s, "Shoulder"),
             base: knob(b, "Base"),
             bias: knob(c, "Bias"),
-            custom: seed.is_some(),
+            custom: installed,
             last_spec: String::new(),
         };
         this.last_spec = if this.custom { this.spec() } else { IDENTITY_SPEC.to_string() };
@@ -1155,8 +1167,8 @@ impl Application for BevelPopup {
                 0,
             )
             .with_label("Edge"),
-            wall: ProfileKnobs::new(wall_seed),
-            edge: ProfileKnobs::new(edge_seed),
+            wall: ProfileKnobs::new(wall_seed, cce_ui::layout::bevel_profile_slopes().is_some()),
+            edge: ProfileKnobs::new(edge_seed, cce_ui::layout::roll_profile_slopes().is_some()),
             depth_slider: Slider::new()
                 .with_label("Depth")
                 .with_range(dmin, dmax)
