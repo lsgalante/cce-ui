@@ -2730,6 +2730,22 @@ pub trait Application: Sized + 'static {
     fn utility(&self) -> bool {
         false
     }
+    /// Declare the window the DESKTOP-GRID layer (zcce set_grid): the
+    /// compositor world-anchors the surface to the virtual desktop and
+    /// pans/zooms it per frame like window content; the app renders only
+    /// when handed a patch (see [`Application::grid_patch`]). The surface
+    /// becomes input-transparent and lives behind all windows. Needs
+    /// manager v6; on an older compositor the declaration is skipped.
+    /// Defaults to `false`.
+    fn grid(&self) -> bool {
+        false
+    }
+    /// A grid patch to render (grid apps only): virtual origin (`x`, `y`),
+    /// virtual size (`w`, `h`), and `scale` surface px per virtual unit.
+    /// Called right before the frame that must show it; the runner has
+    /// already resized the surface to `(w*scale, h*scale)` and acks the
+    /// patch so the coming commit is latched at the new anchor.
+    fn grid_patch(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _scale: f64) {}
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
     /// On-top overlay quads drawn after the display list and its text (e.g. the status bar's
@@ -3038,6 +3054,9 @@ pub struct EngineState<A: Application> {
     /// The cce window-management toplevel handle, held for the window's
     /// lifetime once [`Application::utility`] declared the mode.
     pub cce_toplevel: Option<crate::protocol::cce_window_management_v1::zcce_toplevel_v1::ZcceToplevelV1>,
+    /// Latest unrendered grid_patch (serial, x, y, w, h, scale) — a newer
+    /// event supersedes an unconsumed older one, per protocol.
+    pub pending_grid_patch: Option<(u32, f64, f64, f64, f64, f64)>,
     pub last_pinch_scale: f32,
     pub cursor_pos: (f32, f32),
     /// Serial of the most recent pointer press, kept for
@@ -3215,6 +3234,16 @@ impl<A: Application> EngineState<A> {
     }
 
     pub fn render(&mut self) {
+        // Grid patch: resize to the patch's buffer size, tell the app what
+        // world region this frame covers, and ack — the commit this render
+        // produces is the one the compositor latches at the new anchor.
+        if let Some((serial, px, py, pw, ph, pscale)) = self.pending_grid_patch.take() {
+            self.resize((pw * pscale) as f32, (ph * pscale) as f32);
+            self.inner.as_mut().unwrap().grid_patch(px, py, pw, ph, pscale);
+            if let Some(tl) = &self.cce_toplevel {
+                tl.ack_grid_patch(serial);
+            }
+        }
         let logical_w = self.logical_width;
         let logical_h = self.logical_height;
         let scale_factor = self.scale_factor;
@@ -4351,13 +4380,20 @@ impl<A: Application> wayland_client::Dispatch<crate::protocol::cce_window_manage
 
 impl<A: Application> wayland_client::Dispatch<crate::protocol::cce_window_management_v1::zcce_toplevel_v1::ZcceToplevelV1, ()> for EngineState<A> {
     fn event(
-        _state: &mut Self,
+        state: &mut Self,
         _proxy: &crate::protocol::cce_window_management_v1::zcce_toplevel_v1::ZcceToplevelV1,
-        _event: crate::protocol::cce_window_management_v1::zcce_toplevel_v1::Event,
+        event: crate::protocol::cce_window_management_v1::zcce_toplevel_v1::Event,
         _data: &(),
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-    ) {}
+    ) {
+        use crate::protocol::cce_window_management_v1::zcce_toplevel_v1::Event;
+        if let Event::GridPatch { serial, x, y, width, height, scale } = event {
+            // A newer patch supersedes an unconsumed older one.
+            state.pending_grid_patch = Some((serial, x, y, width, height, scale));
+            state.redraw = true;
+        }
+    }
 }
 
 delegate_compositor!(@<A: Application> EngineState<A>);
@@ -4659,6 +4695,7 @@ fn run_session<'l, A: Application>(
         pointer_gestures,
         pinch_gesture: None,
         cce_toplevel: None,
+        pending_grid_patch: None,
         last_pinch_scale: 1.0,
         cursor_pos: (0.0, 0.0),
         last_press_serial: None,
@@ -4733,21 +4770,29 @@ fn run_session<'l, A: Application>(
         if let Some((min_w, min_h)) = settings.min_size {
             window.set_min_size(Some((min_w, min_h)));
         }
-        if engine_state.inner.as_ref().unwrap().utility() {
+        let wants_utility = engine_state.inner.as_ref().unwrap().utility();
+        let wants_grid = engine_state.inner.as_ref().unwrap().grid();
+        if wants_utility || wants_grid {
             // Declared BEFORE the initial commit so the mode is set by the
             // time the compositor maps (and would otherwise restore) the
-            // window. Manager version 5 is where set_utility appeared; on an
-            // older compositor the declaration is skipped and the app runs
-            // as a plain floating window rather than dying on an unknown
-            // opcode.
-            match globals.bind::<crate::protocol::cce_window_management_v1::zcce_window_manager_v1::ZcceWindowManagerV1, _, _>(&qh, 5..=5, ()) {
+            // window. Manager version 5 is where set_utility appeared, 6 is
+            // where the grid role did; on an older compositor the
+            // declaration is skipped and the app runs as a plain floating
+            // window rather than dying on an unknown opcode.
+            let version = if wants_grid { 6..=6 } else { 5..=5 };
+            match globals.bind::<crate::protocol::cce_window_management_v1::zcce_window_manager_v1::ZcceWindowManagerV1, _, _>(&qh, version, ()) {
                 Ok(cce_wm) => {
                     let toplevel = cce_wm.get_cce_toplevel(&surface, &qh, ());
-                    toplevel.set_utility();
+                    if wants_utility {
+                        toplevel.set_utility();
+                    }
+                    if wants_grid {
+                        toplevel.set_grid();
+                    }
                     engine_state.cce_toplevel = Some(toplevel);
                 }
                 Err(e) => {
-                    log::warn!("[window_runner] utility window declaration unavailable: {e}");
+                    log::warn!("[window_runner] cce window-management declaration unavailable: {e}");
                 }
             }
         }
