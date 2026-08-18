@@ -1153,6 +1153,18 @@ fn parse_relief_profile_spec(spec: Option<&str>) -> Option<(Vec<(f32, f32)>, boo
     spec.filter(|s| *s != RELIEF_PROFILE_IDENTITY_SPEC).and_then(crate::widget::parse_ramp_spec)
 }
 
+/// Install (or clear back to analytic) the WALL profile from a ramp spec —
+/// the entry point for a `(relief)` config value's profile
+/// ([`crate::relief_spec::ReliefSpec`]): an app whose feature carries its
+/// own material installs it process-wide here. Same identity/unparseable
+/// filtering as the config path above.
+pub fn install_wall_profile_spec(spec: Option<&str>) {
+    match parse_relief_profile_spec(spec) {
+        Some((keys, smooth)) => set_bevel_profile_keys(&keys, smooth),
+        None => clear_bevel_profile(),
+    }
+}
+
 fn mod_rest(rest: &str) -> &str {
     let rest = rest.trim();
     if rest.starts_with('"') && rest.ends_with('"') && rest.len() >= 2 {

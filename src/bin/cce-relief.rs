@@ -25,6 +25,15 @@
 //! or, with `--config <path>`, to that file instead (a per-app override
 //! like cce-designer's), which also seeds the knobs/depth/width on open.
 //!
+//! `--key <dotted.key>` edits a single `(relief)` VALUE in place instead
+//! (`cce_ui::relief_spec::ReliefSpec` — width/depth/wall knobs/wall
+//! profile folded into one string), e.g.
+//! `cce-relief --key style.surface.desktop.line_relief` for the desktop
+//! grid's lines. Seeds come from that key, edits still preview live, and
+//! Save rewrites only that key — the DE-wide material is untouched. The
+//! edge section is not part of a `(relief)` value; a feature material has
+//! one wall curve.
+//!
 //! The curve family is the two-exponent rational ease
 //! `h(w) = w^a / (w^a + (1-w)^b)` over a bias pre-warp `w = v^g` — monotone,
 //! endpoint-exact, with the shoulder (a) and base fillet (b) shaped
@@ -456,6 +465,12 @@ struct BevelPopup {
     /// specific config file (a per-app override like cce-designer's), else
     /// the shared config.kdl. Knob/depth/width seeds prefer this file.
     config_path: std::path::PathBuf,
+    /// `--key <dotted.key>`: edit a single `(relief)` VALUE in place —
+    /// Save serializes width/depth/wall knobs/wall profile into that one
+    /// key instead of the `style.surface.relief.*` material keys, and the
+    /// seeds come from it. The edge section still previews but is not part
+    /// of a `(relief)` value (a feature material has one wall curve).
+    target_key: Option<String>,
     /// Short label for a retargeted config ("cce-designer"), shown in the
     /// title and status so it's obvious which material is being edited.
     target_label: Option<String>,
@@ -1026,6 +1041,33 @@ impl BevelPopup {
     /// triples ride along so this editor reopens where you left it.
     fn save_to_config(&mut self) {
         let p = self.config_path.to_string_lossy().into_owned();
+        // `--key` mode: the whole material folds into ONE `(relief)` value
+        // at that key — width, depth, the wall curve, and the knob triple
+        // behind it (so reopening with --key seeds these sliders). The edge
+        // section is not part of a feature material; an untouched analytic
+        // wall writes no profile at all.
+        if let Some(key) = self.target_key.clone() {
+            let spec = cce_ui::relief_spec::ReliefSpec {
+                width: self.width_slider.inner().get_scaled_value(),
+                depth: Some(self.depth_slider.inner().get_scaled_value()),
+                knobs: Some(self.wall.values()),
+                profile: self.wall.custom.then(|| self.wall.last_spec.clone()),
+            };
+            let ok = cce_ui::config::write_config_value_typed(
+                &p,
+                &key,
+                &spec.serialize(),
+                "style",
+                Some("relief"),
+            );
+            self.status = if ok {
+                println!("saved {key} -> {p}");
+                format!("Saved — {key} holds this material.")
+            } else {
+                "Save FAILED — see config.kdl permissions.".to_string()
+            };
+            return;
+        }
         let depth = format!("{:.3}", self.depth_slider.inner().get_scaled_value());
         let width = format!("{:.2}", self.width_slider.inner().get_scaled_value());
         let knob_str = |k: &ProfileKnobs| {
@@ -1092,10 +1134,14 @@ impl Application for BevelPopup {
         let shared_path = cce_ui::config::get_config_path();
         let mut config_path = shared_path.clone();
         let args: Vec<String> = std::env::args().collect();
+        let mut target_key: Option<String> = None;
         let mut i = 1;
         while i < args.len() {
             if args[i] == "--config" && i + 1 < args.len() {
                 config_path = std::path::PathBuf::from(&args[i + 1]);
+                i += 1;
+            } else if args[i] == "--key" && i + 1 < args.len() {
+                target_key = Some(args[i + 1].clone());
                 i += 1;
             }
             i += 1;
@@ -1124,12 +1170,35 @@ impl Application for BevelPopup {
         let rel_f32 = |k: &str| {
             target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_f64()).map(|f| f as f32)
         };
+        // `--key` seeds: the single `(relief)` value at that key wins over
+        // both the target file's material keys and the registry. Installing
+        // it live BEFORE the knob structs are built means the preview shows
+        // the key's material from the first frame, and the wall's
+        // `installed` flag reads the truth from the registry as usual.
+        let key_spec = target_key.as_ref().and_then(|k| {
+            std::fs::read_to_string(&config_path)
+                .ok()
+                .map(|c| cce_ui::config::parse_kdl_to_json(&c))
+                .and_then(|v| v.pointer(&format!("/{}", k.replace('.', "/"))).cloned())
+                .and_then(|v| v.as_str().map(String::from))
+                .and_then(|s| cce_ui::relief_spec::ReliefSpec::parse(&s))
+        });
+        if let Some(ks) = &key_spec {
+            if let Ok(mut reg) = cce_ui::layout::get_style_registry().write() {
+                reg.set_float("bevel_width", ks.width);
+                if let Some(d) = ks.depth {
+                    reg.set_float("bevel_depth", d);
+                }
+            }
+            cce_ui::layout::install_wall_profile_spec(ks.profile.as_deref());
+        }
         let (wall_seed, edge_seed) = {
             let reg = cce_ui::layout::get_style_registry().read().unwrap();
             (
-                rel_str("profile_knobs")
-                    .as_deref()
-                    .and_then(parse_knobs)
+                key_spec
+                    .as_ref()
+                    .and_then(|s| s.knobs)
+                    .or_else(|| rel_str("profile_knobs").as_deref().and_then(parse_knobs))
                     .or_else(|| reg.get_string("bevel_profile_knobs").as_deref().and_then(parse_knobs)),
                 rel_str("edge_knobs")
                     .as_deref()
@@ -1138,8 +1207,24 @@ impl Application for BevelPopup {
             )
         };
 
-        let depth = rel_f32("depth").unwrap_or_else(cce_ui::layout::bevel_depth);
-        let width = rel_f32("width").unwrap_or_else(cce_ui::layout::bevel_width);
+        let depth = key_spec
+            .as_ref()
+            .and_then(|s| s.depth)
+            .or_else(|| rel_f32("depth"))
+            .unwrap_or_else(cce_ui::layout::bevel_depth);
+        let width = key_spec
+            .as_ref()
+            .map(|s| s.width)
+            .or_else(|| rel_f32("width"))
+            .unwrap_or_else(cce_ui::layout::bevel_width);
+        // A key target labels the window by the key, not the file.
+        let target_label = match &target_key {
+            Some(k) => {
+                let parts: Vec<&str> = k.split('.').collect();
+                Some(parts[parts.len().saturating_sub(2)..].join("."))
+            }
+            None => target_label,
+        };
         let (dmin, dmax) = DEPTH_RANGE;
         let (wmin, wmax) = WIDTH_RANGE;
         // The persisted per-app plate opacity, falling back to the DE look.
@@ -1188,11 +1273,13 @@ impl Application for BevelPopup {
             save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
             reset_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Reset"),
             plate_opacity,
-            status: match &target_label {
-                Some(l) => format!("Edits apply live; Save writes {l}'s config."),
-                None => "Edits apply live; Save writes config.kdl.".to_string(),
+            status: match (&target_key, &target_label) {
+                (Some(_), Some(l)) => format!("Edits apply live; Save writes the {l} key."),
+                (None, Some(l)) => format!("Edits apply live; Save writes {l}'s config."),
+                _ => "Edits apply live; Save writes config.kdl.".to_string(),
             },
             config_path,
+            target_key,
             target_label,
             ui_context: cce_ui::context::UiContext::new(),
             width: 520,

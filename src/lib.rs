@@ -3,6 +3,7 @@ pub mod widget;
 pub mod config;
 pub mod input;
 pub mod layout;
+pub mod relief_spec;
 pub mod wayland;
 pub mod protocol;
 pub mod engine;

@@ -719,7 +719,19 @@ pub fn get_kdl_type_annotations(kdl_content: &str, key_paths: &[String]) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
+
+    #[test]
+    fn relief_annotated_string_passes_through() {
+        // The (relief) custom value type: an annotated string prop must
+        // survive kdl_to_json as a plain JSON string at its pointer.
+        let content = "style {\n    surface {\n        desktop gap_width=(i64)16 line_relief=(relief)\"w=8 d=0.55 k=0.8,0.2,0.5 p=0.000:0.000,1.000:1.000\"\n    }\n}\n";
+        let val = parse_kdl_to_json(content);
+        assert_eq!(
+            val.pointer("/style/surface/desktop/line_relief").and_then(|v| v.as_str()),
+            Some("w=8 d=0.55 k=0.8,0.2,0.5 p=0.000:0.000,1.000:1.000"),
+        );
+    }
 
     #[test]
     fn test_nested_parsing() {
