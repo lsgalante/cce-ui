@@ -429,14 +429,6 @@ impl ProfileKnobs {
         // Bitwise-or on purpose: every slider's flag must drain.
         self.shoulder.take_change() | self.base.take_change() | self.bias.take_change()
     }
-
-    fn set_defaults(&mut self) {
-        self.shoulder.set_value(0.5);
-        self.base.set_value(0.5);
-        self.bias.set_value(0.5);
-        self.custom = false;
-        self.last_spec = IDENTITY_SPEC.to_string();
-    }
 }
 
 struct BevelPopup {
@@ -452,7 +444,12 @@ struct BevelPopup {
     depth_slider: Adapted<Slider>,
     width_slider: Adapted<Slider>,
     save_button: Adapted<Button>,
-    reset_button: Adapted<Button>,
+    /// Cancel = discard-and-close: edits are live only in THIS process, so
+    /// with nothing persisted, closing IS the discard (same as Escape).
+    cancel_button: Adapted<Button>,
+    /// Set by the cancel click in `drain_widget_changes` (no exit access
+    /// there); `handle_mouse_input` turns it into `BevelMsg::Exit`.
+    exit_requested: bool,
     /// The window plate's alpha — seeded from this app's own config
     /// (`~/.config/cce/cce-relief/config.kdl`, `window { opacity }`, falling
     /// back to the pre-rename `cce-bevel` path), falling
@@ -959,7 +956,7 @@ impl BevelPopup {
             self.depth_slider.id(),
             self.width_slider.id(),
             self.save_button.id(),
-            self.reset_button.id(),
+            self.cancel_button.id(),
         ]
     }
 
@@ -976,7 +973,7 @@ impl BevelPopup {
             self.depth_slider.as_ptr_mut(),
             self.width_slider.as_ptr_mut(),
             self.save_button.as_ptr_mut(),
-            self.reset_button.as_ptr_mut(),
+            self.cancel_button.as_ptr_mut(),
         ]
     }
 
@@ -1029,9 +1026,8 @@ impl BevelPopup {
             self.save_to_config();
             self.needs_rebuild = true;
         }
-        if self.reset_button.take_click() {
-            self.reset_live();
-            self.needs_rebuild = true;
+        if self.cancel_button.take_click() {
+            self.exit_requested = true;
         }
     }
 
@@ -1096,24 +1092,6 @@ impl BevelPopup {
         };
     }
 
-    /// Back to the analytic material, live only (Save persists it): knobs to
-    /// their midpoints, both profiles cleared, default depth/width.
-    fn reset_live(&mut self) {
-        self.wall.set_defaults();
-        self.edge.set_defaults();
-        cce_ui::layout::clear_bevel_profile();
-        cce_ui::layout::clear_roll_profile();
-        if let Ok(mut reg) = cce_ui::layout::get_style_registry().write() {
-            reg.set_float("bevel_depth", 0.15);
-            reg.set_float("bevel_width", 9.3);
-        }
-        let (dmin, dmax) = DEPTH_RANGE;
-        self.depth_slider.set_value((0.15 - dmin) / (dmax - dmin));
-        let (wmin, wmax) = WIDTH_RANGE;
-        self.width_slider.set_value((9.3 - wmin) / (wmax - wmin));
-        self.status = "Reset to the analytic profiles (unsaved).".to_string();
-        println!("reset");
-    }
 }
 
 impl Application for BevelPopup {
@@ -1271,7 +1249,8 @@ impl Application for BevelPopup {
                 .with_scroll(true)
                 .with_band(true),
             save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
-            reset_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Reset"),
+            cancel_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel"),
+            exit_requested: false,
             plate_opacity,
             status: match (&target_key, &target_label) {
                 (Some(_), Some(l)) => format!("Edits apply live; Save writes the {l} key."),
@@ -1426,7 +1405,7 @@ impl Application for BevelPopup {
             self.width_slider.set_rect(x, y, w, knob_h);
             y += knob_h + gap;
             self.save_button.set_rect(x, y, 96.0, button_h);
-            self.reset_button.set_rect(x + 96.0 + 12.0, y, 96.0, button_h);
+            self.cancel_button.set_rect(x + 96.0 + 12.0, y, 96.0, button_h);
             y += button_h + 8.0;
             self.status_pos = (x, y);
 
@@ -1493,7 +1472,7 @@ impl Application for BevelPopup {
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.edge_dropdown, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.profile_dropdown, &mut pc);
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.save_button, &mut pc);
-        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.reset_button, &mut pc);
+        cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.cancel_button, &mut pc);
 
         // The selector's popover, drawn into the frame on top of everything
         // below it (its labels carry the popover rect as bounds).
@@ -1595,6 +1574,9 @@ impl Application for BevelPopup {
             }
         }
         self.drain_widget_changes();
+        if self.exit_requested {
+            return Some(BevelMsg::Exit);
+        }
         if changed || self.needs_rebuild {
             *needs_rebuild = true;
             self.needs_rebuild = true;
