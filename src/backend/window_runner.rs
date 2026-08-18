@@ -727,155 +727,79 @@ pub fn push_rounded_rect_vertices_corners(
         push_quad(out, x + mid_x1, y + r_tr, ww - mid_x1, h - r_tr - r_br);
     }
 
-    // Corner rendering
+    // Corner rendering. The fans are FEATHERED: the fan body stops half a
+    // pixel short of the silhouette and a strip fades from opaque at
+    // silhouette-0.5 to transparent at silhouette+0.5, so the arc
+    // anti-aliases instead of rasterizing a hard staircase — invisible on
+    // HiDPI widget buffers, glaring on the desktop grid's world-scale
+    // cells. Perceived size is unchanged (the 50%-coverage line stays on
+    // the exact silhouette). Radii too small to feather keep the hard fan.
     let segments = 16;
-
-    // Top-Left
-    if r_tl > 0.1 {
-        let cx = x + r_tl;
-        let cy = y + r_tl;
-        let start = std::f32::consts::PI;
-        let end = 1.5 * std::f32::consts::PI;
+    let fade = [color[0], color[1], color[2], 0.0];
+    let to_ndc = |px: f32, py: f32| -> [f32; 2] {
+        [(px / sw) * 2.0 - 1.0, 1.0 - (py / sh) * 2.0]
+    };
+    let push_corner = |out: &mut Vec<Vertex>, cx: f32, cy: f32, r: f32, start: f32, end: f32| {
+        let feather = r > 1.5;
+        let r_fan = if feather { r - 0.5 } else { r };
+        let r_out = r + 0.5;
         for i in 0..segments {
             let theta1 = start + (i as f32) * (end - start) / (segments as f32);
             let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
-            
+
             let (c1, s1) = superellipse_pt(theta1, corner_e);
             let (c2, s2) = superellipse_pt(theta2, corner_e);
-            let x0 = clamp_x(cx);
-            let y0 = clamp_y(cy);
-            let x1 = clamp_x(cx + r_tl * c1);
-            let y1 = clamp_y(cy + r_tl * s1);
-            let x2 = clamp_x(cx + r_tl * c2);
-            let y2 = clamp_y(cy + r_tl * s2);
-            
-            let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
-            let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
-            let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
-            let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
-            let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
-            let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
-            
-            out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
-            out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
-            out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
+            let p0 = to_ndc(clamp_x(cx), clamp_y(cy));
+            let p1 = to_ndc(clamp_x(cx + r_fan * c1), clamp_y(cy + r_fan * s1));
+            let p2 = to_ndc(clamp_x(cx + r_fan * c2), clamp_y(cy + r_fan * s2));
+
+            out.push(Vertex { position: p0, color, clip_circle });
+            out.push(Vertex { position: p1, color, clip_circle });
+            out.push(Vertex { position: p2, color, clip_circle });
+
+            if feather {
+                let q1 = to_ndc(clamp_x(cx + r_out * c1), clamp_y(cy + r_out * s1));
+                let q2 = to_ndc(clamp_x(cx + r_out * c2), clamp_y(cy + r_out * s2));
+                out.push(Vertex { position: p1, color, clip_circle });
+                out.push(Vertex { position: q1, color: fade, clip_circle });
+                out.push(Vertex { position: q2, color: fade, clip_circle });
+                out.push(Vertex { position: p1, color, clip_circle });
+                out.push(Vertex { position: q2, color: fade, clip_circle });
+                out.push(Vertex { position: p2, color, clip_circle });
+            }
         }
+    };
+
+    // Top-Left
+    if r_tl > 0.1 {
+        push_corner(out, x + r_tl, y + r_tl, r_tl, std::f32::consts::PI, 1.5 * std::f32::consts::PI);
         if mid_x0 > r_tl {
             push_quad(out, x + r_tl, y, mid_x0 - r_tl, r_tl);
         }
-    } else {
-        push_quad(out, x, y, mid_x0, 0.0);
     }
 
     // Top-Right
     if r_tr > 0.1 {
-        let cx = x + ww - r_tr;
-        let cy = y + r_tr;
-        let start = 1.5 * std::f32::consts::PI;
-        let end = 2.0 * std::f32::consts::PI;
-        for i in 0..segments {
-            let theta1 = start + (i as f32) * (end - start) / (segments as f32);
-            let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
-            
-            let (c1, s1) = superellipse_pt(theta1, corner_e);
-            let (c2, s2) = superellipse_pt(theta2, corner_e);
-            let x0 = clamp_x(cx);
-            let y0 = clamp_y(cy);
-            let x1 = clamp_x(cx + r_tr * c1);
-            let y1 = clamp_y(cy + r_tr * s1);
-            let x2 = clamp_x(cx + r_tr * c2);
-            let y2 = clamp_y(cy + r_tr * s2);
-            
-            let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
-            let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
-            let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
-            let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
-            let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
-            let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
-            
-            out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
-            out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
-            out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
-        }
+        push_corner(out, x + ww - r_tr, y + r_tr, r_tr, 1.5 * std::f32::consts::PI, 2.0 * std::f32::consts::PI);
         if ww - mid_x1 > r_tr {
             push_quad(out, x + mid_x1, y, ww - mid_x1 - r_tr, r_tr);
         }
-    } else {
-        push_quad(out, x + mid_x1, y, ww - mid_x1, 0.0);
     }
 
     // Bottom-Right
     if r_br > 0.1 {
-        let cx = x + ww - r_br;
-        let cy = y + h - r_br;
-        let start = 0.0;
-        let end = 0.5 * std::f32::consts::PI;
-        for i in 0..segments {
-            let theta1 = start + (i as f32) * (end - start) / (segments as f32);
-            let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
-            
-            let (c1, s1) = superellipse_pt(theta1, corner_e);
-            let (c2, s2) = superellipse_pt(theta2, corner_e);
-            let x0 = clamp_x(cx);
-            let y0 = clamp_y(cy);
-            let x1 = clamp_x(cx + r_br * c1);
-            let y1 = clamp_y(cy + r_br * s1);
-            let x2 = clamp_x(cx + r_br * c2);
-            let y2 = clamp_y(cy + r_br * s2);
-            
-            let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
-            let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
-            let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
-            let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
-            let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
-            let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
-            
-            out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
-            out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
-            out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
-        }
+        push_corner(out, x + ww - r_br, y + h - r_br, r_br, 0.0, 0.5 * std::f32::consts::PI);
         if ww - mid_x1 > r_br {
             push_quad(out, x + mid_x1, y + h - r_br, ww - mid_x1 - r_br, r_br);
         }
-    } else {
-        push_quad(out, x + mid_x1, y + h, ww - mid_x1, 0.0);
     }
 
     // Bottom-Left
     if r_bl > 0.1 {
-        let cx = x + r_bl;
-        let cy = y + h - r_bl;
-        let start = 0.5 * std::f32::consts::PI;
-        let end = std::f32::consts::PI;
-        for i in 0..segments {
-            let theta1 = start + (i as f32) * (end - start) / (segments as f32);
-            let theta2 = start + ((i + 1) as f32) * (end - start) / (segments as f32);
-            
-            let (c1, s1) = superellipse_pt(theta1, corner_e);
-            let (c2, s2) = superellipse_pt(theta2, corner_e);
-            let x0 = clamp_x(cx);
-            let y0 = clamp_y(cy);
-            let x1 = clamp_x(cx + r_bl * c1);
-            let y1 = clamp_y(cy + r_bl * s1);
-            let x2 = clamp_x(cx + r_bl * c2);
-            let y2 = clamp_y(cy + r_bl * s2);
-            
-            let ndc_x0 = (x0 / sw) * 2.0 - 1.0;
-            let ndc_y0 = 1.0 - (y0 / sh) * 2.0;
-            let ndc_x1 = (x1 / sw) * 2.0 - 1.0;
-            let ndc_y1 = 1.0 - (y1 / sh) * 2.0;
-            let ndc_x2 = (x2 / sw) * 2.0 - 1.0;
-            let ndc_y2 = 1.0 - (y2 / sh) * 2.0;
-            
-            out.push(Vertex { position: [ndc_x0, ndc_y0], color, clip_circle });
-            out.push(Vertex { position: [ndc_x1, ndc_y1], color, clip_circle });
-            out.push(Vertex { position: [ndc_x2, ndc_y2], color, clip_circle });
-        }
+        push_corner(out, x + r_bl, y + h - r_bl, r_bl, 0.5 * std::f32::consts::PI, std::f32::consts::PI);
         if mid_x0 > r_bl {
             push_quad(out, x + r_bl, y + h - r_bl, mid_x0 - r_bl, r_bl);
         }
-    } else {
-        push_quad(out, x, y + h, mid_x0, 0.0);
     }
 }
 
