@@ -3694,6 +3694,12 @@ impl<A: Application> WindowHandler for EngineState<A> {
             self.frame_logical = (width as f32 / f, height as f32 / f);
             self.applied_margin = m;
             self.resize(width as f32 / f + m, height as f32 / f + m);
+        } else if self.inner.as_ref().unwrap().grid() && self.logical_width > 1.0 {
+            // A grid app's size belongs to its PATCHES: the compositor's
+            // "you choose" 0x0 must not bounce the surface back to the
+            // settings size — that thrash recreated multi-hundred-MB
+            // swapchains per bounce (6.3G peak in 10s). Keep the current
+            // size; the next grid_patch is the only resizer.
         } else {
             let settings = self.inner.as_ref().unwrap().settings();
             self.frame_logical = (settings.width as f32, settings.height as f32);
