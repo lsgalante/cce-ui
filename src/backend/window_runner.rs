@@ -3558,6 +3558,11 @@ impl<A: Application> CompositorHandler for EngineState<A> {
             // not clobber the override.
             return;
         }
+        if self.inner.as_ref().map_or(false, |a| a.grid()) {
+            // Grid surfaces stay at scale 1 — patch.scale is the sole
+            // resolution authority (see the pin at surface creation).
+            return;
+        }
         // Resume bounce: when the surface sits on no LIVE output (the DRM
         // connector was destroyed and not yet re-created), the reported
         // factor is SCTK's no-outputs fallback, not information — hold the
@@ -4732,8 +4737,22 @@ fn run_session<'l, A: Application>(
     engine_state.inner = Some(inner);
 
     let surface = engine_state.compositor_state.create_surface(&qh);
+    // A grid app's surface is pinned to scale 1: the patch's `scale` is
+    // BUFFER px per virtual unit and already carries the output scale (the
+    // patch manager folds it in), so adopting the output scale here would
+    // square it — the client renders a doubled buffer and the compositor
+    // downsamples it straight back into blur.
+    if engine_state.inner.as_ref().unwrap().grid() {
+        engine_state.scale_factor = 1.0;
+    }
     // Forced-scale mode renders scaled-up into a buffer_scale-1 surface.
-    let buffer_scale = if crate::scale::forced_scale().is_some() { 1 } else { scale as i32 };
+    let buffer_scale = if crate::scale::forced_scale().is_some()
+        || engine_state.inner.as_ref().unwrap().grid()
+    {
+        1
+    } else {
+        scale as i32
+    };
     surface.set_buffer_scale(buffer_scale);
     engine_state.committed_buffer_scale = buffer_scale;
 
