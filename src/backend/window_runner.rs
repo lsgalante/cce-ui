@@ -224,6 +224,36 @@ pub fn get_text_buffer_attrs(
     buf
 }
 
+/// Byte-offset → x mapping of single-line `text`, shaped exactly as the renderer draws it —
+/// same buffer cache as the draw, so this is a lookup when the text is already on screen.
+/// Returns ascending `(byte_idx, x)` pairs (one per cluster start, logical px, relative to
+/// the text origin), terminated by `(text.len(), total_advance)`. This is the correct
+/// source for caret placement and click→cursor mapping in hand-rolled text fields:
+/// `measure_text_width` reports SVG-rasterized inked extent through fontdb's family
+/// resolution, which disagrees with cosmic-text's advance and can even resolve a
+/// different face — a caret placed with it drifts off the drawn glyphs.
+pub fn shaped_cluster_offsets(
+    fs: &mut FontSystem,
+    text: &str,
+    size: f32,
+    font: Option<&str>,
+) -> Vec<(usize, f32)> {
+    let scale = crate::scale::scale_factor().max(1.0);
+    let buffer = get_text_buffer(fs, text, size, font);
+    let mut out: Vec<(usize, f32)> = Vec::new();
+    let mut total: f32 = 0.0;
+    if let Some(run) = buffer.layout_runs().next() {
+        for glyph in run.glyphs {
+            if out.last().map_or(true, |&(b, _)| b != glyph.start) {
+                out.push((glyph.start, glyph.x / scale));
+            }
+            total = total.max((glyph.x + glyph.w) / scale);
+        }
+    }
+    out.push((text.len(), total));
+    out
+}
+
 /// Shape a boxed [`Prim::Text`] (word-wrap + alignment) and return `(buffer, vertical_offset)`.
 /// Reuses [`get_text_buffer_attrs`] for all the family resolution — that returns a *clone* of the
 /// cached single-run buffer, so re-applying metrics/size/align here does not touch the cache — then
