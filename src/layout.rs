@@ -66,7 +66,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.list.font" | "style.data.list.font" => "list_font",
                 "style.list.font_color" | "style.data.list.font_color" => "list_font_color",
                 "style.control.breadcrumb.font" => "breadcrumb_font",
-                "style.control.breadcrumb.corner_radius" => "breadcrumb_corner_radius",
+
                 "style.control.button.padding" => "button_padding",
                 "style.control.button.height" => "button_height",
                 "style.control.button.corner_radius" => "button_corner_radius",
@@ -326,7 +326,6 @@ static DROPDOWN_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static SLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static RANGESLIDER_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
-static BREADCRUMB_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static LIST_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TREE_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static TOGGLE_BORDER_WIDTH: RwLock<f32> = RwLock::new(1.0);
@@ -595,15 +594,6 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = TEXTBOX_MULTILINE_BORDER_WIDTH.write() {
-                        *lock = val;
-                    }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("breadcrumb_corner_radius") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                let val_str = rest.trim_end_matches('"').trim();
-                if let Ok(val) = val_str.parse::<f32>() {
-                    if let Ok(mut lock) = BREADCRUMB_CORNER_RADIUS.write() {
                         *lock = val;
                     }
                 }
@@ -2915,17 +2905,6 @@ pub fn set_textbox_multiline_border_width(width: f32) {
     }
 }
 
-pub fn breadcrumb_corner_radius() -> f32 {
-    lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("breadcrumb_corner_radius").unwrap_or(4.0)
-}
-
-pub fn set_breadcrumb_corner_radius(radius: f32) {
-    lazy_init_style_registry();
-    if let Ok(mut registry) = get_style_registry().write() {
-        registry.set_float("breadcrumb_corner_radius", radius);
-    }
-}
 
 pub fn list_corner_radius() -> f32 {
     lazy_init_style_registry();

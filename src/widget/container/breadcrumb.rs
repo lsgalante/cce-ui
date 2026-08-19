@@ -276,7 +276,10 @@ impl Paint for Breadcrumb {
         // by seams engraved across it at a "/" lean. The old full-width
         // recessed well is gone: right of the run there is plain window
         // surface now, just as there is around the dropdown.
-        let radius = crate::layout::breadcrumb_corner_radius();
+        // ONE knob with the dropdown (style.control.dropdown.corner_radius):
+        // the two controls share a silhouette by construction, not by two
+        // numbers happening to agree.
+        let radius = crate::layout::dropdown_corner_radius();
         let relief = crate::layout::control_relief();
 
         let segs = self.visible_segs(rect);
