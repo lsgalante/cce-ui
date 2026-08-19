@@ -79,6 +79,12 @@ pub struct TextBox {
     pub cursor_x_offset: f32,
     pub glyph_positions: Vec<f32>,
     pub total_text_width: f32,
+    /// The shaped advance of one column, cached by [`Paint::prepare_text`] from the same
+    /// cosmic-text path that draws the value text. `char_width()` prefers this over the
+    /// SVG-rasterized `measure_text_width`, which reports inked extent (and resolves generic
+    /// families through fontdb, not cosmic-text) — a per-column error that made the multiline
+    /// selection highlight drift off the glyphs. 0.0 until the first `prepare_text`.
+    shaped_char_advance: f32,
     pub update_on_type: bool,
     /// Synced control label ([`Paint::sync_label`]) — drives the side/detached offsets.
     label: Option<String>,
@@ -126,6 +132,7 @@ impl TextBox {
             cursor_x_offset: 0.0,
             glyph_positions: Vec::new(),
             total_text_width: 0.0,
+            shaped_char_advance: 0.0,
             update_on_type: false,
             label: None,
             hovered: false,
@@ -171,7 +178,11 @@ impl TextBox {
     }
 
     pub fn char_width(&self) -> f32 {
-        crate::widget::display::measure_text_width("M", &self.font_family, self.font_size)
+        if self.shaped_char_advance > 0.0 {
+            self.shaped_char_advance
+        } else {
+            crate::widget::display::measure_text_width("M", &self.font_family, self.font_size)
+        }
     }
 
     pub fn line_height(&self) -> f32 {
@@ -1197,6 +1208,15 @@ impl Paint for TextBox {
         let mut x_offsets = vec![0.0; char_count + 1];
         let mut total_w: f32 = 0.0;
         let scale = crate::scale::scale_factor().max(1.0);
+
+        // One column's advance, from the same shaping path as the labels (buffer-cached,
+        // so this is a lookup after the first frame per family/size).
+        let probe = crate::widget::display::text_label::make_widget_text_buffer(fs, "MMMMMMMM", self.font_size, font_fam);
+        self.shaped_char_advance = probe
+            .layout_runs()
+            .next()
+            .and_then(|run| run.glyphs.last().map(|g| (g.x + g.w) / scale / 8.0))
+            .unwrap_or(0.0);
 
         for run in buffer.layout_runs() {
             for glyph in run.glyphs {
