@@ -26,11 +26,12 @@ const SEG_GAP: f32 = 0.0;
 /// mono faces the breadcrumb is set in.
 const SEG_SLANT: f32 = 0.36;
 
-/// Horizontal text inset inside each segment button. Wider than the gapped
-/// layout needed: a seam leans ±`SEG_SLANT * h / 2` about its mid-height, so the
-/// padding has to clear the seam at the plate's top and bottom edges too, not
-/// just beside the text.
-const SEG_PAD_X: f32 = 11.0;
+/// Horizontal text inset inside each segment button — the dropdown's own
+/// label inset (`start_x = x + 8.0` in `Dropdown::paint_text`), so the two
+/// controls share a text rhythm. Must still clear the seam's lean at the
+/// plate's top and bottom edges (±`SEG_SLANT * h / 2` about mid-height —
+/// 4.3px at the 24px control height), not just sit beside the text.
+const SEG_PAD_X: f32 = 8.0;
 
 /// A segment as actually laid out for painting/hit-testing: its text, its BUTTON BOX's left
 /// edge and width (text sits `SEG_PAD_X` in), and logical index in
@@ -185,16 +186,13 @@ impl Breadcrumb {
         None
     }
 
-    /// Margin between the widget's recessed well and the raised segment plate
-    /// inside it. The SAME on the left, top and bottom, so the plate's rolled
-    /// edge lands against the well's carved one on every side it reaches —
-    /// asymmetric insets read as the plate sitting off-centre in its own well.
-    ///
-    /// The RIGHT is not an inset but a limit: the run ends where its content
-    /// ends, leaving well floor beyond it. `avail` reserves this much there
-    /// too, so a run long enough to be elided stops flush against the bevel on
-    /// that side rather than running under it.
-    const SEG_INSET: f32 = 3.0;
+    /// Inset between the widget rect and the segment plate. ZERO since the
+    /// dropdown restyle: the plate fills the control box exactly as the
+    /// dropdown's flush face does (its groove ring is carved OUTSIDE the box,
+    /// widget and dropdown alike), so any inset here would render the
+    /// breadcrumb a shorter control than the dropdown beside it. Kept as a
+    /// named constant because the layout, hit zones and tests all share it.
+    const SEG_INSET: f32 = 0.0;
 
     /// Width of a seam's flat floor in px. Zero would meet the two walls in a
     /// perfect V; a hair of floor keeps the crease from aliasing into a dotted
@@ -204,13 +202,15 @@ impl Breadcrumb {
     /// [`seams`]: Breadcrumb::seams
     pub const SEAM_WIDTH: f32 = 0.75;
 
-    /// The plate band inside the well: (y, height).
+    /// The plate band: (y, height). Full control height since the dropdown
+    /// restyle (SEG_INSET = 0) — the seams, hover tint and hit zones all
+    /// span the plate.
     fn plate_band(rect: Rect) -> (f32, f32) {
         (rect.y + Self::SEG_INSET, (rect.height - 2.0 * Self::SEG_INSET).max(0.0))
     }
 
-    /// The ONE raised plate the whole segment run shares — (x, y, w, h), inset
-    /// vertically inside the widget's well — or `None` when nothing is laid out.
+    /// The ONE plate the whole segment run shares — (x, y, w, h), the full
+    /// control height — or `None` when nothing is laid out.
     ///
     /// The run is a single plate, not a plate per segment: with the segments
     /// abutting, per-segment plates would put a boss wall falling and another
@@ -269,16 +269,15 @@ impl Paint for Breadcrumb {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // The full-width recessed well defines the bar (as it always did); the
-        // segment run is ONE raised plate within it — the dropdown pairing
-        // (recessed surround + raised face) — divided into segments by seams
-        // engraved across it at a "/" lean.
+        // The segment run is ONE flush inset plate hugging its content — the
+        // dropdown trigger's exact relief (`Dropdown::paint_background`'s
+        // raised style: groove ring sunk around the control, its lip rolling
+        // back up, face level with the window plate) — divided into segments
+        // by seams engraved across it at a "/" lean. The old full-width
+        // recessed well is gone: right of the run there is plain window
+        // surface now, just as there is around the dropdown.
         let radius = crate::layout::breadcrumb_corner_radius();
         let relief = crate::layout::control_relief();
-        if relief {
-            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            ctx.recess(rect, (radius, radius, radius, radius), depth);
-        }
 
         let segs = self.visible_segs(rect);
         if let Some((rx, ry, rw, rh)) = self.run_box(rect) {
@@ -286,7 +285,11 @@ impl Paint for Breadcrumb {
             let r = radius.min(rh * 0.5);
             if relief {
                 let depth = crate::layout::bevel_width().min(rh * 0.2);
-                ctx.boss(run_rect, (r, r, r, r), depth);
+                // Transparent face — the dropdown's own degraded form (a
+                // transparent configured fill draws edges only): the window
+                // plate shows through as the face, which is what the boss run
+                // always did here.
+                ctx.inset_plate(run_rect, (r, r, r, r), [0.0; 4], depth);
                 for (a, b) in self.seams(rect) {
                     ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);
                 }
