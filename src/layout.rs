@@ -3538,7 +3538,26 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     let top_room = crate::widget::label_offset(w);
     wy += top_room;
     whh -= top_room;
- 
+
+    // The Dropdown's closed-state chrome is its modern paint's flush inset
+    // trough — relief prims the legacy `all_quads` stream never carried, so
+    // flat-path hosts rendered dropdowns as bare text (cce-files carved the
+    // trough app-side to compensate). Offer it through the RenderTarget hook:
+    // relief-capable hosts carve it for real; tuple hosts degrade to a flat
+    // rounded fill, invisible under the transparent default face.
+    if control_relief() && w.as_any().is::<crate::widget::Dropdown>() {
+        let depth = bevel_width().min(whh * 0.2);
+        pc.inset_plate(
+            crate::color::dropdown_background_color(),
+            wx,
+            wy,
+            www,
+            whh,
+            dropdown_corner_radius(),
+            depth,
+        );
+    }
+
     for (qx, qy, qw, qh, qc) in w.all_quads(ctx) {
         let extra_corners = (
             corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,

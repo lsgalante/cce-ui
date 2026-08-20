@@ -53,7 +53,11 @@ static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 
-static DROPDOWN_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
+// Transparent by default (alpha 0): a dropdown picks up the surface it sits
+// on, and its closed-state chrome is the flush inset trough alone — the
+// cce-files treatment, DE-wide. A configured `dropdown color=` opts a theme
+// back into a filled face (the paint path judges the RAW alpha).
+static DROPDOWN_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 
 static TEXTBOX_PLACEHOLDER_TEXT_COLOR: RwLock<[u8; 3]> = RwLock::new([0x60, 0x60, 0x6a]);
 static TEXTBOX_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
