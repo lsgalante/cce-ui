@@ -801,6 +801,9 @@ impl Dropdown {
                 true
             }
             Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                if std::env::var_os("CCE_DD_DEBUG").is_some() {
+                    eprintln!("[dd] key-select hovered={:?} selected={}", self.hovered_item, self.selected);
+                }
                 if let Some(idx) = self.hovered_item {
                     if idx < self.options.len() && self.options[idx] != "-" {
                         if self.selected != idx || self.custom_display_text.is_some() {
@@ -1121,6 +1124,12 @@ impl Input for Dropdown {
                     && !self.closing
                     && *px >= rx && *px <= rx + rw && *py >= ry && *py <= ry + rh;
 
+                if std::env::var_os("CCE_DD_DEBUG").is_some() {
+                    eprintln!(
+                        "[dd] press ({px},{py}) rect=({:.0},{:.0},{:.0},{:.0}) popover=({rx:.0},{ry:.0},{rw:.0},{rh:.0}) open={} in_trig={inside_trigger} in_pop={inside_popover}",
+                        content.x, content.y, content.width, content.height, self.open
+                    );
+                }
                 if inside_popover {
                     let idx = ((py - ry) / 24.0) as usize;
                     if idx < self.options.len() {

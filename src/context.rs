@@ -635,6 +635,29 @@ impl UiContext {
         }
     }
 
+    /// The registered widget whose OPEN popover contains `(x, y)`, if any — the
+    /// press-priority companion to
+    /// [`close_popovers_missed_by_press`](Self::close_popovers_missed_by_press).
+    /// A popover paints OVER whatever sits beneath it, but positional dispatch
+    /// knows nothing about z-order: an app iterating its roots can hand the
+    /// press to a closed sibling whose trigger band lies under the open menu
+    /// (the Default Apps page's Terminal dropdown covering the Images row).
+    /// Apps route a `MouseButton` to this owner before their positional
+    /// dispatch. Scans the registry like the missed-press walk — popover
+    /// registration is optional and spotty, so `active_popovers` alone cannot
+    /// be trusted to know about every open menu.
+    pub fn popover_owner_at(&self, x: f32, y: f32) -> Option<WidgetId> {
+        self.tree.iter_registered().find_map(|(id, ptr)| unsafe {
+            ptr.as_ref().and_then(|w| {
+                if !w.visible() {
+                    return None;
+                }
+                let (rx, ry, rw, rh) = w.popover_rect()?;
+                (x >= rx && x <= rx + rw && y >= ry && y <= ry + rh).then_some(id)
+            })
+        })
+    }
+
     /// Register an open popover. Takes `&mut` so the registry can be refreshed with the
     /// pointer we are handed (the occlusion walks resolve the stored id through the tree).
     pub fn register_popover(&mut self, w: &mut (dyn WidgetHost + 'static)) {
