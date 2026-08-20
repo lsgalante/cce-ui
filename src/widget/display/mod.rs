@@ -28,7 +28,7 @@ pub use self::splitter::Splitter;
 pub use self::list_item::{TextItem, InteractiveListItem};
 pub use self::separator::Separator;
 pub use self::serialize::serialize_widgets;
-pub use self::graph::{GraphNode, Graph};
+pub use self::graph::{GraphNode, Graph, TaggedQuad};
 pub use self::usage_bar::UsageBar;
 pub use self::info_box::InfoBox;
 pub use self::status_dot::{DotStatus, StatusDot};

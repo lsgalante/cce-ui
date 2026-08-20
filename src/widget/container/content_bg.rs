@@ -270,4 +270,6 @@ impl GraphController for ContentBg {
     fn cancel_connecting(&mut self) {}
     fn is_node_rect(&self, _qx: f32, _qy: f32, _qw: f32, _qh: f32) -> bool { false }
     fn node_at(&self, _px: f32, _py: f32) -> Option<usize> { None }
+    fn cell_corner_radius(&self) -> f32 { 0.0 }
+    fn geometry_quads_tagged(&self, _rect: crate::scene::layout::Rect) -> Vec<crate::widget::TaggedQuad> { Vec::new() }
 }

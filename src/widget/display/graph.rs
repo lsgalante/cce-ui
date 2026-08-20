@@ -27,6 +27,12 @@ pub enum PortType {
 
 fn default_outputs() -> usize { 1 }
 
+/// One flat-geometry quad `(x, y, w, h, color, cell)` from
+/// [`Graph::geometry_quads_tagged`]: `cell` is `Some(corner flags)` for a grid
+/// cell — per-corner `(tl, tr, br, bl)` rounding that survived the pane clip —
+/// and `None` for everything else (wires, gaps, axes, nodes, toggles).
+pub type TaggedQuad = (f32, f32, f32, f32, [f32; 4], Option<(bool, bool, bool, bool)>);
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct GraphNode {
     #[serde(default)]
@@ -297,15 +303,34 @@ impl Graph {
         c
     }
 
+    /// The grid cells' rounded-corner radius at the current zoom: the desktop
+    /// grid's corner PROPORTION — the DE backplate radius per 512 virtual
+    /// units of cell, span-widened (cce-grid draws exactly this on its
+    /// 512vu cells) — applied to this grid's cell size, so the pane's cells
+    /// read as miniatures of the desktop's. Clamped to a quarter sweep;
+    /// 0 when the grid is off or degenerate.
+    pub fn cell_corner_radius(&self) -> f32 {
+        if !self.show_network_grid || self.uniform_background {
+            return 0.0;
+        }
+        if self.grid_size_x <= 0.0 || self.grid_size_y <= 0.0 {
+            return 0.0;
+        }
+        let cell = self.grid_size_x.min(self.grid_size_y);
+        (crate::layout::plate_corner_radius() * (cell / 512.0) * crate::layout::corner_span_factor())
+            .min(cell / 2.0)
+    }
+
     /// The wires / connection preview / grid cells / axes / node bodies / toggles as plain
-    /// quads — the legacy `extra_quads` body, against `rect` instead of a stored rect.
-    fn geometry_quads(&self, rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+    /// quads — the legacy `extra_quads` body, against `rect` instead of a stored rect —
+    /// with grid cells tagged by their surviving rounded corners (see [`TaggedQuad`]).
+    pub fn geometry_quads_tagged(&self, rect: Rect) -> Vec<TaggedQuad> {
         let mut quads = Vec::new();
         let min_x = rect.x;
         let min_y = rect.y;
         let max_x = rect.x + rect.width;
         let max_y = rect.y + rect.height;
-        let push_clipped = |qx: f32, qy: f32, qw: f32, qh: f32, qc: [f32; 4], q: &mut Vec<(f32, f32, f32, f32, [f32; 4])>| {
+        let push_clipped = |qx: f32, qy: f32, qw: f32, qh: f32, qc: [f32; 4], q: &mut Vec<TaggedQuad>| {
             let rx1 = qx.max(min_x);
             let ry1 = qy.max(min_y);
             let rx2 = (qx + qw).min(max_x);
@@ -313,14 +338,14 @@ impl Graph {
             let rw = rx2 - rx1;
             let rh = ry2 - ry1;
             if rw > 0.0 && rh > 0.0 {
-                q.push((rx1, ry1, rw, rh, qc));
+                q.push((rx1, ry1, rw, rh, qc, None));
             }
         };
 
         // A three-segment orthogonal wire from (start_x, start_y) down/up to (end_x, end_y).
         let scale_f = self.grid_size_x / 80.0;
         let wire_thickness = (3.0 * scale_f).clamp(1.0, 15.0);
-        let push_wire = |start_x: f32, start_y: f32, end_x: f32, end_y: f32, color: [f32; 4], q: &mut Vec<(f32, f32, f32, f32, [f32; 4])>| {
+        let push_wire = |start_x: f32, start_y: f32, end_x: f32, end_y: f32, color: [f32; 4], q: &mut Vec<TaggedQuad>| {
             let mid_y = start_y + (end_y - start_y) / 2.0;
 
             let v1_min_y = start_y.min(mid_y);
@@ -372,6 +397,7 @@ impl Graph {
         if self.show_network_grid && self.grid_size_x > 0.0 && self.grid_size_y > 0.0 && !self.uniform_background {
             let step_y = self.grid_size_y + self.skipped_row_h;
             let step_x = self.grid_size_x + self.skipped_col_w;
+            let cell_radius = self.cell_corner_radius();
 
             if step_y >= 4.0 && step_x >= 4.0 {
                 let ry_start = (((rect.y - self.grid_origin_y) / step_y).floor() as i32 - 1).max(-100_000);
@@ -414,14 +440,32 @@ impl Graph {
                             [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity],
                             &mut quads,
                         );
-                        push_clipped(
-                            x_cell_start,
-                            y_cell_start,
-                            cell_w,
-                            cell_h,
-                            [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity],
-                            &mut quads,
-                        );
+                        let cell_rgba = [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity];
+                        if cell_radius >= 0.5 {
+                            // Rounded like the desktop grid's cells: each corner
+                            // that survives the pane clip wears the span-widened
+                            // superellipse arc. The notch is left unpainted on
+                            // purpose — the pane backdrop showing through reads
+                            // as the junction sinking below the cells, like the
+                            // desktop's recess-shaded rails. (A gap-colored
+                            // patch behind the corner was tried and rejected:
+                            // under a translucent cell the stacked alphas make
+                            // every junction glow brighter than its grout.)
+                            let el = x_cell_start >= min_x;
+                            let et = y_cell_start >= min_y;
+                            let er = x_cell_end <= max_x;
+                            let eb = y_cell_end <= max_y;
+                            let corners = (el && et, et && er, er && eb, eb && el);
+                            let rx1 = x_cell_start.max(min_x);
+                            let ry1 = y_cell_start.max(min_y);
+                            let rx2 = (x_cell_start + cell_w).min(max_x);
+                            let ry2 = (y_cell_start + cell_h).min(max_y);
+                            if rx2 - rx1 > 0.0 && ry2 - ry1 > 0.0 {
+                                quads.push((rx1, ry1, rx2 - rx1, ry2 - ry1, cell_rgba, Some(corners)));
+                            }
+                        } else {
+                            push_clipped(x_cell_start, y_cell_start, cell_w, cell_h, cell_rgba, &mut quads);
+                        }
                     }
                 }
             }
@@ -450,7 +494,7 @@ impl Graph {
                 };
                 bg_color[3] *= self.node_opacity;
                 if nx + nw > min_x && nx < max_x && ny + nh > min_y && ny < max_y {
-                    quads.push((nx, ny, nw, nh, bg_color));
+                    quads.push((nx, ny, nw, nh, bg_color, None));
                 }
 
                 if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
@@ -475,9 +519,19 @@ impl Graph {
         quads
     }
 
+    /// [`geometry_quads_tagged`](Self::geometry_quads_tagged) with the cell tags
+    /// stripped — the unchanged legacy `extra_quads` shape.
+    fn geometry_quads(&self, rect: Rect) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        self.geometry_quads_tagged(rect)
+            .into_iter()
+            .map(|(qx, qy, qw, qh, qc, _)| (qx, qy, qw, qh, qc))
+            .collect()
+    }
+
     /// The rounded view of the same geometry — the legacy `all_rounded_quads` conversion: the
-    /// widget background, then each plain quad either as a node body (node corner radius, all
-    /// corners) or with the widget's edge-corner resolution.
+    /// widget background, then each plain quad either as a grid cell (superellipse cell arcs),
+    /// a node body (node corner radius, all corners), or with the widget's edge-corner
+    /// resolution.
     fn rounded_geometry(&self, rect: Rect) -> Vec<(f32, f32, f32, f32, f32, [f32; 4], (bool, bool, bool, bool))> {
         let mut rounded = Vec::new();
 
@@ -485,9 +539,10 @@ impl Graph {
         rounded.push((rect.x, rect.y, rect.width, rect.height, WIDGET_RADIUS, self.bg_color(), WIDGET_CORNERS));
 
         let node_radius = crate::layout::graph_node_corner_radius();
+        let cell_radius = self.cell_corner_radius();
         let (wx, wy, ww, wh) = (rect.x, rect.y, rect.width, rect.height);
 
-        for (qx, qy, qw, qh, qc) in self.geometry_quads(rect) {
+        for (qx, qy, qw, qh, qc, cell) in self.geometry_quads_tagged(rect) {
             if self.is_node_rect(qx, qy, qw, qh) {
                 rounded.push((qx, qy, qw, qh, node_radius, qc, (true, true, true, true)));
             } else {
@@ -496,8 +551,15 @@ impl Graph {
                 let br = w_br && qx + qw >= wx + ww - 1.5 && qy + qh >= wy + wh - 1.5;
                 let bl = w_bl && qx <= wx + 1.5 && qy + qh >= wy + wh - 1.5;
 
-                let r = if tl || tr || br || bl { WIDGET_RADIUS } else { 0.0 };
-                rounded.push((qx, qy, qw, qh, r, qc, (tl, tr, br, bl)));
+                if let Some((ctl, ctr, cbr, cbl)) = cell {
+                    // A cell cut by the pane's own rounded corner wears the
+                    // widget arc there; its interior corners keep the cell arc.
+                    let r = if tl || tr || br || bl { cell_radius.max(WIDGET_RADIUS) } else { cell_radius };
+                    rounded.push((qx, qy, qw, qh, r, qc, (ctl || tl, ctr || tr, cbr || br, cbl || bl)));
+                } else {
+                    let r = if tl || tr || br || bl { WIDGET_RADIUS } else { 0.0 };
+                    rounded.push((qx, qy, qw, qh, r, qc, (tl, tr, br, bl)));
+                }
             }
         }
 
@@ -1002,6 +1064,8 @@ impl GraphController for Graph {
         self.toggle_hovered_idx = None;
     }
     fn get_nodes(&self) -> Vec<GraphNode> { self.nodes.clone() }
+    fn cell_corner_radius(&self) -> f32 { Graph::cell_corner_radius(self) }
+    fn geometry_quads_tagged(&self, rect: Rect) -> Vec<TaggedQuad> { Graph::geometry_quads_tagged(self, rect) }
     fn selected_node(&self) -> Option<usize> { self.selected_idx }
     fn set_selected_node(&mut self, idx: Option<usize>) {
         self.selected_idx = idx;

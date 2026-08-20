@@ -555,7 +555,7 @@ pub use self::container::{
 pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
     InfoBox, StatusDot, InteractiveListItem,
-    GraphNode, Graph, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
+    GraphNode, Graph, TaggedQuad, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
     DotStatus, Panel, ImageView, serialize_widgets,
     truncate_head, truncate_tail,
 };
@@ -605,6 +605,12 @@ pub trait GraphController {
     fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool;
     /// The topmost node whose body contains (px, py), window-absolute coords.
     fn node_at(&self, px: f32, py: f32) -> Option<usize>;
+    /// The grid cells' superellipse corner radius at the current zoom (0 = square).
+    fn cell_corner_radius(&self) -> f32;
+    /// The flat-geometry emission with grid cells tagged by their surviving
+    /// rounded corners — for hosts that draw the graph's quads themselves
+    /// (the designer) and want cells as superellipse tiles.
+    fn geometry_quads_tagged(&self, rect: crate::scene::layout::Rect) -> Vec<TaggedQuad>;
 }
 
 pub trait SpreadsheetController {
