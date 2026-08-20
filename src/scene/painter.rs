@@ -98,10 +98,18 @@ pub fn append_widget_plate(w: &dyn WidgetHost, pc: &mut PaintCtx) {
 /// counterpart of the flat border line, exactly the controls' own
 /// outline→relief degradation.
 pub fn append_widget_plate_tinted(w: &dyn WidgetHost, pc: &mut PaintCtx, tint: Option<[f32; 3]>) {
+    let radii = w.corner_radii();
+    append_widget_plate_radii(w, pc, tint, (radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left));
+}
+
+/// [`append_widget_plate_tinted`] with the corner radii supplied by the caller
+/// instead of read from the widget — for hosts whose panes tile the window:
+/// a pane corner that sits ON a window corner is that pane's share of the
+/// root-plate silhouette and wears the window's span-widened arc, while
+/// interior corners keep the widget-scale nominal radius.
+pub fn append_widget_plate_radii(w: &dyn WidgetHost, pc: &mut PaintCtx, tint: Option<[f32; 3]>, radii_tuple: (f32, f32, f32, f32)) {
     let (x, y, ww, h) = w.rect();
     let rect = Rect { x, y, width: ww, height: h };
-    let radii = w.corner_radii();
-    let radii_tuple = (radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left);
     let tint = tint.unwrap_or([1.0, 1.0, 1.0]);
     if let Some(thickness) = w.plate_bevel() {
         pc.bevel_tinted(rect, radii_tuple, w.color(), thickness, tint);
