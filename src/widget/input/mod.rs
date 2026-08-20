@@ -12,6 +12,7 @@ pub mod button_strip;
 pub mod keybind_recorder;
 pub mod ramp;
 pub mod bevel_preview;
+pub mod ramp_preview;
 
 pub use button::{Button, ButtonKind, PageButton};
 pub use checkbox::{Checkbox, Toggle};
@@ -27,6 +28,7 @@ pub use button_strip::ButtonStrip;
 pub use keybind_recorder::KeybindRecorder;
 pub use ramp::{Ramp, RampKey, ColorRamp, ColorRampKey, format_ramp_spec, parse_ramp_spec};
 pub use bevel_preview::{BevelPreview, bevel_ease, parse_bevel_knobs};
+pub use ramp_preview::RampPreview;
 
 // `BREADCRUMB_PADDING` / `SEGMENT_GAP` lived here and had exactly one consumer
 // between them. The breadcrumb owns its own spacing now (`Breadcrumb::SEG_INSET`,

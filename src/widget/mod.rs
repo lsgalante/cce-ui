@@ -541,7 +541,7 @@ pub use self::core::focus::link_parent_child;
 pub use self::input::{
     Button, TextBox, Spinbox, Dropdown, Checkbox, Toggle, Slider, RangeSlider,
     ColorSelector, Finger, Trackpad, get_font_db, ActiveThumb, FontSelector,
-    BevelPreview, bevel_ease, parse_bevel_knobs,
+    BevelPreview, bevel_ease, parse_bevel_knobs, RampPreview,
     ButtonStrip, KeybindRecorder, Ramp, RampKey, ColorRamp, ColorRampKey,
     format_ramp_spec, parse_ramp_spec
 };

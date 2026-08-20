@@ -3,6 +3,13 @@
 //! `make install` puts it on PATH; run it inside a Wayland session. Edits print
 //! their ramp spec to stdout, so the popup doubles as a curve scratchpad.
 //!
+//! `--key <dotted.key>` (with optional `--config <path>`, default the shared
+//! config.kdl) turns the scratchpad into the `(ramp)` VALUE editor: the curve
+//! seeds from that key's ramp spec, Save writes the spec back to that one key
+//! with the `(ramp)` annotation, and Cancel closes without saving — the
+//! `cce-relief --key` convention. cce-data-editor spawns it this way from a
+//! ramp value's inline preview.
+//!
 //! Architecture mirrors the reference `DemoApp` (`src/main.rs`): display-list
 //! frame, routed events, in-frame popovers.
 
@@ -10,7 +17,8 @@ use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, Win
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::widget::{
-    Adapted, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, Ramp, WidgetHost,
+    Adapted, Button, ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta, Ramp,
+    WidgetHost,
 };
 use wayland_client::QueueHandle;
 
@@ -28,6 +36,18 @@ struct RampPopup {
     ramp: Adapted<Ramp>,
     /// Last spec printed to stdout — edits log their curve for copy/paste.
     last_spec: String,
+    /// `--key` mode only; parked off-screen in the scratchpad.
+    save_button: Adapted<Button>,
+    cancel_button: Adapted<Button>,
+    /// `--key <dotted.key>`: Save writes the spec as a `(ramp)` value at
+    /// this key; the curve seeds from it. None = the stdout scratchpad.
+    target_key: Option<String>,
+    config_path: std::path::PathBuf,
+    /// Status line under the buttons (key mode): what the last save did.
+    status: String,
+    /// Set by the cancel click in `drain_changes` (no exit access there);
+    /// `handle_mouse_input` turns it into `RampMsg::Exit`.
+    exit_requested: bool,
     ui_context: cce_ui::context::UiContext,
     width: u32,
     height: u32,
@@ -44,6 +64,28 @@ impl RampPopup {
             self.last_spec = spec;
             self.needs_rebuild = true;
         }
+        if self.save_button.take_click() {
+            self.save_to_key();
+            self.needs_rebuild = true;
+        }
+        if self.cancel_button.take_click() {
+            // Discard-and-close: nothing persisted without Save.
+            self.exit_requested = true;
+        }
+    }
+
+    /// Persist the current curve as a `(ramp)` value at the target key.
+    fn save_to_key(&mut self) {
+        let Some(key) = self.target_key.clone() else { return };
+        let p = self.config_path.to_string_lossy().into_owned();
+        let spec = self.ramp.inner().spec_string();
+        let ok = cce_ui::config::write_config_value_typed(&p, &key, &spec, "style", Some("ramp"));
+        self.status = if ok {
+            println!("saved {key} -> {p}");
+            format!("Saved — {key} holds this curve.")
+        } else {
+            "Save FAILED — see config permissions.".to_string()
+        };
     }
 }
 
@@ -55,11 +97,48 @@ impl Application for RampPopup {
         _sender: calloop::channel::Sender<Self::Message>,
     ) -> Self {
         cce_ui::scale::set_scale_factor(1.0);
-        let ramp = Ramp::new();
+        let mut ramp = Ramp::new();
+
+        // `--key <dotted.key>` / `--config <path>`: edit one `(ramp)` value
+        // in place — seed the curve from it, Save writes it back.
+        let mut config_path = cce_ui::config::get_config_path();
+        let mut target_key: Option<String> = None;
+        let args: Vec<String> = std::env::args().collect();
+        let mut i = 1;
+        while i < args.len() {
+            if args[i] == "--config" && i + 1 < args.len() {
+                config_path = std::path::PathBuf::from(&args[i + 1]);
+                i += 1;
+            } else if args[i] == "--key" && i + 1 < args.len() {
+                target_key = Some(args[i + 1].clone());
+                i += 1;
+            }
+            i += 1;
+        }
+        if let Some(key) = &target_key {
+            let seed = std::fs::read_to_string(&config_path)
+                .ok()
+                .map(|c| cce_ui::config::parse_kdl_to_json(&c))
+                .and_then(|v| v.pointer(&format!("/{}", key.replace('.', "/"))).cloned())
+                .and_then(|v| v.as_str().map(String::from));
+            if let Some(spec) = seed {
+                ramp.inner_mut().set_spec(&spec);
+            }
+        }
+
         let last_spec = ramp.inner().spec_string();
         Self {
             ramp,
             last_spec,
+            save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
+            cancel_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel"),
+            status: match &target_key {
+                Some(k) => format!("Edits are live in the curve; Save writes the {k} key."),
+                None => String::new(),
+            },
+            target_key,
+            config_path,
+            exit_requested: false,
             ui_context: cce_ui::context::UiContext::new(),
             width: 540,
             height: 420,
@@ -77,13 +156,22 @@ impl Application for RampPopup {
     }
 
     fn settings(&self) -> WindowSettings {
+        let title = match &self.target_key {
+            Some(k) => {
+                let parts: Vec<&str> = k.split('.').collect();
+                format!("Ramp — {}", parts[parts.len().saturating_sub(2)..].join("."))
+            }
+            None => "Ramp".to_string(),
+        };
+        // The key mode adds a Save/Cancel row under the curve.
+        let extra = if self.target_key.is_some() { 56 } else { 0 };
         WindowSettings {
-            title: "Ramp".to_string(),
+            title,
             app_id: "cce-ramp".to_string(),
             width: 460,
-            height: 340,
+            height: 340 + extra,
             fullscreen: false,
-            min_size: Some((420, 300)),
+            min_size: Some((420, 300 + extra)),
         }
     }
 
@@ -108,6 +196,8 @@ impl Application for RampPopup {
             let w = self.ramp.as_ptr_mut();
             let id = self.ramp.id();
             self.ui_context.register_widget(id, w);
+            self.ui_context.register_widget(self.save_button.id(), self.save_button.as_ptr_mut());
+            self.ui_context.register_widget(self.cancel_button.id(), self.cancel_button.as_ptr_mut());
         }
 
         let size_changed = self.width != size.width as u32
@@ -122,14 +212,24 @@ impl Application for RampPopup {
             // One widget, one rect: the ramp fills the plate inside half the
             // DE pad (this popup runs tighter than a full client). The plate
             // itself is inset by OVERFLOW_MARGIN so key pegs can render past
-            // the window frame into the transparent surface rim.
+            // the window frame into the transparent surface rim. Key mode
+            // reserves a Save/Cancel band under the curve.
             let pad = OVERFLOW_MARGIN + cce_ui::layout::backplate_padding() / 2.0;
+            let band = if self.target_key.is_some() { 56.0 } else { 0.0 };
             self.ramp.set_rect(
                 pad,
                 pad,
                 (self.width as f32 - 2.0 * pad).max(0.0),
-                (self.height as f32 - 2.0 * pad).max(0.0),
+                (self.height as f32 - 2.0 * pad - band).max(0.0),
             );
+            if self.target_key.is_some() {
+                let by = self.height as f32 - pad - 30.0;
+                self.save_button.set_rect(pad, by, 96.0, 28.0);
+                self.cancel_button.set_rect(pad + 96.0 + 12.0, by, 96.0, 28.0);
+            } else {
+                self.save_button.set_rect(-1000.0, -1000.0, 1.0, 1.0);
+                self.cancel_button.set_rect(-1000.0, -1000.0, 1.0, 1.0);
+            }
 
             self.needs_rebuild = false;
             self.ui_context.rebuild_spatial_grid();
@@ -163,6 +263,22 @@ impl Application for RampPopup {
         );
 
         cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.ramp, &mut pc);
+        if self.target_key.is_some() {
+            cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.save_button, &mut pc);
+            cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.cancel_button, &mut pc);
+            if !self.status.is_empty() {
+                let pad = OVERFLOW_MARGIN + cce_ui::layout::backplate_padding() / 2.0;
+                pc.text_with(
+                    self.status.clone(),
+                    pad + 2.0 * (96.0 + 12.0),
+                    self.height as f32 - pad - 24.0,
+                    12.0,
+                    [0x9a, 0x9a, 0xa4],
+                    None,
+                    None,
+                );
+            }
+        }
 
         // The ramp's field-dropdown popover, drawn into the frame on top.
         if let Some((px, py, pw, ph)) = self.ramp.popover_rect() {
@@ -257,8 +373,13 @@ impl Application for RampPopup {
             local_x: pos.x,
             local_y: pos.y,
         };
-        let changed = self.ui_context.propagate_event(&ev, self.ramp.id());
+        let mut changed = self.ui_context.propagate_event(&ev, self.ramp.id());
+        changed |= self.ui_context.propagate_event(&ev, self.save_button.id());
+        changed |= self.ui_context.propagate_event(&ev, self.cancel_button.id());
         self.drain_changes();
+        if self.exit_requested {
+            return Some(RampMsg::Exit);
+        }
         if changed || self.needs_rebuild {
             *needs_rebuild = true;
             self.needs_rebuild = true;
