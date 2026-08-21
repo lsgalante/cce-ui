@@ -1040,9 +1040,11 @@ impl Paint for Dropdown {
                 continue;
             }
 
+            // Menu-button mode (custom_display_text) has no "current" option —
+            // its rows are commands, so none reads as selected.
             let text_color = if self.hovered_item == Some(idx) {
                 [0xff, 0xff, 0xff]
-            } else if self.selected == idx {
+            } else if self.selected == idx && self.custom_display_text.is_none() {
                 [0x3a, 0x9a, 0xff]
             } else {
                 [0xcc, 0xcc, 0xd4]
