@@ -493,13 +493,32 @@ impl Paint for MenuBar {
             ctx.quad(rect, self.bg_color());
         }
 
-        // Title highlight while the context dropdown is open / hovered.
+        // Context-dropdown trigger: the DE-wide closed-dropdown chrome — a flush
+        // inset trough with a transparent face (Dropdown::paint_background's
+        // raised path), so a bar's folder/pane selector reads as a normal
+        // dropdown instead of bare text. The trough is carved on a band-inset
+        // rect; the open / hovered fills round to sit inside it. The vertical
+        // and curved title modes keep the plain highlight quads — their title
+        // geometry is exotic and gets no trough.
         if !self.context_options.is_empty() {
             let tr = self.title_rect(rect);
-            if self.context_dropdown_open {
-                ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, colors::highlight_primary_color());
-            } else if self.context_title_hovered {
-                ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, colors::HIGHLIGHT_SECONDARY);
+            if self.vertical || self.curved_circle.is_some() {
+                if self.context_dropdown_open {
+                    ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, colors::highlight_primary_color());
+                } else if self.context_title_hovered {
+                    ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, colors::HIGHLIGHT_SECONDARY);
+                }
+            } else {
+                let trough_h = DROPDOWN_ITEM_H.min((tr.3 - 6.0).max(8.0));
+                let trough = Rect { x: tr.0, y: tr.1 + (tr.3 - trough_h) / 2.0, width: tr.2, height: trough_h };
+                let radius = crate::layout::dropdown_corner_radius();
+                let depth = crate::layout::bevel_width().min(trough_h * 0.2);
+                ctx.inset_plate(trough, (radius, radius, radius, radius), [0.0; 4], depth);
+                if self.context_dropdown_open {
+                    ctx.rounded_rect(trough, radius, (true, true, true, true), colors::highlight_primary_color());
+                } else if self.context_title_hovered {
+                    ctx.rounded_rect(trough, radius, (true, true, true, true), colors::HIGHLIGHT_SECONDARY);
+                }
             }
         }
 
