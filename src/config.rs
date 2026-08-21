@@ -543,6 +543,49 @@ pub fn cached_config_content() -> String {
     CONFIG_CACHE.read().map(|c| c.raw_content.clone()).unwrap_or_default()
 }
 
+static SHARED_CONFIG_CACHE: std::sync::RwLock<ConfigCache> = std::sync::RwLock::new(ConfigCache {
+    last_modified: None,
+    parsed: None,
+    raw_content: String::new(),
+});
+
+/// The SHARED config alone — the per-app override is deliberately NOT merged.
+/// For values that describe something outside the app (the compositor's
+/// window silhouette radius), where an app-local override restyles the app
+/// but must not desynchronize it from the DE. Mtime-cached like
+/// [`cached_config`].
+pub fn cached_shared_config() -> serde_json::Value {
+    let path = get_config_path();
+    let current_modified = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+
+    if let Ok(cache) = SHARED_CONFIG_CACHE.read() {
+        if cache.last_modified.is_some() && cache.last_modified == current_modified {
+            if let Some(ref val) = cache.parsed {
+                return val.clone();
+            }
+        }
+    }
+
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let val = if let Ok(doc) = content.parse::<kdl::KdlDocument>() {
+        kdl_to_json(&doc)
+    } else {
+        serde_json::json!({})
+    };
+    if let Ok(mut cache) = SHARED_CONFIG_CACHE.write() {
+        cache.last_modified = current_modified;
+        cache.parsed = Some(val.clone());
+        cache.raw_content = content;
+    }
+    val
+}
+
+/// Read an i64 at `pointer` from the SHARED config only (no per-app merge),
+/// or `default` — see [`cached_shared_config`].
+pub fn get_i64_shared(pointer: &str, default: i64) -> i64 {
+    cached_shared_config().pointer(pointer).and_then(|v| v.as_i64()).unwrap_or(default)
+}
+
 // ── Typed accessors over the cached config ──────────────────────────────────
 // Each reads the mtime-cached config and extracts a value at a JSON pointer
 // (e.g. "/notifications/enable"), returning the default when absent or mistyped.

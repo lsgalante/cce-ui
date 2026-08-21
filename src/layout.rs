@@ -1570,6 +1570,17 @@ pub fn corner_shape() -> f32 {
     get_style_registry().read().unwrap().get_float("corner_shape").unwrap_or(2.0).clamp(2.0, 16.0)
 }
 
+/// The window silhouette's nominal corner radius: the SHARED config's
+/// backplate corner_radius, never the per-app override. The compositor clips
+/// every decorated window with this value (widened by
+/// [`corner_span_factor`]), so any window-corner arc an app draws itself must
+/// use it too — even when the app restyles its own plates through its
+/// override file — or its corners detach from the silhouette (and from the
+/// desktop grid's cells, which share the same knob).
+pub fn window_corner_radius() -> f32 {
+    crate::config::get_i64_shared("/style/surface/backplate/corner_radius", 12) as f32
+}
+
 /// The curvature-matched corner-span factor for window-scale squircle corners.
 /// A raw superellipse of exponent n at a circle's nominal radius turns tighter
 /// at the diagonal than that circle — its radius of curvature there is
