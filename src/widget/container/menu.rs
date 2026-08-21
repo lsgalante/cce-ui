@@ -493,38 +493,71 @@ impl Paint for MenuBar {
             ctx.quad(rect, self.bg_color());
         }
 
-        // Context-dropdown trigger: the DE-wide closed-dropdown chrome — a flush
-        // inset trough with a transparent face (Dropdown::paint_background's
-        // raised path), so a bar's folder/pane selector reads as a normal
-        // dropdown instead of bare text. The trough is carved on a band-inset
-        // rect; the open / hovered fills round to sit inside it. The vertical
-        // and curved title modes keep the plain highlight quads — their title
-        // geometry is exotic and gets no trough.
+        // Dropdown-trigger chrome shared by the context title and the menu
+        // buttons on horizontal bars: the DE-wide closed-dropdown look — a
+        // flush inset trough with a transparent face (Dropdown::
+        // paint_background's raised path) carved on a band-inset rect, with
+        // the state fill rounded to sit inside it. The vertical and curved
+        // modes keep their plain quads — their geometry is exotic and gets no
+        // trough.
+        let flat_modes = self.vertical || self.curved_circle.is_some();
+        let trough_chrome = |ctx: &mut PaintCtx, r: (f32, f32, f32, f32), fill: Option<[f32; 4]>| {
+            let trough_h = DROPDOWN_ITEM_H.min((r.3 - 6.0).max(8.0));
+            let trough = Rect { x: r.0, y: r.1 + (r.3 - trough_h) / 2.0, width: r.2, height: trough_h };
+            let radius = crate::layout::dropdown_corner_radius();
+            let depth = crate::layout::bevel_width().min(trough_h * 0.2);
+            ctx.inset_plate(trough, (radius, radius, radius, radius), [0.0; 4], depth);
+            if let Some(c) = fill {
+                ctx.rounded_rect(trough, radius, (true, true, true, true), c);
+            }
+        };
+
+        // Context-dropdown trigger (the bar's folder/pane selector).
         if !self.context_options.is_empty() {
             let tr = self.title_rect(rect);
-            if self.vertical || self.curved_circle.is_some() {
+            if flat_modes {
                 if self.context_dropdown_open {
                     ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, colors::highlight_primary_color());
                 } else if self.context_title_hovered {
                     ctx.quad(Rect { x: tr.0, y: tr.1, width: tr.2, height: tr.3 }, colors::HIGHLIGHT_SECONDARY);
                 }
             } else {
-                let trough_h = DROPDOWN_ITEM_H.min((tr.3 - 6.0).max(8.0));
-                let trough = Rect { x: tr.0, y: tr.1 + (tr.3 - trough_h) / 2.0, width: tr.2, height: trough_h };
-                let radius = crate::layout::dropdown_corner_radius();
-                let depth = crate::layout::bevel_width().min(trough_h * 0.2);
-                ctx.inset_plate(trough, (radius, radius, radius, radius), [0.0; 4], depth);
-                if self.context_dropdown_open {
-                    ctx.rounded_rect(trough, radius, (true, true, true, true), colors::highlight_primary_color());
+                let fill = if self.context_dropdown_open {
+                    Some(colors::highlight_primary_color())
                 } else if self.context_title_hovered {
-                    ctx.rounded_rect(trough, radius, (true, true, true, true), colors::HIGHLIGHT_SECONDARY);
-                }
+                    Some(colors::HIGHLIGHT_SECONDARY)
+                } else {
+                    None
+                };
+                trough_chrome(ctx, tr, fill);
             }
         }
 
-        // The embedded strip's geometry (it is not a tree child; its pixels are ours).
-        for (qx, qy, qw, qh, qc) in self.menus.extra_quads() {
-            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+        // The embedded strip's geometry (it is not a tree child; its pixels are
+        // ours). Horizontal bars restyle the menu buttons as dropdown triggers
+        // too: each gets its own trough (side-inset so adjacent troughs keep
+        // separate groove rings), and the strip's full-height square state
+        // quads are replaced by the trigger fills — open matches the context
+        // dropdown's open tint rather than the strip's legacy palette.
+        if flat_modes {
+            for (qx, qy, qw, qh, qc) in self.menus.extra_quads() {
+                ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+            }
+        } else {
+            for i in 0..self.menus.buttons.len() {
+                let r = self.menus.item_rect(i);
+                let r = (r.0 + 3.0, r.1, (r.2 - 6.0).max(8.0), r.3);
+                let fill = if Some(i) == self.menus.selected {
+                    Some(colors::highlight_primary_color())
+                } else if Some(i) == self.menus.pressed_idx {
+                    Some(colors::BUTTON_PRESS)
+                } else if Some(i) == self.menus.hovered_idx {
+                    Some(colors::HIGHLIGHT_SECONDARY)
+                } else {
+                    None
+                };
+                trough_chrome(ctx, r, fill);
+            }
         }
         for (cx, cy, r, t, start, end, c) in self.menus.extra_arcs() {
             ctx.arc(cx, cy, r, t, start, end, c);
