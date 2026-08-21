@@ -168,7 +168,30 @@ fn rr_sdf_grad(p: vec2f, prect: vec4f, pradii: vec4f) -> vec3f {
             let lp = max(pow(pow(q.x, shape) + pow(q.y, shape), 1.0 / shape), 1e-4);
             let g = vec2f(pow(q.x / lp, shape - 1.0), pow(q.y / lp, shape - 1.0));
             let gm = max(length(g), 1e-4);
-            return vec3f(s * g / gm, (lp - r) / gm);
+            // First-order |∇|-corrected distance: exact on the boundary and on
+            // the axis/diagonal rays, but mid-arc it runs up to ~4% of the
+            // depth low, so the roll band's contours drift off the true
+            // parallels of the arc as the roll widens.
+            let d0 = (lp - r) / gm;
+            let dir = g / gm;
+            // One re-evaluation at the projected near-boundary point tightens
+            // the band to true parallels (error /5 to /10 over the lit part of
+            // the roll). Trusted only near the boundary: past the roll the
+            // projection approaches the Lp field's degenerate center and
+            // diverges, so the step is clamped and the result blends back to
+            // the plain first-order value — beyond 1.5 rolls the field is
+            // bit-identical to the pre-refinement one (flat fill; only
+            // crest/AO tails read it there).
+            let roll = max(rrect_clip.p_light.w, 2.0);
+            let step = clamp(d0, -roll, roll);
+            let q1 = max(q - step * dir, vec2f(1e-4));
+            let lp1 = max(pow(pow(q1.x, shape) + pow(q1.y, shape), 1.0 / shape), 1e-4);
+            let g1 = vec2f(pow(q1.x / lp1, shape - 1.0), pow(q1.y / lp1, shape - 1.0));
+            let gm1 = max(length(g1), 1e-4);
+            let d1 = step + (lp1 - r) / gm1;
+            let w = smoothstep(roll, roll * 1.5 + 2.0, abs(d0));
+            let nrm = normalize(mix(g1 / gm1, dir, w));
+            return vec3f(s * nrm, mix(d1, d0, w));
         }
         let len = max(length(q), 1e-4);
         return vec3f(s * q / len, len - r);
