@@ -475,9 +475,37 @@ pub fn data_home() -> std::path::PathBuf {
     }
 }
 
+/// XDG runtime base directory: `$XDG_RUNTIME_DIR`, else the temp dir.
+///
+/// Unlike the other bases there is no `~/...` fallback to construct: the
+/// runtime dir is `/run/user/UID`, created by pam_systemd at login and mode
+/// 0700. An unset variable means we are outside a login session, where the
+/// shared temp dir is the honest answer rather than a path we would have to
+/// invent (and could not create with the right ownership anyway).
+pub fn runtime_dir() -> std::path::PathBuf {
+    match std::env::var("XDG_RUNTIME_DIR") {
+        Ok(x) if !x.is_empty() => std::path::PathBuf::from(x),
+        _ => std::env::temp_dir(),
+    }
+}
+
 /// The cce config directory (`<config_home>/cce`).
 pub fn cce_config_dir() -> std::path::PathBuf {
     config_home().join("cce")
+}
+
+/// The cce runtime directory (`<runtime_dir>/cce`), created if absent.
+///
+/// Session-scoped files — logs, sockets, pid files — belong here rather than
+/// in `/tmp`, which is one namespace shared by every user on the machine: a
+/// fixed `/tmp/cce-*.log` is a path the first user to log in owns, and the
+/// sticky bit then denies everyone else. Creating on demand keeps call sites
+/// to one line; a failure surfaces when the caller opens its file, which it
+/// already has to handle.
+pub fn cce_runtime_dir() -> std::path::PathBuf {
+    let dir = runtime_dir().join("cce");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
 }
 
 pub fn get_config_path() -> std::path::PathBuf {
@@ -763,6 +791,19 @@ pub fn get_kdl_type_annotations(kdl_content: &str, key_paths: &[String]) -> Vec<
 mod tests {
     use super::*;
 
+    #[test]
+    fn cce_runtime_dir_sits_under_the_runtime_base_and_is_created() {
+        // No env mutation: reading the real base keeps this correct both in a
+        // session (XDG_RUNTIME_DIR set) and anywhere it is not (temp dir), and
+        // avoids racing every other test in the process.
+        let base = runtime_dir();
+        assert!(base.is_absolute(), "runtime base must be absolute: {base:?}");
+        let dir = cce_runtime_dir();
+        assert_eq!(dir, base.join("cce"));
+        // The create-on-demand contract callers depend on: they open a file
+        // inside this directory without creating it themselves.
+        assert!(dir.is_dir(), "cce_runtime_dir must create its directory: {dir:?}");
+    }
 
     #[test]
     fn relief_annotated_string_passes_through() {
