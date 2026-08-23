@@ -265,14 +265,6 @@ impl Toggle {
         self.toggled
     }
 
-    fn gradient_color(&self) -> [f32; 4] {
-        if self.toggled {
-            colors::toggle_on_color()
-        } else {
-            colors::toggle_off_color()
-        }
-    }
-
     /// The slide style's button (config `style.control.toggle.style =
     /// "slide"`): half the widget wide, gliding between the left (off) and
     /// right (on) ends by the animated `slide_t`. `None` when the style is
@@ -288,23 +280,6 @@ impl Toggle {
             width: bw,
             height: rect.height,
         })
-    }
-
-    /// The slide button's face color: the disabled/enabled state colors
-    /// (rgba) crossfaded by the animated position, so the fill morphs while
-    /// the button glides. The colors are used verbatim — their alpha channel
-    /// IS the button's opacity, so a glass tint is a low-alpha state color
-    /// (the beveled edges carry the button's read either way).
-    pub fn slide_button_color(&self) -> [f32; 4] {
-        let off = colors::toggle_off_color();
-        let on = colors::toggle_on_color();
-        let t = self.slide_t;
-        [
-            off[0] + (on[0] - off[0]) * t,
-            off[1] + (on[1] - off[1]) * t,
-            off[2] + (on[2] - off[2]) * t,
-            off[3] + (on[3] - off[3]) * t,
-        ]
     }
 
     /// The rocker's two halves over `rect` as FLAT relief steps: (half rect,
@@ -396,8 +371,11 @@ impl Layout for Toggle {
 }
 
 impl Paint for Toggle {
+    /// No fill of its own: a toggle is worked out of the plate it sits on, so
+    /// the plate's material (tint, blur, whatever it is) shows through and the
+    /// state reads from light and relief alone — see [`Paint::paint`].
     fn color(&self) -> [f32; 4] {
-        colors::toggle_bg_color()
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
@@ -420,51 +398,36 @@ impl Paint for Toggle {
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         let radius = crate::layout::toggle_corner_radius();
-        let bg = colors::toggle_bg_color();
         let slide = crate::layout::toggle_slide();
 
+        // A toggle paints NO fill of its own, in any style: it is worked out
+        // of the plate it sits on, so the plate's own material shows through
+        // and the state reads from light and relief — the DE's transparent-face
+        // convention (closed dropdowns, inset troughs). The state colors this
+        // used to tint with (enabled/disabled/background) are retired with the
+        // rest of the toggle's palette.
         if slide {
             // The slide style: the widget is the track; a half-width button
             // glides between its ends with the state (animated in `tick`).
-            // Under control_relief the button is a raised plateau riding the
-            // track (its beveled edges also reach legacy-view hosts through
-            // `slide_button` — see `ParametersBg::reliefs`).
-            if bg[3] > 0.001 {
-                if radius > 0.0 {
-                    ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
-                } else {
-                    ctx.quad(rect, bg);
-                }
-            }
+            // With no fill the button is a bare raised pad of the plate — its
+            // beveled rim and its position ARE the read (left off, right on).
+            // The rim also reaches legacy-view hosts through `slide_button`
+            // (see `ParametersBg::reliefs`).
             if let Some(btn) = self.slide_button(rect) {
-                let fill = self.slide_button_color();
-                if fill[3] > 0.003 {
-                    if radius > 0.0 {
-                        ctx.rounded_rect(btn, radius, (true, true, true, true), fill);
-                    } else {
-                        ctx.quad(btn, fill);
-                    }
-                }
-                // The beveled rim is the style's defining edge — the glass
-                // fill alone wouldn't read — so it draws in both DE styles.
                 let depth = crate::layout::bevel_width().min(h * 0.2);
                 ctx.boss_edges(btn, (radius, radius, radius, radius), depth, (true, true, true, true));
             }
-        } else if self.raised {
+        } else {
             // The rocker: two FLAT half faces (see `rocker_reliefs`) — the
-            // state half a raised plateau, the other recessed, hinge wall
-            // open so they meet in a single step. Each face carries its
-            // uniform `face_light` overlay (lit plateau, shaded floor) under
-            // the beveled edges, so faces reflect the same light the walls
-            // do. This is the physical read of the flat style's state
-            // gradient, which this style drops entirely.
-            if bg[3] > 0.001 {
-                if radius > 0.0 {
-                    ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
-                } else {
-                    ctx.quad(rect, bg);
-                }
-            }
+            // state half tipped out toward the light, the other away — each
+            // carrying its uniform `face_light` overlay, a neutral light/shade
+            // over the plate rather than a color. Under `control_relief` the
+            // halves additionally wear their beveled step (state half a raised
+            // plateau, the other recessed, hinge wall open so they meet in a
+            // single step); without it that same lighting stands alone. The
+            // flat style's hue gradient is gone with the rest of the palette,
+            // so the two styles now differ only by the relief they were named
+            // for.
             for (half, radii, _, _) in self.rocker_reliefs(rect) {
                 let light = self.face_light(radii.0 > 0.0);
                 if light[3] > 0.001 {
@@ -472,55 +435,15 @@ impl Paint for Toggle {
                     ctx.rounded_rect(half, radius, corners, light);
                 }
             }
-            let depth = crate::layout::bevel_width().min(h * 0.2);
-            for (half, radii, walls, raised) in self.rocker_reliefs(rect) {
-                if raised {
-                    ctx.boss_edges(half, radii, depth, walls);
-                } else {
-                    ctx.recess_edges(half, radii, depth, walls);
+            if self.raised {
+                let depth = crate::layout::bevel_width().min(h * 0.2);
+                for (half, radii, walls, raised) in self.rocker_reliefs(rect) {
+                    if raised {
+                        ctx.boss_edges(half, radii, depth, walls);
+                    } else {
+                        ctx.recess_edges(half, radii, depth, walls);
+                    }
                 }
-            }
-        } else if radius > 0.0 {
-            ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
-        } else {
-            ctx.quad(rect, bg);
-        }
-
-        // The state half carries a vertical gradient of the state color: full opacity at
-        // the widget's outer edge (top when on, bottom when off), fading to transparent at
-        // the vertical middle. Banded quads (the content_bg gradient pattern) so it flows
-        // through the plain-quad views; bands inside the corner radius inset to follow the
-        // rounded corners. The band alphas follow a perceptual curve, not a straight ramp —
-        // see `colors::perceptual_fade_alpha`. The bands composite onto the bg quad above,
-        // so that is the backdrop the curve is solved against.
-        let grad = if self.raised || slide { [0.0; 4] } else { self.gradient_color() };
-        let half = h / 2.0;
-        if half > 0.0 && grad[3] > 0.0 {
-            let steps = (half.ceil() as usize).clamp(4, 32);
-            let band_h = half / steps as f32;
-            for i in 0..steps {
-                let t0 = i as f32 * band_h; // band start, as distance from the outer edge
-                let t_mid = t0 + band_h / 2.0;
-                let alpha = colors::perceptual_fade_alpha(
-                    t_mid / half,
-                    [grad[0], grad[1], grad[2]],
-                    [bg[0], bg[1], bg[2]],
-                    grad[3],
-                );
-                if alpha <= 0.003 {
-                    continue;
-                }
-                let by = if self.toggled { y + t0 } else { y + h - t0 - band_h };
-                let inset = if radius > 0.0 && t_mid < radius {
-                    let dr = radius - t_mid;
-                    radius - (radius * radius - dr * dr).max(0.0).sqrt()
-                } else {
-                    0.0
-                };
-                ctx.quad(
-                    Rect { x: x + inset, y: by, width: w - 2.0 * inset, height: band_h },
-                    [grad[0], grad[1], grad[2], alpha],
-                );
             }
         }
 

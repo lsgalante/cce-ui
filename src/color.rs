@@ -40,9 +40,6 @@ static CONTROL_LABEL_HOVER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static CONTROL_LABEL_FOCUS_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static BACKPLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
-static TOGGLE_ON_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_ON);
-static TOGGLE_OFF_COLOR: RwLock<[f32; 4]> = RwLock::new(TOGGLE_OFF);
-static TOGGLE_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.22, 1.0]);
 static LIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static LIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
 static LIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
@@ -367,24 +364,9 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/control/label/focus_color") {
         if let Ok(mut lock) = CONTROL_LABEL_FOCUS_COLOR.write() { *lock = Some(c); }
     }
-    // State colors: explicit enabled/disabled keys win; the gradient/border
-    // color is only a fallback for whichever state key is absent.
-    let toggle_gradient_color = get_color("/style/control/toggle/gradient_color")
-        .or_else(|| get_color("/style/control/toggle/border_color"))
-        .or_else(|| get_color("/layout/toggle_border_color"));
-
-    if let Some(c) = get_color("/style/control/toggle/enabled_color")
-        .or_else(|| get_color("/layout/toggle_enabled_color"))
-        .or(toggle_gradient_color) {
-        if let Ok(mut lock) = TOGGLE_ON_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/toggle/disabled_color")
-        .or(toggle_gradient_color) {
-        if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/toggle/background_color").or_else(|| get_color("/layout/toggle_bg_color")) {
-        if let Ok(mut lock) = TOGGLE_BG_COLOR.write() { *lock = c; }
-    }
+    // The toggle state colors (enabled/disabled/gradient/background) are not
+    // read: the control inherits its plate — see the note by the retired
+    // getters below.
     if let Some(c) = get_color("/style/control/ramp/background") {
         if let Ok(mut lock) = RAMP_BACKGROUND_COLOR.write() { *lock = c; }
     }
@@ -1156,38 +1138,10 @@ pub fn read_backplate_opacity_if_configured() -> Option<f32> {
     *BACKPLATE_OPACITY.read().unwrap()
 }
 
-pub fn toggle_on_color() -> [f32; 4] {
-    load_colors_once();
-    *TOGGLE_ON_COLOR.read().unwrap()
-}
-
-pub fn set_toggle_on_color(color: [f32; 4]) {
-    if let Ok(mut lock) = TOGGLE_ON_COLOR.write() {
-        *lock = color;
-    }
-}
-
-pub fn toggle_off_color() -> [f32; 4] {
-    load_colors_once();
-    *TOGGLE_OFF_COLOR.read().unwrap()
-}
-
-pub fn set_toggle_off_color(color: [f32; 4]) {
-    if let Ok(mut lock) = TOGGLE_OFF_COLOR.write() {
-        *lock = color;
-    }
-}
-
-pub fn toggle_bg_color() -> [f32; 4] {
-    load_colors_once();
-    *TOGGLE_BG_COLOR.read().unwrap()
-}
-
-pub fn set_toggle_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = TOGGLE_BG_COLOR.write() {
-        *lock = color;
-    }
-}
+// The toggle's own palette (enabled/disabled/background) is RETIRED: a toggle
+// inherits the plate it sits on and marks state with light and relief, so
+// there is nothing left to tint. The `TOGGLE_*` consts above survive for the
+// graph's node geometry switch, which is a different control.
 
 pub fn list_bg_color() -> [f32; 4] {
     load_colors_once();
