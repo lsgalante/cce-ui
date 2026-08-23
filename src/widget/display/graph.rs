@@ -65,8 +65,13 @@ pub struct Graph {
     nodes: Vec<GraphNode>,
     selected_idx: Option<usize>,
     selected_id: Option<String>,
-    double_clicked_idx: Option<usize>,
-    double_click_timer: Option<(std::time::Instant, usize)>,
+    double_clicked_id: Option<String>,
+    /// Keyed by node ID, not index: hosts (the designer) re-sync nodes on
+    /// EVERY window event, and set_nodes used to wipe this state wholesale —
+    /// the first press's timer never survived to the second press, so
+    /// double-click detection could not fire at all. Same id-keyed survival
+    /// as `selected_id` and the hovered-port remap.
+    double_click_timer: Option<(std::time::Instant, String)>,
     grid_snap_enabled: bool,
     node_geom_toggled: Option<(usize, bool)>,
 
@@ -117,7 +122,7 @@ impl Graph {
             nodes: Vec::new(),
             selected_idx: None,
             selected_id: None,
-            double_clicked_idx: None,
+            double_clicked_id: None,
             double_click_timer: None,
             grid_snap_enabled,
             node_geom_toggled: None,
@@ -980,12 +985,13 @@ impl Graph {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 if px >= nx && px < nx + nw && py >= ny && py < ny + nh {
                     let now = std::time::Instant::now();
-                    if let Some((prev_time, prev_idx)) = self.double_click_timer {
-                        if prev_idx == i && now.duration_since(prev_time) < std::time::Duration::from_millis(500) {
-                            self.double_clicked_idx = Some(i);
+                    let clicked_id = self.nodes[i].id.clone();
+                    if let Some((prev_time, prev_id)) = self.double_click_timer.take() {
+                        if prev_id == clicked_id && now.duration_since(prev_time) < std::time::Duration::from_millis(500) {
+                            self.double_clicked_id = Some(clicked_id.clone());
                         }
                     }
-                    self.double_click_timer = Some((now, i));
+                    self.double_click_timer = Some((now, clicked_id));
                     self.selected_idx = Some(i);
                     self.selected_id = Some(self.nodes[i].id.clone());
                     self.dragging_idx = Some(i);
@@ -1059,8 +1065,10 @@ impl GraphController for Graph {
             self.drag_node_pos = None;
         }
 
-        self.double_clicked_idx = None;
-        self.double_click_timer = None;
+        // double_clicked_id / double_click_timer survive deliberately: they
+        // are keyed by node id, and clearing them here (as this used to)
+        // guaranteed no double-click could ever complete — the host re-syncs
+        // between the two presses. A stale id simply resolves to None.
         self.toggle_hovered_idx = None;
     }
     fn get_nodes(&self) -> Vec<GraphNode> { self.nodes.clone() }
@@ -1071,8 +1079,12 @@ impl GraphController for Graph {
         self.selected_idx = idx;
         self.selected_id = idx.and_then(|i| self.nodes.get(i).map(|n| n.id.clone()));
     }
-    fn double_clicked_node(&self) -> Option<usize> { self.double_clicked_idx }
-    fn clear_double_clicked_node(&mut self) { self.double_clicked_idx = None; }
+    fn double_clicked_node(&self) -> Option<usize> {
+        self.double_clicked_id
+            .as_ref()
+            .and_then(|id| self.nodes.iter().position(|n| &n.id == id))
+    }
+    fn clear_double_clicked_node(&mut self) { self.double_clicked_id = None; }
     fn set_grid_snap_enabled(&mut self, enabled: bool) { self.grid_snap_enabled = enabled; }
     fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { self.node_geom_toggled.take() }
     fn set_grid_snap(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
@@ -1120,6 +1132,45 @@ mod tests {
         };
         g.set_nodes(&[node("a", "alpha", 0.0, 0.0), node("b", "beta", 1.0, 1.0)]);
         g
+    }
+
+    /// A double-click's two presses always straddle a host node re-sync — the
+    /// designer calls set_nodes on EVERY window event — so the detection state
+    /// must survive set_nodes. It used to be wiped there wholesale, which made
+    /// double-click structurally impossible outside unit tests.
+    #[test]
+    fn double_click_survives_the_between_press_node_resync() {
+        let mut ctx = UiContext::new();
+        let mut g = two_nodes();
+        let (id, ptr) = (g.id(), g.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+
+        // First press on node a, then the host re-syncs (same content),
+        // then the second press: this is the real event sequence.
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
+        g.mouse_input(MouseButton::Left, ElementState::Released, 110.0, 120.0, &mut ctx);
+        let nodes = g.get_nodes();
+        g.set_nodes(&nodes);
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
+
+        assert_eq!(g.double_clicked_node(), Some(0), "double-click lost across set_nodes");
+        g.clear_double_clicked_node();
+        assert_eq!(g.double_clicked_node(), None);
+    }
+
+    /// Two presses on DIFFERENT nodes are not a double-click, id-keyed or not.
+    #[test]
+    fn presses_on_two_nodes_are_not_a_double_click() {
+        let mut ctx = UiContext::new();
+        let mut g = two_nodes();
+        let (id, ptr) = (g.id(), g.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 120.0, &mut ctx));
+        g.mouse_input(MouseButton::Left, ElementState::Released, 110.0, 120.0, &mut ctx);
+        // Node b sits one grid step down-right of a.
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 210.0, 180.0, &mut ctx));
+        assert_eq!(g.double_clicked_node(), None);
     }
 
     #[test]
