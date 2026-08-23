@@ -5497,46 +5497,35 @@ pub fn get_system_sans_serif_font() -> &'static str {
     })
 }
 
-pub fn parse_font_for_alias(content: &str, alias: &str) -> Option<String> {
-    let lines: Vec<&str> = content.lines().collect();
-    for i in 0..lines.len() {
-        let line = lines[i].trim();
-        if line.contains("<test") && line.contains("name=\"family\"") && line.contains(&format!("<string>{}</string>", alias)) {
-            for j in (i + 1)..(i + 6).min(lines.len()) {
-                let next_line = lines[j].trim();
-                if next_line.contains("<edit") {
-                    for k in (j + 1)..(j + 6).min(lines.len()) {
-                        let str_line = lines[k].trim();
-                        if str_line.contains("<string>") && str_line.contains("</string>") {
-                            if let Some(start) = str_line.find("<string>") {
-                                if let Some(end) = str_line.find("</string>") {
-                                    let font = &str_line[start + 8..end];
-                                    return Some(font.to_string());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-pub fn read_preferred_fonts() -> (String, String, String, String, String, String, String) {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let path = std::path::Path::new(&home).join(".config/fontconfig/fonts.conf");
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    
-    let sans = parse_font_for_alias(&content, "sans-serif").unwrap_or_else(|| "Noto Sans".to_string());
-    let serif = parse_font_for_alias(&content, "serif").unwrap_or_else(|| "Noto Serif".to_string());
-    let mono = parse_font_for_alias(&content, "monospace").unwrap_or_else(|| "Noto Sans Mono".to_string());
-    let borders = parse_font_for_alias(&content, "window-borders").unwrap_or_else(|| "Noto Sans".to_string());
-    let status = parse_font_for_alias(&content, "status-interface").unwrap_or_else(|| "Noto Sans".to_string());
-    let fuzzel_font = parse_font_for_alias(&content, "fuzzel").unwrap_or_else(|| "Noto Sans".to_string());
-    let term = parse_font_for_alias(&content, "terminal").unwrap_or_else(|| "Noto Sans Mono".to_string());
-    
-    (sans, serif, mono, borders, status, fuzzel_font, term)
+/// The DE's font families, from the shared config's `fonts { }` block:
+/// `(sans_serif, serif, monospace, terminal)`.
+///
+/// These used to live in `~/.config/fontconfig/fonts.conf`, read back out of
+/// fontconfig's XML by alias. Three of the seven aliases it carried
+/// (`window-borders`, `status-interface`, `fuzzel`) were cce inventions
+/// squatting in fontconfig's family namespace, and by the end none of them was
+/// read by anything: window borders lost their text when titlebars went away,
+/// the status bar moved to `module { font }` / `/style/status/font` in KDL and
+/// only ever consulted the alias as a last-resort fallback, and fuzzel was
+/// replaced by cce-cloud. The settings app's Fonts page — which edited that
+/// file, rewriting it wholesale and preserving only its `<dir>` lines — went
+/// with them.
+///
+/// fonts.conf is still fontconfig's file and still governs GTK/Electron apps;
+/// cce simply no longer reads or writes it. Per-app overrides work here because
+/// this reads the merged config, the same way the status bar's font does.
+pub fn read_preferred_fonts() -> (String, String, String, String) {
+    let get = |key: &str, fallback: &str| {
+        crate::config::get_string(&format!("/fonts/{key}"))
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| fallback.to_string())
+    };
+    (
+        get("sans_serif", "Noto Sans"),
+        get("serif", "Noto Serif"),
+        get("monospace", "Noto Sans Mono"),
+        get("terminal", "Noto Sans Mono"),
+    )
 }
 
 impl crate::widget::ContainerLayout for FlexLayout {

@@ -130,7 +130,7 @@ pub fn get_text_buffer_attrs(
     let mut buf = Buffer::new(fs, metrics);
     let mut attrs = Attrs::new();
 
-    let (sans_fallback, serif_fallback, mono_fallback, _, _, _, _) = crate::layout::read_preferred_fonts();
+    let (sans_fallback, serif_fallback, mono_fallback, _) = crate::layout::read_preferred_fonts();
 
     let resolved_storage = family_name.as_deref().and_then(|font_name| match font_name {
         "monospace" if !mono_fallback.is_empty() => find_cased_family(fs, &mono_fallback),
