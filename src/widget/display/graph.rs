@@ -509,22 +509,12 @@ impl Graph {
                     quads.push((nx, ny, nw, nh, bg_color, None));
                 }
 
-                if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
-                    let mut btn_color = if self.toggle_hovered_idx == Some(i) {
-                        colors::TOGGLE_HOVER
-                    } else {
-                        colors::TOGGLE_OFF
-                    };
-                    btn_color[3] *= self.node_opacity;
-                    push_clipped(tx, ty, tw, th, btn_color, &mut quads);
-
-                    if self.nodes[i].geom_visible {
-                        let inset = 3.0 * scale_f;
-                        let mut toggle_on_color = colors::TOGGLE_ON;
-                        toggle_on_color[3] *= self.node_opacity;
-                        push_clipped(tx + inset, ty + inset, tw - inset * 2.0, th - inset * 2.0, toggle_on_color, &mut quads);
-                    }
-                }
+                // The geometry toggle is a single-color circle now — it draws
+                // through the circles channel (see port_circles), not as
+                // quads: a filled dot when the geometry is visible, the same
+                // color faded when hidden. The old look was a two-tone square
+                // (state square inside a hover-tinted well).
+                let _ = scale_f;
             }
         }
 
@@ -591,6 +581,28 @@ impl Graph {
                 circles.push((cx, cy, r, color));
             }
         };
+
+        // Geometry toggles: one circle per toggleable node, a SINGLE color —
+        // TOGGLE_ON at full alpha when visible, the same color faded when
+        // hidden; hover grows the radius the way port dots do, so no second
+        // hover tint is needed. Hit-testing stays toggle_rect's square (the
+        // circle is inscribed in it).
+        for i in 0..self.nodes.len() {
+            if let Some((tx, ty, tw, th)) = self.toggle_rect(i) {
+                let cx = tx + tw / 2.0;
+                let cy = ty + th / 2.0;
+                let mut r = tw.min(th) / 2.0;
+                if self.toggle_hovered_idx == Some(i) {
+                    r *= 1.15;
+                }
+                let mut c = colors::TOGGLE_ON;
+                if !self.nodes[i].geom_visible {
+                    c[3] *= 0.25;
+                }
+                c[3] *= self.node_opacity;
+                push_circle_clipped(cx, cy, r, c);
+            }
+        }
 
         let conn_size = crate::layout::graph_connector_size();
         let mut conn_color = colors::graph_connector_color();
