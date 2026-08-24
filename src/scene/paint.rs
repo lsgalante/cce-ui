@@ -98,6 +98,13 @@ pub struct DropletSpec {
     pub shine: f32,
     /// Fresnel rim crest amplitude (the glass-edge brightening).
     pub rim: f32,
+    /// Bottom bow: the drop's bottom boundary becomes ONE continuous circular
+    /// arc — lowest at center, rising by `bow` (fraction of height) at the
+    /// drop's side extents. The arc's radius is derived per drop from that
+    /// fixed edge rise, so a wide drop gets a huge radius and the curvature
+    /// stays subtle at the middle while a narrow drop curves visibly. 0
+    /// disables it (flat bottom run between the corner arcs).
+    pub bow: f32,
 }
 
 impl Default for DropletSpec {
@@ -118,6 +125,7 @@ impl Default for DropletSpec {
             gleam: 1.4,
             shine: 32.0,
             rim: 0.5,
+            bow: 0.12,
         }
     }
 }

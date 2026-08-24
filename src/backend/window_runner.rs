@@ -2007,6 +2007,9 @@ pub fn tessellate_display_list(
                     ar *= f;
                 }
                 let band = (spec.band.max(0.05) * rect.height).max(1.0);
+                // Bottom-bow edge rise; the shader derives the arc radius
+                // from it per drop (R = hx²/2·rise).
+                let bow = (spec.bow.clamp(0.0, 0.5) * rect.height).min(hy * 0.9);
                 plate = Some(crate::vk::PlatePush {
                     rect: [
                         (rect.x + rect.width * 0.5) * scale,
@@ -2021,7 +2024,7 @@ pub fn tessellate_display_list(
                     // DE material's (a drop is wetter than the DE's plates).
                     material: [plate_mat[0], spec.gleam, spec.shine, spec.rim],
                     host: [sr * scale, spec.clarity.clamp(0.0, 1.0), spec.dome, ar * scale],
-                    specular_tint: [1.0, 1.0, 1.0, 0.0],
+                    specular_tint: [1.0, 1.0, 1.0, bow * scale],
                     mode: 10.0,
                     shape: 2.0,
                 });

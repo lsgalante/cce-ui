@@ -354,6 +354,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     //   p_radii = [sag, belly radius, belly half-width, blend k] px;
     //   p_host  = [sheet bottom-corner radius px, edge clarity 0-1, dome
     //              amplitude, attach (top-corner) radius px];
+    //   p_spec_tint.w = bottom-bow edge rise px (0 = flat bottom run);
     //   p_mat.w = fresnel rim crest amplitude (droplets carve nothing, so the
     //             AO slot is free); p_light.w = shaded band width px.
     // The silhouette is the smooth union of a film SHEET attached to the top
@@ -394,6 +395,24 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             let hm = clamp(0.5 + 0.5 * (gb.z - ga.z) / k, 0.0, 1.0);
             d = mix(gb.z, ga.z, hm) - k * hm * (1.0 - hm);
             g = mix(gb.xy, ga.xy, hm);
+        }
+        // Bottom bow (p_spec_tint.w = edge rise, px): smooth-INTERSECT the
+        // drop with a disc whose lowest point touches the drop's bottom
+        // center — the bottom becomes one continuous circular arc, rising by
+        // the given amount at x = ±hx. The radius follows from that fixed
+        // rise (R = hx²/2·rise), so wide drops flatten toward the middle on
+        // their own. smax = -smin(-a,-b): same polynomial blend, sign flipped.
+        let bow = rrect_clip.p_spec_tint.w;
+        if (bow > 0.25) {
+            let bigr = hx * hx / (2.0 * bow);
+            let cc = vec2f(c.x, c.y + hy - bigr);
+            let pc = frag - cc;
+            let dl = max(length(pc), 1e-3);
+            let dc = dl - bigr;
+            let gc = pc / dl;
+            let hm2 = clamp(0.5 + 0.5 * (d - dc) / k, 0.0, 1.0);
+            d = mix(dc, d, hm2) + k * hm2 * (1.0 - hm2);
+            g = mix(gc, g, hm2);
         }
         g = normalize(g);
 
