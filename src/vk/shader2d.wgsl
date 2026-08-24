@@ -129,6 +129,7 @@ const MODE_FILLET_DOWN: i32 = 6;  // concave inside-corner wall, recessed
 const MODE_FILLET_UP: i32 = 7;    // concave inside-corner wall, raised
 const MODE_GROOVE: i32 = 8;       // slab carve about an arbitrary line
 const MODE_TROUGH: i32 = 9;       // sunken valley straddling the boundary
+const MODE_DROPLET: i32 = 10;     // hanging water droplet clinging to the box top
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -345,6 +346,72 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let shade = 1.0 + (diff / flat_shade - 1.0) * strength;
         let spec = roll_spec(c / h);
         return vec4f(vcol.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), vcol.a * aa);
+    }
+
+    // MODE_DROPLET: a hanging water droplet clinging to the box's TOP edge.
+    // Field reinterpretation (the push block cannot grow):
+    //   p_rect  = the droplet box, center + half-extents (like a plate);
+    //   p_radii = [sag, belly radius, belly half-width, blend k] px;
+    //   p_host  = [sheet corner radius px, edge clarity 0-1, dome amplitude, _];
+    //   p_mat.w = fresnel rim crest amplitude (droplets carve nothing, so the
+    //             AO slot is free); p_light.w = shaded band width px.
+    // The silhouette is the smooth union of a film SHEET attached to the top
+    // edge (square top corners — the attach line; bottom lifted by sag) and a
+    // BELLY capsule resting on the box bottom: the polynomial smin forms the
+    // waist/neck a real drop's surface tension pulls in. Shading reuses the
+    // plate vocabulary — roll_slope tilt over the band, ambient/diffuse,
+    // decoupled roll specular — plus two water terms: a fresnel rim crest
+    // (f³, like PLATE_CREST but tunable) and a thin-edge clarity falloff on
+    // the tint alpha, so the (compositor- or resolve_blur-) frosted backdrop
+    // shows through clearer at the rim.
+    if (mode == MODE_DROPLET) {
+        let c = rrect_clip.p_rect.xy;
+        let hx = rrect_clip.p_rect.z;
+        let hy = rrect_clip.p_rect.w;
+        let sag = rrect_clip.p_radii.x;
+        let br = rrect_clip.p_radii.y;
+        let bw = rrect_clip.p_radii.z;
+        let k = max(rrect_clip.p_radii.w, 1.0);
+        let sr = rrect_clip.p_host.x;
+        let clarity = rrect_clip.p_host.y;
+        let dome = rrect_clip.p_host.z;
+
+        // Sheet: bottom lifted by sag, top corners square (the attach line).
+        let a_rect = vec4f(c.x, c.y - sag * 0.5, hx, hy - sag * 0.5);
+        let ga = rr_sdf_grad(frag, a_rect, vec4f(0.0, 0.0, sr, sr));
+        // Belly: a horizontal capsule resting on the box bottom.
+        let b_rect = vec4f(c.x, c.y + hy - br, bw, br);
+        let gb = rr_sdf_grad(frag, b_rect, vec4f(br));
+        // Polynomial smooth union — one drop, smooth neck. The gradient is the
+        // same weighted mix as the distance, renormalized.
+        let hm = clamp(0.5 + 0.5 * (gb.z - ga.z) / k, 0.0, 1.0);
+        let d = mix(gb.z, ga.z, hm) - k * hm * (1.0 - hm);
+        let g = normalize(mix(gb.xy, ga.xy, hm));
+
+        let din = -d;
+        let aa2 = clamp(din + 0.5, 0.0, 1.0);
+        if (aa2 <= 0.0) {
+            discard;
+        }
+        var base = vcol;
+        if (vcol.a < 0.0) {
+            base = resolve_blur(frag, vcol);
+        }
+        let t2 = max(rrect_clip.p_light.w, 0.001);
+        let u = clamp(din / t2, 0.0, 1.0);
+        let f = 1.0 - u;
+        let sv = g * roll_slope(f) * dome;
+        let n = normalize(vec3f(sv, 1.0));
+        let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
+        let extra = rrect_clip.p_mat.w * f * f * f;
+        let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
+        let spec = roll_spec(sv);
+        // Thin edges are clearer water: the tint opacity falls toward the rim.
+        let body = mix(clarity, 1.0, u);
+        return vec4f(
+            base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength),
+            abs(base.a) * body * aa2,
+        );
     }
 
     let gd = rr_sdf_grad(frag, rrect_clip.p_rect, rrect_clip.p_radii);

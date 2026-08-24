@@ -1478,7 +1478,8 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Ridge { .. } => "Ridge", P::Trough { .. } => "Trough", P::Plate { .. } => "Plate",
         P::Arc { .. } => "Arc", P::ArcShaded { .. } => "ArcShaded",
         P::Vector { .. } => "Vector", P::Circle { .. } => "Circle",
-        P::Sphere { .. } => "Sphere", P::ConcaveFillet { .. } => "ConcaveFillet",
+        P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
+        P::ConcaveFillet { .. } => "ConcaveFillet",
         P::Groove { .. } => "Groove", P::Text { .. } => "Text", P::Image { .. } => "Image",
     }
 }
@@ -1548,7 +1549,8 @@ pub fn tessellate_display_list(
         let blur_behind = matches!(
             &item.prim,
             crate::scene::paint::Prim::Bevel { color, .. }
-            | crate::scene::paint::Prim::Plate { color, .. } if color[3] < 0.0
+            | crate::scene::paint::Prim::Plate { color, .. }
+            | crate::scene::paint::Prim::Droplet { color, .. } if color[3] < 0.0
         );
         // Logical [cx, cy, r] → the physical-pixel triple the vertex attribute carries.
         let no = item
@@ -1971,6 +1973,51 @@ pub fn tessellate_display_list(
             Prim::Sphere { cx, cy, radius, color } => {
                 // Legacy path: the flat disc, exactly a Circle.
                 verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
+            }
+            Prim::Droplet { rect, color, spec } if shader_plates => {
+                // A water droplet lit by shader mode 10: one cover quad; the
+                // shader owns silhouette (sheet ∪smin belly), dome shading,
+                // fresnel rim and thin-edge clarity. The spec's height
+                // fractions resolve against the concrete rect here, clamped so
+                // small or narrow boxes stay well-formed (a belly wider than
+                // the box would turn the SDF interior inside out).
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                let hx = rect.width * 0.5;
+                let hy = rect.height * 0.5;
+                let sag = spec.sag.clamp(0.0, 0.9) * rect.height;
+                let br = (spec.belly.clamp(0.05, 1.0) * rect.height).min(hy).min(hx);
+                let bw = ((hx - br).max(0.0) * spec.belly_w.clamp(0.0, 1.0)).max(1.0);
+                let k = (spec.blend.max(0.0) * rect.height).max(1.0);
+                let sheet_hy = hy - sag * 0.5;
+                let sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(sheet_hy.max(0.0)).min(hx);
+                let band = (spec.band.max(0.05) * rect.height).max(1.0);
+                plate = Some(crate::vk::PlatePush {
+                    rect: [
+                        (rect.x + rect.width * 0.5) * scale,
+                        (rect.y + rect.height * 0.5) * scale,
+                        hx * scale,
+                        hy * scale,
+                    ],
+                    radii: [sag * scale, br * scale, bw * scale, k * scale],
+                    light: [plate_light[0], plate_light[1], plate_light[2], band * scale],
+                    // Slots y/z/w feed roll_spec and the rim term directly:
+                    // droplets carry their own gleam/shine/rim instead of the
+                    // DE material's (a drop is wetter than the DE's plates).
+                    material: [plate_mat[0], spec.gleam, spec.shine, spec.rim],
+                    host: [sr * scale, spec.clarity.clamp(0.0, 1.0), spec.dome, 0.0],
+                    specular_tint: [1.0, 1.0, 1.0, 0.0],
+                    mode: 10.0,
+                    shape: 2.0,
+                });
+            }
+            Prim::Droplet { rect, color, .. } => {
+                // Legacy banded path: the flat hanging capsule — square top,
+                // round bottom. Degrades the material but keeps the silhouette
+                // (a prim with no arm here VANISHES, it doesn't degrade — see
+                // Ridge/Groove above).
+                let r = (rect.height * 0.5).min(rect.width * 0.5);
+                let radii = crate::widget::CornerRadii::new(0.0, 0.0, r, r);
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, radii, sw, sh, *color, no, None, &mut verts);
             }
             Prim::ConcaveFillet { cx, cy, radius, depth, start: a0, raised } if shader_plates => {
                 // A quarter-arc carve wall (shader mode 6/7): one cover quad

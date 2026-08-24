@@ -95,7 +95,10 @@ pub struct PlatePush {
     /// 1.0 = raised lit plate, 2.0 = recess overlay, 3.0 = boss, 4.0 = ridge,
     /// 5.0 = sphere, 6.0/7.0 = concave fillet (recessed/raised), 8.0 = groove
     /// (slab carve about a line: `rect` = [cx, cy, half-width, _], `radii.xy` =
-    /// the line's unit normal, `host` = the surface it is engraved into).
+    /// the line's unit normal, `host` = the surface it is engraved into),
+    /// 9.0 = trough, 10.0 = droplet (`radii` = [sag, belly r, belly half-w,
+    /// blend k] px, `host` = [sheet corner r px, clarity, dome amplitude, _],
+    /// `material.w` = fresnel rim — see shader2d's MODE_DROPLET).
     pub mode: f32,
     /// Corner shape exponent: 2.0 = circular arcs, > 2 = superellipse
     /// (continuous-curvature) corners — see shader2d's `plate_sdf_grad`.
