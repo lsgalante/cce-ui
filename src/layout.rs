@@ -3556,6 +3556,19 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
         ctx.register_widget(w_id, w as *mut T as *mut (dyn WidgetHost + 'static));
     }
     w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
+
+    // Shape, which on this path nobody else does. A flat host consumes
+    // `all_quads`, so `prepare_text` — where a TextBox records the per-glyph x
+    // offsets its selection highlight, caret and click->index mapping all read
+    // — was never called for the widgets it draws. Those three then fell back
+    // to `measure_text_width("M")`, an SVG-rasterized INKED extent rather than
+    // an advance, so the highlight under-ran the glyphs by a few px per
+    // character (a full glyph by the end of "example.com"). Hosts that shape
+    // for themselves (cce-files, the TreeList) just re-read the shared buffer
+    // cache here.
+    if let Ok(mut fs) = crate::geometry_font_system().lock() {
+        w.prepare_text(&mut fs);
+    }
     let (style_r, corners) = w.corner_style();
     let r = if corners != (false, false, false, false) { style_r } else { 0.0 };
     let (wx, mut wy, www, mut whh) = w.rect();

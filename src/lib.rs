@@ -125,6 +125,26 @@ pub fn create_font_system() -> cosmic_text::FontSystem {
     build_font_system(false)
 }
 
+/// A `FontSystem` the TOOLKIT owns, for widget GEOMETRY rather than drawing:
+/// the shaping a widget's own selection, caret and click-to-index math needs on
+/// a host that never hands one in.
+///
+/// Paint-walk apps shape through their own (`prepare_text`) and the display
+/// list shapes through the runner's — but a flat-path host consumes
+/// `all_quads`, so nothing ever shaped for the widgets it draws and `TextBox`
+/// fell back to `measure_text_width("M")`: an SVG-rasterized INKED extent, not
+/// an advance, which walks off the glyphs a few px per character.
+///
+/// Created on FIRST USE, so an app that shapes for itself never pays for it,
+/// and from the same bundle [`create_font_system`] gives the renderer. The
+/// shaped-buffer cache behind it is keyed by text/size/family and shared per
+/// thread, so in practice this reads the very buffers the draw already built.
+pub fn geometry_font_system() -> &'static std::sync::Mutex<cosmic_text::FontSystem> {
+    static GEOMETRY_FONT_SYSTEM: std::sync::OnceLock<std::sync::Mutex<cosmic_text::FontSystem>> =
+        std::sync::OnceLock::new();
+    GEOMETRY_FONT_SYSTEM.get_or_init(|| std::sync::Mutex::new(create_font_system()))
+}
+
 /// Like [`create_font_system`] but always also loads installed system fonts, for
 /// apps that must see every font on the system (e.g. the font picker) or want
 /// them as fallbacks. Additive — bundled CCE fonts are still loaded.
