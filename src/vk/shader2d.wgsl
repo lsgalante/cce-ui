@@ -354,7 +354,8 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     //   p_radii = [sag, belly radius, belly half-width, blend k] px;
     //   p_host  = [sheet bottom-corner radius px, edge clarity 0-1, dome
     //              amplitude, attach (top-corner) radius px];
-    //   p_spec_tint.w = bottom-bow edge rise px (0 = flat bottom run);
+    //   p_spec_tint = [core density, _, _, bottom-bow edge rise px] — a
+    //     droplet's glint is always white, so the tint RGB slots are free;
     //   p_mat.w = fresnel rim crest amplitude (droplets carve nothing, so the
     //             AO slot is free); p_light.w = shaded band width px.
     // The silhouette is the smooth union of a film SHEET attached to the top
@@ -434,11 +435,12 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let extra = rrect_clip.p_mat.w * f * f * f;
         let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
         let spec = roll_spec(sv);
-        // Thin edges are clearer water: the tint opacity falls toward the rim.
-        let body = mix(clarity, 1.0, u);
+        // Thin edges are clearer water; the deep interior densifies by the
+        // core term (thickest water in the middle — the text's field).
+        let body = mix(clarity, 1.0 + rrect_clip.p_spec_tint.x, u);
         return vec4f(
-            base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength),
-            abs(base.a) * body * aa2,
+            base.rgb * shade + vec3f(spec * strength),
+            min(abs(base.a) * body, 1.0) * aa2,
         );
     }
 

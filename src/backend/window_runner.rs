@@ -2024,7 +2024,9 @@ pub fn tessellate_display_list(
                     // DE material's (a drop is wetter than the DE's plates).
                     material: [plate_mat[0], spec.gleam, spec.shine, spec.rim],
                     host: [sr * scale, spec.clarity.clamp(0.0, 1.0), spec.dome, ar * scale],
-                    specular_tint: [1.0, 1.0, 1.0, bow * scale],
+                    // Droplet glints are always white, so the tint RGB slots
+                    // carry droplet params instead: x = core density.
+                    specular_tint: [spec.core.clamp(0.0, 2.0), 1.0, 1.0, bow * scale],
                     mode: 10.0,
                     shape: spec.curve.clamp(2.0, 6.0),
                 });

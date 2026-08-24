@@ -113,6 +113,13 @@ pub struct DropletSpec {
     /// instead of two arcs meeting, and the contact eases out of the flat
     /// top like a meniscus. Clamped to [2, 6].
     pub curve: f32,
+    /// Extra tint density at the drop's deep interior: the body opacity ramps
+    /// from `clarity` at the rim up to `1 + core` (× the color's own alpha,
+    /// clamped to opaque) inside — the water reads thickest in the middle,
+    /// which is also where a module's text sits, so glyphs get a calmer
+    /// field without giving up the watery rim. 0 = the original flat
+    /// interior falloff.
+    pub core: f32,
 }
 
 impl Default for DropletSpec {
@@ -138,6 +145,7 @@ impl Default for DropletSpec {
             rim: 0.5,
             bow: 0.12,
             curve: 2.6,
+            core: 0.35,
         }
     }
 }
