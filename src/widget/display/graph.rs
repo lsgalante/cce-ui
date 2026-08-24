@@ -324,8 +324,13 @@ impl Graph {
             return 0.0;
         }
         let cell = self.grid_size_x.min(self.grid_size_y);
-        (crate::layout::plate_corner_radius() * (cell / 512.0) * crate::layout::corner_span_factor())
-            .min(cell / 2.0)
+        // The NODE radius, not a scaled-down plate radius: nodes, grid cells
+        // and the hosts' cell cursors (the designer's empty-cell cursor reads
+        // this) share one corner language. The old derivation
+        // (plate_corner_radius * cell/512 * span) gave cells a different,
+        // grid-size-dependent rounding that never matched the node bodies
+        // sitting on them.
+        crate::layout::graph_node_corner_radius().min(cell / 2.0)
     }
 
     /// The wires / connection preview / grid cells / axes / node bodies / toggles as plain
