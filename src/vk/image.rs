@@ -348,7 +348,15 @@ impl ImageStage {
                 .create_image(
                     &vk::ImageCreateInfo::default()
                         .image_type(vk::ImageType::TYPE_2D)
-                        .format(vk::Format::R8G8B8A8_UNORM)
+                        // SRGB, not UNORM: uploaded pixels are sRGB-encoded
+                        // (rasterized SVGs, decoded PNGs, Servo page readback),
+                        // and the swapchain is an sRGB format, so the hardware
+                        // encodes shader output on write. Sampling as UNORM
+                        // fed those bytes through as if linear and encoded
+                        // them a second time, lightening every midtone —
+                        // a page's #101010 measured (71,71,71) on screen.
+                        // Decoding on sample makes the round trip exact.
+                        .format(vk::Format::R8G8B8A8_SRGB)
                         .extent(vk::Extent3D { width, height, depth: 1 })
                         .mip_levels(1)
                         .array_layers(1)
@@ -465,7 +473,7 @@ impl ImageStage {
                     &vk::ImageViewCreateInfo::default()
                         .image(image)
                         .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(vk::Format::R8G8B8A8_UNORM)
+                        .format(vk::Format::R8G8B8A8_SRGB)
                         .subresource_range(range),
                     None,
                 )
