@@ -57,6 +57,58 @@ pub type Radii = (f32, f32, f32, f32);
 /// for two things: the `Bevel` prim, and the shared *edge treatment* every
 /// relief primitive is shaded with (`bevel_width`, `bevel_depth`,
 /// `bevel_shader`, `bevel_profile` — the lit roll, not the shape).
+/// Shape and material knobs for [`Prim::Droplet`]. Fractions are of the
+/// droplet rect's height unless said otherwise, so a spec is resolution- and
+/// module-size-independent; the tessellator resolves and clamps them against
+/// the concrete rect.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DropletSpec {
+    /// How far the sheet's bottom lifts above the rect bottom (the waist the
+    /// sides pull up into), fraction of height. 0 = no waist (a capsule).
+    pub sag: f32,
+    /// Belly capsule radius, fraction of height.
+    pub belly: f32,
+    /// Belly half-width, fraction of the half-width left after the belly
+    /// radius (1 = the belly spans the whole bottom).
+    pub belly_w: f32,
+    /// Smooth-union blend distance, fraction of height — bigger = softer neck
+    /// between sheet and belly.
+    pub blend: f32,
+    /// Sheet bottom-corner radius, fraction of height.
+    pub sheet_r: f32,
+    /// Tint opacity at the deep interior relative to the color's own alpha;
+    /// the rim falls toward `clarity` × that (thin water is clearer). 1 = flat.
+    pub clarity: f32,
+    /// Dome slope amplitude: scales the surface tilt the shading sees.
+    pub dome: f32,
+    /// Shaded band width (the dome's curved skirt), fraction of height.
+    pub band: f32,
+    /// Specular (gleam) strength — replaces the DE material's slot.
+    pub gleam: f32,
+    /// Wet-surface shininess exponent.
+    pub shine: f32,
+    /// Fresnel rim crest amplitude (the glass-edge brightening).
+    pub rim: f32,
+}
+
+impl Default for DropletSpec {
+    fn default() -> Self {
+        Self {
+            sag: 0.45,
+            belly: 0.75,
+            belly_w: 0.85,
+            blend: 0.35,
+            sheet_r: 0.3,
+            clarity: 0.55,
+            dome: 1.0,
+            band: 0.9,
+            gleam: 1.2,
+            shine: 24.0,
+            rim: 0.35,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Prim {
     Quad { rect: Rect, color: [f32; 4] },
@@ -147,6 +199,19 @@ pub enum Prim {
     /// plate's face keeps the app's color. Falls back to a flat circle on the
     /// legacy (`bevel_shader 0`) path.
     Sphere { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
+    /// A hanging water droplet clinging to the TOP edge of `rect`, lit per pixel
+    /// by shader mode 10: the silhouette is a smooth union of a film "sheet"
+    /// attached to the top edge (square top corners — the attach line) and a
+    /// belly capsule resting on the rect's bottom, blended metaball-style so a
+    /// waist forms where the sides pull up. Shaded as a glass dome under the
+    /// DE's plate light — same ambient/diffuse and decoupled specular as the
+    /// plates, plus a fresnel rim crest and a thin-edge clarity falloff (tint
+    /// opacity drops toward the silhouette, so the frosted backdrop shows
+    /// through clearer at the rim, which is what reads as water rather than
+    /// plastic). Shape knobs in [`DropletSpec`]. On the legacy (`bevel_shader
+    /// 0`) path it degrades to the flat hanging capsule — square top, round
+    /// bottom — rather than vanishing.
+    Droplet { rect: Rect, color: [f32; 4], spec: DropletSpec },
     /// A concave inside-corner fillet for composed carves: a quarter-arc wall
     /// whose centre `(cx, cy)` sits out in the corner's pocket, shaded with the
     /// same step profile as a `Recess`/`Boss` wall (`raised` flips the sign).
@@ -462,6 +527,13 @@ impl PaintCtx {
         self.push(Prim::Sphere { cx: cx + ox, cy: cy + oy, radius, color });
     }
 
+    /// A hanging water droplet clinging to `rect`'s top edge — see
+    /// [`Prim::Droplet`] and [`DropletSpec`].
+    pub fn droplet(&mut self, rect: Rect, color: [f32; 4], spec: DropletSpec) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Droplet { rect, color, spec });
+    }
+
     /// A concave inside-corner fillet — see `Prim::ConcaveFillet`. `start` is
     /// the quarter wedge's start angle; the arc's centre sits in the corner's
     /// pocket and the wall descends (or rises, `raised`) away from it.
@@ -518,6 +590,7 @@ impl PaintCtx {
             }
             Prim::Circle { cx, cy, radius, color } => self.circle(cx, cy, radius, color),
             Prim::Sphere { cx, cy, radius, color } => self.sphere(cx, cy, radius, color),
+            Prim::Droplet { rect, color, spec } => self.droplet(rect, color, spec),
             Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
                 self.concave_fillet(cx, cy, radius, depth, start, raised)
             }
@@ -634,6 +707,30 @@ impl PaintCtx {
             self.border(rect, radii, color, [0.0; 4], 0.0);
         }
         self.trough(rect, radii, depth);
+    }
+
+    /// Emit one [`crate::layout::ReliefCarve`]. The shared application point:
+    /// a widget's `paint` carves through here, and a flat host re-emits the
+    /// carves it collected through here too, so the two can only ever draw the
+    /// same prim.
+    ///
+    /// A tinted recess takes `recess_tinted`, which lights the whole rim — it
+    /// is the focus treatment, and every tinted carve the toolkit emits is a
+    /// full ring. A partial ring falls back to the untinted walls rather than
+    /// silently tinting walls the caller suppressed.
+    pub fn carve(&mut self, c: &crate::layout::ReliefCarve) {
+        let rect = Rect { x: c.x, y: c.y, width: c.w, height: c.h };
+        match c.kind {
+            crate::layout::CarveKind::Boss => self.boss_edges(rect, c.radii, c.depth, c.edges),
+            crate::layout::CarveKind::Recess { tint: Some(t) }
+                if c.edges == (true, true, true, true) =>
+            {
+                self.recess_tinted(rect, c.radii, c.depth, t)
+            }
+            crate::layout::CarveKind::Recess { .. } => {
+                self.recess_edges(rect, c.radii, c.depth, c.edges)
+            }
+        }
     }
 
     /// Sink a valley along `rect`'s boundary — see [`Prim::Trough`]. `depth` is
@@ -881,13 +978,8 @@ impl crate::layout::RenderTarget for PaintCtx {
     fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32) {
         PaintCtx::inset_plate(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), color, depth);
     }
-    fn recess(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: Option<[f32; 3]>) {
-        let rect = Rect { x, y, width: w, height: h };
-        let radii = (radius, radius, radius, radius);
-        match tint {
-            Some(t) => PaintCtx::recess_tinted(self, rect, radii, depth, t),
-            None => PaintCtx::recess(self, rect, radii, depth),
-        }
+    fn relief_carve(&mut self, carve: &crate::layout::ReliefCarve) {
+        PaintCtx::carve(self, carve);
     }
 }
 

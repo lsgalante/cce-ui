@@ -304,6 +304,71 @@ impl Toggle {
         [(state.0, state.1, state.2, true), (other.0, other.1, other.2, false)]
     }
 
+    /// The face-light overlays this Toggle paints: `(rect, radius, corners,
+    /// color)`. The rocker's two half faces carry them; the slide style has
+    /// none (its glider is pure relief). Empty when the light works out to
+    /// nothing.
+    ///
+    /// The single source `paint` and the flat-path bridge in
+    /// `layout::render_widget` both read — a Toggle paints NO fill in any
+    /// style, so on a flat host these overlays plus [`Toggle::flat_carves`]
+    /// are the ENTIRE control; without them the row was a bare label.
+    pub fn flat_faces(&self, rect: Rect) -> Vec<(Rect, f32, (bool, bool, bool, bool), [f32; 4])> {
+        if crate::layout::toggle_slide() {
+            return Vec::new();
+        }
+        let radius = crate::layout::toggle_corner_radius();
+        self.rocker_reliefs(rect)
+            .into_iter()
+            .filter_map(|(half, radii, _, _)| {
+                let light = self.face_light(radii.0 > 0.0);
+                if light[3] <= 0.001 {
+                    return None;
+                }
+                let corners = (radii.0 > 0.0, radii.1 > 0.0, radii.2 > 0.0, radii.3 > 0.0);
+                Some((half, radius, corners, light))
+            })
+            .collect()
+    }
+
+    /// The step carves this Toggle paints — the glider's raised rim in the
+    /// slide style, the rocker's raised/recessed halves otherwise (only under
+    /// `raised` styling; without it the faces' light stands alone). Companion
+    /// to [`Toggle::flat_faces`]; see there for why both exist.
+    pub fn flat_carves(&self, rect: Rect) -> Vec<crate::layout::ReliefCarve> {
+        use crate::layout::{CarveKind, ReliefCarve};
+        let radius = crate::layout::toggle_corner_radius();
+        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+        if let Some(btn) = self.slide_button(rect) {
+            return vec![ReliefCarve {
+                kind: CarveKind::Boss,
+                x: btn.x,
+                y: btn.y,
+                w: btn.width,
+                h: btn.height,
+                radii: (radius, radius, radius, radius),
+                depth,
+                edges: (true, true, true, true),
+            }];
+        }
+        if !self.raised {
+            return Vec::new();
+        }
+        self.rocker_reliefs(rect)
+            .into_iter()
+            .map(|(half, radii, walls, raised)| ReliefCarve {
+                kind: if raised { CarveKind::Boss } else { CarveKind::Recess { tint: None } },
+                x: half.x,
+                y: half.y,
+                w: half.width,
+                h: half.height,
+                radii,
+                depth,
+                edges: walls,
+            })
+            .collect()
+    }
+
     /// A rocker face's UNIFORM lighting overlay, evaluated under the SAME DE
     /// light the relief primitives answer to: `light_source_position` through the plate
     /// model (shader2d's `plate_shade` — ambient floor, diffuse off the
@@ -397,7 +462,6 @@ impl Paint for Toggle {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-        let radius = crate::layout::toggle_corner_radius();
         let slide = crate::layout::toggle_slide();
 
         // A toggle paints NO fill of its own, in any style: it is worked out
@@ -413,9 +477,8 @@ impl Paint for Toggle {
             // beveled rim and its position ARE the read (left off, right on).
             // The rim also reaches legacy-view hosts through `slide_button`
             // (see `ParametersBg::reliefs`).
-            if let Some(btn) = self.slide_button(rect) {
-                let depth = crate::layout::bevel_width().min(h * 0.2);
-                ctx.boss_edges(btn, (radius, radius, radius, radius), depth, (true, true, true, true));
+            for carve in self.flat_carves(rect) {
+                ctx.carve(&carve);
             }
         } else {
             // The rocker: two FLAT half faces (see `rocker_reliefs`) — the
@@ -428,22 +491,11 @@ impl Paint for Toggle {
             // flat style's hue gradient is gone with the rest of the palette,
             // so the two styles now differ only by the relief they were named
             // for.
-            for (half, radii, _, _) in self.rocker_reliefs(rect) {
-                let light = self.face_light(radii.0 > 0.0);
-                if light[3] > 0.001 {
-                    let corners = (radii.0 > 0.0, radii.1 > 0.0, radii.2 > 0.0, radii.3 > 0.0);
-                    ctx.rounded_rect(half, radius, corners, light);
-                }
+            for (half, r, corners, light) in self.flat_faces(rect) {
+                ctx.rounded_rect(half, r, corners, light);
             }
-            if self.raised {
-                let depth = crate::layout::bevel_width().min(h * 0.2);
-                for (half, radii, walls, raised) in self.rocker_reliefs(rect) {
-                    if raised {
-                        ctx.boss_edges(half, radii, depth, walls);
-                    } else {
-                        ctx.recess_edges(half, radii, depth, walls);
-                    }
-                }
+            for carve in self.flat_carves(rect) {
+                ctx.carve(&carve);
             }
         }
 

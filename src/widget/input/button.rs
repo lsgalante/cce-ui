@@ -139,6 +139,23 @@ impl Button {
             crate::widget::display::measure_text_width(label, &family, size)
         }
     }
+
+    /// The flush inset plate this Button's `paint` draws, as `(rect, corner
+    /// radius, depth, face colour)` — `None` when it draws none (flat styling,
+    /// or a ListRow, which is a transparent-until-hover surface and would wear
+    /// a permanent carved ring on every idle row).
+    ///
+    /// The single source `paint` and the flat-path bridge in
+    /// `layout::render_widget` both read, so a flat host's groove can't drift
+    /// from the drawn one.
+    pub fn inset_face(&self, rect: Rect) -> Option<(Rect, f32, f32, [f32; 4])> {
+        if !self.raised || self.kind == ButtonKind::ListRow {
+            return None;
+        }
+        let radius = crate::layout::button_corner_radius();
+        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+        Some((rect, radius, depth, self.color()))
+    }
 }
 
 /// The by-value builder chain, mirrored on the wrapped type (`with_label` comes from the generic
@@ -296,9 +313,8 @@ impl Paint for Button {
         // List rows are exempt: they are transparent-until-hover/selected
         // surfaces, and the edges-only groove would stack a permanent carved
         // ring on every idle row of a list.
-        if self.raised && self.kind != ButtonKind::ListRow {
-            let depth = crate::layout::bevel_width().min(h * 0.2);
-            ctx.inset_plate(rect, (radius, radius, radius, radius), color, depth);
+        if let Some((face, r, depth, c)) = self.inset_face(rect) {
+            ctx.inset_plate(face, (r, r, r, r), c, depth);
         } else {
             // ListRow also skips the border idiom below: it draws the border
             // color as a FULL rect with the fill inset over it, which only

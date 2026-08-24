@@ -3449,6 +3449,50 @@ pub fn set_rangeslider_height(height: f32) {
 }
 
 
+
+/// One step carve a widget's `paint` draws, handed to a flat-path host through
+/// [`RenderTarget::relief_carve`] so it can re-emit it as a real prim.
+///
+/// Geometry always comes from the WIDGET (`TextBox::well`, `Toggle::
+/// rocker_reliefs` / `slide_button`), never re-derived here — a second copy of
+/// that math in the bridge is exactly how the flat host's carve and the drawn
+/// one drift apart.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReliefCarve {
+    pub kind: CarveKind,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    /// Per-corner radii, clockwise from top-left.
+    pub radii: (f32, f32, f32, f32),
+    /// Full width of the step's transition band.
+    pub depth: f32,
+    /// Which walls the carve has (top, right, bottom, left). A suppressed wall
+    /// means the step runs flush to its neighbour there — the rocker's hinge,
+    /// where the raised half and the recessed one meet in ONE step rather than
+    /// two facing walls.
+    pub edges: (bool, bool, bool, bool),
+}
+
+/// Which way a [`ReliefCarve`] steps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CarveKind {
+    /// Interior one step DOWN ([`crate::scene::paint::PaintCtx::recess_edges`]).
+    /// `tint` lights the rim in the focus accent (`recess_tinted`).
+    Recess { tint: Option<[f32; 3]> },
+    /// Interior one step UP ([`crate::scene::paint::PaintCtx::boss_edges`]).
+    Boss,
+}
+
+impl ReliefCarve {
+    /// This carve shifted vertically — the page-scroll adjustment a host
+    /// applies when it re-emits collected carves.
+    pub fn shifted_y(self, dy: f32) -> Self {
+        Self { y: self.y + dy, ..self }
+    }
+}
+
 pub trait RenderTarget {
     fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32);
     fn rect_with_radius(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, _radius: f32) {
@@ -3476,17 +3520,16 @@ pub trait RenderTarget {
     fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, _depth: f32) {
         self.rect_with_radius(color, x, y, w, h, radius);
     }
-    /// A sunken well ([`crate::scene::paint::PaintCtx::recess`]) — the carve a
-    /// TextBox leaves, offered here for the same reason as `inset_plate`: the
-    /// legacy `all_quads` stream carries no relief prims, so a flat-path host
-    /// never sees it. `tint` is the focus accent (`recess_tinted`).
+    /// One step carve from a widget's `paint` ([`ReliefCarve`]) — offered here
+    /// for the same reason as `inset_plate`: the legacy `all_quads` stream
+    /// carries no relief prims, so a flat-path host never sees them.
     ///
-    /// The default is deliberately a NO-OP, not a fill: a recessed control's
-    /// face is transparent by design (the host surface IS the well floor), so
-    /// the carve is the entire decoration — a host that can't carve has
-    /// nothing truthful to draw, and a solid box here would paint every text
-    /// field a flat slab it never had.
-    fn recess(&mut self, _x: f32, _y: f32, _w: f32, _h: f32, _radius: f32, _depth: f32, _tint: Option<[f32; 3]>) {}
+    /// The default is deliberately a NO-OP, not a fill. These controls have
+    /// transparent faces by design (the host surface IS the well floor / the
+    /// rocker plate), so the carve is their entire decoration — a host that
+    /// can't carve has nothing truthful to draw, and a solid box here would
+    /// paint every text field a flat slab it never had.
+    fn relief_carve(&mut self, _carve: &ReliefCarve) {}
     /// Whether this host renders sections as sunken wells (the designer idiom).
     /// `SectionContext` then lays the title out left-aligned over its tab box
     /// instead of centered on the top border.
@@ -3603,7 +3646,46 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     if control_relief() {
         if let Some(tb) = w.as_any().downcast_ref::<crate::widget::TextBox>() {
             if let Some((well, radius, depth, tint)) = tb.well() {
-                pc.recess(well.x, well.y, well.width, well.height, radius, depth, tint);
+                pc.relief_carve(&ReliefCarve {
+                    kind: CarveKind::Recess { tint },
+                    x: well.x,
+                    y: well.y,
+                    w: well.width,
+                    h: well.height,
+                    radii: (radius, radius, radius, radius),
+                    depth,
+                    edges: (true, true, true, true),
+                });
+            }
+        }
+    }
+
+    // A Button's chrome is the Dropdown's: a flush inset plate, so it rides the
+    // same hook. Its face DOES carry a colour (`Button::color`), which the flat
+    // fill the tuple hosts degrade to still shows — what they were missing is
+    // the groove ring around it.
+    if control_relief() {
+        if let Some(btn) = w.as_any().downcast_ref::<crate::widget::Button>() {
+            let brect = crate::scene::layout::Rect { x: wx, y: wy, width: www, height: whh };
+            if let Some((rect, radius, depth, color)) = btn.inset_face(brect) {
+                pc.inset_plate(color, rect.x, rect.y, rect.width, rect.height, radius, depth);
+            }
+        }
+    }
+
+    // A Toggle is the extreme case: it paints NO fill in any style — it is
+    // worked out of the plate it sits on, so relief and light ARE the control.
+    // On a flat host that left the row as a bare label with nothing to click at
+    // all. Both halves of its appearance come across: the face-light overlays
+    // (ordinary quads) and the step carves.
+    if control_relief() {
+        if let Some(tg) = w.as_any().downcast_ref::<crate::widget::Toggle>() {
+            let rect = crate::scene::layout::Rect { x: wx, y: wy, width: www, height: whh };
+            for (face, r, corners, light) in tg.flat_faces(rect) {
+                pc.rect_with_radius_corners(light, face.x, face.y, face.width, face.height, r, corners);
+            }
+            for carve in tg.flat_carves(rect) {
+                pc.relief_carve(&carve);
             }
         }
     }
