@@ -237,7 +237,9 @@ impl Graph {
 
     pub fn toggle_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
         if let Some(node) = self.nodes.get(idx) {
-            if node.node_type == "utility" {
+            // Settings containers have no geometry to toggle: utility nodes,
+            // and the designer's session node that now nests them.
+            if node.node_type == "utility" || node.node_type == "session" {
                 return None;
             }
         }
