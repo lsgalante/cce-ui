@@ -14,8 +14,8 @@ use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::{
-    Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseScrollDelta, NamedKey,
-    Paint, SpreadsheetController,
+    Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton, MouseScrollDelta,
+    NamedKey, Paint, SpreadsheetController,
 };
 
 const HEADER_H: f32 = 24.0;
@@ -27,6 +27,16 @@ pub struct Spreadsheet {
     hovered: bool,
     headers: Vec<String>,
     rows: Vec<Vec<String>>,
+    /// Display order into `rows` — the identity permutation unless `sort` is set.
+    /// Rebuilt by `apply_sort` at both mutation sites (header click, data refresh),
+    /// so `order.len() == rows.len()` always holds.
+    order: Vec<usize>,
+    /// Active sort: `(column, ascending)`. A header click cycles
+    /// ascending → descending → natural order (matching the source data).
+    sort: Option<(usize, bool)>,
+    /// Header cell the pointer is over — hover tint, like the Processes page's
+    /// sortable headers.
+    header_hover_col: Option<usize>,
     scroll_y: f32,
     scroll_velocity: f32,
     dragging_scrollbar: bool,
@@ -55,6 +65,9 @@ impl Spreadsheet {
             hovered: false,
             headers: Vec::new(),
             rows: Vec::new(),
+            order: Vec::new(),
+            sort: None,
+            header_hover_col: None,
             scroll_y: 0.0,
             scroll_velocity: 0.0,
             dragging_scrollbar: false,
@@ -88,6 +101,47 @@ impl Spreadsheet {
             thumb_y: track_y + (scroll / max_scroll) * track_range,
             track_range,
         })
+    }
+
+    /// The header column under `(px, py)`, if the point is inside the header band.
+    fn header_col_at(&self, px: f32, py: f32, rect: Rect) -> Option<usize> {
+        if self.headers.is_empty() || rect.width <= 0.0 {
+            return None;
+        }
+        if px < rect.x || px > rect.x + rect.width || py < rect.y || py >= rect.y + HEADER_H {
+            return None;
+        }
+        let n = self.headers.len();
+        let col = ((px - rect.x) / (rect.width / n as f32)) as usize;
+        Some(col.min(n - 1))
+    }
+
+    /// Cell comparison: numeric when both cells parse (so "10" sorts after "9"),
+    /// lexicographic otherwise.
+    fn cmp_cells(a: &str, b: &str) -> std::cmp::Ordering {
+        match (a.parse::<f64>(), b.parse::<f64>()) {
+            (Ok(x), Ok(y)) => x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal),
+            _ => a.cmp(b),
+        }
+    }
+
+    /// Rebuild `order` from `sort`. Stable, so equal cells keep their source order.
+    fn apply_sort(&mut self) {
+        // A refresh can shrink the column set out from under the sort.
+        if let Some((col, _)) = self.sort {
+            if col >= self.headers.len() {
+                self.sort = None;
+            }
+        }
+        self.order = (0..self.rows.len()).collect();
+        if let Some((col, ascending)) = self.sort {
+            let rows = &self.rows;
+            let cell = |r: usize| rows[r].get(col).map(String::as_str).unwrap_or("");
+            self.order.sort_by(|&a, &b| {
+                let ord = Self::cmp_cells(cell(a), cell(b));
+                if ascending { ord } else { ord.reverse() }
+            });
+        }
     }
 
     /// Scroll to where a thumb dragged to `thumb_y` puts the content.
@@ -196,17 +250,33 @@ impl Paint for Spreadsheet {
             return;
         }
         let n_cols = self.headers.len();
-        for (i, header) in self.headers.iter().enumerate() {
-            let cx = x + w * (i as f32 / n_cols as f32) + 8.0;
-            ctx.text(header.clone(), cx, y + 6.0, 12.0, [0xdd, 0xdd, 0xee]);
+        let col_w = w / n_cols as f32;
+        if let Some(hc) = self.header_hover_col {
+            // Subtle hover tint on the clickable header cell (the Processes-page
+            // sortable-header convention).
+            ctx.quad(
+                Rect { x: x + col_w * hc as f32, y, width: col_w, height: HEADER_H },
+                [1.0, 1.0, 1.0, 0.05],
+            );
         }
-        for (i, row) in self.rows.iter().enumerate() {
+        for (i, header) in self.headers.iter().enumerate() {
+            let cx = x + col_w * i as f32 + 8.0;
+            let (label, color) = match self.sort {
+                Some((col, ascending)) if col == i => {
+                    let mark = if ascending { '\u{25b2}' } else { '\u{25bc}' };
+                    (format!("{header} {mark}"), [0xff, 0xff, 0xff])
+                }
+                _ => (header.clone(), [0xdd, 0xdd, 0xee]),
+            };
+            ctx.text(label, cx, y + 6.0, 12.0, color);
+        }
+        for (i, &src) in self.order.iter().enumerate() {
             let ry = y + HEADER_H + i as f32 * ROW_H - scroll;
             if ry < body_top || ry + ROW_H > body_bottom {
                 continue;
             }
-            for (col_idx, val) in row.iter().enumerate().take(n_cols) {
-                let cx = x + w * (col_idx as f32 / n_cols as f32) + 8.0;
+            for (col_idx, val) in self.rows[src].iter().enumerate().take(n_cols) {
+                let cx = x + col_w * col_idx as f32 + 8.0;
                 ctx.text(val.clone(), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc]);
             }
         }
@@ -237,9 +307,32 @@ impl Input for Spreadsheet {
                     self.scrollbar_hovered = false;
                     self.scrollbar_thumb_hovered = false;
                 }
+                let was_header = self.header_hover_col;
+                self.header_hover_col = self.header_col_at(*px, *py, r);
                 was_hovered != self.hovered
                     || was_sb != self.scrollbar_hovered
                     || was_thumb != self.scrollbar_thumb_hovered
+                    || was_header != self.header_hover_col
+            }
+            // A left press on a column header cycles that column's sort:
+            // ascending → descending → back to natural order.
+            Event::MouseButton {
+                button: MouseButton::Left,
+                state: ElementState::Pressed,
+                x: px,
+                y: py,
+                ..
+            } => {
+                let Some(col) = self.header_col_at(*px, *py, ectx.rect) else {
+                    return false;
+                };
+                self.sort = match self.sort {
+                    Some((c, true)) if c == col => Some((col, false)),
+                    Some((c, false)) if c == col => None,
+                    _ => Some((col, true)),
+                };
+                self.apply_sort();
+                true
             }
             // Hit-gated by the adapter (which also rejects hidden widgets).
             Event::MouseWheel { delta, .. } => {
@@ -369,6 +462,9 @@ impl SpreadsheetController for Spreadsheet {
     fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>) {
         self.headers = headers;
         self.rows = rows;
+        // Re-derive the display order so an active sort survives a data refresh
+        // (the designer re-sets the whole table on selection/param changes).
+        self.apply_sort();
         // The raw scroll may now exceed the new content; every consumer clamps through
         // `geom()`, and the next scroll write re-clamps it for real.
     }
@@ -462,5 +558,97 @@ mod tests {
         // Hidden: the focused-widget keyboard path must not consume keys.
         s.set_visible(false);
         assert!(!s.keyboard_input(&end, &mut ctx), "hidden widget ignores keys");
+    }
+
+    fn header_click(x: f32) -> Event {
+        Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x,
+            y: 10.0,
+            local_x: x,
+            local_y: 10.0,
+        }
+    }
+
+    #[test]
+    fn header_click_cycles_ascending_descending_natural() {
+        let mut ctx = UiContext::new();
+        let mut s = Spreadsheet::new();
+        s.set_visible(true);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0);
+        let (id, ptr) = (s.id(), s.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        // Numeric strings out of lexicographic order: "10" must sort after "9".
+        let rows = vec![
+            vec!["10".to_string(), "b".to_string()],
+            vec!["9".to_string(), "c".to_string()],
+            vec!["2".to_string(), "a".to_string()],
+        ];
+        SpreadsheetController::set_spreadsheet_data(&mut *s, vec!["n".into(), "s".into()], rows);
+        assert_eq!(s.inner().order, vec![0, 1, 2], "unsorted = natural order");
+
+        // Column 0 spans x 0..100. Click 1: ascending, numeric.
+        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        assert_eq!(s.inner().sort, Some((0, true)));
+        assert_eq!(s.inner().order, vec![2, 1, 0], "2 < 9 < 10 numerically");
+
+        // Click 2: descending.
+        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        assert_eq!(s.inner().sort, Some((0, false)));
+        assert_eq!(s.inner().order, vec![0, 1, 2]);
+
+        // Click 3: back to natural order.
+        assert!(s.handle_event(&header_click(50.0), &mut ctx));
+        assert_eq!(s.inner().sort, None);
+        assert_eq!(s.inner().order, vec![0, 1, 2]);
+
+        // Column 1 (lexicographic), then a body click changes nothing.
+        assert!(s.handle_event(&header_click(150.0), &mut ctx));
+        assert_eq!(s.inner().order, vec![2, 0, 1], "a < b < c");
+        let body = Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 50.0,
+            y: 60.0,
+            local_x: 50.0,
+            local_y: 60.0,
+        };
+        assert!(!s.handle_event(&body, &mut ctx), "body press is not a sort");
+        assert_eq!(s.inner().sort, Some((1, true)));
+    }
+
+    #[test]
+    fn data_refresh_reapplies_sort_and_column_shrink_clears_it() {
+        let mut ctx = UiContext::new();
+        let mut s = Spreadsheet::new();
+        s.set_visible(true);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0);
+        let (id, ptr) = (s.id(), s.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        SpreadsheetController::set_spreadsheet_data(
+            &mut *s,
+            vec!["a".into(), "b".into()],
+            vec![vec!["1".into(), "x".into()], vec!["2".into(), "y".into()]],
+        );
+        assert!(s.handle_event(&header_click(150.0), &mut ctx)); // sort col 1 asc
+
+        // A refresh with new rows keeps the sort and re-derives the order.
+        SpreadsheetController::set_spreadsheet_data(
+            &mut *s,
+            vec!["a".into(), "b".into()],
+            vec![vec!["1".into(), "z".into()], vec!["2".into(), "w".into()]],
+        );
+        assert_eq!(s.inner().sort, Some((1, true)));
+        assert_eq!(s.inner().order, vec![1, 0], "w < z");
+
+        // A refresh that drops the sorted column clears the sort.
+        SpreadsheetController::set_spreadsheet_data(
+            &mut *s,
+            vec!["a".into()],
+            vec![vec!["1".into()], vec!["2".into()]],
+        );
+        assert_eq!(s.inner().sort, None);
+        assert_eq!(s.inner().order, vec![0, 1]);
     }
 }
