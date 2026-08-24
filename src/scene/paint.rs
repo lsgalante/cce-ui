@@ -120,6 +120,81 @@ pub struct DropletSpec {
     /// field without giving up the watery rim. 0 = the original flat
     /// interior falloff.
     pub core: f32,
+    /// Refraction strength in logical px — how far the COMPOSITOR's droplet
+    /// backdrop pass bends the image behind the drop at the rim. Client-side
+    /// rendering ignores it (a Wayland client cannot see behind its own
+    /// window); the compositor reads the same spec and drives its scenefx
+    /// droplet node with it. 0 disables the backdrop pass.
+    pub refr: f32,
+    /// Strength (0-1) of the compositor pass's inverted lens ghost — the
+    /// faint upside-down image of the scene a real hanging drop shows in its
+    /// belly. Client-side ignored, like `refr`.
+    pub ghost: f32,
+}
+
+impl DropletSpec {
+    /// Parse the DE's droplet spec string — whitespace-separated `k=v` pairs
+    /// onto the defaults (an empty string is all defaults). Unknown keys and
+    /// non-numeric values `log::warn!` and are skipped, so a typo surfaces in
+    /// the log instead of silently reverting one knob. Shared by the status
+    /// bar (which draws the drop) and the compositor (whose scenefx droplet
+    /// node refracts the backdrop behind it) so the two sides can never
+    /// disagree about a spec's meaning.
+    pub fn parse(raw: &str) -> Self {
+        let mut spec = Self::default();
+        for tok in raw.split_whitespace() {
+            let Some((key, val)) = tok.split_once('=') else {
+                log::warn!("droplet spec: token '{}' is not k=v — skipped", tok);
+                continue;
+            };
+            let Ok(v) = val.parse::<f32>() else {
+                log::warn!("droplet spec: '{}' has a non-numeric value — skipped", tok);
+                continue;
+            };
+            match key {
+                "sag" => spec.sag = v,
+                "belly" => spec.belly = v,
+                "belly_w" => spec.belly_w = v,
+                "blend" => spec.blend = v,
+                "sheet_r" => spec.sheet_r = v,
+                "attach" => spec.attach = v,
+                "clarity" => spec.clarity = v,
+                "dome" => spec.dome = v,
+                "band" => spec.band = v,
+                "gleam" => spec.gleam = v,
+                "shine" => spec.shine = v,
+                "rim" => spec.rim = v,
+                "bow" => spec.bow = v,
+                "curve" => spec.curve = v,
+                "core" => spec.core = v,
+                "refr" => spec.refr = v,
+                "ghost" => spec.ghost = v,
+                _ => log::warn!("droplet spec: unknown key '{}' — skipped", key),
+            }
+        }
+        spec
+    }
+
+    /// Resolve the silhouette's height-fraction knobs against a concrete rect
+    /// (logical px) with the SAME clamps the tessellator applies: returns
+    /// `(sheet_r, attach_r, bow_rise)` in logical px, the attach/sheet pair
+    /// proportionally scaled down when it overfills the height. The
+    /// compositor's droplet backdrop node uses this so its refracting
+    /// silhouette and the client-drawn drop are the same shape.
+    pub fn resolve_silhouette(&self, w: f32, h: f32) -> (f32, f32, f32) {
+        let hx = w * 0.5;
+        let hy = h * 0.5;
+        let mut sr = (self.sheet_r.clamp(0.0, 1.0) * h).min(hx);
+        let mut ar = (self.attach.clamp(0.0, 1.0) * h).min(hx);
+        let sheet_h = 2.0 * hy;
+        if sr + ar > sheet_h && sr + ar > 0.0 {
+            let f = sheet_h / (sr + ar);
+            sr *= f;
+            ar *= f;
+        }
+        let bow = (self.bow.clamp(0.0, 0.5) * h).min(hy * 0.9);
+        (sr, ar, bow)
+    }
 }
 
 impl Default for DropletSpec {
@@ -146,6 +221,8 @@ impl Default for DropletSpec {
             bow: 0.12,
             curve: 2.6,
             core: 0.35,
+            refr: 0.0,
+            ghost: 0.0,
         }
     }
 }
