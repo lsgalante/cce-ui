@@ -881,6 +881,14 @@ impl crate::layout::RenderTarget for PaintCtx {
     fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32) {
         PaintCtx::inset_plate(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), color, depth);
     }
+    fn recess(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: Option<[f32; 3]>) {
+        let rect = Rect { x, y, width: w, height: h };
+        let radii = (radius, radius, radius, radius);
+        match tint {
+            Some(t) => PaintCtx::recess_tinted(self, rect, radii, depth, t),
+            None => PaintCtx::recess(self, rect, radii, depth),
+        }
+    }
 }
 
 #[cfg(test)]

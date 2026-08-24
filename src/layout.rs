@@ -3476,6 +3476,17 @@ pub trait RenderTarget {
     fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, _depth: f32) {
         self.rect_with_radius(color, x, y, w, h, radius);
     }
+    /// A sunken well ([`crate::scene::paint::PaintCtx::recess`]) — the carve a
+    /// TextBox leaves, offered here for the same reason as `inset_plate`: the
+    /// legacy `all_quads` stream carries no relief prims, so a flat-path host
+    /// never sees it. `tint` is the focus accent (`recess_tinted`).
+    ///
+    /// The default is deliberately a NO-OP, not a fill: a recessed control's
+    /// face is transparent by design (the host surface IS the well floor), so
+    /// the carve is the entire decoration — a host that can't carve has
+    /// nothing truthful to draw, and a solid box here would paint every text
+    /// field a flat slab it never had.
+    fn recess(&mut self, _x: f32, _y: f32, _w: f32, _h: f32, _radius: f32, _depth: f32, _tint: Option<[f32; 3]>) {}
     /// Whether this host renders sections as sunken wells (the designer idiom).
     /// `SectionContext` then lays the title out left-aligned over its tab box
     /// instead of centered on the top border.
@@ -3569,6 +3580,19 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
             dropdown_corner_radius(),
             depth,
         );
+    }
+
+    // The same gap for the TextBox, whose chrome is a WELL rather than a
+    // trough (`TextBox::well` — the geometry it carves in `paint`, asked for
+    // here so the two cannot drift). A recessed box with the DE's transparent
+    // face draws no border or background at all — the carve is the only thing
+    // marking the field — so on a flat host the row rendered as bare text.
+    if control_relief() {
+        if let Some(tb) = w.as_any().downcast_ref::<crate::widget::TextBox>() {
+            if let Some((well, radius, depth, tint)) = tb.well() {
+                pc.recess(well.x, well.y, well.width, well.height, radius, depth, tint);
+            }
+        }
     }
 
     for (qx, qy, qw, qh, qc) in w.all_quads(ctx) {

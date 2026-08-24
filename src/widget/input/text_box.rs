@@ -1012,6 +1012,36 @@ impl TextBox {
         }
         labels
     }
+
+    /// The well this TextBox carves, as `(rect, corner radius, depth, focus
+    /// tint)` — `None` when it draws no relief at all (square-cornered legacy
+    /// geometry, `control_relief` off, or a box that draws no background).
+    ///
+    /// The SINGLE source for that geometry: `paint` carves it here, and the
+    /// flat-path bridge in `layout::render_widget` re-offers the same rect
+    /// through [`crate::layout::RenderTarget::recess`] for hosts that consume
+    /// `all_quads` and so never see the carve. A second copy of this math in
+    /// the bridge is exactly how the two would drift apart.
+    pub fn well(&self) -> Option<(Rect, f32, f32, Option<[f32; 3]>)> {
+        let radius = crate::layout::textbox_corner_radius();
+        if radius <= 0.0 || !self.recessed || !self.draw_bg_border {
+            return None;
+        }
+        let top = self.label_top();
+        let label_x = side_offset(&self.label);
+        let well = Rect {
+            x: self.rect.x + label_x,
+            y: self.rect.y + top,
+            width: self.rect.width - label_x,
+            height: self.rect.height - top,
+        };
+        let depth = crate::layout::bevel_width().min(well.height * 0.2);
+        let tint = self.editing.then(|| {
+            let hc = crate::color::highlight_primary_color();
+            [hc[0], hc[1], hc[2]]
+        });
+        Some((well, radius, depth, tint))
+    }
 }
 
 impl Adapted<TextBox> {
@@ -1326,17 +1356,13 @@ impl Paint for TextBox {
                         bg_color,
                     );
                 }
-                if self.recessed {
+                if let Some((well, r, depth, tint)) = self.well() {
                     // Focus lights the well's rim in the highlight accent (with
                     // the shader's complementary shadow) — the TreeList treatment.
-                    let depth = crate::layout::bevel_width().min(visual_h * 0.2);
-                    let well = Rect { x, y: self.rect.y + top, width: w, height: visual_h };
-                    let radii = (radius, radius, radius, radius);
-                    if self.editing {
-                        let hc = crate::color::highlight_primary_color();
-                        ctx.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);
-                    } else {
-                        ctx.recess(well, radii, depth);
+                    let radii = (r, r, r, r);
+                    match tint {
+                        Some(t) => ctx.recess_tinted(well, radii, depth, t),
+                        None => ctx.recess(well, radii, depth),
                     }
                 }
             }
