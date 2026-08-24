@@ -352,7 +352,8 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // Field reinterpretation (the push block cannot grow):
     //   p_rect  = the droplet box, center + half-extents (like a plate);
     //   p_radii = [sag, belly radius, belly half-width, blend k] px;
-    //   p_host  = [sheet corner radius px, edge clarity 0-1, dome amplitude, _];
+    //   p_host  = [sheet bottom-corner radius px, edge clarity 0-1, dome
+    //              amplitude, attach (top-corner) radius px];
     //   p_mat.w = fresnel rim crest amplitude (droplets carve nothing, so the
     //             AO slot is free); p_light.w = shaded band width px.
     // The silhouette is the smooth union of a film SHEET attached to the top
@@ -375,18 +376,26 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let sr = rrect_clip.p_host.x;
         let clarity = rrect_clip.p_host.y;
         let dome = rrect_clip.p_host.z;
+        let ar = rrect_clip.p_host.w;
 
-        // Sheet: bottom lifted by sag, top corners square (the attach line).
+        // Sheet: bottom lifted by sag; top corners carry the attach radius —
+        // the meniscus taper that curves the sides into the attach line (0 =
+        // the square-shouldered clinging-pool look).
         let a_rect = vec4f(c.x, c.y - sag * 0.5, hx, hy - sag * 0.5);
-        let ga = rr_sdf_grad(frag, a_rect, vec4f(0.0, 0.0, sr, sr));
-        // Belly: a horizontal capsule resting on the box bottom.
-        let b_rect = vec4f(c.x, c.y + hy - br, bw, br);
-        let gb = rr_sdf_grad(frag, b_rect, vec4f(br));
-        // Polynomial smooth union — one drop, smooth neck. The gradient is the
-        // same weighted mix as the distance, renormalized.
-        let hm = clamp(0.5 + 0.5 * (gb.z - ga.z) / k, 0.0, 1.0);
-        let d = mix(gb.z, ga.z, hm) - k * hm * (1.0 - hm);
-        let g = normalize(mix(gb.xy, ga.xy, hm));
+        let ga = rr_sdf_grad(frag, a_rect, vec4f(ar, ar, sr, sr));
+        var d = ga.z;
+        var g = ga.xy;
+        // Belly (radius > 0 only): a horizontal capsule resting on the box
+        // bottom, joined by polynomial smooth union — one drop, smooth neck.
+        // The gradient is the same weighted mix as the distance, renormalized.
+        if (br > 0.5) {
+            let b_rect = vec4f(c.x, c.y + hy - br, bw, br);
+            let gb = rr_sdf_grad(frag, b_rect, vec4f(br));
+            let hm = clamp(0.5 + 0.5 * (gb.z - ga.z) / k, 0.0, 1.0);
+            d = mix(gb.z, ga.z, hm) - k * hm * (1.0 - hm);
+            g = mix(gb.xy, ga.xy, hm);
+        }
+        g = normalize(g);
 
         let din = -d;
         let aa2 = clamp(din + 0.5, 0.0, 1.0);

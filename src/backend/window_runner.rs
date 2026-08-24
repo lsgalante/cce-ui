@@ -1985,11 +1985,27 @@ pub fn tessellate_display_list(
                 let hx = rect.width * 0.5;
                 let hy = rect.height * 0.5;
                 let sag = spec.sag.clamp(0.0, 0.9) * rect.height;
-                let br = (spec.belly.clamp(0.05, 1.0) * rect.height).min(hy).min(hx);
-                let bw = ((hx - br).max(0.0) * spec.belly_w.clamp(0.0, 1.0)).max(1.0);
+                // belly ≤ 0 disables the belly outright (the oval-dewdrop
+                // default) — the shader skips the smin when the radius is 0.
+                let (br, bw) = if spec.belly > 0.0 {
+                    let br = (spec.belly.min(1.0) * rect.height).min(hy).min(hx);
+                    (br, ((hx - br).max(0.0) * spec.belly_w.clamp(0.0, 1.0)).max(1.0))
+                } else {
+                    (0.0, 0.0)
+                };
                 let k = (spec.blend.max(0.0) * rect.height).max(1.0);
                 let sheet_hy = hy - sag * 0.5;
-                let sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(sheet_hy.max(0.0)).min(hx);
+                // Bottom (sheet_r) and top (attach) corner radii: when the
+                // pair overfills the sheet height, scale both down
+                // proportionally — 0.5 + 0.5 is the fully continuous egg.
+                let mut sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(hx);
+                let mut ar = (spec.attach.clamp(0.0, 1.0) * rect.height).min(hx);
+                let sheet_h = (2.0 * sheet_hy).max(0.0);
+                if sr + ar > sheet_h && sr + ar > 0.0 {
+                    let f = sheet_h / (sr + ar);
+                    sr *= f;
+                    ar *= f;
+                }
                 let band = (spec.band.max(0.05) * rect.height).max(1.0);
                 plate = Some(crate::vk::PlatePush {
                     rect: [
@@ -2004,19 +2020,21 @@ pub fn tessellate_display_list(
                     // droplets carry their own gleam/shine/rim instead of the
                     // DE material's (a drop is wetter than the DE's plates).
                     material: [plate_mat[0], spec.gleam, spec.shine, spec.rim],
-                    host: [sr * scale, spec.clarity.clamp(0.0, 1.0), spec.dome, 0.0],
+                    host: [sr * scale, spec.clarity.clamp(0.0, 1.0), spec.dome, ar * scale],
                     specular_tint: [1.0, 1.0, 1.0, 0.0],
                     mode: 10.0,
                     shape: 2.0,
                 });
             }
-            Prim::Droplet { rect, color, .. } => {
-                // Legacy banded path: the flat hanging capsule — square top,
-                // round bottom. Degrades the material but keeps the silhouette
-                // (a prim with no arm here VANISHES, it doesn't degrade — see
-                // Ridge/Groove above).
-                let r = (rect.height * 0.5).min(rect.width * 0.5);
-                let radii = crate::widget::CornerRadii::new(0.0, 0.0, r, r);
+            Prim::Droplet { rect, color, spec } => {
+                // Legacy banded path: the flat drop outline — attach-tapered
+                // top, round bottom. Degrades the material but keeps the
+                // silhouette (a prim with no arm here VANISHES, it doesn't
+                // degrade — see Ridge/Groove above).
+                let cap = (rect.height * 0.5).min(rect.width * 0.5);
+                let sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(cap);
+                let ar = (spec.attach.clamp(0.0, 1.0) * rect.height).min(cap);
+                let radii = crate::widget::CornerRadii::new(ar, ar, sr, sr);
                 push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, radii, sw, sh, *color, no, None, &mut verts);
             }
             Prim::ConcaveFillet { cx, cy, radius, depth, start: a0, raised } if shader_plates => {

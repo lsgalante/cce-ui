@@ -66,7 +66,9 @@ pub struct DropletSpec {
     /// How far the sheet's bottom lifts above the rect bottom (the waist the
     /// sides pull up into), fraction of height. 0 = no waist (a capsule).
     pub sag: f32,
-    /// Belly capsule radius, fraction of height.
+    /// Belly capsule radius, fraction of height. **≤ 0 disables the belly**:
+    /// the drop is the sheet alone — with `attach` and `sheet_r` rounding its
+    /// top and bottom this is the oval dewdrop, and the default.
     pub belly: f32,
     /// Belly half-width, fraction of the half-width left after the belly
     /// radius (1 = the belly spans the whole bottom).
@@ -76,6 +78,13 @@ pub struct DropletSpec {
     pub blend: f32,
     /// Sheet bottom-corner radius, fraction of height.
     pub sheet_r: f32,
+    /// Sheet TOP-corner radius (the meniscus taper at the attach line),
+    /// fraction of height. 0 = the sides meet the attach edge square (the
+    /// clinging-pool look); larger values narrow the contact span so the
+    /// silhouette curves into the edge like a dewdrop. When `attach + sheet_r`
+    /// exceeds the sheet height the pair scales down proportionally, so 0.5 +
+    /// 0.5 is the fully continuous egg curve with no straight side segment.
+    pub attach: f32,
     /// Tint opacity at the deep interior relative to the color's own alpha;
     /// the rim falls toward `clarity` × that (thin water is clearer). 1 = flat.
     pub clarity: f32,
@@ -93,18 +102,22 @@ pub struct DropletSpec {
 
 impl Default for DropletSpec {
     fn default() -> Self {
+        // The oval dewdrop: no belly, no sag — one continuous curve from a
+        // tapered attach line to a fully round bottom. The pendant-pool look
+        // is reachable by setting `belly` > 0 (and usually some `sag`).
         Self {
-            sag: 0.45,
-            belly: 0.75,
-            belly_w: 0.85,
+            sag: 0.0,
+            belly: 0.0,
+            belly_w: 0.5,
             blend: 0.35,
-            sheet_r: 0.3,
-            clarity: 0.55,
-            dome: 1.0,
+            sheet_r: 0.55,
+            attach: 0.35,
+            clarity: 0.5,
+            dome: 0.9,
             band: 0.9,
-            gleam: 1.2,
-            shine: 24.0,
-            rim: 0.35,
+            gleam: 1.4,
+            shine: 32.0,
+            rim: 0.5,
         }
     }
 }
