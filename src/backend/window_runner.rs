@@ -2026,7 +2026,7 @@ pub fn tessellate_display_list(
                     host: [sr * scale, spec.clarity.clamp(0.0, 1.0), spec.dome, ar * scale],
                     specular_tint: [1.0, 1.0, 1.0, bow * scale],
                     mode: 10.0,
-                    shape: 2.0,
+                    shape: spec.curve.clamp(2.0, 6.0),
                 });
             }
             Prim::Droplet { rect, color, spec } => {

@@ -105,20 +105,31 @@ pub struct DropletSpec {
     /// stays subtle at the middle while a narrow drop curves visibly. 0
     /// disables it (flat bottom run between the corner arcs).
     pub bow: f32,
+    /// Corner-curve exponent for the silhouette (and the dome profile riding
+    /// it): 2 = circular arcs, above 2 = superellipse quadrants whose
+    /// curvature ramps to ZERO at both ends of each arc — every junction
+    /// (attach↔side, side↔bottom, curve↔flat top) becomes curvature-
+    /// continuous, so unequal attach/sheet_r radii read as ONE flowing curve
+    /// instead of two arcs meeting, and the contact eases out of the flat
+    /// top like a meniscus. Clamped to [2, 6].
+    pub curve: f32,
 }
 
 impl Default for DropletSpec {
     fn default() -> Self {
         // The oval dewdrop: no belly, no sag — one continuous curve from a
-        // tapered attach line to a fully round bottom. The pendant-pool look
-        // is reachable by setting `belly` > 0 (and usually some `sag`).
+        // tapered attach line to a fully round bottom. attach + sheet_r fill
+        // the whole height (no straight side segment), biased bottom-heavy,
+        // and the superellipse curve exponent keeps the unequal pair
+        // curvature-continuous. The pendant-pool look is reachable by
+        // setting `belly` > 0 (and usually some `sag`).
         Self {
             sag: 0.0,
             belly: 0.0,
             belly_w: 0.5,
             blend: 0.35,
-            sheet_r: 0.55,
-            attach: 0.35,
+            sheet_r: 0.58,
+            attach: 0.42,
             clarity: 0.5,
             dome: 0.9,
             band: 0.9,
@@ -126,6 +137,7 @@ impl Default for DropletSpec {
             shine: 32.0,
             rim: 0.5,
             bow: 0.12,
+            curve: 2.6,
         }
     }
 }
