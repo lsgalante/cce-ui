@@ -171,11 +171,13 @@ impl Paint for ColorSelector {
         let pick_x = rect.x + rect.width * 0.65;
         let pick_w = rect.width * 0.35;
 
-        // The text field stays colorless: one configurable textbox background
-        // regardless of editing (the TextBox convention — the caret is the
-        // editing affordance), and neutral greys for the border. The old blue
-        // editing bg/border were this widget's own invention.
-        let bg_color = crate::colors::textbox_background_color();
+        // The text field has NO face of its own — a frame over the host plate,
+        // like a relief TextBox well (transparent fill, the outline defines
+        // it) and the closed-dropdown convention. The first colorless pass
+        // used the textbox background here, but under the DE's relief themes
+        // real text wells draw no fill, so even a neutral one read as "the
+        // color selector has a background". Neutral greys for the frame; the
+        // caret is the editing affordance.
         let border_color = if self.editing {
             [0.45, 0.45, 0.52, 1.0]
         } else if self.hovered {
@@ -184,8 +186,13 @@ impl Paint for ColorSelector {
             [0.18, 0.18, 0.24, 1.0]
         };
 
-        quads.push((rect.x, rect.y, rect.width, visual_h, border_color));
-        quads.push((rect.x + 1.0, rect.y + 1.0, rect.width - 2.0, visual_h - 2.0, bg_color));
+        // A real frame, not a border-quad-under-fill-quad: with no fill, the
+        // old full-rect border quad would read as a solid slab.
+        let bw = 1.0;
+        quads.push((rect.x, rect.y, rect.width, bw, border_color));
+        quads.push((rect.x, rect.y + visual_h - bw, rect.width, bw, border_color));
+        quads.push((rect.x, rect.y, bw, visual_h, border_color));
+        quads.push((rect.x + rect.width - bw, rect.y, bw, visual_h, border_color));
 
         if self.editing {
             let font_size = 12.0;
