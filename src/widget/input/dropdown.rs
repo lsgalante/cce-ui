@@ -1111,6 +1111,20 @@ impl Input for Dropdown {
         match event {
             Event::MouseButton {
                 button: MouseButton::Left,
+                state: ElementState::Released,
+                ..
+            } => {
+                // While the menu is open (or shrinking closed), the paired
+                // release of any press this dropdown handled must not leak to
+                // widgets stacked beneath the popover: an unconsumed release
+                // falling through the host's dispatch landed on the button
+                // whose row the menu covers — in the designer's params pane,
+                // picking an "Open" entry fired the Save As button underneath
+                // and opened a save chooser on top of the load.
+                self.open || self.closing
+            }
+            Event::MouseButton {
+                button: MouseButton::Left,
                 state: ElementState::Pressed,
                 x: px,
                 y: py,

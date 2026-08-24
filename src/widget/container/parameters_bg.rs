@@ -1533,6 +1533,19 @@ impl Input for ParametersBg {
         }
         let mut changed = false;
         let mut dummy = crate::context::UiContext::new();
+        // Choice rows tick their Dropdowns' open/close animation. This was the
+        // ONLY path that can advance a pane dropdown's anim_snap (the widget's
+        // tick-receiver registration points at an id pane internals never put
+        // in the host tree), and without it every params-pane dropdown opened
+        // at zero drawn extent: logically open, invisible, reporting a sliver
+        // popover rect — and the next click toggled it closed again.
+        for c_opt in &mut self.choices {
+            if let Some(d) = c_opt {
+                if d.tick(dt, &mut dummy) {
+                    changed = true;
+                }
+            }
+        }
         for cb_opt in &mut self.toggles {
             if let Some(cb) = cb_opt {
                 if cb.tick(dt, &mut dummy) {
@@ -1797,8 +1810,15 @@ impl Input for ParametersBg {
                         continue;
                     }
                     if let Some(d) = d_opt {
+                        if std::env::var("CCE_PARAM_DEBUG").is_ok() {
+                            eprintln!("[pdbg] press ({px:.0},{py:.0}) choice[{i}] open-priority: popover_rect={:?}", d.popover_rect());
+                        }
                         if d.popover_rect().is_some() {
-                            if d.mouse_input(button, state, px, py, ui) {
+                            let consumed = d.mouse_input(button, state, px, py, ui);
+                            if std::env::var("CCE_PARAM_DEBUG").is_ok() {
+                                eprintln!("[pdbg]   -> open dropdown consumed={consumed}");
+                            }
+                            if consumed {
                                 if d.take_change() {
                                     if let Some(val) = d.get_value_string() {
                                         self.display_params[i].1 = val;
@@ -1846,6 +1866,9 @@ impl Input for ParametersBg {
                     } else if p.2 == "button" {
                         if let Some(b) = &mut self.buttons[i] {
                             if b.mouse_input(button, state, px, py, ui) {
+                                if std::env::var("CCE_PARAM_DEBUG").is_ok() {
+                                    eprintln!("[pdbg] press ({px:.0},{py:.0}) BUTTON[{i}] '{}' consumed", p.0);
+                                }
                                 if b.take_click() {
                                     p.1 = "clicked".to_string();
                                 }
