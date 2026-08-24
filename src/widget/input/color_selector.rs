@@ -171,13 +171,13 @@ impl Paint for ColorSelector {
         let pick_x = rect.x + rect.width * 0.65;
         let pick_w = rect.width * 0.35;
 
-        let bg_color = if self.editing {
-            [0.06, 0.10, 0.18, 1.0]
-        } else {
-            [0.08, 0.08, 0.12, 1.0]
-        };
+        // The text field stays colorless: one configurable textbox background
+        // regardless of editing (the TextBox convention — the caret is the
+        // editing affordance), and neutral greys for the border. The old blue
+        // editing bg/border were this widget's own invention.
+        let bg_color = crate::colors::textbox_background_color();
         let border_color = if self.editing {
-            [0.20, 0.50, 0.85, 1.0]
+            [0.45, 0.45, 0.52, 1.0]
         } else if self.hovered {
             [0.25, 0.25, 0.35, 1.0]
         } else {
