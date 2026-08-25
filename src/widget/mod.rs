@@ -526,6 +526,7 @@ pub trait WidgetHost {
 
 pub mod core;
 pub mod input;
+pub mod plate_dock;
 pub mod container;
 pub mod display;
 pub mod editor;

@@ -95,6 +95,17 @@ impl PlateSpec {
         Self::radii_for(self.window_corners)
     }
 
+    /// This plate detached into its own window (RFC Phase 7c): every corner
+    /// becomes a window corner, and with the role the radii snap to the
+    /// silhouette curve and [`Self::fill`] flips frost regimes (the
+    /// compositor's blur-behind takes over from the in-app sentinel). The
+    /// reverse — reattaching — is the host assigning its computed
+    /// `window_corner_flags` back.
+    pub fn detached(mut self) -> Self {
+        self.window_corners = (true, true, true, true);
+        self
+    }
+
     /// The fill with the role-correct frost encoding: root → alpha forced
     /// non-negative (the compositor's frost, not ours), nested + `blur` →
     /// the in-app frost pass's negative-alpha sentinel.
@@ -1247,6 +1258,17 @@ mod tests {
         assert!(spec.fill()[3] < 0.0, "nested frost = negative-alpha sentinel");
         spec.blur = false;
         assert_eq!(spec.fill()[3], 0.8, "no frost, no encoding");
+
+        // The detach role flip (RFC 7c): a frosted nested pane becomes a
+        // root — silhouette corners, and the frost regime flips from the
+        // in-app sentinel to the compositor's (alpha back to positive).
+        spec.blur = true;
+        assert!(spec.fill()[3] < 0.0);
+        let det = spec.detached();
+        assert!(det.is_root());
+        assert!(det.fill()[3] > 0.0, "root frost is the compositor's again");
+        let wr = crate::layout::window_silhouette_radius();
+        assert_eq!(det.radii(), (wr, wr, wr, wr));
     }
 
     fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {

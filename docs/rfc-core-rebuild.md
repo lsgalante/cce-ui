@@ -2510,6 +2510,27 @@ Constraint respected: **each crate still builds standalone** — the new core is
     and sync channel (`default_project.json` polling) remain app policy — the toolkit provides
     the plate-role flip (interior→window corners, blur regime swap, CSD hookup via the existing
     `standard_csd`/`take_window_action` hooks), not the process management.
+    - **7c-1 DONE (2026-08-25).** `widget::plate_dock`: the app-agnostic PROTOCOL —
+      constants (control radius/inset, min plate span, stub height, drag threshold),
+      `PlateDockState { collapsed, detached }` with `stubbed()`, `corner_center(rect,
+      stubbed)` (rect placement incl. the stub exemption; the designer's circular-pane
+      arc placement stays app policy), `corner_hit`, `press_becomes_drag`, and
+      `standard_menu(state, can_detach)` → (label, `PlateDockAction`) rows the host
+      appends its own items after (the designer's spreadsheet span modes). Deliberately
+      LEAN: no container type, no widget — a second consumer decides those.
+      `PlateSpec::detached()` is the role flip (all corners→window, radii snap to the
+      silhouette, `fill()` swaps frost regimes), unit-tested. The designer delegates:
+      constants re-exported, rect placement/hit/threshold/standard-menu all
+      toolkit-calls; PLATE_SLOTS membership, visibility, dock regions, layout
+      application, and the detach process spawn stay designer policy. Verified live:
+      corner menus (Collapse/Detach; Reattach-only stubs), the collapse→stub→expand
+      cycle, and dock-drag arming+drop all behave identically through the delegation.
+    - **7c-2 — pending.** A second consumer adopts the affordance (cce-mail's
+      list/detail split or cce-files' panes are the candidates) — that adoption decides
+      whether a `PlateDock` container type earns its place, whether the corner control
+      becomes a drawable helper, and how `standard_csd`/`take_window_action` package the
+      detached-window CSD for hosts without the designer's custom chrome. The cce-cloud
+      overlay-silhouette question from 7b-2 also lands here.
 
   Not started; no code moves before 7a's alias sweep is reviewed, and stages land in order —
   7b is the value (one paint path, plates compositional), 7c is the payoff feature.
