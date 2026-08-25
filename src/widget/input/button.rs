@@ -35,6 +35,10 @@ pub struct Button {
     /// Icon face: an uploaded texture `(image id, pixel w, pixel h)` drawn
     /// centered in place of the label (see [`crate::upload_icon`]).
     icon: Option<(u32, f32, f32)>,
+    /// Opacity of the icon face — the ONLY state lever an icon has, since
+    /// `PaintCtx::image` carries no color and images ignore vertex color. A
+    /// disabled icon button dims instead of graying its glyph.
+    icon_alpha: f32,
     hovered: bool,
     /// Keyboard focus, tracked from `FocusIn`/`FocusOut` the way Checkbox does —
     /// `Paint` never sees the `Widget` base, so the flag has to live here to be
@@ -73,6 +77,7 @@ impl Button {
             justify: Justification::Center,
             label: None,
             icon: None,
+            icon_alpha: 1.0,
             hovered: false,
             focused: false,
             raised: crate::layout::control_relief(),
@@ -110,6 +115,34 @@ impl Button {
     /// Whether an icon face is set (hosts size icon buttons square).
     pub fn has_icon(&self) -> bool {
         self.icon.is_some()
+    }
+
+    /// Where the icon face draws inside `rect`: centered, inset one 4px margin
+    /// per side from the shorter extent, native aspect kept. `None` when this
+    /// button has no icon.
+    ///
+    /// Public because a flat-path host draws the icon itself — it consumes
+    /// `all_quads` and a text list, so `paint` never runs for it and an image
+    /// is neither a quad nor a label. Keeping the geometry here means the icon
+    /// lands in the same place on both paths.
+    pub fn icon_rect(&self, rect: Rect) -> Option<(u32, Rect, f32)> {
+        let (image, iw, ih) = self.icon?;
+        let s = (rect.width.min(rect.height) - 8.0).max(4.0);
+        let (dw, dh) = if iw >= ih {
+            (s, s * ih / iw.max(1.0))
+        } else {
+            (s * iw / ih.max(1.0), s)
+        };
+        Some((
+            image,
+            Rect {
+                x: rect.x + (rect.width - dw) / 2.0,
+                y: rect.y + (rect.height - dh) / 2.0,
+                width: dw,
+                height: dh,
+            },
+            self.icon_alpha,
+        ))
     }
 
     /// Hover state, also settable by immediate-mode hosts that hit-test themselves.
@@ -167,6 +200,12 @@ impl Adapted<Button> {
     /// (no `with_label`), so the legacy label views stay empty.
     pub fn with_icon(mut self, image: u32, w: f32, h: f32) -> Self {
         self.icon = Some((image, w, h));
+        self
+    }
+
+    /// Dim the icon face — see the `icon_alpha` field. 1.0 is fully opaque.
+    pub fn with_icon_alpha(mut self, alpha: f32) -> Self {
+        self.icon_alpha = alpha;
         self
     }
 
@@ -354,20 +393,10 @@ impl Paint for Button {
             }
         }
 
-        // Icon face: centered, inset one 4px margin per side from the shorter
-        // extent, native aspect kept. Replaces the label.
-        if let Some((image, iw, ih)) = self.icon {
-            let s = (w.min(h) - 8.0).max(4.0);
-            let (dw, dh) = if iw >= ih {
-                (s, s * ih / iw.max(1.0))
-            } else {
-                (s * iw / ih.max(1.0), s)
-            };
-            ctx.image(
-                image,
-                Rect { x: x + (w - dw) / 2.0, y: y + (h - dh) / 2.0, width: dw, height: dh },
-                1.0,
-            );
+        // Icon face: replaces the label. Geometry from `icon_rect` — see there
+        // for why it is not inlined here.
+        if let Some((image, rect, alpha)) = self.icon_rect(rect) {
+            ctx.image(image, rect, alpha);
             return;
         }
 
