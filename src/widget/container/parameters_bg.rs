@@ -39,8 +39,9 @@ fn is_text_row(t: &str) -> bool {
     t == "text" || t.starts_with("textpick")
 }
 
-/// Width of a textpick row's picker trigger, carved off the TextBox's right.
-const PICK_W: f32 = 26.0;
+/// Width of a textpick row's picker button, nested inside the right end of
+/// the TextBox's recessed well.
+const PICK_W: f32 = 24.0;
 
 pub struct ParametersBg {
     rect: Rect,
@@ -600,8 +601,19 @@ impl ParametersBg {
             if let Some(d) = d_opt {
                 let r = rects[i];
                 if self.display_params[i].2.starts_with("textpick") {
-                    // The picker trigger: a sliver at the text box's right.
-                    d.set_rect(r.0 + r.2 - PICK_W, r.1, PICK_W, r.3);
+                    // The picker button nests INSIDE the text box's recessed
+                    // well (the box spans the full row): below the detached
+                    // label band, inset from the well's right edge.
+                    let label_top = if crate::layout::control_label_layout() == "side" {
+                        0.0
+                    } else {
+                        crate::layout::control_label_font_detached_parsed().1
+                            + crate::layout::control_label_margin()
+                    };
+                    let inset = 3.0;
+                    let by = r.1 + label_top + inset;
+                    let bh = (r.3 - label_top - 2.0 * inset).max(8.0);
+                    d.set_rect(r.0 + r.2 - PICK_W - inset - 2.0, by, PICK_W, bh);
                 } else {
                     d.set_rect(r.0, r.1, r.2, r.3);
                 }
@@ -610,11 +622,7 @@ impl ParametersBg {
         for (i, tb_opt) in self.texts.iter_mut().enumerate() {
             if let Some(tb) = tb_opt {
                 let r = rects[i];
-                if self.display_params[i].2.starts_with("textpick") && self.choices[i].is_some() {
-                    tb.set_rect(r.0, r.1, r.2 - PICK_W - 4.0, r.3);
-                } else {
-                    tb.set_rect(r.0, r.1, r.2, r.3);
-                }
+                tb.set_rect(r.0, r.1, r.2, r.3);
             }
         }
         for (i, cb_opt) in self.toggles.iter_mut().enumerate() {
@@ -1917,16 +1925,29 @@ impl Input for ParametersBg {
                         }
                     } else if is_text_row(&p.2) {
                         if let Some(d) = &mut self.choices[i] {
-                            if d.mouse_input(button, state, px, py, ui) {
-                                if d.take_change() {
-                                    if let Some(val) = d.get_value_string() {
-                                        if let Some(tb) = &mut self.texts[i] {
-                                            tb.text = val.clone();
-                                            tb.edit_buffer = val.clone();
+                            // The picker acts on PRESSES only; the release
+                            // over the button is swallowed. Releases used to
+                            // reach the dropdown, and one arriving before the
+                            // open animation's first frame (a fast or
+                            // injected click) read as an outside press and
+                            // closed the menu it had just opened.
+                            let (bx, by, bw, bh) = d.rect();
+                            let on_button =
+                                px >= bx && px <= bx + bw && py >= by && py <= by + bh;
+                            if state == ElementState::Pressed {
+                                if d.mouse_input(button, state, px, py, ui) {
+                                    if d.take_change() {
+                                        if let Some(val) = d.get_value_string() {
+                                            if let Some(tb) = &mut self.texts[i] {
+                                                tb.text = val.clone();
+                                                tb.edit_buffer = val.clone();
+                                            }
+                                            p.1 = val;
                                         }
-                                        p.1 = val;
                                     }
+                                    return true;
                                 }
+                            } else if on_button {
                                 return true;
                             }
                         }
@@ -2602,7 +2623,13 @@ impl ParamController for ParametersBg {
                     if options.is_empty() {
                         None
                     } else {
-                        Some(Dropdown::new(options, 0).with_custom_display_text("\u{25be}"))
+                        // A raised face: the picker reads as a BUTTON sitting
+                        // in the box's recess, not a bare glyph beside it.
+                        Some(
+                            Dropdown::new(options, 0)
+                                .with_custom_display_text("\u{25be}")
+                                .with_raised(true),
+                        )
                     }
                 } else {
                     None
@@ -2815,11 +2842,13 @@ mod tests {
         assert!(p.choices[1].is_none(), "plain text has no picker");
         assert!(p.texts[2].is_some() && p.choices[2].is_none(), "no options, no picker");
 
-        // Layout: the picker is a sliver at the box's right edge.
-        let (tx, _, tw, _) = p.texts[0].as_ref().unwrap().rect();
-        let (dx, _, dw, _) = p.choices[0].as_ref().unwrap().rect();
+        // Layout: the box spans the full row; the picker button nests
+        // inside it (within the box's right end).
+        let (tx, ty, tw, th) = p.texts[0].as_ref().unwrap().rect();
+        let (dx, dy, dw, dh) = p.choices[0].as_ref().unwrap().rect();
         assert_eq!(dw, PICK_W);
-        assert!(dx >= tx + tw, "picker sits right of the text box");
+        assert!(dx > tx && dx + dw < tx + tw, "button inside the box horizontally");
+        assert!(dy > ty && dy + dh <= ty + th, "button inside the box vertically");
 
         // Both text variants lay out at the same row height.
         assert_eq!(p.inner().row_height(0), p.inner().row_height(1));
