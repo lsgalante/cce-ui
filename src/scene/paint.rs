@@ -1012,8 +1012,25 @@ impl PaintCtx {
 
     /// Emit the plate a [`PlateSpec`] describes: role-resolved per-corner
     /// radii and role-encoded frost (RFC Phase 7b).
+    ///
+    /// The spec's radii are FINAL on-screen values (a window corner already
+    /// wears the full silhouette span), but `Prim::Plate` speaks the older
+    /// convention — NOMINAL radii, span applied downstream by
+    /// `plate_push_raised(scale_corners = true)`, which the unmigrated
+    /// hand-rolled plates (cce-cloud, the test-interface gallery shim) still
+    /// rely on. So divide the span back out here and let the push multiply
+    /// reconstruct the spec's exact values.
+    ///
+    /// Feeding the final radii straight through double-spanned every window
+    /// corner (12 → ~100 logical at corner_shape 4.5): the plate arc pulled
+    /// away from the compositor's clip, the black window background showed
+    /// through as a corner crescent, and the corners stopped matching the
+    /// desktop grid — the original 7b-2 report of this looking like "the arc
+    /// correction" was the regression itself.
     pub fn plate_spec(&mut self, spec: &PlateSpec) {
-        self.plate(spec.rect, spec.radii(), spec.fill(), spec.depth);
+        let f = crate::layout::corner_span_factor();
+        let (tl, tr, br, bl) = spec.radii();
+        self.plate(spec.rect, (tl / f, tr / f, br / f, bl / f), spec.fill(), spec.depth);
     }
 
     pub fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {
@@ -1273,6 +1290,39 @@ mod tests {
 
     fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect { x, y, width: w, height: h }
+    }
+
+    /// The emission round-trip: `plate_spec` pre-divides by the span factor so
+    /// `plate_push_raised(scale_corners = true)` lands each corner at exactly
+    /// the spec's final radius. Guards the double-span regression (7b-2), and
+    /// holds for any configured corner_shape because both sides use the same
+    /// factor.
+    #[test]
+    fn plate_spec_emission_round_trips_the_span() {
+        let spec = PlateSpec {
+            rect: r(0.0, 0.0, 400.0, 300.0),
+            color: [0.1, 0.2, 0.3, 0.8],
+            blur: false,
+            window_corners: (true, true, false, false),
+            depth: 4.0,
+        };
+        let mut pc = PaintCtx::new();
+        pc.plate_spec(&spec);
+        let f = crate::layout::corner_span_factor();
+        let emitted = pc
+            .finish()
+            .items
+            .iter()
+            .find_map(|it| match &it.prim {
+                Prim::Plate { radii, .. } => Some(radii.clone()),
+                _ => None,
+            })
+            .expect("plate_spec emits a Prim::Plate");
+        let want = spec.radii();
+        let got = (emitted.0 * f, emitted.1 * f, emitted.2 * f, emitted.3 * f);
+        for (g, w) in [(got.0, want.0), (got.1, want.1), (got.2, want.2), (got.3, want.3)] {
+            assert!((g - w).abs() < 1e-3, "span round-trip drifted: {g} vs {w}");
+        }
     }
 
     #[test]

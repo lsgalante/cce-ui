@@ -2347,7 +2347,7 @@ Constraint respected: **each crate still builds standalone** — the new core is
     phase-4 flip reaches them first; no standalone pointer-to-id
     signature sweep.
 
-- **Phase 7 — Plate unification: backplate becomes a ROLE of Plate (PROPOSED, not started).**
+- **Phase 7 — Plate unification: backplate becomes a ROLE of Plate (7a/7b/7c stages DONE 2026-08-25; open questions below).**
   Finish what 6as/6at began. The `Backplate` and `Plate` container widgets are deleted and the
   `is_backplate`/`is_movable_backplate`/`is_plate` flags are folded, but "backplate" survives as
   a second vocabulary for what is now one concept — a lit base surface (`Prim::Plate`). What
@@ -2495,6 +2495,23 @@ Constraint respected: **each crate still builds standalone** — the new core is
       design. Verified: seven apps diff ONLY within 120px corner squares; the eighth
       (system-interface, hardcoded r=12 → silhouette, the largest jump) also shifts the
       perimeter roll's edge gradient, eyeball-confirmed as the arc correction.
+
+      **CORRECTION (2026-08-25, post-7c): the Plate-group half of that story was
+      inverted — a double-span, since fixed.** `plate_spec` fed the spec's FINAL
+      radii into `Prim::Plate`, whose contract is NOMINAL radii spanned downstream
+      by `plate_push_raised(scale_corners = true)` — so the five Plate-group
+      clients drew window corners at span² (12 → ~100 logical at n=4.5). Those
+      apps had been CORRECT all along (nominal in, spanned once by the push); the
+      "arc correction" the A/B eyeball accepted was the regression itself, caught
+      when the user reported corners rounder than the desktop grid. Measured on a
+      live corner diagonal: clip/grid arc at the expected 0.202·span depth, plate
+      arc ~2× deeper. The four scalar-group clients (graph, fonts, color-editor,
+      text-editor) tessellate without a downstream span, so for them the spanned
+      scalar was and remains the genuine correction. Fix: `plate_spec` pre-divides
+      by `corner_span_factor()` so the push's multiply reconstructs the spec's
+      exact values; unit test `plate_spec_emission_round_trips_the_span` guards
+      it. The same double-span reached DemoApp via 7b-1 — its "AE≠0 expected"
+      diff bundled the genuine correction WITH the overshoot.
       Authenticator is values-only verification (never launch it in a shadow — it claims
       the PolicyKit D-Bus name). SKIPPED deliberately: cce-cloud (overlay popup windows —
       whether they share the decorated-window silhouette is an open question for 7c) and
@@ -2546,8 +2563,10 @@ Constraint respected: **each crate still builds standalone** — the new core is
         appear). It lands with the first non-designer detach implementation, as does the
         cce-cloud overlay-silhouette question from 7b-2.
 
-  Not started; no code moves before 7a's alias sweep is reviewed, and stages land in order —
-  7b is the value (one paint path, plates compositional), 7c is the payoff feature.
+  All numbered stages DONE (2026-08-25). Still open: detached-window CSD packaging (lands
+  with the first non-designer detach), the cce-cloud overlay-silhouette question, and
+  designer pane spec-OBJECT emission (focus tint / widget-driven bevel styling are not yet
+  spec fields).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
