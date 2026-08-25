@@ -91,6 +91,19 @@ pub fn press_becomes_drag(press: (f32, f32), cursor: (f32, f32)) -> bool {
     (cursor.0 - press.0).abs().max((cursor.1 - press.1).abs()) > DRAG_THRESHOLD
 }
 
+/// Draw the corner control at `center`: the plate-border-colored dot,
+/// enlarged when `emphasized` (hovered, or its menu is open). Earned by the
+/// second consumer (RFC 7c-2) — both hosts drew the identical dot.
+pub fn draw_corner_dot(
+    pc: &mut crate::scene::paint::PaintCtx,
+    center: (f32, f32),
+    emphasized: bool,
+) {
+    let r = if emphasized { CORNER_R * 1.15 } else { CORNER_R };
+    let fill = crate::color::plate_border_color().unwrap_or([0.55, 0.58, 0.66, 0.85]);
+    pc.circle(center.0, center.1, r, fill);
+}
+
 /// The standard corner-menu rows for a plate in `state`. A detached pane's
 /// stub offers ONLY Reattach (collapsing it would mean nothing); otherwise
 /// Collapse/Expand per state, then Detach when the host allows it. The host

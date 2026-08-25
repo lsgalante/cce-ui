@@ -2525,12 +2525,26 @@ Constraint respected: **each crate still builds standalone** — the new core is
       application, and the detach process spawn stay designer policy. Verified live:
       corner menus (Collapse/Detach; Reattach-only stubs), the collapse→stub→expand
       cycle, and dock-drag arming+drop all behave identically through the delegation.
-    - **7c-2 — pending.** A second consumer adopts the affordance (cce-mail's
-      list/detail split or cce-files' panes are the candidates) — that adoption decides
-      whether a `PlateDock` container type earns its place, whether the corner control
-      becomes a drawable helper, and how `standard_csd`/`take_window_action` package the
-      detached-window CSD for hosts without the designer's custom chrome. The cce-cloud
-      overlay-silhouette question from 7b-2 also lands here.
+    - **7c-2 — DONE (2026-08-25): cce-files is the second consumer.** Its preview pane
+      carries the corner control; Collapse narrows every page's pane column to a Preview
+      title stub (the list keeps the freed width — the feature's actual value), the
+      stub's control restores the prior split fracs, and the divider/wheel are inert
+      while collapsed. The adoption answered the open API questions:
+      - `draw_corner_dot(pc, center, emphasized)` EARNED — both hosts drew the identical
+        dot; the designer now uses it too.
+      - A `PlateDock` CONTAINER did NOT earn its place: one `PlateDockState` field
+        sufficed. Revisit only if a host manages many dockable plates outside its own
+        state arrays.
+      - Press arming was designer-specific after all: it exists to disambiguate click
+        from dock-DRAG, and a single pane has nowhere to dock — files opens the menu
+        directly. Moreover, files keys the whole interaction on mouse RELEASES: its
+        routed-widget path consumes left PRESSES before the `Application` hook (only
+        releases reliably arrive there), a per-app dispatch reality any adopter must
+        check first. The designer's release-opened menu means the two feel identical.
+      - The detached-window CSD packaging question REMAINS OPEN (files has no detach
+        model; `standard_menu` is called with `can_detach = false` and the rows never
+        appear). It lands with the first non-designer detach implementation, as does the
+        cce-cloud overlay-silhouette question from 7b-2.
 
   Not started; no code moves before 7a's alias sweep is reviewed, and stages land in order —
   7b is the value (one paint path, plates compositional), 7c is the payoff feature.
