@@ -2514,9 +2514,14 @@ Constraint respected: **each crate still builds standalone** — the new core is
       diff bundled the genuine correction WITH the overshoot.
       Authenticator is values-only verification (never launch it in a shadow — it claims
       the PolicyKit D-Bus name). SKIPPED deliberately: cce-cloud (overlay popup windows —
-      whether they share the decorated-window silhouette is an open question for 7c) and
+      whether they share the decorated-window silhouette was an open question, since
+      CLOSED: **yes** — resolved 2026-08-25 post-7c, cce-cloud@4829451. The compositor
+      never clips layer surfaces, so the app's drawing IS the overlay's silhouette, and a
+      launcher-sized panel at the nominal radius read nearly square beside real windows;
+      its root emission is now a PlateSpec with all four corners window-flagged, verified
+      pixel-identical corner depth to a real window's plate) and
       cce-test-interface's `Backplate` gallery shim (a legacy-lookalike test fixture;
-      migrating it would defeat its purpose). Designer pane EMISSION: radii and the
+      migrating it would defeat its purpose — still skipped, still deliberate). Designer pane EMISSION: radii and the
       nested-blur sentinel already flow from spec-derived values; full spec-OBJECT
       emission is deferred into 7c, because pane plates carry focus tint and
       widget-driven bevel styling `PlateSpec` does not yet model — detach will dictate
@@ -2563,10 +2568,11 @@ Constraint respected: **each crate still builds standalone** — the new core is
         appear). It lands with the first non-designer detach implementation, as does the
         cce-cloud overlay-silhouette question from 7b-2.
 
-  All numbered stages DONE (2026-08-25). Still open: detached-window CSD packaging (lands
-  with the first non-designer detach), the cce-cloud overlay-silhouette question, and
-  designer pane spec-OBJECT emission (focus tint / widget-driven bevel styling are not yet
-  spec fields).
+  All numbered stages DONE (2026-08-25); the cce-cloud overlay-silhouette question is
+  CLOSED (shares the silhouette — see 7b-2). Still open, both gated on the first
+  non-designer detach implementation: detached-window CSD packaging, and designer pane
+  spec-OBJECT emission (focus tint / widget-driven bevel styling are not yet spec fields —
+  detach dictates whether the spec grows them or the widget hooks stay authoritative).
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
