@@ -2563,16 +2563,38 @@ Constraint respected: **each crate still builds standalone** — the new core is
         routed-widget path consumes left PRESSES before the `Application` hook (only
         releases reliably arrive there), a per-app dispatch reality any adopter must
         check first. The designer's release-opened menu means the two feel identical.
-      - The detached-window CSD packaging question REMAINS OPEN (files has no detach
-        model; `standard_menu` is called with `can_detach = false` and the rows never
-        appear). It lands with the first non-designer detach implementation, as does the
-        cce-cloud overlay-silhouette question from 7b-2.
+      - The detached-window CSD packaging question is ANSWERED (2026-08-25,
+        cce-files@805be06 — the preview pane detaches for real now): **no new
+        toolkit packaging was needed.** A detached window is an ordinary
+        `Application` whose root plate carries the detached role (all window
+        corners); the compositor's decoration IS the CSD in this DE (border =
+        grab surface, no titlebars), and plate_dock's existing pieces —
+        `corner_center`/`corner_hit`/`draw_corner_dot`/`standard_menu` — cover
+        the control. What the second implementation DID establish as the
+        convention worth naming: **the child's Reattach is process exit** — the
+        parent `try_wait`s and reclaims the pane, so every way a detached
+        window can die reattaches it; and the child exits itself when its sync
+        file or parent pid disappears, so orphans (crash, stale session
+        restore) self-collect. The sync-file idiom generalizes: parent pid
+        then payload, written before the spawn, unlinked on reattach.
+        One packaging gap surfaced and stands as app policy for now: the
+        toolkit context menu dispatches through a widget tree a minimal
+        detached window does not have, so the child draws its one-row menu
+        itself — a third consumer hitting this earns a widget-tree-free menu
+        helper.
+      - The designer pane spec-OBJECT emission question got its answer from the
+        same implementation: detach dictated NO new spec fields — the files
+        pane detached with `PlateSpec` as it stands, so focus tint and
+        widget-driven bevel styling stay widget-hook territory and the spec
+        stays lean. The designer's emission migration remains optional and
+        unblocked.
 
-  All numbered stages DONE (2026-08-25); the cce-cloud overlay-silhouette question is
-  CLOSED (shares the silhouette — see 7b-2). Still open, both gated on the first
-  non-designer detach implementation: detached-window CSD packaging, and designer pane
-  spec-OBJECT emission (focus tint / widget-driven bevel styling are not yet spec fields —
-  detach dictates whether the spec grows them or the widget hooks stay authoritative).
+  All numbered stages DONE (2026-08-25), and all three open questions CLOSED the same
+  day: cce-cloud overlays share the silhouette (7b-2); the first non-designer detach
+  (cce-files' preview pane, 7c-2) answered CSD packaging — nothing new was needed, the
+  conventions are recorded there — and established that detach dictates no new
+  `PlateSpec` fields, leaving the designer's spec-OBJECT emission optional and
+  unblocked. Phase 7 is COMPLETE.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
