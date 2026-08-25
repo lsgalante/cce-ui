@@ -429,10 +429,21 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let t2 = max(rrect_clip.p_light.w, 0.001);
         let u = clamp(din / t2, 0.0, 1.0);
         let f = 1.0 - u;
-        let sv = g * roll_slope(f) * dome;
+        // Continuous dome: the drop is a spherical-cap height field over the
+        // silhouette — h = sqrt(2u - u²), vertical at the rim, flattening
+        // toward the interior — so the normal varies over the ENTIRE body
+        // and the diffuse rolls from lit shoulder to shaded belly instead of
+        // reading as a flat face inside a shaded band (the old roll_slope
+        // treatment, which only tilted the skirt).
+        let hdome = sqrt(max(2.0 * u - u * u, 1e-4));
+        let sv = g * ((1.0 - u) / hdome * dome);
         let n = normalize(vec3f(sv, 1.0));
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
-        let extra = rrect_clip.p_mat.w * f * f * f;
+        // Rim crest weighted toward the BOTTOM edge (g.y > 0, y-down): a
+        // hanging drop concentrates transmitted light into a caustic along
+        // its lower arc, while the attach line stays quiet.
+        let down = clamp(g.y, 0.0, 1.0);
+        let extra = rrect_clip.p_mat.w * f * f * f * (0.3 + 1.2 * down * down);
         let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
         let spec = roll_spec(sv);
         // Thin edges are clearer water; the deep interior densifies by the
