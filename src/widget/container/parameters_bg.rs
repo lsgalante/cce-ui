@@ -603,17 +603,21 @@ impl ParametersBg {
                 if self.display_params[i].2.starts_with("textpick") {
                     // The picker button nests INSIDE the text box's recessed
                     // well (the box spans the full row): below the detached
-                    // label band, inset from the well's right edge.
+                    // label band, inset from the well's walls by exactly the
+                    // well's carve depth, so the button's raised walls abut
+                    // the recess walls — together they read as the DE's
+                    // trough ring around an inset button (see the carve pass).
                     let label_top = if crate::layout::control_label_layout() == "side" {
                         0.0
                     } else {
                         crate::layout::control_label_font_detached_parsed().1
                             + crate::layout::control_label_margin()
                     };
-                    let inset = 3.0;
+                    let band_h = r.3 - label_top;
+                    let inset = crate::layout::bevel_width().min(band_h * 0.2);
                     let by = r.1 + label_top + inset;
-                    let bh = (r.3 - label_top - 2.0 * inset).max(8.0);
-                    d.set_rect(r.0 + r.2 - PICK_W - inset - 2.0, by, PICK_W, bh);
+                    let bh = (band_h - 2.0 * inset).max(8.0);
+                    d.set_rect(r.0 + r.2 - PICK_W - inset, by, PICK_W, bh);
                     // The menu hangs off the WHOLE field, not the button
                     // sliver: anchor the popover to the box's well band.
                     d.popover_anchor = Some(Rect {
@@ -1155,6 +1159,25 @@ impl ParametersBg {
             }
             // (control, its configured corner radius, raised vs recessed)
             let ctl: Option<(&dyn WidgetHost, f32, bool)> = if is_text_row(&p.2) {
+                // A textpick row's picker button: a raised island inside the
+                // well. Its walls carry the SAME depth as the well's recess
+                // and abut it (the layout insets the button by that depth),
+                // so wall-against-wall the pair forms the trough valley
+                // around the button's top, right, and bottom — the DE's
+                // inset-button-in-a-trough look. The radius is the well
+                // radius's parallel curve at that inset.
+                if p.2.starts_with("textpick") {
+                    if let (Some(d), Some(tb)) = (&self.choices[i], &self.texts[i]) {
+                        let (bx, by, bw, bh) = d.rect();
+                        let (_, _, _, th) = tb.rect();
+                        let ty = crate::widget::label_offset(tb);
+                        if bw > 0.0 && bh > 0.0 {
+                            let depth = crate::layout::bevel_width().min((th - ty) * 0.2);
+                            let r = (crate::layout::textbox_corner_radius() - depth).max(2.0);
+                            out.push((bx, by, bw, bh, (r, r, r, r), depth, true, all));
+                        }
+                    }
+                }
                 self.texts[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::textbox_corner_radius(), false))
             } else if p.2.starts_with("choice") {
                 self.choices[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::dropdown_corner_radius(), true))
@@ -1861,7 +1884,20 @@ impl Input for ParametersBg {
                         if std::env::var("CCE_PARAM_DEBUG").is_ok() {
                             eprintln!("[pdbg] press ({px:.0},{py:.0}) choice[{i}] open-priority: popover_rect={:?}", d.popover_rect());
                         }
-                        if d.popover_rect().is_some() {
+                        if let Some((ox, oy, ow, oh)) = d.popover_rect() {
+                            // Textpick pickers are press-driven end to end
+                            // (selection fires on the option PRESS): a release
+                            // over the open surface is swallowed, never
+                            // dispatched — mid-animation it can read as an
+                            // outside press and close the menu it just opened.
+                            if state != ElementState::Pressed
+                                && self.display_params[i].2.starts_with("textpick")
+                            {
+                                if px >= ox && px <= ox + ow && py >= oy && py <= oy + oh {
+                                    return true;
+                                }
+                                continue;
+                            }
                             let consumed = d.mouse_input(button, state, px, py, ui);
                             if std::env::var("CCE_PARAM_DEBUG").is_ok() {
                                 eprintln!("[pdbg]   -> open dropdown consumed={consumed}");
