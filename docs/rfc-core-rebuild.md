@@ -2347,6 +2347,69 @@ Constraint respected: **each crate still builds standalone** — the new core is
     phase-4 flip reaches them first; no standalone pointer-to-id
     signature sweep.
 
+- **Phase 7 — Plate unification: backplate becomes a ROLE of Plate (PROPOSED, not started).**
+  Finish what 6as/6at began. The `Backplate` and `Plate` container widgets are deleted and the
+  `is_backplate`/`is_movable_backplate`/`is_plate` flags are folded, but "backplate" survives as
+  a second vocabulary for what is now one concept — a lit base surface (`Prim::Plate`). What
+  remains under the old name: the `style.surface.backplate.*` config namespace and its getters
+  (`backplate_{padding,gap,color,blur,corner_radius}`, the menubar/statusbar sub-styles); a
+  partial merge already in the tree (`layout::plate_corner_radius()` falls back to
+  `backplate_corner_radius`); and — the real content — a ROLE: "the plate that meets the window
+  edge" (window-background drag via `blocks_backplate_drag`/`drag_allowed_at`, MenuBar/StatusBar
+  carving into it, the compositor clipping every window at the span-widened backplate radius).
+  Each app also hand-rolls its root-surface painting from the backplate getters (`DemoApp`
+  in `src/main.rs` is the reference copy; every client repeats a variant).
+
+  **Motivation.** One surface concept instead of two makes plates fully compositional: a plate
+  can be the base surface of a window OR a child of another surface, with nothing but role data
+  distinguishing them. The concrete driver is detachable plates — cce-designer's detached panes
+  already behave exactly like this (a pane plate becomes a new window's root plate; its interior
+  corners become window corners), but the geometry lives app-side in
+  `cce-designer/src/render.rs::pane_plate_radii` and the detach machinery is designer-only.
+
+  **Design.** No widget returns (6as stays won). The unification lives in the paint/geometry
+  layer: a `PlateSpec` — rect, per-corner radii, color, blur, plus role flags:
+  `window_corners: (bool, bool, bool, bool)` (which corners lie on the window silhouette) and
+  `drag_background: bool` (whether uncovered area is a window-drag region). The toolkit computes
+  per-corner radii from the flags (a window corner wears
+  `window_corner_radius() * corner_span_factor()`, an interior corner wears
+  `plate_corner_radius()` — the `pane_plate_radii` math, moved in from the designer), and the
+  engine paints any plate root-or-nested through the one path, absorbing the per-app hand-rolled
+  root painting. A window's base surface is just a plate whose four corners are all window
+  corners.
+
+  **Invariants.**
+  - *The window silhouette stays a shared cross-process contract.* The compositor clips windows
+    from the SHARED corner value; per-plate radius freedom must never leak into a
+    `window_corners=true` corner (the designer's config.kdl radius override already documents
+    this trap at its `pane_plate_radii` call site). The role flags are where the constraint
+    lives: flagged corners read the shared value, period.
+  - *Blur regime follows the role.* A root plate frosts against the compositor's blur-behind
+    (the negative-alpha marker convention); a nested plate blurs against app content. Detaching
+    moves a plate between regimes; the marker choice keys off the role flags, and this is the
+    subtlest part of the phase — it gets its own design note before code.
+  - *No root container widget.* `PlateSpec` is data consumed by the paint path, not a node that
+    owns the window.
+
+  **Stages.**
+  - **7a — Vocabulary.** `style.surface.plate.*` becomes the canonical config namespace;
+    `backplate.*` keys stay as silent read-aliases (the existing `plate_corner_radius`
+    fallback is the pattern — extend it to every getter, then rename getters to `plate_*` with
+    deprecated `backplate_*` wrappers). User configs keep working unchanged. A/B: every client
+    AE=0.
+  - **7b — `PlateSpec` + window-corner math toolkit-side.** Introduce the spec, port
+    `pane_plate_radii` in, and give the engine a root-plate paint path fed by a spec instead of
+    each app's hand-rolled quads (DemoApp first, then the clients). The designer's per-pane
+    plates convert to specs with computed role flags. A/B: AE=0 per app.
+  - **7c — Detach/dock generalization.** Lift the designer's plate-corner control, collapse,
+    and dock-drag onto `PlateSpec` so any app can offer them. The detached-window PROCESS model
+    and sync channel (`default_project.json` polling) remain app policy — the toolkit provides
+    the plate-role flip (interior→window corners, blur regime swap, CSD hookup via the existing
+    `standard_csd`/`take_window_action` hooks), not the process management.
+
+  Not started; no code moves before 7a's alias sweep is reviewed, and stages land in order —
+  7b is the value (one paint path, plates compositional), 7c is the payoff feature.
+
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
 
