@@ -4560,6 +4560,45 @@ enum SessionEnd {
 const RECONNECT_ATTEMPTS: u32 = 8;
 const RECONNECT_RESET: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Raise this process's file-descriptor soft limit toward its hard limit.
+///
+/// A cce-ui client's fd usage is not bounded by anything the app controls.
+/// Every dmabuf-feedback event the compositor sends carries a format-table
+/// fd, and those arrive per surface whenever scanout candidacy changes —
+/// entering the overview re-sends one for every window at once. Long-lived
+/// windows sit at 700+ open fds in normal use, against a soft limit of 1024.
+///
+/// Crossing that limit does not fail politely. `recvmsg` drops the SCM_RIGHTS
+/// payload when it cannot allocate descriptors, while still delivering the
+/// message body — so libwayland hits a message whose fd never arrived,
+/// reports "file descriptor expected", and the connection dies. That is
+/// precisely the transport break [`run`] reconnects from below, at the cost
+/// of a rebuilt window.
+///
+/// The compositor raises itself to 65536 for the same reason and then
+/// deliberately restores the inherited limit for the programs it spawns
+/// (cce-compositor `process.rs::cleanup_child`) — right for an arbitrary
+/// child, far too low for a dmabuf-heavy Wayland client. So each client
+/// raises its own, to the same ceiling.
+fn raise_fd_limit() {
+    unsafe {
+        let mut lim: libc::rlimit = std::mem::zeroed();
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) != 0 {
+            return;
+        }
+        let want = std::cmp::min(65536, lim.rlim_max);
+        if lim.rlim_cur >= want {
+            return;
+        }
+        let raised = libc::rlimit { rlim_cur: want, rlim_max: lim.rlim_max };
+        if libc::setrlimit(libc::RLIMIT_NOFILE, &raised) == 0 {
+            log::info!("[window_runner] fd limit raised {} -> {}", lim.rlim_cur, want);
+        } else {
+            log::warn!("[window_runner] could not raise fd limit from {}", lim.rlim_cur);
+        }
+    }
+}
+
 /// Run an [`Application`] to completion, surviving loss of the compositor
 /// connection.
 ///
@@ -4582,6 +4621,8 @@ const RECONNECT_RESET: std::time::Duration = std::time::Duration::from_secs(10);
 /// [`Application::new`]) are not replayed into the new renderer — upload from
 /// `renderer_init` if they must survive a reconnect.
 pub fn run<A: Application>() {
+    raise_fd_limit();
+
     // Outlives every session: worker threads hold this Sender, and the app's
     // own event sources are registered on this loop once.
     let (sender, channel) = calloop::channel::channel::<A::Message>();
