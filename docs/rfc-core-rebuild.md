@@ -2400,11 +2400,34 @@ Constraint respected: **each crate still builds standalone** — the new core is
     which parses the same `DropletSpec`.
 
   **Stages.**
-  - **7a — Vocabulary.** `style.surface.plate.*` becomes the canonical config namespace;
-    `backplate.*` keys stay as silent read-aliases (the existing `plate_corner_radius`
-    fallback is the pattern — extend it to every getter, then rename getters to `plate_*` with
-    deprecated `backplate_*` wrappers). User configs keep working unchanged. A/B: every client
-    AE=0.
+  - **7a — Vocabulary. REVISED at implementation, 7a-1 DONE (2026-08-25).** The original
+    text said "`style.surface.plate.*` becomes canonical" — implementation surveying found
+    `style.surface.plate.*` ALREADY EXISTS as the NESTED-plate style namespace (padding,
+    color, border_color, border_thickness, blur) carrying deliberately different values
+    from `backplate.*`; a flat alias would have merged root styling into pane styling.
+    The canonical namespace is therefore role-scoped: **`style.surface.plate.root.*`**
+    (with `plate.root.menubar.*` for the bar sub-style) — truer to the phase's thesis
+    anyway: backplate = plate in the root role. Getter names follow as `root_plate_*`.
+    - **7a-1 DONE.** Both config paths aliased: the layout style-registry table maps
+      `plate.root.*` rows onto the same slots as `backplate.*` (slot names keep the
+      historical prefix — invisible), and color.rs's JSON-pointer loads are canonical-first
+      chains (`/style/surface/plate/root/…` `.or_else(` `/backplate/…)`), so the new
+      spelling WINS when both are present; in the registry table both spellings write one
+      slot and document order decides (single-spelling configs — all real ones — are exact).
+      Canonical getters (`root_plate_{padding,gap,opacity,corner_radius}`,
+      `root_plate_{menubar,statusbar}_{color,text_color,blur}`) with the old `backplate_*`
+      names as plain delegating wrappers — NOT `#[deprecated]` yet: 15 crates + the
+      compositor still call them (16-crate caller census in the 7a-1 commit). "root" joined
+      `PROP_NODES` for the config-editor path helpers. cce-ui's own callers (config.rs
+      tests, DemoApp, cce-relief, cce-ramp) migrated. Tests: the legacy styling test now
+      reads through canonical getters (legacy-config → canonical-getter equivalence), plus
+      a canonical-spelling test proving parse, precedence over legacy, and legacy-only
+      fallback. 245 lib tests green; designer A/B AE=0.
+    - **7a-2 — pending.** Migrate the other crates' callers per-repo (cce-compositor's
+      `server/config.rs` is the largest at 9 sites — it reads the SHARED silhouette values,
+      so that migration must not change which slot it reads), then flip the `backplate_*`
+      wrappers to `#[deprecated]`. The `Application::is_movable_backplate_at` trait-method
+      NAME is 7b vocabulary (behavioral role naming), not 7a's.
   - **7b — `PlateSpec` + window-corner math toolkit-side.** Introduce the spec, port
     `pane_plate_radii` in, and give the engine a root-plate paint path fed by a spec instead of
     each app's hand-rolled quads (DemoApp first, then the clients). The designer's per-pane

@@ -91,7 +91,7 @@ const SHADE_STRIP_H: f32 = 14.0;
 /// (The compositor may still restore a saved size over this; see the Utility
 /// window-mode proposal. Until then the request is only a request.)
 fn content_height(width: f32) -> f32 {
-    let pad = cce_ui::layout::backplate_padding();
+    let pad = cce_ui::layout::root_plate_padding();
     let w = (width - 2.0 * pad).max(0.0);
     let gap = 14.0;
     let strip = {
@@ -1218,7 +1218,7 @@ impl Application for BevelPopup {
                     .and_then(|o| o.as_f64())
                     .map(|f| (f as f32).clamp(0.0, 1.0))
             })
-            .unwrap_or_else(|| cce_ui::color::active_backplate_opacity());
+            .unwrap_or_else(|| cce_ui::color::root_plate_opacity());
         Self {
             profile_dropdown: Dropdown::new(
                 Shape::ALL.iter().map(|s| s.label().to_string()).collect(),
@@ -1334,7 +1334,7 @@ impl Application for BevelPopup {
             // Manual column layout: the profile selector, ONE cutaway, the
             // selected profile's knobs, then the global rows. The unselected
             // profile's knobs park off-screen.
-            let pad = cce_ui::layout::backplate_padding();
+            let pad = cce_ui::layout::root_plate_padding();
             let x = pad;
             let w = (self.width as f32 - 2.0 * pad).max(0.0);
             let gap = 14.0;
@@ -1435,7 +1435,7 @@ impl Application for BevelPopup {
         // profile — the popup is its own material sample.
         let mut plate = cce_ui::color::page_low_color();
         plate[3] = self.plate_opacity;
-        let radius = cce_ui::colors::backplate_corner_radius();
+        let radius = cce_ui::colors::root_plate_corner_radius();
         let bevel = cce_ui::layout::bevel_width();
         pc.plate(
             Rect { x: 0.0, y: 0.0, width: w, height: h },

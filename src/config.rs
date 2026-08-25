@@ -307,7 +307,7 @@ pub fn parse_config_path(key: &str, default_section: &str) -> (String, String, O
 const PROP_NODES: &[&str] = &[
     "gestures", "key_bindings", "pointer_bind", "gesture_bind",
     "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
-    "status", "overlay", "backplate", "desktop", "list", "section", "textbox", "multiline", "editor", "tree",
+    "status", "overlay", "backplate", "root", "desktop", "list", "section", "textbox", "multiline", "editor", "tree",
     "menubar", "statusbar", "node", "relief"
 ];
 
@@ -961,21 +961,58 @@ mod tests {
         // Parse into json and set colors
         crate::color::reload_colors(content);
 
-        // Verify values are parsed correctly
-        assert_eq!(crate::color::backplate_menubar_blur(), true);
+        // Verify values are parsed correctly — read through the CANONICAL
+        // getters: a legacy-spelling config must feed them (Phase 7a alias).
+        assert_eq!(crate::color::root_plate_menubar_blur(), true);
         
         let dd_color = crate::color::dropdown_background_color();
         assert!((dd_color[0] - crate::color::srgb_to_linear(8.0 / 255.0)).abs() < 0.0001);
         
         let placeholder_color = crate::color::textbox_placeholder_text_color();
         assert_eq!(placeholder_color, [0x60, 0x60, 0x6a]);
-        assert_eq!(crate::color::backplate_statusbar_blur(), false);
+        assert_eq!(crate::color::root_plate_statusbar_blur(), false);
 
         // Colors are in sRGB converted to linear, let's verify text colors
-        let menubar_txt = crate::color::backplate_menubar_text_color();
+        let menubar_txt = crate::color::root_plate_menubar_text_color();
         assert!(menubar_txt[0] > 0.0);
-        let statusbar_txt = crate::color::backplate_statusbar_text_color();
+        let statusbar_txt = crate::color::root_plate_statusbar_text_color();
         assert!(statusbar_txt[0] > 0.0);
+    }
+
+    /// Phase 7a: `style.surface.plate.root.*` is the canonical root-plate
+    /// spelling — it feeds the same values as `backplate.*`, and wins when
+    /// both spellings are present (canonical-first pointer chains).
+    #[test]
+    fn test_plate_root_canonical_spelling() {
+        let _ = crate::color::root_plate_corner_radius();
+
+        let content = r##"
+            style {
+                surface {
+                    plate {
+                        root corner_radius=(i64)17 {
+                            menubar blur=(bool)true color=(rgba)"#1a1d26d0"
+                        }
+                    }
+                    backplate corner_radius=(i64)9
+                }
+            }
+        "##;
+        crate::color::reload_colors(content);
+        assert_eq!(crate::color::root_plate_corner_radius(), 17.0, "canonical wins over legacy");
+        assert_eq!(crate::color::backplate_corner_radius(), 17.0, "legacy getter follows");
+        assert_eq!(crate::color::root_plate_menubar_blur(), true);
+
+        // Legacy-only spelling still feeds the canonical getter.
+        let legacy = r##"
+            style {
+                surface {
+                    backplate corner_radius=(i64)9
+                }
+            }
+        "##;
+        crate::color::reload_colors(legacy);
+        assert_eq!(crate::color::root_plate_corner_radius(), 9.0);
     }
 
     #[test]

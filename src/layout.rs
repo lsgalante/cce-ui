@@ -162,14 +162,30 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.desktop.grid_cell_width" => "grid_cell_width",
                 "style.surface.desktop.grid_cell_height" => "grid_cell_height",
                 "style.surface.plate.padding" => "plate_padding",
+                // Phase 7a: `style.surface.plate.root.*` is the CANONICAL
+                // spelling of the root-plate style; `backplate.*` is its
+                // silent read-alias (same registry slots; the slot names
+                // keep the historical prefix). Both spellings write the one
+                // slot, so with both present the LAST in document order
+                // wins here — the color.rs pointer chains are canonical-
+                // first; single-spelling configs (all real ones) are exact.
+                "style.surface.plate.root.padding" => "backplate_padding",
                 "style.surface.backplate.padding" => "backplate_padding",
+                "style.surface.plate.root.gap" => "backplate_gap",
                 "style.surface.backplate.gap" => "backplate_gap",
+                "style.surface.plate.root.color" => "backplate_color",
                 "style.surface.backplate.color" => "backplate_color",
+                "style.surface.plate.root.blur" => "backplate_blur",
                 "style.surface.backplate.blur" => "backplate_blur",
+                "style.surface.plate.root.corner_radius" => "backplate_corner_radius",
                 "style.surface.backplate.corner_radius" => "backplate_corner_radius",
+                "style.surface.plate.root.menubar.color" => "backplate_menubar_color",
                 "style.surface.backplate.menubar.color" => "backplate_menubar_color",
+                "style.surface.plate.root.menubar.text_color" => "backplate_menubar_text_color",
                 "style.surface.backplate.menubar.text_color" => "backplate_menubar_text_color",
+                "style.surface.plate.root.menubar.blur" => "backplate_menubar_blur",
                 "style.surface.backplate.menubar.blur" => "backplate_menubar_blur",
+                "style.surface.plate.root.menubar.font" => "menubar_font",
                 "style.surface.backplate.menubar.font" => "menubar_font",
                 "style.surface.statusbar.color" => "backplate_statusbar_color",
                 "style.surface.statusbar.text_color" => "backplate_statusbar_text_color",
@@ -1755,19 +1771,32 @@ pub fn bevel_profile_generation() -> u64 {
 }
 
 /// Padding between the window plate's edge and the objects sitting on it, in
-/// logical px (`style.surface.backplate.padding` in config.kdl). DE-wide so
+/// logical px (`style.surface.plate.root.padding` in config.kdl; the legacy
+/// `style.surface.backplate.padding` spelling reads as an alias). DE-wide so
 /// every app's content sits the same distance off the plate rim.
-pub fn backplate_padding() -> f32 {
+pub fn root_plate_padding() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("backplate_padding").unwrap_or(16.0)
 }
 
+/// Legacy alias for [`root_plate_padding`] (RFC Phase 7a; callers migrate in
+/// 7a-2, after which this gains `#[deprecated]`).
+pub fn backplate_padding() -> f32 {
+    root_plate_padding()
+}
+
 /// Gap between sibling objects on the window plate, in logical px
-/// (`style.surface.backplate.gap` in config.kdl) — pane splits, control rows.
-/// The companion to [`backplate_padding`]: rim distance vs object spacing.
-pub fn backplate_gap() -> f32 {
+/// (`style.surface.plate.root.gap`; `backplate.gap` is the legacy alias) —
+/// pane splits, control rows. The companion to [`root_plate_padding`]:
+/// rim distance vs object spacing.
+pub fn root_plate_gap() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("backplate_gap").unwrap_or(12.0)
+}
+
+/// Legacy alias for [`root_plate_gap`] (RFC Phase 7a).
+pub fn backplate_gap() -> f32 {
+    root_plate_gap()
 }
 
 /// Roll-off width for the wall where a bar (menubar / status bar / the demo's

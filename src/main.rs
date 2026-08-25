@@ -261,8 +261,8 @@ impl Application for DemoApp {
             // intrinsic sizes; `grow` distributes leftover space; the solved rects are
             // assigned straight onto the widgets.
             // DE-wide plate spacing: rim padding and object gap from config.
-            let plate_pad = cce_ui::layout::backplate_padding();
-            let plate_gap = cce_ui::layout::backplate_gap();
+            let plate_pad = cce_ui::layout::root_plate_padding();
+            let plate_gap = cce_ui::layout::root_plate_gap();
             let mut arena: Arena<LayoutBox> = Arena::new();
             let root = arena.insert(LayoutBox::container(
                 Style::column().padding(plate_pad).gap(plate_gap).cross_align(CrossAlign::Stretch),
@@ -361,9 +361,9 @@ impl Application for DemoApp {
         // `bevel_width` so the surface reads as a physical plate rather than a flat fill.
         let mut plate = cce_ui::color::page_low_color();
         if plate[3] > 0.001 {
-            plate[3] = cce_ui::color::active_backplate_opacity();
+            plate[3] = cce_ui::color::root_plate_opacity();
         }
-        let radius = cce_ui::colors::backplate_corner_radius();
+        let radius = cce_ui::colors::root_plate_corner_radius();
         let frame = Rect { x: 0.0, y: 0.0, width: w, height: h };
         let bevel = cce_ui::layout::bevel_width();
         pc.plate(frame, (radius, radius, radius, radius), plate, bevel);

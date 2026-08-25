@@ -214,7 +214,7 @@ impl Application for RampPopup {
             // itself is inset by OVERFLOW_MARGIN so key pegs can render past
             // the window frame into the transparent surface rim. Key mode
             // reserves a Save/Cancel band under the curve.
-            let pad = OVERFLOW_MARGIN + cce_ui::layout::backplate_padding() / 2.0;
+            let pad = OVERFLOW_MARGIN + cce_ui::layout::root_plate_padding() / 2.0;
             let band = if self.target_key.is_some() { 56.0 } else { 0.0 };
             self.ramp.set_rect(
                 pad,
@@ -250,9 +250,9 @@ impl Application for RampPopup {
         let mut plate = cce_ui::color::page_low_color();
         if plate[3] > 0.001 {
             // Half the DE opacity: this popup reads better mostly-glass.
-            plate[3] = cce_ui::color::active_backplate_opacity() * 0.5;
+            plate[3] = cce_ui::color::root_plate_opacity() * 0.5;
         }
-        let radius = cce_ui::colors::backplate_corner_radius();
+        let radius = cce_ui::colors::root_plate_corner_radius();
         let bevel = cce_ui::layout::bevel_width();
         let m = OVERFLOW_MARGIN;
         pc.plate(
@@ -267,7 +267,7 @@ impl Application for RampPopup {
             cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.save_button, &mut pc);
             cce_ui::scene::painter::paint_root_into(&self.ui_context, &self.cancel_button, &mut pc);
             if !self.status.is_empty() {
-                let pad = OVERFLOW_MARGIN + cce_ui::layout::backplate_padding() / 2.0;
+                let pad = OVERFLOW_MARGIN + cce_ui::layout::root_plate_padding() / 2.0;
                 pc.text_with(
                     self.status.clone(),
                     pad + 2.0 * (96.0 + 12.0),
