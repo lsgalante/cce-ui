@@ -2390,6 +2390,14 @@ Constraint respected: **each crate still builds standalone** — the new core is
     subtlest part of the phase — it gets its own design note before code.
   - *No root container widget.* `PlateSpec` is data consumed by the paint path, not a node that
     owns the window.
+  - *The droplet family rides the plate PUSH-CONSTANT block, not the plate concept.*
+    `Prim::Droplet` (shader2d `MODE_DROPLET`) reuses the plate block's fields by mode-10
+    reinterpretation only — it deliberately does not consume `PlateSpec` or the backplate
+    getters. 7b may reshape how plates are DESCRIBED, but the shader-side field packing is
+    shared: changing the plate block means re-checking the droplet arm. If droplets are ever
+    folded into a generalized plate role, two external contracts must survive: the
+    `module { droplet "k=v" }` spec-string idiom, and the compositor's scenefx droplet node,
+    which parses the same `DropletSpec`.
 
   **Stages.**
   - **7a — Vocabulary.** `style.surface.plate.*` becomes the canonical config namespace;
