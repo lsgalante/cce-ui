@@ -31,6 +31,17 @@ use crate::widget::{
     MouseScrollDelta, NamedKey, Paint, ParamController, TextEditorState, UiContext,
 };
 
+/// A text row, in either variant: plain (`"text"`), or with a completion
+/// picker (`"textpick:a,b,c"` — the Houdini-style attribute/group chooser: a
+/// TextBox plus a slim menu-button Dropdown at its right edge whose pick
+/// fills the box; the host supplies the candidates in the type string).
+fn is_text_row(t: &str) -> bool {
+    t == "text" || t.starts_with("textpick")
+}
+
+/// Width of a textpick row's picker trigger, carved off the TextBox's right.
+const PICK_W: f32 = 26.0;
+
 pub struct ParametersBg {
     rect: Rect,
     display_params: Vec<(String, String, String)>,
@@ -187,7 +198,7 @@ impl ParametersBg {
             108.0
         } else if p.2.starts_with("slider") {
             38.0
-        } else if p.2 == "text" || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
+        } else if is_text_row(&p.2) || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
             42.0
         } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
             40.0
@@ -588,13 +599,22 @@ impl ParametersBg {
         for (i, d_opt) in self.choices.iter_mut().enumerate() {
             if let Some(d) = d_opt {
                 let r = rects[i];
-                d.set_rect(r.0, r.1, r.2, r.3);
+                if self.display_params[i].2.starts_with("textpick") {
+                    // The picker trigger: a sliver at the text box's right.
+                    d.set_rect(r.0 + r.2 - PICK_W, r.1, PICK_W, r.3);
+                } else {
+                    d.set_rect(r.0, r.1, r.2, r.3);
+                }
             }
         }
         for (i, tb_opt) in self.texts.iter_mut().enumerate() {
             if let Some(tb) = tb_opt {
                 let r = rects[i];
-                tb.set_rect(r.0, r.1, r.2, r.3);
+                if self.display_params[i].2.starts_with("textpick") && self.choices[i].is_some() {
+                    tb.set_rect(r.0, r.1, r.2 - PICK_W - 4.0, r.3);
+                } else {
+                    tb.set_rect(r.0, r.1, r.2, r.3);
+                }
             }
         }
         for (i, cb_opt) in self.toggles.iter_mut().enumerate() {
@@ -697,9 +717,12 @@ impl ParametersBg {
                 if let Some(sb) = &self.spinboxes[i] {
                     labels.extend(sb.own_text_labels());
                 }
-            } else if ptype == "text" {
+            } else if is_text_row(ptype) {
                 if let Some(tb) = &self.texts[i] {
                     labels.extend(tb.own_text_labels());
+                }
+                if let Some(d) = &self.choices[i] {
+                    labels.extend(d.own_text_labels());
                 }
             } else if ptype.starts_with("choice") {
                 if let Some(d) = &self.choices[i] {
@@ -801,10 +824,13 @@ impl ParametersBg {
                         let val2 = min + f.values[2] * (max - min);
                         p.1 = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
                     }
-                } else if p.2 == "text" {
+                } else if is_text_row(&p.2) {
                     if let Some(tb) = &mut self.texts[idx] {
                         tb.unfocus();
                         p.1 = tb.text.clone();
+                    }
+                    if let Some(d) = &mut self.choices[idx] {
+                        d.unfocus();
                     }
                 } else if p.2.starts_with("choice") {
                     if let Some(d) = &mut self.choices[idx] {
@@ -909,9 +935,12 @@ impl ParametersBg {
                         }
                     }
                 }
-            } else if p.2 == "text" {
+            } else if is_text_row(&p.2) {
                 if let Some(tb) = &self.texts[i] {
                     param_quads.extend(tb.extra_quads());
+                }
+                if let Some(d) = &self.choices[i] {
+                    param_quads.extend(d.extra_quads());
                 }
             } else if p.2.starts_with("choice") {
                 if let Some(d) = &self.choices[i] {
@@ -970,9 +999,12 @@ impl ParametersBg {
             if hidden[i] {
                 continue;
             }
-            if p.2 == "text" {
+            if is_text_row(&p.2) {
                 if let Some(tb) = &self.texts[i] {
                     out.extend(tb.all_rounded_quads(ctx));
+                }
+                if let Some(d) = &self.choices[i] {
+                    out.extend(d.all_rounded_quads(ctx));
                 }
             } else if p.2.starts_with("slider") {
                 // Track (square style only — the recessed style has no track
@@ -1106,7 +1138,7 @@ impl ParametersBg {
                 continue;
             }
             // (control, its configured corner radius, raised vs recessed)
-            let ctl: Option<(&dyn WidgetHost, f32, bool)> = if p.2 == "text" {
+            let ctl: Option<(&dyn WidgetHost, f32, bool)> = if is_text_row(&p.2) {
                 self.texts[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::textbox_corner_radius(), false))
             } else if p.2.starts_with("choice") {
                 self.choices[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::dropdown_corner_radius(), true))
@@ -1821,6 +1853,14 @@ impl Input for ParametersBg {
                             if consumed {
                                 if d.take_change() {
                                     if let Some(val) = d.get_value_string() {
+                                        // A textpick row's pick fills its
+                                        // TextBox — the box IS the value.
+                                        if self.display_params[i].2.starts_with("textpick") {
+                                            if let Some(tb) = &mut self.texts[i] {
+                                                tb.text = val.clone();
+                                                tb.edit_buffer = val.clone();
+                                            }
+                                        }
                                         self.display_params[i].1 = val;
                                     }
                                 }
@@ -1875,7 +1915,21 @@ impl Input for ParametersBg {
                                 return true;
                             }
                         }
-                    } else if p.2 == "text" {
+                    } else if is_text_row(&p.2) {
+                        if let Some(d) = &mut self.choices[i] {
+                            if d.mouse_input(button, state, px, py, ui) {
+                                if d.take_change() {
+                                    if let Some(val) = d.get_value_string() {
+                                        if let Some(tb) = &mut self.texts[i] {
+                                            tb.text = val.clone();
+                                            tb.edit_buffer = val.clone();
+                                        }
+                                        p.1 = val;
+                                    }
+                                }
+                                return true;
+                            }
+                        }
                         if let Some(tb) = &mut self.texts[i] {
                             if tb.mouse_input(button, state, px, py, ui) {
                                 if tb.editing {
@@ -2138,7 +2192,21 @@ impl Input for ParametersBg {
                                     return true;
                                 }
                             }
-                        } else if p.2 == "text" {
+                        } else if is_text_row(&p.2) {
+                            if let Some(d) = &mut self.choices[idx] {
+                                if d.open && d.keyboard_input(event, ui) {
+                                    if d.take_change() {
+                                        if let Some(val) = d.get_value_string() {
+                                            if let Some(tb) = &mut self.texts[idx] {
+                                                tb.text = val.clone();
+                                                tb.edit_buffer = val.clone();
+                                            }
+                                            p.1 = val;
+                                        }
+                                    }
+                                    return true;
+                                }
+                            }
                             if let Some(tb) = &mut self.texts[idx] {
                                 if tb.keyboard_input(event, ui) {
                                     if !tb.editing {
@@ -2523,12 +2591,25 @@ impl ParamController for ParametersBg {
                     let options: Vec<String> = options_str.split(',').map(|s| s.to_string()).collect();
                     let selected = options.iter().position(|o| o == &p.1).unwrap_or(0);
                     Some(Dropdown::new(options, selected).with_label(&p.0))
+                } else if p.2.starts_with("textpick:") {
+                    // The text row's completion picker: a menu-button Dropdown
+                    // (fixed glyph, re-fires on repeat picks) beside the box.
+                    let options: Vec<String> = p.2.strip_prefix("textpick:").unwrap_or("")
+                        .split(',')
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                        .collect();
+                    if options.is_empty() {
+                        None
+                    } else {
+                        Some(Dropdown::new(options, 0).with_custom_display_text("\u{25be}"))
+                    }
                 } else {
                     None
                 }
             }).collect();
             self.texts = self.display_params.iter().map(|p| {
-                if p.2 == "text" {
+                if is_text_row(&p.2) {
                     Some(TextBox::new(p.1.clone()).with_label(&p.0))
                 } else {
                     None
@@ -2715,6 +2796,33 @@ mod tests {
         ParamController::set_display_params(&mut *p, &params);
         WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
         p
+    }
+
+    /// The textpick text-row variant: a TextBox AND a menu-button Dropdown
+    /// share the row — the picker takes a right-edge sliver, its options come
+    /// from the type string, and a plain text row builds no picker.
+    #[test]
+    fn textpick_rows_carry_a_picker() {
+        let p = panel_with(&[
+            ("Attribute Name", "mass", "textpick:Norm,UV,Pos,Col"),
+            ("Plain", "x", "text"),
+            ("Empty", "y", "textpick:"),
+        ]);
+        assert!(p.texts[0].is_some(), "textpick keeps its TextBox");
+        let d = p.choices[0].as_ref().expect("textpick builds the picker");
+        assert_eq!(d.options, ["Norm", "UV", "Pos", "Col"]);
+        assert!(d.custom_display_text.is_some(), "menu-button mode");
+        assert!(p.choices[1].is_none(), "plain text has no picker");
+        assert!(p.texts[2].is_some() && p.choices[2].is_none(), "no options, no picker");
+
+        // Layout: the picker is a sliver at the box's right edge.
+        let (tx, _, tw, _) = p.texts[0].as_ref().unwrap().rect();
+        let (dx, _, dw, _) = p.choices[0].as_ref().unwrap().rect();
+        assert_eq!(dw, PICK_W);
+        assert!(dx >= tx + tw, "picker sits right of the text box");
+
+        // Both text variants lay out at the same row height.
+        assert_eq!(p.inner().row_height(0), p.inner().row_height(1));
     }
 
     #[test]
