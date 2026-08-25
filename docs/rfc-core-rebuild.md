@@ -2450,6 +2450,43 @@ Constraint respected: **each crate still builds standalone** — the new core is
     `pane_plate_radii` in, and give the engine a root-plate paint path fed by a spec instead of
     each app's hand-rolled quads (DemoApp first, then the clients). The designer's per-pane
     plates convert to specs with computed role flags. A/B: AE=0 per app.
+
+    **Blur-regime design note (required before code; written 2026-08-25).** Two frost
+    regimes; the role selects between them:
+    - *Root plate* (all four corners on the window silhouette): the fill stays
+      POSITIVE-alpha translucent; the COMPOSITOR frosts what lies behind the window
+      (`plate.root.blur` in the shared config drives cce-fx's blur-behind). The app
+      draws no frost of its own.
+    - *Nested plate* (any interior corner): frost is the NEGATIVE-ALPHA sentinel on
+      the fill — the in-app vk frost pass blurs app content drawn BEFORE the plate
+      (draw-order-dependent by design; see `param_plate_fill`). A pane touching some
+      window edges is still nested for blur purposes: it frosts app content.
+    `PlateSpec` therefore stores `color` with positive alpha plus `blur: bool`, and
+    `fill()` applies the role-correct encoding: root → alpha forced non-negative,
+    nested+blur → alpha negated. DETACH is exactly a role flip: interior corners become
+    window corners, `fill()` flips regimes, and the formerly-frosted app content beneath
+    simply does not exist in the new window. No other app-side blur change is needed.
+
+    **Radii rule.** A window-flagged corner wears
+    `window_corner_radius() * corner_span_factor()` (the SHARED silhouette curve — the
+    invariant); an interior corner wears `plate_corner_radius()` (the app-overridable
+    pane value). This is `pane_plate_radii` verbatim, moved in.
+
+    - **7b-1 DONE (2026-08-25).** `PlateSpec` in `scene/paint.rs` (rect, positive-alpha
+      color, `blur`, per-corner `window_corners`, perimeter `depth`) with
+      `window_corner_flags(rect, win_w, win_h)`, `radii()`/`radii_for()`, role-aware
+      `fill()`, and `PaintCtx::plate_spec`. DemoApp's hand-rolled root plate migrated —
+      DELIBERATE visual correction: its radius was the un-spanned
+      `root_plate_corner_radius`, so under squircle `corner_shape` its perimeter shading
+      detached from the compositor's span-widened clip; the spec snaps it to the
+      silhouette (demo AE≠0 expected and intended). The designer's `pane_plate_radii`
+      delegates to the toolkit (A/B AE=0). Two 7a stragglers the getter census could not
+      see (raw JSON-pointer reads, not getter calls) gained the canonical-first chain:
+      `layout::window_corner_radius`'s shared-config read, and cce-grid's silhouette
+      read.
+    - **7b-2 — pending.** Migrate the remaining clients' hand-rolled root plates onto
+      `PlateSpec` (per-repo, AE=0 each) and convert the designer's pane plate EMISSION
+      (not just radii) to specs. 7c builds on the role flip.
   - **7c — Detach/dock generalization.** Lift the designer's plate-corner control, collapse,
     and dock-drag onto `PlateSpec` so any app can offer them. The detached-window PROCESS model
     and sync channel (`default_project.json` polling) remain app policy — the toolkit provides

@@ -363,10 +363,19 @@ impl Application for DemoApp {
         if plate[3] > 0.001 {
             plate[3] = cce_ui::color::root_plate_opacity();
         }
-        let radius = cce_ui::colors::root_plate_corner_radius();
+        // The root plate as a PlateSpec (RFC Phase 7b): all four corners are
+        // window corners, so the radii come from the SHARED silhouette curve
+        // — under squircle corner_shape this widens the perimeter roll to
+        // match the compositor's clip, which the old hand-rolled
+        // root_plate_corner_radius did not.
         let frame = Rect { x: 0.0, y: 0.0, width: w, height: h };
-        let bevel = cce_ui::layout::bevel_width();
-        pc.plate(frame, (radius, radius, radius, radius), plate, bevel);
+        pc.plate_spec(&cce_ui::scene::paint::PlateSpec {
+            rect: frame,
+            color: plate,
+            blur: false,
+            window_corners: (true, true, true, true),
+            depth: cce_ui::layout::bevel_width(),
+        });
 
         // Header band: the title strip carved one step down into the plate. Flush to the
         // window's top and sides, so its only real wall is the bottom one facing the

@@ -1596,7 +1596,12 @@ pub fn corner_shape() -> f32 {
 /// override file — or its corners detach from the silhouette (and from the
 /// desktop grid's cells, which share the same knob).
 pub fn window_corner_radius() -> f32 {
-    crate::config::get_i64_shared("/style/surface/backplate/corner_radius", 12) as f32
+    // Canonical-first (RFC Phase 7a): the shared config may spell the
+    // silhouette radius either way; both feed the one value.
+    crate::config::get_i64_shared_opt("/style/surface/plate/root/corner_radius")
+        .unwrap_or_else(|| {
+            crate::config::get_i64_shared("/style/surface/backplate/corner_radius", 12)
+        }) as f32
 }
 
 /// The curvature-matched corner-span factor for window-scale squircle corners.

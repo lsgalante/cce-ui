@@ -614,6 +614,12 @@ pub fn get_i64_shared(pointer: &str, default: i64) -> i64 {
     cached_shared_config().pointer(pointer).and_then(|v| v.as_i64()).unwrap_or(default)
 }
 
+/// [`get_i64_shared`] without a default — for canonical-first alias chains
+/// (RFC Phase 7a) where absence must fall through to the next spelling.
+pub fn get_i64_shared_opt(pointer: &str) -> Option<i64> {
+    cached_shared_config().pointer(pointer).and_then(|v| v.as_i64())
+}
+
 // ── Typed accessors over the cached config ──────────────────────────────────
 // Each reads the mtime-cached config and extracts a value at a JSON pointer
 // (e.g. "/notifications/enable"), returning the default when absent or mistyped.

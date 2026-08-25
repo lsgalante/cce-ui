@@ -33,6 +33,83 @@ pub enum Cap {
 /// `CornerRadii` order.
 pub type Radii = (f32, f32, f32, f32);
 
+/// RFC Phase 7b: the ONE description of a lit base surface — a window's root
+/// plate or a nested pane plate — distinguished only by ROLE data, never by
+/// type. A window root is a plate whose four corners are all window corners;
+/// detaching a pane into its own window is a role flip, nothing more.
+///
+/// `color` always carries POSITIVE alpha; the frost encoding is applied by
+/// [`Self::fill`] per the role (see the Phase 7b blur-regime note in
+/// `docs/rfc-core-rebuild.md`): a root plate stays positive-alpha (the
+/// COMPOSITOR frosts behind the window), a nested plate with `blur` encodes
+/// the in-app frost pass's negative-alpha sentinel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlateSpec {
+    pub rect: Rect,
+    /// Fill, linear RGBA, alpha positive — the role encoding is `fill()`'s.
+    pub color: [f32; 4],
+    /// Frost the surface (encoding per role; see `fill`).
+    pub blur: bool,
+    /// Which corners lie ON the window silhouette (TL, TR, BR, BL).
+    pub window_corners: (bool, bool, bool, bool),
+    /// Transition-band width of the rolled perimeter.
+    pub depth: f32,
+}
+
+impl PlateSpec {
+    /// All four corners on the silhouette: this plate IS the window's base
+    /// surface.
+    pub fn is_root(&self) -> bool {
+        let (tl, tr, br, bl) = self.window_corners;
+        tl && tr && br && bl
+    }
+
+    /// Which of `rect`'s corners lie on a `win_w` x `win_h` window's
+    /// silhouette (edge tolerance 1.5px) — the designer's `pane_plate_radii`
+    /// derivation, toolkit-side.
+    pub fn window_corner_flags(rect: Rect, win_w: f32, win_h: f32) -> (bool, bool, bool, bool) {
+        let e = 1.5;
+        let left = rect.x <= e;
+        let top = rect.y <= e;
+        let right = rect.x + rect.width >= win_w - e;
+        let bottom = rect.y + rect.height >= win_h - e;
+        (top && left, top && right, bottom && right, bottom && left)
+    }
+
+    /// Per-corner radii for `flags`: a window corner wears the SHARED
+    /// silhouette curve (`window_corner_radius * corner_span_factor` — the
+    /// compositor clips the window and the desktop grid draws its cells from
+    /// the same value, so window-corner arcs must follow it, never a per-app
+    /// plate override); an interior corner wears the nominal
+    /// `plate_corner_radius`.
+    pub fn radii_for(flags: (bool, bool, bool, bool)) -> Radii {
+        let nominal = crate::layout::plate_corner_radius();
+        let window_r =
+            crate::layout::window_corner_radius() * crate::layout::corner_span_factor();
+        let (tl, tr, br, bl) = flags;
+        let pick = |on: bool| if on { window_r } else { nominal };
+        (pick(tl), pick(tr), pick(br), pick(bl))
+    }
+
+    /// [`Self::radii_for`] over this spec's flags.
+    pub fn radii(&self) -> Radii {
+        Self::radii_for(self.window_corners)
+    }
+
+    /// The fill with the role-correct frost encoding: root → alpha forced
+    /// non-negative (the compositor's frost, not ours), nested + `blur` →
+    /// the in-app frost pass's negative-alpha sentinel.
+    pub fn fill(&self) -> [f32; 4] {
+        let mut c = self.color;
+        if self.is_root() {
+            c[3] = c[3].abs();
+        } else if self.blur {
+            c[3] = -c[3].abs();
+        }
+        c
+    }
+}
+
 /// The **relief primitives** are the members of this enum that describe a lit
 /// surface rather than a flat fill: [`Prim::Bevel`], [`Prim::Plate`],
 /// [`Prim::Recess`], [`Prim::Boss`], [`Prim::Ridge`], [`Prim::ConcaveFillet`],
@@ -923,6 +1000,12 @@ impl PaintCtx {
         self.push(Prim::Plate { rect, radii, color, depth });
     }
 
+    /// Emit the plate a [`PlateSpec`] describes: role-resolved per-corner
+    /// radii and role-encoded frost (RFC Phase 7b).
+    pub fn plate_spec(&mut self, spec: &PlateSpec) {
+        self.plate(spec.rect, spec.radii(), spec.fill(), spec.depth);
+    }
+
     pub fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {
         let (ox, oy) = self.offset;
         self.push(Prim::Arc { cx: cx + ox, cy: cy + oy, radius, thickness, start, end, color });
@@ -1123,6 +1206,49 @@ impl crate::layout::RenderTarget for PaintCtx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC Phase 7b: PlateSpec role mechanics — flag derivation from window
+    /// geometry, silhouette-vs-nominal radii selection, and the role-encoded
+    /// frost (root positive-alpha, nested negative-alpha sentinel).
+    #[test]
+    fn plate_spec_roles() {
+        // Flags: a full-window rect is root; an inset pane has none; a pane
+        // flush to the window's right edge owns the two right corners.
+        let root_flags = PlateSpec::window_corner_flags(
+            Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 }, 800.0, 600.0);
+        assert_eq!(root_flags, (true, true, true, true));
+        let inset = PlateSpec::window_corner_flags(
+            Rect { x: 20.0, y: 20.0, width: 100.0, height: 100.0 }, 800.0, 600.0);
+        assert_eq!(inset, (false, false, false, false));
+        let right_pane = PlateSpec::window_corner_flags(
+            Rect { x: 500.0, y: 0.0, width: 300.0, height: 600.0 }, 800.0, 600.0);
+        assert_eq!(right_pane, (false, true, true, false));
+
+        // Radii: flagged corners wear the shared silhouette curve, interior
+        // ones the nominal plate radius (compared against the same getters,
+        // so the assertion holds for any configured values).
+        let window_r =
+            crate::layout::window_corner_radius() * crate::layout::corner_span_factor();
+        let nominal = crate::layout::plate_corner_radius();
+        let r = PlateSpec::radii_for((false, true, true, false));
+        assert_eq!(r, (nominal, window_r, window_r, nominal));
+
+        // Frost encoding by role.
+        let mut spec = PlateSpec {
+            rect: Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 },
+            color: [0.1, 0.2, 0.3, 0.8],
+            blur: true,
+            window_corners: (true, true, true, true),
+            depth: 3.0,
+        };
+        assert!(spec.is_root());
+        assert!(spec.fill()[3] > 0.0, "root frost is the compositor's; alpha stays positive");
+        spec.window_corners = (false, true, true, false);
+        assert!(!spec.is_root());
+        assert!(spec.fill()[3] < 0.0, "nested frost = negative-alpha sentinel");
+        spec.blur = false;
+        assert_eq!(spec.fill()[3], 0.8, "no frost, no encoding");
+    }
 
     fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect { x, y, width: w, height: h }
