@@ -614,6 +614,14 @@ impl ParametersBg {
                     let by = r.1 + label_top + inset;
                     let bh = (r.3 - label_top - 2.0 * inset).max(8.0);
                     d.set_rect(r.0 + r.2 - PICK_W - inset - 2.0, by, PICK_W, bh);
+                    // The menu hangs off the WHOLE field, not the button
+                    // sliver: anchor the popover to the box's well band.
+                    d.popover_anchor = Some(Rect {
+                        x: r.0,
+                        y: r.1 + label_top,
+                        width: r.2,
+                        height: r.3 - label_top,
+                    });
                 } else {
                     d.set_rect(r.0, r.1, r.2, r.3);
                 }
@@ -2852,6 +2860,19 @@ mod tests {
 
         // Both text variants lay out at the same row height.
         assert_eq!(p.inner().row_height(0), p.inner().row_height(1));
+
+        // The menu anchors off the WHOLE field: the popover spans at least
+        // the box width and hangs below it, not off the button sliver.
+        let anchor = p.choices[0].as_ref().unwrap().popover_anchor.expect("anchor set");
+        assert_eq!(anchor.x, tx);
+        assert_eq!(anchor.width, tw);
+        let d = p.choices[0].as_ref().unwrap();
+        let (px_, py_, pw, _ph) = d.popover_geom(crate::scene::layout::Rect {
+            x: dx, y: dy, width: dw, height: dh,
+        });
+        assert_eq!(px_, tx, "menu left-aligns with the box");
+        assert!(pw >= tw, "menu at least as wide as the box");
+        assert!(py_ >= ty + th - 1.0, "menu hangs below the box");
     }
 
     #[test]

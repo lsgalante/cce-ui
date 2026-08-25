@@ -93,6 +93,11 @@ pub struct Dropdown {
     /// production writer). Read by the Ramp popover clamp and the fade-blend parent color,
     /// like the legacy `parent` pointer it replaces.
     pub parent_snapshot: Option<ParentSnapshot>,
+    /// Optional popover anchor override: the menu hangs off THIS rect instead
+    /// of the trigger's — for triggers embedded in a larger control (the
+    /// parameter pane's textpick picker button nested in its TextBox), where
+    /// the menu should span the whole field, not the button sliver.
+    pub popover_anchor: Option<Rect>,
     pub font_family: String,
     pub custom_display_text: Option<String>,
     pub open_upward: Option<bool>,
@@ -141,6 +146,7 @@ impl Dropdown {
             hovered_item: None,
             just_changed: false,
             parent_snapshot: None,
+            popover_anchor: None,
             font_family: "sans-serif".to_string(),
             custom_display_text: None,
             open_upward: None,
@@ -335,6 +341,7 @@ impl Dropdown {
     /// with the base-rect reads rewritten in content-rect terms (`base.y + base.h` ⇒
     /// `content.y + content.height`, `base.y + label_offset` ⇒ `content.y`).
     pub fn popover_geom(&self, content: Rect) -> (f32, f32, f32, f32) {
+        let content = self.popover_anchor.unwrap_or(content);
         let rw = self.popover_width(content);
         let rh = self.options.len() as f32 * 24.0;
 
