@@ -84,8 +84,7 @@ impl PlateSpec {
     /// `plate_corner_radius`.
     pub fn radii_for(flags: (bool, bool, bool, bool)) -> Radii {
         let nominal = crate::layout::plate_corner_radius();
-        let window_r =
-            crate::layout::window_corner_radius() * crate::layout::corner_span_factor();
+        let window_r = crate::layout::window_silhouette_radius();
         let (tl, tr, br, bl) = flags;
         let pick = |on: bool| if on { window_r } else { nominal };
         (pick(tl), pick(tr), pick(br), pick(bl))

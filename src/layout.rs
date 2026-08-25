@@ -1613,6 +1613,16 @@ pub fn window_corner_radius() -> f32 {
 /// ~1.5·r along the edge). Exactly 1 at n = 2. Applied to window-scale corners
 /// only — `Prim::Plate` and the renderer's window-corner clip — never to
 /// widget-scale radii, which must match the nominal-radius squircles around them.
+/// The window silhouette's EFFECTIVE corner radius: the shared nominal value
+/// widened by the corner-span factor — exactly the arc the compositor clips
+/// every decorated window with, and the radius a root plate's corners must
+/// wear (RFC Phase 7b; `PlateSpec::radii_for` uses it for window-flagged
+/// corners). Apps drawing root-surface geometry through non-Plate prims read
+/// this scalar directly.
+pub fn window_silhouette_radius() -> f32 {
+    window_corner_radius() * corner_span_factor()
+}
+
 pub fn corner_span_factor() -> f32 {
     let n = corner_shape();
     if n > 2.001 {

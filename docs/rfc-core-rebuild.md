@@ -2484,9 +2484,27 @@ Constraint respected: **each crate still builds standalone** — the new core is
       see (raw JSON-pointer reads, not getter calls) gained the canonical-first chain:
       `layout::window_corner_radius`'s shared-config read, and cce-grid's silhouette
       read.
-    - **7b-2 — pending.** Migrate the remaining clients' hand-rolled root plates onto
-      `PlateSpec` (per-repo, AE=0 each) and convert the designer's pane plate EMISSION
-      (not just radii) to specs. 7c builds on the role flip.
+    - **7b-2 — DONE (2026-08-25).** Nine clients migrated: files, terminal,
+      system-interface, authenticator, data-editor (Prim::Plate hand-rolls →
+      `plate_spec`, plus data-editor's concentric `corner_frame` now follows the
+      silhouette), and graph, fonts, color-editor, text-editor (non-Plate root emissions —
+      rounded_rect/border/legacy tuples — take their values from the spec via the new
+      `layout::window_silhouette_radius()` scalar, which `radii_for` also uses). A/B
+      revision: the original "AE=0 each" predates 7b-1's discovery that migrating IS a
+      correction — every app moved off the un-spanned radius, so corners change by
+      design. Verified: seven apps diff ONLY within 120px corner squares; the eighth
+      (system-interface, hardcoded r=12 → silhouette, the largest jump) also shifts the
+      perimeter roll's edge gradient, eyeball-confirmed as the arc correction.
+      Authenticator is values-only verification (never launch it in a shadow — it claims
+      the PolicyKit D-Bus name). SKIPPED deliberately: cce-cloud (overlay popup windows —
+      whether they share the decorated-window silhouette is an open question for 7c) and
+      cce-test-interface's `Backplate` gallery shim (a legacy-lookalike test fixture;
+      migrating it would defeat its purpose). Designer pane EMISSION: radii and the
+      nested-blur sentinel already flow from spec-derived values; full spec-OBJECT
+      emission is deferred into 7c, because pane plates carry focus tint and
+      widget-driven bevel styling `PlateSpec` does not yet model — detach will dictate
+      whether the spec grows those fields or the widget hooks stay authoritative.
+      7c builds on the role flip.
   - **7c — Detach/dock generalization.** Lift the designer's plate-corner control, collapse,
     and dock-drag onto `PlateSpec` so any app can offer them. The detached-window PROCESS model
     and sync channel (`default_project.json` polling) remain app policy — the toolkit provides
