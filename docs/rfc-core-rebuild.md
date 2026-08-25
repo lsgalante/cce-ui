@@ -2423,11 +2423,18 @@ Constraint respected: **each crate still builds standalone** — the new core is
       reads through canonical getters (legacy-config → canonical-getter equivalence), plus
       a canonical-spelling test proving parse, precedence over legacy, and legacy-only
       fallback. 245 lib tests green; designer A/B AE=0.
-    - **7a-2 — pending.** Migrate the other crates' callers per-repo (cce-compositor's
-      `server/config.rs` is the largest at 9 sites — it reads the SHARED silhouette values,
-      so that migration must not change which slot it reads), then flip the `backplate_*`
-      wrappers to `#[deprecated]`. The `Application::is_movable_backplate_at` trait-method
-      NAME is 7b vocabulary (behavioral role naming), not 7a's.
+    - **7a-2 — pending.** Migrate the other crates' callers per-repo, then flip the
+      `backplate_*` wrappers to `#[deprecated]`. The 7a-1 census, by call sites:
+      cce-compositor `server/config.rs` (9 — reads the SHARED silhouette values; the
+      migration must not change which slot it reads), cce-files (10 across main/
+      preview_pane/pages), cce-test-interface (11), cce-data-editor (5), cce-terminal (3),
+      cce-graph (2), cce-fonts (2), cce-color-editor (2), cce-cloud (2), cce-text-editor
+      (1), cce-system-interface `main.rs` (1), cce-authenticator (1). DONE: cce-designer
+      (vk-smoke, the exemplar). CONFIRMED CLEAN, nothing to migrate: cce-status-interface
+      (its bar styling reads `module { }` keys + `/style/status/*`, not the root-plate
+      getters — verified by its owning session 2026-08-25). The
+      `Application::is_movable_backplate_at` trait-method NAME is 7b vocabulary
+      (behavioral role naming), not 7a's.
   - **7b — `PlateSpec` + window-corner math toolkit-side.** Introduce the spec, port
     `pane_plate_radii` in, and give the engine a root-plate paint path fed by a spec instead of
     each app's hand-rolled quads (DemoApp first, then the clients). The designer's per-pane
