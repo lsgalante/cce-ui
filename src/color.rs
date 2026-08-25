@@ -1234,6 +1234,7 @@ pub fn root_plate_corner_radius() -> f32 {
 
 /// Legacy alias for [`root_plate_corner_radius`] (RFC Phase 7a; callers
 /// migrate in 7a-2, after which this gains `#[deprecated]`).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_corner_radius() -> f32 {
     root_plate_corner_radius()
 }
@@ -1565,6 +1566,7 @@ pub fn root_plate_opacity() -> f32 {
 }
 
 /// Legacy alias for [`root_plate_opacity`] (RFC Phase 7a).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn active_backplate_opacity() -> f32 {
     root_plate_opacity()
 }
@@ -1655,6 +1657,7 @@ pub fn root_plate_menubar_color() -> [f32; 4] {
 }
 
 /// Legacy alias for [`root_plate_menubar_color`] (RFC Phase 7a).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_menubar_color() -> [f32; 4] {
     root_plate_menubar_color()
 }
@@ -1668,6 +1671,7 @@ pub fn root_plate_menubar_text_color() -> [f32; 4] {
 }
 
 /// Legacy alias for [`root_plate_menubar_text_color`] (RFC Phase 7a).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_menubar_text_color() -> [f32; 4] {
     root_plate_menubar_text_color()
 }
@@ -1681,6 +1685,7 @@ pub fn root_plate_menubar_blur() -> bool {
 }
 
 /// Legacy alias for [`root_plate_menubar_blur`] (RFC Phase 7a).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_menubar_blur() -> bool {
     root_plate_menubar_blur()
 }
@@ -1694,6 +1699,7 @@ pub fn root_plate_statusbar_color() -> [f32; 4] {
 }
 
 /// Legacy alias for [`root_plate_statusbar_color`] (RFC Phase 7a).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_statusbar_color() -> [f32; 4] {
     root_plate_statusbar_color()
 }
@@ -1707,6 +1713,7 @@ pub fn root_plate_statusbar_text_color() -> [f32; 4] {
 }
 
 /// Legacy alias for [`root_plate_statusbar_text_color`] (RFC Phase 7a).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_statusbar_text_color() -> [f32; 4] {
     root_plate_statusbar_text_color()
 }
@@ -1720,6 +1727,7 @@ pub fn root_plate_statusbar_blur() -> bool {
 }
 
 /// Legacy alias for [`root_plate_statusbar_blur`] (RFC Phase 7a).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_statusbar_blur() -> bool {
     root_plate_statusbar_blur()
 }

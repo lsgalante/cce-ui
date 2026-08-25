@@ -2423,8 +2423,17 @@ Constraint respected: **each crate still builds standalone** — the new core is
       reads through canonical getters (legacy-config → canonical-getter equivalence), plus
       a canonical-spelling test proving parse, precedence over legacy, and legacy-only
       fallback. 245 lib tests green; designer A/B AE=0.
-    - **7a-2 — pending.** Migrate the other crates' callers per-repo, then flip the
-      `backplate_*` wrappers to `#[deprecated]`. The 7a-1 census, by call sites:
+    - **7a-2 — DONE (2026-08-25).** All caller crates migrated per-repo and the
+      `backplate_*` wrappers flipped to `#[deprecated]`. Census correction: the compositor's
+      9 census hits were all its OWN vocabulary (serde fields + a local default fn) — zero
+      cce-ui getter calls; what it actually needed was the CANONICAL KDL alias, since it
+      parses the silhouette block from the shared config.kdl itself (`plate { root ... }`
+      accepted canonical-first, legacy `backplate` unchanged, tested both ways —
+      cce-compositor@0ef2901). Implementation trap for the record: exact-match renaming of
+      `backplate_corner_radius()` also matched the compositor's
+      `default_backplate_corner_radius()` calls while its serde `default = "..."` string
+      attribute did not — audit renames for substring collisions against local wrappers.
+      The original census, by call sites:
       cce-compositor `server/config.rs` (9 — reads the SHARED silhouette values; the
       migration must not change which slot it reads), cce-files (10 across main/
       preview_pane/pages), cce-test-interface (11), cce-data-editor (5), cce-terminal (3),
@@ -2434,7 +2443,9 @@ Constraint respected: **each crate still builds standalone** — the new core is
       (its bar styling reads `module { }` keys + `/style/status/*`, not the root-plate
       getters — verified by its owning session 2026-08-25). The
       `Application::is_movable_backplate_at` trait-method NAME is 7b vocabulary
-      (behavioral role naming), not 7a's.
+      (behavioral role naming), not 7a's. With 7a-2 done, 7a is COMPLETE: new code uses
+      `root_plate_*` / `plate.root.*`; the deprecated wrappers and the legacy config
+      spelling remain indefinitely for out-of-tree configs.
   - **7b — `PlateSpec` + window-corner math toolkit-side.** Introduce the spec, port
     `pane_plate_radii` in, and give the engine a root-plate paint path fed by a spec instead of
     each app's hand-rolled quads (DemoApp first, then the clients). The designer's per-pane

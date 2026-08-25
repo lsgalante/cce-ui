@@ -1781,6 +1781,7 @@ pub fn root_plate_padding() -> f32 {
 
 /// Legacy alias for [`root_plate_padding`] (RFC Phase 7a; callers migrate in
 /// 7a-2, after which this gains `#[deprecated]`).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_padding() -> f32 {
     root_plate_padding()
 }
@@ -1795,6 +1796,7 @@ pub fn root_plate_gap() -> f32 {
 }
 
 /// Legacy alias for [`root_plate_gap`] (RFC Phase 7a).
+#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
 pub fn backplate_gap() -> f32 {
     root_plate_gap()
 }
