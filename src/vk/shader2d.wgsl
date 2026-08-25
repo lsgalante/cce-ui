@@ -354,8 +354,9 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     //   p_radii = [sag, belly radius, belly half-width, blend k] px;
     //   p_host  = [sheet bottom-corner radius px, edge clarity 0-1, dome
     //              amplitude, attach (top-corner) radius px];
-    //   p_spec_tint = [core density, _, _, bottom-bow edge rise px] — a
-    //     droplet's glint is always white, so the tint RGB slots are free;
+    //   p_spec_tint = [core density, contact-shadow reach px, contact-shadow
+    //     strength, bottom-bow edge rise px] — a droplet's glint is always
+    //     white, so the tint RGB slots are free;
     //   p_mat.w = fresnel rim crest amplitude (droplets carve nothing, so the
     //             AO slot is free); p_light.w = shaded band width px.
     // The silhouette is the smooth union of a film SHEET attached to the top
@@ -420,7 +421,23 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let din = -d;
         let aa2 = clamp(din + 0.5, 0.0, 1.0);
         if (aa2 <= 0.0) {
-            discard;
+            // Outside the silhouette: the contact shadow — a soft dark
+            // falloff cast below the drop's lower arc (weighted by the
+            // outward gradient's downward component, so the attach line and
+            // sides stay clean). The cover quad overhangs the box by the
+            // reach to give these fragments pixels to land on.
+            let sh_reach = rrect_clip.p_spec_tint.y;
+            let sh_amp = rrect_clip.p_spec_tint.z;
+            if (sh_reach < 0.5 || sh_amp <= 0.0) {
+                discard;
+            }
+            let down_sh = clamp(g.y, 0.0, 1.0);
+            let sfall = 1.0 - clamp(d / sh_reach, 0.0, 1.0);
+            let sa = sh_amp * sfall * sfall * down_sh;
+            if (sa <= 0.004) {
+                discard;
+            }
+            return vec4f(0.0, 0.0, 0.0, sa);
         }
         var base = vcol;
         if (vcol.a < 0.0) {

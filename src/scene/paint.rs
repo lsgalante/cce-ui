@@ -130,6 +130,12 @@ pub struct DropletSpec {
     /// faint upside-down image of the scene a real hanging drop shows in its
     /// belly. Client-side ignored, like `refr`.
     pub ghost: f32,
+    /// Contact-shadow strength (0-1): a soft dark falloff cast below the
+    /// drop's lower arc, outside the silhouette — the volume cue of a bead
+    /// sitting proud of the surface. The host must leave room beneath the
+    /// drop box for it (the status bar insets the box by
+    /// [`DropletSpec::shadow_gap`]). 0 disables it.
+    pub shadow: f32,
 }
 
 impl DropletSpec {
@@ -169,6 +175,7 @@ impl DropletSpec {
                 "core" => spec.core = v,
                 "refr" => spec.refr = v,
                 "ghost" => spec.ghost = v,
+                "shadow" => spec.shadow = v,
                 _ => log::warn!("droplet spec: unknown key '{}' — skipped", key),
             }
         }
@@ -194,6 +201,17 @@ impl DropletSpec {
         }
         let bow = (self.bow.clamp(0.0, 0.5) * h).min(hy * 0.9);
         (sr, ar, bow)
+    }
+
+    /// Vertical room (logical px) a host should leave BELOW the drop box for
+    /// the contact shadow, given the full slot height. One place, so the
+    /// bar's reserved gap and the shader's falloff reach stay proportioned.
+    pub fn shadow_gap(&self, slot_h: f32) -> f32 {
+        if self.shadow > 0.0 {
+            (0.16 * slot_h).ceil()
+        } else {
+            0.0
+        }
     }
 }
 
@@ -223,6 +241,7 @@ impl Default for DropletSpec {
             core: 0.35,
             refr: 0.0,
             ghost: 0.0,
+            shadow: 0.35,
         }
     }
 }

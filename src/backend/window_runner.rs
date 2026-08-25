@@ -1981,7 +1981,17 @@ pub fn tessellate_display_list(
                 // fractions resolve against the concrete rect here, clamped so
                 // small or narrow boxes stay well-formed (a belly wider than
                 // the box would turn the SDF interior inside out).
-                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                // The cover quad grows sideways and BELOW the box by the
+                // contact shadow's reach — shadow fragments live outside the
+                // silhouette, so they need covered pixels to shade.
+                let sh_reach = if spec.shadow > 0.0 { (0.18 * rect.height).max(2.0) } else { 0.0 };
+                verts.extend(quad_vertices(
+                    rect.x - sh_reach,
+                    rect.y,
+                    rect.width + 2.0 * sh_reach,
+                    rect.height + sh_reach,
+                    sw, sh, *color,
+                ));
                 let hx = rect.width * 0.5;
                 let hy = rect.height * 0.5;
                 let sag = spec.sag.clamp(0.0, 0.9) * rect.height;
@@ -2025,8 +2035,14 @@ pub fn tessellate_display_list(
                     material: [plate_mat[0], spec.gleam, spec.shine, spec.rim],
                     host: [sr * scale, spec.clarity.clamp(0.0, 1.0), spec.dome, ar * scale],
                     // Droplet glints are always white, so the tint RGB slots
-                    // carry droplet params instead: x = core density.
-                    specular_tint: [spec.core.clamp(0.0, 2.0), 1.0, 1.0, bow * scale],
+                    // carry droplet params instead: x = core density,
+                    // y = contact-shadow reach px, z = shadow strength.
+                    specular_tint: [
+                        spec.core.clamp(0.0, 2.0),
+                        sh_reach * scale,
+                        spec.shadow.clamp(0.0, 1.0),
+                        bow * scale,
+                    ],
                     mode: 10.0,
                     shape: spec.curve.clamp(2.0, 6.0),
                 });
