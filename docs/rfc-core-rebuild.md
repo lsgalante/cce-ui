@@ -2564,8 +2564,12 @@ Constraint respected: **each crate still builds standalone** — the new core is
         releases reliably arrive there), a per-app dispatch reality any adopter must
         check first. The designer's release-opened menu means the two feel identical.
       - The detached-window CSD packaging question is ANSWERED (2026-08-25,
-        cce-files@805be06 — the preview pane detaches for real now): **no new
-        toolkit packaging was needed.** A detached window is an ordinary
+        cce-files@805be06 — a working, end-to-end-verified preview-pane detach;
+        RETIRED the same day at the user's direction, cce-files@f2a89d5:
+        detach is designer-only for now. The answers below were derived from
+        that implementation and stand; the code is one revert away at 805be06
+        for whichever app adopts detach next): **no new toolkit packaging was
+        needed.** A detached window is an ordinary
         `Application` whose root plate carries the detached role (all window
         corners); the compositor's decoration IS the CSD in this DE (border =
         grab surface, no titlebars), and plate_dock's existing pieces —
@@ -2591,10 +2595,11 @@ Constraint respected: **each crate still builds standalone** — the new core is
 
   All numbered stages DONE (2026-08-25), and all three open questions CLOSED the same
   day: cce-cloud overlays share the silhouette (7b-2); the first non-designer detach
-  (cce-files' preview pane, 7c-2) answered CSD packaging — nothing new was needed, the
-  conventions are recorded there — and established that detach dictates no new
-  `PlateSpec` fields, leaving the designer's spec-OBJECT emission optional and
-  unblocked. Phase 7 is COMPLETE.
+  (cce-files' preview pane — built, verified, then retired by product choice the same
+  day, see 7c-2) answered CSD packaging — nothing new was needed, the conventions are
+  recorded there — and established that detach dictates no new `PlateSpec` fields,
+  leaving the designer's spec-OBJECT emission optional and unblocked. The designer
+  remains the only detach host. Phase 7 is COMPLETE.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
