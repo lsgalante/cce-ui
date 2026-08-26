@@ -1,6 +1,7 @@
 use std::time::Instant;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
+    data_device_manager::DataDeviceManagerState,
     delegate_compositor, delegate_keyboard, delegate_pointer, delegate_registry,
     delegate_seat, delegate_shm, delegate_xdg_shell, delegate_xdg_window, delegate_output,
     delegate_layer,
@@ -2851,6 +2852,29 @@ pub trait Application: Sized + 'static {
         (width, height)
     }
     
+    /// Mime types this app accepts from a drag, in the app's own preference
+    /// order (the source's order is ignored — a browser lists `text/html`
+    /// before `text/uri-list` and which is more useful is the app's call).
+    /// The default is empty: the app accepts nothing and drags over it read
+    /// as "can't drop here", which is what every client did before drops
+    /// existed. Opting in also requires [`Application::handle_drop`].
+    fn drop_mimes(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// A completed drop: `data` is everything the source wrote for `mime`,
+    /// and `pos` is where it was released in the app's logical coordinates.
+    /// Runs on the main loop, after the transfer finished — this is not the
+    /// place to block, since the compositor is waiting on the next frame.
+    fn handle_drop(
+        &mut self,
+        _mime: &str,
+        _data: &[u8],
+        _pos: LogicalPosition,
+        _needs_rebuild: &mut bool,
+    ) {
+    }
+
     fn handle_pointer_move(&mut self, pos: LogicalPosition, needs_rebuild: &mut bool);
     fn handle_mouse_input(&mut self, button: MouseButton, state: ElementState, pos: LogicalPosition, needs_rebuild: &mut bool) -> Option<Self::Message>;
     fn handle_mouse_wheel(&mut self, delta: &MouseScrollDelta, pos: LogicalPosition, needs_rebuild: &mut bool);
@@ -3114,6 +3138,24 @@ pub struct EngineState<A: Application> {
     /// in the render pass can borrow the buffers (Phase 6 —
     /// [`Application::display_list_text`]).
     pub dl_text_items: Vec<TextItem>,
+
+    /// Drag-and-drop destination state (see [`crate::backend::dnd`]). The
+    /// manager is absent when the compositor exposes no wl_data_device_manager;
+    /// every drop path then no-ops.
+    pub data_device_manager: Option<smithay_client_toolkit::data_device_manager::DataDeviceManagerState>,
+    pub data_devices: Vec<smithay_client_toolkit::data_device_manager::data_device::DataDevice>,
+    /// Mime type accepted for the in-flight drag; `None` means the app wants
+    /// nothing this offer carries, so the drop is declined.
+    pub drag_mime: Option<String>,
+    /// Surface-local logical position of the last drag enter/motion — the
+    /// drop point handed to [`Application::handle_drop`].
+    pub drag_pos: LogicalPosition,
+    /// Reader threads post completed drops here; the main loop drains it.
+    pub drop_tx: Option<calloop::channel::Sender<crate::backend::dnd::DroppedData>>,
+    /// The offer being read right now, held so it can be finished only once
+    /// the transfer is actually done (see `dnd::drop_performed`).
+    pub pending_drop_offer:
+        Option<smithay_client_toolkit::data_device_manager::data_offer::DragOffer>,
 }
 
 impl<A: Application> EngineState<A> {
@@ -3796,7 +3838,8 @@ impl<A: Application> SeatHandler for EngineState<A> {
         &mut self.seat_state
     }
     
-    fn new_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+    fn new_seat(&mut self, _conn: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        self.ensure_data_device(qh, &seat);
         self.seats.push(seat);
     }
     
@@ -3807,6 +3850,10 @@ impl<A: Application> SeatHandler for EngineState<A> {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        // Every seat arrives here, unlike `new_seat` — SCTK binds the seats
+        // that already exist at startup without announcing them, so a device
+        // created only there is never created at all on a normal launch.
+        self.ensure_data_device(qh, &seat);
         if capability == Capability::Pointer && self.pointer.is_none() {
             let surface = self.compositor_state.create_surface::<Self>(qh);
             let themed_pointer = self.seat_state.get_pointer_with_theme(
@@ -4642,6 +4689,11 @@ pub fn run<A: Application>() {
     // Outlives every session: worker threads hold this Sender, and the app's
     // own event sources are registered on this loop once.
     let (sender, channel) = calloop::channel::channel::<A::Message>();
+    // Drop payloads come back from the per-drop reader threads (see
+    // `backend::dnd`); registered once, like the app channel, because the
+    // loop outlives a reconnect while the EngineState does not.
+    let (drop_tx, drop_rx) =
+        calloop::channel::channel::<crate::backend::dnd::DroppedData>();
     let mut event_loop = match EventLoop::try_new() {
         Ok(l) => l,
         Err(e) => {
@@ -4661,6 +4713,26 @@ pub fn run<A: Application>() {
             }
         })
         .unwrap();
+    event_loop
+        .handle()
+        .insert_source(drop_rx, |event, _metadata, app_state: &mut EngineState<A>| {
+            if let calloop::channel::Event::Msg(drop) = event {
+                // The transfer is complete, so the source can be released now
+                // — doing it any earlier costs the payload.
+                if let Some(offer) = app_state.pending_drop_offer.take() {
+                    offer.finish();
+                    offer.destroy();
+                }
+                let mut rebuild = false;
+                if let Some(app) = app_state.inner.as_mut() {
+                    app.handle_drop(&drop.mime, &drop.bytes, drop.pos, &mut rebuild);
+                }
+                if rebuild {
+                    app_state.redraw = true;
+                }
+            }
+        })
+        .unwrap();
 
     let mut app: Option<A> = None;
     let mut sources_registered = false;
@@ -4669,7 +4741,7 @@ pub fn run<A: Application>() {
     loop {
         let started = std::time::Instant::now();
         let (returned_app, end) =
-            run_session(&mut event_loop, sender.clone(), app.take(), !sources_registered);
+            run_session(&mut event_loop, sender.clone(), drop_tx.clone(), app.take(), !sources_registered);
         app = returned_app;
         sources_registered = true;
 
@@ -4714,6 +4786,7 @@ pub fn run<A: Application>() {
 fn run_session<'l, A: Application>(
     event_loop: &mut EventLoop<'l, EngineState<A>>,
     sender: calloop::channel::Sender<A::Message>,
+    drop_tx: calloop::channel::Sender<crate::backend::dnd::DroppedData>,
     existing_app: Option<A>,
     register_app_sources: bool,
 ) -> (Option<A>, SessionEnd) {
@@ -4743,6 +4816,12 @@ fn run_session<'l, A: Application>(
     let pointer_gestures: Option<ZwpPointerGesturesV1> = globals.bind(&qh, 1..=3, ()).ok();
 
     let mut engine_state = EngineState {
+        data_device_manager: DataDeviceManagerState::bind(&globals, &qh).ok(),
+        data_devices: Vec::new(),
+        drag_mime: None,
+        drag_pos: LogicalPosition::new(0.0, 0.0),
+        drop_tx: Some(drop_tx),
+        pending_drop_offer: None,
         registry_state: RegistryState::new(&globals),
         compositor_state,
         xdg_shell_state,
