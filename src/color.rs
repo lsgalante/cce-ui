@@ -661,6 +661,19 @@ pub fn reload_colors(content: &str) {
     parse_and_set_colors(content);
 }
 
+/// Test-only: the color state is process-global, so any test that calls
+/// [`reload_colors`] and then asserts getter values races every other such
+/// test on the parallel harness. Each of those tests must hold this lock
+/// across its reload + asserts, and should fire the once-per-process config
+/// loads ([`load_colors_once`] via any getter, and
+/// `layout::lazy_init_style_registry`) inside the lock BEFORE its reload, so
+/// neither can rewrite the state from the live config file mid-assert.
+#[cfg(test)]
+pub(crate) fn test_color_state_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub fn dropdown_background_color() -> [f32; 4] {
     load_colors_once();
     *DROPDOWN_BACKGROUND_COLOR.read().unwrap()

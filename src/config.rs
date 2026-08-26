@@ -944,8 +944,12 @@ mod tests {
 
     #[test]
     fn test_backplate_menubar_statusbar_styling() {
-        // Trigger load_colors_once first to initialize the Once block from the real config file
+        // Global color state: serialize against the other reload_colors tests,
+        // and fire both once-per-process live-config loads before our reload
+        // so neither can rewrite the state mid-assert.
+        let _guard = crate::color::test_color_state_lock();
         let _ = crate::color::backplate_statusbar_blur();
+        crate::layout::lazy_init_style_registry();
 
         let content = r##"
             style {
@@ -990,7 +994,12 @@ mod tests {
     /// both spellings are present (canonical-first pointer chains).
     #[test]
     fn test_plate_root_canonical_spelling() {
+        // Global color state: serialize against the other reload_colors tests,
+        // and fire both once-per-process live-config loads before our reload
+        // so neither can rewrite the state mid-assert.
+        let _guard = crate::color::test_color_state_lock();
         let _ = crate::color::root_plate_corner_radius();
+        crate::layout::lazy_init_style_registry();
 
         let content = r##"
             style {
