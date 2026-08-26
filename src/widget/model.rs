@@ -165,6 +165,15 @@ pub trait Paint {
         }
     }
 
+    /// [`paint`](Paint::paint) with the live [`UiContext`] — what `paint_self` actually calls.
+    /// The default forwards to `paint`, so ordinary widgets implement only that. Override this
+    /// for composites whose own geometry aggregates hover/coverage-dependent child chrome that
+    /// needs the context (ParametersBg): child-holding widgets that never entered the arena tree
+    /// have no other way to reach it from the paint path.
+    fn paint_ui(&self, _ui: &UiContext, rect: Rect, ctx: &mut PaintCtx) {
+        self.paint(rect, ctx);
+    }
+
     /// Whether the paint walk clips this widget's children to its `rect` (scroll/backplate
     /// containers). Default: no.
     fn clips_children(&self) -> bool {
@@ -1244,7 +1253,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
 
     fn paint_self(&self, ui: &UiContext, ctx: &mut PaintCtx) {
         let mut tmp = PaintCtx::new();
-        Paint::paint(&self.inner, self.content_rect(), &mut tmp);
+        Paint::paint_ui(&self.inner, ui, self.content_rect(), &mut tmp);
         // Subtree painters (paints_own_subtree) author their COMPLETE text in paint() —
         // per-child fonts and clip bounds included — so their Text prims pass through
         // verbatim and the single-font own-labels re-derivation below is skipped

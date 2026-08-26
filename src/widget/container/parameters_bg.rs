@@ -1362,9 +1362,47 @@ impl Paint for ParametersBg {
         Some(crate::layout::control_label_font())
     }
 
-    /// Scene-path emission (the designer renders through the legacy hatches instead): the row
-    /// chrome plus the viewport-filtered labels. The background plate stays out — see
-    /// [`color`](Paint::color).
+    /// The COMPLETE row chrome — everything the legacy hatches carry, in the hosts' canonical
+    /// draw order: the controls' rounded wells, the flat-style section outline fillets, the
+    /// relief steps (after the fills so the walls shade what they cross), the section carves'
+    /// concave throat fillets, the slider-thumb spheres, the scene-path rows, then the flat
+    /// plain-quad chrome. What stays OUT, deliberately: the background plate (see
+    /// [`color`](Paint::color)), the scrollbar (hosts place its depth — the designer straddles
+    /// it around the pane plate), and text (`paint_self`'s own-labels bridge carries the
+    /// per-row fonts and code-box bounds). Hosts clip this to their pane viewport — a rect
+    /// clip pushed here would not survive `paint_self`'s replay.
+    fn paint_ui(&self, ui: &UiContext, _rect: Rect, ctx: &mut PaintCtx) {
+        if !self.visible {
+            return;
+        }
+        for (qx, qy, qw, qh, qr, qc, corners) in self.rounded_quads(ui) {
+            ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
+        }
+        for (acx, acy, ar, at, a0, a1, ac) in self.arcs() {
+            ctx.arc(acx, acy, ar, at, a0, a1, ac);
+        }
+        for (rx, ry, rw, rh, radii, rd, raised, edges) in self.reliefs() {
+            if raised {
+                ctx.boss_edges(Rect { x: rx, y: ry, width: rw, height: rh }, radii, rd, edges);
+            } else {
+                ctx.recess_edges(Rect { x: rx, y: ry, width: rw, height: rh }, radii, rd, edges);
+            }
+        }
+        for (fcx, fcy, fr, fd, fs) in self.section_fillets() {
+            ctx.concave_fillet(fcx, fcy, fr, fd, fs, false);
+        }
+        for (scx, scy, sr, sc) in self.spheres() {
+            ctx.sphere(scx, scy, sr, sc);
+        }
+        self.paint_scene_rows(ctx);
+        for (qx, qy, qw, qh, qc) in self.plain_quads() {
+            ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+        }
+    }
+
+    /// Ui-less emission (the [`paint_ui`](Paint::paint_ui) override above is what `paint_self`
+    /// runs): the flat subset plus the scrollbar, kept for direct callers only. The background
+    /// plate stays out — see [`color`](Paint::color).
     fn paint(&self, _rect: Rect, ctx: &mut PaintCtx) {
         for (qx, qy, qw, qh, qc) in self.plain_quads() {
             ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
