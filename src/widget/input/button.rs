@@ -18,6 +18,12 @@ pub enum ButtonKind {
     Reset,
     ListRow,
     CopyIcon,
+    /// A row in a menu: no plate and no border of its own, transparent until
+    /// hovered, because a menu draws ONE recess around the whole run and the
+    /// items butt together inside it. Keeps button typography and honours
+    /// `with_justify`, which is what separates it from `ListRow` (list font,
+    /// list justification config).
+    MenuItem,
 }
 
 #[derive(Clone)]
@@ -102,6 +108,12 @@ impl Button {
         Button::adapted(ButtonKind::ListRow, x, y, w, h)
     }
 
+    /// A menu row — see [`ButtonKind::MenuItem`]. The host draws the shared
+    /// recess; this draws only its label and its hover.
+    pub fn new_menu_item(x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
+        Button::adapted(ButtonKind::MenuItem, x, y, w, h)
+    }
+
     pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
         let b = Button::adapted(ButtonKind::CopyIcon, x, y, w, h);
         // Copy icon face (cce-icons); label fallback if the icon set is
@@ -182,7 +194,10 @@ impl Button {
     /// `layout::render_widget` both read, so a flat host's groove can't drift
     /// from the drawn one.
     pub fn inset_face(&self, rect: Rect) -> Option<(Rect, f32, f32, [f32; 4])> {
-        if !self.raised || self.kind == ButtonKind::ListRow {
+        if !self.raised
+            || self.kind == ButtonKind::ListRow
+            || self.kind == ButtonKind::MenuItem
+        {
             return None;
         }
         let radius = crate::layout::button_corner_radius();
@@ -285,6 +300,17 @@ impl Paint for Button {
                     colors::button_background_color()
                 }
             }
+            ButtonKind::MenuItem => {
+                // Idle is fully transparent so the shared recess reads as one
+                // continuous well; only the hovered row lifts out of it.
+                if self.pressed {
+                    colors::button_press_color()
+                } else if self.hovered {
+                    colors::button_hover_color()
+                } else {
+                    [0.0, 0.0, 0.0, 0.0]
+                }
+            }
             ButtonKind::Reset => {
                 if self.pressed {
                     colors::RESET_BTN_PRESS
@@ -366,7 +392,7 @@ impl Paint for Button {
             // opt-out too: a focused row must show the ring, which is the whole point.
             let border_color = if self.focused {
                 Some(colors::tree_border_focus_color())
-            } else if self.kind == ButtonKind::ListRow {
+            } else if self.kind == ButtonKind::ListRow || self.kind == ButtonKind::MenuItem {
                 None
             } else {
                 colors::button_border_color()
