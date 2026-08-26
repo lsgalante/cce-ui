@@ -180,6 +180,15 @@ impl Paint for Spreadsheet {
         colors::plate_border_color().map(|bc| (bc, colors::plate_border_thickness()))
     }
 
+    /// Subtree painter: `paint` authors the pane's complete text with
+    /// per-column clamp bounds, so its Text prims must pass through
+    /// `paint_self` verbatim — the own-labels re-derivation drops per-prim
+    /// bounds, which is exactly how long cell values used to overlap into
+    /// their neighbor columns on narrow panes.
+    fn paints_own_subtree(&self) -> bool {
+        true
+    }
+
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         let scroll = self.geom(rect).map_or(0.0, |g| g.scroll);
@@ -259,6 +268,17 @@ impl Paint for Spreadsheet {
                 [1.0, 1.0, 1.0, 0.05],
             );
         }
+        // Every label clamps to its own column (a 4px gutter short of the
+        // divider), so a long value cuts off instead of running under its
+        // neighbor — the overlap that made narrow panes unreadable.
+        let col_bounds = |col: usize, top: f32, height: f32| -> Option<[f32; 4]> {
+            Some([
+                x + col_w * col as f32,
+                top,
+                x + col_w * (col + 1) as f32 - 4.0,
+                top + height,
+            ])
+        };
         for (i, header) in self.headers.iter().enumerate() {
             let cx = x + col_w * i as f32 + 8.0;
             let (label, color) = match self.sort {
@@ -268,7 +288,7 @@ impl Paint for Spreadsheet {
                 }
                 _ => (header.clone(), [0xdd, 0xdd, 0xee]),
             };
-            ctx.text(label, cx, y + 6.0, 12.0, color);
+            ctx.text_with(label, cx, y + 6.0, 12.0, color, None, col_bounds(i, y, HEADER_H));
         }
         for (i, &src) in self.order.iter().enumerate() {
             let ry = y + HEADER_H + i as f32 * ROW_H - scroll;
@@ -277,7 +297,7 @@ impl Paint for Spreadsheet {
             }
             for (col_idx, val) in self.rows[src].iter().enumerate().take(n_cols) {
                 let cx = x + col_w * col_idx as f32 + 8.0;
-                ctx.text(val.clone(), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc]);
+                ctx.text_with(val.clone(), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, ry, ROW_H));
             }
         }
     }
