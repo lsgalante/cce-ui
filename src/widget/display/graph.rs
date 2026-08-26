@@ -188,6 +188,30 @@ impl Graph {
         Some((nx, ny, self.grid_size_x, self.grid_size_y))
     }
 
+    /// The grid cell an in-flight node drag will deposit on, as its pixel
+    /// rect — hosts highlight it as the drop target. Runs the SAME
+    /// resolution as `commit_drag` (round to the nearest cell, then
+    /// `find_empty_cell` walks off occupied ones), so the highlight never
+    /// lies about where the node actually lands. None outside a node drag.
+    pub fn drop_target_cell_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        let idx = self.dragging_idx?;
+        let (nx, ny) = self.drag_node_pos?;
+        let step_x = self.grid_size_x + self.skipped_col_w;
+        let step_y = self.grid_size_y + self.skipped_row_h;
+        if step_x <= 0.0 || step_y <= 0.0 {
+            return None;
+        }
+        let c = ((nx - self.grid_origin_x) / step_x).round();
+        let r = ((ny - self.grid_origin_y) / step_y).round();
+        let (c, r) = self.find_empty_cell(c, r, Some(idx));
+        Some((
+            self.grid_origin_x + c * step_x,
+            self.grid_origin_y + r * step_y,
+            self.grid_size_x,
+            self.grid_size_y,
+        ))
+    }
+
     pub fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool {
         for i in 0..self.nodes.len() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
@@ -1094,6 +1118,7 @@ impl GraphController for Graph {
     fn get_nodes(&self) -> Vec<GraphNode> { self.nodes.clone() }
     fn cell_corner_radius(&self) -> f32 { Graph::cell_corner_radius(self) }
     fn geometry_quads_tagged(&self, rect: Rect) -> Vec<TaggedQuad> { Graph::geometry_quads_tagged(self, rect) }
+    fn drop_target_cell_rect(&self) -> Option<(f32, f32, f32, f32)> { Graph::drop_target_cell_rect(self) }
     fn selected_node(&self) -> Option<usize> { self.selected_idx }
     fn set_selected_node(&mut self, idx: Option<usize>) {
         self.selected_idx = idx;

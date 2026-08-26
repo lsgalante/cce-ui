@@ -272,4 +272,5 @@ impl GraphController for ContentBg {
     fn node_at(&self, _px: f32, _py: f32) -> Option<usize> { None }
     fn cell_corner_radius(&self) -> f32 { 0.0 }
     fn geometry_quads_tagged(&self, _rect: crate::scene::layout::Rect) -> Vec<crate::widget::TaggedQuad> { Vec::new() }
+    fn drop_target_cell_rect(&self) -> Option<(f32, f32, f32, f32)> { None }
 }

@@ -612,6 +612,10 @@ pub trait GraphController {
     /// rounded corners — for hosts that draw the graph's quads themselves
     /// (the designer) and want cells as superellipse tiles.
     fn geometry_quads_tagged(&self, rect: crate::scene::layout::Rect) -> Vec<TaggedQuad>;
+    /// The pixel rect of the cell an in-flight node drag will deposit on
+    /// (`commit_drag`'s resolution), for hosts' drop-target highlight.
+    /// None outside a node drag.
+    fn drop_target_cell_rect(&self) -> Option<(f32, f32, f32, f32)>;
 }
 
 pub trait SpreadsheetController {
