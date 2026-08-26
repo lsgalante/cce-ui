@@ -282,13 +282,16 @@ impl Paint for Spreadsheet {
         // Ellipsize what the clamp would cut, so truncation reads as
         // deliberate. A char budget from ONE cached measurement is exact
         // because the DE label font is monospace; the clamp bounds stay on
-        // as the backstop for any fallback-font drift.
+        // as the backstop for any fallback-font drift. Below three columns'
+        // worth of budget the mark would REPLACE the content (a 19px column
+        // fits one glyph — a bare "…" says less than a clipped digit), so
+        // very narrow columns keep the raw string and let the clamp cut it.
         let fam = crate::layout::control_label_font();
         let char_w =
             (crate::widget::display::measure_text_width("0123456789", &fam, 12.0) / 10.0).max(1.0);
-        let budget = (((col_w - 12.0) / char_w).floor() as usize).max(1);
+        let budget = ((col_w - 12.0) / char_w).floor() as usize;
         let fit = move |s: String| -> String {
-            if s.chars().count() <= budget {
+            if budget < 3 || s.chars().count() <= budget {
                 return s;
             }
             let mut out: String = s.chars().take(budget - 1).collect();
