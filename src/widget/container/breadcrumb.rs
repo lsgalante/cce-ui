@@ -342,6 +342,15 @@ impl Paint for Breadcrumb {
 }
 
 impl Input for Breadcrumb {
+    /// The widget claims only its segment run, not its laid-out strip: hosts
+    /// float the breadcrumb over live content (the designer's graph runs
+    /// underneath), and presses on the strip's empty remainder must fall
+    /// through to what's beneath. Right-clicks sharpen with it — the
+    /// copy-path menu opens over the run, the content's own menu elsewhere.
+    fn hit(&self, rect: Rect, px: f32, py: f32) -> bool {
+        self.seg_at(rect, px, py).is_some()
+    }
+
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
             Event::PointerMove { x: px, y: py, .. } => {
