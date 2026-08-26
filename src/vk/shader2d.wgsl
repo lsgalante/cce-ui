@@ -513,7 +513,15 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
         let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
         let spec = roll_spec(sv);
-        return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
+        // p_spec_tint.w = 1 marks an accent-tinted plate (the focused-pane
+        // treatment): the ENTIRE rolled edge takes the accent color — the
+        // roll's material mixes toward the tint across its coverage (f = 1 at
+        // the silhouette, 0 on the face) with the light/shade profile intact —
+        // instead of only the specular glint. Neutral plates (w = 0) shade
+        // exactly as before.
+        let tw = rrect_clip.p_spec_tint.w;
+        let rgb = mix(base.rgb, rrect_clip.p_spec_tint.rgb, tw * f);
+        return vec4f(rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
     }
 
     // Free-floating recess, boss, or ridge (one not grouped into a host plate —

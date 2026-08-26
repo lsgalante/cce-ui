@@ -1693,7 +1693,13 @@ pub fn tessellate_display_list(
                 // curvature-matched span.
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
                 let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, false);
-                p.specular_tint = [tint[0], tint[1], tint[2], 0.0];
+                // w = 1 marks an accent-tinted plate (the focused-pane
+                // treatment): the shader then colors the WHOLE rolled edge
+                // with the tint, not just the specular glint — matching the
+                // free-carve path's tinted-well convention. Neutral white
+                // keeps w = 0 (spec-only, a no-op multiply).
+                let full = if *tint == [1.0, 1.0, 1.0] { 0.0 } else { 1.0 };
+                p.specular_tint = [tint[0], tint[1], tint[2], full];
                 plate = Some(p);
                 made_plate = Some(*rect);
             }
