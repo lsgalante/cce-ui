@@ -279,6 +279,22 @@ impl Paint for Spreadsheet {
                 top + height,
             ])
         };
+        // Ellipsize what the clamp would cut, so truncation reads as
+        // deliberate. A char budget from ONE cached measurement is exact
+        // because the DE label font is monospace; the clamp bounds stay on
+        // as the backstop for any fallback-font drift.
+        let fam = crate::layout::control_label_font();
+        let char_w =
+            (crate::widget::display::measure_text_width("0123456789", &fam, 12.0) / 10.0).max(1.0);
+        let budget = (((col_w - 12.0) / char_w).floor() as usize).max(1);
+        let fit = move |s: String| -> String {
+            if s.chars().count() <= budget {
+                return s;
+            }
+            let mut out: String = s.chars().take(budget - 1).collect();
+            out.push('\u{2026}');
+            out
+        };
         for (i, header) in self.headers.iter().enumerate() {
             let cx = x + col_w * i as f32 + 8.0;
             let (label, color) = match self.sort {
@@ -288,7 +304,7 @@ impl Paint for Spreadsheet {
                 }
                 _ => (header.clone(), [0xdd, 0xdd, 0xee]),
             };
-            ctx.text_with(label, cx, y + 6.0, 12.0, color, None, col_bounds(i, y, HEADER_H));
+            ctx.text_with(fit(label), cx, y + 6.0, 12.0, color, None, col_bounds(i, y, HEADER_H));
         }
         for (i, &src) in self.order.iter().enumerate() {
             let ry = y + HEADER_H + i as f32 * ROW_H - scroll;
@@ -297,7 +313,7 @@ impl Paint for Spreadsheet {
             }
             for (col_idx, val) in self.rows[src].iter().enumerate().take(n_cols) {
                 let cx = x + col_w * col_idx as f32 + 8.0;
-                ctx.text_with(val.clone(), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, ry, ROW_H));
+                ctx.text_with(fit(val.clone()), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, ry, ROW_H));
             }
         }
     }
