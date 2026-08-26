@@ -416,6 +416,14 @@ pub enum Prim {
     ArcShaded { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, inner: [f32; 4], crest: [f32; 4], outer: [f32; 4] },
     Vector { x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap },
     Circle { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
+    /// A feathered aura around (and over) a rounded rect: the interior fills
+    /// at the color's full alpha, and outside the boundary the alpha falls
+    /// off smoothly to zero across `reach` px. Tessellated as concentric
+    /// per-vertex-alpha rings the GPU interpolates, so the gradient is
+    /// per-pixel smooth — no stacked-layer banding. Highlights and soft
+    /// focus auras (the designer's drop-target glow) are the intended use;
+    /// no relief shading, no light involvement.
+    Glow { rect: Rect, radius: f32, reach: f32, color: [f32; 4] },
     /// A `Circle` lit as a ball: the disc is shaded per pixel as a hemisphere
     /// under the DE's plate light (same ambient/diffuse/specular model), so it
     /// reads as a sphere sitting on the surface — the slider thumb's look. The
@@ -735,6 +743,14 @@ impl PaintCtx {
         self.push(Prim::RoundedRect { rect, radius, corners, color });
     }
 
+    /// Feathered aura over a rounded rect (see [`Prim::Glow`]): interior at
+    /// the color's alpha, smooth per-pixel falloff to zero across `reach` px
+    /// outside the boundary.
+    pub fn glow(&mut self, rect: Rect, radius: f32, reach: f32, color: [f32; 4]) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Glow { rect, radius, reach, color });
+    }
+
     pub fn vector(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, color: [f32; 4], cap: Cap) {
         let (ox, oy) = self.offset;
         self.push(Prim::Vector { x1: x1 + ox, y1: y1 + oy, x2: x2 + ox, y2: y2 + oy, thickness, color, cap });
@@ -814,6 +830,7 @@ impl PaintCtx {
             }
             Prim::Circle { cx, cy, radius, color } => self.circle(cx, cy, radius, color),
             Prim::Sphere { cx, cy, radius, color } => self.sphere(cx, cy, radius, color),
+            Prim::Glow { rect, radius, reach, color } => self.glow(rect, radius, reach, color),
             Prim::Droplet { rect, color, spec } => self.droplet(rect, color, spec),
             Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
                 self.concave_fillet(cx, cy, radius, depth, start, raised)

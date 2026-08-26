@@ -660,6 +660,93 @@ fn superellipse_pt(theta: f32, e: f32) -> (f32, f32) {
     (c.signum() * c.abs().powf(e), s.signum() * s.abs().powf(e))
 }
 
+/// Feathered glow ([`Prim::Glow`]): the rounded rect's interior fills at the
+/// color's alpha and concentric outline rings fade it to zero across `reach`
+/// px outside the boundary. Alpha rides the VERTICES, so the GPU interpolates
+/// a per-pixel-smooth falloff between rings — stacked translucent layers band
+/// visibly; this cannot. Ring alphas sit on a quadratic ease-out, giving the
+/// vignette profile piecewise-linearly with kinks below visibility at glow
+/// alphas. Circular corner arcs (not the DE superellipse): at a soft edge the
+/// difference is invisible, and one sampler keeps every ring seam-free.
+pub fn push_glow_vertices(
+    x: f32, y: f32, ww: f32, h: f32,
+    radius: f32, reach: f32,
+    sw: f32, sh: f32,
+    color: [f32; 4],
+    clip_circle: [f32; 3],
+    out: &mut Vec<Vertex>,
+) {
+    if ww <= 0.0 || h <= 0.0 || color[3].abs() <= 0.0005 || sw <= 0.0 || sh <= 0.0 {
+        return;
+    }
+    let r0 = radius.clamp(0.0, ww.min(h) * 0.5);
+    let ctl = (x + r0, y + r0);
+    let ctr = (x + ww - r0, y + r0);
+    let cbr = (x + ww - r0, y + h - r0);
+    let cbl = (x + r0, y + h - r0);
+    const K: usize = 10;
+    use std::f32::consts::PI;
+    // One outline ring `off` px outside the boundary, clockwise from the
+    // top-left arc; every ring shares the layout, so strips never twist.
+    let ring = |off: f32| -> Vec<[f32; 2]> {
+        let r = (r0 + off).max(0.0);
+        let mut pts = Vec::with_capacity(4 * (K + 1));
+        let corners = [
+            (ctl, PI, 1.5 * PI),
+            (ctr, 1.5 * PI, 2.0 * PI),
+            (cbr, 0.0, 0.5 * PI),
+            (cbl, 0.5 * PI, PI),
+        ];
+        for ((cx, cy), a0, a1) in corners {
+            for k in 0..=K {
+                let a = a0 + (a1 - a0) * (k as f32 / K as f32);
+                pts.push([cx + r * a.cos(), cy + r * a.sin()]);
+            }
+        }
+        pts
+    };
+    let to_v = |p: [f32; 2], a: f32| Vertex {
+        position: [(p[0] / sw) * 2.0 - 1.0, 1.0 - (p[1] / sh) * 2.0],
+        color: [color[0], color[1], color[2], a],
+        clip_circle,
+    };
+
+    let rings: Vec<(Vec<[f32; 2]>, f32)> = [0.0f32, 0.35, 0.7, 1.0]
+        .iter()
+        .map(|&t| (ring(reach * t), color[3] * (1.0 - t) * (1.0 - t)))
+        .collect();
+    let n = rings[0].0.len();
+
+    // Interior: a fan from the rect center over the innermost ring (a rounded
+    // rect is convex, so the fan covers it exactly), uniform core alpha.
+    let center = [x + ww * 0.5, y + h * 0.5];
+    for i in 0..n {
+        let p1 = rings[0].0[i];
+        let p2 = rings[0].0[(i + 1) % n];
+        out.push(to_v(center, color[3]));
+        out.push(to_v(p1, color[3]));
+        out.push(to_v(p2, color[3]));
+    }
+    // The feather: strips between consecutive rings, each vertex carrying its
+    // ring's alpha.
+    for w in rings.windows(2) {
+        let (inner, ia) = (&w[0].0, w[0].1);
+        let (outer, oa) = (&w[1].0, w[1].1);
+        for i in 0..n {
+            let a1 = inner[i];
+            let a2 = inner[(i + 1) % n];
+            let b1 = outer[i];
+            let b2 = outer[(i + 1) % n];
+            out.push(to_v(a1, ia));
+            out.push(to_v(b1, oa));
+            out.push(to_v(a2, ia));
+            out.push(to_v(a2, ia));
+            out.push(to_v(b1, oa));
+            out.push(to_v(b2, oa));
+        }
+    }
+}
+
 pub fn push_rounded_rect_vertices_corners(
     x: f32, y: f32, ww: f32, h: f32,
     radii: crate::widget::CornerRadii,
@@ -1481,7 +1568,8 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Vector { .. } => "Vector", P::Circle { .. } => "Circle",
         P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
         P::ConcaveFillet { .. } => "ConcaveFillet",
-        P::Groove { .. } => "Groove", P::Text { .. } => "Text", P::Image { .. } => "Image",
+        P::Groove { .. } => "Groove", P::Glow { .. } => "Glow",
+        P::Text { .. } => "Text", P::Image { .. } => "Image",
     }
 }
 
@@ -1592,6 +1680,9 @@ pub fn tessellate_display_list(
                 let cr = crate::widget::CornerRadii::new(radii.0, radii.1, radii.2, radii.3);
                 push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, cr, sw, sh, *fill, no, None, &mut verts);
                 push_plate_solid_border_vertices(rect.x, rect.y, rect.width, rect.height, cr, *thickness, sw, sh, *border, no, &mut verts);
+            }
+            Prim::Glow { rect, radius, reach, color } => {
+                push_glow_vertices(rect.x, rect.y, rect.width, rect.height, *radius, *reach, sw, sh, *color, no, &mut verts);
             }
             Prim::Bevel { rect, radii, color, depth, tint } if shader_plates => {
                 // SDF-lit raised plate: one cover quad; the shader owns fill,
