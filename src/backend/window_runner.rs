@@ -3156,6 +3156,9 @@ pub struct EngineState<A: Application> {
     /// the transfer is actually done (see `dnd::drop_performed`).
     pub pending_drop_offer:
         Option<smithay_client_toolkit::data_device_manager::data_offer::DragOffer>,
+    /// The input region last sent to the compositor, so a per-frame
+    /// [`Application::input_regions`] only costs protocol traffic on change.
+    pub applied_input_regions: Option<Vec<(i32, i32, i32, i32)>>,
 }
 
 impl<A: Application> EngineState<A> {
@@ -3332,13 +3335,20 @@ impl<A: Application> EngineState<A> {
 
         if let Some(ref surface) = self.surface {
             if let Some(regions) = self.inner.as_ref().unwrap().input_regions() {
-                let compositor = self.compositor_state.wl_compositor();
-                let wl_region = compositor.create_region(&self.qh, ());
-                for &(rx, ry, rw, rh) in &regions {
-                    wl_region.add(rx, ry, rw, rh);
+                // Only re-send when it actually changes. This runs per frame,
+                // and a client whose region tracks its content (the desktop
+                // grid's items follow every pan) would otherwise create and
+                // destroy a wl_region on every frame of a camera flight.
+                if self.applied_input_regions.as_deref() != Some(regions.as_slice()) {
+                    let compositor = self.compositor_state.wl_compositor();
+                    let wl_region = compositor.create_region(&self.qh, ());
+                    for &(rx, ry, rw, rh) in &regions {
+                        wl_region.add(rx, ry, rw, rh);
+                    }
+                    surface.set_input_region(Some(&wl_region));
+                    wl_region.destroy();
+                    self.applied_input_regions = Some(regions);
                 }
-                surface.set_input_region(Some(&wl_region));
-                wl_region.destroy();
             }
         }
         
@@ -4822,6 +4832,7 @@ fn run_session<'l, A: Application>(
         drag_pos: LogicalPosition::new(0.0, 0.0),
         drop_tx: Some(drop_tx),
         pending_drop_offer: None,
+        applied_input_regions: None,
         registry_state: RegistryState::new(&globals),
         compositor_state,
         xdg_shell_state,
