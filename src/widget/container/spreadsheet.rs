@@ -22,6 +22,10 @@ const HEADER_H: f32 = 24.0;
 const ROW_H: f32 = 24.0;
 const SCROLLBAR_W: f32 = 6.0;
 const SCROLLBAR_PAD: f32 = 2.0;
+/// Columns never squeeze below this: when they don't fit, the pane scrolls
+/// horizontally instead. Sized for a 4-decimal value / a short header plus its
+/// sort mark in the 12px mono label font, with the cell padding on both sides.
+const MIN_COL_W: f32 = 76.0;
 
 pub struct Spreadsheet {
     hovered: bool,
@@ -43,6 +47,12 @@ pub struct Spreadsheet {
     drag_offset_y: f32,
     scrollbar_hovered: bool,
     scrollbar_thumb_hovered: bool,
+    scroll_x: f32,
+    hscroll_velocity: f32,
+    dragging_hscrollbar: bool,
+    drag_offset_x: f32,
+    hscrollbar_hovered: bool,
+    hscrollbar_thumb_hovered: bool,
 }
 
 /// Scroll/scrollbar geometry for one (row count, rect) pair. Present only when the content
@@ -56,6 +66,20 @@ struct ScrollGeom {
     track_y: f32,
     thumb_h: f32,
     thumb_y: f32,
+    track_range: f32,
+}
+
+/// [`ScrollGeom`]'s horizontal twin, for the bottom scrollbar. Present only
+/// when the column run overflows the pane width.
+struct HScrollGeom {
+    visible_w: f32,
+    max_scroll: f32,
+    /// `scroll_x` clamped to the current bounds.
+    scroll: f32,
+    track_x: f32,
+    track_y: f32,
+    thumb_w: f32,
+    thumb_x: f32,
     track_range: f32,
 }
 
@@ -74,6 +98,12 @@ impl Spreadsheet {
             drag_offset_y: 0.0,
             scrollbar_hovered: false,
             scrollbar_thumb_hovered: false,
+            scroll_x: 0.0,
+            hscroll_velocity: 0.0,
+            dragging_hscrollbar: false,
+            drag_offset_x: 0.0,
+            hscrollbar_hovered: false,
+            hscrollbar_thumb_hovered: false,
         });
         // The spreadsheet pane starts hidden (the designer toggles it in later).
         crate::widget::WidgetHost::set_visible(&mut s, false);
@@ -103,6 +133,43 @@ impl Spreadsheet {
         })
     }
 
+    /// One column's width: an even share of the pane, floored at [`MIN_COL_W`] —
+    /// past the floor the content overflows into the horizontal scroll.
+    fn col_w(&self, rect: Rect) -> f32 {
+        let n = self.headers.len().max(1) as f32;
+        (rect.width / n).max(MIN_COL_W)
+    }
+
+    /// Horizontal counterpart of [`geom`]: present only when the column run is
+    /// wider than the pane.
+    fn hgeom(&self, rect: Rect) -> Option<HScrollGeom> {
+        let content_w = self.col_w(rect) * self.headers.len() as f32;
+        let visible_w = rect.width;
+        if visible_w <= 0.0 || content_w <= visible_w {
+            return None;
+        }
+        let max_scroll = content_w - visible_w;
+        let scroll = self.scroll_x.clamp(0.0, max_scroll);
+        let thumb_w = ((visible_w / content_w) * visible_w).clamp(15.0_f32.min(visible_w), visible_w);
+        let track_x = rect.x;
+        let track_range = visible_w - thumb_w;
+        Some(HScrollGeom {
+            visible_w,
+            max_scroll,
+            scroll,
+            track_x,
+            track_y: rect.y + rect.height - SCROLLBAR_W - SCROLLBAR_PAD,
+            thumb_w,
+            thumb_x: track_x + (scroll / max_scroll) * track_range,
+            track_range,
+        })
+    }
+
+    /// The clamped horizontal scroll — 0 while everything fits.
+    fn hscroll(&self, rect: Rect) -> f32 {
+        self.hgeom(rect).map_or(0.0, |g| g.scroll)
+    }
+
     /// The header column under `(px, py)`, if the point is inside the header band.
     fn header_col_at(&self, px: f32, py: f32, rect: Rect) -> Option<usize> {
         if self.headers.is_empty() || rect.width <= 0.0 {
@@ -112,8 +179,21 @@ impl Spreadsheet {
             return None;
         }
         let n = self.headers.len();
-        let col = ((px - rect.x) / (rect.width / n as f32)) as usize;
-        Some(col.min(n - 1))
+        let col = ((px - rect.x + self.hscroll(rect)) / self.col_w(rect)) as usize;
+        if col >= n {
+            return None;
+        }
+        Some(col)
+    }
+
+    /// Scroll to where a thumb dragged to `thumb_x` puts the columns.
+    fn hscroll_to_thumb(&mut self, g: &HScrollGeom, thumb_x: f32) {
+        let ratio = if g.track_range > 0.0 {
+            ((thumb_x - g.track_x) / g.track_range).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        self.scroll_x = ratio * g.max_scroll;
     }
 
     /// Cell comparison: numeric when both cells parse (so "10" sorts after "9"),
@@ -224,12 +304,17 @@ impl Paint for Spreadsheet {
         // Header separator
         ctx.quad(Rect { x, y: y + HEADER_H, width: w, height: 1.0 }, [0.20, 0.20, 0.25, 0.25]);
 
-        // Vertical column dividers
+        // Vertical column dividers, at scrolled column edges, kept inside the pane.
+        let hscroll = self.hscroll(rect);
         if h > 0.0 && !self.headers.is_empty() {
             let n_cols = self.headers.len();
+            let cw = self.col_w(rect);
             for i in 1..n_cols {
-                let r = i as f32 / n_cols as f32;
-                ctx.quad(Rect { x: x + w * r, y, width: 1.0, height: h }, [0.20, 0.20, 0.25, 0.15]);
+                let dx = x + cw * i as f32 - hscroll;
+                if dx <= x || dx >= x + w {
+                    continue;
+                }
+                ctx.quad(Rect { x: dx, y, width: 1.0, height: h }, [0.20, 0.20, 0.25, 0.15]);
             }
         }
 
@@ -254,30 +339,59 @@ impl Paint for Spreadsheet {
             );
         }
 
+        // Horizontal scrollbar along the bottom, the vertical bar's twin.
+        if let Some(g) = self.hgeom(rect) {
+            ctx.quad(
+                Rect { x: g.track_x, y: g.track_y, width: g.visible_w, height: SCROLLBAR_W },
+                [0.05, 0.05, 0.08, 0.15],
+            );
+            let thumb_color = if self.dragging_hscrollbar {
+                [0.40, 0.40, 0.48, 1.0]
+            } else if self.hscrollbar_thumb_hovered {
+                [0.32, 0.32, 0.38, 1.0]
+            } else if self.hscrollbar_hovered {
+                [0.24, 0.24, 0.30, 0.9]
+            } else {
+                [0.18, 0.18, 0.24, 0.7]
+            };
+            ctx.quad(
+                Rect { x: g.thumb_x, y: g.track_y, width: g.thumb_w, height: SCROLLBAR_W },
+                thumb_color,
+            );
+        }
+
         // Header + cell text. Cells render only when the row lies fully inside the body.
         if self.headers.is_empty() {
             return;
         }
         let n_cols = self.headers.len();
-        let col_w = w / n_cols as f32;
+        let col_w = self.col_w(rect);
+        // Scrolled column origin; columns fully outside the pane skip.
+        let xoff = x - hscroll;
+        let col_visible = |col: usize| -> bool {
+            let cx0 = xoff + col_w * col as f32;
+            cx0 + col_w > x && cx0 < x + w
+        };
         if let Some(hc) = self.header_hover_col {
             // Subtle hover tint on the clickable header cell (the Processes-page
-            // sortable-header convention).
-            ctx.quad(
-                Rect { x: x + col_w * hc as f32, y, width: col_w, height: HEADER_H },
-                [1.0, 1.0, 1.0, 0.05],
-            );
+            // sortable-header convention), clamped to the pane.
+            let hx0 = (xoff + col_w * hc as f32).max(x);
+            let hx1 = (xoff + col_w * (hc + 1) as f32).min(x + w);
+            if hx1 > hx0 {
+                ctx.quad(Rect { x: hx0, y, width: hx1 - hx0, height: HEADER_H }, [1.0, 1.0, 1.0, 0.05]);
+            }
         }
         // Every label clamps to its own column (a 4px gutter short of the
-        // divider), so a long value cuts off instead of running under its
-        // neighbor — the overlap that made narrow panes unreadable.
+        // divider) AND to the pane, so a long value cuts off instead of
+        // running under its neighbor, and half-scrolled edge columns stop at
+        // the plate instead of bleeding past it.
         let col_bounds = |col: usize, top: f32, height: f32| -> Option<[f32; 4]> {
-            Some([
-                x + col_w * col as f32,
-                top,
-                x + col_w * (col + 1) as f32 - 4.0,
-                top + height,
-            ])
+            let x0 = (xoff + col_w * col as f32).max(x);
+            let x1 = (xoff + col_w * (col + 1) as f32 - 4.0).min(x + w);
+            if x1 <= x0 {
+                return None;
+            }
+            Some([x0, top, x1, top + height])
         };
         // Ellipsize what the clamp would cut, so truncation reads as
         // deliberate. A char budget from ONE cached measurement is exact
@@ -299,7 +413,10 @@ impl Paint for Spreadsheet {
             out
         };
         for (i, header) in self.headers.iter().enumerate() {
-            let cx = x + col_w * i as f32 + 8.0;
+            if !col_visible(i) {
+                continue;
+            }
+            let cx = xoff + col_w * i as f32 + 8.0;
             let (label, color) = match self.sort {
                 Some((col, ascending)) if col == i => {
                     let mark = if ascending { '\u{25b2}' } else { '\u{25bc}' };
@@ -315,7 +432,10 @@ impl Paint for Spreadsheet {
                 continue;
             }
             for (col_idx, val) in self.rows[src].iter().enumerate().take(n_cols) {
-                let cx = x + col_w * col_idx as f32 + 8.0;
+                if !col_visible(col_idx) {
+                    continue;
+                }
+                let cx = xoff + col_w * col_idx as f32 + 8.0;
                 ctx.text_with(fit(val.clone()), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, ry, ROW_H));
             }
         }
@@ -346,11 +466,28 @@ impl Input for Spreadsheet {
                     self.scrollbar_hovered = false;
                     self.scrollbar_thumb_hovered = false;
                 }
+                let was_hsb = self.hscrollbar_hovered;
+                let was_hthumb = self.hscrollbar_thumb_hovered;
+                if let Some(g) = self.hgeom(r) {
+                    self.hscrollbar_hovered = *py >= g.track_y - 2.0
+                        && *py <= r.y + r.height
+                        && *px >= g.track_x
+                        && *px <= g.track_x + g.visible_w;
+                    self.hscrollbar_thumb_hovered = *py >= g.track_y - 2.0
+                        && *py <= r.y + r.height
+                        && *px >= g.thumb_x
+                        && *px <= g.thumb_x + g.thumb_w;
+                } else {
+                    self.hscrollbar_hovered = false;
+                    self.hscrollbar_thumb_hovered = false;
+                }
                 let was_header = self.header_hover_col;
                 self.header_hover_col = self.header_col_at(*px, *py, r);
                 was_hovered != self.hovered
                     || was_sb != self.scrollbar_hovered
                     || was_thumb != self.scrollbar_thumb_hovered
+                    || was_hsb != self.hscrollbar_hovered
+                    || was_hthumb != self.hscrollbar_thumb_hovered
                     || was_header != self.header_hover_col
             }
             // A left press on a column header cycles that column's sort:
@@ -375,16 +512,20 @@ impl Input for Spreadsheet {
             }
             // Hit-gated by the adapter (which also rejects hidden widgets).
             Event::MouseWheel { delta, .. } => {
-                if self.geom(ectx.rect).is_some() {
-                    let scroll_amount = match delta {
-                        MouseScrollDelta::LineDelta(_x, y) => *y * ROW_H,
-                        MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                    };
-                    self.scroll_velocity += scroll_amount * 12.0;
-                    true
-                } else {
-                    false
+                let (dx, dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (*x * ROW_H, *y * ROW_H),
+                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
+                };
+                let mut used = false;
+                if dy.abs() > 0.0 && self.geom(ectx.rect).is_some() {
+                    self.scroll_velocity += dy * 12.0;
+                    used = true;
                 }
+                if dx.abs() > 0.0 && self.hgeom(ectx.rect).is_some() {
+                    self.hscroll_velocity += dx * 12.0;
+                    used = true;
+                }
+                used
             }
             Event::KeyInput(key_event) => {
                 if key_event.state != ElementState::Pressed {
@@ -419,15 +560,18 @@ impl Input for Spreadsheet {
     // landed on the scrollbar; a body press starts no drag, exactly like legacy.
 
     fn draggable(&self, rect: Rect) -> bool {
-        self.geom(rect).is_some()
+        self.geom(rect).is_some() || self.hgeom(rect).is_some()
     }
 
     fn is_dragging(&self) -> bool {
-        self.dragging_scrollbar
+        self.dragging_scrollbar || self.dragging_hscrollbar
     }
 
     fn drag_begin(&mut self, px: f32, py: f32, rect: Rect) {
         self.scroll_velocity = 0.0;
+        self.hscroll_velocity = 0.0;
+        // The vertical bar owns the shared bottom-right corner (it was here
+        // first); the horizontal bar takes what's left of the bottom band.
         if let Some(g) = self.geom(rect) {
             if px >= g.scrollbar_x - 4.0
                 && px <= rect.x + rect.width
@@ -442,53 +586,92 @@ impl Input for Spreadsheet {
                     self.drag_offset_y = g.thumb_h / 2.0;
                     self.scroll_to_thumb(&g, py - self.drag_offset_y);
                 }
+                return;
+            }
+        }
+        if let Some(g) = self.hgeom(rect) {
+            if py >= g.track_y - 4.0
+                && py <= rect.y + rect.height
+                && px >= g.track_x
+                && px <= g.track_x + g.visible_w
+            {
+                self.dragging_hscrollbar = true;
+                if px >= g.thumb_x && px <= g.thumb_x + g.thumb_w {
+                    self.drag_offset_x = px - g.thumb_x;
+                } else {
+                    self.drag_offset_x = g.thumb_w / 2.0;
+                    self.hscroll_to_thumb(&g, px - self.drag_offset_x);
+                }
             }
         }
     }
 
-    fn drag_update(&mut self, _px: f32, py: f32, rect: Rect) -> bool {
-        if !self.dragging_scrollbar {
+    fn drag_update(&mut self, px: f32, py: f32, rect: Rect) -> bool {
+        if self.dragging_scrollbar {
+            self.scroll_velocity = 0.0;
+            if let Some(g) = self.geom(rect) {
+                let old = g.scroll;
+                self.scroll_to_thumb(&g, py - self.drag_offset_y);
+                return (self.scroll_y - old).abs() > 0.01;
+            }
             return false;
         }
-        self.scroll_velocity = 0.0;
-        if let Some(g) = self.geom(rect) {
-            let old = g.scroll;
-            self.scroll_to_thumb(&g, py - self.drag_offset_y);
-            return (self.scroll_y - old).abs() > 0.01;
+        if self.dragging_hscrollbar {
+            self.hscroll_velocity = 0.0;
+            if let Some(g) = self.hgeom(rect) {
+                let old = g.scroll;
+                self.hscroll_to_thumb(&g, px - self.drag_offset_x);
+                return (self.scroll_x - old).abs() > 0.01;
+            }
         }
         false
     }
 
     fn drag_end(&mut self) {
         self.dragging_scrollbar = false;
+        self.dragging_hscrollbar = false;
         self.scroll_velocity = 0.0;
+        self.hscroll_velocity = 0.0;
     }
 
     // --- Inertial scroll: the wheel only sets velocity; each frame integrates and decays it.
 
     fn tick(&mut self, dt: f32, rect: Rect) -> bool {
-        if self.scroll_velocity.abs() <= 0.01 {
-            return false;
-        }
-        let content_h = self.rows.len() as f32 * ROW_H;
-        let visible_h = (rect.height - HEADER_H).max(0.0);
-        let max_scroll = (content_h - visible_h).max(0.0);
-        let old = self.scroll_y;
-
-        self.scroll_y = (self.scroll_y + self.scroll_velocity * dt).clamp(0.0, max_scroll);
-
-        // Decelerate with friction (exponential decay); stop dead at the bounds or below the
-        // motion threshold.
+        let mut moved = false;
         let friction = 8.0;
-        self.scroll_velocity *= (-friction * dt).exp();
-        if self.scroll_y == 0.0 || self.scroll_y == max_scroll {
-            self.scroll_velocity = 0.0;
-        }
-        if self.scroll_velocity.abs() < 5.0 {
-            self.scroll_velocity = 0.0;
-        }
+        if self.scroll_velocity.abs() > 0.01 {
+            let content_h = self.rows.len() as f32 * ROW_H;
+            let visible_h = (rect.height - HEADER_H).max(0.0);
+            let max_scroll = (content_h - visible_h).max(0.0);
+            let old = self.scroll_y;
 
-        (self.scroll_y - old).abs() > 0.01
+            self.scroll_y = (self.scroll_y + self.scroll_velocity * dt).clamp(0.0, max_scroll);
+
+            // Decelerate with friction (exponential decay); stop dead at the bounds or below
+            // the motion threshold.
+            self.scroll_velocity *= (-friction * dt).exp();
+            if self.scroll_y == 0.0 || self.scroll_y == max_scroll {
+                self.scroll_velocity = 0.0;
+            }
+            if self.scroll_velocity.abs() < 5.0 {
+                self.scroll_velocity = 0.0;
+            }
+            moved |= (self.scroll_y - old).abs() > 0.01;
+        }
+        if self.hscroll_velocity.abs() > 0.01 {
+            let max_scroll = self.hgeom(rect).map_or(0.0, |g| g.max_scroll);
+            let old = self.scroll_x;
+            self.scroll_x = (self.scroll_x + self.hscroll_velocity * dt).clamp(0.0, max_scroll);
+            self.hscroll_velocity *= (-friction * dt).exp();
+            if self.scroll_x == 0.0 || self.scroll_x == max_scroll {
+                self.hscroll_velocity = 0.0;
+            }
+            if self.hscroll_velocity.abs() < 5.0 {
+                self.hscroll_velocity = 0.0;
+            }
+            moved |= (self.scroll_x - old).abs() > 0.01;
+        }
+        moved
     }
 
     fn wants_tick(&self) -> bool {
@@ -523,6 +706,77 @@ mod tests {
             (0..rows).map(|i| vec![format!("r{i}"), format!("v{i}")]).collect();
         SpreadsheetController::set_spreadsheet_data(&mut *s, vec!["a".into(), "b".into()], data);
         s
+    }
+
+    fn wide(cols: usize) -> Adapted<Spreadsheet> {
+        let mut s = Spreadsheet::new();
+        s.set_visible(true);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 124.0);
+        let headers: Vec<String> = (0..cols).map(|i| format!("c{i}")).collect();
+        let rows = vec![(0..cols).map(|i| format!("v{i}")).collect::<Vec<String>>(); 2];
+        SpreadsheetController::set_spreadsheet_data(&mut *s, headers, rows);
+        s
+    }
+
+    /// Columns floor at MIN_COL_W instead of squeezing: past the floor the run
+    /// overflows into the horizontal scroll, and within it there is none.
+    #[test]
+    fn columns_floor_at_min_width_and_overflow_scrolls() {
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
+        let s = wide(6);
+        assert_eq!((*s).col_w(rect), MIN_COL_W);
+        let g = (*s).hgeom(rect).expect("6 floored columns overflow a 200px pane");
+        assert!((g.max_scroll - (6.0 * MIN_COL_W - 200.0)).abs() < 0.01);
+
+        let fits = wide(2);
+        assert!((*fits).hgeom(rect).is_none(), "2 columns share the pane, no h-scroll");
+        assert_eq!((*fits).col_w(rect), 100.0, "fitting columns still split the width evenly");
+    }
+
+    /// The sort hit-test must look up columns through the scrolled origin, or
+    /// clicking a header would sort the column that USED to be under the pointer.
+    #[test]
+    fn header_hit_test_tracks_horizontal_scroll() {
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
+        let mut s = wide(6);
+        assert_eq!((*s).header_col_at(10.0, 5.0, rect), Some(0));
+        (*s).scroll_x = MIN_COL_W;
+        assert_eq!((*s).header_col_at(10.0, 5.0, rect), Some(1));
+    }
+
+    /// A horizontal wheel feeds hscroll velocity, tick integrates and decays it,
+    /// and the scroll clamps inside the overflow.
+    #[test]
+    fn horizontal_wheel_integrates_and_decays_through_tick() {
+        let mut ctx = UiContext::new();
+        let mut s = wide(6);
+        let (id, ptr) = (s.id(), s.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+
+        let wheel = Event::MouseWheel {
+            delta: MouseScrollDelta::LineDelta(2.0, 0.0),
+            x: 50.0,
+            y: 60.0,
+            local_x: 50.0,
+            local_y: 60.0,
+        };
+        assert!(s.handle_event(&wheel, &mut ctx), "in-rect horizontal wheel consumed");
+        assert!(WidgetHost::tick(&mut s, 0.016, &mut ctx), "first tick moves the h-scroll");
+        let mut guard = 0;
+        while WidgetHost::tick(&mut s, 0.016, &mut ctx) {
+            guard += 1;
+            assert!(guard < 1000, "h-inertia must decay to a stop");
+        }
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
+        let max = (*s).hgeom(rect).unwrap().max_scroll;
+        assert!((*s).scroll_x >= 0.0 && (*s).scroll_x <= max, "h-scroll stays clamped");
+        assert!((*s).scroll_x > 0.0, "positive dx scrolled the columns");
+
+        // A pane whose columns fit ignores horizontal wheels.
+        let mut fits = wide(2);
+        let (fid, fptr) = (fits.id(), fits.as_ptr_mut());
+        ctx.register_widget(fid, fptr);
+        assert!(!fits.handle_event(&wheel, &mut ctx), "no overflow, wheel passes through");
     }
 
     #[test]
