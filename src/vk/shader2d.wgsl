@@ -130,6 +130,7 @@ const MODE_FILLET_UP: i32 = 7;    // concave inside-corner wall, raised
 const MODE_GROOVE: i32 = 8;       // slab carve about an arbitrary line
 const MODE_TROUGH: i32 = 9;       // sunken valley straddling the boundary
 const MODE_DROPLET: i32 = 10;     // hanging water droplet clinging to the box top
+const MODE_ROLL: i32 = 11;        // fill-less rolled perimeter, composited as an overlay
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -553,6 +554,33 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             }
         }
         return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
+    }
+
+    if (mode == MODE_ROLL) {
+        // Fill-less rolled perimeter: MODE_PLATE's roll — same profile, crest
+        // and specular, spanning the full width INSIDE the silhouette — for a
+        // window whose face is not a plate fill (the designer's full-bleed 3D
+        // canvas). With no fill to shade into, it composites like the free
+        // carves: darkening is a black multiply, brightening a translucent
+        // white screen, over whatever is beneath. No CSG features: an overlay
+        // owns no surface, so carves never group into it (the tessellator
+        // never opens it as a host).
+        let aa = clamp(d + 0.5, 0.0, 1.0);
+        if (aa <= 0.0) {
+            discard;
+        }
+        let u = clamp(d / t, 0.0, 1.0);
+        let f = 1.0 - u;
+        let sv = gd.xy * roll_slope(f);
+        let extra = PLATE_CREST * f * f * f;
+        let n = normalize(vec3f(sv, 1.0));
+        let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
+        let spec = roll_spec(sv);
+        let v = (diff / flat_shade - 1.0 + extra + spec) * strength * aa;
+        if (v >= 0.0) {
+            return vec4f(1.0, 1.0, 1.0, min(v, 1.0));
+        }
+        return vec4f(0.0, 0.0, 0.0, min(-v, 1.0));
     }
 
     // Free-floating recess, boss, or ridge (one not grouped into a host plate —

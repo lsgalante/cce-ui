@@ -1706,11 +1706,24 @@ pub fn tessellate_display_list(
                 made_plate = Some(*rect);
             }
             Prim::Plate { rect, radii, color, depth } if shader_plates => {
-                // Same lit-plate branch; the cover quad is the exact rect so the
-                // silhouette and the compositor's rounded window corners agree.
-                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
-                plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, true));
-                made_plate = Some(*rect);
+                if *depth < 0.0 {
+                    // Negative depth = fill-less roll overlay (MODE_ROLL): the
+                    // window-edge roll shading alone, screened over whatever is
+                    // beneath — for a root plate whose face is not a fill (the
+                    // designer's 3D canvas). The cover quad carries no color,
+                    // and the batch is NOT opened as a carve host: an overlay
+                    // owns no surface for a CSG feature to cut into.
+                    verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, [0.0; 4]));
+                    let mut p = plate_push_raised(rect, *radii, -*depth, scale, plate_light, plate_mat, true);
+                    p.mode = 11.0; // MODE_ROLL
+                    plate = Some(p);
+                } else {
+                    // Same lit-plate branch; the cover quad is the exact rect so the
+                    // silhouette and the compositor's rounded window corners agree.
+                    verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                    plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, true));
+                    made_plate = Some(*rect);
+                }
             }
             Prim::Recess { rect, radii, depth, edges, .. }
             | Prim::Boss { rect, radii, depth, edges, .. }
@@ -1945,6 +1958,13 @@ pub fn tessellate_display_list(
                 push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, *depth, sw, sh, *color, no, &mut verts);
             }
             Prim::Plate { rect, radii, color, depth } => {
+                if *depth < 0.0 {
+                    // Fill-less roll overlay (negative-depth sentinel): the banded
+                    // legacy tessellation has no overlay compositing, so the roll
+                    // is simply absent here — the A/B path draws nothing rather
+                    // than a wrong fill.
+                    continue;
+                }
                 // Fill at full size (no inset — see Prim::Plate), then light the face,
                 // then roll the perimeter. The lip rides on top of the fill's outer band
                 // rather than replacing it, so the plate's silhouette and the

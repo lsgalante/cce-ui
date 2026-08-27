@@ -52,7 +52,8 @@ pub struct PlateSpec {
     pub blur: bool,
     /// Which corners lie ON the window silhouette (TL, TR, BR, BL).
     pub window_corners: (bool, bool, bool, bool),
-    /// Transition-band width of the rolled perimeter.
+    /// Transition-band width of the rolled perimeter. Negative = the fill-less
+    /// roll-overlay sentinel (see [`PaintCtx::plate`]).
     pub depth: f32,
 }
 
@@ -1022,6 +1023,13 @@ impl PaintCtx {
     /// The window's glass slab: rounded fill at full size plus a rolled, lit perimeter.
     /// `depth` is the roll-off width in px — pass [`crate::layout::bevel_width`] unless the
     /// window wants a shallower edge than the DE default.
+    ///
+    /// A NEGATIVE `depth` is the fill-less sentinel: no fill is drawn, and the
+    /// rolled perimeter (width `-depth`) renders as an overlay — translucent
+    /// white screen / black multiply — over whatever is beneath, for a root
+    /// plate whose face is not a fill (the designer's full-bleed 3D canvas).
+    /// `color` is ignored; the roll profile, crest and specular are exactly the
+    /// positive-depth plate's.
     pub fn plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Plate { rect, radii, color, depth });
