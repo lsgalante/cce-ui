@@ -231,6 +231,25 @@ fn roll_spec(sv: vec2f) -> f32 {
     return rrect_clip.p_mat.y * max(pow(prof, shininess) - pow(hv.z, shininess), 0.0) * az * az;
 }
 
+// roll_spec with the azimuth mask dropped: every edge shades as if it faced
+// the light, so the glint the light-facing edges normally get sweeps the
+// WHOLE silhouette at the same inset, width, and peak (the decoupled profile
+// keeps those constant through corners by construction). The focused-plate
+// treatment: the familiar specular line, accent-tinted, on all four sides.
+fn roll_spec_wrap(sv: vec2f) -> f32 {
+    let m = length(sv);
+    if (m < 1e-5) {
+        return 0.0;
+    }
+    let hv = normalize(rrect_clip.p_light.xyz + vec3f(0.0, 0.0, 1.0));
+    let shininess = rrect_clip.p_mat.z;
+    let cos_t = inverseSqrt(1.0 + m * m);
+    let sin_t = m * cos_t;
+    let hxy = length(hv.xy);
+    let prof = cos_t * hv.z + sin_t * hxy;
+    return rrect_clip.p_mat.y * max(pow(prof, shininess) - pow(hv.z, shininess), 0.0);
+}
+
 // Slope of the raised roll's height profile at f (0 at the face join, 1 at the
 // silhouette). Circular (shape 2): a quarter-round h = sqrt(1 - f²) — tangent-
 // continuous with the face but with a curvature JUMP at the join (1/t → 0), the
@@ -512,31 +531,19 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let n = normalize(vec3f(sv, 1.0));
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
         let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
-        let spec = roll_spec(sv);
         // p_spec_tint.w = 1 marks an accent-tinted plate (the focused-pane
-        // treatment): the ENTIRE rolled edge takes a quiet WASH of the accent,
-        // capped low (full-strength read as a painted frame). The ramp does
-        // NOT come from the plate's own SDF depth: offset contours of a
-        // rounded rect SHARPEN at the corners as depth consumes the corner
-        // radius (any falloff shaped from `f` inherits square-ish inner
-        // contours). Instead a SECOND SDF of the t-inset rect with the SAME
-        // radii bounds the band, so the wash runs between two concentric
-        // rounded boundaries and its inner edge follows the silhouette's arcs.
-        // Quadratic ramp: zero-slope termination on the inner boundary. The
-        // specular glint keeps its own tint term on top. Neutral plates
-        // (w = 0) shade exactly as before.
-        var rgb = base.rgb;
+        // treatment): the specular line WRAPS — the exact glint the
+        // light-facing edges always carry runs the whole silhouette in the
+        // accent color, same inset, width, and peak. Nothing else about the
+        // plate's shading changes (accent-wash variants were tried and read
+        // as painted frames). Neutral plates (w = 0) keep the directional
+        // glint, byte-identical.
         let tw = rrect_clip.p_spec_tint.w;
+        var spec = roll_spec(sv);
         if (tw > 0.0) {
-            let ihw = max(rrect_clip.p_rect.z - t, 1.0);
-            let ihh = max(rrect_clip.p_rect.w - t, 1.0);
-            let irect = vec4f(rrect_clip.p_rect.xy, ihw, ihh);
-            let irad = min(rrect_clip.p_radii, vec4f(min(ihw, ihh)));
-            let gi = rr_sdf_grad(frag, irect, irad);
-            let q = clamp(gi.z / t, 0.0, 1.0);
-            rgb = mix(base.rgb, rrect_clip.p_spec_tint.rgb, tw * q * q * 0.20);
+            spec = roll_spec_wrap(sv);
         }
-        return vec4f(rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
+        return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
     }
 
     // Free-floating recess, boss, or ridge (one not grouped into a host plate —
