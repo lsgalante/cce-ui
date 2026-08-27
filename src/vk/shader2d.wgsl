@@ -639,9 +639,17 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let hb = rrect_clip.p_host;
     let host_d = min(hb.z - abs(frag.x - hb.x), hb.w - abs(frag.y - hb.y));
     let att = clamp(host_d / t, 0.0, 1.0) * wedge;
-    let v = (diff / flat_shade - 1.0 + curv + spec) * strength * att;
-    // p_spec_tint.w = 1 marks a tinted carve (a focused well); plates leave w at 0.
+    var v = (diff / flat_shade - 1.0 + curv + spec) * strength * att;
+    // p_spec_tint.w = 1 marks a tinted carve — the FOCUS treatment. It
+    // renders as the wrapped specular line alone (roll_spec_wrap: the glint
+    // the light-facing edges normally carry, swept around the whole
+    // outline), matching the focused plates' accent glint exactly; the
+    // relief's diffuse/curvature terms drop so a standalone focus ring reads
+    // as the line, not a lit step. Plates leave w at 0.
     let tw = rrect_clip.p_spec_tint.w;
+    if (tw > 0.0) {
+        v = roll_spec_wrap(sv) * strength * att;
+    }
     if (v >= 0.0) {
         // Highlight: the white screen mixes toward the tint color, slightly
         // boosted so the accent reads at the rim's low alphas.
