@@ -288,11 +288,23 @@ impl Paint for Breadcrumb {
             let r = radius.min(rh * 0.5);
             if relief {
                 let depth = crate::layout::bevel_width().min(rh * 0.2);
-                // Transparent face — the dropdown's own degraded form (a
-                // transparent configured fill draws edges only): the window
-                // plate shows through as the face, which is what the boss run
-                // always did here.
-                ctx.inset_plate(run_rect, (r, r, r, r), [0.0; 4], depth);
+                // The face comes from the DROPDOWN's fill knob, not one of
+                // the breadcrumb's own: the two controls sit side by side on a
+                // toolbar and must read as the same material under any config.
+                // A transparent configured fill is the dropdown's degraded
+                // form — edges only, the window plate showing through as the
+                // face, which is what the boss run always did here; an opaque
+                // one makes both controls that color. Mirrors
+                // `Dropdown::paint_background`'s `face` exactly.
+                let raw_bg = crate::color::dropdown_background_color();
+                let face = if raw_bg[3] > 0.001 {
+                    let mut c = raw_bg;
+                    c[3] = 1.0;
+                    c
+                } else {
+                    [0.0; 4]
+                };
+                ctx.inset_plate(run_rect, (r, r, r, r), face, depth);
                 for (a, b) in self.seams(rect) {
                     ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);
                 }
