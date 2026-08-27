@@ -514,17 +514,28 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
         let spec = roll_spec(sv);
         // p_spec_tint.w = 1 marks an accent-tinted plate (the focused-pane
-        // treatment): the ENTIRE rolled edge takes a quiet WASH of the accent
-        // (f = 1 at the silhouette, 0 on the face; capped low — full-strength
-        // read as a painted frame). QUADRATIC in f: the wash hugs the
-        // silhouette and dies out with zero slope, so it has no crisp inner
-        // boundary — a linear fade terminated on the SDF's inner iso-contour,
-        // whose corners sharpen as the roll consumes the corner radius, and
-        // the band read as a sharp-cornered inner frame. The specular glint
-        // keeps its own tint term on top. Neutral plates (w = 0) shade
-        // exactly as before.
+        // treatment): the ENTIRE rolled edge takes a quiet WASH of the accent,
+        // capped low (full-strength read as a painted frame). The ramp does
+        // NOT come from the plate's own SDF depth: offset contours of a
+        // rounded rect SHARPEN at the corners as depth consumes the corner
+        // radius (any falloff shaped from `f` inherits square-ish inner
+        // contours). Instead a SECOND SDF of the t-inset rect with the SAME
+        // radii bounds the band, so the wash runs between two concentric
+        // rounded boundaries and its inner edge follows the silhouette's arcs.
+        // Quadratic ramp: zero-slope termination on the inner boundary. The
+        // specular glint keeps its own tint term on top. Neutral plates
+        // (w = 0) shade exactly as before.
+        var rgb = base.rgb;
         let tw = rrect_clip.p_spec_tint.w;
-        let rgb = mix(base.rgb, rrect_clip.p_spec_tint.rgb, tw * f * f * 0.20);
+        if (tw > 0.0) {
+            let ihw = max(rrect_clip.p_rect.z - t, 1.0);
+            let ihh = max(rrect_clip.p_rect.w - t, 1.0);
+            let irect = vec4f(rrect_clip.p_rect.xy, ihw, ihh);
+            let irad = min(rrect_clip.p_radii, vec4f(min(ihw, ihh)));
+            let gi = rr_sdf_grad(frag, irect, irad);
+            let q = clamp(gi.z / t, 0.0, 1.0);
+            rgb = mix(base.rgb, rrect_clip.p_spec_tint.rgb, tw * q * q * 0.20);
+        }
         return vec4f(rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
     }
 
