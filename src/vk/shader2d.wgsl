@@ -542,6 +542,15 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         var spec = roll_spec(sv);
         if (tw > 0.0) {
             spec = roll_spec_wrap(sv);
+            // A FILL-LESS tinted plate is a pure focus ring (the network
+            // cursor): the wrapped glint alone, on the plate's own roll — so
+            // the line traces the same superellipse silhouette, radius
+            // family, and inset as every node and pane, which a
+            // boundary-straddling carve band cannot (outward offsets of an
+            // Lp corner round off).
+            if (abs(base.a) < 0.004) {
+                return vec4f(rrect_clip.p_spec_tint.rgb, spec * strength * aa);
+            }
         }
         return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
     }
