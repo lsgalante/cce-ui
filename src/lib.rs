@@ -51,11 +51,17 @@ pub fn fonts_dir() -> String {
 }
 
 /// Directory the bundled cce-icons SVGs are loaded from: `$CCE_ICONS_DIR`, else
-/// `~/Dropbox/cce/cce-icons/svg`.
+/// `~/projects/cce/cce-icons/svg`.
+///
+/// The workspace moved out of ~/Dropbox on 2026-08-27: 432k of its 444k files
+/// were cargo build artifacts, and syncing them kept Dropbox re-hashing a tree
+/// that regenerates itself. Set `$CCE_ICONS_DIR` if yours lives elsewhere —
+/// this default is the only path in the toolkit that assumes a checkout
+/// location.
 pub fn icons_dir() -> String {
     std::env::var("CCE_ICONS_DIR").unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_default();
-        format!("{home}/Dropbox/cce/cce-icons/svg")
+        format!("{home}/projects/cce/cce-icons/svg")
     })
 }
 
