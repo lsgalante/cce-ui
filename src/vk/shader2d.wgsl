@@ -648,7 +648,12 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // as the line, not a lit step. Plates leave w at 0.
     let tw = rrect_clip.p_spec_tint.w;
     if (tw > 0.0) {
-        v = roll_spec_wrap(sv) * strength * att;
+        // The PLATE's monotonic roll profile, not the carve wall's: a wall's
+        // slope is a bell (rises then falls), so its tilt crosses the glint
+        // angle twice and drew two concentric lines. With roll_slope the ring
+        // is exactly a plate silhouette's glint — one line, same position.
+        let fr = clamp(1.0 - u, 0.0, 1.0);
+        v = roll_spec_wrap(fgd * roll_slope(fr)) * strength * att;
     }
     if (v >= 0.0) {
         // Highlight: the white screen mixes toward the tint color, slightly
