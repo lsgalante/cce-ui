@@ -342,9 +342,11 @@ impl Graph {
     /// read as miniatures of the desktop's. Clamped to a quarter sweep;
     /// 0 when the grid is off or degenerate.
     pub fn cell_corner_radius(&self) -> f32 {
-        if !self.show_network_grid || self.uniform_background {
-            return 0.0;
-        }
+        // Pure cell GEOMETRY — no display gating: hosts read this for
+        // anything cell-shaped (the empty-cell cursor, drop-target
+        // highlights), which exist whether or not the cell tiles render.
+        // Gating on show_network_grid/uniform_background silently squared
+        // those consumers whenever the tiles were hidden.
         if self.grid_size_x <= 0.0 || self.grid_size_y <= 0.0 {
             return 0.0;
         }
