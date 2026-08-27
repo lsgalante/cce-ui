@@ -666,8 +666,8 @@ fn superellipse_pt(theta: f32, e: f32) -> (f32, f32) {
 /// a per-pixel-smooth falloff between rings — stacked translucent layers band
 /// visibly; this cannot. Ring alphas sit on a quadratic ease-out, giving the
 /// vignette profile piecewise-linearly with kinks below visibility at glow
-/// alphas. Circular corner arcs (not the DE superellipse): at a soft edge the
-/// difference is invisible, and one sampler keeps every ring seam-free.
+/// alphas. Corners sample [`superellipse_pt`], so a glow's silhouette sits in
+/// the same corner family as the cells, nodes, and plates it highlights.
 pub fn push_glow_vertices(
     x: f32, y: f32, ww: f32, h: f32,
     radius: f32, reach: f32,
@@ -686,6 +686,7 @@ pub fn push_glow_vertices(
     let cbl = (x + r0, y + h - r0);
     const K: usize = 10;
     use std::f32::consts::PI;
+    let corner_e = 2.0 / crate::layout::corner_shape();
     // One outline ring `off` px outside the boundary, clockwise from the
     // top-left arc; every ring shares the layout, so strips never twist.
     let ring = |off: f32| -> Vec<[f32; 2]> {
@@ -700,7 +701,8 @@ pub fn push_glow_vertices(
         for ((cx, cy), a0, a1) in corners {
             for k in 0..=K {
                 let a = a0 + (a1 - a0) * (k as f32 / K as f32);
-                pts.push([cx + r * a.cos(), cy + r * a.sin()]);
+                let (ux, uy) = superellipse_pt(a, corner_e);
+                pts.push([cx + r * ux, cy + r * uy]);
             }
         }
         pts
