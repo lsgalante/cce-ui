@@ -208,6 +208,12 @@ impl Breadcrumb {
     /// named constant because the layout, hit zones and tests all share it.
     const SEG_INSET: f32 = 0.0;
 
+    /// Face opacity of the raised run, applied over the configured dropdown
+    /// fill's own alpha. Translucent on purpose: the floating stance pairs it
+    /// with the blur-behind frost, so the face reads as glass over the
+    /// content beneath rather than a solid chip.
+    pub const RAISED_FACE_OPACITY: f32 = 0.5;
+
     /// Width of a seam's flat floor in px. Zero would meet the two walls in a
     /// perfect V; a hair of floor keeps the crease from aliasing into a dotted
     /// line as the seam's subpixel position drifts with the path text. Public
@@ -319,16 +325,23 @@ impl Paint for Breadcrumb {
                     [0.0; 4]
                 };
                 if self.raised {
-                    // The floating stance: the run rises out of the surface
-                    // instead of sitting sunk flush with it. Face first, as a
-                    // zero-stroke Border for exactly `inset_plate`'s reasons
-                    // (legacy getters must not see a RoundedRect; four radii),
-                    // then the boss shades only the edges so a transparent
-                    // face still reads as the host plate lifted.
+                    // The floating stance: the run rises out of the surface as
+                    // ONE beveled plate — fill and raised roll in a single
+                    // lighting pass. The face is deliberately translucent
+                    // ([`Self::RAISED_FACE_OPACITY`] over the configured fill)
+                    // and ALWAYS frosted (negative alpha, the blur-behind
+                    // sentinel): a floating part shows what is under it, and
+                    // at this translucency the frost is what keeps the names
+                    // legible over live content beneath. A transparent
+                    // configured fill keeps the boss degradation: edges only,
+                    // the surface as the face.
                     if face[3] > 0.001 {
-                        ctx.border(run_rect, (r, r, r, r), face, [0.0; 4], 0.0);
+                        let mut c = face;
+                        c[3] = -(c[3] * Self::RAISED_FACE_OPACITY);
+                        ctx.bevel(run_rect, (r, r, r, r), c, depth);
+                    } else {
+                        ctx.boss(run_rect, (r, r, r, r), depth);
                     }
-                    ctx.boss(run_rect, (r, r, r, r), depth);
                 } else {
                     ctx.inset_plate(run_rect, (r, r, r, r), face, depth);
                 }
