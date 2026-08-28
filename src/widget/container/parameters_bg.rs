@@ -605,11 +605,15 @@ impl ParametersBg {
                 if self.display_params[i].2.starts_with("textpick") {
                     // The picker button nests INSIDE the text box's recessed
                     // well (the box spans the full row): below the detached
-                    // label band, inset from the well's walls by exactly the
-                    // well's carve depth. Its relief is a flush trough ring
-                    // ([`Self::picker_troughs`]) whose valley straddles this
-                    // outline, so the outer half meets the well wall's roll
-                    // and the two shade into one inset seam.
+                    // label band, inset from the well's walls by HALF the
+                    // well's carve depth — its trough ring
+                    // ([`Self::picker_troughs`]) straddles this outline by
+                    // ±depth/2, so the ring's outer edge lands exactly on the
+                    // well outline and the seam hugs the box's edges the way
+                    // the dropdown's groove hugs its face. (The full-depth
+                    // inset was the boss era's: a raised island needed a
+                    // strip of floor for its wall to abut the recess wall,
+                    // which read as a too-small button in a too-wide ring.)
                     let label_top = if crate::layout::control_label_layout() == "side" {
                         0.0
                     } else {
@@ -617,7 +621,7 @@ impl ParametersBg {
                             + crate::layout::control_label_margin()
                     };
                     let band_h = r.3 - label_top;
-                    let inset = crate::layout::bevel_width().min(band_h * 0.2);
+                    let inset = 0.5 * crate::layout::bevel_width().min(band_h * 0.2);
                     let by = r.1 + label_top + inset;
                     let bh = (band_h - 2.0 * inset).max(8.0);
                     d.set_rect(r.0 + r.2 - PICK_W - inset, by, PICK_W, bh);
