@@ -445,6 +445,18 @@ pub enum Prim {
     /// 0`) path it degrades to the flat hanging capsule — square top, round
     /// bottom — rather than vanishing.
     Droplet { rect: Rect, color: [f32; 4], spec: DropletSpec },
+    /// The same silhouette as [`Prim::Droplet`] under the same [`DropletSpec`],
+    /// filled FLAT and feathered inward: opaque through the interior, fading
+    /// to nothing over `feather` px as it approaches the drop's edge. A
+    /// vignette shaped exactly like the drop, for grounding text drawn on top
+    /// of one — not a second lit body, so it carries no dome, rim, gleam or
+    /// contact shadow.
+    ///
+    /// It shares the droplet's shader path rather than approximating the
+    /// outline with a rounded rect, so the two can never disagree about where
+    /// the drop's edge is. On the legacy (`bevel_shader 0`) path it degrades
+    /// to the same flat rounded-rect outline `Prim::Droplet` falls back to.
+    DropletScrim { rect: Rect, color: [f32; 4], spec: DropletSpec, feather: f32 },
     /// A concave inside-corner fillet for composed carves: a quarter-arc wall
     /// whose centre `(cx, cy)` sits out in the corner's pocket, shaded with the
     /// same step profile as a `Recess`/`Boss` wall (`raised` flips the sign).
@@ -770,6 +782,13 @@ impl PaintCtx {
 
     /// A hanging water droplet clinging to `rect`'s top edge — see
     /// [`Prim::Droplet`] and [`DropletSpec`].
+    /// See [`Prim::DropletScrim`]. `feather` is how far in from the drop's
+    /// edge the fill reaches full opacity, in logical px.
+    pub fn droplet_scrim(&mut self, rect: Rect, color: [f32; 4], spec: DropletSpec, feather: f32) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::DropletScrim { rect, color, spec, feather });
+    }
+
     pub fn droplet(&mut self, rect: Rect, color: [f32; 4], spec: DropletSpec) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Droplet { rect, color, spec });
@@ -833,6 +852,9 @@ impl PaintCtx {
             Prim::Sphere { cx, cy, radius, color } => self.sphere(cx, cy, radius, color),
             Prim::Glow { rect, radius, reach, color } => self.glow(rect, radius, reach, color),
             Prim::Droplet { rect, color, spec } => self.droplet(rect, color, spec),
+            Prim::DropletScrim { rect, color, spec, feather } => {
+                self.droplet_scrim(rect, color, spec, feather)
+            }
             Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
                 self.concave_fillet(cx, cy, radius, depth, start, raised)
             }

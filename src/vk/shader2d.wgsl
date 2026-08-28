@@ -131,6 +131,7 @@ const MODE_GROOVE: i32 = 8;       // slab carve about an arbitrary line
 const MODE_TROUGH: i32 = 9;       // sunken valley straddling the boundary
 const MODE_DROPLET: i32 = 10;     // hanging water droplet clinging to the box top
 const MODE_ROLL: i32 = 11;        // fill-less rolled perimeter, composited as an overlay
+const MODE_DROPLET_SCRIM: i32 = 12; // flat feathered fill of the droplet silhouette
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -388,7 +389,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // (f³, like PLATE_CREST but tunable) and a thin-edge clarity falloff on
     // the tint alpha, so the (compositor- or resolve_blur-) frosted backdrop
     // shows through clearer at the rim.
-    if (mode == MODE_DROPLET) {
+    if (mode == MODE_DROPLET || mode == MODE_DROPLET_SCRIM) {
         let c = rrect_clip.p_rect.xy;
         let hx = rrect_clip.p_rect.z;
         let hy = rrect_clip.p_rect.w;
@@ -440,6 +441,24 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
 
         let din = -d;
         let aa2 = clamp(din + 0.5, 0.0, 1.0);
+        // MODE_DROPLET_SCRIM: the same silhouette, filled flat and feathered
+        // inward — a vignette shaped exactly like the drop it sits in, for a
+        // caller that needs a legible ground under text without a second lit
+        // body. It shares this mode's SDF rather than approximating the shape
+        // with a rounded rect, which is the whole point: the two can never
+        // disagree about where the drop's edge is. p_light.w carries the
+        // feather (px) instead of the shading band, which is only read below.
+        if (mode == MODE_DROPLET_SCRIM) {
+            if (aa2 <= 0.0) {
+                discard;
+            }
+            let fth = max(rrect_clip.p_light.w, 0.001);
+            let sa2 = vcol.a * clamp(din / fth, 0.0, 1.0) * aa2;
+            if (sa2 <= 0.004) {
+                discard;
+            }
+            return vec4f(vcol.rgb, sa2);
+        }
         if (aa2 <= 0.0) {
             // Outside the silhouette: the contact shadow — a soft dark
             // falloff cast below the drop's lower arc (weighted by the

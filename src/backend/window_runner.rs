@@ -60,6 +60,64 @@ std::thread_local! {
     static BUFFER_CACHE: std::cell::RefCell<std::collections::HashMap<BufferCacheKey, CachedBuffer>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
+/// A droplet spec resolved against a concrete rect: the push-constant fields
+/// that define its SILHOUETTE, in logical px.
+///
+/// Shared by [`crate::scene::paint::Prim::Droplet`] and
+/// [`crate::scene::paint::Prim::DropletScrim`] so the lit drop and the vignette
+/// drawn inside it can never disagree about the shape — the whole reason the
+/// scrim rides the droplet's shader path instead of approximating the outline
+/// with a rounded rect.
+struct DropletGeom {
+    hx: f32,
+    hy: f32,
+    sag: f32,
+    br: f32,
+    bw: f32,
+    k: f32,
+    sr: f32,
+    ar: f32,
+    band: f32,
+    bow: f32,
+    /// How far the contact shadow reaches below/beside the box (0 when the
+    /// spec has no shadow). The lit drop's cover quad grows by this; a scrim
+    /// never draws outside the silhouette and ignores it.
+    sh_reach: f32,
+}
+
+fn droplet_geom(rect: &crate::scene::layout::Rect, spec: &crate::scene::paint::DropletSpec) -> DropletGeom {
+    let hx = rect.width * 0.5;
+    let hy = rect.height * 0.5;
+    let sag = spec.sag.clamp(0.0, 0.9) * rect.height;
+    // belly <= 0 disables the belly outright (the oval-dewdrop default) — the
+    // shader skips the smin when the radius is 0.
+    let (br, bw) = if spec.belly > 0.0 {
+        let br = (spec.belly.min(1.0) * rect.height).min(hy).min(hx);
+        (br, ((hx - br).max(0.0) * spec.belly_w.clamp(0.0, 1.0)).max(1.0))
+    } else {
+        (0.0, 0.0)
+    };
+    let k = (spec.blend.max(0.0) * rect.height).max(1.0);
+    let sheet_hy = hy - sag * 0.5;
+    // Bottom (sheet_r) and top (attach) corner radii: when the pair overfills
+    // the sheet height, scale both down proportionally — 0.5 + 0.5 is the
+    // fully continuous egg.
+    let mut sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(hx);
+    let mut ar = (spec.attach.clamp(0.0, 1.0) * rect.height).min(hx);
+    let sheet_h = (2.0 * sheet_hy).max(0.0);
+    if sr + ar > sheet_h && sr + ar > 0.0 {
+        let f = sheet_h / (sr + ar);
+        sr *= f;
+        ar *= f;
+    }
+    let band = (spec.band.max(0.05) * rect.height).max(1.0);
+    // Bottom-bow edge rise; the shader derives the arc radius from it per drop
+    // (R = hx^2/2*rise).
+    let bow = (spec.bow.clamp(0.0, 0.5) * rect.height).min(hy * 0.9);
+    let sh_reach = if spec.shadow > 0.0 { (0.18 * rect.height).max(2.0) } else { 0.0 };
+    DropletGeom { hx, hy, sag, br, bw, k, sr, ar, band, bow, sh_reach }
+}
+
 fn find_cased_family(fs: &FontSystem, name: &str) -> Option<String> {
     let lower_name = name.to_lowercase();
     for face in fs.db().faces() {
@@ -1569,6 +1627,7 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Arc { .. } => "Arc", P::ArcShaded { .. } => "ArcShaded",
         P::Vector { .. } => "Vector", P::Circle { .. } => "Circle",
         P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
+        P::DropletScrim { .. } => "DropletScrim",
         P::ConcaveFillet { .. } => "ConcaveFillet",
         P::Groove { .. } => "Groove", P::Glow { .. } => "Glow",
         P::Text { .. } => "Text", P::Image { .. } => "Image",
@@ -2094,6 +2153,31 @@ pub fn tessellate_display_list(
                 // Legacy path: the flat disc, exactly a Circle.
                 verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
             }
+            Prim::DropletScrim { rect, color, spec, feather } if shader_plates => {
+                // Shader mode 12: the droplet's own SDF, filled flat and
+                // feathered inward. No contact shadow, so unlike the lit drop
+                // the cover quad is exactly the box — a scrim never draws
+                // outside the silhouette.
+                let g = droplet_geom(rect, spec);
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                plate = Some(crate::vk::PlatePush {
+                    rect: [
+                        (rect.x + rect.width * 0.5) * scale,
+                        (rect.y + rect.height * 0.5) * scale,
+                        g.hx * scale,
+                        g.hy * scale,
+                    ],
+                    radii: [g.sag * scale, g.br * scale, g.bw * scale, g.k * scale],
+                    // p_light.w carries the FEATHER here; mode 12 returns
+                    // before the shading band it otherwise holds is read.
+                    light: [plate_light[0], plate_light[1], plate_light[2], feather.max(0.001) * scale],
+                    material: [plate_mat[0], 0.0, 0.0, 0.0],
+                    host: [g.sr * scale, 0.0, 0.0, g.ar * scale],
+                    specular_tint: [0.0, 0.0, 0.0, g.bow * scale],
+                    mode: 12.0,
+                    shape: spec.curve.clamp(2.0, 6.0),
+                });
+            }
             Prim::Droplet { rect, color, spec } if shader_plates => {
                 // A water droplet lit by shader mode 10: one cover quad; the
                 // shader owns silhouette (sheet ∪smin belly), dome shading,
@@ -2104,7 +2188,9 @@ pub fn tessellate_display_list(
                 // The cover quad grows sideways and BELOW the box by the
                 // contact shadow's reach — shadow fragments live outside the
                 // silhouette, so they need covered pixels to shade.
-                let sh_reach = if spec.shadow > 0.0 { (0.18 * rect.height).max(2.0) } else { 0.0 };
+                let g = droplet_geom(rect, spec);
+                let (hx, hy, sag, br, bw, k, sr, ar, band, bow, sh_reach) =
+                    (g.hx, g.hy, g.sag, g.br, g.bw, g.k, g.sr, g.ar, g.band, g.bow, g.sh_reach);
                 verts.extend(quad_vertices(
                     rect.x - sh_reach,
                     rect.y,
@@ -2112,34 +2198,6 @@ pub fn tessellate_display_list(
                     rect.height + sh_reach,
                     sw, sh, *color,
                 ));
-                let hx = rect.width * 0.5;
-                let hy = rect.height * 0.5;
-                let sag = spec.sag.clamp(0.0, 0.9) * rect.height;
-                // belly ≤ 0 disables the belly outright (the oval-dewdrop
-                // default) — the shader skips the smin when the radius is 0.
-                let (br, bw) = if spec.belly > 0.0 {
-                    let br = (spec.belly.min(1.0) * rect.height).min(hy).min(hx);
-                    (br, ((hx - br).max(0.0) * spec.belly_w.clamp(0.0, 1.0)).max(1.0))
-                } else {
-                    (0.0, 0.0)
-                };
-                let k = (spec.blend.max(0.0) * rect.height).max(1.0);
-                let sheet_hy = hy - sag * 0.5;
-                // Bottom (sheet_r) and top (attach) corner radii: when the
-                // pair overfills the sheet height, scale both down
-                // proportionally — 0.5 + 0.5 is the fully continuous egg.
-                let mut sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(hx);
-                let mut ar = (spec.attach.clamp(0.0, 1.0) * rect.height).min(hx);
-                let sheet_h = (2.0 * sheet_hy).max(0.0);
-                if sr + ar > sheet_h && sr + ar > 0.0 {
-                    let f = sheet_h / (sr + ar);
-                    sr *= f;
-                    ar *= f;
-                }
-                let band = (spec.band.max(0.05) * rect.height).max(1.0);
-                // Bottom-bow edge rise; the shader derives the arc radius
-                // from it per drop (R = hx²/2·rise).
-                let bow = (spec.bow.clamp(0.0, 0.5) * rect.height).min(hy * 0.9);
                 plate = Some(crate::vk::PlatePush {
                     rect: [
                         (rect.x + rect.width * 0.5) * scale,
@@ -2166,6 +2224,16 @@ pub fn tessellate_display_list(
                     mode: 10.0,
                     shape: spec.curve.clamp(2.0, 6.0),
                 });
+            }
+            Prim::DropletScrim { rect, color, spec, .. } => {
+                // Legacy banded path: no SDF to feather against, so the scrim
+                // degrades to the same flat outline the drop itself does —
+                // hard-edged, but present. A prim with no arm here VANISHES.
+                let cap = (rect.height * 0.5).min(rect.width * 0.5);
+                let sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(cap);
+                let ar = (spec.attach.clamp(0.0, 1.0) * rect.height).min(cap);
+                let radii = crate::widget::CornerRadii::new(ar, ar, sr, sr);
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, radii, sw, sh, *color, no, None, &mut verts);
             }
             Prim::Droplet { rect, color, spec } => {
                 // Legacy banded path: the flat drop outline — attach-tapered
