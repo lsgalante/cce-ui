@@ -606,9 +606,10 @@ impl ParametersBg {
                     // The picker button nests INSIDE the text box's recessed
                     // well (the box spans the full row): below the detached
                     // label band, inset from the well's walls by exactly the
-                    // well's carve depth, so the button's raised walls abut
-                    // the recess walls — together they read as the DE's
-                    // trough ring around an inset button (see the carve pass).
+                    // well's carve depth. Its relief is a flush trough ring
+                    // ([`Self::picker_troughs`]) whose valley straddles this
+                    // outline, so the outer half meets the well wall's roll
+                    // and the two shade into one inset seam.
                     let label_top = if crate::layout::control_label_layout() == "side" {
                         0.0
                     } else {
@@ -1161,25 +1162,12 @@ impl ParametersBg {
             }
             // (control, its configured corner radius, raised vs recessed)
             let ctl: Option<(&dyn WidgetHost, f32, bool)> = if is_text_row(&p.2) {
-                // A textpick row's picker button: a raised island inside the
-                // well. Its walls carry the SAME depth as the well's recess
-                // and abut it (the layout insets the button by that depth),
-                // so wall-against-wall the pair forms the trough valley
-                // around the button's top, right, and bottom — the DE's
-                // inset-button-in-a-trough look. The radius is the well
-                // radius's parallel curve at that inset.
-                if p.2.starts_with("textpick") {
-                    if let (Some(d), Some(tb)) = (&self.choices[i], &self.texts[i]) {
-                        let (bx, by, bw, bh) = d.rect();
-                        let (_, _, _, th) = tb.rect();
-                        let ty = crate::widget::label_offset(tb);
-                        if bw > 0.0 && bh > 0.0 {
-                            let depth = crate::layout::bevel_width().min((th - ty) * 0.2);
-                            let r = (crate::layout::textbox_corner_radius() - depth).max(2.0);
-                            out.push((bx, by, bw, bh, (r, r, r, r), depth, true, all));
-                        }
-                    }
-                }
+                // The textpick picker button is NOT in this list: it is a
+                // flush inset control (face level with the well floor, a
+                // valley seam around it — the dropdown trigger's trough
+                // language, not a boss), and troughs travel through
+                // [`Self::picker_troughs`]. A boss here read as a raised
+                // island, which no other inset control in the DE does.
                 self.texts[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::textbox_corner_radius(), false))
             } else if p.2.starts_with("choice") {
                 self.choices[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::dropdown_corner_radius(), true))
@@ -1239,6 +1227,39 @@ impl ParametersBg {
                 let ty = crate::widget::label_offset(w);
                 let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
                 out.push((x + lx, y + ty, ww - lx, h - ty, r4(radius), depth, raised, all));
+            }
+        }
+        out
+    }
+
+    /// The textpick picker buttons' trough rings — `(x, y, w, h, radii, depth)`
+    /// for [`crate::scene::paint::PaintCtx::trough`], drawn by the host AFTER
+    /// [`Self::reliefs`]. The picker is a FLUSH inset control: its face stays
+    /// level with the well floor and a valley seam straddles its outline — the
+    /// dropdown trigger's (and the breadcrumb run's) inset language. It cannot
+    /// ride in [`Self::reliefs`], whose tuple only speaks boss/recess. The
+    /// radius is the well radius's parallel curve at the button's inset; the
+    /// depth matches the well's carve, so the seam and the wall read as one
+    /// family.
+    pub fn picker_troughs(&self) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32)> {
+        if !self.visible || !crate::layout::control_relief() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let hidden = self.hidden_rows();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if hidden[i] || !p.2.starts_with("textpick") {
+                continue;
+            }
+            if let (Some(d), Some(tb)) = (&self.choices[i], &self.texts[i]) {
+                let (bx, by, bw, bh) = d.rect();
+                let (_, _, _, th) = tb.rect();
+                let ty = crate::widget::label_offset(tb);
+                if bw > 0.0 && bh > 0.0 {
+                    let depth = crate::layout::bevel_width().min((th - ty) * 0.2);
+                    let r = (crate::layout::textbox_corner_radius() - depth).max(2.0);
+                    out.push((bx, by, bw, bh, (r, r, r, r), depth));
+                }
             }
         }
         out
@@ -1389,6 +1410,9 @@ impl Paint for ParametersBg {
             } else {
                 ctx.recess_edges(Rect { x: rx, y: ry, width: rw, height: rh }, radii, rd, edges);
             }
+        }
+        for (tx2, ty2, tw2, th2, radii, td) in self.picker_troughs() {
+            ctx.trough(Rect { x: tx2, y: ty2, width: tw2, height: th2 }, radii, td);
         }
         for (fcx, fcy, fr, fd, fs) in self.section_fillets() {
             ctx.concave_fillet(fcx, fcy, fr, fd, fs, false);
