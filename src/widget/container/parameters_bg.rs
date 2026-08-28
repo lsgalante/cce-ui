@@ -605,15 +605,13 @@ impl ParametersBg {
                 if self.display_params[i].2.starts_with("textpick") {
                     // The picker button nests INSIDE the text box's recessed
                     // well (the box spans the full row): below the detached
-                    // label band, inset from the well's walls by HALF the
-                    // well's carve depth — its trough ring
-                    // ([`Self::picker_troughs`]) straddles this outline by
-                    // ±depth/2, so the ring's outer edge lands exactly on the
-                    // well outline and the seam hugs the box's edges the way
-                    // the dropdown's groove hugs its face. (The full-depth
-                    // inset was the boss era's: a raised island needed a
-                    // strip of floor for its wall to abut the recess wall,
-                    // which read as a too-small button in a too-wide ring.)
+                    // label band, its face reaching exactly to the base of
+                    // the well's wall (inset = the carve depth) on the sides
+                    // it adjoins — there the WELL'S OWN BEVEL is the seam's
+                    // far side, and the trough ([`Self::troughs`]) carves
+                    // only the interior left edge. A ring encapsulated
+                    // within the bevel doubled the valley on the adjoining
+                    // sides.
                     let label_top = if crate::layout::control_label_layout() == "side" {
                         0.0
                     } else {
@@ -621,7 +619,7 @@ impl ParametersBg {
                             + crate::layout::control_label_margin()
                     };
                     let band_h = r.3 - label_top;
-                    let inset = 0.5 * crate::layout::bevel_width().min(band_h * 0.2);
+                    let inset = crate::layout::bevel_width().min(band_h * 0.2);
                     let by = r.1 + label_top + inset;
                     let bh = (band_h - 2.0 * inset).max(8.0);
                     d.set_rect(r.0 + r.2 - PICK_W - inset, by, PICK_W, bh);
@@ -1246,15 +1244,20 @@ impl ParametersBg {
     }
 
     /// The textpick picker buttons' trough rings — `(x, y, w, h, radii, depth)`
-    /// for [`crate::scene::paint::PaintCtx::trough`], drawn by the host AFTER
-    /// [`Self::reliefs`]. These are the rows' FLUSH inset controls — the
+    /// for [`crate::scene::paint::PaintCtx::trough_edges`], drawn by the host
+    /// AFTER [`Self::reliefs`]. These are the rows' FLUSH inset controls — the
     /// textpick picker button, and the spinbox's -/+ run: faces level with
-    /// their well floor, a valley seam straddling the outline — the dropdown
-    /// trigger's (and the breadcrumb run's) inset language. They cannot ride
-    /// in [`Self::reliefs`], whose tuple only speaks boss/recess. Radii are
-    /// the well radius's parallel curve at each control's inset; depths match
-    /// the well's carve, so seam and wall read as one family.
-    pub fn troughs(&self) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32)> {
+    /// their well floor. On the sides a control adjoins its well, the WELL'S
+    /// OWN WALL is the seam's far side (the face reaches the wall's base and
+    /// that trough edge is suppressed — a lip of its own there doubles the
+    /// valley); only edges facing open floor carve their own wall. They
+    /// cannot ride in [`Self::reliefs`], whose tuple only speaks boss/recess.
+    /// Radii are the well radius's parallel curve at each control's inset;
+    /// depths match the well's carve, so seam and wall read as one family.
+    #[allow(clippy::type_complexity)]
+    pub fn troughs(
+        &self,
+    ) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32, (bool, bool, bool, bool))> {
         if !self.visible || !crate::layout::control_relief() {
             return Vec::new();
         }
@@ -1272,7 +1275,8 @@ impl ParametersBg {
                     if bw > 0.0 && bh > 0.0 {
                         let depth = crate::layout::bevel_width().min((th - ty) * 0.2);
                         let r = (crate::layout::textbox_corner_radius() - depth).max(2.0);
-                        out.push((bx, by, bw, bh, (r, r, r, r), depth));
+                        // Left edge only: top, right and bottom adjoin the well.
+                        out.push((bx, by, bw, bh, (r, r, r, r), depth, (false, false, false, true)));
                     }
                 }
             } else if p.2.starts_with("spinbox") {
@@ -1280,8 +1284,10 @@ impl ParametersBg {
                     let (x, y, w, h) = sb.rect();
                     let ty = crate::widget::label_offset(sb);
                     let band = Rect { x, y: y + ty, width: w, height: h - ty };
-                    if let Some((_, Some(((run, radii, rd), _)))) = sb.inner().relief_parts(band) {
-                        out.push((run.x, run.y, run.width, run.height, radii, rd));
+                    if let Some((_, Some(((run, radii, rd, edges), _)))) =
+                        sb.inner().relief_parts(band)
+                    {
+                        out.push((run.x, run.y, run.width, run.height, radii, rd, edges));
                     }
                 }
             }
@@ -1309,7 +1315,7 @@ impl ParametersBg {
                 let (x, y, w, h) = sb.rect();
                 let ty = crate::widget::label_offset(sb);
                 let band = Rect { x, y: y + ty, width: w, height: h - ty };
-                if let Some((_, Some(((_, _, rd), (sa, sb2, sw, host))))) =
+                if let Some((_, Some(((_, _, rd, _), (sa, sb2, sw, host))))) =
                     sb.inner().relief_parts(band)
                 {
                     out.push((sa, sb2, sw, rd, host));
@@ -1465,8 +1471,8 @@ impl Paint for ParametersBg {
                 ctx.recess_edges(Rect { x: rx, y: ry, width: rw, height: rh }, radii, rd, edges);
             }
         }
-        for (tx2, ty2, tw2, th2, radii, td) in self.troughs() {
-            ctx.trough(Rect { x: tx2, y: ty2, width: tw2, height: th2 }, radii, td);
+        for (tx2, ty2, tw2, th2, radii, td, tedges) in self.troughs() {
+            ctx.trough_edges(Rect { x: tx2, y: ty2, width: tw2, height: th2 }, radii, td, tedges);
         }
         for (ga, gb, gw, gd, ghost) in self.grooves() {
             ctx.groove(ga, gb, gw, gd, ghost);
