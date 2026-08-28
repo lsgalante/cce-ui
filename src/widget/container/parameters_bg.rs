@@ -1204,6 +1204,15 @@ impl ParametersBg {
                     }
                 }
                 None
+            } else if p.2.starts_with("spinbox") {
+                // The well recess only — the -/+ run's trough and its seam
+                // travel through [`Self::troughs`] / [`Self::grooves`] (this
+                // tuple speaks boss/recess). The generic push below matches
+                // the widget's own `relief_parts` well exactly: same side-
+                // label inset, same content band, same depth cap.
+                self.spinboxes[i]
+                    .as_ref()
+                    .map(|w| (w as &dyn WidgetHost, crate::layout::spinbox_corner_radius(), false))
             } else {
                 if let Some(s) = &self.sliders[i] {
                     let (x, y, w, h) = s.rect();
@@ -1238,31 +1247,72 @@ impl ParametersBg {
 
     /// The textpick picker buttons' trough rings — `(x, y, w, h, radii, depth)`
     /// for [`crate::scene::paint::PaintCtx::trough`], drawn by the host AFTER
-    /// [`Self::reliefs`]. The picker is a FLUSH inset control: its face stays
-    /// level with the well floor and a valley seam straddles its outline — the
-    /// dropdown trigger's (and the breadcrumb run's) inset language. It cannot
-    /// ride in [`Self::reliefs`], whose tuple only speaks boss/recess. The
-    /// radius is the well radius's parallel curve at the button's inset; the
-    /// depth matches the well's carve, so the seam and the wall read as one
-    /// family.
-    pub fn picker_troughs(&self) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32)> {
+    /// [`Self::reliefs`]. These are the rows' FLUSH inset controls — the
+    /// textpick picker button, and the spinbox's -/+ run: faces level with
+    /// their well floor, a valley seam straddling the outline — the dropdown
+    /// trigger's (and the breadcrumb run's) inset language. They cannot ride
+    /// in [`Self::reliefs`], whose tuple only speaks boss/recess. Radii are
+    /// the well radius's parallel curve at each control's inset; depths match
+    /// the well's carve, so seam and wall read as one family.
+    pub fn troughs(&self) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32)> {
         if !self.visible || !crate::layout::control_relief() {
             return Vec::new();
         }
         let mut out = Vec::new();
         let hidden = self.hidden_rows();
         for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] || !p.2.starts_with("textpick") {
+            if hidden[i] {
                 continue;
             }
-            if let (Some(d), Some(tb)) = (&self.choices[i], &self.texts[i]) {
-                let (bx, by, bw, bh) = d.rect();
-                let (_, _, _, th) = tb.rect();
-                let ty = crate::widget::label_offset(tb);
-                if bw > 0.0 && bh > 0.0 {
-                    let depth = crate::layout::bevel_width().min((th - ty) * 0.2);
-                    let r = (crate::layout::textbox_corner_radius() - depth).max(2.0);
-                    out.push((bx, by, bw, bh, (r, r, r, r), depth));
+            if p.2.starts_with("textpick") {
+                if let (Some(d), Some(tb)) = (&self.choices[i], &self.texts[i]) {
+                    let (bx, by, bw, bh) = d.rect();
+                    let (_, _, _, th) = tb.rect();
+                    let ty = crate::widget::label_offset(tb);
+                    if bw > 0.0 && bh > 0.0 {
+                        let depth = crate::layout::bevel_width().min((th - ty) * 0.2);
+                        let r = (crate::layout::textbox_corner_radius() - depth).max(2.0);
+                        out.push((bx, by, bw, bh, (r, r, r, r), depth));
+                    }
+                }
+            } else if p.2.starts_with("spinbox") {
+                if let Some(sb) = &self.spinboxes[i] {
+                    let (x, y, w, h) = sb.rect();
+                    let ty = crate::widget::label_offset(sb);
+                    let band = Rect { x, y: y + ty, width: w, height: h - ty };
+                    if let Some((_, Some(((run, radii, rd), _)))) = sb.inner().relief_parts(band) {
+                        out.push((run.x, run.y, run.width, run.height, radii, rd));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The engraved seams companion — `(a, b, width, depth, host)` for
+    /// [`crate::scene::paint::PaintCtx::groove`], drawn AFTER [`Self::troughs`]
+    /// (a groove engraves the surface the trough's control face provides).
+    /// Today: the seam dividing a spinbox's -/+ run into its two buttons —
+    /// the breadcrumb's segment-seam language at miniature scale.
+    #[allow(clippy::type_complexity)]
+    pub fn grooves(&self) -> Vec<((f32, f32), (f32, f32), f32, f32, Rect)> {
+        if !self.visible || !crate::layout::control_relief() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let hidden = self.hidden_rows();
+        for (i, p) in self.display_params.iter().enumerate() {
+            if hidden[i] || !p.2.starts_with("spinbox") {
+                continue;
+            }
+            if let Some(sb) = &self.spinboxes[i] {
+                let (x, y, w, h) = sb.rect();
+                let ty = crate::widget::label_offset(sb);
+                let band = Rect { x, y: y + ty, width: w, height: h - ty };
+                if let Some((_, Some(((_, _, rd), (sa, sb2, sw, host))))) =
+                    sb.inner().relief_parts(band)
+                {
+                    out.push((sa, sb2, sw, rd, host));
                 }
             }
         }
@@ -1415,8 +1465,11 @@ impl Paint for ParametersBg {
                 ctx.recess_edges(Rect { x: rx, y: ry, width: rw, height: rh }, radii, rd, edges);
             }
         }
-        for (tx2, ty2, tw2, th2, radii, td) in self.picker_troughs() {
+        for (tx2, ty2, tw2, th2, radii, td) in self.troughs() {
             ctx.trough(Rect { x: tx2, y: ty2, width: tw2, height: th2 }, radii, td);
+        }
+        for (ga, gb, gw, gd, ghost) in self.grooves() {
+            ctx.groove(ga, gb, gw, gd, ghost);
         }
         for (fcx, fcy, fr, fd, fs) in self.section_fillets() {
             ctx.concave_fillet(fcx, fcy, fr, fd, fs, false);

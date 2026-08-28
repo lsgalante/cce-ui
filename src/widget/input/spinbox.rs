@@ -98,6 +98,58 @@ impl Spinbox {
         }
     }
 
+    /// The control's relief set under `control_relief`, shared by the widget's
+    /// own `paint` and flat hosts (`ParametersBg`) that must re-emit carves
+    /// (their rounded-quad bridge keeps only flat prims — the slider's
+    /// `track_relief` precedent). Faces are transparent in this style; the
+    /// relief IS the chrome:
+    /// - the whole control is a recessed well (the TextBox language — the
+    ///   value sits on the well floor),
+    /// - the -/+ pair is ONE flush inset run inside the well's right end,
+    ///   trough-ringed like the textpick picker and the dropdown trigger,
+    /// - the two buttons divide by an engraved seam, not a wall pair — the
+    ///   breadcrumb run's segment language at miniature scale.
+    ///
+    /// Returns the well `(rect, radius, depth)`, plus the run
+    /// `(rect, radii, depth)` and seam `(top, bottom, width, host)` when the
+    /// button zone is non-degenerate. `None` when the control has no area.
+    /// The caller gates on `control_relief`.
+    #[allow(clippy::type_complexity)]
+    pub fn relief_parts(
+        &self,
+        rect: Rect,
+    ) -> Option<(
+        (Rect, f32, f32),
+        Option<(
+            (Rect, (f32, f32, f32, f32), f32),
+            ((f32, f32), (f32, f32), f32, Rect),
+        )>,
+    )> {
+        let g = self.geom(rect);
+        if g.w <= 0.0 || g.h <= 0.0 {
+            return None;
+        }
+        let radius = crate::layout::spinbox_corner_radius();
+        let depth = crate::layout::bevel_width().min(g.h * 0.2);
+        let well = (Rect { x: g.x, y: g.y, width: g.w, height: g.h }, radius, depth);
+        if g.btn_w <= 0.0 || g.btn_h <= 0.0 {
+            return Some((well, None));
+        }
+        // The run rides the existing button hit zones (inset `pad` from the
+        // control edges — within a hair of the trough's depth/2 straddle, so
+        // the ring's outer edge hugs the well outline; the picker lesson).
+        // Right corners follow the well radius's parallel curve at that
+        // inset; left corners stay tight — the run's left edge is interior.
+        let run_rect = Rect { x: g.split_dec + g.pad, y: g.btn_y, width: 2.0 * g.btn_w, height: g.btn_h };
+        let rr = (radius - g.pad).max(2.0);
+        let run = (run_rect, (2.0, rr, rr, 2.0), depth);
+        // Seam floor width: the breadcrumb's SEAM_WIDTH — a hair of flat
+        // floor so the crease doesn't alias into a dotted line.
+        let sx = run_rect.x + g.btn_w;
+        let seam = ((sx, run_rect.y), (sx, run_rect.y + run_rect.height), 0.75, run_rect);
+        Some((well, Some((run, seam))))
+    }
+
     fn value_text(&self) -> String {
         if self.editing {
             self.edit_buffer.clone()
@@ -219,7 +271,50 @@ impl Paint for Spinbox {
         let inc_col = if self.hover_inc { colors::spinbox_button_hover() } else { colors::spinbox_button() };
         let dec_col = if self.hover_dec { colors::spinbox_button_hover() } else { colors::spinbox_button() };
 
-        if rounded {
+        if crate::layout::control_relief() {
+            // The DE relief style: transparent faces, the relief is the
+            // chrome (see [`Self::relief_parts`]). Flat prims first — hover
+            // washes and the editing cue survive a flat host's rounded-quad
+            // bridge, the carves are re-emitted host-side.
+            if let Some((well, buttons)) = self.relief_parts(rect) {
+                if let Some(((run, radii, _), _)) = buttons {
+                    let wash = [1.0, 1.0, 1.0, 0.06];
+                    let half = Rect { x: run.x, y: run.y, width: run.width * 0.5, height: run.height };
+                    if self.hover_dec {
+                        ctx.rounded_rect(half, radii.0, (true, false, false, true), wash);
+                    }
+                    if self.hover_inc {
+                        ctx.rounded_rect(
+                            Rect { x: run.x + run.width * 0.5, ..half },
+                            radii.1,
+                            (false, true, true, false),
+                            wash,
+                        );
+                    }
+                }
+                if self.editing {
+                    // Editing cue: an accent hairline on the well floor under
+                    // the value, plus the caret — a flat stand-in for the
+                    // tinted-recess focus treatment the pane's relief tuple
+                    // cannot carry.
+                    let accent = colors::highlight_primary_color();
+                    ctx.quad(
+                        Rect { x: g.x + 4.0, y: g.y + g.h - 4.0, width: g.w * 0.55 - 8.0, height: 1.5 },
+                        accent,
+                    );
+                    let char_width = 8.4;
+                    let cursor_x = (g.x + 4.0 + self.cursor_idx as f32 * char_width).min(g.x + g.w * 0.55 - 4.0);
+                    let cursor_y = g.y + (g.h - 14.0) / 2.0;
+                    ctx.quad(Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 }, [0.80, 0.80, 0.85, 1.0]);
+                }
+                let (wr, wrad, wd) = well;
+                ctx.recess(wr, (wrad, wrad, wrad, wrad), wd);
+                if let Some(((run, radii, rd), (sa, sb, sw, host))) = buttons {
+                    ctx.trough(run, radii, rd);
+                    ctx.groove(sa, sb, sw, rd, host);
+                }
+            }
+        } else if rounded {
             let rc = (true, true, true, true);
             let border_color = if self.editing {
                 [0.20, 0.50, 0.85, 1.0]
