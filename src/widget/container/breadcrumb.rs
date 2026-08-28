@@ -51,6 +51,14 @@ pub struct Breadcrumb {
     clicked_seg: Option<usize>,
     pub right_clicked_seg: Option<usize>,
     pub network_opacity: f32,
+    /// Relief stance of the segment run. `false` (the default) is the
+    /// dropdown-mirror trough: the run sits flush, sunk into the surface
+    /// behind a valley seam. `true` swaps the trough for a boss — the same
+    /// silhouette raised out of the surface, for hosts whose breadcrumb
+    /// floats in front of its plate (the designer's network editor) rather
+    /// than sitting inset into a toolbar. Flat (non-relief) styling and the
+    /// seams are identical in both stances.
+    pub raised: bool,
 }
 
 impl Breadcrumb {
@@ -62,11 +70,17 @@ impl Breadcrumb {
             clicked_seg: None,
             right_clicked_seg: None,
             network_opacity: 1.0,
+            raised: false,
         })
     }
 
     pub fn set_network_opacity(&mut self, opacity: f32) {
         self.network_opacity = opacity;
+    }
+
+    /// See [`Breadcrumb::raised`].
+    pub fn set_raised(&mut self, raised: bool) {
+        self.raised = raised;
     }
 
     pub fn path_to_seg(&self, idx: usize) -> String {
@@ -304,7 +318,20 @@ impl Paint for Breadcrumb {
                 } else {
                     [0.0; 4]
                 };
-                ctx.inset_plate(run_rect, (r, r, r, r), face, depth);
+                if self.raised {
+                    // The floating stance: the run rises out of the surface
+                    // instead of sitting sunk flush with it. Face first, as a
+                    // zero-stroke Border for exactly `inset_plate`'s reasons
+                    // (legacy getters must not see a RoundedRect; four radii),
+                    // then the boss shades only the edges so a transparent
+                    // face still reads as the host plate lifted.
+                    if face[3] > 0.001 {
+                        ctx.border(run_rect, (r, r, r, r), face, [0.0; 4], 0.0);
+                    }
+                    ctx.boss(run_rect, (r, r, r, r), depth);
+                } else {
+                    ctx.inset_plate(run_rect, (r, r, r, r), face, depth);
+                }
                 for (a, b) in self.seams(rect) {
                     ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);
                 }
