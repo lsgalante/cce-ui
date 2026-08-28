@@ -100,8 +100,10 @@ fn section_carve_depth(h: f32) -> f32 {
     let sd = crate::layout::section_depth().max(0.0);
     (crate::layout::bevel_width() * sd).min(h * 0.2).min(CHANNEL * sd)
 }
-/// Vertical pitch between consecutive rows — one channel; rows abut.
-const ROW_GAP: f32 = CHANNEL;
+/// Vertical pitch between consecutive rows. Wider than the horizontal
+/// channel on purpose: each label+control pair gets its own breathing room,
+/// so rows read as separate entries rather than one packed stack.
+const ROW_GAP: f32 = 8.0;
 /// How far a section's title box overhangs its header row upward, and the box's height.
 const TITLE_BOX_INSET: f32 = 2.0;
 const TITLE_BOX_H: f32 = 28.0;
