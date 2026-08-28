@@ -182,9 +182,17 @@ impl Breadcrumb {
     /// (see [`SEG_SLANT`]), so the hit zones are parallelograms, not columns —
     /// testing x alone would put the top-left corner of a segment in its
     /// neighbor, exactly where the seam is drawn furthest from the nominal edge.
+    ///
+    /// The parallelograms are bounded vertically by the plate band. That bound
+    /// is what makes this usable as [`Input::hit`]: `py` otherwise enters only
+    /// through `lean`, which slants the seams without ever rejecting a point,
+    /// so every segment would claim the full-height column beneath it.
     fn seg_at(&self, rect: Rect, px: f32, py: f32) -> Option<usize> {
         let segs = self.visible_segs(rect);
         let (py0, ph) = Self::plate_band(rect);
+        if py < py0 || py >= py0 + ph {
+            return None;
+        }
         let mid = py0 + ph * 0.5;
         // Only interior edges lean; the run's two outer ends stay upright.
         let lean = |i: usize| -> f32 {
@@ -659,6 +667,36 @@ mod tests {
         // At mid-height the seam sits on the nominal edge.
         assert_eq!(breadcrumb.seg_at(rect, edge + 0.5, y + h * 0.5), Some(1));
         assert_eq!(breadcrumb.seg_at(rect, edge - 0.5, y + h * 0.5), Some(0));
+    }
+
+    /// A segment claims its plate, not the full-height column under it. `hit()`
+    /// delegates to `seg_at`, so a missing vertical bound there hands the widget
+    /// every press sharing an x with the run — which is how a host's own content
+    /// menu (cce-files' file rows) lost its right-click to the copy-path menu.
+    #[test]
+    fn hit_test_stops_at_the_plate_band() {
+        let mut breadcrumb = Breadcrumb::new();
+        breadcrumb.set_path(&["home".to_string(), "lsgalante".to_string()]);
+        let rect = Rect { x: 10.0, y: 20.0, width: 300.0, height: 24.0 };
+        breadcrumb.set_rect(rect.x, rect.y, rect.width, rect.height);
+
+        let (y, h) = Breadcrumb::plate_band(rect);
+        let x = seg_center_x(&breadcrumb, rect, 1);
+
+        // Inside the band the segment answers, at the top and bottom edges too.
+        assert_eq!(breadcrumb.seg_at(rect, x, y + h * 0.5), Some(1));
+        assert_eq!(breadcrumb.seg_at(rect, x, y), Some(1));
+        assert_eq!(breadcrumb.seg_at(rect, x, y + h - 0.5), Some(1));
+
+        // Above and below it, nothing — however far the seams have leaned.
+        assert_eq!(breadcrumb.seg_at(rect, x, y - 0.5), None);
+        assert_eq!(breadcrumb.seg_at(rect, x, y + h), None);
+        assert_eq!(breadcrumb.seg_at(rect, x, y + 400.0), None);
+
+        // And the same bound through the `hit_test` hosts actually call.
+        let ctx = UiContext::new();
+        assert!(breadcrumb.hit_test(x, y + h * 0.5, &ctx));
+        assert!(!breadcrumb.hit_test(x, y + 400.0, &ctx));
     }
 
     /// The run's outer ends stay upright — only edges that face another segment
