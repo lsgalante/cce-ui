@@ -331,6 +331,24 @@ pub mod context_menu {
     use crate::widget::*;
     use std::cell::RefCell;
 
+    /// Height of one menu row. Sizing, both hit tests, the label run and the
+    /// plate's hover fill all step by this — they were five copies of a bare
+    /// `24.0`, and a menu whose rows are measured differently from where they
+    /// are drawn selects the entry above the one under the cursor.
+    pub const ROW_H: f32 = 24.0;
+
+    /// Point size of a menu label.
+    const LABEL_SIZE: f32 = 12.0;
+
+    /// A toolkit color as the `[u8; 3]` a [`TextLabel`] carries.
+    fn rgb8(c: [f32; 4]) -> [u8; 3] {
+        [
+            (c[0] * 255.0).round().clamp(0.0, 255.0) as u8,
+            (c[1] * 255.0).round().clamp(0.0, 255.0) as u8,
+            (c[2] * 255.0).round().clamp(0.0, 255.0) as u8,
+        ]
+    }
+
     #[derive(Debug, Clone)]
     pub struct ContextMenuState {
         pub x: f32,
@@ -365,7 +383,7 @@ pub mod context_menu {
             self.x = x;
             self.y = y;
             self.options = options;
-            self.h = self.options.len() as f32 * 24.0;
+            self.h = self.options.len() as f32 * ROW_H;
             let max_len = self.options.iter().map(|s| s.len()).max().unwrap_or(0);
             self.w = ((max_len as f32 * 7.5) + 24.0).max(120.0);
             self.visible = true;
@@ -389,7 +407,7 @@ pub mod context_menu {
             let was_hovered = self.hovered_item;
             self.hovered_item = None;
             if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
-                let idx = ((py - self.y) / 24.0) as usize;
+                let idx = ((py - self.y) / ROW_H) as usize;
                 if idx < self.options.len() && idx >= self.header_count {
                     self.hovered_item = Some(idx);
                 }
@@ -408,7 +426,7 @@ pub mod context_menu {
             }
 
             if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
-                let idx = ((py - self.y) / 24.0) as usize;
+                let idx = ((py - self.y) / ROW_H) as usize;
                 if idx < self.options.len() {
                     if idx >= self.header_count {
                         let opt = self.options[idx].clone();
@@ -451,6 +469,66 @@ pub mod context_menu {
             }
         }
 
+        /// Paint the menu as a lit plate: a rounded face in the DE's plate color,
+        /// translucent and frosted (the negative-alpha blur-behind sentinel), with
+        /// the rolled perimeter — the material every other floating surface in the
+        /// DE wears. Hosts on the display-list path call this INSTEAD of iterating
+        /// [`ContextMenuState::extra_quads`], then draw [`text_labels`] over it.
+        ///
+        /// A transparent configured plate color degrades to the edges-only boss,
+        /// as the breadcrumb's raised run does: with no face to tint, a plate
+        /// would paint a hole.
+        ///
+        /// [`text_labels`]: ContextMenuState::text_labels
+        pub fn paint(&self, ctx: &mut crate::scene::paint::PaintCtx) {
+            if !self.visible {
+                return;
+            }
+            let rect = crate::scene::layout::Rect {
+                x: self.x,
+                y: self.y,
+                width: self.w,
+                height: self.h,
+            };
+            let r = crate::layout::plate_corner_radius();
+            let depth = crate::layout::bevel_width().min(self.h * 0.2);
+            let face = crate::color::page_low_color();
+            if face[3] > 0.001 {
+                let mut frosted = face;
+                frosted[3] = -frosted[3];
+                ctx.plate(rect, (r, r, r, r), frosted, depth);
+            } else {
+                ctx.boss(rect, (r, r, r, r), depth);
+            }
+
+            if let Some(h_idx) = self.hovered_item {
+                // Inset off the roll so the fill sits on the face instead of
+                // climbing the lit edge, and round the corners it actually meets:
+                // the first and last rows touch the plate's, and a header row is
+                // never hovered, so the top pair only rounds when there is no
+                // header above.
+                let iy = self.y + h_idx as f32 * ROW_H;
+                let inset = (depth * 0.5).max(2.0);
+                let first = h_idx == self.header_count && self.header_count == 0;
+                let last = h_idx + 1 == self.options.len();
+                ctx.rounded_rect(
+                    crate::scene::layout::Rect {
+                        x: self.x + inset,
+                        y: iy + 2.0,
+                        width: self.w - 2.0 * inset,
+                        height: ROW_H - 4.0,
+                    },
+                    (r - inset).max(0.0),
+                    (first, first, last, last),
+                    [0.20, 0.40, 0.65, 0.6],
+                );
+            }
+        }
+
+        /// The flat-quad menu: a 1px border rect, a near-black fill and the hover
+        /// row. Superseded by [`ContextMenuState::paint`], which draws the menu as
+        /// the lit plate the rest of the DE's floating surfaces wear; this stays
+        /// for hosts that have not migrated, and renders as it always has.
         pub fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
             let mut quads = Vec::new();
             if !self.visible { return quads; }
@@ -461,8 +539,8 @@ pub mod context_menu {
             quads.push((self.x + 1.0, self.y + 1.0, self.w - 2.0, self.h - 2.0, [0.06, 0.06, 0.09, 1.0]));
 
             if let Some(h_idx) = self.hovered_item {
-                let iy = self.y + h_idx as f32 * 24.0;
-                quads.push((self.x + 2.0, iy + 2.0, self.w - 4.0, 20.0, [0.20, 0.40, 0.65, 0.6]));
+                let iy = self.y + h_idx as f32 * ROW_H;
+                quads.push((self.x + 2.0, iy + 2.0, self.w - 4.0, ROW_H - 4.0, [0.20, 0.40, 0.65, 0.6]));
             }
 
             quads
@@ -473,13 +551,17 @@ pub mod context_menu {
             if !self.visible { return labels; }
 
             for (idx, opt) in self.options.iter().enumerate() {
-                let iy = self.y + idx as f32 * 24.0 + (24.0 - 12.0) / 2.0;
+                let iy = self.y + idx as f32 * ROW_H + (ROW_H - LABEL_SIZE) / 2.0;
+                // The toolkit's semantic colors rather than greys hand-mixed
+                // against the old near-black fill: on the plate's mid-slate the
+                // header's 0x70 was a step above its background and read as
+                // nothing.
                 let text_color = if idx < self.header_count {
-                    [0x70, 0x70, 0x78]
+                    rgb8(crate::color::TEXT_DIM)
                 } else if self.hovered_item == Some(idx) {
-                    [0xff, 0xff, 0xff]
+                    rgb8(crate::color::TEXT_HEADER)
                 } else {
-                    [0xcc, 0xcc, 0xd4]
+                    rgb8(crate::color::TEXT_FG)
                 };
 
                 labels.push(TextLabel {
@@ -538,6 +620,12 @@ pub mod context_menu {
 
     pub fn mouse_input(button: MouseButton, state: ElementState, px: f32, py: f32, ctx: Option<&mut crate::context::UiContext>) -> bool {
         CONTEXT_MENU.with(|m| m.borrow_mut().mouse_input(button, state, px, py, ctx))
+    }
+
+    /// Paint the menu as a lit plate — see [`ContextMenuState::paint`]. Hosts on
+    /// the display-list path call this in place of the [`extra_quads`] loop.
+    pub fn paint(ctx: &mut crate::scene::paint::PaintCtx) {
+        CONTEXT_MENU.with(|m| m.borrow().paint(ctx));
     }
 
     pub fn extra_quads() -> Vec<(f32, f32, f32, f32, [f32; 4])> {
