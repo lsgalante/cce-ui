@@ -1215,6 +1215,22 @@ impl Input for Dropdown {
                 true
             }
             Event::KeyInput(key_event) => {
+                // A key event carries no position, so hosts that broadcast one to every
+                // widget root (cce-system-interface's `dispatch_page_event`) rely on each
+                // widget declining what is not addressed to it — TextBox gates on
+                // `editing`, Toggle has no key arm at all. A closed dropdown must gate on
+                // focus for the same reason: without this it opened on any Enter/Space
+                // that reached it, so the first dropdown in the host's dispatch order
+                // swallowed the Return meant for whatever actually held focus. (Settings'
+                // Browser page: Enter in the Homepage field opened the Page Color Scheme
+                // menu instead of committing the field. Its Power page: Enter on the
+                // focused Power Profile opened the last of the nine, GPU Power Limit.)
+                // An open dropdown always holds focus — the trigger press and `FocusIn`
+                // both claim it, and `FocusOut` closes it — so the `open` arm is reachable
+                // either way; it is spelled out so arrows and Escape stay live regardless.
+                if !self.open && !crate::widget::focus::is_focused_id(ectx.id) {
+                    return false;
+                }
                 let handled = self.handle_key(key_event);
                 if self.open {
                     if let Some(ui) = ectx.ui.as_deref_mut() {
@@ -1343,6 +1359,63 @@ mod tests {
 
         crate::widget::context_menu::hide();
         assert!(!crate::widget::context_menu::is_visible());
+    }
+
+    /// A closed dropdown takes Enter only when it is the focused widget.
+    ///
+    /// Hosts that broadcast a key event to every widget root (cce-system-interface's
+    /// `dispatch_page_event`) depend on each widget declining what is not addressed to
+    /// it — a key event carries no position to filter on. Without the focus gate the
+    /// first dropdown in the host's dispatch order opened on *any* Enter that reached
+    /// it, swallowing the Return meant for whatever actually held focus: settings'
+    /// Browser page opened Page Color Scheme instead of committing the Homepage field,
+    /// and its Power page opened the last of nine menus instead of the focused one.
+    #[test]
+    fn closed_dropdown_takes_enter_only_when_focused() {
+        let mut dummy = crate::context::UiContext::new();
+        let enter = crate::widget::KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(NamedKey::Enter),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+            alt: false,
+        };
+
+        let opts = vec!["Dark".to_string(), "Light".to_string()];
+        let mut dd = Dropdown::new(opts.clone(), 0);
+        dd.set_rect(10.0, 10.0, 100.0, 24.0);
+
+        // Nothing focused: the Return belongs to someone else, so it is declined and
+        // the menu stays shut.
+        crate::widget::focus::clear_focus(None);
+        assert!(!dd.keyboard_input(&enter, &mut dummy));
+        assert!(!dd.open);
+
+        // Another widget focused: same — this is the settings-page case, where the
+        // focused TextBox sits later in the reversed dispatch order.
+        let other = Dropdown::new(opts, 0);
+        crate::widget::focus::set_focused_id(other.id(), None);
+        assert!(!dd.keyboard_input(&enter, &mut dummy));
+        assert!(!dd.open);
+
+        // Focused: Enter opens it, and arms the hover on the selection as before.
+        crate::widget::focus::set_focused_id(dd.id(), None);
+        assert!(dd.keyboard_input(&enter, &mut dummy));
+        assert!(dd.open);
+        assert_eq!(dd.hovered_item, Some(0));
+
+        // Once open the gate is out of the way, so Escape still closes it even if the
+        // focus moved on (`FocusOut` closes it too, but the key path must not depend
+        // on that having run).
+        crate::widget::focus::clear_focus(None);
+        let escape = crate::widget::KeyEvent {
+            logical_key: Key::Named(NamedKey::Escape),
+            ..enter.clone()
+        };
+        assert!(dd.keyboard_input(&escape, &mut dummy));
+        assert!(dd.closing || !dd.open);
     }
 
     #[test]
