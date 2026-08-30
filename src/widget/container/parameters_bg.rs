@@ -2074,6 +2074,17 @@ impl Input for ParametersBg {
                     if p.2.starts_with("choice") {
                         if let Some(d) = &mut self.choices[i] {
                             if d.mouse_input(button, state, px, py, ui) {
+                                // Claim the param focus while the dropdown is
+                                // open — the KeyInput arm above is gated on
+                                // `focused_param`, and without this the choice
+                                // row was the ONE row type that never set it,
+                                // so Escape/arrows/Enter could not reach an
+                                // open params dropdown (found via cce-designer).
+                                if d.open {
+                                    self.focused_param = Some(i);
+                                } else if self.focused_param == Some(i) {
+                                    self.focused_param = None;
+                                }
                                 if d.take_change() {
                                     if let Some(val) = d.get_value_string() {
                                         p.1 = val;
