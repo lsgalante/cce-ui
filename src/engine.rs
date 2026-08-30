@@ -10,5 +10,5 @@ pub use crate::backend::window_runner::{
     extra_quad_vertices, push_extra_quad_vertices, extra_quad_vertices_clipped,
     push_extra_quad_vertices_clipped, circle_vertices, circle_border_vertices,
     arc_background_vertices, push_arc_background_vertices, push_plate_solid_border_vertices,
-    get_text_buffer_laid_out, shaped_cluster_offsets,
+    get_text_buffer_laid_out, shaped_cluster_offsets, shaping_for,
 };

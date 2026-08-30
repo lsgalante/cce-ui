@@ -130,6 +130,53 @@ fn find_cased_family(fs: &FontSystem, name: &str) -> Option<String> {
     None
 }
 
+thread_local! {
+    /// Family name → is-monospaced, resolved once per family from fontdb's
+    /// face metadata (the post table's isFixedPitch, as fontdb records it).
+    static MONO_FAMILY_CACHE: std::cell::RefCell<std::collections::HashMap<String, bool>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+fn family_is_monospaced(fs: &FontSystem, name: &str) -> bool {
+    MONO_FAMILY_CACHE.with(|cache| {
+        if let Some(&mono) = cache.borrow().get(name) {
+            return mono;
+        }
+        let lower = name.to_lowercase();
+        let mono = fs
+            .db()
+            .faces()
+            .find(|face| face.families.iter().any(|(f, _)| f.to_lowercase() == lower))
+            .map(|face| face.monospaced)
+            .unwrap_or(false);
+        cache.borrow_mut().insert(name.to_string(), mono);
+        mono
+    })
+}
+
+/// The shaping mode for one text run: ASCII-only text in a MONOSPACED face
+/// shapes `Basic`, everything else `Advanced`.
+///
+/// `Basic` bypasses OpenType substitution and positioning, and for ASCII in a
+/// mono face that is exactly right: a mono font's ligatures are the one thing
+/// `Advanced` adds there, and they break the grid — Chivo Mono's `liga`
+/// squeezes f+i into a single-advance ﬁ glyph, which is why the bar's window
+/// titles rendered "file" with a cramped fi — while mono faces carry no
+/// kerning to lose. Proportional faces keep `Advanced` (their kerning and
+/// ligatures are wanted — a font preview must not misrepresent the face), and
+/// any non-ASCII text keeps real shaping (combining marks, emoji, complex
+/// scripts) whatever the face.
+pub fn shaping_for(fs: &FontSystem, text: &str, family: &cosmic_text::Family) -> cosmic_text::Shaping {
+    if text.is_ascii() {
+        if let cosmic_text::Family::Name(name) = family {
+            if family_is_monospaced(fs, name) {
+                return cosmic_text::Shaping::Basic;
+            }
+        }
+    }
+    cosmic_text::Shaping::Advanced
+}
+
 pub fn get_text_buffer(fs: &mut FontSystem, text: &str, size: f32, font: Option<&str>) -> Buffer {
     get_text_buffer_attrs(fs, text, size, font, crate::scene::paint::TextAttrs::default())
 }
@@ -259,7 +306,8 @@ pub fn get_text_buffer_attrs(
     if let Some(w) = text_attrs.weight {
         attrs = attrs.weight(cosmic_text::Weight(w));
     }
-    buf.set_text(fs, text, attrs, cosmic_text::Shaping::Advanced);
+    let shaping = shaping_for(fs, text, &family);
+    buf.set_text(fs, text, attrs, shaping);
     buf.shape_until_scroll(fs, true);
 
     BUFFER_CACHE.with(|cache| {
