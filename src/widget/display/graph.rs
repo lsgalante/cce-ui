@@ -98,6 +98,18 @@ pub struct Graph {
     current_mouse_pos: (f32, f32),
     pending_connection: Option<(String, String)>,
     hovered_port: Option<(usize, PortType, usize)>,
+
+    /// The wire the in-flight node drag would splice into, as (src node id,
+    /// dest node id) — ids, not indices, because hosts re-sync nodes on
+    /// every window event and an index would go stale between drag_update
+    /// and the release (the hovered_port lesson). Drawn highlighted while it
+    /// holds; resolved into `pending_splice` on drop.
+    splice_target: Option<(String, String)>,
+    /// A completed splice drop for the host: (dragged node id, the wire's
+    /// upstream node NAME — what Input params store, the wire's downstream
+    /// node id). The host rewires: dragged.Input = upstream name,
+    /// downstream.Input = dragged's name.
+    pending_splice: Option<(String, String, String)>,
 }
 
 impl Graph {
@@ -141,6 +153,8 @@ impl Graph {
             current_mouse_pos: (0.0, 0.0),
             pending_connection: None,
             hovered_port: None,
+            splice_target: None,
+            pending_splice: None,
         })
     }
 
@@ -400,27 +414,23 @@ impl Graph {
             push_clipped(end_x - wire_thickness / 2.0, v2_min_y, wire_thickness, v2_max_y - v2_min_y, color, q);
         };
 
-        // Connection wires: each node with an "input" parameter draws a wire from that source
-        // node's first output port to its own first input port.
+        // Connection wires: each node with an "input" parameter draws a wire
+        // from that source node's first output port to its own first input
+        // port (pairs and endpoints from the shared helpers the splice hit
+        // test also reads). The wire an in-flight node drag would splice
+        // into draws in the highlight color — the drop affordance.
         let wire_color = [0.0, 0.75, 1.0, 0.7 * self.node_opacity]; // Vibrant cyan glow
-        for i in 0..self.nodes.len() {
-            let node = &self.nodes[i];
-            if let Some((_, input_name, _)) = node.parameters.iter().find(|(name, _, _)| name.eq_ignore_ascii_case("input")) {
-                if let Some(src_idx) = self.nodes.iter().position(|n| n.name == *input_name) {
-                    if let (Some((sx, sy, sw, sh)), Some((ex, ey, ew, _eh))) = (self.node_rect(src_idx), self.node_rect(i)) {
-                        // Wires attach at the port circles' centers (which
-                        // float outside the node boxes); portless nodes fall
-                        // back to the edge midpoint.
-                        let (start_x, start_y) = self
-                            .port_center(src_idx, PortType::Output, 0)
-                            .unwrap_or((sx + sw / 2.0, sy + sh));
-                        let (end_x, end_y) = self
-                            .port_center(i, PortType::Input, 0)
-                            .unwrap_or((ex + ew / 2.0, ey));
-
-                        push_wire(start_x, start_y, end_x, end_y, wire_color, &mut quads);
-                    }
-                }
+        let hl = crate::color::graph_wire_highlight_color();
+        let splice_color = [hl[0], hl[1], hl[2], hl[3] * self.node_opacity];
+        for (src_idx, i) in self.wire_pairs() {
+            if let Some(((start_x, start_y), (end_x, end_y))) = self.wire_endpoints(src_idx, i) {
+                let is_splice_target = self
+                    .splice_target
+                    .as_ref()
+                    .map(|(s, d)| self.nodes[src_idx].id == *s && self.nodes[i].id == *d)
+                    .unwrap_or(false);
+                let color = if is_splice_target { splice_color } else { wire_color };
+                push_wire(start_x, start_y, end_x, end_y, color, &mut quads);
             }
         }
 
@@ -929,6 +939,13 @@ impl Input for Graph {
             };
 
             self.drag_node_pos = Some((nx, ny));
+            // The wire the ghost sits on right now, held by id (hosts
+            // re-sync between events) and drawn highlighted — the drop
+            // affordance the user aims by.
+            self.splice_target = self
+                .dragging_idx
+                .and_then(|i| self.splice_wire_at(i, nx, ny))
+                .map(|(s, d)| (self.nodes[s].id.clone(), self.nodes[d].id.clone()));
             return true;
         }
         false
@@ -1055,14 +1072,105 @@ impl Graph {
         false
     }
 
-    /// Drop the in-flight node drag onto the nearest free grid cell (legacy `drag_end`).
+    /// The wire pairs the draw pass renders: (src idx, dest idx), one per
+    /// node whose "Input" parameter names another node — the ONE derivation,
+    /// shared with the splice hit test so the two cannot disagree about
+    /// where a wire is.
+    fn wire_pairs(&self) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        for i in 0..self.nodes.len() {
+            let node = &self.nodes[i];
+            if let Some((_, input_name, _)) =
+                node.parameters.iter().find(|(name, _, _)| name.eq_ignore_ascii_case("input"))
+            {
+                if let Some(src_idx) = self.nodes.iter().position(|n| n.name == *input_name) {
+                    out.push((src_idx, i));
+                }
+            }
+        }
+        out
+    }
+
+    /// A wire's two attachment points — the port circles' centers, falling
+    /// back to the node edge midpoints for portless nodes. The three-segment
+    /// shape (down, across, down) derives from these in both the draw pass
+    /// and [`Self::wire_segment_rects`].
+    fn wire_endpoints(&self, src_idx: usize, dest_idx: usize) -> Option<((f32, f32), (f32, f32))> {
+        let (sx, sy, sw, sh) = self.node_rect(src_idx)?;
+        let (ex, ey, ew, _eh) = self.node_rect(dest_idx)?;
+        let start = self
+            .port_center(src_idx, PortType::Output, 0)
+            .unwrap_or((sx + sw / 2.0, sy + sh));
+        let end = self
+            .port_center(dest_idx, PortType::Input, 0)
+            .unwrap_or((ex + ew / 2.0, ey));
+        Some((start, end))
+    }
+
+    /// The wire's three segments as axis-aligned rects at the drawn
+    /// thickness — `push_wire`'s exact shape, unclipped.
+    fn wire_segment_rects(&self, src_idx: usize, dest_idx: usize) -> Option<[(f32, f32, f32, f32); 3]> {
+        let ((start_x, start_y), (end_x, end_y)) = self.wire_endpoints(src_idx, dest_idx)?;
+        let scale_f = self.grid_size_x / 80.0;
+        let t = (3.0 * scale_f).clamp(1.0, 15.0);
+        let mid_y = start_y + (end_y - start_y) / 2.0;
+        let v1 = (start_x - t / 2.0, start_y.min(mid_y), t, (start_y - mid_y).abs());
+        let h = (start_x.min(end_x), mid_y - t / 2.0, (end_x - start_x).abs(), t);
+        let v2 = (end_x - t / 2.0, mid_y.min(end_y), t, (end_y - mid_y).abs());
+        Some([v1, h, v2])
+    }
+
+    /// The wire the dragged node's ghost at (nx, ny) would splice into —
+    /// the first pair (draw order) whose segment run touches the ghost rect,
+    /// inflated by the wire activation radius so a near miss still takes.
+    /// The dragged node's own wires never count (dropping a node on a wire
+    /// it is already an end of is a move, not a rewire), and a node with no
+    /// "Input" parameter or no output port cannot sit mid-chain.
+    fn splice_wire_at(&self, idx: usize, nx: f32, ny: f32) -> Option<(usize, usize)> {
+        let node = self.nodes.get(idx)?;
+        let has_input = node
+            .parameters
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("input"));
+        if !has_input || node.outputs == 0 {
+            return None;
+        }
+        let (_, _, nw, nh) = self.node_rect(idx)?;
+        let pad = crate::layout::graph_wire_activation_radius().max(0.0);
+        let (gx1, gy1) = (nx - pad, ny - pad);
+        let (gx2, gy2) = (nx + nw + pad, ny + nh + pad);
+        for (src, dest) in self.wire_pairs() {
+            if src == idx || dest == idx {
+                continue;
+            }
+            let Some(segs) = self.wire_segment_rects(src, dest) else { continue };
+            let hit = segs.iter().any(|&(x, y, w, h)| {
+                x < gx2 && x + w > gx1 && y < gy2 && y + h > gy1
+            });
+            if hit {
+                return Some((src, dest));
+            }
+        }
+        None
+    }
+
+    /// Drop the in-flight node drag onto the nearest free grid cell (legacy `drag_end`),
+    /// resolving a held splice target into `pending_splice` for the host.
     fn commit_drag(&mut self) {
+        let target = self.splice_target.take();
         if let Some((nx, ny)) = self.drag_node_pos.take() {
             let c = ((nx - self.grid_origin_x) / (self.grid_size_x + self.skipped_col_w)).round();
             let r = ((ny - self.grid_origin_y) / (self.grid_size_y + self.skipped_row_h)).round();
             if let Some(idx) = self.dragging_idx.take() {
                 let (nx, ny) = self.find_empty_cell(c, r, Some(idx));
                 self.nodes[idx].position = (nx, ny);
+                if let Some((src_id, dest_id)) = target {
+                    let src_name = self.nodes.iter().find(|n| n.id == src_id).map(|n| n.name.clone());
+                    let dest_ok = self.nodes.iter().any(|n| n.id == dest_id);
+                    if let (Some(src_name), true) = (src_name, dest_ok) {
+                        self.pending_splice = Some((self.nodes[idx].id.clone(), src_name, dest_id));
+                    }
+                }
             }
         } else {
             self.dragging_idx = None;
@@ -1105,10 +1213,12 @@ impl GraphController for Graph {
             if self.dragging_idx.is_none() {
                 self.dragging_id = None;
                 self.drag_node_pos = None;
+                self.splice_target = None;
             }
         } else {
             self.dragging_idx = None;
             self.drag_node_pos = None;
+            self.splice_target = None;
         }
 
         // double_clicked_id / double_click_timer survive deliberately: they
@@ -1142,6 +1252,9 @@ impl GraphController for Graph {
     fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
     fn take_pending_connection(&mut self) -> Option<(String, String)> {
         self.pending_connection.take()
+    }
+    fn take_pending_splice(&mut self) -> Option<(String, String, String)> {
+        self.pending_splice.take()
     }
     fn cancel_connecting(&mut self) {
         self.connecting_from = None;
@@ -1243,6 +1356,64 @@ mod tests {
         // An empty-space press clears the selection and is NOT consumed (legacy contract).
         assert!(!g.mouse_input(MouseButton::Left, ElementState::Pressed, 700.0, 550.0, &mut ctx));
         assert_eq!(g.selected_node(), None);
+    }
+
+    /// Dropping a dragged node onto a wire splices it in: the drop reports
+    /// (dragged id, the wire's upstream NAME, the wire's downstream id) for
+    /// the host to rewire both Input params. A drop away from every wire
+    /// reports nothing, and the handshake is take-once.
+    #[test]
+    fn node_dropped_on_a_wire_reports_a_splice() {
+        let mut ctx = UiContext::new();
+        let mut g = Graph::new();
+        WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
+        g.set_grid_sizes(80.0, 40.0);
+        g.set_skipped_sizes(20.0, 20.0);
+        g.set_grid_origin(100.0, 100.0);
+        g.set_grid_snap_enabled(true);
+        let node = |id: &str, name: &str, col: f32, row: f32, params: Vec<(String, String, String)>| GraphNode {
+            id: id.into(),
+            name: name.into(),
+            position: (col, row),
+            parameters: params,
+            geom_visible: true,
+            node_type: String::new(),
+            inputs: 1,
+            outputs: 1,
+        };
+        let p = |v: &str| vec![("Input".to_string(), v.to_string(), "text".to_string())];
+        // alpha → beta wire runs through the empty cell (1, 0) between them;
+        // gamma sits below, unwired.
+        g.set_nodes(&[
+            node("a", "alpha", 0.0, 0.0, Vec::new()),
+            node("b", "beta", 2.0, 0.0, p("alpha")),
+            node("c", "gamma", 0.0, 2.0, p("")),
+        ]);
+        let (id, ptr) = (g.id(), g.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+
+        // Drag gamma's body onto the wire's horizontal run (cell (1, 0)).
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 110.0, 240.0, &mut ctx));
+        g.drag_begin(110.0, 240.0);
+        assert!(g.drag_update(210.0, 140.0));
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 140.0, &mut ctx));
+
+        let splice = GraphController::take_pending_splice(&mut *g);
+        assert_eq!(
+            splice,
+            Some(("c".to_string(), "alpha".to_string(), "b".to_string())),
+            "drop on the wire must report (dragged, upstream name, downstream id)"
+        );
+        assert_eq!(GraphController::take_pending_splice(&mut *g), None, "take-once");
+
+        // A drop in open space reports nothing. Gamma landed in cell (1, 0)
+        // — the free cell its splice drop resolved to — so drag it from
+        // there down to open space clear of the wire.
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, 210.0, 110.0, &mut ctx));
+        g.drag_begin(210.0, 110.0);
+        assert!(g.drag_update(210.0, 230.0));
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 230.0, &mut ctx));
+        assert_eq!(GraphController::take_pending_splice(&mut *g), None);
     }
 
     #[test]

@@ -602,6 +602,14 @@ pub trait GraphController {
     fn grid_origin(&self) -> (f32, f32);
     fn set_show_network_grid(&mut self, show: bool);
     fn take_pending_connection(&mut self) -> Option<(String, String)>;
+    /// A node dropped onto a wire, to be spliced in between its ends:
+    /// (dragged node id, the wire's upstream node NAME — what Input params
+    /// store, the wire's downstream node id). The host rewires both Input
+    /// params: dragged.Input = upstream name, downstream.Input = dragged's
+    /// name. Default None for hosts whose graphs have no wires to splice.
+    fn take_pending_splice(&mut self) -> Option<(String, String, String)> {
+        None
+    }
     fn cancel_connecting(&mut self);
     fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool;
     /// The topmost node whose body contains (px, py), window-absolute coords.
