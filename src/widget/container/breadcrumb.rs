@@ -363,22 +363,48 @@ impl Paint for Breadcrumb {
                 }
             }
         }
-        // Hover tint. The segment is a parallelogram but the tint is the
-        // axis-aligned box inset to the seam's furthest lean, so it never
-        // crosses a boundary — a slanted fill would need a primitive of its own
-        // for a 6% wash.
+        // Hover wash: the WHOLE segment silhouette — flush to the slanted
+        // seams, and around the run's rounded end arcs on the first/last
+        // segment. No sheared primitive exists, so the wash is BANDED: one
+        // thin quad per logical pixel row, each row's edges sampled from the
+        // same seam-lean and corner-arc math the seams and run box use.
+        // ~24 plain Quads, hover-only — and Quads survive the flat hosts'
+        // rounded-quad bridge, so cce-files' mirror gets the same shape.
         if let Some(hovered) = self.hovered_seg {
-            let (hy, hh) = Self::plate_band(rect);
-            let run = SEG_SLANT * hh * 0.5;
-            if let Some(vs) = segs.iter().find(|s| s.logical == Some(hovered)) {
-                let first = segs.first().map(|s| s.x) == Some(vs.x);
-                let last = segs.last().map(|s| s.x + s.w) == Some(vs.x + vs.w);
-                let l = vs.x + if first { 0.0 } else { run };
-                let r = vs.x + vs.w - if last { 0.0 } else { run };
-                ctx.quad(
-                    Rect { x: l, y: hy, width: (r - l).max(0.0), height: hh },
-                    [1.0, 1.0, 1.0, 0.06],
-                );
+            if let (Some((sx0, sw)), Some((rx, ry, rw, rh))) = (
+                segs.iter().find(|s| s.logical == Some(hovered)).map(|s| (s.x, s.w)),
+                self.run_box(rect),
+            ) {
+                let (hy, hh) = Self::plate_band(rect);
+                let run = SEG_SLANT * hh * 0.5;
+                let first = segs.first().map(|s| s.x) == Some(sx0);
+                let last = segs.last().map(|s| s.x + s.w) == Some(sx0 + sw);
+                let rr = crate::layout::dropdown_corner_radius().min(rh * 0.5);
+                // The rounded end's horizontal inset at height yc.
+                let arc = |yc: f32| -> f32 {
+                    let dy = if yc < ry + rr {
+                        rr - (yc - ry)
+                    } else if yc > ry + rh - rr {
+                        yc - (ry + rh - rr)
+                    } else {
+                        return 0.0;
+                    };
+                    rr - (rr * rr - dy * dy).max(0.0).sqrt()
+                };
+                let wash = [1.0, 1.0, 1.0, 0.06];
+                let mut y = hy;
+                while y < hy + hh {
+                    let bh = 1.0f32.min(hy + hh - y);
+                    let yc = y + bh * 0.5;
+                    let t = ((yc - hy) / hh).clamp(0.0, 1.0);
+                    let lean = run * (1.0 - 2.0 * t);
+                    let l = if first { rx + arc(yc) } else { sx0 + lean };
+                    let r_edge = if last { rx + rw - arc(yc) } else { sx0 + sw + lean };
+                    if r_edge > l {
+                        ctx.quad(Rect { x: l, y, width: r_edge - l, height: bh }, wash);
+                    }
+                    y += bh;
+                }
             }
         }
 
