@@ -956,7 +956,9 @@ impl PaintCtx {
     /// An opaque `color` fills the face; transparent leaves the surface below
     /// showing through as the face.
     pub fn inset_plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
-        if color[3] > 0.001 {
+        // abs(): negative alpha is the blur-behind frost sentinel, a real
+        // face — only a genuinely transparent color skips the fill.
+        if color[3].abs() > 0.001 {
             // Flat fill only — the relief is the trough's, so the face must not
             // carry a lip of its own (that lip WAS the second wall).
             //

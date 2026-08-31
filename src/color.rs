@@ -63,6 +63,9 @@ static TEXTBOX_BACKGROUND_EDIT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.10
 static BACKPLATE_MENUBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static BACKPLATE_MENUBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]);
 static BACKPLATE_MENUBAR_BLUR: RwLock<bool> = RwLock::new(false);
+/// Tint strength of frosted menus/popovers over the blurred backdrop:
+/// 1.0 is fully opaque (frost invisible), lower shows more content through.
+static MENU_OPACITY: RwLock<f32> = RwLock::new(0.8);
 
 static BACKPLATE_STATUSBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.06, 0.10, 1.0]);
 static BACKPLATE_STATUSBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.6666, 0.6666, 0.7333, 1.0]);
@@ -312,6 +315,10 @@ fn parse_and_set_colors(content: &str) {
     {
         if let Ok(mut lock) = BACKPLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
     }
+    if let Some(o) = val.pointer("/style/surface/menu/opacity").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = MENU_OPACITY.write() { *lock = (o as f32).clamp(0.0, 1.0); }
+    }
+
     let menubar_blur_ptr = val.pointer("/style/surface/plate/root/menubar/blur")
         .or_else(|| val.pointer("/style/surface/backplate/menubar/blur"));
     if let Some(blur) = menubar_blur_ptr.and_then(|v| v.as_bool()) {
@@ -1159,6 +1166,13 @@ pub fn set_menubar_tab_label_color(color: [f32; 4]) {
 pub fn read_opacity_if_configured() -> Option<f32> {
     load_colors_once();
     *OPACITY.read().unwrap()
+}
+
+/// Tint strength for frosted menus/popovers (`/style/surface/menu/opacity`,
+/// default 0.8): the |alpha| of the blur-behind sentinel their plates carry.
+pub fn menu_opacity() -> f32 {
+    load_colors_once();
+    *MENU_OPACITY.read().unwrap()
 }
 
 pub fn read_backplate_opacity_if_configured() -> Option<f32> {

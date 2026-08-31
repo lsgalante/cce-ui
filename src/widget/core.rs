@@ -495,7 +495,9 @@ pub mod context_menu {
             let face = crate::color::page_low_color();
             if face[3] > 0.001 {
                 let mut frosted = face;
-                frosted[3] = -frosted[3];
+                // menu_opacity, not the color's own alpha: an opaque page
+                // color resolved the frost to a solid tint (invisible).
+                frosted[3] = -crate::color::menu_opacity();
                 ctx.plate(rect, (r, r, r, r), frosted, depth);
             } else {
                 ctx.boss(rect, (r, r, r, r), depth);
