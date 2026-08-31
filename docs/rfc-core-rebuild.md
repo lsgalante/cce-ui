@@ -2601,6 +2601,48 @@ Constraint respected: **each crate still builds standalone** — the new core is
   leaving the designer's spec-OBJECT emission optional and unblocked. The designer
   remains the only detach host. Phase 7 is COMPLETE.
 
+  **Design note (recorded 2026-08-30) — why carve GROUPING exists, and why its
+  rarity is correct.** The mechanism predates this phase: it landed with the SDF-lit
+  plate system (cce-ui@3877dd6), and its rationale lived only in that commit message
+  and the `tessellate_display_list` doc comment until now. The tessellator promotes a
+  `Recess` emitted while a `Plate`/`Bevel` is still "open" into a **CSG feature of
+  that plate's single draw** (the per-frame feature UBO); every other carve renders
+  through the standalone overlay branch. Two things justify the dual path:
+
+  - *Junction correctness at the perimeter roll.* A grouped plate is ONE composite
+    height field — the rolled edge minus its carves — lit once per pixel from summed
+    analytic slope vectors, so a carve wall meeting the plate's perimeter roll is an
+    arithmetic junction. The overlay branch approximates that meeting with the
+    host-box fade.
+  - *Features never blend in color space.* An overlay is shading drawn over
+    already-lit pixels, so stacked shading double-counts — the same reason
+    `Prim::Ridge` exists rather than a boss+recess pair (double-counted specular at
+    the crest).
+
+  The corollary that makes the design coherent: **the two paths differ visibly only
+  near the host's rolled perimeter.** An interior carve (a TreeList or TextBox well
+  in the middle of a window plate) never touches the roll, so the fallback is
+  effectively exact there. That is why the measured grouping rates — the demo groups
+  2 of 10 carves, cce-files 0 of 7 — are correct spending, not waste: the carves that
+  DO group (menubar/status bands sinking through the window's rounded-corner region,
+  edge to edge) are precisely the ones the approximation would visibly regress. So
+  neither path is retirable: fallback-only regresses perimeter-spanning carves, and
+  grouping-always is impossible because ordinary geometry painted after a plate
+  correctly closes its feature run (the carve's shading is baked into the plate's
+  earlier draw).
+
+  The standing hazard is the *silent flip*: three of the six grouping conditions are
+  dynamic (draw order, sibling plates, whether another plate claimed the host's
+  feature run), so the same widget can render through either path depending on its
+  surroundings. That shipped as a bug once — a hovered button's opaque fill severed
+  every later button from the backplate they carve into — fixed by making the
+  carve-host tracker a stack (`plate_stack`, cce-ui@9cfadad). `CCE_PLATE_DEBUG=1`
+  reports each carve's verdict, the fallback reason, and which prim closed a
+  grouping window; it is the first tool for any "same widget, different look"
+  report. A future hardening candidate: assert (debug builds) that a
+  perimeter-touching carve actually grouped, turning the silent flip into a loud
+  one.
+
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
 
