@@ -2622,14 +2622,22 @@ Constraint respected: **each crate still builds standalone** — the new core is
   The corollary that makes the design coherent: **the two paths differ visibly only
   near the host's rolled perimeter.** An interior carve (a TreeList or TextBox well
   in the middle of a window plate) never touches the roll, so the fallback is
-  effectively exact there. That is why the measured grouping rates — the demo groups
-  2 of 10 carves, cce-files 0 of 7 — are correct spending, not waste: the carves that
-  DO group (menubar/status bands sinking through the window's rounded-corner region,
-  edge to edge) are precisely the ones the approximation would visibly regress. So
-  neither path is retirable: fallback-only regresses perimeter-spanning carves, and
-  grouping-always is impossible because ordinary geometry painted after a plate
-  correctly closes its feature run (the carve's shading is baked into the plate's
-  earlier draw).
+  effectively exact there. Two scope corrections recorded 2026-08-30 (the first
+  version of this note got them wrong): what groups is **full-ring untinted carves**
+  (button grooves, slider wells) — the flush menubar/status bands never group, by
+  design since cce-ui@80d50de: an edge-suppressed carve's wall rect extends past the
+  boundary, relying on the overlay cover quad to clip it, a clip the grouped
+  whole-plate draw does not have (grouped, the extended walls smeared across the
+  plate). So the junction where a flush band meets the plate's roll is ALWAYS the
+  host-box fade; grouping's value is the single-evaluation lighting of full-ring
+  carves, exact wherever one sits near the roll. And per the audit that shipped
+  `CCE_PLATE_DEBUG` (cce-ui@949e35e, three apps): **no misgrouping — every fallback
+  is a documented rule firing correctly**; grouping is rare (demo 2 of 10, cce-files
+  0 of 7) because apps constantly interleave flat fills with reliefs, and each one
+  correctly closes the grouping window (the carve's shading is baked into the
+  plate's earlier draw). Neither path is retirable: grouping-always is impossible
+  for exactly that reason, and fallback-only would forfeit the exact junctions
+  full-ring carves get when they do group.
 
   The standing hazard is the *silent flip*: three of the six grouping conditions are
   dynamic (draw order, sibling plates, whether another plate claimed the host's
@@ -2639,9 +2647,17 @@ Constraint respected: **each crate still builds standalone** — the new core is
   carve-host tracker a stack (`plate_stack`, cce-ui@9cfadad). `CCE_PLATE_DEBUG=1`
   reports each carve's verdict, the fallback reason, and which prim closed a
   grouping window; it is the first tool for any "same widget, different look"
-  report. A future hardening candidate: assert (debug builds) that a
-  perimeter-touching carve actually grouped, turning the silent flip into a loud
-  one.
+  report. Hardening (landed 2026-08-30): debug builds warn loudly — once per
+  geometry, no env var — when a groupable full-ring carve is enclosed by a
+  still-open plate, its shaded region reaches that plate's roll band, and a dynamic
+  rule (occlusion, feature-run contiguity, budget) rejected it: the one class where
+  the flip is visually significant (`near_roll_fallback_reason` in
+  `backend/window_runner.rs`, unit-tested). Deliberately a warning, NOT an assert:
+  the audit established every rejection is conservative-correct — the render is
+  right, it is the frame-to-frame look that flips — so a panic would crash debug
+  builds on correct behavior. The ubiquitous accepted case (ordinary geometry
+  already closed every grouping window) stays quiet by construction: no open
+  enclosing plate remains for the check to run against.
 
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.

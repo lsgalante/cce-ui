@@ -391,8 +391,10 @@ impl Application for DemoApp {
 
         // Status band: the header's mirror — carved into the bottom of the
         // plate, flush to the window's bottom and sides, its only wall the top
-        // one facing the content. Emitted here, before any widget geometry, so
-        // it CSG-groups into the plate like the header band does. Sized from
+        // one facing the content. (Neither band CSG-groups: edge-suppressed
+        // carves never do — their extended walls would smear across the
+        // plate's whole-surface draw. Both shade through the overlay fallback,
+        // whose host-box fade owns the junction with the roll.) Sized from
         // the status font plus a symmetric pad (the layout's status leaf only
         // reserves the space; the band and its text center independently).
         let status_h = text_leaf_height(STATUS_FONT_SIZE) + 2.0 * STATUS_BAND_PAD;

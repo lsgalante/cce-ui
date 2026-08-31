@@ -1687,6 +1687,71 @@ fn plate_debug() -> bool {
     *ON.get_or_init(|| std::env::var("CCE_PLATE_DEBUG").is_ok_and(|v| v != "0"))
 }
 
+/// Debug builds make one kind of fallback LOUD without `CCE_PLATE_DEBUG`: a
+/// carve that could group (full ring, untinted) failing to while a still-open
+/// plate encloses it and the carve's shaded region reaches that plate's
+/// perimeter roll. There the grouped and overlay paths shade the junction
+/// differently, and the rejection is one of the dynamic rules — so the SAME
+/// widget can flip looks frame to frame with nothing on stderr. Not an
+/// assert/panic: every rejection is conservative-CORRECT (the audit that
+/// shipped CCE_PLATE_DEBUG found no misgrouping; a later plate overlapping the
+/// carve genuinely must be shaded over, not under) — it is the frame-to-frame
+/// LOOK that flips, so the right loudness is an unmissable warning, not a
+/// crash. The ubiquitous quiet case stays quiet by construction: ordinary
+/// geometry closing every grouping window empties `plate_stack`, so no
+/// enclosing OPEN plate exists and this never runs — that is draw-order
+/// design, not a flip.
+///
+/// Returns the dynamic rule to report, or `None` when the fallback is not the
+/// loud case. Pure so the classification is unit-testable; `later_plates` are
+/// the open plates emitted after the enclosing host.
+#[cfg(debug_assertions)]
+fn near_roll_fallback_reason(
+    carve: &crate::scene::layout::Rect,
+    depth: f32,
+    host: &crate::scene::layout::Rect,
+    roll: f32,
+    later_plates: &[crate::scene::layout::Rect],
+    budget_full: bool,
+) -> Option<&'static str> {
+    // The carve's shaded region — the overlay path's cover-quad inflation.
+    let infl = depth * 0.5 + 2.0;
+    let (sx0, sy0) = (carve.x - infl, carve.y - infl);
+    let (sx1, sy1) = (carve.x + carve.width + infl, carve.y + carve.height + infl);
+    // "Near the roll" = the shaded region leaves the host rect deflated by the
+    // host's own roll width on any side.
+    let near = sx0 < host.x + roll
+        || sy0 < host.y + roll
+        || sx1 > host.x + host.width - roll
+        || sy1 > host.y + host.height - roll;
+    if !near {
+        return None;
+    }
+    // The dynamic rules, in the order the grouping guard tests them.
+    if budget_full {
+        return Some("the feature budget is full");
+    }
+    if later_plates
+        .iter()
+        .any(|o| sx0 < o.x + o.width && sx1 > o.x && sy0 < o.y + o.height && sy1 > o.y)
+    {
+        return Some("a later plate overlaps the carve's shaded region");
+    }
+    Some("the host's feature run is closed (another plate appended features since)")
+}
+
+/// Print a near-roll fallback warning once per distinct message — a carve in a
+/// steady layout would otherwise repeat it every frame.
+#[cfg(debug_assertions)]
+fn plate_carve_warn_once(msg: String) {
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
+    if seen.lock().unwrap().insert(msg.clone()) {
+        eprintln!("{msg}");
+    }
+}
+
 pub fn tessellate_display_list(
     dl: &crate::scene::paint::DisplayList,
     sw: f32,
@@ -1918,6 +1983,37 @@ pub fn tessellate_display_list(
                 } else {
                     None
                 };
+                // Debug-build loudness for the silent grouped→overlay flip —
+                // see `near_roll_fallback_reason` on what qualifies and why
+                // this warns instead of panicking.
+                #[cfg(debug_assertions)]
+                if host_plate.is_none() && mode < 3.5 && full_ring && tint.is_none() {
+                    let enclosing = plate_stack.iter().enumerate().rev().find(|(_, (_, p))| {
+                        rect.x >= p.x - 0.5
+                            && rect.y >= p.y - 0.5
+                            && rect.x + rect.width <= p.x + p.width + 0.5
+                            && rect.y + rect.height <= p.y + p.height + 0.5
+                    });
+                    if let Some((si, &(bi, prect))) = enclosing {
+                        // Host roll width rides the push's light.w (physical px).
+                        let roll = batches[bi].plate.as_ref().map_or(0.0, |p| p.light[3]) / scale;
+                        let later: Vec<crate::scene::layout::Rect> =
+                            plate_stack[si + 1..].iter().map(|&(_, r)| r).collect();
+                        let budget_full = features.len() >= crate::vk::MAX_PLATE_FEATURES;
+                        if let Some(why) =
+                            near_roll_fallback_reason(rect, *depth, &prect, roll, &later, budget_full)
+                        {
+                            let kind = if mode > 2.5 { "boss" } else { "recess" };
+                            plate_carve_warn_once(format!(
+                                "plate-carve: near-roll {kind} ({:.0},{:.0} {:.0}x{:.0}) lost grouping — {why}; \
+                                 its junction with the host plate's roll shades through the overlay fallback, \
+                                 visually different from grouped frames (CCE_PLATE_DEBUG=1 traces verdicts) \
+                                 [debug-build warning, printed once]",
+                                rect.x, rect.y, rect.width, rect.height
+                            ));
+                        }
+                    }
+                }
                 if dbg_plates {
                     match host_plate {
                         Some(_) => dbg_grouped += 1,
@@ -5587,4 +5683,65 @@ fn run_session<'l, A: Application>(
     let app = engine_state.inner.take();
     drop(engine_state);
     (app, end)
+}
+
+#[cfg(test)]
+mod near_roll_fallback_tests {
+    use super::near_roll_fallback_reason;
+    use crate::scene::layout::Rect;
+
+    fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
+        Rect { x, y, width: w, height: h }
+    }
+
+    const HOST: Rect = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+    const ROLL: f32 = 8.0;
+
+    #[test]
+    fn interior_carve_is_quiet() {
+        // Well inside the deflated host: the overlay fallback is exact there.
+        let carve = r(100.0, 100.0, 200.0, 100.0);
+        assert_eq!(near_roll_fallback_reason(&carve, 6.0, &HOST, ROLL, &[], false), None);
+    }
+
+    #[test]
+    fn shaded_region_reaching_the_roll_is_loud() {
+        // Carve rect stops 3px short of the roll band, but its shaded region
+        // (depth*0.5 + 2 = 5px) crosses in — the inflation must count.
+        let carve = r(ROLL + 3.0, 100.0, 200.0, 100.0);
+        assert_eq!(
+            near_roll_fallback_reason(&carve, 6.0, &HOST, ROLL, &[], false),
+            Some("the host's feature run is closed (another plate appended features since)")
+        );
+    }
+
+    #[test]
+    fn occlusion_is_named_before_run_contiguity() {
+        let carve = r(2.0, 100.0, 200.0, 100.0);
+        let occluder = r(150.0, 150.0, 100.0, 100.0);
+        assert_eq!(
+            near_roll_fallback_reason(&carve, 6.0, &HOST, ROLL, &[occluder], false),
+            Some("a later plate overlaps the carve's shaded region")
+        );
+    }
+
+    #[test]
+    fn non_overlapping_later_plate_is_not_occlusion() {
+        let carve = r(2.0, 100.0, 200.0, 100.0);
+        let elsewhere = r(500.0, 400.0, 100.0, 100.0);
+        assert_eq!(
+            near_roll_fallback_reason(&carve, 6.0, &HOST, ROLL, &[elsewhere], false),
+            Some("the host's feature run is closed (another plate appended features since)")
+        );
+    }
+
+    #[test]
+    fn budget_wins_over_every_other_reason() {
+        let carve = r(2.0, 100.0, 200.0, 100.0);
+        let occluder = r(150.0, 150.0, 100.0, 100.0);
+        assert_eq!(
+            near_roll_fallback_reason(&carve, 6.0, &HOST, ROLL, &[occluder], true),
+            Some("the feature budget is full")
+        );
+    }
 }
