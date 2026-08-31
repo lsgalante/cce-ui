@@ -1742,13 +1742,24 @@ pub fn tessellate_display_list(
         let start = verts.len() as u32;
         let mut plate: Option<crate::vk::PlatePush> = None;
         let mut made_plate: Option<crate::scene::layout::Rect> = None;
-        // Blur-behind marker: a Plate/Bevel whose fill alpha is negative asks
-        // the renderer to snapshot the frame-so-far before it draws.
+        // Blur-behind marker: a prim whose FILL alpha is negative asks the
+        // renderer to snapshot the frame-so-far before it draws. Every
+        // fill-bearing prim counts — the shader's a<0 branch runs for all of
+        // them, and a variant missing here still frosts, but against the
+        // stale scene backdrop instead of the frame: a flat tint with no
+        // content and no blur, which is how the Dropdown popover (Border)
+        // and the menubar panels (Quad) shipped visibly unfrosted while the
+        // context menu (Plate) worked.
         let blur_behind = matches!(
             &item.prim,
             crate::scene::paint::Prim::Bevel { color, .. }
             | crate::scene::paint::Prim::Plate { color, .. }
-            | crate::scene::paint::Prim::Droplet { color, .. } if color[3] < 0.0
+            | crate::scene::paint::Prim::Droplet { color, .. }
+            | crate::scene::paint::Prim::Quad { color, .. }
+            | crate::scene::paint::Prim::RoundedRect { color, .. } if color[3] < 0.0
+        ) || matches!(
+            &item.prim,
+            crate::scene::paint::Prim::Border { fill, .. } if fill[3] < 0.0
         );
         // Logical [cx, cy, r] → the physical-pixel triple the vertex attribute carries.
         let no = item

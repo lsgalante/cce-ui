@@ -840,11 +840,14 @@ fn resolve_blur(pos: vec2f, color: vec4f) -> vec4f {
     var blurred = vec4f(0.0);
     var total_weight = 0.0;
 
-    // 7x7 Gaussian blur kernel, samples every 2.5 px (~±7.5px reach); the
-    // linear sampler between taps papers over the stride.
+    // 7x7 Gaussian blur kernel, samples every 5.5 px (±16.5px reach,
+    // effective sigma ~11px); the linear sampler between taps papers over
+    // the stride. The old 2.5px stride (±7.5px reach) was technically a
+    // blur but read as plain translucency — fine detail beneath a frosted
+    // menu stayed legible, which is not what frosted glass does.
     for (var x = -3.0; x <= 3.0; x += 1.0) {
         for (var y = -3.0; y <= 3.0; y += 1.0) {
-            let offset = vec2f(x, y) * 2.5;
+            let offset = vec2f(x, y) * 5.5;
             let sample_uv = (pos + offset) / tex_size;
             let weight = exp(-(x*x + y*y) / (2.0 * 2.0 * 2.0));
             blurred += textureSample(t_backdrop, s_backdrop, sample_uv) * weight;
