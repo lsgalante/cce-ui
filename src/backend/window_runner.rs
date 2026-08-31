@@ -3320,6 +3320,9 @@ pub struct EngineState<A: Application> {
     /// True while the previous frame ran with a nonzero margin — lets the
     /// per-frame geometry publish reset state exactly once on deactivation.
     pub overflow_was_active: bool,
+    /// The popover-union rect last sent via zcce set_popover_region, logical
+    /// surface px; None once a clear has been sent (or never anything).
+    pub sent_popover_region: Option<(i32, i32, i32, i32)>,
 
     pub exit: bool,
     pub redraw: bool,
@@ -3513,6 +3516,59 @@ impl<A: Application> EngineState<A> {
         }
     }
     
+    /// Report the union of the open popover rects to the compositor
+    /// (zcce set_popover_region, manager v7), so its window chrome — the
+    /// overview resize ring — stays out from under an in-surface menu. Sent
+    /// only on change, and a clear is sent when the last popover closes;
+    /// rects are clamped to the surface in logical px, the coordinate space
+    /// the protocol specifies. Popovers animate, so this runs every loop —
+    /// the change gate is what keeps it quiet.
+    fn send_popover_region(&mut self) {
+        let Some(tl) = &self.cce_toplevel else { return };
+        // Version gate on the MANAGER numbering the resource carries (the
+        // toplevel inherits its bind version): 7 is where the request
+        // appeared. An older compositor would kill the client on the
+        // unknown opcode.
+        if tl.version() < 7 {
+            return;
+        }
+        let mut union: Option<(f32, f32, f32, f32)> = None;
+        if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
+            for (_id, ptr) in ctx.tree.iter_registered() {
+                unsafe {
+                    let Some(w) = ptr.as_ref() else { continue };
+                    if !w.visible() {
+                        continue;
+                    }
+                    let Some((px, py, pw, ph)) = w.popover_rect() else { continue };
+                    let (x0, y0) = (px.max(0.0), py.max(0.0));
+                    let x1 = (px + pw).min(self.logical_width);
+                    let y1 = (py + ph).min(self.logical_height);
+                    if x1 <= x0 || y1 <= y0 {
+                        continue;
+                    }
+                    union = Some(match union {
+                        None => (x0, y0, x1, y1),
+                        Some((ux0, uy0, ux1, uy1)) => {
+                            (ux0.min(x0), uy0.min(y0), ux1.max(x1), uy1.max(y1))
+                        }
+                    });
+                }
+            }
+        }
+        let next = union.map(|(x0, y0, x1, y1)| {
+            (x0 as i32, y0 as i32, (x1 - x0).ceil() as i32, (y1 - y0).ceil() as i32)
+        });
+        if next == self.sent_popover_region {
+            return;
+        }
+        match next {
+            Some((x, y, w, h)) => tl.set_popover_region(x, y, w, h),
+            None => tl.set_popover_region(0, 0, 0, 0),
+        }
+        self.sent_popover_region = next;
+    }
+
     /// The cursor for the pointer at (lx, ly): the app's
     /// [`Application::cursor_icon`] override, else the standard-CSD edge
     /// cursors (status bars and non-standard-CSD apps fall back to Default).
@@ -5093,6 +5149,7 @@ fn run_session<'l, A: Application>(
         frame_logical: (0.0, 0.0),
         applied_margin: 0.0,
         overflow_was_active: false,
+        sent_popover_region: None,
         exit: false,
         redraw: false,
         frame_callback_pending: false,
@@ -5203,14 +5260,18 @@ fn run_session<'l, A: Application>(
         }
         let wants_utility = engine_state.inner.as_ref().unwrap().utility();
         let wants_grid = engine_state.inner.as_ref().unwrap().grid();
-        if wants_utility || wants_grid {
-            // Declared BEFORE the initial commit so the mode is set by the
-            // time the compositor maps (and would otherwise restore) the
-            // window. Manager version 5 is where set_utility appeared, 6 is
-            // where the grid role did; on an older compositor the
-            // declaration is skipped and the app runs as a plain floating
-            // window rather than dying on an unknown opcode.
-            let version = if wants_grid { 6..=6 } else { 5..=5 };
+        {
+            // Bound for EVERY app now, not just utility/grid ones: the
+            // toplevel also carries the popover-region hint (manager v7),
+            // which any app with a dropdown wants. Role declarations go
+            // BEFORE the initial commit so the mode is set by the time the
+            // compositor maps the window. Version floors: set_utility
+            // appeared at manager 5, the grid role at 6; the range tops at 7
+            // so a newer compositor grants the hint and an older one simply
+            // yields a lower-versioned toplevel — the hint send is gated on
+            // version() >= 7 (send_popover_region), and on a pre-5
+            // compositor the bind fails and the app runs plain.
+            let version = if wants_grid { 6..=7 } else { 5..=7 };
             match globals.bind::<crate::protocol::cce_window_management_v1::zcce_window_manager_v1::ZcceWindowManagerV1, _, _>(&qh, version, ()) {
                 Ok(cce_wm) => {
                     let toplevel = cce_wm.get_cce_toplevel(&surface, &qh, ());
@@ -5403,6 +5464,7 @@ fn run_session<'l, A: Application>(
                 engine_state.publish_window_geometry();
                 engine_state.overflow_was_active = engine_state.applied_margin > 0.0;
             }
+            engine_state.send_popover_region();
         }
 
         if let Some(ref mut pk) = engine_state.pressed_key {
