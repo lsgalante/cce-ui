@@ -136,11 +136,11 @@ impl ScrollRegion {
         self.content_w > self.w
     }
 
-    fn max_scroll(&self) -> f32 {
+    pub fn max_scroll(&self) -> f32 {
         (self.content_h - self.viewport_h).max(0.0)
     }
 
-    fn max_scroll_x(&self) -> f32 {
+    pub fn max_scroll_x(&self) -> f32 {
         (self.content_w - self.w).max(0.0)
     }
 
