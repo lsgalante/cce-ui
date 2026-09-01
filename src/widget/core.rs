@@ -408,7 +408,10 @@ pub mod context_menu {
             self.hovered_item = None;
             if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
                 let idx = ((py - self.y) / ROW_H) as usize;
-                if idx < self.options.len() && idx >= self.header_count {
+                // A "-" row is a SEPARATOR (the dropdown's convention):
+                // engraved, never hovered, never an action.
+                if idx < self.options.len() && idx >= self.header_count && self.options[idx] != "-"
+                {
                     self.hovered_item = Some(idx);
                 }
             }
@@ -525,6 +528,23 @@ pub mod context_menu {
                     [0.20, 0.40, 0.65, 0.6],
                 );
             }
+
+            // Separator rows ("-"): an engraved line across the face at the
+            // row's vertical centre — the breadcrumb seam's language, cut
+            // into the menu plate instead of a printed dash.
+            for (idx, opt) in self.options.iter().enumerate() {
+                if opt == "-" {
+                    let cy = self.y + idx as f32 * ROW_H + ROW_H * 0.5;
+                    let inset = (depth * 0.5).max(6.0);
+                    ctx.groove(
+                        (self.x + inset, cy),
+                        (self.x + self.w - inset, cy),
+                        0.75,
+                        depth,
+                        rect,
+                    );
+                }
+            }
         }
 
         /// The flat-quad menu: a 1px border rect, a near-black fill and the hover
@@ -545,6 +565,15 @@ pub mod context_menu {
                 quads.push((self.x + 2.0, iy + 2.0, self.w - 4.0, ROW_H - 4.0, [0.20, 0.40, 0.65, 0.6]));
             }
 
+            // Separator rows ("-"): a hairline in place of the engraved
+            // groove the plate path cuts.
+            for (idx, opt) in self.options.iter().enumerate() {
+                if opt == "-" {
+                    let cy = self.y + idx as f32 * ROW_H + ROW_H * 0.5;
+                    quads.push((self.x + 6.0, cy, self.w - 12.0, 1.0, [0.22, 0.22, 0.28, 1.0]));
+                }
+            }
+
             quads
         }
 
@@ -553,6 +582,9 @@ pub mod context_menu {
             if !self.visible { return labels; }
 
             for (idx, opt) in self.options.iter().enumerate() {
+                if opt == "-" {
+                    continue;
+                }
                 let iy = self.y + idx as f32 * ROW_H + (ROW_H - LABEL_SIZE) / 2.0;
                 // The toolkit's semantic colors rather than greys hand-mixed
                 // against the old near-black fill: on the plate's mid-slate the
