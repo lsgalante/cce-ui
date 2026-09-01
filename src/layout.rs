@@ -97,6 +97,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.rangeslider.height" => "rangeslider_height",
                 "style.control.rangeslider.corner_radius" | "style.rangeslider.corner_radius" => "rangeslider_corner_radius",
                 "style.control.scrollbar.width" => "scrollbar_width",
+                "style.control.scrollbar.inset" => "scrollbar_inset",
                 "style.control.spinbox.height" => "spinbox_height",
                 "style.control.spinbox.button_padding" => "spinbox_button_padding",
                 "style.control.spinbox.corner_radius" => "spinbox_corner_radius",
@@ -324,6 +325,7 @@ static BUTTON_HEIGHT: RwLock<f32> = RwLock::new(40.0);
 static RAMP_HEIGHT: RwLock<f32> = RwLock::new(32.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
+static SCROLLBAR_INSET: RwLock<f32> = RwLock::new(16.0);
 static COLUMN_GAP: RwLock<f32> = RwLock::new(16.0);
 static CONTROL_PANEL_PADDING: RwLock<f32> = RwLock::new(16.0);
 static CONTROL_PANEL_GAP: RwLock<f32> = RwLock::new(12.0);
@@ -533,6 +535,15 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
+                        *lock = val;
+                    }
+                }
+            }
+            if let Some(rest) = trimmed.strip_prefix("scrollbar_inset") {
+                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                let val_str = rest.trim_end_matches('"').trim();
+                if let Ok(val) = val_str.parse::<f32>() {
+                    if let Ok(mut lock) = SCROLLBAR_INSET.write() {
                         *lock = val;
                     }
                 }
@@ -2852,6 +2863,32 @@ pub fn set_scrollbar_width(width: f32) {
     if let Ok(mut lock) = SCROLLBAR_WIDTH.write() {
         *lock = width;
     }
+}
+
+/// How far a page-level scrollbar stands off its window/plate right edge — the
+/// designer parameter-pane look (config `style.control.scrollbar.inset`).
+/// Framed inner lists keep their own tight 4px hug; this is for bars floating
+/// over a plate.
+pub fn scrollbar_inset() -> f32 {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        if let Some(content) = read_config() {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("scrollbar_inset") {
+                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
+                    let val_str = rest.trim_end_matches('"').trim();
+                    if let Ok(val) = val_str.parse::<f32>() {
+                        if let Ok(mut lock) = SCROLLBAR_INSET.write() {
+                            *lock = val;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    *SCROLLBAR_INSET.read().unwrap()
 }
 
 pub fn tree_opacity() -> f32 {

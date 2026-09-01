@@ -70,20 +70,11 @@ pub struct ParametersBg {
     pub content_h: f32,
     scrollbar_dragging: bool,
     drag_offset_y: f32,
-    /// Seconds left in the "recently scrolled" window that keeps the scrollbar raised in
-    /// front of the pane plate; decays in `tick`. See [`ParametersBg::scrollbar_active`].
-    scroll_activity: f32,
-    /// Whether the pointer currently sits over the scrollbar track (updated on pointer move).
-    scrollbar_hover: bool,
-    /// Latched "raised in front of the plate" state, with hysteresis: a wheel scroll (or an
-    /// active drag) raises it; hover only *sustains* an already-raised bar; nothing else
-    /// raises it. While sunk it is behind the plate, so hover and clicks can't reach it —
-    /// the plate occludes it. Recomputed via [`ParametersBg::recompute_scrollbar_raised`].
-    scrollbar_raised: bool,
+    /// The raise/sink hysteresis (wheel/drag raises, hover sustains, the hold decays in
+    /// `tick`) — the shared [`crate::widget::ScrollbarActivity`], which was extracted FROM
+    /// this widget so every app's plate-straddling scrollbar behaves the same way.
+    activity: crate::widget::ScrollbarActivity,
 }
-
-/// How long (seconds) the scrollbar stays raised after the last wheel scroll or drag release.
-const SCROLL_ACTIVE_HOLD: f32 = 0.7;
 
 /// The channel: the ONLY gap a control keeps from whatever its edge meets — the
 /// neighboring control, or its section's wall. Controls pack edge-to-edge; the
@@ -168,9 +159,7 @@ impl ParametersBg {
             content_h: 0.0,
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
-            scroll_activity: 0.0,
-            scrollbar_raised: false,
-            scrollbar_hover: false,
+            activity: crate::widget::ScrollbarActivity::new(),
         })
     }
 
@@ -526,23 +515,13 @@ impl ParametersBg {
     /// Whether the scrollbar is currently raised in front of the pane plate (the latched
     /// state). While this is false the bar sits behind the plate and is non-interactive.
     pub fn scrollbar_active(&self) -> bool {
-        self.scrollbar_raised
+        self.activity.raised()
     }
 
-    /// Recompute the latched "raised" state with hysteresis, returning whether it changed.
-    ///
-    /// A wheel scroll (`scroll_activity`) or an active drag raises the bar. Hover only
-    /// *sustains* a bar that is already raised — it can never raise a sunk one, because a
-    /// sunk bar is behind the plate and the plate is what the pointer is actually over. Once
-    /// nothing holds it up it sinks, and can only rise again by scrolling.
+    /// Re-latch the shared hysteresis with this pane's inputs, returning whether it changed.
     fn recompute_scrollbar_raised(&mut self) -> bool {
-        let raised = self.scrollbar_visible()
-            && (self.scrollbar_dragging
-                || self.scroll_activity > 0.0
-                || (self.scrollbar_raised && self.scrollbar_hover));
-        let changed = raised != self.scrollbar_raised;
-        self.scrollbar_raised = raised;
-        changed
+        let visible = self.scrollbar_visible();
+        self.activity.recompute(visible, self.scrollbar_dragging)
     }
 
     /// The scrollbar's track + thumb quads (empty when no scrollbar is needed). The host draws
@@ -1709,7 +1688,7 @@ impl Input for ParametersBg {
     fn drag_end(&mut self) {
         if self.scrollbar_dragging {
             self.scrollbar_dragging = false;
-            self.scroll_activity = SCROLL_ACTIVE_HOLD;
+            self.activity.bump();
             return;
         }
         if let Some(i) = self.dragging_param.take() {
@@ -1793,12 +1772,12 @@ impl Input for ParametersBg {
         }
         // Decay the "recently scrolled" window; keep frames coming until it expires so the
         // scrollbar's sink behind the plate actually renders.
-        if self.scroll_activity > 0.0 {
-            self.scroll_activity = (self.scroll_activity - dt).max(0.0);
+        if self.activity.holding() {
             changed = true;
         }
         // Re-latch the raised state (e.g. sink once the scroll window lapses).
-        if self.recompute_scrollbar_raised() {
+        let visible = self.scrollbar_visible();
+        if self.activity.tick(dt, visible, self.scrollbar_dragging) {
             changed = true;
         }
         changed
@@ -1826,7 +1805,8 @@ impl Input for ParametersBg {
                 // Track scrollbar hover, then re-latch: hover only sustains an already-raised
                 // bar (a sunk one is behind the plate, so the pointer never reaches it), so
                 // the only visible change here is the raised state — redraw on that transition.
-                self.scrollbar_hover = self.hit_test_scrollbar(px, py);
+                let hover = self.hit_test_scrollbar(px, py);
+                self.activity.set_hover(hover);
                 let raised_changed = self.recompute_scrollbar_raised();
                 let Some(ui) = ectx.ui.as_deref_mut() else {
                     return raised_changed;
@@ -1934,7 +1914,7 @@ impl Input for ParametersBg {
                     if state == ElementState::Pressed {
                         // Only a raised bar can be grabbed — a sunk one is behind the plate,
                         // so the press falls through to the pane content underneath it.
-                        if self.scrollbar_raised && self.hit_test_scrollbar(px, py) {
+                        if self.activity.raised() && self.hit_test_scrollbar(px, py) {
                             // Legacy called `self.focus()` here — base flag only, which
                             // nothing reads (see module docs).
                             self.scrollbar_dragging = true;
@@ -1971,7 +1951,7 @@ impl Input for ParametersBg {
                     } else if state == ElementState::Released {
                         if self.scrollbar_dragging {
                             self.scrollbar_dragging = false;
-                            self.scroll_activity = SCROLL_ACTIVE_HOLD;
+                            self.activity.bump();
                             return true;
                         }
                     }
@@ -2641,7 +2621,7 @@ impl Input for ParametersBg {
                             self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
                             if (self.scroll_y - old_scroll).abs() > 0.01 {
                                 self.update_slider_rects();
-                                self.scroll_activity = SCROLL_ACTIVE_HOLD;
+                                self.activity.bump();
                                 self.recompute_scrollbar_raised();
                             }
                         }

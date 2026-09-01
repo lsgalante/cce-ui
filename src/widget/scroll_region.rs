@@ -24,6 +24,84 @@
 
 use crate::widget::{ElementState, Key, KeyEvent, MouseScrollDelta, NamedKey};
 
+/// How long (seconds) a raise/sink scrollbar stays raised after the last wheel
+/// scroll or drag release.
+pub const SCROLL_ACTIVE_HOLD: f32 = 0.7;
+
+/// The raise/sink hysteresis for scrollbars that idle BEHIND their host's
+/// translucent plate — the designer parameter-pane treatment, shared so every
+/// app's bar behaves the same way. The bar has two depths: *raised* it draws in
+/// front of the content and takes input; *sunk* it draws under the host's plate
+/// (dimly visible through a translucent one) and is non-interactive, because
+/// the plate occludes it.
+///
+/// The rules: a scroll (wheel, keyboard) or an active thumb drag raises the
+/// bar, and a drag release refreshes the hold. Hover only *sustains* a bar
+/// that is already raised — it can never raise a sunk one, since the pointer
+/// is really over the plate, not the bar. Once nothing holds it up for
+/// [`SCROLL_ACTIVE_HOLD`] seconds it sinks, and only scrolling brings it back.
+///
+/// The owner drives it: [`Self::bump`] on scrolls and drag releases,
+/// [`Self::set_hover`] from pointer moves, [`Self::tick`] once per frame
+/// (which decays the hold and recomputes — a `true` return is the repaint
+/// signal for the raise/sink flip).
+#[derive(Debug, Clone, Default)]
+pub struct ScrollbarActivity {
+    /// Seconds left in the "recently scrolled" window that keeps the bar raised.
+    activity: f32,
+    hover: bool,
+    raised: bool,
+}
+
+impl ScrollbarActivity {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the bar is currently raised in front of the plate. While false
+    /// it sits behind the plate and must not take input.
+    pub fn raised(&self) -> bool {
+        self.raised
+    }
+
+    /// Refresh the hold window: call on a wheel/keyboard scroll and on a drag
+    /// release.
+    pub fn bump(&mut self) {
+        self.activity = SCROLL_ACTIVE_HOLD;
+    }
+
+    /// Track whether the pointer sits over the bar (raw geometry — the caller
+    /// does not gate this on raised; the hysteresis is what limits hover to
+    /// sustaining).
+    pub fn set_hover(&mut self, over: bool) {
+        self.hover = over;
+    }
+
+    /// Whether the post-scroll hold window is still running — owners whose tick
+    /// chain only runs while frames are being drawn use this to keep frames
+    /// coming until the sink actually renders.
+    pub fn holding(&self) -> bool {
+        self.activity > 0.0
+    }
+
+    /// Recompute the latched raised state, returning whether it changed.
+    pub fn recompute(&mut self, visible: bool, dragging: bool) -> bool {
+        let raised = visible && (dragging || self.activity > 0.0 || (self.raised && self.hover));
+        let changed = raised != self.raised;
+        self.raised = raised;
+        changed
+    }
+
+    /// Per-frame decay + recompute. Returns whether the raised state flipped —
+    /// the owner's repaint signal.
+    pub fn tick(&mut self, dt: f32, visible: bool, dragging: bool) -> bool {
+        if self.activity > 0.0 {
+            self.activity = (self.activity - dt).max(0.0);
+        }
+        self.recompute(visible, dragging)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ScrollRegion {
     pub x: f32,
@@ -53,6 +131,17 @@ pub struct ScrollRegion {
     /// Draw the border + background plate in `push_prims`. Off = frameless: rows
     /// sit directly on the window plate (the scrollbar still draws).
     pub draw_frame: bool,
+    /// Gap between the vertical bar's right edge and the region's right edge.
+    /// The default 4.0 hugs a framed list's border; page-level bars floating
+    /// over a window plate use [`crate::layout::scrollbar_inset`] for the
+    /// designer's stood-off look.
+    pub edge_inset: f32,
+    /// Opt-in raise/sink behavior ([`ScrollbarActivity`]): the bar idles sunk
+    /// (host draws it behind its plate via [`Self::push_scrollbar_prims`]) and
+    /// is non-interactive until a scroll raises it. Off (the default), the bar
+    /// is always drawn and always grabbable — existing hosts unchanged.
+    pub sink_behind: bool,
+    activity: ScrollbarActivity,
 }
 
 impl Default for ScrollRegion {
@@ -88,11 +177,24 @@ impl ScrollRegion {
             hovered: false,
             focused: false,
             draw_frame: true,
+            edge_inset: 4.0,
+            sink_behind: false,
+            activity: ScrollbarActivity::new(),
         }
     }
 
     pub fn with_frame(mut self, draw_frame: bool) -> Self {
         self.draw_frame = draw_frame;
+        self
+    }
+
+    pub fn with_edge_inset(mut self, inset: f32) -> Self {
+        self.edge_inset = inset;
+        self
+    }
+
+    pub fn with_sink_behind(mut self, sink: bool) -> Self {
+        self.sink_behind = sink;
         self
     }
 
@@ -172,7 +274,7 @@ impl ScrollRegion {
     /// Scrollbar geometry (`ScrollBox::extra_quads`): (sb_x, track_y, sb_w, track_h, thumb_y, thumb_h).
     fn scrollbar_geom(&self) -> (f32, f32, f32, f32, f32, f32) {
         let sb_w = crate::layout::scrollbar_width();
-        let sb_x = self.x + self.w - sb_w - 4.0;
+        let sb_x = self.x + self.w - sb_w - self.edge_inset;
         let track_h = self.viewport_h - 8.0;
         let track_y = self.viewport_y + 4.0;
         let visible_ratio = self.viewport_h / self.content_h.max(1.0);
@@ -188,6 +290,11 @@ impl ScrollRegion {
 
     pub fn hit_scrollbar(&self, px: f32, py: f32) -> bool {
         if self.content_h <= self.viewport_h {
+            return false;
+        }
+        // A sunk bar is behind the host's plate: the plate occludes it, so the
+        // pointer can neither grab nor jump-scroll it.
+        if self.sink_behind && !self.activity.raised() {
             return false;
         }
         let (sb_x, track_y, sb_w, track_h, _, _) = self.scrollbar_geom();
@@ -217,6 +324,9 @@ impl ScrollRegion {
 
     fn hit_h_scrollbar(&self, px: f32, py: f32) -> bool {
         if !self.h_scroll_active() {
+            return false;
+        }
+        if self.sink_behind && !self.activity.raised() {
             return false;
         }
         let (track_x, sb_y, track_w, sb_h, _, _) = self.h_scrollbar_geom();
@@ -274,7 +384,13 @@ impl ScrollRegion {
     pub fn release(&mut self) -> bool {
         // Bitwise on purpose: both drags must reset even when the first
         // operand is already true (|| would short-circuit the take).
-        std::mem::take(&mut self.dragging) | std::mem::take(&mut self.dragging_h)
+        let was_dragging = std::mem::take(&mut self.dragging) | std::mem::take(&mut self.dragging_h);
+        if was_dragging && self.sink_behind {
+            // A drag release starts the hold window, so the bar lingers
+            // briefly instead of sinking the instant the button lifts.
+            self.activity.bump();
+        }
+        was_dragging
     }
 
     fn drag_move(&mut self, py: f32) -> bool {
@@ -295,6 +411,12 @@ impl ScrollRegion {
     /// tint and the keyboard scope.
     pub fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
         self.hovered = self.hit(px, py);
+        if self.sink_behind {
+            // Gated hit tests: a sunk bar reports no hover, so hover can only
+            // sustain a raised bar (the hysteresis contract).
+            self.activity
+                .set_hover(self.hit_scrollbar(px, py) || self.hit_h_scrollbar(px, py));
+        }
         if self.dragging {
             self.drag_move(py);
             return true;
@@ -327,7 +449,47 @@ impl ScrollRegion {
         // vertical-only list ignores them (max_scroll_x = 0 clamps to 0).
         let old_x = self.scroll_x;
         self.scroll_x = (self.scroll_x + dx).clamp(0.0, self.max_scroll_x());
-        (self.scroll_y - old_y).abs() > 0.01 || (self.scroll_x - old_x).abs() > 0.01
+        let changed = (self.scroll_y - old_y).abs() > 0.01 || (self.scroll_x - old_x).abs() > 0.01;
+        if changed {
+            self.raise();
+        }
+        changed
+    }
+
+    /// Whether the bar overflows in either axis — the raise/sink "visible" input.
+    fn overflowing(&self) -> bool {
+        self.content_h > self.viewport_h || self.h_scroll_active()
+    }
+
+    /// Refresh the raise hold and recompute immediately, so a scroll shows the
+    /// bar in the same frame's redraw rather than one tick later.
+    fn raise(&mut self) {
+        if self.sink_behind {
+            self.activity.bump();
+            self.activity.recompute(self.overflowing(), self.dragging || self.dragging_h);
+        }
+    }
+
+    /// Whether the scrollbar currently draws in front of the content and takes
+    /// input. Always true for a region without [`Self::sink_behind`].
+    pub fn scrollbar_raised(&self) -> bool {
+        !self.sink_behind || self.activity.raised()
+    }
+
+    /// Per-frame raise/sink upkeep for sink-behind regions; a `true` return is
+    /// the host's repaint signal. True while the post-scroll hold is running,
+    /// not just on the flip: the demand-driven frame loop only keeps ticking
+    /// while frames flow, so the hold must keep them coming or the sink would
+    /// stall until the next input event. No-op (false) without `sink_behind`.
+    pub fn tick(&mut self, dt: f32) -> bool {
+        if !self.sink_behind {
+            return false;
+        }
+        let holding = self.activity.holding();
+        let flipped = self
+            .activity
+            .tick(dt, self.overflowing(), self.dragging || self.dragging_h);
+        flipped || holding
     }
 
     /// Hover/focus-scoped keyboard scrolling (`ScrollBox::keyboard_input` reached the boxes
@@ -365,10 +527,15 @@ impl ScrollRegion {
                 _ => return false,
             }
             if (self.scroll_x - old_x).abs() > 0.01 {
+                self.raise();
                 return true;
             }
         }
-        (self.scroll_y - old).abs() > 0.01
+        let changed = (self.scroll_y - old).abs() > 0.01;
+        if changed {
+            self.raise();
+        }
+        changed
     }
 
     /// The legacy frame, single-drawn: 1px rounded border (focus/hover tinted, from
@@ -395,6 +562,17 @@ impl ScrollRegion {
                 all,
             );
         }
+        // A sunk sink-behind bar is NOT drawn here: the host paints it under
+        // its plate via `push_scrollbar_prims` so it shows through dimly.
+        if self.scrollbar_raised() {
+            self.push_scrollbar_prims(pc);
+        }
+    }
+
+    /// The pill scrollbars alone (track + thumb, both axes), drawn wherever the
+    /// host calls it. A sink-behind host emits this twice a frame at most:
+    /// under its plate while the bar is sunk, over the content while raised.
+    pub fn push_scrollbar_prims(&self, pc: &mut dyn crate::layout::RenderTarget) {
         if self.content_h > self.viewport_h {
             // Track and thumb are pills — half-width radius (the designer look).
             let (sb_x, track_y, sb_w, track_h, thumb_y, thumb_h) = self.scrollbar_geom();
@@ -543,6 +721,76 @@ mod tests {
         assert!(r.release());
         // A rows-area press still falls through (no h-bar hit).
         assert!(!r.press(50.0, 50.0));
+    }
+
+    #[test]
+    fn edge_inset_moves_the_bar_off_the_edge() {
+        let mut r = region().with_edge_inset(20.0);
+        r.update_bounds(10, 20.0, 100.0);
+        // Bar right edge sits edge_inset in from the region's right edge; the
+        // old 4px position no longer hits.
+        let sb_x = 10.0 + 200.0 - crate::layout::scrollbar_width() - 20.0;
+        assert!(r.press(sb_x + 1.0, 50.0));
+        assert!(r.release());
+        let old_x = 10.0 + 200.0 - crate::layout::scrollbar_width() - 4.0 + 1.0;
+        assert!(!r.press(old_x + 4.1, 50.0)); // past the ±4 slop of the inset bar
+    }
+
+    #[test]
+    fn sink_behind_gates_input_until_a_scroll_raises() {
+        let mut r = region().with_sink_behind(true);
+        r.update_bounds(10, 20.0, 100.0);
+        assert!(!r.scrollbar_raised());
+        // Sunk: a press on the bar strip falls through (the plate occludes it).
+        let sb_x = 10.0 + 200.0 - crate::layout::scrollbar_width() - 4.0;
+        assert!(!r.press(sb_x + 1.0, 50.0));
+        assert!(!r.dragging);
+        // A wheel scroll raises it in the same frame…
+        assert!(r.wheel(&MouseScrollDelta::LineDelta(0.0, -2.0), 50.0, 50.0));
+        assert!(r.scrollbar_raised());
+        // …and now the bar takes the grab.
+        assert!(r.press(sb_x + 1.0, 50.0));
+        assert!(r.dragging);
+        assert!(r.release());
+        // The release refreshed the hold: still raised, and the hold keeps the
+        // repaint signal up so the frame loop keeps ticking toward the sink.
+        assert!(r.scrollbar_raised());
+        assert!(r.tick(0.3)); // holding → keep frames coming
+        assert!(r.scrollbar_raised());
+        assert!(r.tick(SCROLL_ACTIVE_HOLD)); // hold lapses → sink flip reported
+        assert!(!r.scrollbar_raised());
+        assert!(!r.tick(0.016)); // settled sunk: quiet again
+    }
+
+    #[test]
+    fn hover_sustains_but_never_raises() {
+        let mut r = region().with_sink_behind(true);
+        r.update_bounds(10, 20.0, 100.0);
+        let sb_x = 10.0 + 200.0 - crate::layout::scrollbar_width() - 4.0;
+        // Hovering the sunk bar's strip does not raise it.
+        r.cursor_moved(sb_x + 1.0, 50.0);
+        assert!(!r.tick(0.016));
+        assert!(!r.scrollbar_raised());
+        // Raise by scrolling, hover it, and let the hold lapse: hover sustains.
+        r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+        r.cursor_moved(sb_x + 1.0, 50.0);
+        r.tick(SCROLL_ACTIVE_HOLD + 0.1); // hold lapses, hover keeps it raised
+        assert!(r.scrollbar_raised());
+        assert!(!r.tick(0.016)); // sustained by hover alone: no repaint churn
+        // Pointer leaves: the next tick sinks it.
+        r.cursor_moved(50.0, 50.0);
+        assert!(r.tick(0.016));
+        assert!(!r.scrollbar_raised());
+    }
+
+    #[test]
+    fn non_sink_regions_are_unchanged() {
+        let mut r = region();
+        r.update_bounds(10, 20.0, 100.0);
+        assert!(r.scrollbar_raised()); // always interactive
+        assert!(!r.tick(1.0)); // tick is a no-op
+        let sb_x = 10.0 + 200.0 - crate::layout::scrollbar_width() - 4.0;
+        assert!(r.press(sb_x + 1.0, 50.0));
     }
 
     #[test]
