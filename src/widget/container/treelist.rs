@@ -259,6 +259,13 @@ impl TreeList {
         self.scroll_box.update_bounds(content_h, self.scroll_box.viewport_y, h - offset_y - header_h);
     }
 
+    /// The on-screen rect of a leaf row, or `None` unless the row is FULLY
+    /// visible. Deliberately full-containment, unlike the draw-side
+    /// virtualization (which returns partial rows to be drawn cut by the
+    /// clip): this positions a floating overlay (cce-data-editor's inline
+    /// value editors) that draws OVER the well unclipped, and an editor
+    /// hanging half off the list edge is worse than one that waits for its
+    /// row to scroll fully into view.
     pub fn get_row_rect(&self, original_idx: usize) -> Option<(f32, f32, f32, f32)> {
         let list_top = self.scroll_box.viewport_y;
         let list_bottom = self.scroll_box.viewport_y + self.scroll_box.viewport_h;

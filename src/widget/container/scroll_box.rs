@@ -111,9 +111,18 @@ impl ScrollBox {
             && py >= sb_track_y && py <= sb_track_y + sb_track_h
     }
 
+    /// Screen y for an item at `virtual_y`, or `None` when it doesn't
+    /// intersect the viewport at all. Partially visible items ARE returned —
+    /// callers draw under a clip rect (or clamp per quad), so an edge item
+    /// renders cut, not culled, and hit-testing must accept the same partial
+    /// items the draw shows. (The original full-containment test here is what
+    /// made list rows vanish the moment they touched the viewport edge, in
+    /// every app that copied it.)
     pub fn get_item_draw_y(&self, virtual_y: f32, item_h: f32) -> Option<f32> {
         let draw_y = self.viewport_y + virtual_y - self.scroll_y;
-        if draw_y >= self.viewport_y - 1.0 && draw_y + item_h <= self.viewport_y + self.viewport_h + 1.0 {
+        if draw_y + item_h >= self.viewport_y - 1.0
+            && draw_y <= self.viewport_y + self.viewport_h + 1.0
+        {
             Some(draw_y)
         } else {
             None
@@ -478,15 +487,20 @@ mod tests {
         sb.mouse_wheel(&delta_large, 50.0, 50.0, &mut dummy);
         assert_eq!(sb.scroll_y, 50.0);
 
-        // 5. Test item draw coordinates
+        // 5. Test item draw coordinates (intersection contract: partially
+        // visible items are returned so callers draw them cut by the clip).
         // Virtual item at virtual_y = 10, item_h = 24
-        // Screen draw y = viewport_y + virtual_y - scroll_y = 20 + 10 - 50 = -20
-        // -20 < viewport_y + 2.0 (22.0), so it should return None (not visible)
+        // Screen draw y = 20 + 10 - 50 = -20; bottom = 4 < viewport_y - 1
+        // (19.0): fully above the viewport, culled.
         assert!(sb.get_item_draw_y(10.0, 24.0).is_none());
 
+        // Virtual item at virtual_y = 40, item_h = 24
+        // Screen draw y = 20 + 40 - 50 = 10: straddles the viewport top
+        // (bottom = 34 >= 19.0) — returned, drawn cut by the clip.
+        assert_eq!(sb.get_item_draw_y(40.0, 24.0), Some(10.0));
+
         // Virtual item at virtual_y = 60, item_h = 24
-        // Screen draw y = 20 + 60 - 50 = 30
-        // 30 >= 22.0 and 30 + 24 <= 118.0, so it should return Some(30.0)
+        // Screen draw y = 20 + 60 - 50 = 30: fully inside.
         assert_eq!(sb.get_item_draw_y(60.0, 24.0), Some(30.0));
     }
 
