@@ -349,16 +349,49 @@ pub fn shaped_cluster_offsets(
     let buffer = get_text_buffer(fs, text, size, font);
     let mut out: Vec<(usize, f32)> = Vec::new();
     let mut total: f32 = 0.0;
-    if let Some(run) = buffer.layout_runs().next() {
-        for glyph in run.glyphs {
-            if out.last().map_or(true, |&(b, _)| b != glyph.start) {
-                out.push((glyph.start, glyph.x / scale));
-            }
-            total = total.max((glyph.x + glyph.w) / scale);
+    for (start, x, w) in normalized_glyph_starts(&buffer, text) {
+        if out.last().map_or(true, |&(b, _)| b != start) {
+            out.push((start, x / scale));
         }
+        total = total.max((x + w) / scale);
     }
     out.push((text.len(), total));
     out
+}
+
+/// Every glyph of `buffer`'s layout runs as `(start_byte, x, w)` (physical px),
+/// with `start` normalized to be text-relative.
+///
+/// Exists because cosmic-text 0.12's `Shaping::Basic` path (`shape_skip`) emits
+/// `LayoutGlyph::start` relative to the shape SPAN — it resets to 0 at every
+/// word — while the Advanced path emits line-relative starts. `shaping_for`
+/// picks Basic exactly for ASCII text in a monospace family (the DE's default
+/// control font), so any multi-word value hit the bug: offsets keyed by those
+/// starts collide on the low columns and the caret/selection walk off the
+/// glyphs. A reset can ONLY come from that path, which shapes strictly one
+/// glyph per char in logical order — so when one is seen, byte starts are
+/// rebuilt by walking the text's chars. `text` must be the single line the
+/// buffer was shaped from.
+pub(crate) fn normalized_glyph_starts(buffer: &Buffer, text: &str) -> Vec<(usize, f32, f32)> {
+    let mut glyphs: Vec<(usize, f32, f32)> = Vec::new();
+    let mut monotonic = true;
+    let mut prev = 0usize;
+    for run in buffer.layout_runs() {
+        for g in run.glyphs {
+            if g.start < prev {
+                monotonic = false;
+            }
+            prev = g.start;
+            glyphs.push((g.start, g.x, g.w));
+        }
+    }
+    if !monotonic {
+        let mut starts = text.char_indices().map(|(i, _)| i);
+        for g in glyphs.iter_mut() {
+            g.0 = starts.next().unwrap_or(text.len());
+        }
+    }
+    glyphs
 }
 
 /// Shape a boxed [`Prim::Text`] (word-wrap + alignment) and return `(buffer, vertical_offset)`.

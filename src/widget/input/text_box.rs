@@ -85,6 +85,14 @@ pub struct TextBox {
     /// families through fontdb, not cosmic-text) — a per-column error that made the multiline
     /// selection highlight drift off the glyphs. 0.0 until the first `prepare_text`.
     shaped_char_advance: f32,
+    /// Multiline counterpart of `glyph_positions`: per WRAPPED line, per-column x
+    /// offsets of that line as drawn (`[line][col]`, one extra entry per line = its
+    /// total advance), recorded by [`Paint::prepare_text`] over the same wrap the
+    /// paint uses. The multiline caret, selection, click→column, and
+    /// scroll-to-cursor read these; the uniform `col * char_width()` grid they used
+    /// before is exact only for monospace. Empty for single-line boxes or until the
+    /// first shape (readers fall back to the grid).
+    line_glyph_positions: Vec<Vec<f32>>,
     pub update_on_type: bool,
     /// Synced control label ([`Paint::sync_label`]) — drives the side/detached offsets.
     label: Option<String>,
@@ -133,6 +141,7 @@ impl TextBox {
             glyph_positions: Vec::new(),
             total_text_width: 0.0,
             shaped_char_advance: 0.0,
+            line_glyph_positions: Vec::new(),
             update_on_type: false,
             label: None,
             hovered: false,
@@ -175,6 +184,33 @@ impl TextBox {
             }
         }
         closest_idx
+    }
+
+    /// The x offset of `col` on wrapped line `line`, from the shaped per-line
+    /// offsets when recorded, else the uniform-grid estimate.
+    fn line_col_x(&self, line: usize, col: usize) -> f32 {
+        self.line_glyph_positions
+            .get(line)
+            .and_then(|l| l.get(col).copied())
+            .unwrap_or_else(|| col as f32 * self.char_width())
+    }
+
+    /// An x offset (relative to the text origin) → nearest column on wrapped
+    /// line `line`, from the shaped offsets when recorded.
+    fn line_x_to_col(&self, line: usize, relative_x: f32) -> usize {
+        let Some(offsets) = self.line_glyph_positions.get(line).filter(|l| !l.is_empty()) else {
+            return ((relative_x / self.char_width()).round() as isize).max(0) as usize;
+        };
+        let mut closest = 0;
+        let mut min_diff = f32::MAX;
+        for (i, &pos) in offsets.iter().enumerate() {
+            let diff = (pos - relative_x).abs();
+            if diff < min_diff {
+                min_diff = diff;
+                closest = i;
+            }
+        }
+        closest
     }
 
     pub fn char_width(&self) -> f32 {
@@ -436,6 +472,25 @@ impl TextBox {
         }
     }
 
+    /// The widest line's drawn advance — shaped when recorded, else the
+    /// chars × char_width estimate (the pre-shaping formula).
+    fn content_width(&self, lines: &[String]) -> f32 {
+        let shaped = if self.multiline {
+            self.line_glyph_positions
+                .iter()
+                .filter_map(|l| l.last().copied())
+                .fold(0.0f32, f32::max)
+        } else {
+            self.total_text_width
+        };
+        if shaped > 0.0 {
+            shaped
+        } else {
+            let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+            max_line_len as f32 * self.char_width()
+        }
+    }
+
     pub fn clamp_scroll(&mut self) {
         let char_width = self.char_width();
         let line_height = self.line_height();
@@ -460,8 +515,7 @@ impl TextBox {
         }
 
         if !self.line_wrap_enabled() {
-            let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-            let content_w = max_line_len as f32 * char_width;
+            let content_w = self.content_width(&lines);
             let max_scroll_x = (content_w - (self.rect.width - 16.0)).max(0.0);
             self.scroll_x = self.scroll_x.clamp(0.0, max_scroll_x);
         } else {
@@ -506,7 +560,14 @@ impl TextBox {
         }
 
         if !self.line_wrap_enabled() {
-            let cursor_x = col_idx as f32 * char_width;
+            let cursor_x = if self.multiline {
+                self.line_col_x(line_idx, col_idx)
+            } else {
+                self.glyph_positions
+                    .get(col_idx)
+                    .copied()
+                    .unwrap_or(col_idx as f32 * char_width)
+            };
             if cursor_x < self.scroll_x + 10.0 {
                 self.scroll_x = (cursor_x - 20.0).max(0.0);
             } else if cursor_x + char_width > self.scroll_x + viewport_w - 10.0 {
@@ -559,7 +620,8 @@ impl TextBox {
             };
             let (lines, index_map) = self.wrap_text(max_chars);
             let click_line = (((py - (self.rect.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
-            let click_col = (((px - (self.rect.x + label_x + 8.0) + self.scroll_x) / char_width).round() as isize).max(0) as usize;
+            let rel_x = px - (self.rect.x + label_x + 8.0) + self.scroll_x;
+            let click_col = self.line_x_to_col(click_line.min(lines.len() - 1), rel_x);
             self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
         } else {
             self.map_x_to_idx(px)
@@ -774,8 +836,7 @@ impl TextBox {
         }
 
         if !self.line_wrap_enabled() {
-            let max_line_len = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-            let content_w = max_line_len as f32 * char_width;
+            let content_w = self.content_width(&lines);
             let max_scroll_x = (content_w - (self.rect.width - 16.0)).max(0.0);
             let natural = crate::layout::touchpad_natural_scroll();
             let scroll_amt_x = match *delta {
@@ -860,8 +921,8 @@ impl TextBox {
                         }
                     }
                     if let (Some(sc), Some(ec)) = (line_start_col, line_end_col) {
-                        let highlight_x = x + 8.0 + (sc as f32 * char_width) - self.scroll_x;
-                        let highlight_w = (ec - sc + 1) as f32 * char_width;
+                        let highlight_x = x + 8.0 + self.line_col_x(line_idx, sc) - self.scroll_x;
+                        let highlight_w = self.line_col_x(line_idx, ec + 1) - self.line_col_x(line_idx, sc);
                         let highlight_y = self.rect.y + top + 8.0 + (line_idx as f32 * line_height) - self.scroll_y;
                         let clipped_y = highlight_y.max(view_top);
                         let clipped_bottom = (highlight_y + line_height).min(view_bottom);
@@ -877,7 +938,7 @@ impl TextBox {
             if self.editing {
                 let caret_h = self.font_size * 1.15;
                 let (cursor_l, cursor_c) = index_map[self.cursor_idx.min(index_map.len() - 1)];
-                let cursor_x = x + 8.0 + (cursor_c as f32 * char_width) - self.scroll_x;
+                let cursor_x = x + 8.0 + self.line_col_x(cursor_l, cursor_c) - self.scroll_x;
                 let cursor_y = self.rect.y + top + 8.0 + (cursor_l as f32 * line_height) + (line_height - caret_h) / 2.0 - self.scroll_y;
                 let clipped_y = cursor_y.max(view_top);
                 let clipped_bottom = (cursor_y + caret_h).min(view_bottom);
@@ -1248,15 +1309,12 @@ impl Paint for TextBox {
             .and_then(|run| run.glyphs.last().map(|g| (g.x + g.w) / scale / 8.0))
             .unwrap_or(0.0);
 
-        for run in buffer.layout_runs() {
-            for glyph in run.glyphs {
-                let byte_offset = glyph.start;
-                let c_idx = render_text[..byte_offset.min(render_text.len())].chars().count();
-                if c_idx < x_offsets.len() {
-                    x_offsets[c_idx] = glyph.x / scale;
-                }
-                total_w = total_w.max((glyph.x + glyph.w) / scale);
+        for (start, gx, gw) in crate::backend::window_runner::normalized_glyph_starts(&buffer, &render_text) {
+            let c_idx = render_text[..start.min(render_text.len())].chars().count();
+            if c_idx < x_offsets.len() {
+                x_offsets[c_idx] = gx / scale;
             }
+            total_w = total_w.max((gx + gw) / scale);
         }
 
         let mut current_x = 0.0;
@@ -1278,6 +1336,45 @@ impl Paint for TextBox {
 
         let cursor_pos = self.cursor_idx.min(self.glyph_positions.len() - 1);
         self.cursor_x_offset = self.glyph_positions.get(cursor_pos).copied().unwrap_or(0.0);
+
+        // Multiline: shape each WRAPPED line the way the paint draws it (same wrap,
+        // same buffer path) and record per-column x offsets. `char_width()` already
+        // returns this frame's shaped advance here, so the wrap below matches the
+        // one `selection_quads`/`value_labels` compute at paint time.
+        self.line_glyph_positions.clear();
+        if self.multiline {
+            let label_x = side_offset(&self.label);
+            let wrap_w = self.rect.width - label_x;
+            let max_chars = if self.line_wrap_enabled() {
+                (((wrap_w - 16.0) / self.char_width()).floor() as usize).max(1)
+            } else {
+                999999
+            };
+            let (lines, _) = self.wrap_text(max_chars);
+            for line in &lines {
+                let line_buffer = crate::widget::display::text_label::make_widget_text_buffer(fs, line, self.font_size, font_fam);
+                let n = line.chars().count();
+                let mut offs = vec![0.0f32; n + 1];
+                let mut line_total: f32 = 0.0;
+                for (start, gx, gw) in crate::backend::window_runner::normalized_glyph_starts(&line_buffer, line) {
+                    let c_idx = line[..start.min(line.len())].chars().count();
+                    if c_idx < offs.len() {
+                        offs[c_idx] = gx / scale;
+                    }
+                    line_total = line_total.max((gx + gw) / scale);
+                }
+                let mut current = 0.0;
+                for o in offs.iter_mut() {
+                    if *o == 0.0 {
+                        *o = current;
+                    } else {
+                        current = *o;
+                    }
+                }
+                offs[n] = line_total;
+                self.line_glyph_positions.push(offs);
+            }
+        }
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
@@ -1586,6 +1683,65 @@ unsafe impl Sync for TextBox {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The multiline caret/click math reads shaped per-line offsets; a caret
+    /// must land exactly where it is drawn, on every column of every line.
+    #[test]
+    fn multiline_shaped_offsets_round_trip() {
+        let mut fs = cosmic_text::FontSystem::new();
+        let mut tb = TextBox::new("wim wim wim\niiii WWWW mm ii".to_string())
+            .with_multiline(true)
+            .with_line_wrap(false);
+        tb.set_rect(10.0, 10.0, 300.0, 100.0);
+        tb.prepare_text(&mut fs);
+
+        assert_eq!(tb.line_glyph_positions.len(), 2, "one offset row per line");
+        for line in &tb.line_glyph_positions {
+            for w in line.windows(2) {
+                assert!(w[1] >= w[0], "offsets must be non-decreasing: {:?}", line);
+            }
+        }
+
+        // Round-trip caret→pixel→column. Skipped in a font-less environment
+        // (no glyphs shape, offsets stay zero — nothing to verify).
+        for (l, line) in tb.line_glyph_positions.clone().iter().enumerate() {
+            if line.last().copied().unwrap_or(0.0) == 0.0 {
+                continue;
+            }
+            for c in 0..line.len() {
+                assert_eq!(
+                    tb.line_x_to_col(l, tb.line_col_x(l, c)),
+                    c,
+                    "line {l} col {c} must round-trip"
+                );
+            }
+        }
+    }
+
+    /// Single-line offsets must be non-decreasing for MULTI-WORD text. Guards
+    /// the `normalized_glyph_starts` workaround for cosmic-text 0.12's
+    /// `Shaping::Basic` bug (span-relative `LayoutGlyph::start`, resetting at
+    /// every word): without it, each word's glyphs overwrite the low columns
+    /// and a mid-text caret lands inside the wrong word.
+    #[test]
+    fn single_line_multi_word_offsets_monotonic() {
+        let mut fs = cosmic_text::FontSystem::new();
+        let mut tb = TextBox::new("wim wim wim".to_string());
+        tb.set_rect(10.0, 10.0, 300.0, 30.0);
+        tb.prepare_text(&mut fs);
+
+        for w in tb.glyph_positions.windows(2) {
+            assert!(w[1] >= w[0], "offsets must be non-decreasing: {:?}", tb.glyph_positions);
+        }
+        // In a font-bearing environment the mid-text columns are real advances:
+        // strictly inside (0, total). Skipped font-less (all zeros).
+        if tb.glyph_positions.last().copied().unwrap_or(0.0) > 0.0 {
+            let total = *tb.glyph_positions.last().unwrap();
+            for (i, &x) in tb.glyph_positions.iter().enumerate().skip(1).take(tb.glyph_positions.len() - 2) {
+                assert!(x > 0.0 && x < total, "col {i} offset {x} must sit inside the text run");
+            }
+        }
+    }
 
     #[test]
     fn test_textbox_selection_highlight() {
