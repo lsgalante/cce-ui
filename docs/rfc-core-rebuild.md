@@ -2659,6 +2659,47 @@ Constraint respected: **each crate still builds standalone** — the new core is
   already closed every grouping window) stays quiet by construction: no open
   enclosing plate remains for the check to run against.
 
+- **Design note (2026-09-01) — the scroll-virtualization contract, and the ScrollRegion
+  de-duplication sweep.** A class fix, recorded because the class outlived every
+  individual sighting of it. `ScrollBox::get_item_draw_y` returned a row's position
+  only when the row was FULLY inside the viewport, so callers drew nothing for a row
+  straddling the edge — cards/rows visibly vanished mid-scroll. The helper predates
+  the §3.4 clip stack (when there was no way to draw a row "cut", culling whole was
+  the only option), and the contract then traveled: the struct around it was copied
+  into cce-system-interface, and from there into cce-fonts, cce-mail, cce-cloud, and
+  cce-layout-interface as each dissolved its List/ScrollBox embedded base (Phase 6q),
+  plus reimplemented in cce-files' RowList — the multi-repo copy-drift failure mode,
+  in widget form. The bug was then rediscovered and fixed **per app**
+  (cce-system-interface first; cce-cloud@1063422 fixed only the CLICK half), which is
+  exactly the cost the sweep exists to stop paying.
+
+  The sweep (one commit per repo, 2026-09-01): the fixed system-interface copy was
+  lifted verbatim into **`widget::ScrollRegion`** (cce-ui@764d9e7) — the union of all
+  the copies' APIs — so the contract lives in one place: **`get_item_draw_y`/
+  `get_draw_y` return every row that INTERSECTS the viewport; callers draw those rows
+  under a clip (the §3.4 stack, or exact per-quad clamping for flat pipelines), and
+  hit-test the SAME partial rows the draw shows** — visible ⇒ clickable, culled ⇒
+  not; a fix to only one half just mirrors the bug (1063422's blank-band click gate
+  became the sliver-selects-correctly gate with no shape change once the draw side
+  caught up). `ScrollBox::get_item_draw_y` itself moved to the intersection contract.
+  Deliberately NOT migrated: TreeList's `get_row_rect` keeps full containment — it
+  places a floating overlay that draws over the well unclipped, and an editor hanging
+  half off the list edge is worse than one that waits — and TreeList's row-bottom
+  separator gate, which is spatial (the separator would land outside the well), not a
+  cull.
+
+  Two pipeline lessons from the app migrations, for anyone adding a scrolled list:
+  the clip must survive to EVERY stage that renders row content, or partial rows
+  bleed instead of cut. cce-mail's hand-emitted row labels ride a boundless labels
+  drain — they drew whole into the menubar until given viewport bounds; cce-cloud's
+  span assembly dropped the paint walk's merged clip on the floor (`bounds: None`)
+  until it was threaded through to the glyph pass. And where widgets keep their full
+  rect while drawing cut (cce-layout-interface's row buttons above other controls),
+  the stored hit rect is re-clamped to the visible sliver after the visuals are
+  recorded, so the hidden part cannot shadow what's beneath it. New scrolled lists
+  build on `widget::ScrollRegion`; hand-copying it back into an app is how this
+  class got six lives.
+
 Order rationale: each phase is independently valuable and reversible, and no phase requires the
 next to compile. Phase 0 can land immediately regardless of the rest.
 
