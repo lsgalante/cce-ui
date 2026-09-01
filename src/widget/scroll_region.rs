@@ -470,6 +470,13 @@ impl ScrollRegion {
         }
     }
 
+    /// A host scrolled the region programmatically (selection auto-snap, jump
+    /// to a search hit): raise a sink-behind bar the same way a wheel scroll
+    /// does. No-op for regions without [`Self::sink_behind`].
+    pub fn notify_scrolled(&mut self) {
+        self.raise();
+    }
+
     /// Whether the scrollbar currently draws in front of the content and takes
     /// input. Always true for a region without [`Self::sink_behind`].
     pub fn scrollbar_raised(&self) -> bool {
@@ -552,6 +559,13 @@ impl ScrollRegion {
             };
             let all = (true, true, true, true);
             pc.rect_with_radius_corners(border_color, self.x, self.y, self.w, self.h, radius, all);
+            // A sunk sink-behind bar draws here, UNDER the translucent bg fill
+            // (list_bg_color's alpha is 0.3): it shows through dimly, sunk into
+            // the list plate — the designer parameter-pane look, self-contained
+            // for framed regions.
+            if self.sink_behind && !self.activity.raised() {
+                self.push_scrollbar_prims(pc);
+            }
             pc.rect_with_radius_corners(
                 crate::color::list_bg_color(),
                 self.x + 1.0,
@@ -562,8 +576,10 @@ impl ScrollRegion {
                 all,
             );
         }
-        // A sunk sink-behind bar is NOT drawn here: the host paints it under
-        // its plate via `push_scrollbar_prims` so it shows through dimly.
+        // Raised (or plain always-on): the bar rides on top. A FRAMELESS
+        // sink-behind region draws no sunk layer here — its rows sit directly
+        // on the host's plate, so the host owns the under-plate emission via
+        // `push_scrollbar_prims`.
         if self.scrollbar_raised() {
             self.push_scrollbar_prims(pc);
         }
@@ -592,12 +608,28 @@ impl ScrollRegion {
     /// split into [`Self::push_scrollbar_quads`] so the host can emit it AFTER
     /// the rows — drawn together, the rows paint over the thumb and it peeks
     /// through the inter-row gaps as dotted segments.
+    ///
+    /// For a sink-behind region, a sunk bar is emitted here FIRST, under the
+    /// translucent bg fill (alpha 0.3), so it shows through dimly — and
+    /// [`Self::push_scrollbar_quads`] goes quiet. The host's existing
+    /// bg → rows → scrollbar order needs no change to adopt the treatment.
     pub fn push_quads(&self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
+        if self.sink_behind && !self.activity.raised() {
+            self.push_scrollbar_quads_always(quads);
+        }
         quads.push((self.x, self.y, self.w, self.h, crate::color::list_bg_color()));
     }
 
     /// Scrollbar track + thumb when the content overflows; emit after the rows.
+    /// For a sink-behind region this is the RAISED layer only — while sunk the
+    /// bar was already emitted under the bg by [`Self::push_quads`].
     pub fn push_scrollbar_quads(&self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
+        if self.scrollbar_raised() {
+            self.push_scrollbar_quads_always(quads);
+        }
+    }
+
+    fn push_scrollbar_quads_always(&self, quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
         if self.content_h > self.viewport_h {
             let (sb_x, track_y, sb_w, track_h, thumb_y, thumb_h) = self.scrollbar_geom();
             quads.push((sb_x, track_y, sb_w, track_h, crate::color::scrollbar_track_color()));
@@ -781,6 +813,36 @@ mod tests {
         r.cursor_moved(50.0, 50.0);
         assert!(r.tick(0.016));
         assert!(!r.scrollbar_raised());
+    }
+
+    #[test]
+    fn tuple_emission_layers_by_raised_state() {
+        let mut r = region().with_sink_behind(true);
+        r.update_bounds(10, 20.0, 100.0);
+        // Sunk: bar quads come UNDER the bg (push_quads emits bar then bg, the
+        // raised-layer call is quiet).
+        let mut under = Vec::new();
+        r.push_quads(&mut under);
+        assert_eq!(under.len(), 3); // track + thumb + bg
+        assert_eq!(under[2].2, 200.0); // last quad is the full-width bg fill
+        let mut over = Vec::new();
+        r.push_scrollbar_quads(&mut over);
+        assert!(over.is_empty());
+        // Raised: bg alone below, bar above.
+        r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+        let mut under = Vec::new();
+        r.push_quads(&mut under);
+        assert_eq!(under.len(), 1);
+        let mut over = Vec::new();
+        r.push_scrollbar_quads(&mut over);
+        assert_eq!(over.len(), 2);
+        // A non-sink region keeps the legacy shape: bg alone, bar always.
+        let mut plain = region();
+        plain.update_bounds(10, 20.0, 100.0);
+        let (mut under, mut over) = (Vec::new(), Vec::new());
+        plain.push_quads(&mut under);
+        plain.push_scrollbar_quads(&mut over);
+        assert_eq!((under.len(), over.len()), (1, 2));
     }
 
     #[test]
