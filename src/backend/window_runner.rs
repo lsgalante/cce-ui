@@ -3750,6 +3750,36 @@ impl<A: Application> EngineState<A> {
             }
         }
         
+        // 0. Shape every registered widget against the SAME FontSystem the glyph pass draws
+        // with, before the app builds its frame. A widget's caret/selection/click→index math
+        // reads per-glyph advances its `prepare_text` records; nothing else calls it on the
+        // display-list path (the paint walk is `&dyn`, and apps were left to remember —
+        // cce-list, cce-secrets, and the reference DemoApp all forgot, so their carets fell
+        // back to `measure_text_width("M")`, an inked extent that drifts off the glyphs).
+        // The flat path shapes in `layout::render_widget`; apps that hand-shape still work —
+        // their call and this one hit the same shaped-buffer cache. Pointers are collected
+        // first so the registry borrow ends before any widget is mutated (the missed-press
+        // walk dereferences the same registry the same way).
+        {
+            let ptrs: Vec<*mut (dyn crate::widget::WidgetHost + 'static)> = self
+                .inner
+                .as_ref()
+                .unwrap()
+                .ui_context()
+                .map(|ctx| ctx.tree.iter_registered().map(|(_, p)| p).collect())
+                .unwrap_or_default();
+            if !ptrs.is_empty() {
+                let fs = self.font_system.as_mut().unwrap();
+                for ptr in ptrs {
+                    unsafe {
+                        if let Some(w) = ptr.as_mut() {
+                            w.prepare_text(fs);
+                        }
+                    }
+                }
+            }
+        }
+
         // 1. The frame's geometry IS the app's display list — the single paint path. Tessellated
         // below as one batched, GPU-scissor-clipped pass. An app that draws nothing returns
         // `None`, giving an empty frame (the legacy view*/tuple-wrapping path is gone).

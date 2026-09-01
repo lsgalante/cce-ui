@@ -25,6 +25,12 @@ pub struct ColorSelector {
     live_rx: Option<std::sync::mpsc::Receiver<String>>,
     /// The value at picker launch, restored when the stream reports `cancel`.
     revert_hex: Option<String>,
+    /// Char-index → x offsets of the drawn hex text, recorded by
+    /// [`Paint::prepare_text`] from the same shaped buffer `ctx.text` draws
+    /// (size 12, default family). The caret reads these; the SVG-rasterized
+    /// `measure_text` prefix it used before reports inked extent, which drifts
+    /// off the glyph advances. Empty until the first shape.
+    glyph_offsets: Vec<f32>,
 }
 
 impl Clone for ColorSelector {
@@ -45,6 +51,7 @@ impl Clone for ColorSelector {
             with_alpha: self.with_alpha,
             live_rx: None,
             revert_hex: None,
+            glyph_offsets: self.glyph_offsets.clone(),
         }
     }
 }
@@ -67,6 +74,7 @@ impl ColorSelector {
             with_alpha: false,
             live_rx: None,
             revert_hex: None,
+            glyph_offsets: Vec::new(),
         })
     }
 
@@ -87,6 +95,7 @@ impl ColorSelector {
             with_alpha: true,
             live_rx: None,
             revert_hex: None,
+            glyph_offsets: Vec::new(),
         })
     }
 
@@ -134,6 +143,30 @@ impl Layout for ColorSelector {
 }
 
 impl Paint for ColorSelector {
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
+        // Shape the drawn hex string exactly as `ctx.text` draws it (size 12,
+        // default family) and record char-index → x for the caret.
+        let text = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
+        let clusters =
+            crate::backend::window_runner::shaped_cluster_offsets(fs, &text, 12.0, None);
+        let mut offsets = vec![0.0f32; text.chars().count() + 1];
+        for (byte, x) in clusters {
+            let ci = text[..byte.min(text.len())].chars().count();
+            if ci < offsets.len() {
+                offsets[ci] = x;
+            }
+        }
+        let mut current = 0.0;
+        for off in offsets.iter_mut() {
+            if *off == 0.0 {
+                *off = current;
+            } else {
+                current = *off;
+            }
+        }
+        self.glyph_offsets = offsets;
+    }
+
     fn color(&self) -> [f32; 4] {
         colors::to_linear([
             self.color[0] as f32 / 255.0,
@@ -196,8 +229,10 @@ impl Paint for ColorSelector {
 
         if self.editing {
             let font_size = 12.0;
-            let cursor_text: String = self.edit_buffer.chars().take(self.cursor_idx).collect();
-            let text_w = crate::widget::display::measure_text(&cursor_text, font_size);
+            let text_w = self.glyph_offsets.get(self.cursor_idx).copied().unwrap_or_else(|| {
+                let cursor_text: String = self.edit_buffer.chars().take(self.cursor_idx).collect();
+                crate::widget::display::measure_text(&cursor_text, font_size)
+            });
             let caret_x = rect.x + 4.0 + text_w;
             let caret_h = font_size * 1.15;
             let caret_y = rect.y + (visual_h - caret_h) / 2.0;

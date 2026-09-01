@@ -36,6 +36,11 @@ pub struct Spinbox {
     pub editor_state: TextEditorState,
     pub just_changed: bool,
     label: Option<String>,
+    /// Char-index → x offsets of the value text, recorded by [`Paint::prepare_text`]
+    /// from the same shaped buffer the renderer draws (`ctx.text`, size 14, default
+    /// family). The caret and click→index math read these; the `8.4` px/char guess
+    /// they used before drifted off the glyphs. Empty until the first shape.
+    glyph_offsets: Vec<f32>,
 }
 
 /// The zone geometry shared by paint and input, derived from the content rect.
@@ -69,7 +74,36 @@ impl Spinbox {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             label: None,
+            glyph_offsets: Vec::new(),
         })
+    }
+
+    /// The caret x offset for a char index, from the shaped offsets when present
+    /// (falling back to the legacy estimate only if nothing shaped yet).
+    fn caret_offset(&self, idx: usize) -> f32 {
+        self.glyph_offsets
+            .get(idx)
+            .copied()
+            .unwrap_or(idx as f32 * 8.4)
+    }
+
+    /// Click x (relative to the text origin) → char index, nearest shaped offset.
+    fn x_to_idx(&self, relative_x: f32) -> usize {
+        if self.glyph_offsets.is_empty() {
+            return ((relative_x / 8.4).round() as isize)
+                .max(0)
+                .min(self.edit_buffer.chars().count() as isize) as usize;
+        }
+        let mut closest = 0;
+        let mut min_diff = f32::MAX;
+        for (i, &pos) in self.glyph_offsets.iter().enumerate() {
+            let diff = (pos - relative_x).abs();
+            if diff < min_diff {
+                min_diff = diff;
+                closest = i;
+            }
+        }
+        closest
     }
 
     pub fn set_unit(&mut self, unit: &str) {
@@ -251,6 +285,31 @@ impl Layout for Spinbox {
 }
 
 impl Paint for Spinbox {
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
+        // Shape the displayed value exactly as `ctx.text` draws it (size 14,
+        // default family) and record char-index → x. Cluster offsets arrive
+        // keyed by byte; the editor state is char-indexed.
+        let text = self.value_text();
+        let clusters =
+            crate::backend::window_runner::shaped_cluster_offsets(fs, &text, 14.0, None);
+        let mut offsets = vec![0.0f32; text.chars().count() + 1];
+        for (byte, x) in clusters {
+            let ci = text[..byte.min(text.len())].chars().count();
+            if ci < offsets.len() {
+                offsets[ci] = x;
+            }
+        }
+        let mut current = 0.0;
+        for off in offsets.iter_mut() {
+            if *off == 0.0 {
+                *off = current;
+            } else {
+                current = *off;
+            }
+        }
+        self.glyph_offsets = offsets;
+    }
+
     fn color(&self) -> [f32; 4] {
         [0.0, 0.0, 0.0, 0.0]
     }
@@ -315,8 +374,7 @@ impl Paint for Spinbox {
                         Rect { x: g.x + 4.0, y: g.y + g.h - 4.0, width: g.w * 0.55 - 8.0, height: 1.5 },
                         accent,
                     );
-                    let char_width = 8.4;
-                    let cursor_x = (g.x + 4.0 + self.cursor_idx as f32 * char_width).min(g.x + g.w * 0.55 - 4.0);
+                    let cursor_x = (g.x + 4.0 + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
                     let cursor_y = g.y + (g.h - 14.0) / 2.0;
                     ctx.quad(Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 }, [0.80, 0.80, 0.85, 1.0]);
                 }
@@ -358,8 +416,7 @@ impl Paint for Spinbox {
                 );
             }
             if self.editing {
-                let char_width = 8.4;
-                let cursor_x = (g.x + 4.0 + self.cursor_idx as f32 * char_width).min(g.x + g.w * 0.55 - 4.0);
+                let cursor_x = (g.x + 4.0 + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
                 let cursor_y = g.y + (g.h - 14.0) / 2.0;
                 ctx.rounded_rect(
                     Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 },
@@ -381,8 +438,7 @@ impl Paint for Spinbox {
                 ctx.quad(Rect { x: g.x, y: g.y, width: 1.0, height: g.h }, border_color);
                 ctx.quad(Rect { x: g.x + g.w - 1.0, y: g.y, width: 1.0, height: g.h }, border_color);
 
-                let char_width = 8.4;
-                let cursor_x = (g.x + 4.0 + self.cursor_idx as f32 * char_width).min(g.x + g.w * 0.55 - 4.0);
+                let cursor_x = (g.x + 4.0 + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
                 let cursor_y = g.y + (g.h - 14.0) / 2.0;
                 ctx.quad(Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 }, [0.80, 0.80, 0.85, 1.0]);
             }
@@ -438,10 +494,9 @@ impl Input for Spinbox {
                     true
                 } else if *px < g.split_dec {
                     self.begin_edit(false);
-                    let char_width = 8.4;
-                    self.cursor_idx = (((px - (g.x + 4.0)) / char_width).round() as isize)
-                        .max(0)
-                        .min(self.edit_buffer.chars().count() as isize) as usize;
+                    self.cursor_idx = self
+                        .x_to_idx(px - (g.x + 4.0))
+                        .min(self.edit_buffer.chars().count());
                     ectx.request_focus();
                     true
                 } else {

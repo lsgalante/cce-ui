@@ -74,6 +74,11 @@ pub struct ParametersBg {
     /// `tick`) — the shared [`crate::widget::ScrollbarActivity`], which was extracted FROM
     /// this widget so every app's plate-straddling scrollbar behaves the same way.
     activity: crate::widget::ScrollbarActivity,
+    /// One code-editor column's shaped advance (monospace @12, the family/size
+    /// the code rows draw in), recorded by [`Paint::prepare_text`]. The caret
+    /// and click→column math read it; the hardcoded 7.2 px/col they used
+    /// before drifted off the glyphs. 0.0 until the first shape.
+    code_char_advance: f32,
 }
 
 /// The channel: the ONLY gap a control keeps from whatever its edge meets — the
@@ -136,6 +141,16 @@ const CONTROL_INSET: f32 = CHANNEL;
 const ROW_X_INSET: f32 = SECTION_MARGIN + CONTROL_INSET;
 
 impl ParametersBg {
+    /// One code column's width — the shaped advance when recorded, else the
+    /// legacy 7.2 estimate (only before the first `prepare_text`).
+    fn code_col_w(&self) -> f32 {
+        if self.code_char_advance > 0.0 {
+            self.code_char_advance
+        } else {
+            7.2
+        }
+    }
+
     pub fn new() -> Adapted<ParametersBg> {
         Adapted::new(ParametersBg {
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
@@ -157,6 +172,7 @@ impl ParametersBg {
             visible: true,
             scroll_y: 0.0,
             content_h: 0.0,
+            code_char_advance: 0.0,
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
             activity: crate::widget::ScrollbarActivity::new(),
@@ -932,7 +948,7 @@ impl ParametersBg {
                 if self.focused_param == Some(i) {
                     if let Some(ref editor) = self.code_editor {
                         let (cursor_l, cursor_c) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                        let cursor_x = r.0 + 12.0 + (cursor_c as f32 * 7.2);
+                        let cursor_x = r.0 + 12.0 + (cursor_c as f32 * self.code_col_w());
                         let cursor_y = r.1 + 22.0 + (cursor_l as f32 * 16.0) + (16.0 - 13.0) / 2.0;
                         if cursor_y >= r.1 + 18.0 && cursor_y + 13.0 <= r.1 + r.3 {
                             param_quads.push((cursor_x, cursor_y, 1.5, 13.0, [0.80, 0.80, 0.85, 1.0]));
@@ -1396,6 +1412,32 @@ impl Layout for ParametersBg {
 }
 
 impl Paint for ParametersBg {
+    /// Shape the hosted controls (their carets read per-glyph advances nothing
+    /// else records for children of a container) and one code column's advance
+    /// from the same monospace@12 path the code rows draw through.
+    fn prepare_text(&mut self, fs: &mut cosmic_text::FontSystem, _rect: Rect) {
+        for tb in self.texts.iter_mut().flatten() {
+            tb.prepare_text(fs);
+        }
+        for sb in self.spinboxes.iter_mut().flatten() {
+            sb.prepare_text(fs);
+        }
+        for c in self.colors.iter_mut().flatten() {
+            c.prepare_text(fs);
+        }
+        let clusters = crate::backend::window_runner::shaped_cluster_offsets(
+            fs,
+            "MMMMMMMM",
+            12.0,
+            Some("monospace"),
+        );
+        if let Some(&(_, total)) = clusters.last() {
+            if total > 0.0 {
+                self.code_char_advance = total / 8.0;
+            }
+        }
+    }
+
     /// The panel IS its own background plate (the host draws it from `color()` + the corner
     /// style via `push_widget_vertices`) — there is no separate plate widget behind it, so
     /// this carries the full plate treatment: `PARAM_BG` scaled by the global plate opacity,
@@ -2196,7 +2238,7 @@ impl Input for ParametersBg {
                                 let click_x = px - (r.0 + 12.0);
                                 let click_y = py - (r.1 + 22.0);
                                 let line = (click_y / 16.0).floor().max(0.0) as usize;
-                                let col = (click_x / 7.2 + 0.5).floor().max(0.0) as usize;
+                                let col = (click_x / self.code_col_w() + 0.5).floor().max(0.0) as usize;
                                 editor.cursor_idx = map_2d_to_1d(&editor.buffer, line, col);
                                 self.code_editor = Some(editor);
                                 clicked_any_focusable = true;
