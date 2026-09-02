@@ -753,10 +753,19 @@ impl Paint for TreeList {
             c
         };
 
-        // 1. Draw container border and background
+        // 1. Draw container border and background. A true fill + border ring
+        // (not the legacy full-rect border punched out by the background quad,
+        // which read as a whole-pane border_color wash once the background
+        // went transparent).
         if let Some((border_color, thickness)) = self.tree_border() {
-            quads.push((x, y, w, h, radius, apply_opacity(border_color), (r1, r2, r3, r4)));
-            quads.push((x + thickness, y + thickness, w - 2.0 * thickness, h - 2.0 * thickness, radius - thickness, apply_opacity(crate::color::tree_background_color()), (r1, r2, r3, r4)));
+            let rr = |on: bool| if on { radius } else { 0.0 };
+            pc.border(
+                Rect { x, y, width: w, height: h },
+                (rr(r1), rr(r2), rr(r3), rr(r4)),
+                apply_opacity(crate::color::tree_background_color()),
+                apply_opacity(border_color),
+                thickness,
+            );
         } else {
             quads.push((x, y, w, h, radius, apply_opacity(crate::color::tree_background_color()), (r1, r2, r3, r4)));
         }
