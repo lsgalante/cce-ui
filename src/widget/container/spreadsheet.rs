@@ -512,9 +512,11 @@ impl Input for Spreadsheet {
             }
             // Hit-gated by the adapter (which also rejects hidden widgets).
             Event::MouseWheel { delta, .. } => {
+                // Delta signs follow the ScrollRegion/TextBox convention (negate the
+                // event delta); natural scroll is already applied upstream by libinput.
                 let (dx, dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (*x * ROW_H, *y * ROW_H),
-                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
+                    MouseScrollDelta::LineDelta(x, y) => (-*x * ROW_H, -*y * ROW_H),
+                    MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
                 };
                 let mut used = false;
                 if dy.abs() > 0.0 && self.geom(ectx.rect).is_some() {
@@ -754,7 +756,7 @@ mod tests {
         ctx.register_widget(id, ptr);
 
         let wheel = Event::MouseWheel {
-            delta: MouseScrollDelta::LineDelta(2.0, 0.0),
+            delta: MouseScrollDelta::LineDelta(-2.0, 0.0),
             x: 50.0,
             y: 60.0,
             local_x: 50.0,
@@ -770,7 +772,7 @@ mod tests {
         let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
         let max = (*s).hgeom(rect).unwrap().max_scroll;
         assert!((*s).scroll_x >= 0.0 && (*s).scroll_x <= max, "h-scroll stays clamped");
-        assert!((*s).scroll_x > 0.0, "positive dx scrolled the columns");
+        assert!((*s).scroll_x > 0.0, "negative dx scrolled the columns (ScrollRegion sign convention)");
 
         // A pane whose columns fit ignores horizontal wheels.
         let mut fits = wide(2);
@@ -786,10 +788,10 @@ mod tests {
         let (id, ptr) = (s.id(), s.as_ptr_mut());
         ctx.register_widget(id, ptr);
 
-        // A wheel over the body feeds velocity (scroll down = negative line delta in practice,
-        // but sign just follows the delta)…
+        // A wheel over the body feeds velocity (negated delta, the ScrollRegion
+        // convention: a negative line delta scrolls the view down)…
         let wheel = Event::MouseWheel {
-            delta: MouseScrollDelta::LineDelta(0.0, 2.0),
+            delta: MouseScrollDelta::LineDelta(0.0, -2.0),
             x: 50.0,
             y: 60.0,
             local_x: 50.0,
