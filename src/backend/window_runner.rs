@@ -5748,7 +5748,9 @@ fn run_session<'l, A: Application>(
     (app, end)
 }
 
-#[cfg(test)]
+// `all(test, debug_assertions)`: the function under test only exists in
+// debug builds, so a `cargo test --release` must compile the module out too.
+#[cfg(all(test, debug_assertions))]
 mod near_roll_fallback_tests {
     use super::near_roll_fallback_reason;
     use crate::scene::layout::Rect;
