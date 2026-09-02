@@ -774,17 +774,14 @@ impl Paint for TreeList {
         let search_h = 26.0;
         let offset_y = search_h + 2.0 * search_margin_y;
 
-        // Draw Header background and border
+        // Draw Header border (no background fill — the header sits directly on
+        // the pane surface, like the rows).
         let header_h = 26.0;
-        let header_bg_color = [0.12, 0.12, 0.16, 1.0]; // Dark header color
         let header_border_color = [0.18, 0.18, 0.22, 1.0];
-        
+
         let list_left = self.scroll_box.base.x;
         let list_width = self.scroll_box.base.w;
-        
-        // Header background (not rounded anymore, since it is in the middle of TreeList, below search box)
-        quads.push((list_left + 1.0, y + offset_y + 1.0, list_width - 2.0, header_h - 1.0, 0.0, apply_opacity(header_bg_color), (false, false, false, false)));
-        
+
         // Separator line below header
         quads.push((list_left + 1.0, y + offset_y + header_h - 1.0, list_width - 2.0, 1.0, 0.0, apply_opacity(header_border_color), (false, false, false, false)));
         
