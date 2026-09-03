@@ -183,7 +183,12 @@ impl TextBox {
                 closest_idx = i;
             }
         }
-        closest_idx
+        // When the box is empty, `prepare_text` shapes the PLACEHOLDER into
+        // `glyph_positions`, so the nearest-glyph snap above can land on a
+        // placeholder column. Clamp to the real text: the placeholder is
+        // painted, not caret-addressable.
+        let text_len = if self.editing { self.edit_buffer.chars().count() } else { self.text.chars().count() };
+        closest_idx.min(text_len)
     }
 
     /// The x offset of `col` on wrapped line `line`, from the shaped per-line
@@ -1838,6 +1843,25 @@ mod tests {
             "typing must insert into the prefilled value, not replace it"
         );
         assert!(tb.edit_buffer.starts_with("imap"), "the existing value survives the first keystroke");
+    }
+
+    #[test]
+    fn empty_box_click_ignores_placeholder_glyphs() {
+        let mut dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new(String::new()).with_placeholder("Search...");
+        tb.set_rect(10.0, 10.0, 200.0, 30.0);
+
+        // `prepare_text` shapes the placeholder when the value is empty; the
+        // caret math must still treat the box as zero-length. Simulate the
+        // shaped placeholder ("Search...", 9 cols) directly so the test does
+        // not depend on a font being present.
+        tb.glyph_positions = (0..=9).map(|i| i as f32 * 7.0).collect();
+
+        // Click deep into the painted placeholder.
+        let click_x = 10.0 + 8.0 + 8.0 * 7.0;
+        assert!(tb.mouse_input(MouseButton::Left, ElementState::Pressed, click_x, 20.0, &mut dummy));
+        assert!(tb.editing);
+        assert_eq!(tb.cursor_idx, 0, "empty box: the caret lands at the start, not on a placeholder column");
     }
 
     #[test]
