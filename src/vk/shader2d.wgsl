@@ -709,7 +709,14 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // angle twice and drew two concentric lines. With roll_slope the ring
         // is exactly a plate silhouette's glint — one line, same position.
         let fr = clamp(1.0 - u, 0.0, 1.0);
-        v = roll_spec_wrap(fgd * roll_slope(fr)) * strength * att;
+        // ...and ENDS at that silhouette (the rect outset by t/2), 1px
+        // anti-aliased like a plate's own. Past it `u` saturates at 0 and
+        // roll_slope(1) is the profile's steepest point, so every pixel of
+        // the cover quad outside the ring drew the full glint — a flat
+        // tinted block, square-cornered (the quad's own shape), around the
+        // rounded ring.
+        let sil = clamp(fd + 0.5 * t + 0.5, 0.0, 1.0);
+        v = roll_spec_wrap(fgd * roll_slope(fr)) * strength * att * sil;
     }
     if (v >= 0.0) {
         // Highlight: the white screen mixes toward the tint color, slightly
