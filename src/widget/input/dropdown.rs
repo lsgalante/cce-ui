@@ -117,6 +117,14 @@ pub struct Dropdown {
     /// Raised style: the closed control's background is an SDF-lit `Bevel`
     /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
     raised: bool,
+    /// The open menu REPLACES the trigger instead of growing out of it: no
+    /// trigger band (display text + ▼) in the open surface, the rows alone,
+    /// with the menu's edge anchored where the trigger's was (its bottom for
+    /// an upward menu, its top for a downward one) so the rows occupy the
+    /// trigger's slot. The trigger itself stops painting once the revealed
+    /// menu covers it. The settings app's page switcher: the current page
+    /// already reads blue in the list, so the band repeated it.
+    menu_replaces_trigger: bool,
     /// Expand/contract animation (the status-interface module-menu feel).
     /// WALL-CLOCK, not dt-stepped: progress runs from `anim_from` at
     /// `anim_start` toward 1 (or 0 while `closing`) over [`Self::ANIM_S`], read
@@ -155,6 +163,7 @@ impl Dropdown {
             hovered: false,
             corner_frame: None,
             raised: crate::layout::control_relief(),
+            menu_replaces_trigger: false,
             anim_from: 0.0,
             anim_start: None,
             closing: false,
@@ -306,6 +315,10 @@ impl Dropdown {
     /// popover plate.
     fn unified_geom_drawn(&self, content: Rect) -> (f32, f32, f32, f32) {
         let (ax, ay, aw, ah) = self.popover_geom_drawn(content);
+        if self.menu_replaces_trigger {
+            // No band: the revealed menu IS the whole open surface.
+            return (ax, ay, aw, ah);
+        }
         let label_x = side_offset(&self.label);
         let (tx, ty) = (content.x + label_x, content.y);
         let (tw, th) = ((content.width - label_x).max(0.0), content.height);
@@ -350,7 +363,11 @@ impl Dropdown {
         let label_x = side_offset(&self.label);
 
         let mut rx = content.x + label_x;
-        let mut ry = if open_upward {
+        let mut ry = if self.menu_replaces_trigger {
+            // The menu takes the trigger's slot: flush with its bottom edge
+            // (upward) or its top edge (downward) rather than stacked past it.
+            if open_upward { content.y + content.height - rh } else { content.y }
+        } else if open_upward {
             content.y - rh
         } else {
             content.y + content.height
@@ -858,6 +875,12 @@ impl Adapted<Dropdown> {
         self
     }
 
+    /// The open menu replaces the trigger: see the `menu_replaces_trigger` field.
+    pub fn with_menu_replaces_trigger(mut self, replaces: bool) -> Self {
+        self.menu_replaces_trigger = replaces;
+        self
+    }
+
     /// Popover geometry from the widget's laid-out rect — the legacy inherent
     /// `get_popover_geom` shape, for callers that hold the wrapper.
     pub fn get_popover_geom(&self) -> (f32, f32, f32, f32) {
@@ -928,6 +951,16 @@ impl Paint for Dropdown {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        if self.menu_replaces_trigger && self.open {
+            // The trigger yields to the menu the moment the revealed rows
+            // cover its band (and comes back as the contraction uncovers it);
+            // the frosted menu plate is translucent, so a trigger left
+            // painting beneath would show through blurred.
+            let (_, ay, _, ah) = self.popover_geom_drawn(rect);
+            if ay <= rect.y + 0.5 && ay + ah >= rect.y + rect.height - 0.5 {
+                return;
+            }
+        }
         self.paint_background(rect, ctx);
         self.paint_text(rect, ctx);
     }
@@ -1005,7 +1038,8 @@ impl Paint for Dropdown {
 
         // Trigger content redrawn over its band (the box covers the widget-pass
         // trigger paint) — display text left, ▼ right, the paint_text palette.
-        {
+        // A menu that replaces the trigger has no band to redraw on.
+        if !self.menu_replaces_trigger {
             let label_x = side_offset(&self.label);
             let (tx, ty) = (rect.x + label_x, rect.y);
             let (tw, th) = ((rect.width - label_x).max(0.0), rect.height);
@@ -1626,5 +1660,44 @@ mod tests {
         dd.land_anim_for_test();
         assert!(!dd.open);
         assert!(!dd.take_change(), "outside close does not report a change");
+    }
+
+    /// `with_menu_replaces_trigger`: the open surface is the rows alone, sat
+    /// in the trigger's slot — no band, and the trigger stops painting once
+    /// the menu covers it.
+    #[test]
+    fn menu_replaces_trigger_drops_the_band() {
+        let mut dummy = crate::context::UiContext::new();
+        let options = vec!["A".to_string(), "B".to_string(), "C".to_string()];
+        let mut dd = Dropdown::new(options, 1)
+            .with_open_upward(true)
+            .with_menu_replaces_trigger(true);
+        dd.set_rect(10.0, 300.0, 100.0, 24.0);
+
+        dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 310.0, &mut dummy);
+        assert!(dd.open);
+        dd.land_anim_for_test();
+        let (rx, ry, rw, rh) = WidgetHost::popover_rect(&dd).expect("open dropdown registers its popover");
+        assert_eq!(rh, 72.0, "three rows and nothing else — no trigger band");
+        assert_eq!((rx, ry + rh), (10.0, 324.0), "the menu's bottom edge sits on the trigger's bottom edge");
+        assert!(rw >= 100.0);
+        assert_eq!(dd.get_popover_geom(), (rx, ry, rw, rh), "the drawn box is the full menu once landed");
+
+        // The trigger's slot is now the bottom row: a press there picks it,
+        // rather than toggling the trigger closed.
+        dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 312.0, &mut dummy);
+        assert_eq!(dd.selected, 2);
+        assert!(dd.take_change());
+        assert!(dd.closing);
+        dd.land_anim_for_test();
+        assert!(!dd.open);
+
+        // The default keeps the band.
+        let mut plain = Dropdown::new(vec!["A".to_string(), "B".to_string()], 0).with_open_upward(true);
+        plain.set_rect(10.0, 300.0, 100.0, 24.0);
+        plain.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 310.0, &mut dummy);
+        plain.land_anim_for_test();
+        let (_, ry, _, rh) = WidgetHost::popover_rect(&plain).unwrap();
+        assert_eq!((ry, rh), (252.0, 72.0), "band (24) + two rows (48), stacked above the trigger");
     }
 }
