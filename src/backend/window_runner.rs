@@ -3264,6 +3264,21 @@ pub trait Application: Sized + 'static {
         false
     }
     fn handle_key_input(&mut self, event: &KeyEvent, needs_rebuild: &mut bool) -> Option<Self::Message>;
+
+    /// Undo, after the focused widget declined the chord (a text box that is
+    /// editing takes it for its own typing). Return true when something was
+    /// undone; false lets the key fall through to `handle_key_input` like any
+    /// other. The chords are `undo` / `redo` in `input.kdl` (cce-ui domain
+    /// defaults `ctrl+z` / `ctrl+shift+z`), resolved once at startup. Build
+    /// the history on `cce_ui::history::History`.
+    fn undo(&mut self, _needs_rebuild: &mut bool) -> bool {
+        false
+    }
+
+    /// Redo — see [`undo`](Self::undo).
+    fn redo(&mut self, _needs_rebuild: &mut bool) -> bool {
+        false
+    }
     /// Keyboard focus entered/left the window (the compositor keyboard-focuses
     /// the focused window, so this is the "am I the focused window" signal —
     /// e.g. for focus-dependent chrome). Default: ignore.
@@ -3483,6 +3498,9 @@ pub struct EngineState<A: Application> {
     pub extent_gate_skips: u32,
     pub first_configure_received: bool,
     pub ctrl_pressed: bool,
+    /// The `undo` / `redo` chords, resolved from `input.kdl` at startup.
+    pub undo_chord: String,
+    pub redo_chord: String,
     pub shift_pressed: bool,
     pub alt_pressed: bool,
     pub logo_pressed: bool,
@@ -4763,6 +4781,37 @@ impl<A: Application> KeyboardHandler for EngineState<A> {
 }
 
 impl<A: Application> EngineState<A> {
+    /// The toolkit-wide undo/redo routing: a press matching the `undo` /
+    /// `redo` chord goes to the focused widget first (`ContextAction::Undo`
+    /// / `Redo` — a text box that is editing steps its own typing), then to
+    /// the app's `Application::undo` / `redo`. Returns whether either took
+    /// it; otherwise the key is dispatched as usual, so an app with its own
+    /// scheme is undisturbed. Runs for repeats too — holding the chord walks
+    /// the history like holding Backspace walks the text.
+    fn route_history_chord(&mut self, event: &KeyEvent, rebuild: &mut bool) -> bool {
+        if event.state != ElementState::Pressed {
+            return false;
+        }
+        let undo = crate::widget::match_key_shortcut(event, &self.undo_chord);
+        let redo = !undo && crate::widget::match_key_shortcut(event, &self.redo_chord);
+        if !undo && !redo {
+            return false;
+        }
+        let app = self.inner.as_mut().unwrap();
+        let action = if undo { crate::widget::ContextAction::Undo } else { crate::widget::ContextAction::Redo };
+        if let Some(ctx) = app.ui_context_mut() {
+            if ctx.focused_context_action(action) {
+                *rebuild = true;
+                return true;
+            }
+        }
+        let taken = if undo { app.undo(rebuild) } else { app.redo(rebuild) };
+        if taken {
+            *rebuild = true;
+        }
+        taken
+    }
+
     fn handle_key(&mut self, event: smithay_client_toolkit::seat::keyboard::KeyEvent, state: ElementState) {
         let logical_key = match event.keysym {
             xkeysym::Keysym::Escape => Key::Named(NamedKey::Escape),
@@ -4858,6 +4907,10 @@ impl<A: Application> EngineState<A> {
         }
 
         let mut rebuild = false;
+        if self.route_history_chord(&custom_event, &mut rebuild) {
+            self.redraw = true;
+            return;
+        }
         if let Some(msg) = self.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut rebuild) {
             let mut update_rebuild = false;
             self.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut self.exit);
@@ -5328,6 +5381,8 @@ fn run_session<'l, A: Application>(
         extent_gate_skips: 0,
         first_configure_received: false,
         ctrl_pressed: false,
+        undo_chord: crate::input::app_chord("undo", "ctrl+z"),
+        redo_chord: crate::input::app_chord("redo", "ctrl+shift+z"),
         shift_pressed: false,
         alt_pressed: false,
         logo_pressed: false,
@@ -5660,7 +5715,9 @@ fn run_session<'l, A: Application>(
                     }
 
                     let mut key_rebuild = false;
-                    if let Some(msg) = engine_state.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut key_rebuild) {
+                    if engine_state.route_history_chord(&custom_event, &mut key_rebuild) {
+                        engine_state.redraw = true;
+                    } else if let Some(msg) = engine_state.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut key_rebuild) {
                         let mut update_rebuild = false;
                         engine_state.inner.as_mut().unwrap().update(msg, &mut update_rebuild, &mut engine_state.exit);
                         if update_rebuild {

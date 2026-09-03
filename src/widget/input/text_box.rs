@@ -22,6 +22,7 @@ use crate::widget::*;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
+use crate::history::History;
 use std::sync::OnceLock;
 
 static FONT_DB: OnceLock<resvg::usvg::fontdb::Database> = OnceLock::new();
@@ -72,6 +73,12 @@ pub struct TextBox {
     pub font_family: String,
     pub placeholder: Option<String>,
     pub editor_state: TextEditorState,
+    /// Edit history for the current editing session (cleared by
+    /// `begin_editing`): a typed run is one step, a deleted run one, a
+    /// paste/cut/selection-replacement one. Stepped by `ContextAction::Undo`
+    /// / `Redo`, which the runner routes here on the `undo` / `redo` chords
+    /// while the box is focused and editing.
+    pub history: History<TextEditorState>,
     pub scroll_y: f32,
     pub scroll_x: f32,
     default_font_size: f32,
@@ -133,6 +140,7 @@ impl TextBox {
             font_family: style_family.clone(),
             placeholder: None,
             editor_state,
+            history: History::new(),
             scroll_y: 0.0,
             scroll_x: 0.0,
             default_font_size: style_size,
@@ -379,6 +387,58 @@ impl TextBox {
         };
     }
 
+    /// The editing fields as one value — what the history stores.
+    fn snapshot(&self) -> TextEditorState {
+        TextEditorState {
+            buffer: self.edit_buffer.clone(),
+            cursor_idx: self.cursor_idx,
+            select_anchor: self.select_anchor,
+            all_selected: self.all_selected,
+        }
+    }
+
+    fn restore(&mut self, snap: TextEditorState) {
+        self.edit_buffer = snap.buffer;
+        self.cursor_idx = snap.cursor_idx;
+        self.select_anchor = snap.select_anchor;
+        self.all_selected = snap.all_selected;
+        self.sync_editor_state();
+        self.scroll_to_cursor();
+    }
+
+    /// Step the edit buffer back one recorded step. Only while editing —
+    /// a committed value is the app's to undo, not the box's.
+    pub fn undo_edit(&mut self) -> bool {
+        if !self.editing || self.disabled {
+            return false;
+        }
+        let current = self.snapshot();
+        match self.history.undo(current) {
+            Some(prev) => {
+                self.restore(prev);
+                self.just_changed = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Step forward again — see [`undo_edit`](Self::undo_edit).
+    pub fn redo_edit(&mut self) -> bool {
+        if !self.editing || self.disabled {
+            return false;
+        }
+        let current = self.snapshot();
+        match self.history.redo(current) {
+            Some(next) => {
+                self.restore(next);
+                self.just_changed = true;
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn copy_selection(&self) {
         let state = TextEditorState {
             buffer: self.edit_buffer.clone(),
@@ -392,6 +452,7 @@ impl TextBox {
     }
 
     pub fn cut_selection(&mut self) -> bool {
+        let before = self.snapshot();
         let mut state = TextEditorState {
             buffer: std::mem::take(&mut self.edit_buffer),
             cursor_idx: self.cursor_idx,
@@ -401,6 +462,7 @@ impl TextBox {
         if let Some(text) = state.selected_text() {
             clipboard::copy_to_clipboard(&text);
             state.insert_text("");
+            self.history.record(before);
             self.edit_buffer = state.buffer;
             self.cursor_idx = state.cursor_idx;
             self.select_anchor = state.select_anchor;
@@ -416,6 +478,7 @@ impl TextBox {
 
     pub fn paste_from_clipboard(&mut self) -> bool {
         if let Some(text) = clipboard::read_from_clipboard() {
+            let before = self.snapshot();
             let mut state = TextEditorState {
                 buffer: std::mem::take(&mut self.edit_buffer),
                 cursor_idx: self.cursor_idx,
@@ -429,6 +492,7 @@ impl TextBox {
                 }
             }
             state.insert_text(&cleaned);
+            self.history.record(before);
             self.edit_buffer = state.buffer;
             self.cursor_idx = state.cursor_idx;
             self.select_anchor = state.select_anchor;
@@ -458,6 +522,12 @@ impl TextBox {
     pub fn set_value(&mut self, val: &str) -> bool {
         let val_str = val.to_string();
         if self.text != val_str {
+            if self.editing {
+                let before = self.snapshot();
+                self.history.record(before);
+            } else {
+                self.history.clear();
+            }
             self.text = val_str.clone();
             self.edit_buffer = val_str;
             self.just_changed = true;
@@ -593,6 +663,7 @@ impl TextBox {
         self.select_anchor = Some(0);
         self.all_selected = len > 0;
         self.just_focused = true;
+        self.history.clear();
         self.sync_editor_state();
     }
 
@@ -657,12 +728,21 @@ impl TextBox {
 
         let control = event.ctrl;
 
-        let mut state = TextEditorState {
-            buffer: self.edit_buffer.clone(),
-            cursor_idx: self.cursor_idx,
-            select_anchor: self.select_anchor,
-            all_selected: self.all_selected,
-        };
+        // The undo/redo chords, for apps that hand keys to widgets without
+        // exposing a `UiContext` (the runner's routing reaches the box
+        // through `ContextAction` first when they do). Before the working
+        // copy below, since a step replaces the whole editing state.
+        if control {
+            if match_key_shortcut(event, &crate::input::widget_chord("undo", "", "ctrl+z")) {
+                return self.undo_edit();
+            }
+            if match_key_shortcut(event, &crate::input::widget_chord("redo", "", "ctrl+shift+z")) {
+                return self.redo_edit();
+            }
+        }
+
+        let before = self.snapshot();
+        let mut state = before.clone();
 
         let handled = match &event.logical_key {
             Key::Named(NamedKey::Backspace) => {
@@ -794,6 +874,29 @@ impl TextBox {
         };
 
         if self.editing {
+            if state.buffer != before.buffer {
+                // One step per typed run, per deleted run; whitespace
+                // starts a new run so undo walks back a word at a time.
+                // Replacing a selection is always its own step.
+                let group = match &event.logical_key {
+                    _ if before.selected_range().is_some() => None,
+                    Key::Named(NamedKey::Backspace) => Some(2),
+                    Key::Named(NamedKey::Delete) => Some(3),
+                    Key::Character(_) if !control => {
+                        let ws = event.text.as_deref().map_or(false, |t| t.chars().all(char::is_whitespace));
+                        Some(if ws { 4 } else { 1 })
+                    }
+                    _ => None,
+                };
+                match group {
+                    Some(g) => self.history.record_grouped(before, g),
+                    None => self.history.record(before),
+                }
+            } else if handled {
+                // A cursor or selection move between keystrokes splits the
+                // run: "abc", move, "def" undoes as two steps.
+                self.history.break_group();
+            }
             self.edit_buffer = state.buffer;
             self.cursor_idx = state.cursor_idx;
             self.select_anchor = state.select_anchor;
@@ -1646,6 +1749,8 @@ impl Input for TextBox {
                 self.set_value("");
                 true
             }
+            CA::Undo => self.undo_edit(),
+            CA::Redo => self.redo_edit(),
             _ => false,
         }
     }
@@ -1843,6 +1948,89 @@ mod tests {
             "typing must insert into the prefilled value, not replace it"
         );
         assert!(tb.edit_buffer.starts_with("imap"), "the existing value survives the first keystroke");
+    }
+
+    /// Undo/redo over an editing session: a typed word is one step, a
+    /// space starts the next, a cursor move splits a run, Backspace runs
+    /// coalesce, redo walks forward, a fresh keystroke after an undo forks,
+    /// and the chord reaches the box both as a `ContextAction` (the runner's
+    /// route) and as a raw key (the no-context fallback).
+    #[test]
+    fn typing_undoes_by_run() {
+        let mut dummy = crate::context::UiContext::new();
+        let mut tb = TextBox::new(String::new());
+        tb.set_rect(10.0, 10.0, 300.0, 30.0);
+        tb.focus();
+        assert!(tb.editing);
+        assert!(!tb.undo_edit(), "a fresh session has nothing to undo");
+
+        let key = |k: &str, ctrl: bool, shift: bool| KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Character(k.to_string()),
+            text: if ctrl { None } else { Some(k.to_string()) },
+            repeat: false,
+            ctrl,
+            shift,
+            alt: false,
+        };
+        let named = |n: NamedKey| KeyEvent {
+            state: ElementState::Pressed,
+            logical_key: Key::Named(n),
+            text: None,
+            repeat: false,
+            ctrl: false,
+            shift: false,
+            alt: false,
+        };
+        let type_str = |tb: &mut Adapted<TextBox>, dummy: &mut crate::context::UiContext, s: &str| {
+            for ch in s.chars() {
+                assert!(tb.keyboard_input(&key(&ch.to_string(), false, false), dummy));
+            }
+        };
+
+        type_str(&mut tb, &mut dummy, "hello world");
+        assert_eq!(tb.edit_buffer, "hello world");
+        assert_eq!(tb.history.undo_len(), 3, "'hello', ' ', 'world'");
+
+        // A cursor move splits the next run off.
+        assert!(tb.keyboard_input(&named(NamedKey::ArrowLeft), &mut dummy));
+        type_str(&mut tb, &mut dummy, "XY");
+        assert_eq!(tb.edit_buffer, "hello worlXYd");
+        assert_eq!(tb.history.undo_len(), 4);
+
+        // Backspaces coalesce into one step.
+        assert!(tb.keyboard_input(&named(NamedKey::Backspace), &mut dummy));
+        assert!(tb.keyboard_input(&named(NamedKey::Backspace), &mut dummy));
+        assert_eq!(tb.edit_buffer, "hello world");
+        assert_eq!(tb.history.undo_len(), 5);
+
+        // Undo through the ContextAction route, then the raw-chord route.
+        assert!(WidgetHost::context_action(&mut tb, crate::widget::ContextAction::Undo));
+        assert_eq!(tb.edit_buffer, "hello worlXYd");
+        assert!(tb.keyboard_input(&key("z", true, false), &mut dummy));
+        assert_eq!(tb.edit_buffer, "hello world");
+        assert!(tb.keyboard_input(&key("Z", true, true), &mut dummy), "redo via ctrl+shift+z");
+        assert_eq!(tb.edit_buffer, "hello worlXYd");
+        assert!(tb.keyboard_input(&key("z", true, false), &mut dummy));
+        assert!(tb.keyboard_input(&key("z", true, false), &mut dummy));
+        assert_eq!(tb.edit_buffer, "hello ");
+        assert!(tb.keyboard_input(&key("z", true, false), &mut dummy));
+        assert_eq!(tb.edit_buffer, "hello");
+        assert!(tb.keyboard_input(&key("z", true, false), &mut dummy));
+        assert_eq!(tb.edit_buffer, "");
+        assert!(!tb.undo_edit(), "history exhausted");
+
+        // Redo forward one, then a fresh keystroke forks the branch.
+        assert!(WidgetHost::context_action(&mut tb, crate::widget::ContextAction::Redo));
+        assert_eq!(tb.edit_buffer, "hello");
+        type_str(&mut tb, &mut dummy, "!");
+        assert_eq!(tb.edit_buffer, "hello!");
+        assert!(!tb.redo_edit(), "a new edit after an undo drops the redo branch");
+
+        // A committed value is not the box's to undo.
+        tb.unfocus();
+        assert!(!tb.editing);
+        assert!(!WidgetHost::context_action(&mut tb, crate::widget::ContextAction::Undo));
     }
 
     #[test]

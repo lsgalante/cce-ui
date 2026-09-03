@@ -103,6 +103,12 @@ pub enum ContextAction {
     Copy,
     Paste,
     SelectAll,
+    /// Step the widget's own edit history (a text box's typing). Routed by
+    /// the runner to the focused widget on the `undo` / `redo` chords before
+    /// the app's `Application::undo` / `redo` get their turn; also reachable
+    /// as "Undo" / "Redo" context-menu rows.
+    Undo,
+    Redo,
     ClearText,
     CopyKey,
     CopyValue,

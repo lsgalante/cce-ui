@@ -518,6 +518,22 @@ impl UiContext {
         self.focused_widget == Some(id)
     }
 
+    /// Offer a context action to the focused widget — the runner's first stop
+    /// for the `undo` / `redo` chords. Returns whether the widget applied it;
+    /// a widget that did is marked dirty.
+    pub fn focused_context_action(&mut self, action: crate::widget::ContextAction) -> bool {
+        let Some(ptr) = self.focused_widget.and_then(|id| self.tree.get_ptr(id)) else {
+            return false;
+        };
+        unsafe {
+            if (*ptr).context_action(action) {
+                (*ptr).mark_dirty(self);
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn clear_focus(&mut self) {
         if let Some(id) = self.focused_widget.take() {
             if let Some(ptr) = self.tree.get_ptr(id) {

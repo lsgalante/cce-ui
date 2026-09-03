@@ -443,6 +443,8 @@ pub mod context_menu {
                                         "Copy" => Some(CA::Copy),
                                         "Paste" => Some(CA::Paste),
                                         "Select All" => Some(CA::SelectAll),
+                                        "Undo" => Some(CA::Undo),
+                                        "Redo" => Some(CA::Redo),
                                         "Cear" => Some(CA::ClearText),
                                         "Copy Key" => Some(CA::CopyKey),
                                         "Copy Value" => Some(CA::CopyValue),

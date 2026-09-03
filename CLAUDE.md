@@ -72,6 +72,13 @@ Key methods (see the trait def around `window_runner.rs:1450`):
   handler requests a redraw; the loop is demand-driven and idles when nothing sets it.
 - `ui_context()` / `ui_context_mut()` expose the widget tree (`UiContext`) for apps built on the
   retained widget system rather than immediate drawing.
+- **Undo/redo**: the runner owns the routing. A press matching the `undo` / `redo` chord
+  (`input.kdl`, cce-ui domain defaults `ctrl+z` / `ctrl+shift+z`) goes to the focused widget
+  as `ContextAction::Undo` / `Redo` (a TextBox that is editing steps its own typing), then to
+  the app's `undo(needs_rebuild)` / `redo(needs_rebuild)` hooks (default false); only if both
+  decline does the key reach `handle_key_input`. Apps keep their own document history on
+  `cce_ui::history::History<T>` — snapshots of the app's state type, with gesture/group
+  coalescing and the fork-on-new-edit rule built in (module doc in `src/history.rs`).
 
 The frame loop is demand-driven (single `redraw` dirty bool, gated by a Wayland frame-callback
 vsync) — it idles correctly when nothing changes. Don't add per-frame I/O to the render hot path.
@@ -135,6 +142,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `config.rs` — KDL loading and `kdl_to_json` conversion (see workspace `CLAUDE.md` for paths).
 - `context.rs` — `UiContext`: the retained widget tree, event routing, spatial grid, dirty
   tracking, hit-testing.
+- `history.rs` — `History<T>`: the undo/redo snapshot stack (cap, gestures, grouped runs).
+  The toolkit defines the stack and the routing, never the step — see the trait section.
 - `widget/` — `container/` (vbox/hbox/scroll/menu/treelist/…), `input/` (button/slider/text_box/
   dropdown/…), `display/` (label/graph/svg/…), plus `editor.rs`, `json_layout.rs` (KDL/JSON-driven
   layouts), `core.rs`.

@@ -2,6 +2,7 @@ pub mod color;
 pub mod widget;
 pub mod config;
 pub mod input;
+pub mod history;
 pub mod layout;
 pub mod relief_spec;
 pub mod wayland;
