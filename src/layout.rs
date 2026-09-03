@@ -3702,149 +3702,187 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     wy += top_room;
     whh -= top_room;
 
-    // The Dropdown's closed-state chrome is its modern paint's flush inset
-    // trough — relief prims the legacy `all_quads` stream never carried, so
-    // flat-path hosts rendered dropdowns as bare text (cce-files carved the
-    // trough app-side to compensate). Offer it through the RenderTarget hook:
-    // relief-capable hosts carve it for real; tuple hosts degrade to a flat
-    // rounded fill, invisible under the transparent default face.
-    if control_relief() && w.as_any().is::<crate::widget::Dropdown>() {
-        let depth = bevel_width().min(whh * 0.2);
-        pc.inset_plate(
-            crate::color::dropdown_background_color(),
-            wx,
-            wy,
-            www,
-            whh,
-            dropdown_corner_radius(),
-            depth,
-        );
-    }
-
-    // The same gap for the TextBox, whose chrome is a WELL rather than a
-    // trough (`TextBox::well` — the geometry it carves in `paint`, asked for
-    // here so the two cannot drift). A recessed box with the DE's transparent
-    // face draws no border or background at all — the carve is the only thing
-    // marking the field — so on a flat host the row rendered as bare text.
-    if control_relief() {
-        if let Some(tb) = w.as_any().downcast_ref::<crate::widget::TextBox>() {
-            if let Some((well, radius, depth, tint)) = tb.well() {
-                pc.relief_carve(&ReliefCarve {
-                    kind: CarveKind::Recess { tint },
-                    x: well.x,
-                    y: well.y,
-                    w: well.width,
-                    h: well.height,
-                    radii: (radius, radius, radius, radius),
-                    depth,
-                    edges: (true, true, true, true),
-                });
-            }
-        }
-    }
-
-    // A Button's chrome is the Dropdown's: a flush inset plate, so it rides the
-    // same hook. Its face DOES carry a colour (`Button::color`), which the flat
-    // fill the tuple hosts degrade to still shows — what they were missing is
-    // the groove ring around it.
-    if control_relief() {
-        if let Some(btn) = w.as_any().downcast_ref::<crate::widget::Button>() {
-            let brect = crate::scene::layout::Rect { x: wx, y: wy, width: www, height: whh };
-            if let Some((rect, radius, depth, color)) = btn.inset_face(brect) {
-                pc.inset_plate(color, rect.x, rect.y, rect.width, rect.height, radius, depth);
-            }
-        }
-    }
-
-    // A Toggle is the extreme case: it paints NO fill in any style — it is
-    // worked out of the plate it sits on, so relief and light ARE the control.
-    // On a flat host that left the row as a bare label with nothing to click at
-    // all. Both halves of its appearance come across: the face-light overlays
-    // (ordinary quads) and the step carves.
-    if control_relief() {
-        if let Some(tg) = w.as_any().downcast_ref::<crate::widget::Toggle>() {
-            let rect = crate::scene::layout::Rect { x: wx, y: wy, width: www, height: whh };
-            for (face, r, corners, light) in tg.flat_faces(rect) {
-                pc.rect_with_radius_corners(light, face.x, face.y, face.width, face.height, r, corners);
-            }
-            for carve in tg.flat_carves(rect) {
-                pc.relief_carve(&carve);
-            }
-        }
-    }
-
-    for (qx, qy, qw, qh, qc) in w.all_quads(ctx) {
-        let extra_corners = (
-            corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
-            corners.1 && qx + qw >= wx + www - 1.5 && qy <= wy + 1.5,
-            corners.2 && qx + qw >= wx + www - 1.5 && qy + qh >= wy + whh - 1.5,
-            corners.3 && qx <= wx + 1.5 && qy + qh >= wy + whh - 1.5,
-        );
-
-        let (resolved_r, resolved_corners) = if r <= 0.1 || corners == (false, false, false, false) || extra_corners == (false, false, false, false) {
-            (0.0, (false, false, false, false))
-        } else {
-            (r, extra_corners)
-        };
-
-        // Check if this quad is the background quad for a widget with a solid border
-        let mut border_drawn = false;
-        let is_bg_quad = (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - www).abs() < 0.1 && (qh - whh).abs() < 0.1;
-        if is_bg_quad {
-            if let Some((border_color, thickness)) = w.solid_border() {
-                if thickness > 0.0 {
-                    // Draw full size border quad
-                    pc.rect_with_radius_corners(border_color, qx, qy, qw, qh, resolved_r, resolved_corners);
-                    // Draw inset background quad on top
-                    pc.rect_with_radius_corners(
-                        qc,
-                        qx + thickness,
-                        qy + thickness,
-                        (qw - 2.0 * thickness).max(0.0),
-                        (qh - 2.0 * thickness).max(0.0),
-                        (resolved_r - thickness).max(0.0),
-                        resolved_corners,
-                    );
-                    border_drawn = true;
-                }
-            }
-        }
-
-        if !border_drawn {
-            pc.rect_with_radius_corners(qc, qx, qy, qw, qh, resolved_r, resolved_corners);
-        }
-    }
-    for (qx, qy, qw, qh, qr, qc, qcorners) in w.all_rounded_quads(ctx) {
-        pc.rect_with_radius_corners(qc, qx, qy, qw, qh, qr, qcorners);
-    }
-    // Text via the paint walk: `paint_self` emits each widget's Text prims (content font +
-    // scroll-ancestor clip) exactly as the live display-list render does. render_widget already
-    // drew the geometry via `all_quads`/`all_rounded_quads` above, so we take only the Text prims
-    // from the walk. This drops the legacy `widget_font` + `text_labels_with_font_and_bounds`
-    // getters from render_widget — the prim already carries the per-widget font+bounds.
+    // ONE ordered replay of the paint walk — the same walk the live display-
+    // list render runs (`scene::painter`), every prim in the order the widget
+    // painted it, each mapped onto the flat host's RenderTarget surface.
+    //
+    // This used to be three passes over three typed views of the same paint:
+    // the relief prims (downcast per widget type and re-derived from the
+    // widget's accessors — the Dropdown's inset plate, the TextBox's well, the
+    // Button's face, the Toggle's faces and steps), then every plain quad
+    // (`all_quads`), then every rounded quad (`all_rounded_quads`). Splitting
+    // one paint into typed streams loses the order between them, and the
+    // order is the picture: a TextBox draws its rounded background, carves
+    // its well, THEN lays the selection highlight and caret on top — the
+    // three-pass replay put the well under the highlight and the background
+    // over both. A Dropdown's hovered row is drawn after its menu plate; a
+    // host that replays plates after rects buries the highlight. The prim
+    // walk keeps the widget's order, covers every widget instead of the four
+    // that had a special case, and carries the relief prims' own per-corner
+    // radii and depth (the re-derivations rounded those off).
+    //
+    // Mapping onto the tuple surface: Quad and RoundedRect are the two
+    // native fills (the root's plain background keeps its solid-border
+    // expansion and window-corner resolution); a zero-stroke Border is an
+    // inset plate's FACE and is held until the Trough that follows it, so the
+    // pair reaches the host as ONE `inset_plate` call (a relief host carves
+    // it for real; the default degrades to the flat fill); Recess/Boss go to
+    // `relief_carve`; a Bevel degrades to its fill — what a flat host can
+    // draw of a raised plate. Ridges, circles, arcs, vectors and images have
+    // no flat-surface counterpart and are skipped, as they always were.
+    let solid_border = w.solid_border();
     let mut text_scratch = crate::scene::paint::PaintCtx::new();
     crate::scene::painter::paint_root_into(&*ctx, &*w, &mut text_scratch);
+
+    // A zero-stroke Border waiting for its Trough: (rect, radii, fill).
+    let mut pending_face: Option<(crate::scene::layout::Rect, crate::scene::paint::Radii, [f32; 4])> = None;
+    fn same_rect(a: crate::scene::layout::Rect, b: crate::scene::layout::Rect) -> bool {
+        (a.x - b.x).abs() < 0.1 && (a.y - b.y).abs() < 0.1 && (a.width - b.width).abs() < 0.1 && (a.height - b.height).abs() < 0.1
+    }
+    fn emit_rounded(pc: &mut dyn RenderTarget, rect: crate::scene::layout::Rect, radii: crate::scene::paint::Radii, color: [f32; 4]) {
+        let (r1, r2, r3, r4) = radii;
+        let radius = r1.max(r2).max(r3).max(r4);
+        let mask = (r1 > 0.0, r2 > 0.0, r3 > 0.0, r4 > 0.0);
+        pc.rect_with_radius_corners(color, rect.x, rect.y, rect.width, rect.height, radius, mask);
+    }
+
     for item in text_scratch.finish().items {
-        if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, font, bounds, .. } = item.prim {
-            let color_f32 = [
-                color[0] as f32 / 255.0,
-                color[1] as f32 / 255.0,
-                color[2] as f32 / 255.0,
-                1.0,
-            ];
-            // Compose the walk's container clip with the prim's own bounds (the engine's dl-text
-            // merge), so a clipping ancestor still bounds the text.
-            let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
-            let merged = match (clip, bounds) {
-                (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
-                (Some(a), None) => Some(a),
-                (None, b) => b,
-            };
-            match font {
-                Some(ref f) => pc.text_with_font_and_bounds(&text, x, y, font_size, color_f32, f, merged),
-                None => pc.text_with_bounds(&text, x, y, font_size, color_f32, merged),
+        use crate::scene::paint::Prim;
+        let trough_for_face = match (&item.prim, &pending_face) {
+            (Prim::Trough { rect, .. }, Some((face_rect, _, _))) => same_rect(*rect, *face_rect),
+            _ => false,
+        };
+        if !trough_for_face {
+            if let Some((frect, fradii, fill)) = pending_face.take() {
+                emit_rounded(pc, frect, fradii, fill);
             }
         }
+        match item.prim {
+            Prim::Quad { rect, color: qc } => {
+                let (qx, qy, qw, qh) = (rect.x, rect.y, rect.width, rect.height);
+                let extra_corners = (
+                    corners.0 && qx <= wx + 1.5 && qy <= wy + 1.5,
+                    corners.1 && qx + qw >= wx + www - 1.5 && qy <= wy + 1.5,
+                    corners.2 && qx + qw >= wx + www - 1.5 && qy + qh >= wy + whh - 1.5,
+                    corners.3 && qx <= wx + 1.5 && qy + qh >= wy + whh - 1.5,
+                );
+
+                let (resolved_r, resolved_corners) = if r <= 0.1 || corners == (false, false, false, false) || extra_corners == (false, false, false, false) {
+                    (0.0, (false, false, false, false))
+                } else {
+                    (r, extra_corners)
+                };
+
+                // The widget's own background quad with a solid border: full-size
+                // border quad, then the inset background over it.
+                let mut border_drawn = false;
+                let is_bg_quad = (qx - wx).abs() < 0.1 && (qy - wy).abs() < 0.1 && (qw - www).abs() < 0.1 && (qh - whh).abs() < 0.1;
+                if is_bg_quad {
+                    if let Some((border_color, thickness)) = solid_border {
+                        if thickness > 0.0 {
+                            pc.rect_with_radius_corners(border_color, qx, qy, qw, qh, resolved_r, resolved_corners);
+                            pc.rect_with_radius_corners(
+                                qc,
+                                qx + thickness,
+                                qy + thickness,
+                                (qw - 2.0 * thickness).max(0.0),
+                                (qh - 2.0 * thickness).max(0.0),
+                                (resolved_r - thickness).max(0.0),
+                                resolved_corners,
+                            );
+                            border_drawn = true;
+                        }
+                    }
+                }
+
+                if !border_drawn {
+                    pc.rect_with_radius_corners(qc, qx, qy, qw, qh, resolved_r, resolved_corners);
+                }
+            }
+            Prim::RoundedRect { rect, radius, corners: qcorners, color: qc } => {
+                pc.rect_with_radius_corners(qc, rect.x, rect.y, rect.width, rect.height, radius, qcorners);
+            }
+            Prim::Border { rect, radii, fill, border, thickness } => {
+                if thickness > 0.0 && border[3].abs() > 0.001 {
+                    emit_rounded(pc, rect, radii, border);
+                    if fill[3].abs() > 0.001 {
+                        let inner = crate::scene::layout::Rect {
+                            x: rect.x + thickness,
+                            y: rect.y + thickness,
+                            width: (rect.width - 2.0 * thickness).max(0.0),
+                            height: (rect.height - 2.0 * thickness).max(0.0),
+                        };
+                        let (r1, r2, r3, r4) = radii;
+                        let shrink = |v: f32| if v > 0.0 { (v - thickness).max(0.0) } else { 0.0 };
+                        emit_rounded(pc, inner, (shrink(r1), shrink(r2), shrink(r3), shrink(r4)), fill);
+                    }
+                } else if fill[3].abs() > 0.001 {
+                    // abs(): a negative alpha is the frost sentinel, a real face.
+                    pending_face = Some((rect, radii, fill));
+                }
+            }
+            Prim::Trough { rect, radii, depth, .. } => {
+                let face = pending_face.take().map(|(_, _, fill)| fill).unwrap_or([0.0; 4]);
+                let (r1, r2, r3, r4) = radii;
+                pc.inset_plate(face, rect.x, rect.y, rect.width, rect.height, r1.max(r2).max(r3).max(r4), depth);
+            }
+            Prim::Bevel { rect, radii, color, .. } => {
+                if color[3].abs() > 0.001 {
+                    emit_rounded(pc, rect, radii, color);
+                }
+            }
+            Prim::Recess { rect, radii, depth, edges, tint } => {
+                pc.relief_carve(&ReliefCarve {
+                    kind: CarveKind::Recess { tint },
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.width,
+                    h: rect.height,
+                    radii,
+                    depth,
+                    edges,
+                });
+            }
+            Prim::Boss { rect, radii, depth, edges, .. } => {
+                pc.relief_carve(&ReliefCarve {
+                    kind: CarveKind::Boss,
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.width,
+                    h: rect.height,
+                    radii,
+                    depth,
+                    edges,
+                });
+            }
+            // Text via the paint walk: each widget's Text prims (content font + scroll-ancestor
+            // clip) exactly as the live display-list render does; the prim already carries the
+            // per-widget font + bounds.
+            Prim::Text { text, x, y, font_size, color, font, bounds, .. } => {
+                let color_f32 = [
+                    color[0] as f32 / 255.0,
+                    color[1] as f32 / 255.0,
+                    color[2] as f32 / 255.0,
+                    1.0,
+                ];
+                // Compose the walk's container clip with the prim's own bounds (the engine's dl-text
+                // merge), so a clipping ancestor still bounds the text.
+                let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
+                let merged = match (clip, bounds) {
+                    (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
+                    (Some(a), None) => Some(a),
+                    (None, b) => b,
+                };
+                match font {
+                    Some(ref f) => pc.text_with_font_and_bounds(&text, x, y, font_size, color_f32, f, merged),
+                    None => pc.text_with_bounds(&text, x, y, font_size, color_f32, merged),
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some((frect, fradii, fill)) = pending_face.take() {
+        emit_rounded(pc, frect, fradii, fill);
     }
     if w.popover_rect().is_some() {
         ctx.register_popover(w);
