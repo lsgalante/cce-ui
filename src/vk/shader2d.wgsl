@@ -530,6 +530,10 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // roll meets the face — then every carve's slope adds to it, and its
         // shoulder/fillet ambient term joins the roll's crest.
         var sv = gd.xy * roll_slope(f);
+        // The plate's OWN roll, kept apart from the carves added below: a
+        // focused plate's accent ring traces this alone (see the tinted
+        // branch), so the wells carved into it never wear the ring too.
+        let sv_rim = sv;
         var extra = PLATE_CREST * f * f * f;
         let f_off = u32(rrect_clip.p_host.x);
         let f_cnt = u32(rrect_clip.p_host.y);
@@ -559,9 +563,13 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // as painted frames). Neutral plates (w = 0) keep the directional
         // glint, byte-identical.
         let tw = rrect_clip.p_spec_tint.w;
-        var spec = roll_spec(sv);
         if (tw > 0.0) {
-            spec = roll_spec_wrap(sv);
+            // The wrap runs on the plate's own roll ONLY (sv_rim), never on
+            // the carves: with the full slope every well carved into a
+            // focused plate — each parameter control on the designer's
+            // parameter pane — drew its own accent ring, reading as if every
+            // control were focused alongside the pane.
+            let spec = roll_spec_wrap(sv_rim);
             // A FILL-LESS tinted plate is a pure focus ring (the network
             // cursor): the wrapped glint alone, on the plate's own roll — so
             // the line traces the same superellipse silhouette, radius
@@ -571,7 +579,16 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             if (abs(base.a) < 0.004) {
                 return vec4f(rrect_clip.p_spec_tint.rgb, spec * strength * aa);
             }
+            // The carves keep the neutral directional glint an unfocused
+            // plate gives them (white, as p_spec_tint.rgb is for w = 0);
+            // sv_rim is zero on the face, so this is exactly their term.
+            let carve_spec = roll_spec(sv - sv_rim);
+            return vec4f(
+                base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength) + vec3f(carve_spec * strength),
+                abs(base.a) * aa,
+            );
         }
+        let spec = roll_spec(sv);
         return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
     }
 
