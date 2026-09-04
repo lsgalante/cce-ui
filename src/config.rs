@@ -99,6 +99,21 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
             let mut node_val = serde_json::Value::Null;
             if has_props {
                 node_val = serde_json::Value::Object(node_map);
+            } else if node.entries().len() > 1
+                && node.entries().iter().all(|e| matches!(e.value(), kdl::KdlValue::String(_) | kdl::KdlValue::RawString(_)))
+            {
+                // A string LIST (`rounded_apps "a" "b"`) is an array, so the
+                // writer can put the args back. Joined into one string, as the
+                // numeric multi-arg case below still is (`(vec2i)100 200`),
+                // it came back as ONE quoted arg — `rounded_apps "a b"` — and
+                // a compositor allowlist silently matched nothing after
+                // every cce-data-editor save.
+                node_val = serde_json::Value::Array(
+                    node.entries()
+                        .iter()
+                        .filter_map(|e| e.value().as_string().map(|s| serde_json::Value::String(s.to_string())))
+                        .collect(),
+                );
             } else if node.entries().len() > 1 {
                 let parts: Vec<String> = node.entries().iter().map(|entry| {
                     match entry.value() {
@@ -1055,6 +1070,32 @@ mod tests {
     }
 
     #[test]
+    /// A string list (`rounded_apps "a" "b"`) must survive the JSON round
+    /// trip cce-data-editor saves through — it used to come back as ONE arg,
+    /// `rounded_apps "a b"`, and the compositor's allowlist then matched
+    /// nothing (Claude Desktop lost its corners after every save).
+    #[test]
+    fn test_string_list_roundtrip() {
+        let content = "window_manager {\n    rounded_apps \"claude-desktop\" \"com.anthropic.Claude\"\n    corner_shape (f64)4.5\n}\n";
+        let val = parse_kdl_to_json(content);
+        let list = val.get("window_manager").unwrap().get("rounded_apps").unwrap();
+        assert_eq!(
+            list.as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect::<Vec<_>>(),
+            vec!["claude-desktop", "com.anthropic.Claude"]
+        );
+        let kdl_str = json_to_kdl_string(&val);
+        assert!(kdl_str.contains("rounded_apps \"claude-desktop\" \"com.anthropic.Claude\""), "{kdl_str}");
+        // And it re-parses to the same two args, not one.
+        let doc = kdl_str.parse::<kdl::KdlDocument>().unwrap();
+        let wm = doc.nodes().iter().find(|n| n.name().value() == "window_manager").unwrap();
+        let ra = wm.children().unwrap().nodes().iter().find(|n| n.name().value() == "rounded_apps").unwrap();
+        assert_eq!(ra.entries().len(), 2);
+        // A single-arg string node stays a plain string.
+        let single = parse_kdl_to_json("window_manager {\n    rounded_apps \"claude-desktop\"\n}\n");
+        assert_eq!(single.get("window_manager").unwrap().get("rounded_apps").unwrap().as_str(), Some("claude-desktop"));
+    }
+
+    #[test]
     fn test_vec2i_lossless_roundtrip() {
         let content = "style {\n    surface {\n        cloud {\n            position_default (vec2i)100 200\n        }\n    }\n}\n";
         let val = parse_kdl_to_json(content);
@@ -1199,6 +1240,16 @@ pub fn value_to_kdl_with_annotations(
             }
         }
         serde_json::Value::Array(arr) => {
+            // An array of strings is one node with several positional args
+            // (the shape `kdl_to_json` reads `rounded_apps "a" "b"` into);
+            // any other array is one node per item (key_bindings' objects).
+            if !arr.is_empty() && arr.iter().all(|v| v.is_string()) {
+                let args: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| format!("\"{}\"", s)))
+                    .collect();
+                return format!("{}{} {}\n", indent_str, key, args.join(" "));
+            }
             let mut out = String::new();
             for item in arr {
                 out.push_str(&value_to_kdl_with_annotations(key, item, indent, parent_path, annotations));
