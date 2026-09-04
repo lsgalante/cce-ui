@@ -80,6 +80,11 @@ pub struct UiContext {
     pub is_dragging: bool,
     pub any_dirty: bool,
     pub tick_receivers: Vec<WidgetId>,
+    /// How many times `tick` has run. The runner reads it around the app's
+    /// own `Application::tick` to see whether the app already advanced the
+    /// roster this frame — receivers integrate `dt` (scroll glides, slider
+    /// inertia), so a second tick per frame would run them at double speed.
+    tick_count: u64,
     pub spatial_grid: SpatialGrid,
     pub last_scroll_time: Option<std::time::Instant>,
     pub scroll_initiate_widget_id: Option<WidgetId>,
@@ -106,6 +111,7 @@ impl UiContext {
             is_dragging: false,
             any_dirty: false,
             tick_receivers: Vec::new(),
+            tick_count: 0,
             spatial_grid: SpatialGrid::new(100.0),
             last_scroll_time: None,
             scroll_initiate_widget_id: None,
@@ -441,7 +447,13 @@ impl UiContext {
         true
     }
 
+    /// Number of `tick` calls so far (see the field doc).
+    pub fn tick_count(&self) -> u64 {
+        self.tick_count
+    }
+
     pub fn tick(&mut self, dt: f32) -> bool {
+        self.tick_count = self.tick_count.wrapping_add(1);
         let mut changed = false;
         let ids = self.tick_receivers.clone();
         for id in ids {

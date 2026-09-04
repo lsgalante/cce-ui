@@ -5673,17 +5673,23 @@ fn run_session<'l, A: Application>(
         }
 
         let mut rebuild = false;
+        let roster_ticks_before =
+            engine_state.inner.as_mut().unwrap().ui_context_mut().map(|ctx| ctx.tick_count());
         engine_state.inner.as_mut().unwrap().tick(dt, &mut rebuild);
         if rebuild {
             engine_state.redraw = true;
         }
         // Tick the app's retained UiContext (widget tick_receivers — e.g. an
-        // animating Dropdown popover) for apps that expose it. Apps that also
-        // tick it themselves are safe to double-tick: receivers' animations are
-        // wall-clock-based, so an extra tick only re-reports "changed".
+        // animating Dropdown popover) for apps that expose it — but only when
+        // the app's own tick did not already do so this frame. Receivers
+        // integrate `dt` (scroll glides, slider inertia), so the old
+        // "double-ticking is harmless" assumption ran every glide at twice
+        // its configured rate in apps that tick the context themselves.
         if let Some(ctx) = engine_state.inner.as_mut().unwrap().ui_context_mut() {
-            if ctx.tick(dt) {
-                engine_state.redraw = true;
+            if Some(ctx.tick_count()) == roster_ticks_before {
+                if ctx.tick(dt) {
+                    engine_state.redraw = true;
+                }
             }
         }
 
