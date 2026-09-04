@@ -212,13 +212,26 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
     serde_json::Value::Object(map)
 }
 
+/// The calling app's name — the basename of its executable — used to locate
+/// its per-app config (`~/.config/cce/<name>/config.kdl`) and its `input.kdl`
+/// domain.
+///
+/// Derived from `/proc/self/exe` on every call, which the kernel renders as
+/// `<path> (deleted)` once the binary on disk has been replaced (`ccebuild
+/// install` unlinks before writing). Without the strip, a still-running client
+/// would resolve its override to `~/.config/cce/<name> (deleted)/config.kdl`
+/// on its next config reload and silently lose the whole file — the status
+/// bar's droplet bubbles reverted to square boxes this way on 2026-09-03.
 pub fn get_app_name() -> Option<String> {
     std::env::current_exe()
         .ok()
-        .and_then(|p| {
-            p.file_name()
-                .and_then(|s| s.to_str().map(|ss| ss.to_string()))
-        })
+        .and_then(|p| p.file_name().and_then(|s| s.to_str().map(app_name_from_exe_basename)))
+}
+
+/// [`get_app_name`]'s normalization: the kernel's ` (deleted)` marker on an
+/// unlinked executable is not part of the name.
+fn app_name_from_exe_basename(basename: &str) -> String {
+    basename.strip_suffix(" (deleted)").unwrap_or(basename).to_string()
 }
 
 pub fn get_app_config_path(app_name: &str) -> std::path::PathBuf {
@@ -795,6 +808,17 @@ pub fn get_kdl_type_annotations(kdl_content: &str, key_paths: &[String]) -> Vec<
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn app_name_strips_the_kernels_deleted_marker() {
+        use super::app_name_from_exe_basename as name;
+        assert_eq!(name("cce-status-interface"), "cce-status-interface");
+        assert_eq!(name("cce-status-interface (deleted)"), "cce-status-interface");
+        // Only the exact trailing marker: a name that merely contains the
+        // word, or an unspaced variant, is left alone.
+        assert_eq!(name("cce-deleted-files"), "cce-deleted-files");
+        assert_eq!(name("cce-x(deleted)"), "cce-x(deleted)");
+    }
+
     use super::*;
 
     #[test]
