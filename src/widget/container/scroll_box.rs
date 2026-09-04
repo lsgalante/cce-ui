@@ -69,6 +69,8 @@ pub struct ScrollBox {
     pub show_background: bool,
     pub scrollbar_dragging: bool,
     pub drag_offset_y: f32,
+    /// Smooth-scroll driver behind `scroll_y` (see `ScrollRegion::motion`).
+    motion: crate::widget::scroll_motion::ScrollMotion,
 }
 
 impl ScrollBox {
@@ -85,6 +87,7 @@ impl ScrollBox {
             show_background: true,
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
+            motion: crate::widget::scroll_motion::ScrollMotion::new(),
         }
     }
 
@@ -96,6 +99,16 @@ impl ScrollBox {
         self.viewport_offset_h = viewport_h - self.base.h;
         let max_scroll = (content_h - viewport_h).max(0.0);
         self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
+        self.motion.set_bounds(Bounds::max(0.0), Bounds::max(max_scroll));
+    }
+
+    fn bounds_y(&self) -> Bounds {
+        Bounds::max((self.content_h - self.viewport_h).max(0.0))
+    }
+
+    /// Whether a glide or coast is still moving the offset.
+    pub fn is_animating(&self) -> bool {
+        self.motion.is_animating()
     }
 
     pub fn hit_test_scrollbar(&self, px: f32, py: f32) -> bool {
@@ -300,22 +313,22 @@ impl ScrollBox {
         changed
     }
 
-    /// Legacy `WidgetHost` default parity (cce-test-interface's panel copy ticks it).
-    pub fn tick(&mut self, _dt: f32, _ctx: &mut UiContext) -> bool {
-        false
+    /// Per-frame smooth-scroll upkeep: adopts host writes to `scroll_y`,
+    /// advances a wheel glide or trackpad coast, and returns the repaint
+    /// signal (true while anything is still moving).
+    pub fn tick(&mut self, dt: f32, _ctx: &mut UiContext) -> bool {
+        self.motion.reconcile(0.0, self.scroll_y);
+        let moved = self.motion.tick(dt, Bounds::max(0.0), self.bounds_y());
+        self.scroll_y = self.motion.y.pos();
+        moved || self.motion.is_animating()
     }
 
     pub fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ctx: &mut UiContext) -> bool {
         if self.hit_test(px, py, ctx) {
-            let scroll_speed = 24.0;
-            let dy = match delta {
-                MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
-                MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
-            };
-            let old_scroll = self.scroll_y;
-            let max_scroll = (self.content_h - self.viewport_h).max(0.0);
-            self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
-            (self.scroll_y - old_scroll).abs() > 0.01
+            self.motion.reconcile(0.0, self.scroll_y);
+            let changed = self.motion.apply(delta, (LINE_PX, LINE_PX), Bounds::max(0.0), self.bounds_y());
+            self.scroll_y = self.motion.y.pos();
+            changed
         } else {
             false
         }
@@ -480,11 +493,20 @@ mod tests {
         let mut dummy = UiContext::new();
         let changed = sb.mouse_wheel(&delta, 50.0, 50.0, &mut dummy);
         assert!(changed);
+        // The notch glides: run the motion out before reading the offset.
+        for _ in 0..1000 {
+            if !sb.is_animating() { break; }
+            sb.tick(1.0 / 60.0, &mut dummy);
+        }
         assert_eq!(sb.scroll_y, 48.0);
 
         // 4. Clamps at max scroll: 150 - 100 = 50
         let delta_large = MouseScrollDelta::LineDelta(0.0, -10.0);
         sb.mouse_wheel(&delta_large, 50.0, 50.0, &mut dummy);
+        for _ in 0..1000 {
+            if !sb.is_animating() { break; }
+            sb.tick(1.0 / 60.0, &mut dummy);
+        }
         assert_eq!(sb.scroll_y, 50.0);
 
         // 5. Test item draw coordinates (intersection contract: partially

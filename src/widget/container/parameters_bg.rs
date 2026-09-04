@@ -74,6 +74,8 @@ pub struct ParametersBg {
     /// `tick`) — the shared [`crate::widget::ScrollbarActivity`], which was extracted FROM
     /// this widget so every app's plate-straddling scrollbar behaves the same way.
     activity: crate::widget::ScrollbarActivity,
+    /// Smooth-scroll driver behind `scroll_y` (see `ScrollRegion::motion`).
+    scroll_motion: crate::widget::ScrollMotion,
     /// One code-editor column's shaped advance (monospace @12, the family/size
     /// the code rows draw in), recorded by [`Paint::prepare_text`]. The caret
     /// and click→column math read it; the hardcoded 7.2 px/col they used
@@ -176,6 +178,7 @@ impl ParametersBg {
             scrollbar_dragging: false,
             drag_offset_y: 0.0,
             activity: crate::widget::ScrollbarActivity::new(),
+            scroll_motion: crate::widget::ScrollMotion::new(),
         })
     }
 
@@ -1812,6 +1815,18 @@ impl Input for ParametersBg {
                 }
             }
         }
+        // The pane's own wheel glide / trackpad coast: adopt any host write to
+        // `scroll_y`, advance, and re-seat the rows when the offset moved.
+        self.scroll_motion.reconcile(0.0, self.scroll_y);
+        let pane_max = (self.content_h - self.rect.height).max(0.0);
+        if self.scroll_motion.tick(dt, crate::widget::Bounds::max(0.0), crate::widget::Bounds::max(pane_max)) {
+            self.scroll_y = self.scroll_motion.y.pos();
+            self.update_slider_rects();
+            changed = true;
+        }
+        if self.scroll_motion.is_animating() {
+            changed = true;
+        }
         // Decay the "recently scrolled" window; keep frames coming until it expires so the
         // scrollbar's sink behind the plate actually renders.
         if self.activity.holding() {
@@ -2653,15 +2668,16 @@ impl Input for ParametersBg {
                             if crate::scroll_debug() {
                                 eprintln!("[scroll] params: PANE-SCROLL fallback at ({px:.0},{py:.0})");
                             }
-                            let scroll_speed = 24.0;
-                            let dy = match delta {
-                                MouseScrollDelta::LineDelta(_, y) => -y * scroll_speed,
-                                MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
-                            };
-                            let old_scroll = self.scroll_y;
                             let max_scroll = (self.content_h - self.rect.height).max(0.0);
-                            self.scroll_y = (self.scroll_y + dy).clamp(0.0, max_scroll);
-                            if (self.scroll_y - old_scroll).abs() > 0.01 {
+                            self.scroll_motion.reconcile(0.0, self.scroll_y);
+                            let moved = self.scroll_motion.apply(
+                                delta,
+                                (crate::widget::LINE_PX, crate::widget::LINE_PX),
+                                crate::widget::Bounds::max(0.0),
+                                crate::widget::Bounds::max(max_scroll),
+                            );
+                            self.scroll_y = self.scroll_motion.y.pos();
+                            if moved {
                                 self.update_slider_rects();
                                 self.activity.bump();
                                 self.recompute_scrollbar_raised();

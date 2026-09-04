@@ -539,11 +539,13 @@ pub mod editor;
 pub mod layout_helper;
 pub mod model;
 pub mod scroll_region;
+pub mod scroll_motion;
  
 // Re-exports
 pub use self::editor::TextEditorState;
 pub use self::layout_helper::{ColumnLayout, RowLayout};
 pub use self::scroll_region::{ScrollRegion, ScrollbarActivity};
+pub use self::scroll_motion::{Bounds, ScrollAxis, ScrollMotion, ScrollPhase, ScrollSettings, LINE_PX};
 pub use self::model::{Adapted, EventCtx, Input, Layout, Paint};
 pub use self::core::{Widget, focus, hover_animation, clipboard, context_menu, clear_widget_references};
 pub use self::core::focus::link_parent_child;

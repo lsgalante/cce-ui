@@ -81,6 +81,11 @@ pub struct TextBox {
     pub history: History<TextEditorState>,
     pub scroll_y: f32,
     pub scroll_x: f32,
+    /// Smooth-scroll driver behind `scroll_x`/`scroll_y` (see `ScrollRegion::motion`).
+    scroll_motion: ScrollMotion,
+    /// `(max_x, max_y)` as of the last wheel — the glide's bounds, so `tick`
+    /// never re-wraps the text just to re-derive them.
+    scroll_max: (f32, f32),
     default_font_size: f32,
     default_font_family: String,
     pub cursor_x_offset: f32,
@@ -143,6 +148,8 @@ impl TextBox {
             history: History::new(),
             scroll_y: 0.0,
             scroll_x: 0.0,
+            scroll_motion: ScrollMotion::new(),
+            scroll_max: (0.0, 0.0),
             default_font_size: style_size,
             default_font_family: style_family,
             cursor_x_offset: 0.0,
@@ -927,25 +934,22 @@ impl TextBox {
             (vec![buffer.clone()], vec![(0, 0); buffer.chars().count() + 1])
         };
 
-        let mut changed = false;
-
+        let mut dy_px = 0.0;
+        let mut max_scroll_y = 0.0;
         if self.multiline {
             let content_h = lines.len() as f32 * line_height;
-            let max_scroll = (content_h - (self.rect.height - 16.0)).max(0.0);
-            let scroll_amt = match *delta {
+            max_scroll_y = (content_h - (self.rect.height - 16.0)).max(0.0);
+            dy_px = match *delta {
                 MouseScrollDelta::LineDelta(_, dy) => -dy * line_height * 2.0,
                 MouseScrollDelta::PixelDelta(pos) => -pos.y as f32,
             };
-            let old_scroll = self.scroll_y;
-            self.scroll_y = (self.scroll_y + scroll_amt).clamp(0.0, max_scroll);
-            if old_scroll != self.scroll_y {
-                changed = true;
-            }
         }
 
+        let mut dx_px = 0.0;
+        let mut max_scroll_x = 0.0;
         if !self.line_wrap_enabled() {
             let content_w = self.content_width(&lines);
-            let max_scroll_x = (content_w - (self.rect.width - 16.0)).max(0.0);
+            max_scroll_x = (content_w - (self.rect.width - 16.0)).max(0.0);
             let natural = crate::layout::touchpad_natural_scroll();
             let scroll_amt_x = match *delta {
                 MouseScrollDelta::LineDelta(dx, dy) => {
@@ -966,13 +970,23 @@ impl TextBox {
                     }
                 }
             };
-            let old_scroll_x = self.scroll_x;
-            self.scroll_x = (self.scroll_x + scroll_amt_x).clamp(0.0, max_scroll_x);
-            if old_scroll_x != self.scroll_x {
-                changed = true;
-            }
+            dx_px = scroll_amt_x;
         }
 
+        // Both axes through the shared motion: notches glide, finger tracks
+        // 1:1, a flick coasts. The pub offsets are the drawn values.
+        self.scroll_max = (max_scroll_x, max_scroll_y);
+        self.scroll_motion.reconcile(self.scroll_x, self.scroll_y);
+        let discrete = matches!(delta, MouseScrollDelta::LineDelta(..));
+        let changed = self.scroll_motion.apply_px(
+            dx_px,
+            dy_px,
+            discrete,
+            Bounds::max(max_scroll_x),
+            Bounds::max(max_scroll_y),
+        );
+        self.scroll_x = self.scroll_motion.x.pos();
+        self.scroll_y = self.scroll_motion.y.pos();
         changed
     }
 
@@ -1607,6 +1621,25 @@ impl Paint for TextBox {
 }
 
 impl Input for TextBox {
+    /// Advances the wheel glide / trackpad coast behind the scroll offsets.
+    /// Cheap when idle (the common case); `wants_tick` is unconditional
+    /// because it is sampled once at registration.
+    fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
+        self.scroll_motion.reconcile(self.scroll_x, self.scroll_y);
+        if !self.scroll_motion.is_animating() {
+            return false;
+        }
+        let (mx, my) = self.scroll_max;
+        let moved = self.scroll_motion.tick(dt, Bounds::max(mx), Bounds::max(my));
+        self.scroll_x = self.scroll_motion.x.pos();
+        self.scroll_y = self.scroll_motion.y.pos();
+        moved || self.scroll_motion.is_animating()
+    }
+
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     fn tracks_base_focus(&self) -> bool {
         false
     }

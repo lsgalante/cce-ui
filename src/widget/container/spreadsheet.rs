@@ -13,6 +13,7 @@
 use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
+use crate::widget::scroll_motion::{scroll_settings, Bounds, ScrollMotion};
 use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton, MouseScrollDelta,
     NamedKey, Paint, SpreadsheetController,
@@ -42,13 +43,15 @@ pub struct Spreadsheet {
     /// sortable headers.
     header_hover_col: Option<usize>,
     scroll_y: f32,
-    scroll_velocity: f32,
     dragging_scrollbar: bool,
     drag_offset_y: f32,
     scrollbar_hovered: bool,
     scrollbar_thumb_hovered: bool,
     scroll_x: f32,
-    hscroll_velocity: f32,
+    /// Smooth-scroll driver behind `scroll_y`/`scroll_x`: wheel notches
+    /// glide, trackpad flicks coast (the widget's former velocity model,
+    /// now the toolkit-wide one).
+    motion: ScrollMotion,
     dragging_hscrollbar: bool,
     drag_offset_x: f32,
     hscrollbar_hovered: bool,
@@ -93,13 +96,12 @@ impl Spreadsheet {
             sort: None,
             header_hover_col: None,
             scroll_y: 0.0,
-            scroll_velocity: 0.0,
             dragging_scrollbar: false,
             drag_offset_y: 0.0,
             scrollbar_hovered: false,
             scrollbar_thumb_hovered: false,
             scroll_x: 0.0,
-            hscroll_velocity: 0.0,
+            motion: ScrollMotion::new(),
             dragging_hscrollbar: false,
             drag_offset_x: 0.0,
             hscrollbar_hovered: false,
@@ -514,19 +516,17 @@ impl Input for Spreadsheet {
             Event::MouseWheel { delta, .. } => {
                 // Delta signs follow the ScrollRegion/TextBox convention (negate the
                 // event delta); natural scroll is already applied upstream by libinput.
-                let (dx, dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (-*x * ROW_H, -*y * ROW_H),
-                    MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
-                };
-                let mut used = false;
-                if dy.abs() > 0.0 && self.geom(ectx.rect).is_some() {
-                    self.scroll_velocity += dy * 12.0;
-                    used = true;
-                }
-                if dx.abs() > 0.0 && self.hgeom(ectx.rect).is_some() {
-                    self.hscroll_velocity += dx * 12.0;
-                    used = true;
-                }
+                let (dx, dy) = ScrollMotion::delta_px(delta, (ROW_H, ROW_H));
+                let by = self.geom(ectx.rect).map_or(Bounds::max(0.0), |g| Bounds::max(g.max_scroll));
+                let bx = self.hgeom(ectx.rect).map_or(Bounds::max(0.0), |g| Bounds::max(g.max_scroll));
+                // Claimed whenever the pointed axis can scroll at all (an
+                // overflowing table swallows its wheel), moved or not.
+                let used = (dy != 0.0 && by.hi > 0.0) || (dx != 0.0 && bx.hi > 0.0);
+                self.motion.reconcile(self.scroll_x, self.scroll_y);
+                let discrete = matches!(delta, MouseScrollDelta::LineDelta(..));
+                self.motion.apply_px(dx, dy, discrete, bx, by);
+                self.scroll_x = self.motion.x.pos();
+                self.scroll_y = self.motion.y.pos();
                 used
             }
             Event::KeyInput(key_event) => {
@@ -536,18 +536,23 @@ impl Input for Spreadsheet {
                 let Some(g) = self.geom(ectx.rect) else {
                     return false;
                 };
-                let old = g.scroll;
+                // Steps glide, and a held key accumulates from the glide's
+                // target rather than the offset drawn this frame.
+                self.motion.reconcile(self.scroll_x, self.scroll_y);
+                let by = Bounds::max(g.max_scroll);
+                let old = by.clamp(self.motion.y.target());
                 let new = match &key_event.logical_key {
-                    Key::Named(NamedKey::ArrowDown) => (old + ROW_H).clamp(0.0, g.max_scroll),
-                    Key::Named(NamedKey::ArrowUp) => (old - ROW_H).clamp(0.0, g.max_scroll),
-                    Key::Named(NamedKey::PageDown) => (old + g.visible_h).clamp(0.0, g.max_scroll),
-                    Key::Named(NamedKey::PageUp) => (old - g.visible_h).clamp(0.0, g.max_scroll),
+                    Key::Named(NamedKey::ArrowDown) => old + ROW_H,
+                    Key::Named(NamedKey::ArrowUp) => old - ROW_H,
+                    Key::Named(NamedKey::PageDown) => old + g.visible_h,
+                    Key::Named(NamedKey::PageUp) => old - g.visible_h,
                     Key::Named(NamedKey::Home) => 0.0,
                     Key::Named(NamedKey::End) => g.max_scroll,
                     _ => return false,
                 };
-                self.scroll_y = new;
-                (new - old).abs() > 0.01
+                let moved = self.motion.y.scroll_to(new, by, &scroll_settings());
+                self.scroll_y = self.motion.y.pos();
+                moved
             }
             _ => false,
         }
@@ -570,8 +575,8 @@ impl Input for Spreadsheet {
     }
 
     fn drag_begin(&mut self, px: f32, py: f32, rect: Rect) {
-        self.scroll_velocity = 0.0;
-        self.hscroll_velocity = 0.0;
+        // A grab or release cancels any glide/coast in flight.
+        self.motion = ScrollMotion::at(self.scroll_x, self.scroll_y);
         // The vertical bar owns the shared bottom-right corner (it was here
         // first); the horizontal bar takes what's left of the bottom band.
         if let Some(g) = self.geom(rect) {
@@ -610,7 +615,7 @@ impl Input for Spreadsheet {
 
     fn drag_update(&mut self, px: f32, py: f32, rect: Rect) -> bool {
         if self.dragging_scrollbar {
-            self.scroll_velocity = 0.0;
+            self.motion.y.jump_to(self.scroll_y);
             if let Some(g) = self.geom(rect) {
                 let old = g.scroll;
                 self.scroll_to_thumb(&g, py - self.drag_offset_y);
@@ -619,7 +624,7 @@ impl Input for Spreadsheet {
             return false;
         }
         if self.dragging_hscrollbar {
-            self.hscroll_velocity = 0.0;
+            self.motion.x.jump_to(self.scroll_x);
             if let Some(g) = self.hgeom(rect) {
                 let old = g.scroll;
                 self.hscroll_to_thumb(&g, px - self.drag_offset_x);
@@ -632,48 +637,23 @@ impl Input for Spreadsheet {
     fn drag_end(&mut self) {
         self.dragging_scrollbar = false;
         self.dragging_hscrollbar = false;
-        self.scroll_velocity = 0.0;
-        self.hscroll_velocity = 0.0;
+        // A grab or release cancels any glide/coast in flight.
+        self.motion = ScrollMotion::at(self.scroll_x, self.scroll_y);
     }
 
-    // --- Inertial scroll: the wheel only sets velocity; each frame integrates and decays it.
+    // --- Smooth scroll: the wheel/finger feed the shared motion; each frame advances it.
 
     fn tick(&mut self, dt: f32, rect: Rect) -> bool {
-        let mut moved = false;
-        let friction = 8.0;
-        if self.scroll_velocity.abs() > 0.01 {
-            let content_h = self.rows.len() as f32 * ROW_H;
-            let visible_h = (rect.height - HEADER_H).max(0.0);
-            let max_scroll = (content_h - visible_h).max(0.0);
-            let old = self.scroll_y;
-
-            self.scroll_y = (self.scroll_y + self.scroll_velocity * dt).clamp(0.0, max_scroll);
-
-            // Decelerate with friction (exponential decay); stop dead at the bounds or below
-            // the motion threshold.
-            self.scroll_velocity *= (-friction * dt).exp();
-            if self.scroll_y == 0.0 || self.scroll_y == max_scroll {
-                self.scroll_velocity = 0.0;
-            }
-            if self.scroll_velocity.abs() < 5.0 {
-                self.scroll_velocity = 0.0;
-            }
-            moved |= (self.scroll_y - old).abs() > 0.01;
+        self.motion.reconcile(self.scroll_x, self.scroll_y);
+        if !self.motion.is_animating() {
+            return false;
         }
-        if self.hscroll_velocity.abs() > 0.01 {
-            let max_scroll = self.hgeom(rect).map_or(0.0, |g| g.max_scroll);
-            let old = self.scroll_x;
-            self.scroll_x = (self.scroll_x + self.hscroll_velocity * dt).clamp(0.0, max_scroll);
-            self.hscroll_velocity *= (-friction * dt).exp();
-            if self.scroll_x == 0.0 || self.scroll_x == max_scroll {
-                self.hscroll_velocity = 0.0;
-            }
-            if self.hscroll_velocity.abs() < 5.0 {
-                self.hscroll_velocity = 0.0;
-            }
-            moved |= (self.scroll_x - old).abs() > 0.01;
-        }
-        moved
+        let by = self.geom(rect).map_or(Bounds::max(0.0), |g| Bounds::max(g.max_scroll));
+        let bx = self.hgeom(rect).map_or(Bounds::max(0.0), |g| Bounds::max(g.max_scroll));
+        let moved = self.motion.tick(dt, bx, by);
+        self.scroll_x = self.motion.x.pos();
+        self.scroll_y = self.motion.y.pos();
+        moved || self.motion.is_animating()
     }
 
     fn wants_tick(&self) -> bool {
@@ -847,6 +827,12 @@ mod tests {
             alt: false,
         };
         assert!(s.keyboard_input(&end, &mut ctx));
+        // The key glides: run the motion out before reading the offset.
+        for _ in 0..1000 {
+            if !Input::tick(&mut *s.inner_mut(), 1.0 / 60.0, rect) {
+                break;
+            }
+        }
         let g = s.inner().geom(rect).unwrap();
         assert_eq!(g.scroll, g.max_scroll);
 

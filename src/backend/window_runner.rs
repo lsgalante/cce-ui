@@ -4403,6 +4403,8 @@ impl<A: Application> PointerHandler for EngineState<A> {
         let mut discrete_h = 0;
         let mut discrete_v = 0;
         let mut has_scroll = false;
+        let mut axis_source: Option<wl_pointer::AxisSource> = None;
+        let mut axis_stop = false;
         let (mut last_lx, mut last_ly) = (0.0f32, 0.0f32);
 
         // Forced mode: pointer positions arrive in the compositor's scale-1
@@ -4621,11 +4623,18 @@ impl<A: Application> PointerHandler for EngineState<A> {
                         self.redraw = true;
                     }
                 }
-                PointerEventKind::Axis { horizontal, vertical, .. } => {
+                PointerEventKind::Axis { horizontal, vertical, source, .. } => {
                     coalesced_h += horizontal.absolute;
                     coalesced_v += vertical.absolute;
                     discrete_h += horizontal.discrete;
                     discrete_v += vertical.discrete;
+                    // The source and the finger-lift stop ride in the same
+                    // frame as the deltas (or alone, for the lift): they
+                    // decide the smooth-scroll phase below.
+                    if source.is_some() {
+                        axis_source = *source;
+                    }
+                    axis_stop |= horizontal.stop || vertical.stop;
                     last_lx = lx;
                     last_ly = ly;
                     has_scroll = true;
@@ -4638,6 +4647,23 @@ impl<A: Application> PointerHandler for EngineState<A> {
             // `input { }` blocks); the compositor's global device scaling has
             // already been applied at the source.
             let factors = crate::input::scroll_factors();
+            // Smooth-scroll phase for this dispatch: a finger lift is a stop
+            // frame (no delta); finger/continuous sources track 1:1 and may
+            // fling on the lift; everything else is a wheel notch that glides.
+            let no_delta = coalesced_h == 0.0 && coalesced_v == 0.0 && discrete_h == 0 && discrete_v == 0;
+            let phase = if axis_stop && no_delta {
+                crate::widget::ScrollPhase::FingerEnd
+            } else if discrete_h == 0 && discrete_v == 0
+                && matches!(
+                    axis_source,
+                    None | Some(wl_pointer::AxisSource::Finger) | Some(wl_pointer::AxisSource::Continuous)
+                )
+            {
+                crate::widget::ScrollPhase::Finger
+            } else {
+                crate::widget::ScrollPhase::Wheel
+            };
+            crate::widget::scroll_motion::set_scroll_phase(phase);
             let delta = if discrete_h == 0 && discrete_v == 0 {
                 // Pixel scroll event from touchpad / smooth mouse
                 MouseScrollDelta::PixelDelta(Position {
@@ -4654,7 +4680,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                 static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
                 let t = T0.get_or_init(std::time::Instant::now).elapsed().as_millis();
                 eprintln!(
-                    "[scroll {t}ms] runner: coalesced=({coalesced_h:.2},{coalesced_v:.2}) discrete=({discrete_h},{discrete_v}) factors=(tp {:.2}, m {:.2}) -> {delta:?} at ({last_lx:.0},{last_ly:.0})",
+                    "[scroll {t}ms] runner: coalesced=({coalesced_h:.2},{coalesced_v:.2}) discrete=({discrete_h},{discrete_v}) source={axis_source:?} stop={axis_stop} phase={phase:?} factors=(tp {:.2}, m {:.2}) -> {delta:?} at ({last_lx:.0},{last_ly:.0})",
                     factors.trackpad, factors.mouse
                 );
             }
@@ -5118,6 +5144,8 @@ impl<A: Application> wayland_client::Dispatch<ZwpPointerGesturePinchV1, ()> for 
                 if let Some(ctx) = state.inner.as_mut().unwrap().ui_context_mut() {
                     ctx.ctrl_pressed = true; // Force ctrl_pressed = true for the pinch event
                 }
+                // A synthesized delta, not a scroll gesture: no glide, no fling.
+                crate::widget::scroll_motion::set_scroll_phase(crate::widget::ScrollPhase::Wheel);
 
                 state.inner.as_mut().unwrap().handle_mouse_wheel(&delta, LogicalPosition::new(px, py), &mut rebuild);
 

@@ -22,6 +22,7 @@
 //! together, rows paint over the thumb and it peeks through the inter-row gaps
 //! as dotted segments).
 
+use crate::widget::scroll_motion::{scroll_settings, Bounds, ScrollMotion, LINE_PX};
 use crate::widget::{ElementState, Key, KeyEvent, MouseScrollDelta, NamedKey};
 
 /// How long (seconds) a raise/sink scrollbar stays raised after the last wheel
@@ -142,6 +143,11 @@ pub struct ScrollRegion {
     /// is always drawn and always grabbable — existing hosts unchanged.
     pub sink_behind: bool,
     activity: ScrollbarActivity,
+    /// The smooth-scroll driver behind `scroll_x`/`scroll_y`: wheel notches
+    /// glide, trackpad flicks coast. The pub offsets stay the DRAWN values —
+    /// hosts keep reading them — and any host write to them is adopted on the
+    /// next `wheel`/`tick` via `reconcile`.
+    motion: ScrollMotion,
 }
 
 impl Default for ScrollRegion {
@@ -180,6 +186,7 @@ impl ScrollRegion {
             edge_inset: 4.0,
             sink_behind: false,
             activity: ScrollbarActivity::new(),
+            motion: ScrollMotion::new(),
         }
     }
 
@@ -211,6 +218,7 @@ impl ScrollRegion {
         self.viewport_y = viewport_y;
         self.viewport_h = viewport_h;
         self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll());
+        self.motion.set_bounds(self.bounds_x(), self.bounds_y());
     }
 
     /// `ScrollBox::update_bounds` shape: raw content height, not a row count.
@@ -219,10 +227,44 @@ impl ScrollRegion {
         self.viewport_y = viewport_y;
         self.viewport_h = viewport_h;
         self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll());
+        self.motion.set_bounds(self.bounds_x(), self.bounds_y());
     }
 
+    /// Jump the offset (no glide) — cancels any motion in flight.
     pub fn set_scroll_y(&mut self, val: f32) {
         self.scroll_y = val;
+        self.motion.y.jump_to(val);
+    }
+
+    /// Glide the offset to `val` (a "scroll to selection" that should read as
+    /// motion, not a cut). Falls back to a jump with smoothing off.
+    pub fn scroll_to_y(&mut self, val: f32) -> bool {
+        self.motion.reconcile(self.scroll_x, self.scroll_y);
+        let moved = self.motion.y.scroll_to(val, self.bounds_y(), &scroll_settings());
+        self.sync_from_motion();
+        if moved {
+            self.raise();
+        }
+        moved
+    }
+
+    /// Whether a glide or coast is still moving the offset — hosts whose tick
+    /// chain is conditional use this to keep frames coming.
+    pub fn is_animating(&self) -> bool {
+        self.motion.is_animating()
+    }
+
+    fn bounds_y(&self) -> Bounds {
+        Bounds::max(self.max_scroll())
+    }
+
+    fn bounds_x(&self) -> Bounds {
+        Bounds::max(self.max_scroll_x())
+    }
+
+    fn sync_from_motion(&mut self) {
+        self.scroll_x = self.motion.x.pos();
+        self.scroll_y = self.motion.y.pos();
     }
 
     /// Declare how wide the content really is. Wider than the box = the list
@@ -230,6 +272,7 @@ impl ScrollRegion {
     pub fn set_content_w(&mut self, w: f32) {
         self.content_w = w;
         self.scroll_x = self.scroll_x.clamp(0.0, self.max_scroll_x());
+        self.motion.x.set_bounds(self.bounds_x());
     }
 
     /// Whether horizontal scrolling is live (content declared wider than the
@@ -439,17 +482,11 @@ impl ScrollRegion {
         if !self.hit(px, py) {
             return false;
         }
-        let (dx, dy) = match delta {
-            MouseScrollDelta::LineDelta(x, y) => (-x * 24.0, -y * 24.0),
-            MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
-        };
-        let old_y = self.scroll_y;
-        self.scroll_y = (self.scroll_y + dy).clamp(0.0, self.max_scroll());
         // Sideways wheel/trackpad deltas pan an h-scrollable list; a
         // vertical-only list ignores them (max_scroll_x = 0 clamps to 0).
-        let old_x = self.scroll_x;
-        self.scroll_x = (self.scroll_x + dx).clamp(0.0, self.max_scroll_x());
-        let changed = (self.scroll_y - old_y).abs() > 0.01 || (self.scroll_x - old_x).abs() > 0.01;
+        self.motion.reconcile(self.scroll_x, self.scroll_y);
+        let changed = self.motion.apply(delta, (LINE_PX, LINE_PX), self.bounds_x(), self.bounds_y());
+        self.sync_from_motion();
         if changed {
             self.raise();
         }
@@ -489,14 +526,21 @@ impl ScrollRegion {
     /// while frames flow, so the hold must keep them coming or the sink would
     /// stall until the next input event. No-op (false) without `sink_behind`.
     pub fn tick(&mut self, dt: f32) -> bool {
+        // The glide/coast first: a host write to the pub offsets since the
+        // last frame (thumb drag, auto-snap) is adopted, then the motion
+        // advances and the drawn offsets follow it.
+        self.motion.reconcile(self.scroll_x, self.scroll_y);
+        let moved = self.motion.tick(dt, self.bounds_x(), self.bounds_y());
+        self.sync_from_motion();
+        let animating = self.motion.is_animating();
         if !self.sink_behind {
-            return false;
+            return moved || animating;
         }
         let holding = self.activity.holding();
         let flipped = self
             .activity
             .tick(dt, self.overflowing(), self.dragging || self.dragging_h);
-        flipped || holding
+        moved || animating || flipped || holding
     }
 
     /// Hover/focus-scoped keyboard scrolling (`ScrollBox::keyboard_input` reached the boxes
@@ -505,40 +549,42 @@ impl ScrollRegion {
         if (!self.hovered && !self.focused) || event.state != ElementState::Pressed {
             return false;
         }
-        let max = self.max_scroll();
-        let old = self.scroll_y;
-        if event.ctrl {
+        // Keyboard steps ride the same glide as wheel notches (a held arrow
+        // accumulates into one motion); pages and Home/End glide to their
+        // absolute target.
+        let s = scroll_settings();
+        self.motion.reconcile(self.scroll_x, self.scroll_y);
+        let by = self.bounds_y();
+        let bx = self.bounds_x();
+        let max_x = self.max_scroll_x();
+        let changed = if event.ctrl {
             match &event.logical_key {
-                Key::Character(c) if c == "n" || c == "N" => self.scroll_y = (self.scroll_y + 24.0).clamp(0.0, max),
-                Key::Character(c) if c == "p" || c == "P" => self.scroll_y = (self.scroll_y - 24.0).clamp(0.0, max),
+                Key::Character(c) if c == "n" || c == "N" => self.motion.y.wheel(LINE_PX, by, &s),
+                Key::Character(c) if c == "p" || c == "P" => self.motion.y.wheel(-LINE_PX, by, &s),
                 _ => return false,
             }
         } else {
-            let old_x = self.scroll_x;
-            let max_x = self.max_scroll_x();
             match &event.logical_key {
-                Key::Named(NamedKey::ArrowDown) => self.scroll_y = (self.scroll_y + 24.0).clamp(0.0, max),
-                Key::Named(NamedKey::ArrowUp) => self.scroll_y = (self.scroll_y - 24.0).clamp(0.0, max),
-                Key::Named(NamedKey::PageDown) => self.scroll_y = (self.scroll_y + self.viewport_h).clamp(0.0, max),
-                Key::Named(NamedKey::PageUp) => self.scroll_y = (self.scroll_y - self.viewport_h).clamp(0.0, max),
-                Key::Named(NamedKey::Home) => self.scroll_y = 0.0,
-                Key::Named(NamedKey::End) => self.scroll_y = max,
+                Key::Named(NamedKey::ArrowDown) => self.motion.y.wheel(LINE_PX, by, &s),
+                Key::Named(NamedKey::ArrowUp) => self.motion.y.wheel(-LINE_PX, by, &s),
+                Key::Named(NamedKey::PageDown) => {
+                    let t = self.motion.y.target() + self.viewport_h;
+                    self.motion.y.scroll_to(t, by, &s)
+                }
+                Key::Named(NamedKey::PageUp) => {
+                    let t = self.motion.y.target() - self.viewport_h;
+                    self.motion.y.scroll_to(t, by, &s)
+                }
+                Key::Named(NamedKey::Home) => self.motion.y.scroll_to(0.0, by, &s),
+                Key::Named(NamedKey::End) => self.motion.y.scroll_to(by.hi, by, &s),
                 // Only an h-scrollable list claims the horizontal arrows —
                 // elsewhere they keep falling through to other handlers.
-                Key::Named(NamedKey::ArrowRight) if max_x > 0.0 => {
-                    self.scroll_x = (self.scroll_x + 24.0).clamp(0.0, max_x)
-                }
-                Key::Named(NamedKey::ArrowLeft) if max_x > 0.0 => {
-                    self.scroll_x = (self.scroll_x - 24.0).clamp(0.0, max_x)
-                }
+                Key::Named(NamedKey::ArrowRight) if max_x > 0.0 => self.motion.x.wheel(LINE_PX, bx, &s),
+                Key::Named(NamedKey::ArrowLeft) if max_x > 0.0 => self.motion.x.wheel(-LINE_PX, bx, &s),
                 _ => return false,
             }
-            if (self.scroll_x - old_x).abs() > 0.01 {
-                self.raise();
-                return true;
-            }
-        }
-        let changed = (self.scroll_y - old).abs() > 0.01;
+        };
+        self.sync_from_motion();
         if changed {
             self.raise();
         }
@@ -649,14 +695,25 @@ mod tests {
         r
     }
 
+    /// Run the glide out (a no-op with smoothing off in the test host's config).
+    fn settle(r: &mut ScrollRegion) {
+        let mut n = 0;
+        while r.is_animating() && n < 1000 {
+            r.tick(1.0 / 60.0);
+            n += 1;
+        }
+    }
+
     #[test]
     fn wheel_scrolls_and_clamps() {
         let mut r = region();
         r.update_bounds(10, 20.0, 100.0); // content_h = 444 > 100
         assert!(r.wheel(&MouseScrollDelta::LineDelta(0.0, -2.0), 50.0, 50.0));
+        settle(&mut r);
         assert_eq!(r.scroll_y, 48.0);
         assert!(!r.wheel(&MouseScrollDelta::LineDelta(0.0, -2.0), 500.0, 50.0)); // miss
         r.wheel(&MouseScrollDelta::LineDelta(0.0, -100.0), 50.0, 50.0);
+        settle(&mut r);
         assert_eq!(r.scroll_y, 344.0); // clamped to max_scroll
     }
 
@@ -732,10 +789,13 @@ mod tests {
         r.set_content_w(500.0);
         assert!(r.h_scroll_active());
         assert!(r.wheel(&MouseScrollDelta::LineDelta(-2.0, 0.0), 50.0, 50.0));
+        settle(&mut r);
         assert_eq!(r.scroll_x, 48.0);
         r.wheel(&MouseScrollDelta::LineDelta(-100.0, 0.0), 50.0, 50.0);
+        settle(&mut r);
         assert_eq!(r.scroll_x, 300.0); // max = 500 - 200
         r.wheel(&MouseScrollDelta::LineDelta(100.0, 0.0), 50.0, 50.0);
+        settle(&mut r);
         assert_eq!(r.scroll_x, 0.0);
     }
 
@@ -803,8 +863,11 @@ mod tests {
         r.cursor_moved(sb_x + 1.0, 50.0);
         assert!(!r.tick(0.016));
         assert!(!r.scrollbar_raised());
-        // Raise by scrolling, hover it, and let the hold lapse: hover sustains.
+        // Raise by scrolling (and let the glide land, so the ticks below
+        // measure only the raise/sink state), hover it, and let the hold
+        // lapse: hover sustains.
         r.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 50.0);
+        settle(&mut r);
         r.cursor_moved(sb_x + 1.0, 50.0);
         r.tick(SCROLL_ACTIVE_HOLD + 0.1); // hold lapses, hover keeps it raised
         assert!(r.scrollbar_raised());
@@ -872,6 +935,7 @@ mod tests {
         r.cursor_moved(50.0, 50.0);
         assert!(r.hovered);
         assert!(r.keyboard(&down));
+        settle(&mut r);
         assert_eq!(r.scroll_y, 24.0);
     }
 }

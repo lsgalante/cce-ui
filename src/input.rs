@@ -20,7 +20,13 @@
 //     }
 //     cce-ui {
 //         open_search "ctrl+f"         // toolkit-wide widget defaults
-//         input { scroll_factor 1.0 }  // toolkit-wide scroll default
+//         input {
+//             scroll_factor 1.0        // toolkit-wide scroll default
+//             smooth_scroll true       // wheel notches glide (widget::scroll_motion)
+//             scroll_ease 12.0         // glide rate, 1/s
+//             kinetic_scroll true      // trackpad flicks coast after the lift
+//             scroll_friction 6.0      // coast decay, 1/s
+//         }
 //     }
 //     cce-files {
 //         open_search "/"              // per-app override of the cce-ui default

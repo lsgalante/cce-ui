@@ -60,6 +60,9 @@ pub struct Graph {
     grid_size_y: f32,
     grid_origin_x: f32,
     grid_origin_y: f32,
+    /// Smooth-scroll driver behind the pan origin: notches glide, a trackpad
+    /// flick coasts across the unbounded canvas.
+    pan_motion: crate::widget::ScrollMotion,
     skipped_row_h: f32,
     skipped_col_w: f32,
     nodes: Vec<GraphNode>,
@@ -129,6 +132,7 @@ impl Graph {
             grid_size_y,
             grid_origin_x: 0.0,
             grid_origin_y: 0.0,
+            pan_motion: crate::widget::ScrollMotion::new(),
             skipped_row_h: grid_size_y / 2.0,
             skipped_col_w: grid_size_x / 2.0,
             nodes: Vec::new(),
@@ -761,6 +765,23 @@ impl Paint for Graph {
 }
 
 impl Input for Graph {
+    /// Advances the pan glide/coast behind the grid origin. Idle is a no-op.
+    fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
+        self.pan_motion.reconcile(self.grid_origin_x, self.grid_origin_y);
+        if !self.pan_motion.is_animating() {
+            return false;
+        }
+        let free = crate::widget::Bounds::UNBOUNDED;
+        let moved = self.pan_motion.tick(dt, free, free);
+        self.grid_origin_x = self.pan_motion.x.pos();
+        self.grid_origin_y = self.pan_motion.y.pos();
+        moved || self.pan_motion.is_animating()
+    }
+
+    fn wants_tick(&self) -> bool {
+        true
+    }
+
     /// Legacy hit test excluded the right/bottom edges.
     fn hit(&self, rect: Rect, x: f32, y: f32) -> bool {
         x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
@@ -860,18 +881,19 @@ impl Input for Graph {
                         }
                     }
                 } else {
-                    match delta {
-                        MouseScrollDelta::LineDelta(x, y) => {
-                            self.grid_origin_x += *x * 15.0;
-                            self.grid_origin_y += *y * 15.0;
-                            true
-                        }
-                        MouseScrollDelta::PixelDelta(pos) => {
-                            self.grid_origin_x += pos.x as f32;
-                            self.grid_origin_y += pos.y as f32;
-                            true
-                        }
-                    }
+                    // Pan: the origin moves WITH the wheel sign (no negation —
+                    // the canvas follows the gesture), across an unbounded plane.
+                    let (dx, dy) = match delta {
+                        MouseScrollDelta::LineDelta(x, y) => (*x * 15.0, *y * 15.0),
+                        MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
+                    };
+                    let discrete = matches!(delta, MouseScrollDelta::LineDelta(..));
+                    let free = crate::widget::Bounds::UNBOUNDED;
+                    self.pan_motion.reconcile(self.grid_origin_x, self.grid_origin_y);
+                    self.pan_motion.apply_px(dx, dy, discrete, free, free);
+                    self.grid_origin_x = self.pan_motion.x.pos();
+                    self.grid_origin_y = self.pan_motion.y.pos();
+                    true
                 }
             }
             Event::KeyInput(key_event) => {

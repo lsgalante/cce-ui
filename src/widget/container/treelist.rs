@@ -1197,6 +1197,11 @@ impl Input for TreeList {
             }
         }
 
+        // The list's own glide/coast (wheel notches and trackpad flicks land
+        // in the ScrollBox; only its tick moves the drawn offset).
+        if self.scroll_box.tick(dt, ui) {
+            changed = true;
+        }
         if (self.scroll_box.scroll_y - self.last_scroll_y).abs() > 0.01 {
             self.last_scroll_y = self.scroll_box.scroll_y;
             self.scrollbar_activity_timer = 1.0;
