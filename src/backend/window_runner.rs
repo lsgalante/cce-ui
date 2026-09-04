@@ -1308,7 +1308,9 @@ pub fn push_bevel_edge_vertices_banded(
     kind: EdgeKind,
     out: &mut Vec<Vertex>,
 ) {
-    let cap = ww.min(h) * 0.5;
+    // Floored for the same reason as `plate_push_raised`'s cap: a negative
+    // extent must degrade to no ring, not panic in `clamp`.
+    let cap = (ww.min(h) * 0.5).max(0.0);
     let (tl, tr, br, bl) = (
         radii.0.clamp(0.0, cap),
         radii.1.clamp(0.0, cap),
@@ -2623,7 +2625,10 @@ fn plate_push_raised(
     material: [f32; 4],
     scale_corners: bool,
 ) -> crate::vk::PlatePush {
-    let cap = rect.width.min(rect.height) * 0.5;
+    // Floored: a rect already shrunk past its padding (a window dragged
+    // below what its layout can hold) has a NEGATIVE extent here, and
+    // `clamp(0.0, cap)` with a negative cap is a panic, not a zero radius.
+    let cap = (rect.width.min(rect.height) * 0.5).max(0.0);
     let shape = crate::layout::corner_shape();
     // For PLATES (`scale_corners`), widen the corner span by the
     // curvature-match factor (see `layout::corner_span_factor`): the diagonal
