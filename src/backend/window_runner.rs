@@ -1912,7 +1912,7 @@ pub fn tessellate_display_list(
                 // the controls around it — only window-scale `Plate`s get the
                 // curvature-matched span.
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
-                let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, false);
+                let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, false, None);
                 // w = 1 marks an accent-tinted plate (the focused-pane
                 // treatment): the shader then colors the WHOLE rolled edge
                 // with the tint, not just the specular glint — matching the
@@ -1923,7 +1923,7 @@ pub fn tessellate_display_list(
                 plate = Some(p);
                 made_plate = Some(*rect);
             }
-            Prim::Plate { rect, radii, color, depth } if shader_plates => {
+            Prim::Plate { rect, radii, color, depth, shape } if shader_plates => {
                 if *depth < 0.0 {
                     // Negative depth = fill-less roll overlay (MODE_ROLL): the
                     // window-edge roll shading alone, screened over whatever is
@@ -1932,14 +1932,14 @@ pub fn tessellate_display_list(
                     // and the batch is NOT opened as a carve host: an overlay
                     // owns no surface for a CSG feature to cut into.
                     verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, [0.0; 4]));
-                    let mut p = plate_push_raised(rect, *radii, -*depth, scale, plate_light, plate_mat, true);
+                    let mut p = plate_push_raised(rect, *radii, -*depth, scale, plate_light, plate_mat, true, *shape);
                     p.mode = 11.0; // MODE_ROLL
                     plate = Some(p);
                 } else {
                     // Same lit-plate branch; the cover quad is the exact rect so the
                     // silhouette and the compositor's rounded window corners agree.
                     verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
-                    plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, true));
+                    plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, true, *shape));
                     made_plate = Some(*rect);
                 }
             }
@@ -2167,7 +2167,7 @@ pub fn tessellate_display_list(
                 if !edges.2 { y1 += ext; }
                 if !edges.3 { x0 -= ext; }
                 let sdf_rect = crate::scene::layout::Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
-                let mut p = plate_push_raised(&sdf_rect, *radii, *depth, scale, plate_light, plate_mat, false);
+                let mut p = plate_push_raised(&sdf_rect, *radii, *depth, scale, plate_light, plate_mat, false, None);
                 p.mode = mode;
                 // w = 1.0 flags the free-carve shader path to mix its white
                 // highlight screen toward the tint (plates leave w at 0.0).
@@ -2206,7 +2206,7 @@ pub fn tessellate_display_list(
                 push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, corners, sw, sh, *color, no, None, &mut verts);
                 push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, *depth, sw, sh, *color, no, &mut verts);
             }
-            Prim::Plate { rect, radii, color, depth } => {
+            Prim::Plate { rect, radii, color, depth, .. } => {
                 if *depth < 0.0 {
                     // Fill-less roll overlay (negative-depth sentinel): the banded
                     // legacy tessellation has no overlay compositing, so the roll
@@ -2616,6 +2616,12 @@ const RECESS_DEPTH_RATIO: f32 = 0.6;
 
 /// The push-constant block for a raised SDF-lit plate over `rect` (logical px in,
 /// physical px out). Corner radii clamp to the half-extent cap the SDF needs.
+///
+/// `shape` is a per-plate corner exponent (`Prim::Plate`'s override); `None`
+/// follows the DE-wide `layout::corner_shape`. The span factor follows the
+/// exponent actually used, so a circular override (2.0) spans nothing and a
+/// half-extent radius lands on a true circle.
+#[allow(clippy::too_many_arguments)]
 fn plate_push_raised(
     rect: &crate::scene::layout::Rect,
     radii: (f32, f32, f32, f32),
@@ -2624,12 +2630,13 @@ fn plate_push_raised(
     light: [f32; 3],
     material: [f32; 4],
     scale_corners: bool,
+    shape: Option<f32>,
 ) -> crate::vk::PlatePush {
     // Floored: a rect already shrunk past its padding (a window dragged
     // below what its layout can hold) has a NEGATIVE extent here, and
     // `clamp(0.0, cap)` with a negative cap is a panic, not a zero radius.
     let cap = (rect.width.min(rect.height) * 0.5).max(0.0);
-    let shape = crate::layout::corner_shape();
+    let shape = shape.map_or_else(crate::layout::corner_shape, |n| n.clamp(2.0, 16.0));
     // For PLATES (`scale_corners`), widen the corner span by the
     // curvature-match factor (see `layout::corner_span_factor`): the diagonal
     // curvature radius equals the configured radius, the corner reads as the
@@ -2639,7 +2646,7 @@ fn plate_push_raised(
     // reliefs (recess/boss/ridge fallbacks) pass false: their radii must MATCH
     // the nominal-radius squircles of the widget silhouettes around them, and
     // at their few-px roll widths the offset crease is subpixel.
-    let rscale = if scale_corners { crate::layout::corner_span_factor() } else { 1.0 };
+    let rscale = if scale_corners { crate::layout::corner_span_factor_for(shape) } else { 1.0 };
     crate::vk::PlatePush {
         rect: [
             (rect.x + rect.width * 0.5) * scale,

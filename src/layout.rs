@@ -1635,7 +1635,15 @@ pub fn window_silhouette_radius() -> f32 {
 }
 
 pub fn corner_span_factor() -> f32 {
-    let n = corner_shape();
+    corner_span_factor_for(corner_shape())
+}
+
+/// The span factor for an explicit corner exponent — what a plate carrying
+/// its own `shape` (see `scene::paint::Prim::Plate`) scales its radii by.
+/// Same clamp as [`corner_shape`], so an override cannot reach an exponent
+/// the shader would not accept.
+pub fn corner_span_factor_for(n: f32) -> f32 {
+    let n = n.clamp(2.0, 16.0);
     if n > 2.001 {
         (n - 1.0) * 2f32.powf(1.0 / n) / std::f32::consts::SQRT_2
     } else {

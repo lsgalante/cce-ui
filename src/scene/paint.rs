@@ -409,7 +409,12 @@ pub enum Prim {
     /// `depth` — a plate must fill the window exactly, or the compositor's rounded window
     /// corners would show a gap. `depth` is the width of the roll-off in px, not a color
     /// offset (the shading amplitude is the DE-wide `bevel_depth`).
-    Plate { rect: Rect, radii: Radii, color: [f32; 4], depth: f32 },
+    ///
+    /// `shape` overrides the DE-wide corner exponent (`layout::corner_shape`)
+    /// for this one plate — `Some(2.0)` is circular arcs, so a plate whose
+    /// radii reach its half-extent is a true circle regardless of the
+    /// squircle the rest of the DE wears. `None` follows the DE.
+    Plate { rect: Rect, radii: Radii, color: [f32; 4], depth: f32, shape: Option<f32> },
     Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
     /// A ring band with radial color interpolation — inner rim → crest
     /// (centerline) → outer rim — for rounded rim bevels (the Ramp's key
@@ -838,7 +843,9 @@ impl PaintCtx {
             },
             Prim::Ridge { rect, radii, depth, edges } => self.ridge_edges(rect, radii, depth, edges),
             Prim::Trough { rect, radii, depth, edges } => self.trough_edges(rect, radii, depth, edges),
-            Prim::Plate { rect, radii, color, depth } => self.plate(rect, radii, color, depth),
+            Prim::Plate { rect, radii, color, depth, shape } => {
+                self.plate_shaped(rect, radii, color, depth, shape)
+            }
             Prim::Arc { cx, cy, radius, thickness, start, end, color } => {
                 self.arc(cx, cy, radius, thickness, start, end, color)
             }
@@ -1055,8 +1062,15 @@ impl PaintCtx {
     /// `color` is ignored; the roll profile, crest and specular are exactly the
     /// positive-depth plate's.
     pub fn plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
+        self.plate_shaped(rect, radii, color, depth, None);
+    }
+
+    /// [`plate`](Self::plate) with an explicit corner exponent — see
+    /// [`Prim::Plate`]'s `shape`. `Some(2.0)` on a plate whose radii are its
+    /// half-extent draws a circle; `None` is exactly `plate`.
+    pub fn plate_shaped(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32, shape: Option<f32>) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Plate { rect, radii, color, depth });
+        self.push(Prim::Plate { rect, radii, color, depth, shape });
     }
 
     /// Emit the plate a [`PlateSpec`] describes: role-resolved per-corner
