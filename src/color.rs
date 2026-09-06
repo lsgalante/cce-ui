@@ -285,12 +285,10 @@ fn parse_and_set_colors(content: &str) {
         }
     }
 
-    // Phase 7a: `/style/surface/plate/root/...` is the canonical spelling of
-    // the root-plate style; the `backplate` pointers are its read-alias, and
-    // the chains are canonical-first so the new spelling wins when both are
-    // present.
+    // `/style/surface/plate/root/...` is the one spelling of the root-plate
+    // style (RFC Phase 7a; the legacy `backplate` read-alias was removed
+    // 2026-09-06 once every live config had migrated).
     if let Some(radius) = val.pointer("/style/surface/plate/root/corner_radius")
-        .or_else(|| val.pointer("/style/surface/backplate/corner_radius"))
         .and_then(|v| v.as_f64())
     {
         if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
@@ -298,29 +296,22 @@ fn parse_and_set_colors(content: &str) {
         }
      }
 
-    if let Some(c) = get_color("/style/surface/plate/root/color")
-        .or_else(|| get_color("/style/surface/backplate/color"))
-    {
+    if let Some(c) = get_color("/style/surface/plate/root/color") {
         if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
         if let Ok(mut lock) = BACKPLATE_OPACITY.write() { *lock = Some(c[3]); }
     }
 
-    if let Some(c) = get_color("/style/surface/plate/root/menubar/color")
-        .or_else(|| get_color("/style/surface/backplate/menubar/color"))
-    {
+    if let Some(c) = get_color("/style/surface/plate/root/menubar/color") {
         if let Ok(mut lock) = BACKPLATE_MENUBAR_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/style/surface/plate/root/menubar/text_color")
-        .or_else(|| get_color("/style/surface/backplate/menubar/text_color"))
-    {
+    if let Some(c) = get_color("/style/surface/plate/root/menubar/text_color") {
         if let Ok(mut lock) = BACKPLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
     }
     if let Some(o) = val.pointer("/style/surface/menu/opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = MENU_OPACITY.write() { *lock = (o as f32).clamp(0.0, 1.0); }
     }
 
-    let menubar_blur_ptr = val.pointer("/style/surface/plate/root/menubar/blur")
-        .or_else(|| val.pointer("/style/surface/backplate/menubar/blur"));
+    let menubar_blur_ptr = val.pointer("/style/surface/plate/root/menubar/blur");
     if let Some(blur) = menubar_blur_ptr.and_then(|v| v.as_bool()) {
         if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = blur; }
     } else if let Some(blur_val) = menubar_blur_ptr.and_then(|v| v.as_f64()) {
@@ -1251,19 +1242,12 @@ pub fn set_popover_bg_color(color: [f32; 4]) {
     }
 }
 
-/// Corner radius of the root plate (`style.surface.plate.root.corner_radius`;
-/// legacy `backplate.corner_radius` reads as an alias). The window silhouette
-/// value — the compositor clips windows from the SHARED copy of this.
+/// Corner radius of the root plate (`style.surface.plate.root.corner_radius`).
+/// The window silhouette value — the compositor clips windows from the SHARED
+/// copy of this.
 pub fn root_plate_corner_radius() -> f32 {
     load_colors_once();
     *BACKPLATE_CORNER_RADIUS.read().unwrap()
-}
-
-/// Legacy alias for [`root_plate_corner_radius`] (RFC Phase 7a; callers
-/// migrate in 7a-2, after which this gains `#[deprecated]`).
-#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
-pub fn backplate_corner_radius() -> f32 {
-    root_plate_corner_radius()
 }
 
 pub fn ramp_background_color() -> [f32; 4] {
@@ -1592,12 +1576,6 @@ pub fn root_plate_opacity() -> f32 {
     page_low_color()[3]
 }
 
-/// Legacy alias for [`root_plate_opacity`] (RFC Phase 7a).
-#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
-pub fn active_backplate_opacity() -> f32 {
-    root_plate_opacity()
-}
-
 pub fn tree_background_color() -> [f32; 4] { *TREE_BACKGROUND_COLOR.read().unwrap() }
 pub fn tree_border_color() -> [f32; 4] { *TREE_BORDER_COLOR.read().unwrap() }
 pub fn tree_border_hover_color() -> [f32; 4] { *TREE_BORDER_HOVER_COLOR.read().unwrap() }
@@ -1683,11 +1661,6 @@ pub fn root_plate_menubar_color() -> [f32; 4] {
     *BACKPLATE_MENUBAR_COLOR.read().unwrap()
 }
 
-/// Legacy alias for [`root_plate_menubar_color`] (RFC Phase 7a).
-#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
-pub fn backplate_menubar_color() -> [f32; 4] {
-    root_plate_menubar_color()
-}
 pub fn set_backplate_menubar_color(c: [f32; 4]) {
     if let Ok(mut lock) = BACKPLATE_MENUBAR_COLOR.write() { *lock = c; }
 }
@@ -1697,11 +1670,6 @@ pub fn root_plate_menubar_text_color() -> [f32; 4] {
     *BACKPLATE_MENUBAR_TEXT_COLOR.read().unwrap()
 }
 
-/// Legacy alias for [`root_plate_menubar_text_color`] (RFC Phase 7a).
-#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
-pub fn backplate_menubar_text_color() -> [f32; 4] {
-    root_plate_menubar_text_color()
-}
 pub fn set_backplate_menubar_text_color(c: [f32; 4]) {
     if let Ok(mut lock) = BACKPLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
 }
@@ -1711,11 +1679,6 @@ pub fn root_plate_menubar_blur() -> bool {
     *BACKPLATE_MENUBAR_BLUR.read().unwrap()
 }
 
-/// Legacy alias for [`root_plate_menubar_blur`] (RFC Phase 7a).
-#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
-pub fn backplate_menubar_blur() -> bool {
-    root_plate_menubar_blur()
-}
 pub fn set_backplate_menubar_blur(b: bool) {
     if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = b; }
 }
@@ -1725,11 +1688,6 @@ pub fn root_plate_statusbar_color() -> [f32; 4] {
     *BACKPLATE_STATUSBAR_COLOR.read().unwrap()
 }
 
-/// Legacy alias for [`root_plate_statusbar_color`] (RFC Phase 7a).
-#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
-pub fn backplate_statusbar_color() -> [f32; 4] {
-    root_plate_statusbar_color()
-}
 pub fn set_backplate_statusbar_color(c: [f32; 4]) {
     if let Ok(mut lock) = BACKPLATE_STATUSBAR_COLOR.write() { *lock = c; }
 }
@@ -1739,11 +1697,6 @@ pub fn root_plate_statusbar_text_color() -> [f32; 4] {
     *BACKPLATE_STATUSBAR_TEXT_COLOR.read().unwrap()
 }
 
-/// Legacy alias for [`root_plate_statusbar_text_color`] (RFC Phase 7a).
-#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
-pub fn backplate_statusbar_text_color() -> [f32; 4] {
-    root_plate_statusbar_text_color()
-}
 pub fn set_backplate_statusbar_text_color(c: [f32; 4]) {
     if let Ok(mut lock) = BACKPLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
 }
@@ -1753,11 +1706,6 @@ pub fn root_plate_statusbar_blur() -> bool {
     *BACKPLATE_STATUSBAR_BLUR.read().unwrap()
 }
 
-/// Legacy alias for [`root_plate_statusbar_blur`] (RFC Phase 7a).
-#[deprecated(note = "renamed in RFC Phase 7a; use the root_plate_* getter")]
-pub fn backplate_statusbar_blur() -> bool {
-    root_plate_statusbar_blur()
-}
 pub fn set_backplate_statusbar_blur(b: bool) {
     if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = b; }
 }

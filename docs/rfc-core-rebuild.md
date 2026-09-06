@@ -2445,7 +2445,15 @@ Constraint respected: **each crate still builds standalone** — the new core is
       `Application::is_movable_backplate_at` trait-method NAME is 7b vocabulary
       (behavioral role naming), not 7a's. With 7a-2 done, 7a is COMPLETE: new code uses
       `root_plate_*` / `plate.root.*`; the deprecated wrappers and the legacy config
-      spelling remain indefinitely for out-of-tree configs.
+      spelling were kept for out-of-tree configs.
+    - **7a-3 — DONE (2026-09-06).** Every live config (shared, cce-graph, cce-designer,
+      cce-notifier's per-app `plate { }`) was rewritten to the canonical spelling, then the
+      aliases came out: the `backplate.*` pointer/registry read-aliases in cce-ui, the
+      compositor's `backplate` node fallback, cce-grid's and cce-notifier's fallbacks, the
+      `#[deprecated] backplate_*` getters, and `backplate` in `PROP_NODES`. A `backplate`
+      block in a config is now silently ignored. Registry slot names, `BACKPLATE_*` statics,
+      the compositor's serde fields and `set_backplate_*` setters keep the historical
+      name — internal vocabulary, not aliases.
   - **7b — `PlateSpec` + window-corner math toolkit-side.** Introduce the spec, port
     `pane_plate_radii` in, and give the engine a root-plate paint path fed by a spec instead of
     each app's hand-rolled quads (DemoApp first, then the clients). The designer's per-pane

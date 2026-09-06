@@ -335,7 +335,7 @@ pub fn parse_config_path(key: &str, default_section: &str) -> (String, String, O
 const PROP_NODES: &[&str] = &[
     "gestures", "key_bindings", "pointer_bind", "gesture_bind",
     "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
-    "status", "overlay", "backplate", "root", "desktop", "list", "section", "textbox", "multiline", "editor", "tree",
+    "status", "overlay", "root", "desktop", "list", "section", "textbox", "multiline", "editor", "tree",
     "menubar", "statusbar", "node", "relief"
 ];
 
@@ -982,19 +982,21 @@ mod tests {
     }
 
     #[test]
-    fn test_backplate_menubar_statusbar_styling() {
+    fn test_root_plate_menubar_statusbar_styling() {
         // Global color state: serialize against the other reload_colors tests,
         // and fire both once-per-process live-config loads before our reload
         // so neither can rewrite the state mid-assert.
         let _guard = crate::color::test_color_state_lock();
-        let _ = crate::color::backplate_statusbar_blur();
+        let _ = crate::color::root_plate_statusbar_blur();
         crate::layout::lazy_init_style_registry();
 
         let content = r##"
             style {
                 surface {
-                    backplate blur=(f64)0.1 color=(rgba)"#5e657acf" corner_radius=(i64)12 {
-                        menubar blur=(bool)true color=(rgba)"#1a1d26d0" text_color=(rgba)"#e2e4f0ff"
+                    plate {
+                        root blur=(f64)0.1 color=(rgba)"#5e657acf" corner_radius=(i64)12 {
+                            menubar blur=(bool)true color=(rgba)"#1a1d26d0" text_color=(rgba)"#e2e4f0ff"
+                        }
                     }
                     statusbar blur=(bool)false color=(rgba)"#12141cd0" text_color=(rgba)"#b5b9c8ff"
                 }
@@ -1010,8 +1012,7 @@ mod tests {
         // Parse into json and set colors
         crate::color::reload_colors(content);
 
-        // Verify values are parsed correctly — read through the CANONICAL
-        // getters: a legacy-spelling config must feed them (Phase 7a alias).
+        // Verify values are parsed correctly through the root_plate_* getters.
         assert_eq!(crate::color::root_plate_menubar_blur(), true);
         
         let dd_color = crate::color::dropdown_background_color();
@@ -1028,9 +1029,9 @@ mod tests {
         assert!(statusbar_txt[0] > 0.0);
     }
 
-    /// Phase 7a: `style.surface.plate.root.*` is the canonical root-plate
-    /// spelling — it feeds the same values as `backplate.*`, and wins when
-    /// both spellings are present (canonical-first pointer chains).
+    /// `style.surface.plate.root.*` is the only root-plate spelling: the
+    /// legacy `backplate.*` block is ignored, whether it stands beside the
+    /// canonical block or alone (its read-alias was removed 2026-09-06).
     #[test]
     fn test_plate_root_canonical_spelling() {
         // Global color state: serialize against the other reload_colors tests,
@@ -1053,11 +1054,11 @@ mod tests {
             }
         "##;
         crate::color::reload_colors(content);
-        assert_eq!(crate::color::root_plate_corner_radius(), 17.0, "canonical wins over legacy");
-        assert_eq!(crate::color::backplate_corner_radius(), 17.0, "legacy getter follows");
+        assert_eq!(crate::color::root_plate_corner_radius(), 17.0, "canonical read; legacy ignored");
         assert_eq!(crate::color::root_plate_menubar_blur(), true);
 
-        // Legacy-only spelling still feeds the canonical getter.
+        // A legacy-only spelling no longer feeds the getter: the value from
+        // the canonical load above stands.
         let legacy = r##"
             style {
                 surface {
@@ -1066,7 +1067,7 @@ mod tests {
             }
         "##;
         crate::color::reload_colors(legacy);
-        assert_eq!(crate::color::root_plate_corner_radius(), 9.0);
+        assert_eq!(crate::color::root_plate_corner_radius(), 17.0, "legacy spelling is not read");
     }
 
     #[test]
