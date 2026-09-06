@@ -206,7 +206,7 @@ impl ParametersBg {
             // curve plot (Ramp::graph_h = height − strip).
             260.0
         } else if p.2.starts_with("float3") {
-            108.0
+            Float3::preferred_height(true)
         } else if p.2.starts_with("slider") {
             38.0
         } else if is_text_row(&p.2) || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
@@ -841,11 +841,7 @@ impl ParametersBg {
                 } else if p.2.starts_with("float3") {
                     if let Some(f) = &mut self.float3s[idx] {
                         f.unfocus();
-                        let (min, max) = parse_slider_range(&p.2);
-                        let val0 = min + f.values[0] * (max - min);
-                        let val1 = min + f.values[1] * (max - min);
-                        let val2 = min + f.values[2] * (max - min);
-                        p.1 = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
+                        p.1 = f.value_string();
                     }
                 } else if is_text_row(&p.2) {
                     if let Some(tb) = &mut self.texts[idx] {
@@ -1036,6 +1032,12 @@ impl ParametersBg {
                 if let Some(s) = &self.sliders[i] {
                     out.extend(s.all_rounded_quads(ctx));
                 }
+            } else if p.2.starts_with("float3") {
+                // Three slider rows: the same set per row (readout boxes,
+                // square-style tracks and fills), through the group's own paint.
+                if let Some(f) = &self.float3s[i] {
+                    out.extend(f.all_rounded_quads(ctx));
+                }
             } else if p.2.starts_with("choice") {
                 if let Some(d) = &self.choices[i] {
                     out.extend(d.all_rounded_quads(ctx));
@@ -1209,6 +1211,20 @@ impl ParametersBg {
                 self.spinboxes[i]
                     .as_ref()
                     .map(|w| (w as &dyn WidgetHost, crate::layout::spinbox_corner_radius(), false))
+            } else if p.2.starts_with("float3") {
+                // Three standard slider rows: each row's track carve over its
+                // own row rect (an unlabeled slider's content rect is its
+                // whole rect), the slider-row entry below three times.
+                if let Some(f) = &self.float3s[i] {
+                    for (s, r) in f.sliders().iter().zip(f.get_row_rects()) {
+                        if let Some((rx, ry, rw, rh, rr, rd)) =
+                            s.inner().track_relief(Rect { x: r.0, y: r.1, width: r.2, height: r.3 })
+                        {
+                            out.push((rx, ry, rw, rh, r4(rr), rd, false, all));
+                        }
+                    }
+                }
+                None
             } else {
                 if let Some(s) = &self.sliders[i] {
                     let (x, y, w, h) = s.rect();
@@ -1336,7 +1352,23 @@ impl ParametersBg {
         let mut out = Vec::new();
         let hidden = self.hidden_rows();
         for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] || !p.2.starts_with("slider") {
+            if hidden[i] {
+                continue;
+            }
+            if p.2.starts_with("float3") {
+                // The group's three slider rows, each knob over its row rect.
+                if let Some(f) = &self.float3s[i] {
+                    for (s, r) in f.sliders().iter().zip(f.get_row_rects()) {
+                        if let Some(sphere) =
+                            s.inner().thumb_sphere(Rect { x: r.0, y: r.1, width: r.2, height: r.3 })
+                        {
+                            out.push(sphere);
+                        }
+                    }
+                }
+                continue;
+            }
+            if !p.2.starts_with("slider") {
                 continue;
             }
             if let Some(s) = &self.sliders[i] {
@@ -1714,13 +1746,8 @@ impl Input for ParametersBg {
                 }
             } else if let Some(f) = &mut self.float3s[i] {
                 if f.drag_update(px, py) {
-                    let (min, max) = parse_slider_range(&self.display_params[i].2);
-                    let val0 = min + f.values[0] * (max - min);
-                    let val1 = min + f.values[1] * (max - min);
-                    let val2 = min + f.values[2] * (max - min);
-                    let new_val_str = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
-                    let old_val = &self.display_params[i].1;
-                    if *old_val != new_val_str {
+                    let new_val_str = f.value_string();
+                    if self.display_params[i].1 != new_val_str {
                         self.display_params[i].1 = new_val_str;
                         return true;
                     }
@@ -1784,6 +1811,18 @@ impl Input for ParametersBg {
                     let (min, max) = parse_slider_range(&self.display_params[i].2);
                     let new_val = min + s.value * (max - min);
                     let new_val_str = format!("{:.*}", slider_decimals(&self.display_params[i].2), new_val);
+                    if self.display_params[i].1 != new_val_str {
+                        self.display_params[i].1 = new_val_str;
+                    }
+                    changed = true;
+                }
+            }
+        }
+        // Float3 rows are three slider rows: same glide, same fold-back.
+        for i in 0..self.float3s.len() {
+            if let Some(f) = &mut self.float3s[i] {
+                if f.tick(dt, &mut dummy) {
+                    let new_val_str = f.value_string();
                     if self.display_params[i].1 != new_val_str {
                         self.display_params[i].1 = new_val_str;
                     }
@@ -2277,7 +2316,7 @@ impl Input for ParametersBg {
                             if py >= r.1 && py <= r.1 + r.3 {
                                 if let Some(f) = &mut self.float3s[i] {
                                     if f.mouse_input(button, state, px, py, ui) {
-                                        if f.editing_idx.is_some() {
+                                        if f.editing_idx().is_some() {
                                             self.focused_param = Some(i);
                                             clicked_any_focusable = true;
                                         }
@@ -2509,12 +2548,8 @@ impl Input for ParametersBg {
                         } else if p.2.starts_with("float3") {
                             if let Some(f) = &mut self.float3s[idx] {
                                 if f.keyboard_input(event, ui) {
-                                    let (min, max) = parse_slider_range(&p.2);
-                                    let val0 = min + f.values[0] * (max - min);
-                                    let val1 = min + f.values[1] * (max - min);
-                                    let val2 = min + f.values[2] * (max - min);
-                                    p.1 = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
-                                    if f.editing_idx.is_none() {
+                                    p.1 = f.value_string();
+                                    if f.editing_idx().is_none() {
                                         self.focused_param = None;
                                     }
                                     return true;
@@ -2597,33 +2632,17 @@ impl Input for ParametersBg {
                         }
                     } else if p.2.starts_with("float3") {
                         let r = rects[i];
-                        let row_y = r.1;
-                        if py >= row_y && py <= row_y + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
+                        if py >= r.1 - 2.0 && py <= r.1 + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
+                            // The group's rows apply the slider-row contract
+                            // themselves (band halo / gesture latch, else the
+                            // row strip; ungated forward).
                             if let Some(f) = &mut self.float3s[i] {
-                                let rects_inner = f.get_row_rects();
-                                for j in 0..3 {
-                                    let r_inner = rects_inner[j];
-                                    if py >= r_inner.1 && py <= r_inner.1 + r_inner.3 {
-                                        wheel_taken = true;
-                                        let scroll_amount = delta.notches_y();
-                                        let step = 0.02;
-                                        let new_val = (f.values[j] - scroll_amount * step).clamp(0.0, 1.0);
-                                        if (new_val - f.values[j]).abs() > 0.0001 {
-                                            f.values[j] = new_val;
-                                            if f.editing_idx == Some(j) {
-                                                let scaled_val = f.mins[j] + f.values[j] * (f.maxs[j] - f.mins[j]);
-                                                f.edit_buffer = format!("{:.2}", scaled_val);
-                                            }
-                                            let (min, max) = parse_slider_range(&p.2);
-                                            let val0 = min + f.values[0] * (max - min);
-                                            let val1 = min + f.values[1] * (max - min);
-                                            let val2 = min + f.values[2] * (max - min);
-                                            let new_val_str = format!("{:.2}:{:.2}:{:.2}", val0, val1, val2);
-                                            if p.1 != new_val_str {
-                                                p.1 = new_val_str;
-                                                changed = true;
-                                            }
-                                        }
+                                if f.wheel(delta, px, py, ui) {
+                                    wheel_taken = true;
+                                    let new_val_str = f.value_string();
+                                    if p.1 != new_val_str {
+                                        p.1 = new_val_str;
+                                        changed = true;
                                     }
                                 }
                             }
@@ -2919,12 +2938,7 @@ impl ParamController for ParametersBg {
                     } else if let Some(ref mut f) = self.float3s[i] {
                         let (min, max) = parse_slider_range(&p_new.2);
                         // Same round-trip guard as the slider row.
-                        let cur_str = format!(
-                            "{:.2}:{:.2}:{:.2}",
-                            min + f.values[0] * (max - min),
-                            min + f.values[1] * (max - min),
-                            min + f.values[2] * (max - min)
-                        );
+                        let cur_str = f.value_string();
                         if cur_str != p_new.1 {
                             let vals = parse_float3_value(&p_new.1, min, max);
                             f.set_values(vals);
