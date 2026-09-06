@@ -1172,32 +1172,34 @@ impl ParametersBg {
                 // island, which no other inset control in the DE does.
                 self.texts[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::textbox_corner_radius(), false))
             } else if p.2.starts_with("choice") {
-                self.choices[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::dropdown_corner_radius(), true))
+                // The dropdown trigger is a FLUSH inset control: the widget's
+                // own raised paint is one `inset_plate` (face level with the
+                // plate, a valley seam around it), so its ring travels through
+                // [`Self::troughs`]. A boss here read as a raised island the
+                // widget itself never draws.
+                None
             } else if p.2 == "button" {
                 self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
             } else if p.2 == "toggle" || p.2 == "checkbox" {
                 // The rocker's bg pill and its faces' uniform light overlays
                 // (`Toggle::face_light`) arrive through the rounded-quad view;
-                // the entries here are its two flat halves' beveled edges
-                // (`Toggle::rocker_reliefs`, exactly what the widget's own
-                // raised paint emits): the state half a raised plateau, the
-                // other recessed, hinge wall open on both.
+                // the entries here are the widget's own step carves
+                // (`Toggle::flat_carves`, exactly what its paint emits): the
+                // rocker's two flat halves, the state half a raised plateau,
+                // the other recessed, hinge wall open on both. The slide
+                // glider is a trough, not a step, and rides [`Self::troughs`].
                 if let Some(t) = &self.toggles[i] {
                     let (x, y, w, h) = t.rect();
                     if w > 0.0 && h > 0.0 {
                         let ty = crate::widget::label_offset(t);
                         let rect = Rect { x, y: y + ty, width: w, height: h - ty };
-                        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-                        if let Some(btn) = t.inner().slide_button(rect) {
-                            // Slide style: the gliding half-width button is one
-                            // raised plateau (its fill arrives through the
-                            // rounded-quad view like the rocker's).
-                            let r = crate::layout::toggle_corner_radius();
-                            out.push((btn.x, btn.y, btn.width, btn.height, (r, r, r, r), depth, true, all));
-                        } else {
-                            for (half, radii, walls, raised) in t.inner().rocker_reliefs(rect) {
-                                out.push((half.x, half.y, half.width, half.height, radii, depth, raised, walls));
-                            }
+                        for c in t.inner().flat_carves(rect) {
+                            let raised = match c.kind {
+                                crate::layout::CarveKind::Boss => true,
+                                crate::layout::CarveKind::Recess { .. } => false,
+                                crate::layout::CarveKind::Trough => continue,
+                            };
+                            out.push((c.x, c.y, c.w, c.h, c.radii, c.depth, raised, c.edges));
                         }
                     }
                 }
@@ -1260,8 +1262,10 @@ impl ParametersBg {
     /// The textpick picker buttons' trough rings — `(x, y, w, h, radii, depth)`
     /// for [`crate::scene::paint::PaintCtx::trough_edges`], drawn by the host
     /// AFTER [`Self::reliefs`]. These are the rows' FLUSH inset controls — the
-    /// textpick picker button, and the spinbox's -/+ run: faces level with
-    /// their well floor. On the sides a control adjoins its well, the WELL'S
+    /// textpick picker button, the spinbox's -/+ run, the dropdown trigger
+    /// (the widget's own `inset_plate`) and the slide toggle's glider: faces
+    /// level with the surface they sit in, so the control reads as part of
+    /// the plate, marked off by its seam alone. On the sides a control adjoins its well, the WELL'S
     /// OWN WALL is the seam's far side (the face reaches the wall's base and
     /// that trough edge is suppressed — a lip of its own there doubles the
     /// valley); only edges facing open floor carve their own wall. They
@@ -1302,6 +1306,39 @@ impl ParametersBg {
                         sb.inner().relief_parts(band)
                     {
                         out.push((run.x, run.y, run.width, run.height, radii, rd, edges));
+                    }
+                }
+            } else if p.2.starts_with("choice") {
+                // The dropdown trigger: the widget's own raised paint is one
+                // `inset_plate` on its content band — the same ring here, on
+                // the same band (side-label inset, top-label band excluded),
+                // same radius, same depth cap. The face stays the plate: the
+                // pane carries no dropdown fill (a `Border` face never reaches
+                // the rounded-quad view), so the trigger is flush and bare.
+                if let Some(d) = &self.choices[i] {
+                    let (x, y, w, h) = d.rect();
+                    if w > 0.0 && h > 0.0 {
+                        let lx = d.label_x_offset();
+                        let ty = crate::widget::label_offset(d);
+                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
+                        let r = crate::layout::dropdown_corner_radius();
+                        out.push((x + lx, y + ty, w - lx, h - ty, (r, r, r, r), depth, (true, true, true, true)));
+                    }
+                }
+            } else if p.2 == "toggle" || p.2 == "checkbox" {
+                // The slide glider's seam ring — the trough entries of the
+                // widget's own carves (`Toggle::flat_carves`); its rocker
+                // steps ride [`Self::reliefs`].
+                if let Some(t) = &self.toggles[i] {
+                    let (x, y, w, h) = t.rect();
+                    if w > 0.0 && h > 0.0 {
+                        let ty = crate::widget::label_offset(t);
+                        let rect = Rect { x, y: y + ty, width: w, height: h - ty };
+                        for c in t.inner().flat_carves(rect) {
+                            if matches!(c.kind, crate::layout::CarveKind::Trough) {
+                                out.push((c.x, c.y, c.w, c.h, c.radii, c.depth, c.edges));
+                            }
+                        }
                     }
                 }
             }

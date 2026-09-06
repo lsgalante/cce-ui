@@ -331,17 +331,20 @@ impl Toggle {
             .collect()
     }
 
-    /// The step carves this Toggle paints — the glider's raised rim in the
-    /// slide style, the rocker's raised/recessed halves otherwise (only under
-    /// `raised` styling; without it the faces' light stands alone). Companion
-    /// to [`Toggle::flat_faces`]; see there for why both exist.
+    /// The carves this Toggle paints — the glider's flush seam ring in the
+    /// slide style (a trough: the pad's face stays level with the plate, the
+    /// closed dropdown's chrome, so only the valley around it and its
+    /// position say where the state is), the rocker's raised/recessed halves
+    /// otherwise (only under `raised` styling; without it the faces' light
+    /// stands alone). Companion to [`Toggle::flat_faces`]; see there for why
+    /// both exist.
     pub fn flat_carves(&self, rect: Rect) -> Vec<crate::layout::ReliefCarve> {
         use crate::layout::{CarveKind, ReliefCarve};
         let radius = crate::layout::toggle_corner_radius();
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
         if let Some(btn) = self.slide_button(rect) {
             return vec![ReliefCarve {
-                kind: CarveKind::Boss,
+                kind: CarveKind::Trough,
                 x: btn.x,
                 y: btn.y,
                 w: btn.width,
@@ -473,10 +476,11 @@ impl Paint for Toggle {
         if slide {
             // The slide style: the widget is the track; a half-width button
             // glides between its ends with the state (animated in `tick`).
-            // With no fill the button is a bare raised pad of the plate — its
-            // beveled rim and its position ARE the read (left off, right on).
-            // The rim also reaches legacy-view hosts through `slide_button`
-            // (see `ParametersBg::reliefs`).
+            // With no fill the button is a flush inset pad of the plate — the
+            // valley seam around it (a trough, the closed dropdown's chrome)
+            // and its position ARE the read (left off, right on). The seam
+            // also reaches legacy-view hosts through `flat_carves` (see
+            // `ParametersBg::troughs`).
             for carve in self.flat_carves(rect) {
                 ctx.carve(&carve);
             }

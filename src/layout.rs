@@ -3574,6 +3574,11 @@ pub enum CarveKind {
     Recess { tint: Option<[f32; 3]> },
     /// Interior one step UP ([`crate::scene::paint::PaintCtx::boss_edges`]).
     Boss,
+    /// A FLUSH inset ([`crate::scene::paint::PaintCtx::trough_edges`]): the
+    /// interior stays level with the surface and a valley seam runs the
+    /// boundary — the closed dropdown's chrome, for a control that is part
+    /// of the plate rather than a step up or down from it.
+    Trough,
 }
 
 impl ReliefCarve {

@@ -1003,6 +1003,7 @@ impl PaintCtx {
             crate::layout::CarveKind::Recess { .. } => {
                 self.recess_edges(rect, c.radii, c.depth, c.edges)
             }
+            crate::layout::CarveKind::Trough => self.trough_edges(rect, c.radii, c.depth, c.edges),
         }
     }
 
