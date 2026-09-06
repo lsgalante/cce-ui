@@ -100,8 +100,11 @@ fn section_carve_depth(h: f32) -> f32 {
 }
 /// Vertical pitch between consecutive rows. Wider than the horizontal
 /// channel on purpose: each label+control pair gets its own breathing room,
-/// so rows read as separate entries rather than one packed stack.
-const ROW_GAP: f32 = 8.0;
+/// so rows read as separate entries rather than one packed stack. Was 8
+/// until 2026-09-06; a control's flush seam and the next row's label sat
+/// close enough to read as one block, so the pitch is now near two channels
+/// past the label's own line height.
+const ROW_GAP: f32 = 14.0;
 /// How far a section's title box overhangs its header row upward, and the box's height.
 const TITLE_BOX_INSET: f32 = 2.0;
 const TITLE_BOX_H: f32 = 28.0;
