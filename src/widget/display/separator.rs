@@ -27,7 +27,7 @@ impl Paint for Separator {
 }
 
 impl Input for Separator {
-    fn blocks_backplate_drag(&self) -> bool {
+    fn blocks_root_plate_drag(&self) -> bool {
         false
     }
 }
@@ -42,7 +42,7 @@ mod tests {
         assert_eq!(WidgetHost::rect(&sep), (100.0, 0.0, 1.0, 24.0));
         assert_eq!(WidgetHost::color(&sep), [0.3, 0.3, 0.3, 1.0]);
         assert_eq!(WidgetHost::extra_quads(&sep), vec![(100.0, 0.0, 1.0, 24.0, [0.3, 0.3, 0.3, 1.0])]);
-        assert!(!WidgetHost::blocks_backplate_drag(&sep));
+        assert!(!WidgetHost::blocks_root_plate_drag(&sep));
     }
 
     /// The status bar's vertical-rotation pattern, post-migration: transpose via rect/set_rect.

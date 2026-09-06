@@ -48,7 +48,7 @@ impl Paint for StatusDot {
 }
 
 impl Input for StatusDot {
-    fn blocks_backplate_drag(&self) -> bool {
+    fn blocks_root_plate_drag(&self) -> bool {
         false
     }
 }
@@ -67,7 +67,7 @@ mod tests {
             vec![(5.0, 6.0, 10.0, 10.0, [0.90, 0.60, 0.10, 1.0])],
         );
         // Drags pass through, as legacy declared.
-        assert!(!WidgetHost::blocks_backplate_drag(&dot));
+        assert!(!WidgetHost::blocks_root_plate_drag(&dot));
         // State mutation through Deref, as call sites write it.
         dot.set_status(DotStatus::Error);
         assert_eq!(dot.status, DotStatus::Error);

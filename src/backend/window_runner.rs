@@ -1695,7 +1695,7 @@ pub struct DlImage {
 /// whether another carve already claimed the host's feature run), so the SAME
 /// widget can render either way depending on what is around it — and it does so
 /// silently. That has already shipped as a bug once: a hovered button's opaque
-/// fill used to sever every later button from the backplate they carve into,
+/// fill used to sever every later button from the root plate they carve into,
 /// which is why `plate_stack` is a stack (see its comment below).
 ///
 /// Off by default and read once; the classification below runs only when set.
@@ -1802,9 +1802,9 @@ pub fn tessellate_display_list(
     // and Image prims (which draw through separate paths anyway) intervene.
     let mut features: Vec<[f32; 12]> = Vec::new();
     // Open carve-host plates, in emission order (innermost candidates last).
-    // A STACK, not a single slot: a sibling plate emitted between a backplate
+    // A STACK, not a single slot: a sibling plate emitted between a root plate
     // and its later carves (a hovered button's opaque fill among transparent
-    // ones) must not sever those carves from the backplate they are carved
+    // ones) must not sever those carves from the root plate they are carved
     // into — that severing rendered every button after the hovered one
     // through the visually-different overlay fallback. Ordinary geometry
     // still closes every open plate (the draw-order rule below).
@@ -3223,9 +3223,9 @@ pub trait Application: Sized + 'static {
     }
 
     /// Whether a left-press at (px, py) should start a compositor window drag. Every root
-    /// `Backplate` is dissolved (Phase 6), so the default is "no" — apps that want
+    /// root plate container is dissolved (Phase 6), so the default is "no" — apps that want
     /// drag-anywhere override this with `ctx.drag_allowed_at(px, py)`.
-    fn is_movable_backplate_at(&self, _px: f32, _py: f32) -> bool {
+    fn is_movable_root_plate_at(&self, _px: f32, _py: f32) -> bool {
         false
     }
     
@@ -3358,7 +3358,7 @@ pub trait Application: Sized + 'static {
     fn handle_resize(&mut self, _width: f32, _height: f32, _scale: f64) {}
 
     /// Whether the runner's built-in client-side decorations apply: the
-    /// titlebar move band, the movable-backplate drag regions, and — when
+    /// titlebar move band, the movable-root plate drag regions, and — when
     /// [`csd_resize_borders`](Application::csd_resize_borders) is also on —
     /// the rect-edge resize grabs and their edge cursors. Return `false` for a
     /// window whose chrome doesn't follow its rect (e.g. a circular pane) and
@@ -3386,7 +3386,7 @@ pub trait Application: Sized + 'static {
     /// Whether the standard CSD reserves an implicit title-bar strip (`y` in `[8, 32)`) as a
     /// drag-to-move handle. Opt-in: off by default, so a window has no title bar and is moved
     /// through the compositor (or via explicitly-declared handles —
-    /// [`is_movable_backplate_at`](Application::is_movable_backplate_at)); nothing is
+    /// [`is_movable_root_plate_at`](Application::is_movable_root_plate_at)); nothing is
     /// implicitly draggable. An app with an actual title bar returns `true`. Separate from
     /// [`standard_csd`](Application::standard_csd), which also gates the resize borders, and
     /// only consulted when `standard_csd()` is on.
@@ -4430,7 +4430,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     // Enter carries the pointer's position but no Motion follows until it
                     // actually moves — without this the app's hover state is stale from
                     // enter to first move, and a press in that window can misroute (e.g. a
-                    // divider press falling through to the movable-backplate window drag).
+                    // divider press falling through to the movable-root plate window drag).
                     let mut rebuild = false;
                     self.inner.as_mut().unwrap().handle_pointer_move(LogicalPosition::new(lx, ly), &mut rebuild);
                     if rebuild {
@@ -4570,7 +4570,7 @@ impl<A: Application> PointerHandler for EngineState<A> {
                             && ly >= border && ly < 32.0 && lx < self.logical_width - 70.0
                         {
                             should_move = true;
-                        } else if self.inner.as_ref().unwrap().is_movable_backplate_at(lx, ly) {
+                        } else if self.inner.as_ref().unwrap().is_movable_root_plate_at(lx, ly) {
                             should_move = true;
                         }
 

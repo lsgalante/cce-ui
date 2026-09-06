@@ -165,20 +165,20 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.plate.padding" => "plate_padding",
                 // `style.surface.plate.root.*` is the one spelling of the
                 // root-plate style (RFC Phase 7a). The slot names keep the
-                // historical `backplate_` prefix; the legacy `backplate.*`
+                // historical `root_plate_` prefix; the legacy `root plate.*`
                 // config read-alias was removed 2026-09-06.
-                "style.surface.plate.root.padding" => "backplate_padding",
-                "style.surface.plate.root.gap" => "backplate_gap",
-                "style.surface.plate.root.color" => "backplate_color",
-                "style.surface.plate.root.blur" => "backplate_blur",
-                "style.surface.plate.root.corner_radius" => "backplate_corner_radius",
-                "style.surface.plate.root.menubar.color" => "backplate_menubar_color",
-                "style.surface.plate.root.menubar.text_color" => "backplate_menubar_text_color",
-                "style.surface.plate.root.menubar.blur" => "backplate_menubar_blur",
+                "style.surface.plate.root.padding" => "root_plate_padding",
+                "style.surface.plate.root.gap" => "root_plate_gap",
+                "style.surface.plate.root.color" => "root_plate_color",
+                "style.surface.plate.root.blur" => "root_plate_blur",
+                "style.surface.plate.root.corner_radius" => "root_plate_corner_radius",
+                "style.surface.plate.root.menubar.color" => "root_plate_menubar_color",
+                "style.surface.plate.root.menubar.text_color" => "root_plate_menubar_text_color",
+                "style.surface.plate.root.menubar.blur" => "root_plate_menubar_blur",
                 "style.surface.plate.root.menubar.font" => "menubar_font",
-                "style.surface.statusbar.color" => "backplate_statusbar_color",
-                "style.surface.statusbar.text_color" => "backplate_statusbar_text_color",
-                "style.surface.statusbar.blur" => "backplate_statusbar_blur",
+                "style.surface.statusbar.color" => "root_plate_statusbar_color",
+                "style.surface.statusbar.text_color" => "root_plate_statusbar_text_color",
+                "style.surface.statusbar.blur" => "root_plate_statusbar_blur",
                 "style.surface.statusbar.font" => "statusbar_font",
                 "style.surface.page.opacity" => "page_opacity",
                 "style.surface.page.margin" => "page_margin",
@@ -1588,7 +1588,7 @@ pub fn corner_shape() -> f32 {
 }
 
 /// The window silhouette's nominal corner radius: the SHARED config's
-/// backplate corner_radius, never the per-app override. The compositor clips
+/// root plate corner_radius, never the per-app override. The compositor clips
 /// every decorated window with this value (widened by
 /// [`corner_span_factor`]), so any window-corner arc an app draws itself must
 /// use it too — even when the app restyles its own plates through its
@@ -1792,7 +1792,7 @@ pub fn bevel_profile_generation() -> u64 {
 /// every app's content sits the same distance off the plate rim.
 pub fn root_plate_padding() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("backplate_padding").unwrap_or(16.0)
+    get_style_registry().read().unwrap().get_float("root_plate_padding").unwrap_or(16.0)
 }
 
 /// Gap between sibling objects on the window plate, in logical px
@@ -1800,7 +1800,7 @@ pub fn root_plate_padding() -> f32 {
 /// rim distance vs object spacing.
 pub fn root_plate_gap() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("backplate_gap").unwrap_or(12.0)
+    get_style_registry().read().unwrap().get_float("root_plate_gap").unwrap_or(12.0)
 }
 
 /// Roll-off width for the wall where a bar (menubar / status bar / the demo's
@@ -1934,7 +1934,7 @@ pub fn plate_corner_radius() -> f32 {
     lazy_init_style_registry();
     let r = get_style_registry().read().unwrap();
     r.get_float("plate_corner_radius")
-        .or_else(|| r.get_float("backplate_corner_radius"))
+        .or_else(|| r.get_float("root_plate_corner_radius"))
         .unwrap_or(12.0)
 }
 

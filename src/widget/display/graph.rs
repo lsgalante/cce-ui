@@ -354,7 +354,7 @@ impl Graph {
     }
 
     /// The grid cells' rounded-corner radius at the current zoom: the desktop
-    /// grid's corner PROPORTION — the DE backplate radius per 512 virtual
+    /// grid's corner PROPORTION — the DE root plate radius per 512 virtual
     /// units of cell, span-widened (cce-grid draws exactly this on its
     /// 512vu cells) — applied to this grid's cell size, so the pane's cells
     /// read as miniatures of the desktop's. Clamped to a quarter sweep;

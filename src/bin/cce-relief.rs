@@ -453,7 +453,7 @@ struct BevelPopup {
     /// The window plate's alpha — seeded from this app's own config
     /// (`~/.config/cce/cce-relief/config.kdl`, `window { opacity }`, falling
     /// back to the pre-rename `cce-bevel` path), falling
-    /// back to the DE backplate opacity. Edited on the file directly, the
+    /// back to the DE root plate opacity. Edited on the file directly, the
     /// DE way — no dedicated control.
     plate_opacity: f32,
     /// Status line under the buttons: what the last save/reset did.
@@ -1518,7 +1518,7 @@ impl Application for BevelPopup {
         Some(&mut self.ui_context)
     }
 
-    fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
+    fn is_movable_root_plate_at(&self, px: f32, py: f32) -> bool {
         self.ui_context.drag_allowed_at(px, py)
     }
 

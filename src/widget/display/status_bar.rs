@@ -1,5 +1,5 @@
 //! Narrow-trait `StatusBar` (Phase 5t) — a one-line text bar whose theming is parent-coupled
-//! exactly like MenuBar's: when its tracked parent is a Backplate it pulls the backplate
+//! exactly like MenuBar's: when its tracked parent is a root plate container it pulls the root plate
 //! statusbar color/text-color/blur and derives its rounded corners from where it sits against
 //! the parent's edges ([`Paint::corner_style`] + the corners walk). Two text paths: the
 //! [`Paint::paint`] prim (carrying the configured statusbar font — the legacy default-font
@@ -20,7 +20,7 @@ pub struct StatusBar {
     pub text_offset_x: Option<f32>,
     pub text_color: Option<[f32; 4]>,
     pub bg_color: Option<[f32; 4]>,
-    /// Draw as a step carved into the window backplate instead of an opaque slab: no
+    /// Draw as a step carved into the window root plate instead of an opaque slab: no
     /// background fill of its own, just the shaded wall facing the content, so the plate
     /// shows through. `bg_color` is ignored while this is set — see
     /// [`Adapted::<StatusBar>::with_recess`].
@@ -86,7 +86,7 @@ impl Adapted<StatusBar> {
         self
     }
 
-    /// Drop the bar's own background and sink it into the window backplate instead, the
+    /// Drop the bar's own background and sink it into the window root plate instead, the
     /// mirror of `MenuBar::with_recess`. A status bar always sits flush with the bottom of
     /// the plate, so it is shaded as a plateau one step down whose only wall is the top one
     /// (facing the content) — the other three sides are the plate's outer edge, which
@@ -117,7 +117,7 @@ impl Paint for StatusBar {
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        // Corners never round (the backplate-adjacency source is gone). The radius was the
+        // Corners never round (the root plate-adjacency source is gone). The radius was the
         // parent's, read through a stored pointer — but nothing ever set_parent's a StatusBar,
         // so 0.0 is what production always read (6bd: the dead pointer field is gone).
         Some((0.0, (false, false, false, false)))
@@ -146,7 +146,7 @@ impl Paint for StatusBar {
             ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), depth, (true, false, false, false));
         } else {
             // Always the plain background quad — the rounded-against-parent variant required a
-            // backplate parent, which no longer exists.
+            // root plate parent, which no longer exists.
             ctx.quad(rect, self.bg());
         }
 
@@ -190,7 +190,7 @@ impl Paint for StatusBar {
 }
 
 impl Input for StatusBar {
-    fn blocks_backplate_drag(&self) -> bool {
+    fn blocks_root_plate_drag(&self) -> bool {
         false
     }
 }
@@ -226,7 +226,7 @@ mod tests {
         let extra = WidgetHost::extra_quads(&bar);
         assert_eq!(extra.len(), 1, "cornerless bg quad");
         assert_eq!(WidgetHost::corner_style(&bar).1, (false, false, false, false));
-        assert!(!WidgetHost::blocks_backplate_drag(&bar));
+        assert!(!WidgetHost::blocks_root_plate_drag(&bar));
     }
 
     /// The paint walk strips prim fonts and re-fonts labels via `Paint::text_font` — the

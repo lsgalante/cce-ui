@@ -39,7 +39,7 @@ static CONTROL_LABEL_COLOR_DETACHED: RwLock<[f32; 4]> = RwLock::new([0.22416, 0.
 static CONTROL_LABEL_HOVER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static CONTROL_LABEL_FOCUS_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static OPACITY: RwLock<Option<f32>> = RwLock::new(None);
-static BACKPLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
+static ROOT_PLATE_OPACITY: RwLock<Option<f32>> = RwLock::new(None);
 static LIST_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 0.3]);
 static LIST_ENTRY_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.04]);
 static LIST_ENTRY_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([1.0, 1.0, 1.0, 0.8]);
@@ -48,7 +48,7 @@ static BREADCRUMB_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.
 static POPOVER_BG_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static PAGE_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
 static LAYER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 0.0, 0.0, 0.0]);
-static BACKPLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
+static ROOT_PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 
 // Transparent by default (alpha 0): a dropdown picks up the surface it sits
 // on, and its closed-state chrome is the flush inset trough alone — the
@@ -60,16 +60,16 @@ static TEXTBOX_PLACEHOLDER_TEXT_COLOR: RwLock<[u8; 3]> = RwLock::new([0x60, 0x60
 static TEXTBOX_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static TEXTBOX_BACKGROUND_EDIT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.10, 0.18, 1.0]);
 
-static BACKPLATE_MENUBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
-static BACKPLATE_MENUBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]);
-static BACKPLATE_MENUBAR_BLUR: RwLock<bool> = RwLock::new(false);
+static ROOT_PLATE_MENUBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
+static ROOT_PLATE_MENUBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.90196, 0.90196, 0.94902, 1.0]);
+static ROOT_PLATE_MENUBAR_BLUR: RwLock<bool> = RwLock::new(false);
 /// Tint strength of frosted menus/popovers over the blurred backdrop:
 /// 1.0 is fully opaque (frost invisible), lower shows more content through.
 static MENU_OPACITY: RwLock<f32> = RwLock::new(0.8);
 
-static BACKPLATE_STATUSBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.06, 0.10, 1.0]);
-static BACKPLATE_STATUSBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.6666, 0.6666, 0.7333, 1.0]);
-static BACKPLATE_STATUSBAR_BLUR: RwLock<bool> = RwLock::new(false);
+static ROOT_PLATE_STATUSBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.06, 0.10, 1.0]);
+static ROOT_PLATE_STATUSBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.6666, 0.6666, 0.7333, 1.0]);
+static ROOT_PLATE_STATUSBAR_BLUR: RwLock<bool> = RwLock::new(false);
 static BUTTON_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new(BUTTON_IDLE);
 static RAMP_BACKGROUND_COLOR: RwLock<[f32; 4]> = RwLock::new([0.08, 0.08, 0.12, 1.0]);
 static RAMP_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
@@ -286,26 +286,26 @@ fn parse_and_set_colors(content: &str) {
     }
 
     // `/style/surface/plate/root/...` is the one spelling of the root-plate
-    // style (RFC Phase 7a; the legacy `backplate` read-alias was removed
+    // style (RFC Phase 7a; the legacy `root plate` read-alias was removed
     // 2026-09-06 once every live config had migrated).
     if let Some(radius) = val.pointer("/style/surface/plate/root/corner_radius")
         .and_then(|v| v.as_f64())
     {
-        if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
+        if let Ok(mut lock) = ROOT_PLATE_CORNER_RADIUS.write() {
             *lock = radius as f32;
         }
      }
 
     if let Some(c) = get_color("/style/surface/plate/root/color") {
         if let Ok(mut lock) = PAGE_LOW_COLOR.write() { *lock = c; }
-        if let Ok(mut lock) = BACKPLATE_OPACITY.write() { *lock = Some(c[3]); }
+        if let Ok(mut lock) = ROOT_PLATE_OPACITY.write() { *lock = Some(c[3]); }
     }
 
     if let Some(c) = get_color("/style/surface/plate/root/menubar/color") {
-        if let Ok(mut lock) = BACKPLATE_MENUBAR_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = ROOT_PLATE_MENUBAR_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/style/surface/plate/root/menubar/text_color") {
-        if let Ok(mut lock) = BACKPLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = ROOT_PLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
     }
     if let Some(o) = val.pointer("/style/surface/menu/opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = MENU_OPACITY.write() { *lock = (o as f32).clamp(0.0, 1.0); }
@@ -313,21 +313,21 @@ fn parse_and_set_colors(content: &str) {
 
     let menubar_blur_ptr = val.pointer("/style/surface/plate/root/menubar/blur");
     if let Some(blur) = menubar_blur_ptr.and_then(|v| v.as_bool()) {
-        if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = blur; }
+        if let Ok(mut lock) = ROOT_PLATE_MENUBAR_BLUR.write() { *lock = blur; }
     } else if let Some(blur_val) = menubar_blur_ptr.and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = blur_val > 0.001; }
+        if let Ok(mut lock) = ROOT_PLATE_MENUBAR_BLUR.write() { *lock = blur_val > 0.001; }
     }
 
     if let Some(c) = get_color("/style/surface/statusbar/color") {
-        if let Ok(mut lock) = BACKPLATE_STATUSBAR_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/style/surface/statusbar/text_color") {
-        if let Ok(mut lock) = BACKPLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
     }
     if let Some(blur) = val.pointer("/style/surface/statusbar/blur").and_then(|v| v.as_bool()) {
-        if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = blur; }
+        if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_BLUR.write() { *lock = blur; }
     } else if let Some(blur_val) = val.pointer("/style/surface/statusbar/blur").and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = blur_val > 0.001; }
+        if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_BLUR.write() { *lock = blur_val > 0.001; }
     }
     if let Some(c) = get_color("/layout/color_borders_color") {
         if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() { *lock = c; }
@@ -840,7 +840,7 @@ pub fn set_graph_opacity(opacity: f32) {
 pub fn page_low_color() -> [f32; 4] {
     load_colors_once();
     let mut color = *PAGE_LOW_COLOR.read().unwrap();
-    if let Some(opacity) = read_backplate_opacity_if_configured() {
+    if let Some(opacity) = read_root_plate_opacity_if_configured() {
         color[3] = opacity;
     }
     color
@@ -1166,9 +1166,9 @@ pub fn menu_opacity() -> f32 {
     *MENU_OPACITY.read().unwrap()
 }
 
-pub fn read_backplate_opacity_if_configured() -> Option<f32> {
+pub fn read_root_plate_opacity_if_configured() -> Option<f32> {
     load_colors_once();
-    *BACKPLATE_OPACITY.read().unwrap()
+    *ROOT_PLATE_OPACITY.read().unwrap()
 }
 
 // The toggle's own palette (enabled/disabled/background) is RETIRED: a toggle
@@ -1247,7 +1247,7 @@ pub fn set_popover_bg_color(color: [f32; 4]) {
 /// copy of this.
 pub fn root_plate_corner_radius() -> f32 {
     load_colors_once();
-    *BACKPLATE_CORNER_RADIUS.read().unwrap()
+    *ROOT_PLATE_CORNER_RADIUS.read().unwrap()
 }
 
 pub fn ramp_background_color() -> [f32; 4] {
@@ -1502,8 +1502,8 @@ pub fn set_checkbox_hover(color: [f32; 4]) {
     }
 }
 
-pub fn set_backplate_corner_radius(radius: f32) {
-    if let Ok(mut lock) = BACKPLATE_CORNER_RADIUS.write() {
+pub fn set_root_plate_corner_radius(radius: f32) {
+    if let Ok(mut lock) = ROOT_PLATE_CORNER_RADIUS.write() {
         *lock = radius;
     }
 }
@@ -1658,56 +1658,56 @@ pub fn set_list_close_search_key(k: String) {
 
 pub fn root_plate_menubar_color() -> [f32; 4] {
     load_colors_once();
-    *BACKPLATE_MENUBAR_COLOR.read().unwrap()
+    *ROOT_PLATE_MENUBAR_COLOR.read().unwrap()
 }
 
-pub fn set_backplate_menubar_color(c: [f32; 4]) {
-    if let Ok(mut lock) = BACKPLATE_MENUBAR_COLOR.write() { *lock = c; }
+pub fn set_root_plate_menubar_color(c: [f32; 4]) {
+    if let Ok(mut lock) = ROOT_PLATE_MENUBAR_COLOR.write() { *lock = c; }
 }
 
 pub fn root_plate_menubar_text_color() -> [f32; 4] {
     load_colors_once();
-    *BACKPLATE_MENUBAR_TEXT_COLOR.read().unwrap()
+    *ROOT_PLATE_MENUBAR_TEXT_COLOR.read().unwrap()
 }
 
-pub fn set_backplate_menubar_text_color(c: [f32; 4]) {
-    if let Ok(mut lock) = BACKPLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
+pub fn set_root_plate_menubar_text_color(c: [f32; 4]) {
+    if let Ok(mut lock) = ROOT_PLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
 }
 
 pub fn root_plate_menubar_blur() -> bool {
     load_colors_once();
-    *BACKPLATE_MENUBAR_BLUR.read().unwrap()
+    *ROOT_PLATE_MENUBAR_BLUR.read().unwrap()
 }
 
-pub fn set_backplate_menubar_blur(b: bool) {
-    if let Ok(mut lock) = BACKPLATE_MENUBAR_BLUR.write() { *lock = b; }
+pub fn set_root_plate_menubar_blur(b: bool) {
+    if let Ok(mut lock) = ROOT_PLATE_MENUBAR_BLUR.write() { *lock = b; }
 }
 
 pub fn root_plate_statusbar_color() -> [f32; 4] {
     load_colors_once();
-    *BACKPLATE_STATUSBAR_COLOR.read().unwrap()
+    *ROOT_PLATE_STATUSBAR_COLOR.read().unwrap()
 }
 
-pub fn set_backplate_statusbar_color(c: [f32; 4]) {
-    if let Ok(mut lock) = BACKPLATE_STATUSBAR_COLOR.write() { *lock = c; }
+pub fn set_root_plate_statusbar_color(c: [f32; 4]) {
+    if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_COLOR.write() { *lock = c; }
 }
 
 pub fn root_plate_statusbar_text_color() -> [f32; 4] {
     load_colors_once();
-    *BACKPLATE_STATUSBAR_TEXT_COLOR.read().unwrap()
+    *ROOT_PLATE_STATUSBAR_TEXT_COLOR.read().unwrap()
 }
 
-pub fn set_backplate_statusbar_text_color(c: [f32; 4]) {
-    if let Ok(mut lock) = BACKPLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
+pub fn set_root_plate_statusbar_text_color(c: [f32; 4]) {
+    if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
 }
 
 pub fn root_plate_statusbar_blur() -> bool {
     load_colors_once();
-    *BACKPLATE_STATUSBAR_BLUR.read().unwrap()
+    *ROOT_PLATE_STATUSBAR_BLUR.read().unwrap()
 }
 
-pub fn set_backplate_statusbar_blur(b: bool) {
-    if let Ok(mut lock) = BACKPLATE_STATUSBAR_BLUR.write() { *lock = b; }
+pub fn set_root_plate_statusbar_blur(b: bool) {
+    if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_BLUR.write() { *lock = b; }
 }
 
 static PLATE_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.15, 0.15, 0.2, 0.95]));

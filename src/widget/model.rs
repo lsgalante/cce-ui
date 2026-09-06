@@ -140,7 +140,7 @@ pub trait Layout {
     /// `layout` because the children's addresses move with the owning struct (host struct moves,
     /// `Vec` reallocation) — and the registration is load-bearing: the spatial grid is rebuilt
     /// from registered widgets, and it is the registered ButtonStrip (whose
-    /// `blocks_backplate_drag` is true) that makes the sidebar block backplate drags. The
+    /// `blocks_root_plate_drag` is true) that makes the sidebar block root plate drags. The
     /// adapter calls this from `WidgetHost::tick` and `WidgetHost::layout`, mirroring the legacy
     /// cadence. `host_id` is the adapter's id, for `link_ids`. Default: nothing embedded.
     fn register_embedded_children(&mut self, _host_id: WidgetId, _ctx: &mut UiContext) {}
@@ -174,7 +174,7 @@ pub trait Paint {
         self.paint(rect, ctx);
     }
 
-    /// Whether the paint walk clips this widget's children to its `rect` (scroll/backplate
+    /// Whether the paint walk clips this widget's children to its `rect` (scroll/root plate
     /// containers). Default: no.
     fn clips_children(&self) -> bool {
         false
@@ -403,10 +403,10 @@ pub trait Input {
         false
     }
 
-    /// Whether pressing on this widget blocks dragging the movable backplate under it. Passive
+    /// Whether pressing on this widget blocks dragging the movable root plate under it. Passive
     /// display widgets (separators, status dots) return `false` so drags pass through them.
     /// Default: `true`, matching the legacy `WidgetHost` default.
-    fn blocks_backplate_drag(&self) -> bool {
+    fn blocks_root_plate_drag(&self) -> bool {
         true
     }
 
@@ -1438,8 +1438,8 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     }
 
     // --- Input concern -> `Input` ---
-    fn blocks_backplate_drag(&self) -> bool {
-        Input::blocks_backplate_drag(&self.inner)
+    fn blocks_root_plate_drag(&self) -> bool {
+        Input::blocks_root_plate_drag(&self.inner)
     }
     fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
         Input::context_action(&mut self.inner, action)

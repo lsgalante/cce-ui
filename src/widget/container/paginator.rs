@@ -7,7 +7,7 @@
 //! Two legacy behaviors ride hooks from the 5r migration:
 //! - [`Layout::register_embedded_children`]: legacy `tick`/`layout` re-registered the strip into
 //!   the ctx registry every frame — load-bearing for the spatial grid (the registered strip is
-//!   what makes the sidebar block backplate drags).
+//!   what makes the sidebar block root plate drags).
 //! - [`Paint::aggregates_child_extra_quads`] + [`Paint::forwarded_highlight`]: legacy
 //!   `extra_quads` served the strip's chrome only (cce-mail and cce-layout-interface render
 //!   the tab column through that getter — the paginator's own background quads live in
@@ -211,7 +211,7 @@ impl Paint for Paginator {
 }
 
 impl Input for Paginator {
-    fn blocks_backplate_drag(&self) -> bool {
+    fn blocks_root_plate_drag(&self) -> bool {
         false
     }
 
@@ -330,7 +330,7 @@ mod tests {
         }
 
         // The embedded strip + pages land in the registry on tick (the spatial grid feeds off
-        // it — the registered strip is what blocks backplate drags over the sidebar).
+        // it — the registered strip is what blocks root plate drags over the sidebar).
         WidgetHost::tick(&mut p, 0.016, &mut ctx);
         let strip_id = p.sidebar_menu.id();
         assert!(

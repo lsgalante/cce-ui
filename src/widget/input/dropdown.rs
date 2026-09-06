@@ -8,7 +8,7 @@
 //!   pointer: legacy `set_parent` never wrote it (the WidgetHost default only touched the tree —
 //!   Ramp's dummy-ctx `set_parent` calls were silently discarded), so the Ramp popover clamp
 //!   and the fade-blend parent color activate only for callers that assign the field, exactly
-//!   as before — no production writer exists. The backplate-concentric corner walk it once
+//!   as before — no production writer exists. The root plate-concentric corner walk it once
 //!   anchored is gone outright (replaced by the app-owned `corner_frame`, Phase 6s).
 //! - The row-rect hit expansion (`base.row_x/row_w`) is dropped, consistent with every other
 //!   migrated control: `Input::hit` tests the widget rect plus the open popover.
@@ -111,8 +111,8 @@ pub struct Dropdown {
     hovered: bool,
     /// App-owned concentric frame (Phase 6s): `(rect, radius, corners)` of the rounded plate
     /// the dropdown sits in. When set, the corner adjustment uses it INSTEAD of walking for a
-    /// `Backplate` ancestor — the hook that keeps the adjustment after an app dissolves its
-    /// root Backplate (the walk finds nothing once the widget is parentless).
+    /// root plate container ancestor — the hook that keeps the adjustment after an app dissolves its
+    /// root plate container (the walk finds nothing once the widget is parentless).
     corner_frame: Option<((f32, f32, f32, f32), f32, (bool, bool, bool, bool))>,
     /// Raised style: the closed control's background is an SDF-lit `Bevel`
     /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
@@ -424,7 +424,7 @@ impl Dropdown {
     }
 
     /// Emit the border + background geometry — the legacy `all_rounded_quads` body (rounded,
-    /// with the backplate-concentric corner adjustment) or `extra_quads` (plain) depending on
+    /// with the root plate-concentric corner adjustment) or `extra_quads` (plain) depending on
     /// the configured radius, byte-for-byte on the same content rect.
     fn paint_background(&self, content: Rect, ctx: &mut PaintCtx) {
         let label_x = side_offset(&self.label);
@@ -598,7 +598,7 @@ impl Dropdown {
         let mut inner_radii = [inner_radius; 4];
 
         // Only an explicit corner_frame adjusts concentric corners now — the legacy fallback
-        // walked ancestors for a backplate, which no longer exists.
+        // walked ancestors for a root plate, which no longer exists.
         let frame = self.corner_frame;
         if let Some(((px, py, pw, ph), pr, (pr1, pr2, pr3, pr4))) = frame {
             let g_left = x - px;

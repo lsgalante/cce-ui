@@ -16,7 +16,7 @@
 //!    Enter/Leave synthesis, drag-target recording, and KeyInput-to-focused delivery;
 //!    the app keeps only state-gated `take_*` plumbing.
 //! 4. **No embedded bases.** Widgets are app-owned values (all [`Adapted`]); the window
-//!    plate is prims, not a `Backplate`; popovers draw INTO the frame (there is no popup
+//!    plate is prims, not a root plate container; popovers draw INTO the frame (there is no popup
 //!    surface); app state — not any widget tree — is the source of truth.
 
 use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
@@ -356,7 +356,7 @@ impl Application for DemoApp {
         let w = self.width as f32;
         let h = self.height as f32;
 
-        // The window plate — the dissolved root Backplate as a lit object: page-low color
+        // The window plate — the dissolved root plate container as a lit object: page-low color
         // at the configured opacity, config corner radius, perimeter rolled over
         // `bevel_width` so the surface reads as a physical plate rather than a flat fill.
         let mut plate = cce_ui::color::page_low_color();
@@ -469,7 +469,7 @@ impl Application for DemoApp {
 
     /// Window dragging for a dissolved root: the surface is the movable plate; drag
     /// anywhere a drag-blocking registered widget isn't.
-    fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
+    fn is_movable_root_plate_at(&self, px: f32, py: f32) -> bool {
         self.ui_context.drag_allowed_at(px, py)
     }
 

@@ -2,7 +2,7 @@
 //!
 //! This is Phase 1 of the core rebuild (see `docs/rfc-core-rebuild.md`). It replaces the old
 //! model where the widget tree was smeared across three parallel stores kept in sync by hand
-//! (`Backplate.children: Vec<*mut dyn WidgetHost>`, `UiContext.layout_tree`, and
+//! (`root plate container.children: Vec<*mut dyn WidgetHost>`, `UiContext.layout_tree`, and
 //! `UiContext.widget_registry`) and traversed through raw `*mut dyn WidgetHost` pointers that
 //! `Drop` did not fully clear.
 //!

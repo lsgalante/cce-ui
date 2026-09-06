@@ -427,7 +427,7 @@ pub trait WidgetHost {
         // trap). Migrated widgets go through `Adapted::paint_self`, never this default.
     }
 
-    /// Whether the paint walk should clip this widget's children to its rect (scroll/backplate
+    /// Whether the paint walk should clip this widget's children to its rect (scroll/root plate
     /// containers). Default: no clipping.
     fn clips_children(&self) -> bool { false }
 
@@ -504,7 +504,7 @@ pub trait WidgetHost {
 
     fn z_index(&self) -> i32 { 0 }
     fn is_scrollable(&self) -> bool { false }
-    fn blocks_backplate_drag(&self) -> bool { true }
+    fn blocks_root_plate_drag(&self) -> bool { true }
 
     /// Uniform corner radius + per-corner on-flags, in one read (6bd batch 2 — replaced the
     /// separate `corner_radius`/`rounded_corners` getters). The radius is meaningful even with

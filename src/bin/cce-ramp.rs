@@ -329,7 +329,7 @@ impl Application for RampPopup {
         Some(&self.ui_context)
     }
 
-    fn is_movable_backplate_at(&self, px: f32, py: f32) -> bool {
+    fn is_movable_root_plate_at(&self, px: f32, py: f32) -> bool {
         self.ui_context.drag_allowed_at(px, py)
     }
 

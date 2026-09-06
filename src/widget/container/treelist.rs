@@ -1080,7 +1080,7 @@ impl Paint for TreeList {
 }
 
 impl Input for TreeList {
-    fn blocks_backplate_drag(&self) -> bool {
+    fn blocks_root_plate_drag(&self) -> bool {
         true
     }
 
@@ -1419,8 +1419,8 @@ mod tests {
 
     #[test]
     fn test_treelist_blocks_window_drag() {
-        // Backplate is DELETED: dissolved windows ask `drag_allowed_at` instead — same
-        // walk, minus the registered-movable-Backplate requirement.
+        // root plate container is DELETED: dissolved windows ask `drag_allowed_at` instead — same
+        // walk, minus the registered-movable-root plate container requirement.
         let mut ctx = UiContext::new();
         let mut tree_list = TreeList::new();
         tree_list.set_rect(10.0, 52.0, 380.0, 500.0);

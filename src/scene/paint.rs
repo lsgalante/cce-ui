@@ -350,7 +350,7 @@ pub enum Prim {
     Bevel { rect: Rect, radii: Radii, color: [f32; 4], depth: f32, tint: [f32; 3] },
     /// A recess carved into whatever is already painted underneath — the inverse of
     /// `Bevel`. Emits ONLY the shaded edges, never a fill, so the surface below shows
-    /// through the middle: a relief cut into the backplate rather than a plate laid on
+    /// through the middle: a relief cut into the root plate rather than a plate laid on
     /// top of it. The light vector is negated relative to `Bevel`, so the edges facing
     /// `light_source_position` fall into shadow and the far edges catch the light —
     /// which is what reads as "lower" instead of "raised".
@@ -370,7 +370,7 @@ pub enum Prim {
     /// The inverse of [`Prim::Recess`]: a plateau RAISED out of the surface below.
     /// Like `Recess` it emits only the shaded edges, never a fill — the face is the
     /// untouched surface underneath — so a region outlined by raised rolled bumps
-    /// keeps the backplate's own color and translucency. Same wall semantics as
+    /// keeps the root plate's own color and translucency. Same wall semantics as
     /// `Recess` (`edges` = top/right/bottom/left); the lighting is the raised sign,
     /// so the edges facing `light_source_position` catch the light. `tint` colors
     /// the lit rim like [`Prim::Recess`]'s — the focused-pane treatment for a
@@ -914,7 +914,7 @@ impl PaintCtx {
 
     /// Raise a plateau out of the already-painted surface below — the inverse of
     /// [`PaintCtx::recess`]. Only the edges are shaded; the face stays the surface
-    /// beneath, so the raised region inherits the backplate's color. `depth` is the
+    /// beneath, so the raised region inherits the root plate's color. `depth` is the
     /// roll width in px (pass [`crate::layout::bevel_width`] unless the widget
     /// needs a tighter lip).
     pub fn boss(&mut self, rect: Rect, radii: Radii, depth: f32) {

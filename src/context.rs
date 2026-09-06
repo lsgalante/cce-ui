@@ -922,7 +922,7 @@ impl UiContext {
         false
     }
 
-    /// The window-drag question (Phase 6: every root `Backplate` is dissolved, so the surface
+    /// The window-drag question (Phase 6: every root plate container is dissolved, so the surface
     /// itself is the movable plate): a drag may start anywhere no drag-blocking widget sits
     /// under the cursor.
     pub fn drag_allowed_at(&self, px: f32, py: f32) -> bool {
@@ -943,7 +943,7 @@ impl UiContext {
                         let w = &*ptr;
                         let is_hit = w.hit_test(px, py, self)
                             || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self));
-                        if is_hit && w.blocks_backplate_drag() {
+                        if is_hit && w.blocks_root_plate_drag() {
                             return false;
                         }
                     }
@@ -967,7 +967,7 @@ impl UiContext {
                     if !ptr.is_null() {
                         let w = &*ptr;
                         let is_hit = w.hit_test(px, py, self) || (scroll_y != 0.0 && w.hit_test(px, py + scroll_y, self));
-                        if is_hit && w.blocks_backplate_drag() {
+                        if is_hit && w.blocks_root_plate_drag() {
                             return true;
                         }
                     }

@@ -1030,7 +1030,7 @@ mod tests {
     }
 
     /// `style.surface.plate.root.*` is the only root-plate spelling: the
-    /// legacy `backplate.*` block is ignored, whether it stands beside the
+    /// legacy `root plate.*` block is ignored, whether it stands beside the
     /// canonical block or alone (its read-alias was removed 2026-09-06).
     #[test]
     fn test_plate_root_canonical_spelling() {

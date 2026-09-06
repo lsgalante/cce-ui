@@ -2451,9 +2451,15 @@ Constraint respected: **each crate still builds standalone** — the new core is
       aliases came out: the `backplate.*` pointer/registry read-aliases in cce-ui, the
       compositor's `backplate` node fallback, cce-grid's and cce-notifier's fallbacks, the
       `#[deprecated] backplate_*` getters, and `backplate` in `PROP_NODES`. A `backplate`
-      block in a config is now silently ignored. Registry slot names, `BACKPLATE_*` statics,
-      the compositor's serde fields and `set_backplate_*` setters keep the historical
-      name — internal vocabulary, not aliases.
+      block in a config is now silently ignored.
+    - **7a-4 — DONE (2026-09-06).** The internal vocabulary followed: registry slots
+      (`root_plate_*`), the `ROOT_PLATE_*` statics, `set_root_plate_*` setters,
+      `read_root_plate_opacity_if_configured`, the trait methods
+      `Application::is_movable_root_plate_at` and `Widget::blocks_root_plate_drag`, the
+      compositor's `root_plate_{color,blur,corner_radius}` config fields (and the flat-form
+      keys of the same name), cce-gallery's `RootPlate` exhibit and `--root-plate` flags,
+      and the comment prose across every crate. "backplate" survives only in this RFC's
+      history and in test fixtures that prove the legacy spelling is ignored.
   - **7b — `PlateSpec` + window-corner math toolkit-side.** Introduce the spec, port
     `pane_plate_radii` in, and give the engine a root-plate paint path fed by a spec instead of
     each app's hand-rolled quads (DemoApp first, then the clients). The designer's per-pane

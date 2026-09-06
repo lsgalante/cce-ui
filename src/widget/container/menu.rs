@@ -33,7 +33,7 @@ pub struct MenuBar {
     pub curved_circle: Option<(f32, f32, f32)>,
     pub blur: bool,
     pub color: Option<[f32; 4]>,
-    /// Draw as a recess carved into the window backplate instead of as an opaque bar:
+    /// Draw as a recess carved into the window root plate instead of as an opaque bar:
     /// no background fill of its own, just shaded edges, so the plate shows through.
     /// `color` is ignored while this is set — see [`Adapted::<MenuBar>::with_recess`].
     pub recessed: bool,
@@ -354,7 +354,7 @@ impl Adapted<MenuBar> {
         self
     }
 
-    /// Drop the bar's own background and carve it into the window backplate instead, so
+    /// Drop the bar's own background and carve it into the window root plate instead, so
     /// the plate reads as recessed under the menu — a relief cut into the surface rather
     /// than a slab sitting on it. Shading follows the DE-wide `light_source_position` /
     /// `bevel_depth` config, inverted so the light-facing edges are the shadowed ones.
@@ -448,7 +448,7 @@ impl Paint for MenuBar {
     }
 
     fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        // Corners never round (the backplate-adjacency source is gone). The radius was the
+        // Corners never round (the root plate-adjacency source is gone). The radius was the
         // parent's, read through a stored pointer — but nothing ever set_parent's a MenuBar,
         // so 0.0 is what production always read (6bd: the dead pointer field is gone).
         Some((0.0, (false, false, false, false)))
@@ -465,7 +465,7 @@ impl Paint for MenuBar {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         if self.recessed {
-            // No background of our own: carve the backplate instead. The recess shading is
+            // No background of our own: carve the root plate instead. The recess shading is
             // a light/shadow overlay, so whatever the plate painted here (fill, rim
             // gradient, blur) shows through modulated.
             // `depth` is the roll-off width in px (the shading amplitude is separate: the
@@ -489,7 +489,7 @@ impl Paint for MenuBar {
             }
         } else {
             // Background: always the plain quad — the rounded-against-parent variant required a
-            // backplate parent, which no longer exists.
+            // root plate parent, which no longer exists.
             ctx.quad(rect, self.bg_color());
         }
 
@@ -761,7 +761,7 @@ impl Paint for MenuBar {
 }
 
 impl Input for MenuBar {
-    fn blocks_backplate_drag(&self) -> bool {
+    fn blocks_root_plate_drag(&self) -> bool {
         false
     }
 
