@@ -2752,7 +2752,8 @@ pub fn set_button_font(font: &str) {
 
 pub fn color_selector_preview_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("color_selector_preview_corner_radius").unwrap_or(4.0)
+    // Unset: the swatch rounds like the text field beside it (the TextBox radius).
+    get_style_registry().read().unwrap().get_float("color_selector_preview_corner_radius").unwrap_or_else(textbox_corner_radius)
 }
 
 pub fn set_color_selector_preview_corner_radius(radius: f32) {
@@ -2764,7 +2765,8 @@ pub fn set_color_selector_preview_corner_radius(radius: f32) {
 
 pub fn color_selector_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("color_selector_corner_radius").unwrap_or(4.0)
+    // Unset: the selector's frame rounds like the text field it stands in for.
+    get_style_registry().read().unwrap().get_float("color_selector_corner_radius").unwrap_or_else(textbox_corner_radius)
 }
 
 pub fn set_color_selector_corner_radius(radius: f32) {

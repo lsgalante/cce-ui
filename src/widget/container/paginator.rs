@@ -11,7 +11,7 @@
 //! - [`Paint::aggregates_child_extra_quads`] + [`Paint::forwarded_highlight`]: legacy
 //!   `extra_quads` served the strip's chrome only (cce-layout-interface renders the tab
 //!   column through that getter plus `all_rounded_quads`, which carries the strip's rounded
-//!   state fills — the paginator's own background quads live in `all_quads` alone), and
+//!   state fills — the paginator's own backgrounds live in `all_rounded_quads` alone), and
 //!   legacy `highlight_quad` forwarded to the strip's (the hovered-tab tint
 //!   cce-layout-interface draws directly).
 
@@ -176,11 +176,14 @@ impl Paint for Paginator {
 
     /// Own geometry: the sidebar background plus the page-area background — the latter is the
     /// one visual the former empty `Page` stack contributed (its bg quad over the content
-    /// area), painted directly since the pages folded away (Phase 6au).
+    /// area), painted directly since the pages folded away (Phase 6au). Both round at the
+    /// plate radius; the page area keeps only its outer corners so the seam with the sidebar
+    /// stays straight.
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let r = crate::layout::plate_corner_radius();
         let c = self.color();
         if c[3] > 0.0 {
-            ctx.quad(rect, c);
+            ctx.rounded_rect(rect, r, (true, true, true, true), c);
         }
         if !self.page_labels.is_empty() {
             let mut pc = colors::page_color();
@@ -193,7 +196,7 @@ impl Paint for Paginator {
                     width: (rect.width - sidebar_w).max(0.0),
                     height: rect.height,
                 };
-                ctx.quad(page_rect, pc);
+                ctx.rounded_rect(page_rect, r, (false, true, true, false), pc);
             }
         }
     }
@@ -319,16 +322,17 @@ mod tests {
         ctx.register_widget(id, ptr);
 
         // Legacy split: `extra_quads` is the children's chrome only; the sidebar background
-        // quad lives in `all_quads` alone (email/layout-interface draw their own backgrounds
-        // under `extra_quads`).
+        // (a rounded rect) lives in `all_rounded_quads` alone (layout-interface draws its
+        // own backgrounds under `extra_quads`).
         let extra = WidgetHost::extra_quads(&p);
         let strip_extra = p.sidebar_menu.extra_quads();
         assert_eq!(extra.len(), strip_extra.len(), "children-only plain view (pages emit none)");
         let bg = colors::sidebar_bg_color();
         if bg[3] > 0.0 {
-            let bg_quad = (0.0, 0.0, 400.0, 300.0, bg);
-            assert!(!extra.contains(&bg_quad), "no own bg in extra_quads");
-            assert!(WidgetHost::all_quads(&p, &ctx).contains(&bg_quad), "own bg in all_quads");
+            let r = crate::layout::plate_corner_radius();
+            let bg_quad = (0.0, 0.0, 400.0, 300.0, r, bg, (true, true, true, true));
+            assert!(!extra.iter().any(|q| q.4 == bg && q.2 == 400.0), "no own bg in extra_quads");
+            assert!(WidgetHost::all_rounded_quads(&p, &ctx).contains(&bg_quad), "own bg in all_rounded_quads");
         }
 
         // The embedded strip + pages land in the registry on tick (the spatial grid feeds off
