@@ -1299,7 +1299,12 @@ impl Layout for TextBox {
         4.0
     }
 
+    /// One row for a single-line box; a multiline box has no natural height of its own —
+    /// the host sizes it, and a layout strategy leaves its assigned rect alone.
     fn intrinsic_size(&self) -> Option<Size> {
+        if self.multiline {
+            return None;
+        }
         Some(Size::new(0.0, crate::layout::textbox_height()))
     }
 

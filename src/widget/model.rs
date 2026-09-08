@@ -1168,8 +1168,20 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         }
     }
 
+    /// The height a layout should allot: the widget's intrinsic content height, plus the
+    /// detached-label strip for widgets whose label eats INTO the assigned rect
+    /// ([`Layout::inflates_label_rect`] false — Slider, Spinbox, Dropdown, ...). Inflating
+    /// widgets grow past the assigned rect on `set_rect` instead, so their strip is not
+    /// counted here. Either way, a widget assigned its preferred height ends up with its
+    /// intrinsic content height — which is what makes the two conventions lay out alike.
     fn preferred_height(&self) -> Option<f32> {
-        Layout::intrinsic_size(&self.inner).map(|s| s.height)
+        let size = Layout::intrinsic_size(&self.inner)?;
+        let strip = if Layout::inline_label(&self.inner) || Layout::inflates_label_rect(&self.inner) {
+            0.0
+        } else {
+            self.base.label_offset()
+        };
+        Some(size.height + strip)
     }
 
     /// The `WidgetHost::measure` default, except the width consults the intrinsic size when the
@@ -1676,6 +1688,34 @@ mod tests {
     fn rect_of(ptr: *mut (dyn WidgetHost + 'static)) -> Rect {
         let (x, y, w, h) = unsafe { (*ptr).rect() };
         Rect { x, y, width: w, height: h }
+    }
+
+    /// A labeled control assigned its `preferred_height` keeps its full intrinsic content
+    /// height whichever label convention it follows: the inflating kind (ProgressBar) grows
+    /// past the assigned rect, the eating kind (Slider, Spinbox, Dropdown) has the strip
+    /// counted into the preferred height instead — so a strategy sizing children by
+    /// `preferred_height` never squashes a track to the label's leftovers.
+    #[test]
+    fn preferred_height_of_a_labeled_control_leaves_the_content_height_intact() {
+        use crate::widget::{Dropdown, ProgressBar, Slider, Spinbox};
+        let mut slider = Slider::new().with_label("Gain");
+        let mut spinbox = Spinbox::new(1, 0, 9, 1).with_label("Count");
+        let mut dropdown = Dropdown::new(vec!["a".into()], 0).with_label("Pick");
+        let mut bar = ProgressBar::new(0.5).with_label("Load");
+        let strip = slider.base.label_offset();
+        assert!(strip > 0.0, "a detached label has a strip above the content");
+
+        for (name, w, content) in [
+            ("slider", &mut slider as &mut dyn WidgetHost, crate::layout::slider_height()),
+            ("spinbox", &mut spinbox, crate::layout::spinbox_height()),
+            ("dropdown", &mut dropdown, crate::layout::dropdown_height()),
+            ("progress bar", &mut bar, crate::layout::progressbar_height()),
+        ] {
+            let pref = w.preferred_height().expect(name);
+            w.set_rect(0.0, 0.0, 100.0, pref);
+            let painted = w.rect().3 - crate::widget::label_offset(w);
+            assert!((painted - content).abs() < 0.01, "{name}: content {painted} after preferred {pref}, wanted {content}");
+        }
     }
 
     #[test]

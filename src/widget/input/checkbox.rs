@@ -206,6 +206,9 @@ pub struct Toggle {
     /// (`set_toggled`, `set_value_string`) snap it, so only user interaction
     /// animates.
     slide_t: f32,
+    /// Per-widget slide-style override; `None` follows the DE config
+    /// (`style.control.toggle.style`).
+    slide_override: Option<bool>,
 }
 
 impl Toggle {
@@ -219,7 +222,15 @@ impl Toggle {
             justify: Justification::Center,
             raised: crate::layout::control_relief(),
             slide_t: 0.0,
+            slide_override: None,
         })
+    }
+
+    /// The slide style (config `style.control.toggle.style = "slide"`, or
+    /// `with_slide` per widget): a half-width button gliding between the
+    /// ends instead of the rocker.
+    pub fn slide(&self) -> bool {
+        self.slide_override.unwrap_or_else(crate::layout::toggle_slide)
     }
 
     pub fn set_label(&mut self, label: &str) {
@@ -240,7 +251,7 @@ impl Toggle {
     /// right (on) ends by the animated `slide_t`. `None` when the style is
     /// off — legacy-view hosts fall back to `rocker_reliefs`.
     pub fn slide_button(&self, rect: Rect) -> Option<Rect> {
-        if !crate::layout::toggle_slide() {
+        if !self.slide() {
             return None;
         }
         let bw = rect.width * 0.5;
@@ -284,7 +295,7 @@ impl Toggle {
     /// style, so on a flat host these overlays plus [`Toggle::flat_carves`]
     /// are the ENTIRE control; without them the row was a bare label.
     pub fn flat_faces(&self, rect: Rect) -> Vec<(Rect, f32, (bool, bool, bool, bool), [f32; 4])> {
-        if crate::layout::toggle_slide() {
+        if self.slide() {
             return Vec::new();
         }
         let radius = crate::layout::toggle_corner_radius();
@@ -395,6 +406,12 @@ impl Adapted<Toggle> {
         self.raised = raised;
         self
     }
+
+    /// Slide style for this widget regardless of the config (see `Toggle::slide`).
+    pub fn with_slide(mut self, slide: bool) -> Self {
+        self.slide_override = Some(slide);
+        self
+    }
 }
 
 impl Layout for Toggle {
@@ -435,7 +452,7 @@ impl Paint for Toggle {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-        let slide = crate::layout::toggle_slide();
+        let slide = self.slide();
 
         // A toggle paints NO fill of its own, in any style: it is worked out
         // of the plate it sits on, so the plate's own material shows through
@@ -532,7 +549,7 @@ impl Input for Toggle {
     /// (~90ms exponential settle). Programmatic syncs snap instead — see
     /// `set_toggled` / `set_value_string` — so only user interaction animates.
     fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
-        if !crate::layout::toggle_slide() {
+        if !self.slide() {
             return false;
         }
         let target = if self.toggled { 1.0 } else { 0.0 };

@@ -194,8 +194,10 @@ impl Layout for Float3 {
         4.0
     }
 
+    /// The three rows alone: the adapter adds the detached-label strip itself
+    /// (`Adapted::preferred_height`), as it does for every non-inflating widget.
     fn intrinsic_size(&self) -> Option<Size> {
-        Some(Size::new(0.0, Float3::preferred_height(self.label.is_some())))
+        Some(Size::new(0.0, Float3::preferred_height(false)))
     }
 
     fn rect_assigned(&mut self, rect: Rect) {
