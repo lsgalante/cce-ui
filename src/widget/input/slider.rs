@@ -569,8 +569,9 @@ impl Adapted<RangeSlider> {
 /// more across `range` (between its two swells). Capsule tips: the profile
 /// shrinks over a circular cap inside each track end — the band ends round, not
 /// square-cut, and the well contour and wheel halo (both measured from here)
-/// round with it.
-pub(crate) fn band_profile(track_x: f32, track_w: f32, h: f32, x: f32, centers: &[f32], range: Option<(f32, f32)>) -> f32 {
+/// round with it. Public with `paint_band_shape` so app-owned scrubbers (the
+/// designer's playbar) draw the same band.
+pub fn band_profile(track_x: f32, track_w: f32, h: f32, x: f32, centers: &[f32], range: Option<(f32, f32)>) -> f32 {
     let band_t = crate::layout::slider_band_thickness().max(0.5);
     let bulge_h = crate::layout::slider_bulge_height().clamp(band_t, h);
     let bulge_w = crate::layout::slider_bulge_width().max(2.0);
@@ -599,7 +600,7 @@ pub(crate) fn band_profile(track_x: f32, track_w: f32, h: f32, x: f32, centers: 
 /// `bevel_depth` like the rocker's `face_light`. Then the band itself, one
 /// column per pixel with a hair of overlap so AA seams can't open. The one
 /// painter behind Slider, RangeSlider and Float3's rows.
-pub(crate) fn paint_band_shape(ctx: &mut PaintCtx, track_x: f32, track_w: f32, cy: f32, color: [f32; 4], profile: &dyn Fn(f32) -> f32) {
+pub fn paint_band_shape(ctx: &mut PaintCtx, track_x: f32, track_w: f32, cy: f32, color: [f32; 4], profile: &dyn Fn(f32) -> f32) {
     const WELL_GAP: f32 = 4.0;
     const WELL_WALL: f32 = 3.0;
     const WALL_STEPS: usize = 3;
