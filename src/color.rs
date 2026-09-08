@@ -15,9 +15,6 @@ pub const STATUS_ACCENT: [f32; 4] = [0.20, 0.20, 0.25, 1.0];
 pub const RESET_BTN_IDLE: [f32; 4] = [0.55, 0.20, 0.20, 0.4];
 pub const RESET_BTN_HOVER: [f32; 4] = [0.70, 0.30, 0.30, 0.6];
 pub const RESET_BTN_PRESS: [f32; 4] = [0.40, 0.12, 0.12, 0.8];
-pub const CHECKBOX_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
-pub const CHECKBOX_CHECKED: [f32; 4] = [0.20, 0.50, 0.75, 1.0];
-pub const CHECKBOX_HOVER: [f32; 4] = [0.25, 0.25, 0.30, 1.0];
 pub const TOGGLE_OFF: [f32; 4] = [0.25, 0.25, 0.30, 1.0];
 pub const TOGGLE_ON: [f32; 4] = [0.14, 0.70, 0.38, 1.0];
 pub const TOGGLE_HOVER: [f32; 4] = [0.30, 0.30, 0.35, 1.0];
@@ -84,10 +81,6 @@ static SPINBOX_DISPLAY_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_DISPLAY);
 static SPINBOX_BUTTON_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON);
 static SPINBOX_BUTTON_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON_HOVER);
 static SPINBOX_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.8, 0.8, 0.83, 1.0]);
-static CHECKBOX_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_BG);
-static CHECKBOX_CHECKED_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_CHECKED);
-static CHECKBOX_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new(CHECKBOX_HOVER);
-static CHECKBOX_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.25, 0.25, 0.30, 1.0]);
 
 static BUTTON_BORDER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static BUTTON_HOVER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
@@ -411,18 +404,6 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/spinbox/text_color") {
         if let Ok(mut lock) = SPINBOX_TEXT_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/checkbox/background_color").or_else(|| get_color("/style/checkbox/background_color")) {
-        if let Ok(mut lock) = CHECKBOX_BG_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/checkbox/checked_color").or_else(|| get_color("/style/checkbox/checked_color")) {
-        if let Ok(mut lock) = CHECKBOX_CHECKED_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/checkbox/hover_color").or_else(|| get_color("/style/checkbox/hover_color")) {
-        if let Ok(mut lock) = CHECKBOX_HOVER_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/checkbox/border_color").or_else(|| get_color("/style/checkbox/border_color")) {
-        if let Ok(mut lock) = CHECKBOX_BORDER_COLOR.write() { *lock = c; }
     }
     if let Some(c) = get_color("/style/control/button/border_color").or_else(|| get_color("/style/button/border_color")) {
         if let Ok(mut lock) = BUTTON_BORDER_COLOR.write() { *lock = Some(c); }
@@ -1326,17 +1307,6 @@ pub fn set_rangeslider_fill(color: [f32; 4]) {
     }
 }
 
-pub fn checkbox_border() -> [f32; 4] {
-    load_colors_once();
-    *CHECKBOX_BORDER_COLOR.read().unwrap()
-}
-
-pub fn set_checkbox_border(color: [f32; 4]) {
-    if let Ok(mut lock) = CHECKBOX_BORDER_COLOR.write() {
-        *lock = color;
-    }
-}
-
 pub fn button_border_color() -> Option<[f32; 4]> {
     load_colors_once();
     *BUTTON_BORDER_COLOR.read().unwrap()
@@ -1465,39 +1435,6 @@ pub fn spinbox_text_color() -> [f32; 4] {
 
 pub fn set_spinbox_text_color(color: [f32; 4]) {
     if let Ok(mut lock) = SPINBOX_TEXT_COLOR.write() {
-        *lock = color;
-    }
-}
-
-pub fn checkbox_bg() -> [f32; 4] {
-    load_colors_once();
-    *CHECKBOX_BG_COLOR.read().unwrap()
-}
-
-pub fn set_checkbox_bg(color: [f32; 4]) {
-    if let Ok(mut lock) = CHECKBOX_BG_COLOR.write() {
-        *lock = color;
-    }
-}
-
-pub fn checkbox_checked() -> [f32; 4] {
-    load_colors_once();
-    *CHECKBOX_CHECKED_COLOR.read().unwrap()
-}
-
-pub fn set_checkbox_checked(color: [f32; 4]) {
-    if let Ok(mut lock) = CHECKBOX_CHECKED_COLOR.write() {
-        *lock = color;
-    }
-}
-
-pub fn checkbox_hover() -> [f32; 4] {
-    load_colors_once();
-    *CHECKBOX_HOVER_COLOR.read().unwrap()
-}
-
-pub fn set_checkbox_hover(color: [f32; 4]) {
-    if let Ok(mut lock) = CHECKBOX_HOVER_COLOR.write() {
         *lock = color;
     }
 }
