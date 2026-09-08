@@ -2787,7 +2787,7 @@ pub fn push_extra_quad_vertices(
     }
 
     let (wx, mut wy, ww, mut wh) = target_w.rect();
-    let top_room = crate::widget::label_offset(target_w);
+    let top_room = target_w.label_strip();
     wy += top_room;
     wh -= top_room;
     let extra_radii = crate::widget::CornerRadii::new(
@@ -2801,7 +2801,7 @@ pub fn push_extra_quad_vertices(
 
     if let Some((color, thickness)) = target_w.solid_border() {
         let (rx, mut ry, rw, mut rh) = target_w.rect();
-        let top = crate::widget::label_offset(target_w);
+        let top = target_w.label_strip();
         ry += top;
         rh -= top;
         if (qx - rx).abs() < 0.1 && (qy - ry).abs() < 0.1 && (qw - rw).abs() < 0.1 && (qh - rh).abs() < 0.1 {
@@ -2863,7 +2863,7 @@ pub fn push_extra_quad_vertices_clipped(
     }
 
     let (wx, mut wy, ww, mut wh) = target_w.rect();
-    let top_room = crate::widget::label_offset(target_w);
+    let top_room = target_w.label_strip();
     wy += top_room;
     wh -= top_room;
     let extra_radii = crate::widget::CornerRadii::new(
@@ -2877,7 +2877,7 @@ pub fn push_extra_quad_vertices_clipped(
 
     if let Some((color, thickness)) = target_w.solid_border() {
         let (rx, mut ry, rw, mut rh) = target_w.rect();
-        let top = crate::widget::label_offset(target_w);
+        let top = target_w.label_strip();
         ry += top;
         rh -= top;
         if (qx - rx).abs() < 0.1 && (qy - ry).abs() < 0.1 && (qw - rw).abs() < 0.1 && (qh - rh).abs() < 0.1 {

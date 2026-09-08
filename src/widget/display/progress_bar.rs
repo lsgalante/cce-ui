@@ -140,18 +140,19 @@ mod tests {
         }
     }
 
-    /// The detached-label convention survives the adapter: `set_rect` grows the widget by the
-    /// label offset, and painting is inset below the label region (config-independent: the
-    /// expected offset is derived from the observed rect).
+    /// The one detached-label convention: the assigned rect is the whole block, the
+    /// label strip at its top and the track painted below it (config-independent: the
+    /// strip is read back from the widget).
     #[test]
-    fn label_inflates_rect_and_insets_paint() {
+    fn label_strip_heads_the_block_and_insets_paint() {
         let ctx = UiContext::new();
         let mut bar = ProgressBar::new(0.5).with_recessed(false).with_label("Progress");
-        WidgetHost::set_rect(&mut bar, 0.0, 10.0, 100.0, 8.0);
+        let offset = WidgetHost::label_strip(&bar);
+        assert!(offset > 0.0, "a labeled bar carries a strip");
+        WidgetHost::set_rect(&mut bar, 0.0, 10.0, 100.0, 8.0 + offset);
 
         let (_, y, _, h) = WidgetHost::rect(&bar);
-        let offset = h - 8.0;
-        assert!(offset >= 0.0, "rect grew by the label offset");
+        assert_eq!(h, 8.0 + offset, "the rect is the block it was given");
         assert_eq!(y, 10.0, "origin is unchanged");
 
         let quads = WidgetHost::all_rounded_quads(&bar, &ctx);

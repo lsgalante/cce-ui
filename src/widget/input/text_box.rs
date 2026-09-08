@@ -11,7 +11,7 @@
 //! Parity notes:
 //! - The legacy render split is asymmetric and preserved faithfully: the non-rounded path
 //!   (`extra_quads`) draws at the full base x/width with a disabled special-case; the rounded
-//!   path (`all_rounded_quads`) insets by the side label and has NO disabled branch.
+//!   path (`all_rounded_quads`) has NO disabled branch.
 //! - Releases: legacy `mouse_input` hit-gated releases too (out-of-rect releases were dropped).
 //!   The adapter delivers releases ungated, so the model re-checks containment itself against
 //!   the plain rect (the row-substituted release geometry is approximated — flagged).
@@ -34,16 +34,6 @@ pub fn get_font_db() -> &'static resvg::usvg::fontdb::Database {
         db.load_fonts_dir(crate::fonts_dir());
         db
     })
-}
-
-/// Side-layout label inset — the legacy `WidgetHost::label_x_offset` default for non-exempt
-/// widgets (TextBox was never in the exempt list).
-fn side_offset(label: &Option<String>) -> f32 {
-    if crate::layout::control_label_layout() == "side" && label.is_some() {
-        90.0
-    } else {
-        0.0
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +96,7 @@ pub struct TextBox {
     /// first shape (readers fall back to the grid).
     line_glyph_positions: Vec<Vec<f32>>,
     pub update_on_type: bool,
-    /// Synced control label ([`Paint::sync_label`]) — drives the side/detached offsets.
+    /// Synced control label ([`Paint::sync_label`]) — drives the detached strip offset.
     label: Option<String>,
     /// Own hover flag, maintained from `MouseEnter`/`MouseLeave` (adapter bookkeeping).
     hovered: bool,
@@ -165,23 +155,14 @@ impl TextBox {
         })
     }
 
-    /// The detached-label strip height — a replica of `Widget::label_offset` over the synced
-    /// label (zero in side layout or unlabeled).
+    /// The detached-label strip height above the content (zero unlabeled) — the
+    /// adapter's `Widget::label_offset` over the synced label.
     fn label_top(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" {
-            return 0.0;
-        }
-        if self.label.is_some() {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            font_size + crate::layout::control_label_margin()
-        } else {
-            0.0
-        }
+        crate::widget::input::slider::detached_strip(&self.label)
     }
 
     fn map_x_to_idx(&self, click_x: f32) -> usize {
-        let label_x = side_offset(&self.label);
-        let relative_x = click_x - (self.rect.x + label_x + 8.0) + self.scroll_x;
+        let relative_x = click_x - (self.rect.x + 8.0) + self.scroll_x;
         if self.glyph_positions.is_empty() {
             let char_width = self.char_width();
             return ((relative_x / char_width).round() as isize)
@@ -690,20 +671,19 @@ impl TextBox {
 
     /// Map a press/drag position to a buffer index — the shared body of the legacy
     /// `mouse_input` press arm and `drag_update`.
-    fn position_to_idx(&self, px: f32, py: f32, with_label_x: bool) -> usize {
+    fn position_to_idx(&self, px: f32, py: f32) -> usize {
         let char_width = self.char_width();
         let top = self.label_top();
-        let label_x = if with_label_x { side_offset(&self.label) } else { 0.0 };
         if self.multiline {
             let line_height = self.line_height();
             let max_chars = if self.line_wrap_enabled() {
-                ((((self.rect.width - label_x) - 16.0) / char_width).floor() as usize).max(1)
+                (((self.rect.width - 16.0) / char_width).floor() as usize).max(1)
             } else {
                 999999
             };
             let (lines, index_map) = self.wrap_text(max_chars);
             let click_line = (((py - (self.rect.y + top + 8.0) + self.scroll_y) / line_height).floor() as isize).max(0) as usize;
-            let rel_x = px - (self.rect.x + label_x + 8.0) + self.scroll_x;
+            let rel_x = px - (self.rect.x + 8.0) + self.scroll_x;
             let click_col = self.line_x_to_col(click_line.min(lines.len() - 1), rel_x);
             self.map_2d_to_1d(&index_map, click_line, click_col, lines.len() - 1)
         } else {
@@ -714,7 +694,7 @@ impl TextBox {
     /// Extend the selection to a drag position — the shared body of the legacy
     /// `on_cursor_moved` drag arm and `drag_update` (which used no label inset).
     fn extend_selection_to(&mut self, px: f32, py: f32) -> bool {
-        let drag_idx = self.position_to_idx(px, py, false);
+        let drag_idx = self.position_to_idx(px, py);
         if self.cursor_idx != drag_idx {
             self.cursor_idx = drag_idx;
             self.just_focused = false;
@@ -992,7 +972,7 @@ impl TextBox {
 
     /// Selection highlight + caret quads, shared by both render branches. `x`/`w` are the
     /// (possibly label-inset) horizontal span the branch draws in — the legacy paths differed
-    /// (non-rounded used the full base span, rounded inset by the side label).
+    /// (non-rounded and rounded alike use the full base span).
     fn selection_quads(&self, x: f32, w: f32, out: &mut Vec<(f32, f32, f32, f32, [f32; 4])>) {
         if !(self.editing || self.select_anchor.is_some()) {
             return;
@@ -1140,9 +1120,8 @@ impl TextBox {
             [0xcc, 0xcc, 0xd4]
         };
 
-        let label_x = side_offset(&self.label);
-        let x = self.rect.x + label_x;
-        let w = self.rect.width - label_x;
+        let x = self.rect.x;
+        let w = self.rect.width;
 
         if self.multiline {
             let char_width = self.char_width();
@@ -1211,11 +1190,10 @@ impl TextBox {
             return None;
         }
         let top = self.label_top();
-        let label_x = side_offset(&self.label);
         let well = Rect {
-            x: self.rect.x + label_x,
+            x: self.rect.x,
             y: self.rect.y + top,
-            width: self.rect.width - label_x,
+            width: self.rect.width,
             height: self.rect.height - top,
         };
         let depth = crate::layout::bevel_width().min(well.height * 0.2);
@@ -1292,10 +1270,6 @@ impl Adapted<TextBox> {
 }
 
 impl Layout for TextBox {
-    fn inflates_label_rect(&self) -> bool {
-        false
-    }
-
 
     /// One row for a single-line box; a multiline box has no natural height of its own —
     /// the host sizes it, and a layout strategy leaves its assigned rect alone.
@@ -1376,13 +1350,11 @@ impl Paint for TextBox {
     }
 
     fn text_bounds(&self, rect: Rect) -> Option<[f32; 4]> {
-        // Legacy bounded-text getters clipped to the full base rect, inset on the left by the
-        // side label.
+        // Legacy bounded-text getters clipped to the full block rect.
         let top = self.label_top();
         let base_y = rect.y - top;
         let base_h = rect.height + top;
-        let label_x = side_offset(&self.label);
-        Some([rect.x + label_x, base_y, rect.x + rect.width, base_y + base_h])
+        Some([rect.x, base_y, rect.x + rect.width, base_y + base_h])
     }
 
     /// The legacy `prepare_text`: sync font family/size with the live config defaults, then
@@ -1468,8 +1440,7 @@ impl Paint for TextBox {
         // one `selection_quads`/`value_labels` compute at paint time.
         self.line_glyph_positions.clear();
         if self.multiline {
-            let label_x = side_offset(&self.label);
-            let wrap_w = self.rect.width - label_x;
+            let wrap_w = self.rect.width;
             let max_chars = if self.line_wrap_enabled() {
                 (((wrap_w - 16.0) / self.char_width()).floor() as usize).max(1)
             } else {
@@ -1517,7 +1488,7 @@ impl Paint for TextBox {
         let _ = (base_y, base_h);
 
         if radius <= 0.0 {
-            // Legacy `extra_quads`: full base span (no side-label inset), disabled
+            // Legacy `extra_quads`: full base span, disabled
             // special-case with early return.
             let mut quads: Vec<(f32, f32, f32, f32, [f32; 4])> = Vec::new();
             if self.disabled {
@@ -1547,10 +1518,9 @@ impl Paint for TextBox {
                 ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
             }
         } else {
-            // Legacy `all_rounded_quads`: side-label inset, no disabled special-case.
-            let label_x = side_offset(&self.label);
-            let x = self.rect.x + label_x;
-            let w = self.rect.width - label_x;
+            // Legacy `all_rounded_quads`: no disabled special-case.
+            let x = self.rect.x;
+            let w = self.rect.width;
 
             // One background regardless of focus (see the flat path above).
             let bg_color = crate::colors::textbox_background_color();
@@ -1676,7 +1646,7 @@ impl Input for TextBox {
                     self.begin_editing();
                     ectx.request_focus();
                 }
-                let idx = self.position_to_idx(*px, *py, true);
+                let idx = self.position_to_idx(*px, *py);
                 self.cursor_idx = idx;
                 self.select_anchor = Some(idx);
                 self.all_selected = false;
@@ -1688,11 +1658,8 @@ impl Input for TextBox {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Released, x: px, y: py, .. } => {
                 if self.disabled { return false; }
                 // Legacy gated releases on the hit test; the adapter delivers them ungated, so
-                // re-check containment (plain rect + side inset — row spans approximated).
-                let label_x = side_offset(&self.label);
-                let top = self.label_top();
-                let (bx, by, bw, bh) = (self.rect.x + label_x, self.rect.y, self.rect.width - label_x, self.rect.height);
-                let _ = top;
+                // re-check containment (the plain block rect — row spans approximated).
+                let (bx, by, bw, bh) = (self.rect.x, self.rect.y, self.rect.width, self.rect.height);
                 if !(*px >= bx && *px <= bx + bw && *py >= by && *py <= by + bh) {
                     return false;
                 }

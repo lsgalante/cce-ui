@@ -943,11 +943,7 @@ impl Ramp {
     /// The detached-label strip height the labeled dropdowns carry
     /// (`Widget::label_offset`'s formula).
     pub fn label_strip() -> f32 {
-        if crate::layout::control_label_layout() == "side" {
-            return 0.0;
-        }
-        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-        font_size + crate::layout::control_label_margin()
+        crate::layout::control_label_strip()
     }
 
     /// Lay out the control strip under the curve area. One rhythm: the label

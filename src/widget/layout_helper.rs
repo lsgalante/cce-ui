@@ -21,10 +21,10 @@ impl ColumnLayout {
         }
     }
 
+    /// `height` is the CONTENT height; the widget's block adds its label strip.
     pub fn add_widget(&mut self, widget: &mut dyn WidgetHost, height: f32) {
-        let label_off = widget.base().label_offset();
-        let total_h = height + label_off;
-        widget.set_rect(self.x + self.margin, self.current_y, self.width - 2.0 * self.margin, height);
+        let total_h = height + widget.label_strip();
+        widget.set_rect(self.x + self.margin, self.current_y, self.width - 2.0 * self.margin, total_h);
         self.current_y += total_h + self.gap;
     }
 
@@ -36,7 +36,7 @@ impl ColumnLayout {
         let mut max_label_off = 0.0;
         for &widget_ptr in widgets {
             unsafe {
-                let off = (*widget_ptr).base().label_offset();
+                let off = (*widget_ptr).label_strip();
                 if off > max_label_off {
                     max_label_off = off;
                 }
@@ -48,7 +48,9 @@ impl ColumnLayout {
         let mut curr_x = self.x + self.margin;
         for &widget_ptr in widgets {
             unsafe {
-                (*widget_ptr).set_rect(curr_x, self.current_y, widget_w, height);
+                // Content lines up on one row; a shorter label strip starts lower.
+                let off = (*widget_ptr).label_strip();
+                (*widget_ptr).set_rect(curr_x, self.current_y + max_label_off - off, widget_w, height + off);
             }
             curr_x += widget_w + gap;
         }

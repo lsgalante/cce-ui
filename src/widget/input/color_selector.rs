@@ -226,9 +226,9 @@ impl Paint for ColorSelector {
     /// The legacy `extra_quads` body against the laid-out rect (field, caret while
     /// editing, and the soft-glow rounded color preview), plus the hex readout label.
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // The well is color_selector_height tall, seated at the rect's TOP —
-        // the label rides above the rect (inflating-label convention) and the
-        // row's bottom band belongs to the NEXT row's label. Hosts that hand
+        // The well is color_selector_height tall, seated at the content rect's TOP —
+        // the label rides in the strip above it and the row's bottom band belongs
+        // to the NEXT row's label. Hosts that hand
         // over a whole param row (ParametersBg's 40px color rows) get a
         // standard control-height well instead of a row-tall one.
         let well_h = crate::layout::color_selector_height().min(rect.height);

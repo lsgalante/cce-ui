@@ -86,7 +86,6 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.label.font" => "control_label_font",
                 "style.control.label.font_detached" => "control_label_font_detached",
                 "style.control.label.margin" => "control_label_margin",
-                "style.control.label.layout" => "control_label_layout",
                 "style.control.slider.height" => "slider_height",
                 "style.control.slider.corner_radius" => "slider_corner_radius",
                 "style.control.slider.band_thickness" => "slider_band_thickness",
@@ -389,7 +388,6 @@ static CONTROL_LABEL_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(No
 static CONTROL_LABEL_FONT_DETACHED: RwLock<String> = RwLock::new(String::new());
 static CONTROL_LABEL_FONT_DETACHED_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
 static CONTROL_LABEL_MARGIN: RwLock<f32> = RwLock::new(6.0);
-static CONTROL_LABEL_LAYOUT: RwLock<String> = RwLock::new(String::new());
 static PLATE_CORNER_RADIUS: RwLock<f32> = RwLock::new(12.0);
 static LIST_FONT: RwLock<String> = RwLock::new(String::new());
 static LIST_FONT_CACHED: RwLock<Option<(String, f32)>> = RwLock::new(None);
@@ -462,13 +460,6 @@ pub fn reload_config() {
                     if let Ok(mut lock) = CONTROL_LABEL_MARGIN.write() {
                         *lock = val;
                     }
-                }
-            }
-            if let Some(rest) = trimmed.strip_prefix("control_label_layout") {
-                let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                let val_str = rest.trim_end_matches('"').trim().to_string();
-                if let Ok(mut lock) = CONTROL_LABEL_LAYOUT.write() {
-                    *lock = val_str;
                 }
             }
             if let Some(rest) = trimmed.strip_prefix("nested_section_label_alignment") {
@@ -1228,13 +1219,9 @@ pub fn control_label_margin() -> f32 {
     *CONTROL_LABEL_MARGIN.read().unwrap()
 }
 
-pub fn control_label_layout() -> String {
-    let lock = CONTROL_LABEL_LAYOUT.read().unwrap();
-    if lock.is_empty() {
-        "top".to_string()
-    } else {
-        lock.clone()
-    }
+pub(crate) fn control_label_strip() -> f32 {
+    let (_, font_size) = control_label_font_detached_parsed();
+    font_size + control_label_margin()
 }
 
 pub fn label_margin() -> f32 {
@@ -3682,11 +3669,12 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     if let Some(w_id) = id {
         ctx.register_widget(w_id, w as *mut T as *mut (dyn WidgetHost + 'static));
     }
-    // The legacy contract: `y` is the top of the detached label, `wh` the content
-    // height below it. `layout` takes the CONTENT origin (the label hangs above it),
-    // so step down by the strip.
+    // The flat-host contract, the same block `set_rect` takes: `(x, y)` is the top of
+    // the detached label and `wh` the block height, label strip included. `layout`
+    // takes the CONTENT origin and height, so step down by the strip.
     let strip = w.label_strip();
-    w.layout(crate::widget::Point { x, y: y + strip }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
+    let content_h = (wh - strip).max(0.0);
+    w.layout(crate::widget::Point { x, y: y + strip }, crate::widget::LayoutConstraints::new(ww, ww, content_h, content_h), ctx);
 
     // Shape, which on this path nobody else does. A flat host consumes
     // `all_quads`, so `prepare_text` — where a TextBox records the per-glyph x
@@ -3703,7 +3691,7 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     let (style_r, corners) = w.corner_style();
     let r = if corners != (false, false, false, false) { style_r } else { 0.0 };
     let (wx, mut wy, www, mut whh) = w.rect();
-    let top_room = crate::widget::label_offset(w);
+    let top_room = w.label_strip();
     wy += top_room;
     whh -= top_room;
 
@@ -4053,7 +4041,7 @@ impl Column {
         if let Some(pref) = w.preferred_height() {
             wh = pref;
         }
-        let top_room = crate::widget::label_offset(w);
+        let top_room = w.label_strip();
         let total_h = wh + top_room;
         let x = self.ax(x_off);
         let y = self.ay();
@@ -4234,7 +4222,7 @@ impl Section {
             wh = pref;
         }
         let pad = self.padding();
-        let top_room = crate::widget::label_offset(w);
+        let top_room = w.label_strip();
         let total_h = wh + top_room;
 
         let name = w.type_name();
@@ -5426,7 +5414,7 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
             wh = pref;
         }
         let pad = self.padding();
-        let top_room = crate::widget::label_offset(w);
+        let top_room = w.label_strip();
         let total_h = wh + top_room;
 
         let name = w.type_name();
@@ -5682,7 +5670,7 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
         let y = max_h;
 
         let pref_h = w.preferred_height().unwrap_or(wh);
-        let top_room = crate::widget::label_offset(w);
+        let top_room = w.label_strip();
         let total_h = pref_h + top_room;
 
         w.set_row_rect(self.context.left + pad, self.context.cw - 2.0 * pad);
@@ -5856,11 +5844,11 @@ mod tests {
     impl WidgetHost for MockWidgetWithLabel {
         crate::impl_widget_base!(MockWidgetWithLabel);
         fn rect(&self) -> (f32, f32, f32, f32) {
-            let offset = crate::widget::label_offset(self);
+            let offset = self.label_strip();
             (self.base.x, self.base.y - offset, self.base.w, self.base.h + offset)
         }
         fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-            let offset = crate::widget::label_offset(self);
+            let offset = self.label_strip();
             self.base.x = x;
             self.base.y = y + offset;
             self.base.w = w;

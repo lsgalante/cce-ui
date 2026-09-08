@@ -1,8 +1,7 @@
 //! Narrow-trait `Float3` — a labeled group of three STANDARD [`Slider`]s (X/Y/Z), each with
 //! the toolkit's readout, embedded by value inside `ParametersBg` (its only consumer), which
 //! drives it through direct `WidgetHost` calls. The group label is the ordinary detached
-//! control label (the adapter's, exactly like a slider row's — `inflates_label_rect = false`,
-//! the label eats into the assigned rect); below it sit three `Adapted<Slider>` children in
+//! control label (the adapter's, exactly like a slider row's); below it sit three `Adapted<Slider>` children in
 //! whatever style the DE config gives every other slider (the band that swallowed the rodent,
 //! the recessed well, the square track), each fronted by its axis letter. The model caches its
 //! laid-out rect ([`Layout::rect_assigned`]) and lays the children out from it; paint and input
@@ -52,15 +51,9 @@ impl Float3 {
         })
     }
 
-    /// The height a labeled (`labeled`) group lays out to: the detached label band (none in
-    /// the side layout) plus three slider rows and their gaps — the row-height table entry.
+    /// The height a labeled (`labeled`) group lays out to: the detached label band plus three slider rows and their gaps — the row-height table entry.
     pub fn preferred_height(labeled: bool) -> f32 {
-        let top = if labeled && crate::layout::control_label_layout() != "side" {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            font_size + crate::layout::control_label_margin()
-        } else {
-            0.0
-        };
+        let top = if labeled { crate::layout::control_label_strip() } else { 0.0 };
         top + 3.0 * crate::layout::slider_height() + 2.0 * ROW_GAP
     }
 
@@ -95,36 +88,18 @@ impl Float3 {
         &self.sliders
     }
 
-    /// Detached-label band above the rows — a replica of `Widget::label_offset` over the
-    /// synced label (zero in the side layout or unlabeled), the Slider's own formula.
+    /// Detached-label band above the rows (zero unlabeled) — the adapter's
+    /// `Widget::label_offset` over the synced label.
     fn label_top(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" {
-            return 0.0;
-        }
-        if self.label.is_some() {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            font_size + crate::layout::control_label_margin()
-        } else {
-            0.0
-        }
-    }
-
-    /// The side-layout label inset (`WidgetHost::label_x_offset` — this type is not exempt).
-    fn side_offset(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" && self.label.is_some() {
-            90.0
-        } else {
-            0.0
-        }
+        crate::widget::input::slider::detached_strip(&self.label)
     }
 
     /// The three slider rows' rects (`(x, y, w, h)`, X/Y/Z), laid out below the label band and
     /// right of the axis-letter column. Each is exactly the rect its sub-slider is assigned.
     pub fn get_row_rects(&self) -> Vec<(f32, f32, f32, f32)> {
         let top = self.rect.y + self.label_top();
-        let side = self.side_offset();
-        let x = self.rect.x + side + AXIS_W;
-        let w = (self.rect.width - side - AXIS_W).max(10.0);
+        let x = self.rect.x + AXIS_W;
+        let w = (self.rect.width - AXIS_W).max(10.0);
         let h = crate::layout::slider_height();
         (0..3).map(|i| (x, top + i as f32 * (h + ROW_GAP), w, h)).collect()
     }
@@ -179,10 +154,6 @@ impl Adapted<Float3> {
 impl Layout for Float3 {
     /// The Slider convention: the label eats into the assigned rect, the host sizes the row
     /// for it ([`Float3::preferred_height`]).
-    fn inflates_label_rect(&self) -> bool {
-        false
-    }
-
 
     /// The three rows alone: the adapter adds the detached-label strip itself
     /// (`Adapted::preferred_height`), as it does for every non-inflating widget.

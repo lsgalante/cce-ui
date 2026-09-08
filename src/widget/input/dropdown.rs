@@ -1,7 +1,7 @@
 //! Narrow-trait `Dropdown` (Phase 5p — first popover widget through `Paint::popover` /
-//! `draw_popover`, the 5o surface). Detached-label control on the Slider convention (no rect
-//! inflation; the label eats into the assigned rect), `Control::control_label`'s +4px inset via
-//! `Layout::detached_label_inset`, side-label inset computed from the synced label.
+//! `draw_popover`, the 5o surface). Detached-label control: the adapter draws the label in
+//! the strip above the trigger, at `Layout::detached_label_inset`; the trigger's plate is the
+//! control alone.
 //!
 //! Parity notes (all legacy-faithful, verified against the pre-migration impl):
 //! - `parent_snapshot` is the data form of the legacy public, direct-write-only `parent`
@@ -69,16 +69,6 @@ fn text_advance(text: &str, font_family: &str, font_size: f32) -> f32 {
         let w_dummy = crate::widget::display::measure_text_width("M", font_family, font_size);
         let measure_str = format!("{}M", text);
         (crate::widget::display::measure_text_width(&measure_str, font_family, font_size) - w_dummy).max(0.0)
-    }
-}
-
-/// Side-layout label inset — the legacy `WidgetHost::label_x_offset` default for non-exempt
-/// widgets (Dropdown was never in the exempt list).
-fn side_offset(label: &Option<String>) -> f32 {
-    if crate::layout::control_label_layout() == "side" && label.is_some() {
-        90.0
-    } else {
-        0.0
     }
 }
 
@@ -224,18 +214,10 @@ impl Dropdown {
         text_advance(&self.display_text(), &font_family, font_size) + Self::LABEL_INSET
     }
 
-    /// The detached-label strip height above the content rect — a replica of
-    /// `Widget::label_offset` over the synced label (zero in side layout or unlabeled).
+    /// The detached-label strip height above the content rect (zero unlabeled) —
+    /// the adapter's `Widget::label_offset` over the synced label.
     fn label_top(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" {
-            return 0.0;
-        }
-        if self.label.is_some() {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            font_size + crate::layout::control_label_margin()
-        } else {
-            0.0
-        }
+        crate::widget::input::slider::detached_strip(&self.label)
     }
 
     /// Expansion/contraction duration — the status-interface module-menu pace.
@@ -319,9 +301,8 @@ impl Dropdown {
             // No band: the revealed menu IS the whole open surface.
             return (ax, ay, aw, ah);
         }
-        let label_x = side_offset(&self.label);
-        let (tx, ty) = (content.x + label_x, content.y);
-        let (tw, th) = ((content.width - label_x).max(0.0), content.height);
+        let (tx, ty) = (content.x, content.y);
+        let (tw, th) = (content.width, content.height);
         let x0 = tx.min(ax);
         let y0 = ty.min(ay);
         let x1 = (tx + tw).max(ax + aw);
@@ -360,9 +341,7 @@ impl Dropdown {
 
         let base_y = content.y - self.label_top();
         let open_upward = self.open_upward.unwrap_or(base_y > 400.0);
-        let label_x = side_offset(&self.label);
-
-        let mut rx = content.x + label_x;
+        let mut rx = content.x;
         let mut ry = if self.menu_replaces_trigger {
             // The menu takes the trigger's slot: flush with its bottom edge
             // (upward) or its top edge (downward) rather than stacked past it.
@@ -427,9 +406,8 @@ impl Dropdown {
     /// with the root plate-concentric corner adjustment) or `extra_quads` (plain) depending on
     /// the configured radius, byte-for-byte on the same content rect.
     fn paint_background(&self, content: Rect, ctx: &mut PaintCtx) {
-        let label_x = side_offset(&self.label);
-        let x = content.x + label_x;
-        let w = content.width - label_x;
+        let x = content.x;
+        let w = content.width;
         let y = content.y;
         let visual_h = content.height;
 
@@ -487,105 +465,6 @@ impl Dropdown {
             let (x, y, w, visual_h) = (inner.x, inner.y, inner.width, inner.height);
             let r4 = [r4t.0, r4t.1, r4t.2, r4t.3];
             let face = if raw_bg[3] > 0.001 { bg_color } else { [0.0; 4] };
-            let strip = self.label_top();
-            if strip > 0.0 {
-                // Labeled: the label sits in a CARVE-OUT tab, the section-
-                // title idiom — a flat recessed well hugging the label run,
-                // its bottom open into the trigger's groove ring below (the
-                // tab's walls: top, right, left). Right of the tab the ring
-                // keeps its normal top wall, starting at the tab's throat.
-                let g = depth * 0.5;
-                let orad = (r4[0] + g, r4[1] + g, r4[2] + g, r4[3] + g);
-                let (outer_x, outer_r) = (x - g, x + w + g);
-                let (tab_top, ring_top) = (y - strip - g, y - g);
-                // The tab hugs the label run (drawn at x + inset): text width
-                // plus the inset each side, kept inside the trigger's span.
-                let (fam, fsize) = crate::layout::control_label_font_detached_parsed();
-                let text_w = self
-                    .label
-                    .as_deref()
-                    .map(|l| crate::widget::display::measure_text_width(l, &fam, fsize))
-                    .unwrap_or(0.0);
-                let inset = crate::layout::DETACHED_LABEL_INSET; // the label's x offset
-                let tab_w = (text_w + 2.0 * inset + 2.0 * g)
-                    .max(2.0 * orad.0 + 8.0)
-                    .min(outer_r - outer_x);
-                let tab_r = outer_x + tab_w;
-
-                // The tab: bottom open into the ring, pieces extended `depth`
-                // past their interior seams so the tessellator's host fades
-                // crossfade there instead of notching the walls. With the
-                // fillet, the tab's right wall must END at the fillet's
-                // vertical tangent (crossfading out under the arc) or its
-                // straight run ghosts through the curve — the tab piece stops
-                // there and a left-only bridge carries the left wall across
-                // the fillet span down to the ring's own fade-in.
-                let fr = 6.0_f32.min(strip * 0.5);
-                let filleted = outer_r - tab_r > fr + 4.0;
-                let tab_bottom = if filleted { ring_top - fr } else { ring_top };
-                ctx.recess_edges(
-                    Rect { x: outer_x, y: tab_top, width: tab_w, height: tab_bottom - tab_top + depth },
-                    (orad.0, orad.1.min(strip * 0.5), 0.0, 0.0),
-                    depth,
-                    (true, true, false, true),
-                );
-                if filleted {
-                    ctx.recess_edges(
-                        Rect { x: outer_x, y: ring_top - fr, width: tab_w, height: fr + depth },
-                        (0.0, 0.0, 0.0, 0.0),
-                        depth,
-                        (false, false, false, true),
-                    );
-                }
-                // The ring proper: right + bottom + left walls, one prim so
-                // its corners blend internally.
-                ctx.recess_edges(
-                    Rect { x: outer_x, y: ring_top, width: w + 2.0 * g, height: visual_h + 2.0 * g },
-                    (0.0, 0.0, orad.2, orad.3),
-                    depth,
-                    (false, true, true, true),
-                );
-                // Ring top wall, right of the tab. The concave fillet rounds
-                // the throat; the straight run starts a fillet radius past it
-                // (extended `depth` left so its fade-in lands under the
-                // fillet's hard tangent cut instead of leaving a gap).
-                if filleted {
-                    ctx.concave_fillet(
-                        tab_r + fr,
-                        ring_top - fr,
-                        fr,
-                        depth,
-                        std::f32::consts::FRAC_PI_2,
-                        false,
-                    );
-                    ctx.recess_edges(
-                        Rect {
-                            x: tab_r + fr - depth,
-                            y: ring_top,
-                            width: outer_r - tab_r - fr + depth,
-                            height: visual_h + 2.0 * g,
-                        },
-                        (0.0, orad.1, 0.0, 0.0),
-                        depth,
-                        (true, false, false, false),
-                    );
-                } else if outer_r - tab_r > 0.5 {
-                    ctx.recess_edges(
-                        Rect { x: tab_r - depth, y: ring_top, width: outer_r - tab_r + depth, height: visual_h + 2.0 * g },
-                        (0.0, orad.1, 0.0, 0.0),
-                        depth,
-                        (true, false, false, false),
-                    );
-                }
-                let rect = Rect { x, y, width: w, height: visual_h };
-                let rrad = (r4[0], r4[1], r4[2], r4[3]);
-                if face[3] > 0.001 {
-                    ctx.bevel(rect, rrad, face, depth);
-                } else {
-                    ctx.boss(rect, rrad, depth);
-                }
-                return;
-            }
             ctx.inset_plate(
                 Rect { x, y, width: w, height: visual_h },
                 (r4[0], r4[1], r4[2], r4[3]),
@@ -673,9 +552,8 @@ impl Dropdown {
         };
 
         let (font_family, font_size) = crate::layout::control_label_font_detached_parsed();
-        let label_x = side_offset(&self.label);
-        let x = content.x + label_x;
-        let w = content.width - label_x;
+        let x = content.x;
+        let w = content.width;
         let start_x = x + 8.0;
         let right_limit = x + w - 28.0; // 10px margin before the arrow
         let fade_start_x = (right_limit - 24.0).max(start_x); // Fade out over the last 24px
@@ -911,11 +789,6 @@ impl Layout for Dropdown {
         }
     }
 
-    fn inflates_label_rect(&self) -> bool {
-        false
-    }
-
-
     /// Content size for the scene layout engine (Phase 2b). A normal dropdown is wide enough for
     /// the widest option (via `content_width`, which already includes the arrow/padding inset), so
     /// the control doesn't resize as the selection changes. A menu-button dropdown (fixed
@@ -1053,9 +926,8 @@ impl Paint for Dropdown {
         // trigger paint) — display text left, ▼ right, the paint_text palette.
         // A menu that replaces the trigger has no band to redraw on.
         if !self.menu_replaces_trigger {
-            let label_x = side_offset(&self.label);
-            let (tx, ty) = (rect.x + label_x, rect.y);
-            let (tw, th) = ((rect.width - label_x).max(0.0), rect.height);
+            let (tx, ty) = (rect.x, rect.y);
+            let (tw, th) = (rect.width, rect.height);
             let band_bounds = Some([ux, uy, ux + uw, uy + uh]);
             let font = crate::layout::control_label_font_detached();
             let text_y = crate::layout::align_text_y(ty, th, 12.0, 0.0);

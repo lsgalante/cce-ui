@@ -1,7 +1,6 @@
 //! `Slider2D` — a two-axis pad control: one thumb dragged across a recessed
 //! square well maps to an `(x, y)` pair in 0..1 × 0..1, y-up. Follows the
-//! `Slider` narrow-trait shape: a detached label that does NOT inflate the
-//! rect (the label eats into the assigned rect), host-driven drags through
+//! `Slider` narrow-trait shape: the adapter's detached label above the pad, host-driven drags through
 //! the `Input` drag hooks, and `take_change`-based polling by composites.
 
 use crate::scene::layout::{Rect, Size};
@@ -55,20 +54,6 @@ impl Slider2D {
         )
     }
 
-    /// The detached-label strip height above the content rect — the Slider /
-    /// Dropdown replica of `Widget::label_offset` over the synced label.
-    fn label_top(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" {
-            return 0.0;
-        }
-        if self.label.is_some() {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            font_size + crate::layout::control_label_margin()
-        } else {
-            0.0
-        }
-    }
-
     fn set_from_point(&mut self, px: f32, py: f32, rect: Rect) -> bool {
         let inset = Self::THUMB_R + 2.0;
         let w = (rect.width - 2.0 * inset).max(1.0);
@@ -87,22 +72,9 @@ impl Slider2D {
 }
 
 impl Layout for Slider2D {
-    fn inflates_label_rect(&self) -> bool {
-        false // the Slider rule: the detached label eats into the assigned rect
-    }
-
-
-    /// A 64px pad, or wide enough for its label's carve-out tab plus a filleted
-    /// throat beside it (the tab is clipped to the pad; the label spilled past a
-    /// 64px one, and a throat too short for the fillet reads as a notch).
+    /// A 64px pad.
     fn intrinsic_size(&self) -> Option<Size> {
-        let label_w = crate::widget::input::slider::detached_label_width(&self.label);
-        let tab_w = if label_w > 0.0 {
-            label_w + 2.0 * crate::layout::DETACHED_LABEL_INSET + 24.0 + crate::layout::bevel_width()
-        } else {
-            0.0
-        };
-        Some(Size::new(64.0_f32.max(tab_w), 64.0))
+        Some(Size::new(64.0, 64.0))
     }
 
     fn intrinsic_measure_width(&self) -> bool {
@@ -150,16 +122,10 @@ impl Paint for Slider2D {
         );
 
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        // The well's ring, with a labeled pad's label in a carve-out tab — the one
-        // labeled-well composition the sliders share (`carve_labeled_well`).
-        crate::widget::input::slider::carve_labeled_well(
-            ctx,
-            rect,
-            self.label_top(),
-            crate::widget::input::slider::detached_label_width(&self.label),
-            radius,
-            depth,
-        );
+        // The well's ring, carved inside the pad's rect (`layout::carve_inside`); the
+        // control label above is the adapter's, outside the well like every control's.
+        let (inner, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
+        ctx.recess(inner, radii, depth);
     }
 }
 

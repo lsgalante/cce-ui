@@ -740,16 +740,11 @@ impl Widget {
         }
     }
 
+    /// The detached-label strip this widget carries above its content: the one
+    /// control-label formula (`layout::control_label_strip`) when a label is set,
+    /// zero otherwise.
     pub fn label_offset(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" {
-            return 0.0;
-        }
-        if self.label.is_some() {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            font_size + crate::layout::control_label_margin()
-        } else {
-            0.0
-        }
+        if self.label.is_some() { crate::layout::control_label_strip() } else { 0.0 }
     }
 }
 

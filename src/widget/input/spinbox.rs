@@ -1,5 +1,5 @@
-//! Narrow-trait `Spinbox` (Phase 5i). Slider-style label convention (no rect inflation; label
-//! eats into the assigned rect, side-label inset computed from the synced label). Sub-zone
+//! Narrow-trait `Spinbox` (Phase 5i). The adapter's detached label sits above the content rect
+//! the geometry here works in. Sub-zone
 //! hover (the -/+ buttons) is tracked from `PointerMove` against the content rect; a click on
 //! the display area enters edit mode and takes focus via `EventCtx::request_focus`.
 
@@ -10,14 +10,6 @@ use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton, NamedKey,
     Paint, TextEditorState,
 };
-
-fn side_offset(label: &Option<String>) -> f32 {
-    if crate::layout::control_label_layout() == "side" && label.is_some() {
-        90.0
-    } else {
-        0.0
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Spinbox {
@@ -115,9 +107,8 @@ impl Spinbox {
     }
 
     fn geom(&self, rect: Rect) -> SpinGeom {
-        let side = side_offset(&self.label);
-        let x = rect.x + side;
-        let w = rect.width - side;
+        let x = rect.x;
+        let w = rect.width;
         let pad = crate::layout::spinbox_button_padding();
         SpinGeom {
             x,
@@ -272,10 +263,6 @@ impl Adapted<Spinbox> {
 }
 
 impl Layout for Spinbox {
-    fn inflates_label_rect(&self) -> bool {
-        false
-    }
-
 
 
     fn intrinsic_size(&self) -> Option<Size> {

@@ -613,12 +613,7 @@ impl ParametersBg {
                     // only the interior left edge. A ring encapsulated
                     // within the bevel doubled the valley on the adjoining
                     // sides.
-                    let label_top = if crate::layout::control_label_layout() == "side" {
-                        0.0
-                    } else {
-                        crate::layout::control_label_font_detached_parsed().1
-                            + crate::layout::control_label_margin()
-                    };
+                    let label_top = crate::layout::control_label_strip();
                     let band_h = r.3 - label_top;
                     let inset = crate::layout::bevel_width().min(band_h * 0.2);
                     let by = r.1 + label_top + inset;
@@ -1194,7 +1189,7 @@ impl ParametersBg {
                 if let Some(t) = &self.toggles[i] {
                     let (x, y, w, h) = t.rect();
                     if w > 0.0 && h > 0.0 {
-                        let ty = crate::widget::label_offset(t);
+                        let ty = t.label_strip();
                         let rect = Rect { x, y: y + ty, width: w, height: h - ty };
                         for c in t.inner().flat_carves(rect) {
                             let raised = match c.kind {
@@ -1222,7 +1217,7 @@ impl ParametersBg {
                 // a fill with its own lit edge and stays on the widget's paint.
                 if let Some(c) = &self.colors[i] {
                     let (x, y, w, h) = c.rect();
-                    let ty = crate::widget::label_offset(c);
+                    let ty = c.label_strip();
                     if let Some((rx, ry, rw, rh, rr, rd)) =
                         c.inner().field_relief(Rect { x, y: y + ty, width: w, height: h - ty })
                     {
@@ -1241,13 +1236,10 @@ impl ParametersBg {
                 if ww <= 0.0 || h <= 0.0 {
                     continue;
                 }
-                // The side-label inset the widget's own paint applies (0 for the
-                // exempt kinds — button, toggle), and the top-label band, which
-                // stays outside the relief like every other host.
-                let lx = w.label_x_offset();
-                let ty = crate::widget::label_offset(w);
+                // The top-label band stays outside the relief like every other host.
+                let ty = w.label_strip();
                 let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                out.push((x + lx, y + ty, ww - lx, h - ty, r4(radius), depth, raised, all));
+                out.push((x, y + ty, ww, h - ty, r4(radius), depth, raised, all));
             }
         }
         out
@@ -1283,7 +1275,7 @@ impl ParametersBg {
                 if let (Some(d), Some(tb)) = (&self.choices[i], &self.texts[i]) {
                     let (bx, by, bw, bh) = d.rect();
                     let (_, _, _, th) = tb.rect();
-                    let ty = crate::widget::label_offset(tb);
+                    let ty = tb.label_strip();
                     if bw > 0.0 && bh > 0.0 {
                         let depth = crate::layout::bevel_width().min((th - ty) * 0.2);
                         let r = (crate::layout::textbox_corner_radius() - depth).max(2.0);
@@ -1294,7 +1286,7 @@ impl ParametersBg {
             } else if p.2.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
                     let (x, y, w, h) = sb.rect();
-                    let ty = crate::widget::label_offset(sb);
+                    let ty = sb.label_strip();
                     let band = Rect { x, y: y + ty, width: w, height: h - ty };
                     if let Some((_, Some(((run, radii, rd, edges), _)))) =
                         sb.inner().relief_parts(band)
@@ -1305,18 +1297,17 @@ impl ParametersBg {
             } else if p.2.starts_with("choice") {
                 // The dropdown trigger: the widget's own raised paint is one
                 // `inset_plate` on its content band — the same ring here, on
-                // the same band (side-label inset, top-label band excluded),
+                // the same band (top-label band excluded),
                 // same radius, same depth cap. The face stays the plate: the
                 // pane carries no dropdown fill (a `Border` face never reaches
                 // the rounded-quad view), so the trigger is flush and bare.
                 if let Some(d) = &self.choices[i] {
                     let (x, y, w, h) = d.rect();
                     if w > 0.0 && h > 0.0 {
-                        let lx = d.label_x_offset();
-                        let ty = crate::widget::label_offset(d);
+                        let ty = d.label_strip();
                         let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
                         let r = crate::layout::dropdown_corner_radius();
-                        out.push((x + lx, y + ty, w - lx, h - ty, (r, r, r, r), depth, (true, true, true, true)));
+                        out.push((x, y + ty, w, h - ty, (r, r, r, r), depth, (true, true, true, true)));
                     }
                 }
             } else if p.2 == "toggle" || p.2 == "checkbox" {
@@ -1326,7 +1317,7 @@ impl ParametersBg {
                 if let Some(t) = &self.toggles[i] {
                     let (x, y, w, h) = t.rect();
                     if w > 0.0 && h > 0.0 {
-                        let ty = crate::widget::label_offset(t);
+                        let ty = t.label_strip();
                         let rect = Rect { x, y: y + ty, width: w, height: h - ty };
                         for c in t.inner().flat_carves(rect) {
                             if matches!(c.kind, crate::layout::CarveKind::Trough) {
@@ -1358,7 +1349,7 @@ impl ParametersBg {
             }
             if let Some(sb) = &self.spinboxes[i] {
                 let (x, y, w, h) = sb.rect();
-                let ty = crate::widget::label_offset(sb);
+                let ty = sb.label_strip();
                 let band = Rect { x, y: y + ty, width: w, height: h - ty };
                 if let Some((_, Some(((_, _, rd, _), (sa, sb2, sw, host))))) =
                     sb.inner().relief_parts(band)
@@ -1675,7 +1666,7 @@ impl Input for ParametersBg {
             if p.2.starts_with("slider") {
                 let r = rects[i];
                 if let Some(s) = &mut self.sliders[i] {
-                    let top = crate::widget::label_offset(s);
+                    let top = s.label_strip();
                     if py >= r.1 + top && py <= r.1 + r.3 {
                         s.drag_begin(px, py);
                         self.dragging_param = Some(i);
@@ -2584,7 +2575,7 @@ impl Input for ParametersBg {
                             let latched = !ui.scroll_gesture_new
                                 && ui.scroll_initiate_widget_id == Some(s.base().id());
                             let (sx, sy, sw, sh) = s.rect();
-                            let ty = crate::widget::label_offset(s);
+                            let ty = s.label_strip();
                             latched
                                 || s.inner().scroll_hit(
                                     Rect { x: sx, y: sy + ty, width: sw, height: sh - ty },

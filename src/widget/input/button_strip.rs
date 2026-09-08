@@ -69,7 +69,7 @@ impl ButtonStrip {
 
     /// The laid-out content rect: the rect mirrored from the adapter by
     /// `Layout::rect_assigned` (or the constructor arguments until the first layout)
-    /// less the detached label strip the adapter inflated it by, so the segments,
+    /// less the detached label strip at the top of that block, so the segments,
     /// the well and the hit-testing all sit below the label.
     fn rect(&self) -> (f32, f32, f32, f32) {
         let strip = crate::widget::input::slider::detached_strip(&self.label);

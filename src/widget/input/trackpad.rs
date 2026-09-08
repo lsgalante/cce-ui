@@ -12,8 +12,8 @@ pub struct Finger {
 
 /// Touchpad visualization/input area (narrow-trait model, Phase 6as leaf sweep). The
 /// content rect is cached on assignment (the ParametersBg pattern) because the finger
-/// math runs from events and drags as well as paint; the control label stays
-/// model-drawn (`inline_label`) to keep the legacy detached-top layout byte-identical.
+/// math runs from events and drags as well as paint; the control label is the adapter's
+/// detached one above the pad, like every control's.
 #[derive(Debug, Clone)]
 pub struct Trackpad {
     rect: Rect,
@@ -51,35 +51,10 @@ impl Adapted<Trackpad> {
 }
 
 impl Trackpad {
-
-    fn label_offset(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" {
-            return 0.0;
-        }
-        if self.label.is_some() {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            font_size + crate::layout::control_label_margin()
-        } else {
-            0.0
-        }
-    }
-
-    fn label_x_offset(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" && self.label.is_some() {
-            90.0
-        } else {
-            0.0
-        }
-    }
-
-    /// The inner touch area (content rect minus the detached-label reservation).
+    /// The touch area: the cached block rect less the detached-label strip above it.
     fn touch_area(&self) -> (f32, f32, f32, f32) {
-        let label_x = self.label_x_offset();
-        let x = self.rect.x + label_x;
-        let w = self.rect.width - label_x;
-        let top = self.label_offset();
-        let visual_h = self.rect.height - top;
-        (x, self.rect.y + top, w, visual_h)
+        let top = crate::widget::input::slider::detached_strip(&self.label);
+        (self.rect.x, self.rect.y + top, self.rect.width, self.rect.height - top)
     }
 
     fn finger_at(&self, px: f32, py: f32) -> Finger {
@@ -93,10 +68,6 @@ impl Trackpad {
 }
 
 impl Layout for Trackpad {
-    fn inline_label(&self) -> bool {
-        true
-    }
-
     fn rect_assigned(&mut self, rect: Rect) {
         self.rect = rect;
     }
@@ -160,7 +131,7 @@ impl Paint for Trackpad {
             );
         }
 
-        // 4. Labels ("Touchpad Area" hint + the model-drawn control label)
+        // 4. The "Touchpad Area" hint (the control label is the adapter's).
         ctx.text(
             "Touchpad Area".to_string(),
             x + 12.0,
@@ -168,16 +139,6 @@ impl Paint for Trackpad {
             11.0,
             [0x73, 0x73, 0x8c],
         );
-        if let Some(ref label) = self.label {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            ctx.text(
-                label.clone(),
-                self.rect.x,
-                self.rect.y,
-                font_size,
-                colors::control_label_color_detached_for_state(self.hovered, false),
-            );
-        }
     }
 }
 

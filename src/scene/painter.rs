@@ -143,13 +143,6 @@ pub fn base_control_label(w: &dyn WidgetHost) -> Vec<TextLabel> {
         if let Some(ref label) = b.label {
             let (_, font_size) = crate::layout::control_label_font_detached_parsed();
             let color = crate::colors::control_label_color_detached_for_state(b.hovered, b.focused);
-            if crate::layout::control_label_layout() == "side" {
-                let label_x = w.label_x_offset();
-                if label_x > 0.0 {
-                    let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
-                    return vec![TextLabel { text: label.clone(), x: b.x + 4.0, y: y_pos, font_size, color }];
-                }
-            }
             return vec![TextLabel { text: label.clone(), x: b.x, y: b.y, font_size, color }];
         }
     }

@@ -207,12 +207,13 @@ pub trait WidgetHost {
     fn preferred_height(&self) -> Option<f32> { None }
 
     /// The height of the detached-label strip above this widget's content: zero for
-    /// unlabeled and inline-label widgets. A widget's occupied rect is its content plus
-    /// this strip, whichever legacy convention its `set_rect` follows; `layout` lands
-    /// the content at the origin and the strip above it. A strategy reserves that
+    /// unlabeled widgets and for those whose base label IS their content
+    /// ([`Layout::inline_label`]). A widget's rect is always its content plus this
+    /// strip — `set_rect` takes that block, `layout` lands the content at the origin
+    /// and hangs the strip above it. A strategy reserves that
     /// row above every child's content (`container_layout::label_lead`) and puts
     /// `layout::CONTROL_GAP` between the blocks.
-    fn label_strip(&self) -> f32 { 0.0 }
+    fn label_strip(&self) -> f32 { self.base().label_offset() }
 
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
         let b = self.base_mut();
@@ -268,9 +269,12 @@ pub trait WidgetHost {
         Size { width, height }
     }
 
+    /// Land the CONTENT box at `origin`, the label strip hanging above it — the one
+    /// placement contract (`Adapted` repeats it over its measured content size).
     fn layout(&mut self, origin: Point, constraints: LayoutConstraints, ctx: &mut UiContext) {
         let size = self.measure(constraints, ctx);
-        self.set_rect(origin.x, origin.y, size.width, size.height);
+        let strip = self.label_strip();
+        self.set_rect(origin.x, origin.y - strip, size.width, size.height + strip);
     }
 
     fn rect(&self) -> (f32, f32, f32, f32) {
@@ -318,10 +322,7 @@ pub trait WidgetHost {
             return false;
         }
         let b = self.base();
-        let (mut hx, mut hw) = if b.row_w > 0.0 { (b.row_x, b.row_w) } else { (x, w) };
-        let label_x = self.label_x_offset();
-        hx += label_x;
-        hw -= label_x;
+        let (hx, hw) = if b.row_w > 0.0 { (b.row_x, b.row_w) } else { (x, w) };
         px >= hx && px <= hx + hw && py >= y && py <= y + h
     }
 
@@ -344,10 +345,9 @@ pub trait WidgetHost {
         } else {
             return None;
         };
-        let label_x = self.label_x_offset();
         let b = self.base();
-        let hx = if b.row_w > 0.0 { b.row_x } else { b.x } + label_x;
-        let hw = if b.row_w > 0.0 { b.row_w } else { b.w } - label_x;
+        let hx = if b.row_w > 0.0 { b.row_x } else { b.x };
+        let hw = if b.row_w > 0.0 { b.row_w } else { b.w };
         Some((hx, b.y, hw, b.h, hc))
     }
 
@@ -359,18 +359,6 @@ pub trait WidgetHost {
     // removed their last stored-child-pointer consumer): the drag queries are concrete
     // inherent `Adapted<W>` reads; index-driven rosters (TI, designer) route them
     // through per-slot matches like the other value drains.
-
-    fn label_x_offset(&self) -> f32 {
-        let name = self.type_name();
-        if name == "Label" || name == "Button" || name == "Checkbox" || name == "Toggle" || name == "Ramp" {
-            return 0.0;
-        }
-        if crate::layout::control_label_layout() == "side" && self.base().label.is_some() {
-            90.0
-        } else {
-            0.0
-        }
-    }
 
     fn extra_quads(&self) -> Vec<(f32, f32, f32, f32, [f32; 4])> { Vec::new() }
     fn extra_arcs(&self) -> Vec<(f32, f32, f32, f32, f32, f32, [f32; 4])> { Vec::new() }
@@ -666,14 +654,6 @@ pub trait GeomController {
     fn set_geom_visible(&mut self, visible: bool);
     fn geom_visible(&self) -> bool;
     fn take_geom_toggle(&mut self) -> bool;
-}
-
-pub fn label_offset(w: &dyn WidgetHost) -> f32 {
-    let name = w.type_name();
-    if name == "Label" || name == "Button" || name == "Checkbox" || name == "Toggle" {
-        return 0.0;
-    }
-    w.base().label_offset()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

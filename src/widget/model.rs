@@ -41,19 +41,14 @@ pub trait Layout {
         None
     }
 
-    /// Whether this widget draws its control label *inline* (inside its own rect, like
-    /// `Checkbox`/`Toggle`/`Button`) rather than detached above it (like `ProgressBar`/`Slider`).
-    /// Inline-label widgets get no `set_rect` height inflation and no content-rect inset —
-    /// mirroring the legacy `label_offset` free function's type-name special cases.
+    /// Whether this widget's base label IS its content — the text a `Button` face, a
+    /// `Checkbox` row or a `Label` draws itself — rather than a control label, which
+    /// the adapter draws detached above the content (the one convention for every
+    /// labeled control: `layout::control_label_strip` tall, at
+    /// [`detached_label_inset`](Layout::detached_label_inset)). Inline-label widgets
+    /// carry no label strip and get no content-rect inset.
     fn inline_label(&self) -> bool {
         false
-    }
-
-    /// Whether `set_rect` grows the widget past the assigned rect to make room for a detached
-    /// label above (`ProgressBar`'s legacy convention). Sliders keep the assigned rect and let
-    /// the label eat into it instead. Irrelevant for inline-label widgets. Default: grow.
-    fn inflates_label_rect(&self) -> bool {
-        true
     }
 
     /// Horizontal inset of the detached base label: [`crate::layout::DETACHED_LABEL_INSET`]
@@ -72,7 +67,7 @@ pub trait Layout {
     }
 
     /// Whether the adapter's hit test substitutes the base row rect (`row_x`/`row_w`, pushed in
-    /// by row-layout hosts via `set_row_rect`) plus the side-label inset — the legacy
+    /// by row-layout hosts via `set_row_rect`) — the legacy
     /// `WidgetHost::hit_test` default geometry. Migrated controls so far dropped it (accepted
     /// drift); TextBox restores it (cce-files' save-name box relies on row hits). Default: off,
     /// keeping the other migrated widgets exactly as they shipped.
@@ -710,19 +705,8 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     }
 
     /// The rect the wrapped widget paints into: the widget's rect minus the detached-label
-    /// region at the top (zero inset when there is no label, or when the widget draws its label
-    /// inline — `Widget::label_offset` / [`Layout::inline_label`]).
-    /// How far past an assigned rect `set_rect` grows this widget for its detached
-    /// label — the legacy inflating convention; zero for the eating convention and
-    /// for inline labels.
-    fn label_inflation(&self) -> f32 {
-        if Layout::inline_label(&self.inner) || !Layout::inflates_label_rect(&self.inner) {
-            0.0
-        } else {
-            self.base.label_offset()
-        }
-    }
-
+    /// strip at the top (zero when there is no label, or when the widget's label is its
+    /// content — [`Layout::inline_label`]).
     fn content_rect(&self) -> Rect {
         let top = if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() };
         Rect {
@@ -1025,13 +1009,6 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         if let Some(ref label) = b.label {
             let (_, font_size) = crate::layout::control_label_font_detached_parsed();
             let color = crate::colors::control_label_color_detached_for_state(b.hovered, b.focused);
-            if crate::layout::control_label_layout() == "side" {
-                let label_x = WidgetHost::label_x_offset(self);
-                if label_x > 0.0 {
-                    let y_pos = crate::layout::align_text_y(b.y, b.h, font_size, 0.0);
-                    return vec![TextLabel { text: label.clone(), x: b.x + 4.0, y: y_pos, font_size, color }];
-                }
-            }
             let inset = Layout::detached_label_inset(&self.inner);
             return vec![TextLabel { text: label.clone(), x: b.x + inset, y: b.y, font_size, color }];
         }
@@ -1116,12 +1093,11 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // containers — the ctx-carrying half of the arrangement the model can't do in
         // `arrange_children`.
         // `origin` is the CONTENT box's top-left and `measure` its height; the detached
-        // label hangs in the strip above, so the occupied rect starts `strip` higher.
-        // `set_rect` speaks the widget's legacy convention: an inflating widget grows
-        // by the strip itself, one whose label eats into its rect needs it included.
+        // label hangs in the strip above, so the block `set_rect` takes starts `strip`
+        // higher and is `strip` taller.
         let size = self.measure(constraints, ctx);
         let strip = self.label_strip();
-        self.set_rect(origin.x, origin.y - strip, size.width, size.height + strip - self.label_inflation());
+        self.set_rect(origin.x, origin.y - strip, size.width, size.height + strip);
         let host_id = self.base.id();
         Layout::register_embedded_children(&mut self.inner, host_id, ctx);
     }
@@ -1156,17 +1132,16 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
 
     // --- Legacy structural conventions the adapter owns on the widget's behalf ---
 
-    /// The detached-label convention shared by legacy control widgets: the widget grows past the
-    /// rect its parent assigns to make room for the label above (`ProgressBar`/`Slider`-style
-    /// `set_rect` overrides). Inline-label widgets ([`Layout::inline_label`]) draw the label
-    /// inside their rect and get no inflation. Zero-cost when no label is set.
+    /// The assigned rect is the widget's whole block: the detached label strip (if any)
+    /// at its top, the content below (`content_rect`). One convention for every
+    /// control — a caller sizing a labeled widget by hand adds `label_strip` to the
+    /// content height; `layout` does that for it.
     fn set_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         let r = Layout::adjust_rect(&self.inner, Rect { x, y, width: w, height: h });
-        let inflation = self.label_inflation();
         self.base.x = r.x;
         self.base.y = r.y;
         self.base.w = r.width;
-        self.base.h = r.height + inflation;
+        self.base.h = r.height;
         // Ungated rect notification (TextBox re-clamps scroll on every assignment, hidden or
         // not — the legacy `set_rect` side effect).
         let landed = Rect { x: self.base.x, y: self.base.y, width: self.base.w, height: self.base.h };
@@ -1180,9 +1155,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         }
     }
 
-    /// The intrinsic content height — the control below the label. Which legacy
-    /// `set_rect` convention the widget follows (rect inflated by the label, or the
-    /// label eating into it) is `layout`'s business, not the caller's.
+    /// The intrinsic content height — the control below the label.
     fn preferred_height(&self) -> Option<f32> {
         Layout::intrinsic_size(&self.inner).map(|s| s.height)
     }
@@ -1213,7 +1186,7 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
     /// overrides do today) — unless the widget opts back in
     /// ([`Paint::legacy_focus_highlight`], TextBox), in which case this replicates the
     /// `WidgetHost` default byte-for-byte: primary tint when ctx-focused (or active), secondary
-    /// when hovered, over the row-substituted, side-label-inset span.
+    /// when hovered, over the row-substituted span.
     fn highlight_quad(&self, ctx: &UiContext) -> Option<(f32, f32, f32, f32, [f32; 4])> {
         // A forwarding widget (Paginator → its ButtonStrip) serves the forwarded value here —
         // and only here; `all_quads`/`paint_self` gate on `legacy_focus_highlight` instead, so
@@ -1232,9 +1205,8 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         } else {
             return None;
         };
-        let label_x = WidgetHost::label_x_offset(self);
-        let hx = if self.base.row_w > 0.0 { self.base.row_x } else { self.base.x } + label_x;
-        let hw = if self.base.row_w > 0.0 { self.base.row_w } else { self.base.w } - label_x;
+        let hx = if self.base.row_w > 0.0 { self.base.row_x } else { self.base.x };
+        let hw = if self.base.row_w > 0.0 { self.base.row_w } else { self.base.w };
         Some((hx, self.base.y, hw, self.base.h, hc))
     }
 
@@ -1541,16 +1513,13 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         }
         let (x, y, w, h) = self.rect();
         // Row-hit opt-in ([`Layout::hit_row_rect`]): replicate the legacy `hit_test` default's
-        // geometry — substitute the host-pushed row span and inset by the side label — before
+        // geometry — substitute the host-pushed row span — before
         // the narrow test. The width<=0 reject also comes from that default.
         if Layout::hit_row_rect(&self.inner) {
             if w <= 0.0 || h <= 0.0 {
                 return false;
             }
-            let (mut hx, mut hw) = if self.base.row_w > 0.0 { (self.base.row_x, self.base.row_w) } else { (x, w) };
-            let label_x = WidgetHost::label_x_offset(self);
-            hx += label_x;
-            hw -= label_x;
+            let (hx, hw) = if self.base.row_w > 0.0 { (self.base.row_x, self.base.row_w) } else { (x, w) };
             return Input::hit(&self.inner, Rect { x: hx, y, width: hw, height: h }, px, py);
         }
         Input::hit(&self.inner, Rect { x, y, width: w, height: h }, px, py)
@@ -1698,9 +1667,8 @@ mod tests {
         Rect { x, y, width: w, height: h }
     }
 
-    /// One rhythm for labeled controls whichever legacy convention they follow: the
-    /// preferred height is the CONTENT height for the inflating kind (ProgressBar) and
-    /// the eating kind (Slider, Spinbox, Dropdown) alike, and `layout` places that
+    /// One rhythm for labeled controls: the preferred height is the CONTENT height
+    /// for every kind (ProgressBar, Slider, Spinbox, Dropdown), and `layout` places that
     /// content at the origin with the label strip hanging above it — so a strategy
     /// placing content boxes lines mixed controls up by content, neither squashes a
     /// track to the label's leftovers nor lets a label spill into the gap below.
@@ -1728,7 +1696,7 @@ mod tests {
             let (_, top, _, landed) = w.rect();
             assert!((top - (100.0 - strip)).abs() < 0.01, "{name}: the label hangs above the origin (top {top})");
             assert!((landed - (content + strip)).abs() < 0.01, "{name}: occupied {landed} = content + strip");
-            let painted = landed - crate::widget::label_offset(w);
+            let painted = landed - w.label_strip();
             assert!((painted - content).abs() < 0.01, "{name}: content {painted}, wanted {content}");
         }
     }

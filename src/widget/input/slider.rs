@@ -1,8 +1,6 @@
-//! Narrow-trait `Slider` and `RangeSlider` (Phase 5h). Detached-label widgets that do NOT
-//! inflate their rect (`inflates_label_rect = false`): the label eats into the assigned rect,
-//! so the adapter's content rect is exactly the legacy `y + label_offset` / `h - label_offset`
-//! band the old geometry used. The side-label inset (`label_x_offset`) is computed by the model
-//! from its synced label + config. Drags are host-driven through the `Input` drag hooks; the
+//! Narrow-trait `Slider` and `RangeSlider` (Phase 5h). Detached-label widgets: the adapter
+//! draws the control label in the strip above the content rect the geometry here works in.
+//! Drags are host-driven through the `Input` drag hooks; the
 //! readout edit mode uses `EventCtx::request_focus` and the wheel gating uses the legacy scroll
 //! gesture state through `EventCtx::ui`.
 
@@ -23,14 +21,6 @@ struct SliderGeom {
     h: f32,
     track_x: f32,
     track_w: f32,
-}
-
-fn side_offset(label: &Option<String>) -> f32 {
-    if crate::layout::control_label_layout() == "side" && label.is_some() {
-        90.0
-    } else {
-        0.0
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -124,9 +114,8 @@ impl Slider {
 
 
     fn geom(&self, rect: Rect) -> SliderGeom {
-        let side = side_offset(&self.label);
-        let x = rect.x + side;
-        let w = rect.width - side;
+        let x = rect.x;
+        let w = rect.width;
         let (track_x, track_w) = if self.show_readout {
             let readout_w = 60.0;
             let gap = 8.0;
@@ -232,12 +221,6 @@ impl Adapted<Slider> {
 }
 
 impl Layout for Slider {
-    fn inflates_label_rect(&self) -> bool {
-        false // legacy Slider::set_rect stored the assigned rect verbatim
-    }
-
-
-
     fn intrinsic_size(&self) -> Option<Size> {
         Some(Size::new(0.0, crate::layout::slider_height()))
     }
@@ -662,123 +645,14 @@ pub(crate) fn paint_band_shape(ctx: &mut PaintCtx, track_x: f32, track_w: f32, c
     }
 }
 
-/// The recessed track's carve, in the labeled composition of the Slider2D pad (and
-/// any well that reaches up into its label strip): with a detached label (`strip` > 0, the label strip's height above
-/// `track`) the label sits in a CARVE-OUT tab, the section-title idiom (the labeled
-/// Dropdown's composition) — a flat recessed well hugging the label run, bottom open
-/// into the track's well; the well's top wall picks up right of the tab's throat.
-/// Pieces extend `depth` past interior seams (host-fade crossfade), the tab's right
-/// wall ends at the fillet's vertical tangent (or it ghosts through the arc), and a
-/// left-only bridge carries the left wall across the fillet span. Unlabeled, one
-/// plain recess.
-pub(crate) fn carve_labeled_well(ctx: &mut PaintCtx, track: Rect, strip: f32, label_w: f32, radius: f32, depth: f32) {
-    // Carve INSIDE the track (`layout::carve_inside`): every piece derives from
-    // this rect, so the whole composition — tab, fillet, bridge — moves in with it
-    // and the outer walls land on the track's edges.
-    let (track, radii) = crate::layout::carve_inside(track, (radius, radius, radius, radius), depth);
-    let radius = radii.0;
-    let track_end = track.x + track.width;
-    if strip > 0.0 {
-        // Labeled: the label sits in a CARVE-OUT tab, the section-
-        // title idiom (the labeled Dropdown's composition) — a flat
-        // recessed well hugging the label run, bottom open into the
-        // track's well; the well's top wall picks up right of the
-        // tab's throat.
-        let inset = crate::layout::DETACHED_LABEL_INSET; // the label's x offset
-        let fr = 6.0_f32.min(strip * 0.5);
-        let mut tab_w = (label_w + 2.0 * inset).max(2.0 * radius + 8.0).min(track.width);
-        // A throat too short for the fillet and a run of top wall past it reads
-        // as a notch beside the tab: then the tab spans the whole track (the
-        // Slider2D's pad, a narrow slider) and the well's top wall is the tab's.
-        if track.width - tab_w < 2.0 * fr + 4.0 {
-            tab_w = track.width;
-        }
-        let tab_r = track.x + tab_w;
-        // The labeled-Dropdown composition: pieces extend `depth`
-        // past interior seams (host-fade crossfade), the tab's right
-        // wall ends at the fillet's vertical tangent (or it ghosts
-        // through the arc), and a left-only bridge carries the left
-        // wall across the fillet span.
-        let filleted = track_end - tab_r > 2.0 * fr + 4.0;
-        let tab_bottom = if filleted { track.y - fr } else { track.y };
-        // The tab's crossfade extension past its bottom seam is capped at the
-        // fillet radius: a deep wall (a tall well's) otherwise ran on below the
-        // well's top edge as a stub beside the fillet.
-        let ext = if filleted { depth.min(fr) } else { depth };
-        ctx.recess_edges(
-            Rect { x: track.x, y: track.y - strip, width: tab_w, height: tab_bottom - (track.y - strip) + ext },
-            (radius, radius.min(strip * 0.5), 0.0, 0.0),
-            depth,
-            (true, true, false, true),
-        );
-        if filleted {
-            ctx.recess_edges(
-                Rect { x: track.x, y: track.y - fr, width: tab_w, height: fr + depth },
-                (0.0, 0.0, 0.0, 0.0),
-                depth,
-                (false, false, false, true),
-            );
-        }
-        ctx.recess_edges(track, (0.0, 0.0, radius, radius), depth, (false, true, true, true));
-        if filleted {
-            ctx.concave_fillet(
-                tab_r + fr,
-                track.y - fr,
-                fr,
-                depth,
-                std::f32::consts::FRAC_PI_2,
-                false,
-            );
-            ctx.recess_edges(
-                Rect {
-                    x: tab_r + fr - depth,
-                    y: track.y,
-                    width: track_end - tab_r - fr + depth,
-                    height: track.height,
-                },
-                (0.0, radius, 0.0, 0.0),
-                depth,
-                (true, false, false, false),
-            );
-        } else if track_end - tab_r > 0.5 {
-            ctx.recess_edges(
-                Rect { x: tab_r - depth, y: track.y, width: track_end - tab_r + depth, height: track.height },
-                (0.0, radius, 0.0, 0.0),
-                depth,
-                (true, false, false, false),
-            );
-        }
-    } else {
-        ctx.recess(track, (radius, radius, radius, radius), depth);
-    }
-}
-
-/// The detached-label strip height above a content rect (zero in side layout or
-/// unlabeled) — the adapter's `label_offset`, replicated for widgets that reach up
-/// into the strip to carve the label tab.
+/// The detached-label strip height above a content rect (zero unlabeled) — the
+/// adapter's `Widget::label_offset` over a model's synced label, for models whose
+/// cached rect is the whole block.
 pub(crate) fn detached_strip(label: &Option<String>) -> f32 {
-    if crate::layout::control_label_layout() == "side" {
-        return 0.0;
-    }
-    if label.is_some() {
-        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-        font_size + crate::layout::control_label_margin()
-    } else {
-        0.0
-    }
-}
-
-/// The detached label's measured width (the tab hugs it), zero when unlabeled.
-pub(crate) fn detached_label_width(label: &Option<String>) -> f32 {
-    let (fam, fsize) = crate::layout::control_label_font_detached_parsed();
-    label.as_deref().map(|l| crate::widget::display::measure_text_width(l, &fam, fsize)).unwrap_or(0.0)
+    if label.is_some() { crate::layout::control_label_strip() } else { 0.0 }
 }
 
 impl Layout for RangeSlider {
-    fn inflates_label_rect(&self) -> bool {
-        false
-    }
-
     fn intrinsic_size(&self) -> Option<Size> {
         Some(Size::new(0.0, crate::layout::rangeslider_height()))
     }
@@ -798,8 +672,7 @@ impl Paint for RangeSlider {
     /// swallowed length. The swells sit where the thumbs' centres were, so the
     /// drag geometry below is unchanged.
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        let side = side_offset(&self.label);
-        let (x, y, w, h) = (rect.x + side, rect.y, rect.width - side, rect.height);
+        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         let thumb_size = h * 0.9;
         let range = w - thumb_size;
         let lo = x + self.value_low * range + thumb_size / 2.0;
@@ -817,9 +690,8 @@ impl Input for RangeSlider {
                 if !ui.scroll_gesture_new && ui.scroll_initiate_widget_id != Some(ectx.id) {
                     return false;
                 }
-                let side = side_offset(&self.label);
                 let r = ectx.rect;
-                let (x, y, w, h) = (r.x + side, r.y, r.width - side, r.height);
+                let (x, y, w, h) = (r.x, r.y, r.width, r.height);
                 if *px >= r.x && *px <= r.x + r.width && *py >= y && *py <= y + h {
                     if ui.scroll_gesture_new {
                         ui.scroll_initiate_widget_id = Some(ectx.id);
@@ -865,8 +737,7 @@ impl Input for RangeSlider {
         self.active_thumb.is_some()
     }
     fn drag_begin(&mut self, px: f32, _py: f32, rect: Rect) {
-        let side = side_offset(&self.label);
-        let (x, w) = (rect.x + side, rect.width - side);
+        let (x, w) = (rect.x, rect.width);
         let thumb_size = rect.height * 0.9;
         let range = w - thumb_size;
         let thumb_low_x = x + self.value_low * range;
@@ -890,8 +761,7 @@ impl Input for RangeSlider {
     }
     fn drag_update(&mut self, px: f32, _py: f32, rect: Rect) -> bool {
         let Some(active) = self.active_thumb else { return false };
-        let side = side_offset(&self.label);
-        let (x, w) = (rect.x + side, rect.width - side);
+        let (x, w) = (rect.x, rect.width);
         let thumb_size = rect.height * 0.9;
         let range = w - thumb_size;
         if range <= 0.0 {
