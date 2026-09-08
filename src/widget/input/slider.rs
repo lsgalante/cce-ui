@@ -23,7 +23,6 @@ struct SliderGeom {
     h: f32,
     track_x: f32,
     track_w: f32,
-    thumb_size: f32,
 }
 
 fn side_offset(label: &Option<String>) -> f32 {
@@ -48,11 +47,6 @@ pub struct Slider {
     pub editor_state: TextEditorState,
     pub just_changed: bool,
     label: Option<String>,
-    /// Recessed-track style: the track is a well carved into the plate below
-    /// (the TextBox `with_recessed` idiom) — the carve's shading defines the
-    /// channel, and with a transparent track color the plate itself is its
-    /// floor.
-    recessed: bool,
     /// Wheel-scroll glide velocity (normalized value units/sec) and the last
     /// wheel-event instant — the Ramp hover-scroll idiom: when the event
     /// stream stops (fingers lifted), `tick` keeps the value coasting with
@@ -61,9 +55,6 @@ pub struct Slider {
     last_wheel: Option<std::time::Instant>,
     /// Readout / edit-buffer display precision (decimal places).
     decimals: usize,
-    /// Per-widget band-style override; `None` follows the DE config
-    /// (`style.control.slider.style`).
-    band_override: Option<bool>,
 }
 
 impl Slider {
@@ -81,11 +72,9 @@ impl Slider {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             label: None,
-            recessed: crate::layout::control_relief(),
             scroll_vel: 0.0,
             last_wheel: None,
             decimals: 2,
-            band_override: None,
         })
     }
 
@@ -127,62 +116,12 @@ impl Slider {
         }
     }
 
-    /// The "band" style (config `style.control.slider.style = "band"`): a thin
-    /// full-range band that inflates smoothly at the value — no track fill, no
-    /// thumb ball, no carve.
-    fn band(&self) -> bool {
-        self.band_override.unwrap_or_else(crate::layout::slider_band)
-    }
-
-    /// The width the value maps over: the full track under the band style
-    /// (there is no thumb to keep inside the ends), thumb-inset otherwise.
+    /// The width the value maps over: the whole track — the band has no thumb
+    /// to keep inside the ends.
     fn value_span(&self, g: &SliderGeom) -> f32 {
-        if self.band() { g.track_w } else { g.track_w - g.thumb_size }
+        g.track_w
     }
 
-    /// The recessed track's carve for hosts that draw this control through the
-    /// legacy flat views (see `ParametersBg::reliefs`): (x, y, w, h, radius,
-    /// depth) over the widget's assigned `rect`, or None when the style is off.
-    /// The same geometry `paint` carves.
-    pub fn track_relief(&self, rect: Rect) -> Option<(f32, f32, f32, f32, f32, f32)> {
-        if !self.recessed || self.band() {
-            return None;
-        }
-        let g = self.geom(rect);
-        let radius = crate::layout::slider_corner_radius();
-        let depth = crate::layout::bevel_width().min(g.h * 0.2);
-        let (well, radii) = crate::layout::carve_inside(
-            Rect { x: g.track_x, y: g.y, width: g.track_w, height: g.h },
-            (radius, radius, radius, radius),
-            depth,
-        );
-        Some((well.x, well.y, well.width, well.height, radii.0, depth))
-    }
-
-    /// The thumb knob's circle (cx, cy, radius, color) for hosts that draw this
-    /// control through the legacy flat views (see `ParametersBg::spheres`): the
-    /// `Prim::Sphere` the rounded-corner paint emits — no flat view can carry
-    /// it. None under the square style, whose quad thumb already reaches the
-    /// plain-quad view. The same geometry `paint` draws.
-    pub fn thumb_sphere(&self, rect: Rect) -> Option<(f32, f32, f32, [f32; 4])> {
-        if crate::layout::slider_corner_radius() <= 0.0 || self.band() {
-            return None;
-        }
-        let g = self.geom(rect);
-        let recess_t = crate::layout::bevel_width().min(g.h * 0.2);
-        let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
-        let thumb_y = g.y + (g.h - g.thumb_size) / 2.0;
-        let diameter = if self.recessed { g.h - recess_t } else { g.thumb_size };
-        let color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
-        Some((thumb_x + g.thumb_size / 2.0, thumb_y + g.thumb_size / 2.0, diameter / 2.0, color))
-    }
-
-    /// The detached-label strip height above the content rect — a replica of
-    /// `Widget::label_offset` over the synced label (zero in side layout or
-    /// unlabeled).
-    fn label_top(&self) -> f32 {
-        detached_strip(&self.label)
-    }
 
     fn geom(&self, rect: Rect) -> SliderGeom {
         let side = side_offset(&self.label);
@@ -195,31 +134,13 @@ impl Slider {
         } else {
             (x, w)
         };
-        SliderGeom { x, y: rect.y, w, h: rect.height, track_x, track_w, thumb_size: rect.height * 0.9 }
+        SliderGeom { x, y: rect.y, w, h: rect.height, track_x, track_w }
     }
 
-    /// The band style's height profile at `x`: the flat band thickness, rising
-    /// through the cosine bell around the value position. The single source
-    /// both the paint and the wheel-capture halo (`scroll_hit`) measure from,
-    /// so the halo always conforms to the drawn shape.
+    /// The band's height profile at `x` (`band_profile`, one swell at the value).
     fn band_height_at(&self, g: &SliderGeom, x: f32) -> f32 {
-        let band_t = crate::layout::slider_band_thickness().max(0.5);
-        let bulge_h = crate::layout::slider_bulge_height().clamp(band_t, g.h);
-        let bulge_w = crate::layout::slider_bulge_width().max(2.0);
         let vx = g.track_x + self.value * g.track_w;
-        let t = ((x - vx) / bulge_w).clamp(-1.0, 1.0);
-        let bell = 0.5 * (1.0 + (std::f32::consts::PI * t).cos());
-        let h = band_t + (bulge_h - band_t) * bell.powf(1.35);
-        // Capsule tips: the profile shrinks over a circular cap inside each
-        // track end — the band ends round, not square-cut, and the well
-        // contour and wheel halo (both measured from here) round with it.
-        let d = (x - g.track_x).min(g.track_x + g.track_w - x);
-        let r = (h * 0.5).max(0.5);
-        if d < r {
-            let t = ((r - d.max(0.0)) / r).min(1.0);
-            return h * (1.0 - t * t).max(0.0).sqrt();
-        }
-        h
+        band_profile(g.track_x, g.track_w, g.h, x, &[vx], None)
     }
 
     /// The wheel-capture zone. Band style: an inset halo around the DRAWN
@@ -227,12 +148,6 @@ impl Slider {
     /// a scroll near the visible slider adjusts it while the rest of the row
     /// stays the host pane's to scroll. Otherwise: plain rect containment.
     pub fn scroll_hit(&self, rect: Rect, px: f32, py: f32) -> bool {
-        if !crate::layout::slider_band() {
-            return px >= rect.x
-                && px <= rect.x + rect.width
-                && py >= rect.y
-                && py <= rect.y + rect.height;
-        }
         const SCROLL_INSET: f32 = 14.0;
         let g = self.geom(rect);
         if px < g.track_x - SCROLL_INSET || px > g.track_x + g.track_w + SCROLL_INSET {
@@ -243,116 +158,11 @@ impl Slider {
         (py - cy).abs() <= self.band_height_at(&g, x) * 0.5 + SCROLL_INSET
     }
 
-    /// The band style's geometry: a thin band spanning the whole track, swelling
-    /// smoothly around the value position — a cosine bell sampled as ~1px column
-    /// quads, so the swell reads as one continuous surface (the snake that
-    /// swallowed the rodent), not a marker riding a rail. Emitted as `Prim::Quad`s
-    /// so legacy plain-quad hosts (`ParametersBg::extra_quads`) carry it verbatim.
+    /// The slider: the band spanning the whole track, swelling at the value
+    /// (`paint_band_shape`).
     fn paint_band(&self, g: &SliderGeom, ctx: &mut PaintCtx) {
-        let band_t = crate::layout::slider_band_thickness().max(0.5);
-        let bulge_w = crate::layout::slider_bulge_width().max(2.0);
         let color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
-        let cy = g.y + g.h * 0.5;
-        let vx = g.track_x + self.value * g.track_w;
-
-        // The well: the band appears INSET — a carve whose contour follows the
-        // drawn shape (band + traveling bulge) a small gap outside it. The rect
-        // recess prims can't follow a bell, so the walls are hand-shaded per
-        // column from the same `band_height_at` profile the fill samples: a
-        // shadow band hugging the top contour, a lit band along the bottom
-        // (the DE light sits upper-left), stepped alphas like the legacy
-        // banded bevels, amplitude riding `bevel_depth` like the rocker's
-        // `face_light`.
-        const WELL_GAP: f32 = 4.0;
-        const WELL_WALL: f32 = 3.0;
-        const WALL_STEPS: usize = 3;
-        let strength = (crate::layout::bevel_depth() / 0.15).clamp(0.0, 2.0);
-        let a_dark = 0.32 * strength;
-        let a_light = 0.16 * strength;
-        let wx0 = g.track_x - WELL_GAP;
-        let wx1 = g.track_x + g.track_w + WELL_GAP;
-        // 1px columns, EXACT widths: translucent shading quads must not
-        // overlap (a seam double-blends into a visible tick) — unlike the
-        // opaque fill columns below, which overlap on purpose against AA gaps.
-        let cols = (wx1 - wx0).ceil().max(1.0) as i32;
-        let colw = (wx1 - wx0) / cols as f32;
-        let sub = WELL_WALL / WALL_STEPS as f32;
-        for i in 0..cols {
-            let x = wx0 + i as f32 * colw;
-            let xm = x + colw * 0.5;
-            // Inside the track the contour rides the band profile; past the
-            // tips it wraps around them on a WELL_GAP circle — rounded well
-            // ends, not square-cut walls.
-            let c = if xm < g.track_x {
-                let e = g.track_x - xm;
-                (WELL_GAP * WELL_GAP - e * e).max(0.0).sqrt()
-            } else if xm > g.track_x + g.track_w {
-                let e = xm - (g.track_x + g.track_w);
-                (WELL_GAP * WELL_GAP - e * e).max(0.0).sqrt()
-            } else {
-                self.band_height_at(g, xm) * 0.5 + WELL_GAP
-            };
-            for k in 0..WALL_STEPS {
-                let fade = 1.0 - k as f32 / WALL_STEPS as f32;
-                // Shadow INSIDE the well below the top contour; the lit lip
-                // OUTSIDE below the bottom contour — the textbox-recess read.
-                ctx.quad(
-                    Rect { x, y: cy - c + k as f32 * sub, width: colw, height: sub },
-                    [0.0, 0.0, 0.0, a_dark * fade],
-                );
-                ctx.quad(
-                    Rect { x, y: cy + c + k as f32 * sub, width: colw, height: sub },
-                    [1.0, 1.0, 1.0, a_light * fade],
-                );
-            }
-        }
-        // Flat runs outside the bulge span: one long quad each, except the
-        // capsule-tip regions, which sample the rounded profile per column.
-        let l0 = g.track_x;
-        let r1 = g.track_x + g.track_w;
-        let b0 = (vx - bulge_w).max(l0);
-        let b1 = (vx + bulge_w).min(r1);
-        let tip_columns = |ctx: &mut PaintCtx, from: f32, to: f32| {
-            let steps = ((to - from).ceil() as i32).max(1);
-            let sw = (to - from) / steps as f32;
-            for i in 0..steps {
-                let x = from + i as f32 * sw;
-                let h = self.band_height_at(g, x + sw * 0.5);
-                ctx.quad(Rect { x, y: cy - h * 0.5, width: sw + 0.3, height: h }, color);
-            }
-        };
-        if b0 > l0 {
-            let flat_start = (l0 + band_t).min(b0);
-            tip_columns(ctx, l0, flat_start);
-            ctx.quad(
-                Rect { x: flat_start, y: cy - band_t * 0.5, width: b0 - flat_start, height: band_t },
-                color,
-            );
-        }
-        if r1 > b1 {
-            let flat_end = (r1 - band_t).max(b1);
-            ctx.quad(
-                Rect { x: b1, y: cy - band_t * 0.5, width: flat_end - b1, height: band_t },
-                color,
-            );
-            tip_columns(ctx, flat_end, r1);
-        }
-
-        // The swell: symmetric about the band's centerline. The bell is raised
-        // to a power so the flanks taper long and the crest stays plump —
-        // mid-digestion, not a triangle.
-        let span = b1 - b0;
-        if span <= 0.0 {
-            return;
-        }
-        let steps = (span.ceil() as i32).max(1);
-        let step_w = span / steps as f32;
-        for i in 0..steps {
-            let x = b0 + i as f32 * step_w;
-            let h = self.band_height_at(g, x + step_w * 0.5);
-            // A hair of overlap between columns so AA seams can't open.
-            ctx.quad(Rect { x, y: cy - h * 0.5, width: step_w + 0.3, height: h }, color);
-        }
+        paint_band_shape(ctx, g.track_x, g.track_w, g.y + g.h * 0.5, color, &|x| self.band_height_at(g, x));
     }
 
     fn scaled_string(&self) -> String {
@@ -402,11 +212,6 @@ impl Adapted<Slider> {
         self
     }
 
-    /// Recessed-track style: see the `recessed` field.
-    pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
-        self
-    }
 
     pub fn with_value(mut self, val: f32) -> Self {
         self.set_value(val);
@@ -424,13 +229,6 @@ impl Adapted<Slider> {
         self
     }
 
-    /// Force the band style (the thin full-range band swelling at the value)
-    /// on or off for this slider, regardless of the DE-wide
-    /// `style.control.slider.style` setting.
-    pub fn with_band(mut self, band: bool) -> Self {
-        self.band_override = Some(band);
-        self
-    }
 }
 
 impl Layout for Slider {
@@ -480,19 +278,6 @@ impl Paint for Slider {
             }
         };
 
-        // Track. Recessed style draws no background at all — the plate below
-        // is the well's floor (the TextBox bare-recess look), and the carve
-        // emitted after the fill defines the channel. The band style draws
-        // neither: the band IS the whole control.
-        let band = self.band();
-        let track_rect = Rect { x: g.track_x, y: g.y, width: g.track_w, height: g.h };
-        // Carve wall width, the TextBox formula: capped against the bar height
-        // (the wall straddles the track boundary, intruding half its width).
-        let recess_t = crate::layout::bevel_width().min(g.h * 0.2);
-        if !self.recessed && !band {
-            rrect(track_rect, radius, rc, colors::slider_track(), ctx);
-        }
-
         // Readout box (+ focus border) and its text.
         if self.show_readout {
             let readout_w = 60.0;
@@ -518,54 +303,7 @@ impl Paint for Slider {
             ctx.text(text, rx + 8.0, crate::layout::align_text_y(g.y, g.h, 12.0, 0.0), 12.0, [0xee, 0xee, 0xf0]);
         }
 
-        // Band style: the full-range band with its value swell replaces fill,
-        // carve, and thumb outright.
-        if band {
-            self.paint_band(&g, ctx);
-            return;
-        }
-
-        // Fill up to the thumb center. Recessed style insets the fill onto the
-        // well's flat floor (past the wall, which is carved inside the track), so
-        // the liquid sits in the well instead of climbing its walls.
-        let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
-        if let Some(fill_color) = colors::slider_fill() {
-            let (fx, fy, fmax_w, fh) = if self.recessed {
-                let inset = recess_t;
-                (g.track_x + inset, g.y + inset, g.track_w - 2.0 * inset, g.h - 2.0 * inset)
-            } else {
-                (g.track_x, g.y, g.track_w, g.h)
-            };
-            let fill_w = (thumb_x + g.thumb_size / 2.0 - fx).max(0.0).min(fmax_w);
-            let fill_rad = if rounded { radius.min(fh / 2.0) } else { radius };
-            rrect(Rect { x: fx, y: fy, width: fill_w, height: fh }, fill_rad, (true, true, true, true), fill_color, ctx);
-        }
-
-        // Carve AFTER the fill so the wall's shading modulates whatever it
-        // crosses — the same order TextBox uses for its edit fill.
-        if self.recessed {
-            carve_labeled_well(ctx, track_rect, self.label_top(), detached_label_width(&self.label), radius, recess_t);
-        }
-
-        // Thumb. A real Circle prim, not a full-radius rounded rect: rounded
-        // rects follow the DE-wide corner_shape family, and a squircle knob
-        // reads wrong — the thumb should stay round under any corner style.
-        let thumb_y = g.y + (g.h - g.thumb_size) / 2.0;
-        let thumb_color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
-        // Recessed style: the knob sits IN the well, so its diameter is the
-        // flat floor between the walls (each intrudes half its width) —
-        // drawn size only; the drag/hit geometry keeps the full thumb_size.
-        if let Some((cx, cy, r, c)) = self.thumb_sphere(rect) {
-            ctx.sphere(cx, cy, r, c);
-        } else {
-            rrect(
-                Rect { x: thumb_x, y: thumb_y, width: g.thumb_size, height: g.thumb_size },
-                0.0,
-                (true, true, true, true),
-                thumb_color,
-                ctx,
-            );
-        }
+        self.paint_band(&g, ctx);
     }
 }
 
@@ -616,28 +354,15 @@ impl Input for Slider {
                     // pointer is now — the "slider won't take my scroll" feel.
                     // The default style keeps the gate: only the widget that
                     // initiated a gesture keeps it.
-                    let band = crate::layout::slider_band();
-                    if !band && !ui.scroll_gesture_new && ui.scroll_initiate_widget_id != Some(ectx.id) {
-                        if crate::scroll_debug() {
-                            eprintln!(
-                                "[scroll] slider {:?}: GATE reject (gesture_new=false, initiator={:?}, me={:?})",
-                                self.label, ui.scroll_initiate_widget_id, ectx.id
-                            );
-                        }
-                        return false;
-                    }
                     let r = ectx.rect;
                     // Band: spatial acquisition + gesture LATCH. The halo travels
                     // with the bulge, so adjusting slides it away from the pointer
                     // — without the latch the value moves a little and stalls
                     // mid-scroll. Once a gesture engages this slider it keeps it
                     // until the gesture ends; a new gesture re-acquires by halo.
-                    let latched =
-                        band && !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(ectx.id);
+                    let latched = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(ectx.id);
                     if latched || self.scroll_hit(r, *px, *py) {
-                        if band || ui.scroll_gesture_new {
-                            ui.scroll_initiate_widget_id = Some(ectx.id);
-                        }
+                        ui.scroll_initiate_widget_id = Some(ectx.id);
                         let scroll_amount = delta.notches_y();
                         let new_val = (self.value - scroll_amount * 0.02).clamp(0.0, 1.0);
                         let applied = new_val - self.value;
@@ -823,10 +548,6 @@ pub struct RangeSlider {
     pub(crate) active_thumb: Option<ActiveThumb>,
     drag_offset: f32,
     label: Option<String>,
-    /// Recessed-track style, the Slider's: the track is a well carved into the
-    /// plate below, the fill sits on its floor and the thumbs are spheres in the
-    /// channel. Defaults to `control_relief()`.
-    recessed: bool,
 }
 
 impl RangeSlider {
@@ -837,7 +558,6 @@ impl RangeSlider {
             active_thumb: None,
             drag_offset: 0.0,
             label: None,
-            recessed: crate::layout::control_relief(),
         })
     }
 
@@ -856,16 +576,94 @@ impl Adapted<RangeSlider> {
         self.set_values(low, high);
         self
     }
+}
 
-    /// Recessed style: see the `recessed` field.
-    pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
-        self
+/// The band's height at `x`: the flat band thickness (`style.control.slider.
+/// band_thickness`), rising through a raised-cosine bell to the bulge height
+/// around each of `centers` (`bulge_width` half-span, `bulge_height` peak), the
+/// bell raised to a power so the flanks taper long and the crest stays plump —
+/// mid-digestion, not a triangle; and, for a RangeSlider, one band thickness
+/// more across `range` (between its two swells). Capsule tips: the profile
+/// shrinks over a circular cap inside each track end — the band ends round, not
+/// square-cut, and the well contour and wheel halo (both measured from here)
+/// round with it.
+pub(crate) fn band_profile(track_x: f32, track_w: f32, h: f32, x: f32, centers: &[f32], range: Option<(f32, f32)>) -> f32 {
+    let band_t = crate::layout::slider_band_thickness().max(0.5);
+    let bulge_h = crate::layout::slider_bulge_height().clamp(band_t, h);
+    let bulge_w = crate::layout::slider_bulge_width().max(2.0);
+    let mut bell = 0.0f32;
+    for &vx in centers {
+        let t = ((x - vx) / bulge_w).clamp(-1.0, 1.0);
+        bell = bell.max(0.5 * (1.0 + (std::f32::consts::PI * t).cos()));
+    }
+    let base = if range.is_some_and(|(lo, hi)| x >= lo && x <= hi) { 2.0 * band_t } else { band_t };
+    let h = base + (bulge_h - base) * bell.powf(1.35);
+    let d = (x - track_x).min(track_x + track_w - x);
+    let r = (h * 0.5).max(0.5);
+    if d < r {
+        let t = ((r - d.max(0.0)) / r).min(1.0);
+        return h * (1.0 - t * t).max(0.0).sqrt();
+    }
+    h
+}
+
+/// The band, drawn from its height `profile` (`band_profile`): the well first —
+/// the band appears INSET, a carve whose contour follows the drawn shape a small
+/// gap outside it. The rect recess prims can't follow a bell, so the walls are
+/// hand-shaded per column from the same profile the fill samples: a shadow band
+/// hugging the top contour, a lit band along the bottom (the DE light sits
+/// upper-left), stepped alphas like the legacy banded bevels, amplitude riding
+/// `bevel_depth` like the rocker's `face_light`. Then the band itself, one
+/// column per pixel with a hair of overlap so AA seams can't open. The one
+/// painter behind Slider, RangeSlider and Float3's rows.
+pub(crate) fn paint_band_shape(ctx: &mut PaintCtx, track_x: f32, track_w: f32, cy: f32, color: [f32; 4], profile: &dyn Fn(f32) -> f32) {
+    const WELL_GAP: f32 = 4.0;
+    const WELL_WALL: f32 = 3.0;
+    const WALL_STEPS: usize = 3;
+    let strength = (crate::layout::bevel_depth() / 0.15).clamp(0.0, 2.0);
+    let a_dark = 0.32 * strength;
+    let a_light = 0.16 * strength;
+    let wx0 = track_x - WELL_GAP;
+    let wx1 = track_x + track_w + WELL_GAP;
+    // 1px columns, EXACT widths: translucent shading quads must not overlap (a
+    // seam double-blends into a visible tick) — unlike the opaque band columns
+    // below, which overlap on purpose against AA gaps.
+    let cols = (wx1 - wx0).ceil().max(1.0) as i32;
+    let colw = (wx1 - wx0) / cols as f32;
+    let sub = WELL_WALL / WALL_STEPS as f32;
+    for i in 0..cols {
+        let x = wx0 + i as f32 * colw;
+        let xm = x + colw * 0.5;
+        // Inside the track the contour rides the profile; past the tips it wraps
+        // around them on a WELL_GAP circle — rounded well ends, not square-cut.
+        let c = if xm < track_x {
+            let e = track_x - xm;
+            (WELL_GAP * WELL_GAP - e * e).max(0.0).sqrt()
+        } else if xm > track_x + track_w {
+            let e = xm - (track_x + track_w);
+            (WELL_GAP * WELL_GAP - e * e).max(0.0).sqrt()
+        } else {
+            profile(xm) * 0.5 + WELL_GAP
+        };
+        for k in 0..WALL_STEPS {
+            let fade = 1.0 - k as f32 / WALL_STEPS as f32;
+            // Shadow INSIDE the well below the top contour; the lit lip OUTSIDE
+            // below the bottom contour — the textbox-recess read.
+            ctx.quad(Rect { x, y: cy - c + k as f32 * sub, width: colw, height: sub }, [0.0, 0.0, 0.0, a_dark * fade]);
+            ctx.quad(Rect { x, y: cy + c + k as f32 * sub, width: colw, height: sub }, [1.0, 1.0, 1.0, a_light * fade]);
+        }
+    }
+    let steps = (track_w.ceil() as i32).max(1);
+    let step_w = track_w / steps as f32;
+    for i in 0..steps {
+        let x = track_x + i as f32 * step_w;
+        let h = profile(x + step_w * 0.5);
+        ctx.quad(Rect { x, y: cy - h * 0.5, width: step_w + 0.3, height: h }, color);
     }
 }
 
-/// The recessed track's carve, in the labeled composition shared by Slider and
-/// RangeSlider: with a detached label (`strip` > 0, the label strip's height above
+/// The recessed track's carve, in the labeled composition of the Slider2D pad (and
+/// any well that reaches up into its label strip): with a detached label (`strip` > 0, the label strip's height above
 /// `track`) the label sits in a CARVE-OUT tab, the section-title idiom (the labeled
 /// Dropdown's composition) — a flat recessed well hugging the label run, bottom open
 /// into the track's well; the well's top wall picks up right of the tab's throat.
@@ -991,84 +789,23 @@ impl Paint for RangeSlider {
         [0.0, 0.0, 0.0, 0.0]
     }
 
-    fn corner_style(&self, _rect: Rect) -> Option<(f32, (bool, bool, bool, bool))> {
-        let r = crate::layout::rangeslider_corner_radius();
-        if r > 0.0 {
-            Some((r, (true, true, true, true)))
-        } else {
-            None
-        }
-    }
-
     fn sync_label(&mut self, label: &str) {
         self.label = Some(label.to_string());
     }
 
+    /// The band with two swells — one at each end of the range — and the band
+    /// itself a thickness heavier between them, so the range reads as the
+    /// swallowed length. The swells sit where the thumbs' centres were, so the
+    /// drag geometry below is unchanged.
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let side = side_offset(&self.label);
         let (x, y, w, h) = (rect.x + side, rect.y, rect.width - side, rect.height);
-        let radius = crate::layout::rangeslider_corner_radius();
-        let rounded = radius > 0.0;
-        let rc = (rounded, rounded, rounded, rounded);
         let thumb_size = h * 0.9;
         let range = w - thumb_size;
-        let thumb_low_x = x + self.value_low * range;
-        let thumb_high_x = x + self.value_high * range;
-        let thumb_y = y + (h - thumb_size) / 2.0;
-        let highlight = Rect {
-            x: thumb_low_x + thumb_size / 2.0,
-            y: y + h * 0.35,
-            width: thumb_high_x - thumb_low_x,
-            height: h * 0.3,
-        };
-        let low_color = if self.active_thumb == Some(ActiveThumb::Low) {
-            colors::rangeslider_thumb_drag()
-        } else {
-            colors::rangeslider_thumb()
-        };
-        let high_color = if self.active_thumb == Some(ActiveThumb::High) {
-            colors::rangeslider_thumb_drag()
-        } else {
-            colors::rangeslider_thumb()
-        };
-
-        let rrect = |r: Rect, rad: f32, corners: (bool, bool, bool, bool), c: [f32; 4], ctx: &mut PaintCtx| {
-            if rounded {
-                ctx.rounded_rect(r, rad, corners, c);
-            } else {
-                ctx.quad(r, c);
-            }
-        };
-        let track = Rect { x, y, width: w, height: h };
-        if self.recessed {
-            // The Slider's recessed composition: no track fill (the plate below is
-            // the well's floor), the range band on the floor, the carve after it so
-            // the walls' shading modulates what they cross, and sphere thumbs sized
-            // to the flat floor between the walls.
-            let depth = crate::layout::bevel_width().min(h * 0.2);
-            rrect(highlight, radius.min(highlight.height / 2.0), (true, true, true, true), colors::rangeslider_fill(), ctx);
-            carve_labeled_well(ctx, track, detached_strip(&self.label), detached_label_width(&self.label), radius, depth);
-            let r = (h - depth) / 2.0;
-            ctx.sphere(thumb_low_x + thumb_size / 2.0, thumb_y + thumb_size / 2.0, r, low_color);
-            ctx.sphere(thumb_high_x + thumb_size / 2.0, thumb_y + thumb_size / 2.0, r, high_color);
-            return;
-        }
-        rrect(track, radius, rc, colors::rangeslider_track(), ctx);
-        rrect(highlight, radius.min(highlight.height / 2.0), (true, true, true, true), colors::rangeslider_fill(), ctx);
-        rrect(
-            Rect { x: thumb_low_x, y: thumb_y, width: thumb_size, height: thumb_size },
-            if rounded { thumb_size / 2.0 } else { 0.0 },
-            (true, true, true, true),
-            low_color,
-            ctx,
-        );
-        rrect(
-            Rect { x: thumb_high_x, y: thumb_y, width: thumb_size, height: thumb_size },
-            if rounded { thumb_size / 2.0 } else { 0.0 },
-            (true, true, true, true),
-            high_color,
-            ctx,
-        );
+        let lo = x + self.value_low * range + thumb_size / 2.0;
+        let hi = x + self.value_high * range + thumb_size / 2.0;
+        let color = if self.active_thumb.is_some() { colors::rangeslider_thumb_drag() } else { colors::rangeslider_thumb() };
+        paint_band_shape(ctx, x, w, y + h * 0.5, color, &|px| band_profile(x, w, h, px, &[lo, hi], Some((lo, hi))));
     }
 }
 

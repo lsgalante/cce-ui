@@ -1230,33 +1230,10 @@ impl ParametersBg {
                     }
                 }
                 None
-            } else if p.2.starts_with("float3") {
-                // Three standard slider rows: each row's track carve over its
-                // own row rect (an unlabeled slider's content rect is its
-                // whole rect), the slider-row entry below three times.
-                if let Some(f) = &self.float3s[i] {
-                    for (s, r) in f.sliders().iter().zip(f.get_row_rects()) {
-                        if let Some((rx, ry, rw, rh, rr, rd)) =
-                            s.inner().track_relief(Rect { x: r.0, y: r.1, width: r.2, height: r.3 })
-                        {
-                            out.push((rx, ry, rw, rh, r4(rr), rd, false, all));
-                        }
-                    }
-                }
-                None
             } else {
-                if let Some(s) = &self.sliders[i] {
-                    let (x, y, w, h) = s.rect();
-                    // The detached top label sits OUTSIDE the carve: shrink to
-                    // the content band, exactly the rect the widget's own
-                    // paint receives (the render_widget label_offset shrink).
-                    let ty = crate::widget::label_offset(s);
-                    if let Some((rx, ry, rw, rh, rr, rd)) =
-                        s.inner().track_relief(Rect { x, y: y + ty, width: w, height: h - ty })
-                    {
-                        out.push((rx, ry, rw, rh, r4(rr), rd, false, all));
-                    }
-                }
+                // Sliders (and Float3's three rows) are bands: their well is
+                // hand-shaded quads that follow the band's contour, which reach
+                // a flat host through the plain-quad view — no rect carve.
                 None
             };
             if let Some((w, radius, raised)) = ctl {
@@ -1393,49 +1370,11 @@ impl ParametersBg {
         out
     }
 
-    /// The sphere companion to [`Self::rounded_quads`]: the slider rows' thumb
-    /// knobs, which are `Prim::Sphere` — a prim NO legacy flat view carries, so
-    /// a host rendering this panel through the legacy views must read this
-    /// getter or the knobs vanish. Returned unclipped; the host clips to the
-    /// pane's scroll viewport and draws these AFTER [`Self::reliefs`], matching
-    /// the widget's own fill → carve → thumb order.
+    /// The knobs a flat host draws after [`Self::reliefs`] — none: the sliders
+    /// are bands (their swell is part of the band's own quads), so this is kept
+    /// only for the hosts that still call it.
     pub fn spheres(&self) -> Vec<(f32, f32, f32, [f32; 4])> {
-        if !self.visible {
-            return Vec::new();
-        }
-        let mut out = Vec::new();
-        let hidden = self.hidden_rows();
-        for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] {
-                continue;
-            }
-            if p.2.starts_with("float3") {
-                // The group's three slider rows, each knob over its row rect.
-                if let Some(f) = &self.float3s[i] {
-                    for (s, r) in f.sliders().iter().zip(f.get_row_rects()) {
-                        if let Some(sphere) =
-                            s.inner().thumb_sphere(Rect { x: r.0, y: r.1, width: r.2, height: r.3 })
-                        {
-                            out.push(sphere);
-                        }
-                    }
-                }
-                continue;
-            }
-            if !p.2.starts_with("slider") {
-                continue;
-            }
-            if let Some(s) = &self.sliders[i] {
-                let (x, y, w, h) = s.rect();
-                // Content band, like `reliefs`: the knob sizes to the track
-                // well, not the label-inclusive rect.
-                let ty = crate::widget::label_offset(s);
-                if let Some(sphere) = s.inner().thumb_sphere(Rect { x, y: y + ty, width: w, height: h - ty }) {
-                    out.push(sphere);
-                }
-            }
-        }
-        out
+        Vec::new()
     }
 
     /// The section carves' concave inside-corner fillets — `(cx, cy, radius,
@@ -2633,36 +2572,26 @@ impl Input for ParametersBg {
                 let rects = self.get_param_rects();
                 for (i, p) in self.display_params.iter_mut().enumerate() {
                     if p.2.starts_with("slider") {
-                        let r = rects[i];
-                        let row_y = r.1;
-                        // Band style: the capture zone is the slider's own
-                        // shape halo (`Slider::scroll_hit` — the band plus the
-                        // traveling bulge, inset), so scrolls off the shape
-                        // fall through to the pane's viewport scroll below.
-                        // The default style keeps the whole-row strip.
-                        let in_zone = if crate::layout::slider_band() {
-                            self.sliders[i].as_ref().map_or(false, |s| {
-                                // The same gesture latch the slider's own wheel
-                                // test applies: mid-gesture the slider that
-                                // acquired the scroll keeps it (its halo travels
-                                // away from the pointer as the value moves).
-                                let latched = !ui.scroll_gesture_new
-                                    && ui.scroll_initiate_widget_id == Some(s.base().id());
-                                let (sx, sy, sw, sh) = s.rect();
-                                let ty = crate::widget::label_offset(s);
-                                latched
-                                    || s.inner().scroll_hit(
-                                        Rect { x: sx, y: sy + ty, width: sw, height: sh - ty },
-                                        px,
-                                        py,
-                                    )
-                            })
-                        } else {
-                            py >= row_y - 2.0
-                                && py <= row_y + r.3
-                                && px >= self.rect.x
-                                && px <= self.rect.x + self.rect.width
-                        };
+                        // The capture zone is the slider's own shape halo
+                        // (`Slider::scroll_hit` — the band plus the traveling
+                        // swell, inset), so scrolls off the shape fall through
+                        // to the pane's viewport scroll below.
+                        let in_zone = self.sliders[i].as_ref().map_or(false, |s| {
+                            // The same gesture latch the slider's own wheel
+                            // test applies: mid-gesture the slider that
+                            // acquired the scroll keeps it (its halo travels
+                            // away from the pointer as the value moves).
+                            let latched = !ui.scroll_gesture_new
+                                && ui.scroll_initiate_widget_id == Some(s.base().id());
+                            let (sx, sy, sw, sh) = s.rect();
+                            let ty = crate::widget::label_offset(s);
+                            latched
+                                || s.inner().scroll_hit(
+                                    Rect { x: sx, y: sy + ty, width: sw, height: sh - ty },
+                                    px,
+                                    py,
+                                )
+                        });
                         if in_zone {
                             if let Some(s) = &mut self.sliders[i] {
                                 let was_scroll = s.scroll_enabled;

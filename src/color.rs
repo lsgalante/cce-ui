@@ -22,7 +22,6 @@ pub const SLIDER_TRACK: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
 
 use std::sync::RwLock;
 
-static SLIDER_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_TRACK);
 static PAGE_LOW_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0600316, 0.0600316, 0.080219, 1.0]);
 static COLOR_BORDERS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.2039, 0.2039, 0.2530, 1.0]);
 static NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
@@ -75,8 +74,6 @@ static CONTROL_PANEL_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.161, 0.173,
 
 static PROGRESS_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_BG);
 static PROGRESS_FILL_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_FILL);
-static RANGE_SLIDER_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_TRACK);
-static RANGE_SLIDER_FILL_COLOR: RwLock<[f32; 4]> = RwLock::new(PROGRESS_FILL);
 static SPINBOX_DISPLAY_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_DISPLAY);
 static SPINBOX_BUTTON_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON);
 static SPINBOX_BUTTON_HOVER_COLOR: RwLock<[f32; 4]> = RwLock::new(SPINBOX_BUTTON_HOVER);
@@ -88,7 +85,6 @@ static BUTTON_HOVER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static DROPDOWN_BORDER_COLOR: RwLock<[f32; 4]> = RwLock::new([0.18, 0.18, 0.24, 1.0]);
 static DROPDOWN_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.72305, 0.72305, 0.76008, 1.0]);
 
-static SLIDER_FILL_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 static SLIDER_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB);
 static SLIDER_THUMB_DRAG_COLOR: RwLock<[f32; 4]> = RwLock::new(SLIDER_THUMB_DRAG);
 
@@ -325,9 +321,6 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/layout/color_borders_color") {
         if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/style/control/slider/color").or_else(|| get_color("/layout/slider_track_color")) {
-        if let Ok(mut lock) = SLIDER_TRACK_COLOR.write() { *lock = c; }
-    }
     if let Some(c) = get_color("/layout/paginator_sidebar_color") {
         if let Ok(mut lock) = SIDEBAR_BG_COLOR.write() { *lock = c; }
     }
@@ -417,9 +410,6 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/control/dropdown/text_color").or_else(|| get_color("/style/dropdown/text_color")) {
         if let Ok(mut lock) = DROPDOWN_TEXT_COLOR.write() { *lock = c; }
     }
-    if let Some(c) = get_color("/style/control/slider/fill_color").or_else(|| get_color("/style/slider/fill_color")) {
-        if let Ok(mut lock) = SLIDER_FILL_COLOR.write() { *lock = Some(c); }
-    }
     if let Some(c) = get_color("/style/control/slider/thumb_color").or_else(|| get_color("/style/slider/thumb_color")) {
         if let Ok(mut lock) = SLIDER_THUMB_COLOR.write() { *lock = c; }
         if let Ok(mut lock_drag) = SLIDER_THUMB_DRAG_COLOR.write() {
@@ -447,12 +437,6 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/control/progressbar/fill") {
         if let Ok(mut lock) = PROGRESS_FILL_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/rangeslider/track") {
-        if let Ok(mut lock) = RANGE_SLIDER_TRACK_COLOR.write() { *lock = c; }
-    }
-    if let Some(c) = get_color("/style/control/rangeslider/fill") {
-        if let Ok(mut lock) = RANGE_SLIDER_FILL_COLOR.write() { *lock = c; }
     }
     let parsed_list_bg = get_color("/layout/list_bg_color");
     let parsed_breadcrumb_bg = get_color("/layout/breadcrumb_bg_color");
@@ -867,17 +851,6 @@ pub fn set_color_borders_color(color: [f32; 4]) {
     }
 }
 
-pub fn slider_track() -> [f32; 4] {
-    load_colors_once();
-    *SLIDER_TRACK_COLOR.read().unwrap()
-}
-
-pub fn set_slider_track(color: [f32; 4]) {
-    if let Ok(mut lock) = SLIDER_TRACK_COLOR.write() {
-        *lock = color;
-    }
-}
-
 pub const SLIDER_THUMB: [f32; 4] = [0.60, 0.60, 0.65, 1.0];
 pub const SLIDER_THUMB_DRAG: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
 pub const PROGRESS_BG: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
@@ -1285,28 +1258,6 @@ pub fn set_progress_fill(color: [f32; 4]) {
     }
 }
 
-pub fn rangeslider_track() -> [f32; 4] {
-    load_colors_once();
-    *RANGE_SLIDER_TRACK_COLOR.read().unwrap()
-}
-
-pub fn set_rangeslider_track(color: [f32; 4]) {
-    if let Ok(mut lock) = RANGE_SLIDER_TRACK_COLOR.write() {
-        *lock = color;
-    }
-}
-
-pub fn rangeslider_fill() -> [f32; 4] {
-    load_colors_once();
-    *RANGE_SLIDER_FILL_COLOR.read().unwrap()
-}
-
-pub fn set_rangeslider_fill(color: [f32; 4]) {
-    if let Ok(mut lock) = RANGE_SLIDER_FILL_COLOR.write() {
-        *lock = color;
-    }
-}
-
 pub fn button_border_color() -> Option<[f32; 4]> {
     load_colors_once();
     *BUTTON_BORDER_COLOR.read().unwrap()
@@ -1340,16 +1291,6 @@ pub fn set_dropdown_text_color(color: [f32; 4]) {
     }
 }
 
-pub fn slider_fill() -> Option<[f32; 4]> {
-    load_colors_once();
-    *SLIDER_FILL_COLOR.read().unwrap()
-}
-
-pub fn set_slider_fill(color: [f32; 4]) {
-    if let Ok(mut lock) = SLIDER_FILL_COLOR.write() {
-        *lock = Some(color);
-    }
-}
 
 pub fn slider_thumb() -> [f32; 4] {
     load_colors_once();

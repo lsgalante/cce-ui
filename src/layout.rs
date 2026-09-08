@@ -89,13 +89,11 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.label.layout" => "control_label_layout",
                 "style.control.slider.height" => "slider_height",
                 "style.control.slider.corner_radius" => "slider_corner_radius",
-                "style.control.slider.style" => "slider_style",
                 "style.control.slider.band_thickness" => "slider_band_thickness",
                 "style.control.slider.bulge_width" => "slider_bulge_width",
                 "style.control.slider.bulge_height" => "slider_bulge_height",
                 "style.control.progressbar.height" => "progressbar_height",
                 "style.control.rangeslider.height" => "rangeslider_height",
-                "style.control.rangeslider.corner_radius" | "style.rangeslider.corner_radius" => "rangeslider_corner_radius",
                 "style.control.scrollbar.width" => "scrollbar_width",
                 "style.control.scrollbar.inset" => "scrollbar_inset",
                 "style.control.spinbox.height" => "spinbox_height",
@@ -1926,21 +1924,9 @@ pub fn toggle_slide() -> bool {
 }
 
 
-/// The slider's render style: `style.control.slider.style = "band"` swaps the
-/// track/fill/thumb for a thin full-range band that inflates smoothly at the
-/// value (see `Slider::paint`). Anything else — or unset — keeps the default
-/// look, so apps opt in per-config.
-pub fn slider_band() -> bool {
-    lazy_init_style_registry();
-    get_style_registry()
-        .read()
-        .unwrap()
-        .get_string("slider_style")
-        .is_some_and(|s| s == "band")
-}
-
-/// Band-style knobs (`style.control.slider.*`): the flat band's thickness, and
-/// the bulge's half-span / peak height around the value position.
+/// The slider band's knobs (`style.control.slider.*`): the flat band's thickness,
+/// and the swell's half-span / peak height around the value position. The band —
+/// a thin full-range band that swells at the value — is the one slider style.
 pub fn slider_band_thickness() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("slider_band_thickness").unwrap_or(2.0)
@@ -1963,17 +1949,6 @@ pub fn set_slider_corner_radius(radius: f32) {
     }
 }
 
-pub fn rangeslider_corner_radius() -> f32 {
-    lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("rangeslider_corner_radius").unwrap_or(4.0)
-}
-
-pub fn set_rangeslider_corner_radius(radius: f32) {
-    lazy_init_style_registry();
-    if let Ok(mut registry) = get_style_registry().write() {
-        registry.set_float("rangeslider_corner_radius", radius);
-    }
-}
 
 pub fn plate_corner_radius() -> f32 {
     lazy_init_style_registry();

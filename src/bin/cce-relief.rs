@@ -386,7 +386,6 @@ impl ProfileKnobs {
                 .with_label(label)
                 .with_value(v.clamp(0.0, 1.0))
                 .with_scroll(true)
-                .with_band(true)
         };
         let mut this = Self {
             shoulder: knob(s, "Shoulder"),
@@ -1238,16 +1237,14 @@ impl Application for BevelPopup {
                 .with_value(((depth - dmin) / (dmax - dmin)).clamp(0.0, 1.0))
                 .with_readout(true)
                 .with_decimals(2)
-                .with_scroll(true)
-                .with_band(true),
+                .with_scroll(true),
             width_slider: Slider::new()
                 .with_label("Width")
                 .with_range(wmin, wmax)
                 .with_value(((width - wmin) / (wmax - wmin)).clamp(0.0, 1.0))
                 .with_readout(true)
                 .with_decimals(1)
-                .with_scroll(true)
-                .with_band(true),
+                .with_scroll(true),
             save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
             cancel_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel"),
             exit_requested: false,

@@ -143,15 +143,10 @@ impl Float3 {
     /// it, whether or not the value string ticked over.
     pub fn wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ui: &mut UiContext) -> bool {
         let rows = self.get_row_rects();
-        let band = crate::layout::slider_band();
         for (s, r) in self.sliders.iter_mut().zip(rows) {
             let rect = Rect { x: r.0, y: r.1, width: r.2, height: r.3 };
-            let in_zone = if band {
-                let latched = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(s.base().id());
-                latched || s.inner().scroll_hit(rect, px, py)
-            } else {
-                py >= rect.y && py <= rect.y + rect.height
-            };
+            let latched = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(s.base().id());
+            let in_zone = latched || s.inner().scroll_hit(rect, px, py);
             if !in_zone {
                 continue;
             }
