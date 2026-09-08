@@ -344,8 +344,8 @@ impl crate::widget::Paint for ButtonStrip {
         use crate::scene::layout::Rect;
         // The strip's well: one recess around the whole run, rounded like the
         // buttons, before the segments so their fills sit on its floor. The
-        // segment fills stay plain quads either way — they are what reaches the
-        // flat hosts that read this widget through `extra_quads`.
+        // segment fills are rounded at the same radius (they reach legacy hosts
+        // through `all_rounded_quads`, which the Paginator aggregates).
         let (sx, sy, sw, sh) = self.rect();
         let radius = crate::layout::button_corner_radius();
         let depth = if self.recessed {
@@ -369,16 +369,18 @@ impl crate::widget::Paint for ButtonStrip {
             } else if Some(i) == self.hovered_idx {
                 bg_color = colors::PANEL_MENU_HOVER;
             }
+            // The segment's footprint: in the well, inset by the wall's inner
+            // half-span so it stands on the floor (the selected plateau's rect);
+            // flat, the item rect itself. The state fill and the plateau share it.
+            let inset = if self.recessed { depth * 0.5 } else { 0.0 };
+            let seg = Rect { x: r.0 + inset, y: r.1 + inset, width: (r.2 - 2.0 * inset).max(0.0), height: (r.3 - 2.0 * inset).max(0.0) };
+            let seg_r = (radius - inset).max(0.0);
             if bg_color != [0.0, 0.0, 0.0, 0.0] {
-                pc.quad(Rect { x: r.0, y: r.1, width: r.2, height: r.3 }, bg_color);
+                pc.rounded_rect(seg, seg_r, (true, true, true, true), bg_color);
             }
             if self.recessed && Some(i) == self.selected {
-                // The selected segment: a plateau raised back out of the well,
-                // inset by the wall's inner half-span so it stands on the floor.
-                let inset = depth * 0.5;
-                let plateau = Rect { x: r.0 + inset, y: r.1 + inset, width: (r.2 - 2.0 * inset).max(0.0), height: (r.3 - 2.0 * inset).max(0.0) };
-                let pr = (radius - inset).max(0.0);
-                let (plateau, radii) = crate::layout::carve_inside(plateau, (pr, pr, pr, pr), depth);
+                // The selected segment: a plateau raised back out of the well.
+                let (plateau, radii) = crate::layout::carve_inside(seg, (seg_r, seg_r, seg_r, seg_r), depth);
                 pc.boss(plateau, radii, depth);
             }
 

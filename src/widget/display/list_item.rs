@@ -105,7 +105,9 @@ impl Paint for InteractiveListItem {
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let col = self.color();
         if col[3] > 0.0 {
-            ctx.quad(rect, col);
+            // The state wash, rounded like a list-row Button's.
+            let r = crate::layout::button_corner_radius();
+            ctx.rounded_rect(rect, r, (true, true, true, true), col);
         }
 
         let (x, y, h) = (rect.x, rect.y, rect.height);

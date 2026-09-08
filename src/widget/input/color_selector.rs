@@ -254,13 +254,11 @@ impl Paint for ColorSelector {
         };
 
         // A real frame, not a border-quad-under-fill-quad: with no fill, the
-        // old full-rect border quad would read as a solid slab.
+        // old full-rect border quad would read as a solid slab. Rounded at the
+        // selector's radius like the well it stands in for.
         if !self.recessed {
-            let bw = 1.0;
-            quads.push((rect.x, rect.y, rect.width, bw, border_color));
-            quads.push((rect.x, rect.y + visual_h - bw, rect.width, bw, border_color));
-            quads.push((rect.x, rect.y, bw, visual_h, border_color));
-            quads.push((rect.x + rect.width - bw, rect.y, bw, visual_h, border_color));
+            let fr = crate::layout::color_selector_corner_radius();
+            ctx.border(rect, (fr, fr, fr, fr), [0.0; 4], border_color, 1.0);
         }
 
         if self.editing {

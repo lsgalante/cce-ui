@@ -4,6 +4,7 @@
 
 use crate::colors;
 use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
 use crate::widget::{Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Layout, MouseButton, Paint};
 
 pub struct Splitter {
@@ -30,6 +31,15 @@ impl Paint for Splitter {
             colors::SPLITTER_HOVER
         } else {
             colors::SPLITTER_IDLE
+        }
+    }
+
+    /// The bar as a capsule: fully rounded ends on its short side.
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let color = self.color();
+        if color[3].abs() > 0.001 {
+            let r = rect.width.min(rect.height) * 0.5;
+            ctx.rounded_rect(rect, r, (true, true, true, true), color);
         }
     }
 }

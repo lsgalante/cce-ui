@@ -7,6 +7,8 @@
 //! [`Paint`] default emits the color quad, so the dot now actually shows. The probe test at the
 //! bottom documents the fix.
 
+use crate::scene::layout::Rect;
+use crate::scene::paint::PaintCtx;
 use crate::widget::{Adapted, Input, Layout, Paint};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +38,7 @@ impl StatusDot {
 }
 
 impl Layout for StatusDot {
-    /// A dot: a fixed small square unless the host sizes it.
+    /// A dot: a fixed small disc unless the host sizes it.
     fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
         Some(crate::scene::layout::Size::new(StatusDot::SIZE, StatusDot::SIZE))
     }
@@ -44,14 +46,20 @@ impl Layout for StatusDot {
 
 impl Paint for StatusDot {
     fn color(&self) -> [f32; 4] {
-        // `Paint::paint`'s default emits this as a plain quad — which is the fix: the legacy
-        // impl never got its color onto any render path.
         match self.status {
             DotStatus::Active => [0.20, 0.70, 0.35, 1.0],
             DotStatus::Inactive => [0.50, 0.50, 0.55, 1.0],
             DotStatus::Warning => [0.90, 0.60, 0.10, 1.0],
             DotStatus::Error => [0.85, 0.25, 0.25, 1.0],
         }
+    }
+
+    /// A disc: the colour as a rounded rect whose radius is half the short side. A rounded
+    /// rect rather than a circle prim so it survives every legacy bridge (`all_rounded_quads`,
+    /// `render_widget`), which carry rounded rects but not circles.
+    fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        let r = rect.width.min(rect.height) * 0.5;
+        ctx.rounded_rect(rect, r, (true, true, true, true), self.color());
     }
 }
 
@@ -67,13 +75,15 @@ mod tests {
     use crate::widget::{WidgetHost, UiContext};
 
     #[test]
-    fn emits_its_color_quad_through_the_bridge() {
+    fn emits_its_disc_through_the_rounded_bridge() {
         let mut dot = StatusDot::new(DotStatus::Warning);
         WidgetHost::set_rect(&mut dot, 5.0, 6.0, 10.0, 10.0);
         assert_eq!(
-            WidgetHost::extra_quads(&dot),
-            vec![(5.0, 6.0, 10.0, 10.0, [0.90, 0.60, 0.10, 1.0])],
+            WidgetHost::all_rounded_quads(&dot, &UiContext::new()),
+            vec![(5.0, 6.0, 10.0, 10.0, 5.0, [0.90, 0.60, 0.10, 1.0], (true, true, true, true))],
+            "a disc: the rect at half-side radius",
         );
+        assert!(WidgetHost::extra_quads(&dot).is_empty(), "nothing on the plain path (apps read both)");
         // Drags pass through, as legacy declared.
         assert!(!WidgetHost::blocks_root_plate_drag(&dot));
         // State mutation through Deref, as call sites write it.

@@ -88,11 +88,9 @@ impl Paint for KeybindRecorder {
         } else {
             [0.18, 0.18, 0.24, 1.0]
         };
-        ctx.quad(rect, border_color);
-        ctx.quad(
-            Rect { x: rect.x + 1.0, y: rect.y + 1.0, width: rect.width - 2.0, height: rect.height - 2.0 },
-            [0.08, 0.08, 0.12, 1.0],
-        );
+        // The framed dark field, rounded like the text wells.
+        let radius = crate::layout::textbox_corner_radius();
+        ctx.border(rect, (radius, radius, radius, radius), [0.08, 0.08, 0.12, 1.0], border_color, 1.0);
 
         self.paint_text(rect, ctx);
     }

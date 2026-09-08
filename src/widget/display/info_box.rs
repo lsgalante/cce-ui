@@ -29,14 +29,12 @@ impl Paint for InfoBox {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
+        let (x, y) = (rect.x, rect.y);
         let theme = colors::active_theme();
-        let border_t = 1.0;
-        ctx.quad(rect, theme.surface_bg);
-        ctx.quad(Rect { x, y, width: w, height: border_t }, theme.surface_border);
-        ctx.quad(Rect { x, y: y + h - border_t, width: w, height: border_t }, theme.surface_border);
-        ctx.quad(Rect { x, y, width: border_t, height: h }, theme.surface_border);
-        ctx.quad(Rect { x: x + w - border_t, y, width: border_t, height: h }, theme.surface_border);
+        // A card: the themed surface in a hairline frame, rounded at the plate
+        // radius like every other surface set on the plate.
+        let r = crate::layout::plate_corner_radius();
+        ctx.border(rect, (r, r, r, r), theme.surface_bg, theme.surface_border, 1.0);
 
         ctx.text(self.title.clone(), x + 16.0, y + 12.0, 12.0, [89, 165, 229]);
         let mut current_y = y + 32.0;

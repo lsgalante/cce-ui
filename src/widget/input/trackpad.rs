@@ -96,15 +96,10 @@ impl Paint for Trackpad {
             let (well, radii) = crate::layout::carve_inside(area, (radius, radius, radius, radius), depth);
             ctx.recess(well, radii, depth);
         } else {
-            // 1. Background
-            ctx.quad(area, [0.11, 0.11, 0.16, 0.85]);
-
-            // 2. Borders
+            // 1+2. The framed dark pane, rounded like the text wells.
+            let radius = crate::layout::textbox_corner_radius();
             let border_color = [0.28, 0.28, 0.38, 1.0];
-            ctx.quad(Rect { x, y, width: w, height: 1.0 }, border_color);
-            ctx.quad(Rect { x, y: y + visual_h - 1.0, width: w, height: 1.0 }, border_color);
-            ctx.quad(Rect { x, y, width: 1.0, height: visual_h }, border_color);
-            ctx.quad(Rect { x: x + w - 1.0, y, width: 1.0, height: visual_h }, border_color);
+            ctx.border(area, (radius, radius, radius, radius), [0.11, 0.11, 0.16, 0.85], border_color, 1.0);
         }
 
         // 3. Fingers

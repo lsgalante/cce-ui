@@ -1,6 +1,6 @@
-//! Narrow-trait usage bar (Phase 5c leaf sweep). Legacy geometry lived in `extra_quads` (plain
-//! bg + fill quads); the narrow [`Paint::paint`] emits the same two quads, which reach legacy
-//! render loops byte-identically through the adapter's `extra_quads` reverse bridge.
+//! Narrow-trait usage bar (Phase 5c leaf sweep). The narrow [`Paint::paint`] emits a rounded
+//! track and fill (the ProgressBar's composition, in both styles), which reach legacy render
+//! loops through the adapter's `all_rounded_quads` reverse bridge.
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
@@ -76,8 +76,13 @@ impl Paint for UsageBar {
             ctx.recess(well, radii, depth);
             return;
         }
-        ctx.quad(rect, self.bg_color);
-        ctx.quad(Rect { width: rect.width * self.value, ..rect }, self.fill_color);
+        // The flat style: the ProgressBar's rounded track and fill.
+        let radius = crate::layout::slider_corner_radius();
+        ctx.rounded_rect(rect, radius, (true, true, true, true), self.bg_color);
+        let fill_w = rect.width * self.value;
+        if fill_w > 0.0 {
+            ctx.rounded_rect(Rect { width: fill_w, ..rect }, radius.min(rect.height / 2.0), (true, true, true, true), self.fill_color);
+        }
     }
 }
 
@@ -88,21 +93,23 @@ mod tests {
     use super::*;
     use crate::widget::WidgetHost;
 
-    /// Byte-identical to the legacy `extra_quads` override: full-width bg quad, then a fill quad
-    /// scaled by the clamped value.
+    /// The flat style is the ProgressBar's: a full-width rounded track, then a fill scaled by
+    /// the clamped value with its radius clamped to half the height — on the rounded getter,
+    /// nothing on the plain one (apps read both).
     #[test]
-    fn bridge_matches_legacy_extra_quads() {
+    fn flat_style_is_rounded_track_then_fill() {
         let mut bar = UsageBar::new(0.5).with_recessed(false).with_colors([0.1, 0.2, 0.3, 1.0], [0.4, 0.5, 0.6, 1.0]);
         WidgetHost::set_rect(&mut bar, 12.0, 30.0, 200.0, 8.0);
+        let radius = crate::layout::slider_corner_radius();
+        let all = (true, true, true, true);
         assert_eq!(
-            WidgetHost::extra_quads(&bar),
+            WidgetHost::all_rounded_quads(&bar, &crate::widget::UiContext::new()),
             vec![
-                (12.0, 30.0, 200.0, 8.0, [0.4, 0.5, 0.6, 1.0]),
-                (12.0, 30.0, 100.0, 8.0, [0.1, 0.2, 0.3, 1.0]),
+                (12.0, 30.0, 200.0, 8.0, radius, [0.4, 0.5, 0.6, 1.0], all),
+                (12.0, 30.0, 100.0, 8.0, radius.min(4.0), [0.1, 0.2, 0.3, 1.0], all),
             ],
         );
-        // Nothing leaks onto the rounded path (apps read both getters).
-        assert!(WidgetHost::all_rounded_quads(&bar, &crate::widget::UiContext::new()).is_empty());
+        assert!(WidgetHost::extra_quads(&bar).is_empty(), "no plain quad leaks to flat hosts");
     }
 
     /// Recessed: no bg quad at all — the fill on the floor, then the carve.

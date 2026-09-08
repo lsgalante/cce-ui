@@ -173,12 +173,7 @@ impl Paint for FontSelector {
             self.paint_labels(rect, ctx);
             return;
         }
-        // Rounded base plate (the legacy leaf default from color + corner style)
-        if r > 0.0 {
-            ctx.rounded_rect(rect, r, (true, true, true, true), self.color());
-        }
-
-        // Border + inner background (the legacy extra_quads pair)
+        // The flat style: the framed dark field, rounded at the selector's radius.
         let bg_color = [0.08, 0.08, 0.12, 1.0];
         let border_color = if self.pressed {
             [0.30, 0.50, 0.32, 1.0]
@@ -187,11 +182,7 @@ impl Paint for FontSelector {
         } else {
             [0.18, 0.18, 0.24, 1.0]
         };
-        ctx.quad(rect, border_color);
-        ctx.quad(
-            Rect { x: rect.x + 1.0, y: rect.y + 1.0, width: rect.width - 2.0, height: rect.height - 2.0 },
-            bg_color,
-        );
+        ctx.border(rect, (r, r, r, r), bg_color, border_color, 1.0);
 
         self.paint_labels(rect, ctx);
     }
