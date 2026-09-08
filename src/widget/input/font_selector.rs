@@ -1,3 +1,4 @@
+use crate::colors;
 use crate::scene::layout::{Rect, Size};
 use crate::scene::paint::PaintCtx;
 use crate::widget::model::{Adapted, EventCtx, Input, Layout, Paint};
@@ -15,6 +16,11 @@ pub struct FontSelector {
     pressed: bool,
     hovered: bool,
     child: Arc<Mutex<Option<std::process::Child>>>,
+    /// Raised style, the closed Dropdown's: the field is a flush inset trough
+    /// with a transparent face (the plate shows through), the hover and press
+    /// states a wash inside it. Defaults to `control_relief()`; the flat style
+    /// keeps the framed dark field.
+    raised: bool,
 }
 
 impl FontSelector {
@@ -25,6 +31,7 @@ impl FontSelector {
             pressed: false,
             hovered: false,
             child: Arc::new(Mutex::new(None)),
+            raised: crate::layout::control_relief(),
         })
     }
 
@@ -98,15 +105,26 @@ impl FontSelector {
             }
         }
 
+        // The picker glyph: "Aa", the font-picker convention, in the dropdown arrow's
+        // grey — a text glyph every face has (the emoji this drew rendered as tofu
+        // wherever no emoji font was installed).
         labels.push(TextLabel {
-            text: "🔤".to_string(),
-            x: rect.x + rect.width - 20.0,
+            text: "Aa".to_string(),
+            x: rect.x + rect.width - 24.0,
             y: crate::layout::align_text_y(rect.y, rect.height, 11.0, 0.0),
             font_size: 11.0,
             color: [0x83, 0x83, 0x8a],
         });
 
         labels
+    }
+}
+
+impl Adapted<FontSelector> {
+    /// Raised style: see the `raised` field.
+    pub fn with_raised(mut self, raised: bool) -> Self {
+        self.raised = raised;
+        self
     }
 }
 
@@ -135,8 +153,26 @@ impl Paint for FontSelector {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // Rounded base plate (the legacy leaf default from color + corner style)
         let r = crate::layout::font_selector_corner_radius();
+        if self.raised {
+            // The closed-dropdown chrome: a flush inset trough with a transparent
+            // face, the state fill rounded to sit inside it.
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            ctx.inset_plate(rect, (r, r, r, r), [0.0; 4], depth);
+            let wash = if self.pressed {
+                Some(colors::button_press_color())
+            } else if self.hovered {
+                Some(colors::button_hover_color())
+            } else {
+                None
+            };
+            if let Some(c) = wash {
+                ctx.rounded_rect(rect, r, (true, true, true, true), c);
+            }
+            self.paint_labels(rect, ctx);
+            return;
+        }
+        // Rounded base plate (the legacy leaf default from color + corner style)
         if r > 0.0 {
             ctx.rounded_rect(rect, r, (true, true, true, true), self.color());
         }
@@ -156,8 +192,14 @@ impl Paint for FontSelector {
             bg_color,
         );
 
-        // Labels: family text clipped short of the picker glyph (the legacy per-label
-        // bounds), glyph unclipped.
+        self.paint_labels(rect, ctx);
+    }
+}
+
+impl FontSelector {
+    /// Labels: family text clipped short of the picker glyph (the legacy per-label
+    /// bounds), glyph unclipped.
+    fn paint_labels(&self, rect: Rect, ctx: &mut PaintCtx) {
         let font = self.widget_font();
         let clip_right = rect.x + rect.width - 24.0;
         let bounds = Some([rect.x, rect.y, clip_right, rect.y + rect.height]);

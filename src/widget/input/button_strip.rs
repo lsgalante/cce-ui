@@ -20,6 +20,15 @@ pub struct ButtonStrip {
     pub last_font: Option<String>,
     pub last_scale: Option<f32>,
     pub inherit_menubar_font: bool,
+    /// The detached control label, synced from the adapter (`Paint::sync_label`):
+    /// the strip's geometry keeps clear of the label strip above it.
+    label: Option<String>,
+    /// Recessed style: the strip is ONE well carved into the plate below (the
+    /// menu's recess around its run), the segments butting together on its
+    /// floor; the selected segment is a plateau raised back out of it, hover
+    /// and press a wash. Defaults to `control_relief()`; the flat style keeps
+    /// the plain state quads.
+    pub recessed: bool,
 }
 
 impl ButtonStrip {
@@ -41,7 +50,15 @@ impl ButtonStrip {
             last_font: None,
             last_scale: None,
             inherit_menubar_font: false,
+            label: None,
+            recessed: crate::layout::control_relief(),
         }
+    }
+
+    /// Recessed style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
     }
 
     pub fn with_inherit_menubar_font(mut self, inherit: bool) -> Self {
@@ -50,10 +67,13 @@ impl ButtonStrip {
         self
     }
 
-    /// The laid-out rect, mirrored from the adapter by `Layout::rect_assigned` (or the
-    /// constructor arguments until the first layout).
+    /// The laid-out content rect: the rect mirrored from the adapter by
+    /// `Layout::rect_assigned` (or the constructor arguments until the first layout)
+    /// less the detached label strip the adapter inflated it by, so the segments,
+    /// the well and the hit-testing all sit below the label.
     fn rect(&self) -> (f32, f32, f32, f32) {
-        (self.x, self.y, self.w, self.h)
+        let strip = crate::widget::input::slider::detached_strip(&self.label);
+        (self.x, self.y + strip, self.w, (self.h - strip).max(0.0))
     }
 
     fn current_font(&self) -> String {
@@ -316,10 +336,28 @@ impl crate::widget::Paint for ButtonStrip {
         Some(self.current_font())
     }
 
+    fn sync_label(&mut self, label: &str) {
+        self.label = Some(label.to_string());
+    }
+
     fn paint(&self, _rect: crate::scene::layout::Rect, pc: &mut crate::scene::paint::PaintCtx) {
         use crate::scene::layout::Rect;
-        // The legacy extra_quads body: per-item state backgrounds, plus the rotated
-        // (SVG-rasterized) vertical tab text clamped to the strip.
+        // The strip's well: one recess around the whole run, rounded like the
+        // buttons, before the segments so their fills sit on its floor. The
+        // segment fills stay plain quads either way — they are what reaches the
+        // flat hosts that read this widget through `extra_quads`.
+        let (sx, sy, sw, sh) = self.rect();
+        let radius = crate::layout::button_corner_radius();
+        let depth = if self.recessed {
+            let short = if self.vertical { sw } else { sh };
+            let depth = crate::layout::bevel_width().min(short * 0.2);
+            pc.recess(Rect { x: sx, y: sy, width: sw, height: sh }, (radius, radius, radius, radius), depth);
+            depth
+        } else {
+            0.0
+        };
+        // Per-item state backgrounds, plus the rotated (SVG-rasterized) vertical
+        // tab text clamped to the strip.
         for i in 0..self.buttons.len() {
             let r = self.item_rect(i);
             let mut bg_color = [0.0, 0.0, 0.0, 0.0];
@@ -332,6 +370,14 @@ impl crate::widget::Paint for ButtonStrip {
             }
             if bg_color != [0.0, 0.0, 0.0, 0.0] {
                 pc.quad(Rect { x: r.0, y: r.1, width: r.2, height: r.3 }, bg_color);
+            }
+            if self.recessed && Some(i) == self.selected {
+                // The selected segment: a plateau raised back out of the well,
+                // inset by the wall's inner half-span so it stands on the floor.
+                let inset = depth * 0.5;
+                let plateau = Rect { x: r.0 + inset, y: r.1 + inset, width: (r.2 - 2.0 * inset).max(0.0), height: (r.3 - 2.0 * inset).max(0.0) };
+                let pr = (radius - inset).max(0.0);
+                pc.boss(plateau, (pr, pr, pr, pr), depth);
             }
 
             if self.vertical {

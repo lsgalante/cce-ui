@@ -10,11 +10,24 @@ use crate::widget::{Adapted, Input, Layout, Paint};
 
 pub struct ProgressBar {
     value: f32,
+    /// Recessed-track style, the Slider's: the track is a well carved into the
+    /// plate below — no track fill, the plate is the floor — with the progress
+    /// fill inset onto that floor. Defaults to `control_relief()`; the flat
+    /// style keeps the filled, rounded track.
+    recessed: bool,
 }
 
 impl ProgressBar {
     pub fn new(value: f32) -> Adapted<ProgressBar> {
-        Adapted::new(ProgressBar { value })
+        Adapted::new(ProgressBar { value, recessed: crate::layout::control_relief() })
+    }
+}
+
+impl Adapted<ProgressBar> {
+    /// Recessed style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
     }
 }
 
@@ -36,6 +49,25 @@ impl Paint for ProgressBar {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let radius = crate::layout::slider_corner_radius();
+        if self.recessed {
+            // The Slider's recessed composition: the fill sits on the well's flat
+            // floor (past the wall's inner half-span), the carve comes after it so
+            // the walls' shading modulates what they cross.
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            let inset = depth * 0.5;
+            let floor = Rect { x: rect.x + inset, y: rect.y + inset, width: rect.width - 2.0 * inset, height: rect.height - 2.0 * inset };
+            let fill_w = floor.width * self.value.clamp(0.0, 1.0);
+            if fill_w > 0.0 {
+                ctx.rounded_rect(
+                    Rect { width: fill_w, ..floor },
+                    radius.min(floor.height / 2.0),
+                    (true, true, true, true),
+                    colors::progress_fill(),
+                );
+            }
+            ctx.recess(rect, (radius, radius, radius, radius), depth);
+            return;
+        }
         // Track.
         ctx.rounded_rect(rect, radius, (true, true, true, true), colors::progress_bg());
         // Fill.
@@ -63,7 +95,7 @@ mod tests {
     #[test]
     fn reverse_bridge_matches_legacy_geometry() {
         let ctx = UiContext::new();
-        let mut bar = ProgressBar::new(0.5);
+        let mut bar = ProgressBar::new(0.5).with_recessed(false);
         WidgetHost::set_rect(&mut bar, 10.0, 20.0, 100.0, 8.0);
 
         let quads = WidgetHost::all_rounded_quads(&bar, &ctx);
@@ -80,14 +112,31 @@ mod tests {
     #[test]
     fn fill_clamps_to_track() {
         let ctx = UiContext::new();
-        let mut over = ProgressBar::new(2.0);
+        let mut over = ProgressBar::new(2.0).with_recessed(false);
         WidgetHost::set_rect(&mut over, 0.0, 0.0, 100.0, 8.0);
         let quads = WidgetHost::all_rounded_quads(&over, &ctx);
         assert_eq!(quads[1].2, 100.0, "over-1 value fills the whole track");
 
-        let mut empty = ProgressBar::new(0.0);
+        let mut empty = ProgressBar::new(0.0).with_recessed(false);
         WidgetHost::set_rect(&mut empty, 0.0, 0.0, 100.0, 8.0);
         assert_eq!(WidgetHost::all_rounded_quads(&empty, &ctx).len(), 1, "zero value emits track only");
+    }
+
+    /// The recessed style draws no track of its own: the fill on the well floor, then
+    /// the carve — and nothing else, so the plate below is the floor.
+    #[test]
+    fn recessed_style_is_fill_then_carve() {
+        use crate::scene::paint::Prim;
+        let bar = ProgressBar::new(0.5).with_recessed(true);
+        let mut pc = PaintCtx::new();
+        Paint::paint(bar.inner(), Rect { x: 0.0, y: 0.0, width: 100.0, height: 16.0 }, &mut pc);
+        let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
+        assert_eq!(prims.len(), 2, "fill + carve: {prims:?}");
+        assert!(matches!(prims[0], Prim::RoundedRect { .. }), "the fill first");
+        assert!(matches!(prims[1], Prim::Recess { .. }), "then the well");
+        if let Prim::RoundedRect { rect, .. } = &prims[0] {
+            assert!(rect.x > 0.0 && rect.width < 50.0, "the fill is inset onto the floor: {rect:?}");
+        }
     }
 
     /// The detached-label convention survives the adapter: `set_rect` grows the widget by the
@@ -96,7 +145,7 @@ mod tests {
     #[test]
     fn label_inflates_rect_and_insets_paint() {
         let ctx = UiContext::new();
-        let mut bar = ProgressBar::new(0.5).with_label("Progress");
+        let mut bar = ProgressBar::new(0.5).with_recessed(false).with_label("Progress");
         WidgetHost::set_rect(&mut bar, 0.0, 10.0, 100.0, 8.0);
 
         let (_, y, _, h) = WidgetHost::rect(&bar);

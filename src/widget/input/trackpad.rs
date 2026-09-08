@@ -20,6 +20,10 @@ pub struct Trackpad {
     label: Option<String>,
     hovered: bool,
     pub fingers: Vec<Finger>,
+    /// Recessed style: the touch area is a well carved into the plate below,
+    /// a faint dark wash for its floor, instead of the framed dark pane.
+    /// Defaults to `control_relief()`.
+    recessed: bool,
 }
 
 impl Trackpad {
@@ -29,12 +33,24 @@ impl Trackpad {
             label: None,
             hovered: false,
             fingers: Vec::new(),
+            recessed: crate::layout::control_relief(),
         })
     }
 
     pub fn set_fingers(&mut self, fingers: Vec<Finger>) {
         self.fingers = fingers;
     }
+}
+
+impl Adapted<Trackpad> {
+    /// Recessed style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
+    }
+}
+
+impl Trackpad {
 
     fn label_offset(&self) -> f32 {
         if crate::layout::control_label_layout() == "side" {
@@ -99,15 +115,25 @@ impl Paint for Trackpad {
         let _ = rect; // geometry reads the assignment cache (events/drags share it)
         let (x, y, w, visual_h) = self.touch_area();
 
-        // 1. Background
-        ctx.quad(Rect { x, y, width: w, height: visual_h }, [0.11, 0.11, 0.16, 0.85]);
+        let area = Rect { x, y, width: w, height: visual_h };
+        if self.recessed {
+            // 1+2. A well in the plate: a faint dark floor (the fingers need the
+            // contrast) and the carve around it, rounded like the text wells.
+            let radius = crate::layout::textbox_corner_radius();
+            let depth = crate::layout::bevel_width().min(visual_h * 0.2);
+            ctx.rounded_rect(area, radius, (true, true, true, true), [0.0, 0.0, 0.0, 0.18]);
+            ctx.recess(area, (radius, radius, radius, radius), depth);
+        } else {
+            // 1. Background
+            ctx.quad(area, [0.11, 0.11, 0.16, 0.85]);
 
-        // 2. Borders
-        let border_color = [0.28, 0.28, 0.38, 1.0];
-        ctx.quad(Rect { x, y, width: w, height: 1.0 }, border_color);
-        ctx.quad(Rect { x, y: y + visual_h - 1.0, width: w, height: 1.0 }, border_color);
-        ctx.quad(Rect { x, y, width: 1.0, height: visual_h }, border_color);
-        ctx.quad(Rect { x: x + w - 1.0, y, width: 1.0, height: visual_h }, border_color);
+            // 2. Borders
+            let border_color = [0.28, 0.28, 0.38, 1.0];
+            ctx.quad(Rect { x, y, width: w, height: 1.0 }, border_color);
+            ctx.quad(Rect { x, y: y + visual_h - 1.0, width: w, height: 1.0 }, border_color);
+            ctx.quad(Rect { x, y, width: 1.0, height: visual_h }, border_color);
+            ctx.quad(Rect { x: x + w - 1.0, y, width: 1.0, height: visual_h }, border_color);
+        }
 
         // 3. Fingers
         for finger in &self.fingers {

@@ -31,6 +31,11 @@ pub struct ColorSelector {
     /// `measure_text` prefix it used before reports inked extent, which drifts
     /// off the glyph advances. Empty until the first shape.
     glyph_offsets: Vec<f32>,
+    /// Recessed style: the hex field is a well carved into the plate below
+    /// (the TextBox's, rim lit while editing) and the swatch a raised bevel
+    /// plate of its colour, instead of the hairline frame and the flat swatch
+    /// with its glow. Defaults to `control_relief()`.
+    recessed: bool,
 }
 
 impl Clone for ColorSelector {
@@ -52,6 +57,7 @@ impl Clone for ColorSelector {
             live_rx: None,
             revert_hex: None,
             glyph_offsets: self.glyph_offsets.clone(),
+            recessed: self.recessed,
         }
     }
 }
@@ -75,6 +81,7 @@ impl ColorSelector {
             live_rx: None,
             revert_hex: None,
             glyph_offsets: Vec::new(),
+            recessed: crate::layout::control_relief(),
         })
     }
 
@@ -96,12 +103,34 @@ impl ColorSelector {
             live_rx: None,
             revert_hex: None,
             glyph_offsets: Vec::new(),
+            recessed: crate::layout::control_relief(),
         })
+    }
+
+    /// The hex field's well for hosts that draw this control through the legacy
+    /// flat views (see `ParametersBg::reliefs`): (x, y, w, h, radius, depth) over the
+    /// widget's assigned content `rect`, or None when the style is off. The same
+    /// geometry `paint` carves (untinted).
+    pub fn field_relief(&self, rect: Rect) -> Option<(f32, f32, f32, f32, f32, f32)> {
+        if !self.recessed {
+            return None;
+        }
+        let well_h = crate::layout::color_selector_height().min(rect.height);
+        let field_w = rect.width * 0.65;
+        let radius = crate::layout::textbox_corner_radius();
+        let depth = crate::layout::bevel_width().min(well_h * 0.2);
+        Some((rect.x, rect.y, field_w, well_h, radius, depth))
     }
 
 }
 
 impl Adapted<ColorSelector> {
+    /// Recessed style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
+    }
+
     pub fn with_alpha(mut self, with_alpha: bool) -> Self {
         self.with_alpha = with_alpha;
         self
@@ -221,11 +250,13 @@ impl Paint for ColorSelector {
 
         // A real frame, not a border-quad-under-fill-quad: with no fill, the
         // old full-rect border quad would read as a solid slab.
-        let bw = 1.0;
-        quads.push((rect.x, rect.y, rect.width, bw, border_color));
-        quads.push((rect.x, rect.y + visual_h - bw, rect.width, bw, border_color));
-        quads.push((rect.x, rect.y, bw, visual_h, border_color));
-        quads.push((rect.x + rect.width - bw, rect.y, bw, visual_h, border_color));
+        if !self.recessed {
+            let bw = 1.0;
+            quads.push((rect.x, rect.y, rect.width, bw, border_color));
+            quads.push((rect.x, rect.y + visual_h - bw, rect.width, bw, border_color));
+            quads.push((rect.x, rect.y, bw, visual_h, border_color));
+            quads.push((rect.x + rect.width - bw, rect.y, bw, visual_h, border_color));
+        }
 
         if self.editing {
             let font_size = 12.0;
@@ -291,6 +322,54 @@ impl Paint for ColorSelector {
                 }
             }
         };
+
+        if self.recessed {
+            // The well first (the caret quad above rides over it), then the swatch
+            // as a raised bevel plate of the colour — over a checker when the
+            // colour carries alpha, so the transparency reads through the plate.
+            for (qx, qy, qw, qh, qc) in quads.drain(..) {
+                ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+            }
+            if let Some((wx, wy, ww, wh, radius, depth)) = self.field_relief(rect) {
+                let well = Rect { x: wx, y: wy, width: ww, height: wh };
+                let radii = (radius, radius, radius, radius);
+                if self.editing {
+                    let hc = crate::color::highlight_primary_color();
+                    ctx.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);
+                } else {
+                    ctx.recess(well, radii, depth);
+                }
+            }
+            let swatch = Rect { x: px, y: py, width: pw, height: ph };
+            if self.with_alpha {
+                let mut checker = Vec::new();
+                add_rounded_rect(&mut checker, [0.8, 0.8, 0.8, 1.0], px, py, pw, ph, preview_radius);
+                let grid_size = 6.0;
+                let cols = (pw / grid_size).ceil() as i32;
+                let rows = (ph / grid_size).ceil() as i32;
+                for r in 0..rows {
+                    for c in 0..cols {
+                        if (r + c) % 2 == 1 {
+                            let qx = px + c as f32 * grid_size;
+                            let qy = py + r as f32 * grid_size;
+                            let qw = grid_size.min(px + pw - qx);
+                            let qh = grid_size.min(py + ph - qy);
+                            if qw > 0.0 && qh > 0.0 {
+                                checker.push((qx, qy, qw, qh, [1.0, 1.0, 1.0, 1.0]));
+                            }
+                        }
+                    }
+                }
+                for (qx, qy, qw, qh, qc) in checker {
+                    ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+                }
+            }
+            let depth = crate::layout::bevel_width().min(ph * 0.2);
+            ctx.bevel(swatch, (preview_radius, preview_radius, preview_radius, preview_radius), linear_c, depth);
+            let hex = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
+            ctx.text(hex, rect.x + 4.0, crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0), 12.0, [0xcc, 0xcc, 0xd4]);
+            return;
+        }
 
         let steps = 6;
         for i in (1..=steps).rev() {

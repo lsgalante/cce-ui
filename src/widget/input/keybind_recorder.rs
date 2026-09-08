@@ -14,6 +14,11 @@ pub struct KeybindRecorder {
     pub just_changed: bool,
     pressed: bool,
     hovered: bool,
+    /// Recessed style, the TextBox's: the field is a well carved into the
+    /// plate below with no fill of its own, its rim lit in the highlight
+    /// accent while recording (the TextBox's editing treatment). Defaults to
+    /// `control_relief()`; the flat style keeps the framed dark field.
+    recessed: bool,
 }
 
 impl KeybindRecorder {
@@ -24,6 +29,7 @@ impl KeybindRecorder {
             just_changed: false,
             pressed: false,
             hovered: false,
+            recessed: crate::layout::control_relief(),
         })
     }
 
@@ -40,6 +46,14 @@ impl KeybindRecorder {
     }
 }
 
+impl Adapted<KeybindRecorder> {
+    /// Recessed style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
+    }
+}
+
 impl Layout for KeybindRecorder {
     fn intrinsic_size(&self) -> Option<Size> {
         Some(Size::new(0.0, crate::layout::textbox_height()))
@@ -52,6 +66,19 @@ impl Paint for KeybindRecorder {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        if self.recessed {
+            let radius = crate::layout::textbox_corner_radius();
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            let radii = (radius, radius, radius, radius);
+            if self.recording {
+                let hc = crate::color::highlight_primary_color();
+                ctx.recess_tinted(rect, radii, depth, [hc[0], hc[1], hc[2]]);
+            } else {
+                ctx.recess(rect, radii, depth);
+            }
+            self.paint_text(rect, ctx);
+            return;
+        }
         let border_color = if self.recording {
             colors::HIGHLIGHT_PRIMARY
         } else if self.pressed {
@@ -67,6 +94,12 @@ impl Paint for KeybindRecorder {
             [0.08, 0.08, 0.12, 1.0],
         );
 
+        self.paint_text(rect, ctx);
+    }
+}
+
+impl KeybindRecorder {
+    fn paint_text(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (display_text, color) = if self.recording {
             ("[ Press Keys... ]".to_string(), [135, 135, 153])
         } else if self.value.is_empty() {

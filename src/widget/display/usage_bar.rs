@@ -11,6 +11,10 @@ pub struct UsageBar {
     pub value: f32, // 0.0 to 1.0
     pub fill_color: [f32; 4],
     pub bg_color: [f32; 4],
+    /// Recessed-track style, the ProgressBar's: a well carved into the plate,
+    /// `bg_color` unused (the plate is the floor), the fill inset onto it.
+    /// Defaults to `control_relief()`.
+    recessed: bool,
 }
 
 impl UsageBar {
@@ -19,6 +23,7 @@ impl UsageBar {
             value: value.clamp(0.0, 1.0),
             fill_color: [0.30, 0.50, 0.32, 1.0], // green-ish
             bg_color: [0.15, 0.15, 0.24, 1.0],   // dark-ish
+            recessed: crate::layout::control_relief(),
         })
     }
 
@@ -33,6 +38,12 @@ impl Adapted<UsageBar> {
     pub fn with_colors(mut self, fill: [f32; 4], bg: [f32; 4]) -> Self {
         self.fill_color = fill;
         self.bg_color = bg;
+        self
+    }
+
+    /// Recessed style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
         self
     }
 }
@@ -50,6 +61,20 @@ impl Paint for UsageBar {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        if self.recessed {
+            // The ProgressBar's recessed composition: fill on the well floor, then
+            // the carve, rounded like the sliders' tracks.
+            let radius = crate::layout::slider_corner_radius();
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            let inset = depth * 0.5;
+            let floor = Rect { x: rect.x + inset, y: rect.y + inset, width: rect.width - 2.0 * inset, height: rect.height - 2.0 * inset };
+            let fill_w = floor.width * self.value;
+            if fill_w > 0.0 {
+                ctx.rounded_rect(Rect { width: fill_w, ..floor }, radius.min(floor.height / 2.0), (true, true, true, true), self.fill_color);
+            }
+            ctx.recess(rect, (radius, radius, radius, radius), depth);
+            return;
+        }
         ctx.quad(rect, self.bg_color);
         ctx.quad(Rect { width: rect.width * self.value, ..rect }, self.fill_color);
     }
@@ -66,7 +91,7 @@ mod tests {
     /// scaled by the clamped value.
     #[test]
     fn bridge_matches_legacy_extra_quads() {
-        let mut bar = UsageBar::new(0.5).with_colors([0.1, 0.2, 0.3, 1.0], [0.4, 0.5, 0.6, 1.0]);
+        let mut bar = UsageBar::new(0.5).with_recessed(false).with_colors([0.1, 0.2, 0.3, 1.0], [0.4, 0.5, 0.6, 1.0]);
         WidgetHost::set_rect(&mut bar, 12.0, 30.0, 200.0, 8.0);
         assert_eq!(
             WidgetHost::extra_quads(&bar),
@@ -77,6 +102,20 @@ mod tests {
         );
         // Nothing leaks onto the rounded path (apps read both getters).
         assert!(WidgetHost::all_rounded_quads(&bar, &crate::widget::UiContext::new()).is_empty());
+    }
+
+    /// Recessed: no bg quad at all — the fill on the floor, then the carve.
+    #[test]
+    fn recessed_style_is_fill_then_carve() {
+        use crate::scene::paint::{PaintCtx, Prim};
+        let bar = UsageBar::new(0.5).with_recessed(true);
+        let mut pc = PaintCtx::new();
+        Paint::paint(bar.inner(), Rect { x: 0.0, y: 0.0, width: 100.0, height: 16.0 }, &mut pc);
+        let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
+        assert_eq!(prims.len(), 2, "{prims:?}");
+        assert!(matches!(prims[0], Prim::RoundedRect { .. }));
+        assert!(matches!(prims[1], Prim::Recess { .. }));
+        assert!(WidgetHost::extra_quads(&bar).is_empty(), "no plain bg quad leaks to flat hosts");
     }
 
     #[test]

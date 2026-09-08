@@ -1216,6 +1216,20 @@ impl ParametersBg {
                 self.spinboxes[i]
                     .as_ref()
                     .map(|w| (w as &dyn WidgetHost, crate::layout::spinbox_corner_radius(), false))
+            } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
+                // The hex field's well only (`ColorSelector::field_relief`, the
+                // same geometry its paint carves); the swatch's bevel plate is
+                // a fill with its own lit edge and stays on the widget's paint.
+                if let Some(c) = &self.colors[i] {
+                    let (x, y, w, h) = c.rect();
+                    let ty = crate::widget::label_offset(c);
+                    if let Some((rx, ry, rw, rh, rr, rd)) =
+                        c.inner().field_relief(Rect { x, y: y + ty, width: w, height: h - ty })
+                    {
+                        out.push((rx, ry, rw, rh, r4(rr), rd, false, all));
+                    }
+                }
+                None
             } else if p.2.starts_with("float3") {
                 // Three standard slider rows: each row's track carve over its
                 // own row rect (an unlabeled slider's content rect is its

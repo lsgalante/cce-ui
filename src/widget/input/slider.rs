@@ -176,15 +176,7 @@ impl Slider {
     /// `Widget::label_offset` over the synced label (zero in side layout or
     /// unlabeled).
     fn label_top(&self) -> f32 {
-        if crate::layout::control_label_layout() == "side" {
-            return 0.0;
-        }
-        if self.label.is_some() {
-            let (_, font_size) = crate::layout::control_label_font_detached_parsed();
-            font_size + crate::layout::control_label_margin()
-        } else {
-            0.0
-        }
+        detached_strip(&self.label)
     }
 
     fn geom(&self, rect: Rect) -> SliderGeom {
@@ -552,76 +544,7 @@ impl Paint for Slider {
         // Carve AFTER the fill so the wall's shading modulates whatever it
         // crosses — the same order TextBox uses for its edit fill.
         if self.recessed {
-            let strip = self.label_top();
-            if strip > 0.0 {
-                // Labeled: the label sits in a CARVE-OUT tab, the section-
-                // title idiom (the labeled Dropdown's composition) — a flat
-                // recessed well hugging the label run, bottom open into the
-                // track's well; the well's top wall picks up right of the
-                // tab's throat.
-                let (fam, fsize) = crate::layout::control_label_font_detached_parsed();
-                let text_w = self
-                    .label
-                    .as_deref()
-                    .map(|l| crate::widget::display::measure_text_width(l, &fam, fsize))
-                    .unwrap_or(0.0);
-                let inset = 4.0; // Layout::detached_label_inset — the label's x offset
-                let tab_w = (text_w + 2.0 * inset).max(2.0 * radius + 8.0).min(g.track_w);
-                let tab_r = g.track_x + tab_w;
-                // The labeled-Dropdown composition: pieces extend `recess_t`
-                // past interior seams (host-fade crossfade), the tab's right
-                // wall ends at the fillet's vertical tangent (or it ghosts
-                // through the arc), and a left-only bridge carries the left
-                // wall across the fillet span.
-                let fr = 6.0_f32.min(strip * 0.5);
-                let filleted = g.track_x + g.track_w - tab_r > fr + 4.0;
-                let tab_bottom = if filleted { g.y - fr } else { g.y };
-                ctx.recess_edges(
-                    Rect { x: g.track_x, y: g.y - strip, width: tab_w, height: tab_bottom - (g.y - strip) + recess_t },
-                    (radius, radius.min(strip * 0.5), 0.0, 0.0),
-                    recess_t,
-                    (true, true, false, true),
-                );
-                if filleted {
-                    ctx.recess_edges(
-                        Rect { x: g.track_x, y: g.y - fr, width: tab_w, height: fr + recess_t },
-                        (0.0, 0.0, 0.0, 0.0),
-                        recess_t,
-                        (false, false, false, true),
-                    );
-                }
-                ctx.recess_edges(track_rect, (0.0, 0.0, radius, radius), recess_t, (false, true, true, true));
-                if filleted {
-                    ctx.concave_fillet(
-                        tab_r + fr,
-                        g.y - fr,
-                        fr,
-                        recess_t,
-                        std::f32::consts::FRAC_PI_2,
-                        false,
-                    );
-                    ctx.recess_edges(
-                        Rect {
-                            x: tab_r + fr - recess_t,
-                            y: g.y,
-                            width: g.track_x + g.track_w - tab_r - fr + recess_t,
-                            height: g.h,
-                        },
-                        (0.0, radius, 0.0, 0.0),
-                        recess_t,
-                        (true, false, false, false),
-                    );
-                } else if g.track_x + g.track_w - tab_r > 0.5 {
-                    ctx.recess_edges(
-                        Rect { x: tab_r - recess_t, y: g.y, width: g.track_x + g.track_w - tab_r + recess_t, height: g.h },
-                        (0.0, radius, 0.0, 0.0),
-                        recess_t,
-                        (true, false, false, false),
-                    );
-                }
-            } else {
-                ctx.recess(track_rect, (radius, radius, radius, radius), recess_t);
-            }
+            carve_labeled_well(ctx, track_rect, self.label_top(), detached_label_width(&self.label), radius, recess_t);
         }
 
         // Thumb. A real Circle prim, not a full-radius rounded rect: rounded
@@ -900,6 +823,10 @@ pub struct RangeSlider {
     pub(crate) active_thumb: Option<ActiveThumb>,
     drag_offset: f32,
     label: Option<String>,
+    /// Recessed-track style, the Slider's: the track is a well carved into the
+    /// plate below, the fill sits on its floor and the thumbs are spheres in the
+    /// channel. Defaults to `control_relief()`.
+    recessed: bool,
 }
 
 impl RangeSlider {
@@ -910,6 +837,7 @@ impl RangeSlider {
             active_thumb: None,
             drag_offset: 0.0,
             label: None,
+            recessed: crate::layout::control_relief(),
         })
     }
 
@@ -928,6 +856,109 @@ impl Adapted<RangeSlider> {
         self.set_values(low, high);
         self
     }
+
+    /// Recessed style: see the `recessed` field.
+    pub fn with_recessed(mut self, recessed: bool) -> Self {
+        self.recessed = recessed;
+        self
+    }
+}
+
+/// The recessed track's carve, in the labeled composition shared by Slider and
+/// RangeSlider: with a detached label (`strip` > 0, the label strip's height above
+/// `track`) the label sits in a CARVE-OUT tab, the section-title idiom (the labeled
+/// Dropdown's composition) — a flat recessed well hugging the label run, bottom open
+/// into the track's well; the well's top wall picks up right of the tab's throat.
+/// Pieces extend `depth` past interior seams (host-fade crossfade), the tab's right
+/// wall ends at the fillet's vertical tangent (or it ghosts through the arc), and a
+/// left-only bridge carries the left wall across the fillet span. Unlabeled, one
+/// plain recess.
+pub(crate) fn carve_labeled_well(ctx: &mut PaintCtx, track: Rect, strip: f32, label_w: f32, radius: f32, depth: f32) {
+    let track_end = track.x + track.width;
+    if strip > 0.0 {
+        // Labeled: the label sits in a CARVE-OUT tab, the section-
+        // title idiom (the labeled Dropdown's composition) — a flat
+        // recessed well hugging the label run, bottom open into the
+        // track's well; the well's top wall picks up right of the
+        // tab's throat.
+        let inset = 4.0; // Layout::detached_label_inset — the label's x offset
+        let tab_w = (label_w + 2.0 * inset).max(2.0 * radius + 8.0).min(track.width);
+        let tab_r = track.x + tab_w;
+        // The labeled-Dropdown composition: pieces extend `depth`
+        // past interior seams (host-fade crossfade), the tab's right
+        // wall ends at the fillet's vertical tangent (or it ghosts
+        // through the arc), and a left-only bridge carries the left
+        // wall across the fillet span.
+        let fr = 6.0_f32.min(strip * 0.5);
+        let filleted = track_end - tab_r > fr + 4.0;
+        let tab_bottom = if filleted { track.y - fr } else { track.y };
+        ctx.recess_edges(
+            Rect { x: track.x, y: track.y - strip, width: tab_w, height: tab_bottom - (track.y - strip) + depth },
+            (radius, radius.min(strip * 0.5), 0.0, 0.0),
+            depth,
+            (true, true, false, true),
+        );
+        if filleted {
+            ctx.recess_edges(
+                Rect { x: track.x, y: track.y - fr, width: tab_w, height: fr + depth },
+                (0.0, 0.0, 0.0, 0.0),
+                depth,
+                (false, false, false, true),
+            );
+        }
+        ctx.recess_edges(track, (0.0, 0.0, radius, radius), depth, (false, true, true, true));
+        if filleted {
+            ctx.concave_fillet(
+                tab_r + fr,
+                track.y - fr,
+                fr,
+                depth,
+                std::f32::consts::FRAC_PI_2,
+                false,
+            );
+            ctx.recess_edges(
+                Rect {
+                    x: tab_r + fr - depth,
+                    y: track.y,
+                    width: track_end - tab_r - fr + depth,
+                    height: track.height,
+                },
+                (0.0, radius, 0.0, 0.0),
+                depth,
+                (true, false, false, false),
+            );
+        } else if track_end - tab_r > 0.5 {
+            ctx.recess_edges(
+                Rect { x: tab_r - depth, y: track.y, width: track_end - tab_r + depth, height: track.height },
+                (0.0, radius, 0.0, 0.0),
+                depth,
+                (true, false, false, false),
+            );
+        }
+    } else {
+        ctx.recess(track, (radius, radius, radius, radius), depth);
+    }
+}
+
+/// The detached-label strip height above a content rect (zero in side layout or
+/// unlabeled) — the adapter's `label_offset`, replicated for widgets that reach up
+/// into the strip to carve the label tab.
+pub(crate) fn detached_strip(label: &Option<String>) -> f32 {
+    if crate::layout::control_label_layout() == "side" {
+        return 0.0;
+    }
+    if label.is_some() {
+        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+        font_size + crate::layout::control_label_margin()
+    } else {
+        0.0
+    }
+}
+
+/// The detached label's measured width (the tab hugs it), zero when unlabeled.
+pub(crate) fn detached_label_width(label: &Option<String>) -> f32 {
+    let (fam, fsize) = crate::layout::control_label_font_detached_parsed();
+    label.as_deref().map(|l| crate::widget::display::measure_text_width(l, &fam, fsize)).unwrap_or(0.0)
 }
 
 impl Layout for RangeSlider {
@@ -993,7 +1024,21 @@ impl Paint for RangeSlider {
                 ctx.quad(r, c);
             }
         };
-        rrect(Rect { x, y, width: w, height: h }, radius, rc, colors::rangeslider_track(), ctx);
+        let track = Rect { x, y, width: w, height: h };
+        if self.recessed {
+            // The Slider's recessed composition: no track fill (the plate below is
+            // the well's floor), the range band on the floor, the carve after it so
+            // the walls' shading modulates what they cross, and sphere thumbs sized
+            // to the flat floor between the walls.
+            let depth = crate::layout::bevel_width().min(h * 0.2);
+            rrect(highlight, radius.min(highlight.height / 2.0), (true, true, true, true), colors::rangeslider_fill(), ctx);
+            carve_labeled_well(ctx, track, detached_strip(&self.label), detached_label_width(&self.label), radius, depth);
+            let r = (h - depth) / 2.0;
+            ctx.sphere(thumb_low_x + thumb_size / 2.0, thumb_y + thumb_size / 2.0, r, low_color);
+            ctx.sphere(thumb_high_x + thumb_size / 2.0, thumb_y + thumb_size / 2.0, r, high_color);
+            return;
+        }
+        rrect(track, radius, rc, colors::rangeslider_track(), ctx);
         rrect(highlight, radius.min(highlight.height / 2.0), (true, true, true, true), colors::rangeslider_fill(), ctx);
         rrect(
             Rect { x: thumb_low_x, y: thumb_y, width: thumb_size, height: thumb_size },
