@@ -28,6 +28,9 @@ pub struct Spinbox {
     pub editor_state: TextEditorState,
     pub just_changed: bool,
     label: Option<String>,
+    /// Wheel notches carried between events: a trackpad's fractional notches
+    /// add up to whole steps instead of being dropped.
+    wheel_accum: f32,
     /// Char-index → x offsets of the value text, recorded by [`Paint::prepare_text`]
     /// from the same shaped buffer the renderer draws (`ctx.text`, size 14, default
     /// family). The caret and click→index math read these; the `8.4` px/char guess
@@ -66,6 +69,7 @@ impl Spinbox {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             label: None,
+            wheel_accum: 0.0,
             glyph_offsets: Vec::new(),
         })
     }
@@ -489,6 +493,21 @@ impl Input for Spinbox {
                     false
                 }
             }
+            Event::MouseWheel { delta, .. } => {
+                // Wheel up steps up, wheel down steps down, one step per notch;
+                // fractional (trackpad) notches accumulate. Always consumed, so
+                // a host's page never scrolls under a spinbox mid-gesture.
+                self.wheel_accum += delta.notches_y();
+                while self.wheel_accum >= 1.0 {
+                    self.wheel_accum -= 1.0;
+                    self.step_by(1);
+                }
+                while self.wheel_accum <= -1.0 {
+                    self.wheel_accum += 1.0;
+                    self.step_by(-1);
+                }
+                true
+            }
             Event::KeyInput(key_event) => {
                 if !self.editing || key_event.state != ElementState::Pressed {
                     return false;
@@ -638,6 +657,33 @@ mod tests {
         // FocusOut now commits the refreshed buffer — the step survives.
         sb.handle_event(&Event::FocusOut, &mut ctx);
         assert_eq!(sb.value, 7);
+    }
+
+    #[test]
+    fn spinbox_wheel_steps_by_notch_and_accumulates_fractions() {
+        use crate::widget::MouseScrollDelta;
+        let mut ctx = UiContext::new();
+        let mut sb = Spinbox::new(10, 0, 100, 5);
+        let (id, ptr) = (sb.id(), sb.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        WidgetHost::set_rect(&mut sb, 10.0, 20.0, 100.0, 26.0);
+
+        // One notch up steps up, one notch down steps down — and the wheel is consumed.
+        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 50.0, 33.0, &mut ctx));
+        assert_eq!(sb.value, 15);
+        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), 50.0, 33.0, &mut ctx));
+        assert_eq!(sb.value, 10);
+        assert!(sb.take_change());
+
+        // Fractional (trackpad) notches accumulate to a whole step, consumed all the while.
+        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), 50.0, 33.0, &mut ctx));
+        assert_eq!(sb.value, 10, "half a notch: no step yet");
+        assert!(sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), 50.0, 33.0, &mut ctx));
+        assert_eq!(sb.value, 15, "the second half completes the notch");
+
+        // Outside the rect the wheel is not the spinbox's (hit-gated by the adapter).
+        assert!(!sb.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 200.0, 200.0, &mut ctx));
+        assert_eq!(sb.value, 15);
     }
 
     #[test]
