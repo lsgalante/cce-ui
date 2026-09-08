@@ -108,6 +108,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.textbox.multiline.line_wrap" | "style.textbox.multiline.line_wrap" | "style.data.textbox.multiline.line_wrap" => "textbox_line_wrap",
                 "style.control.textbox.multiline.border_width" | "style.textbox.multiline.border_width" | "style.data.textbox.multiline.border_width" => "textbox_multiline_border_width",
                 "style.control.toggle.style" => "toggle_style",
+                "style.control.checkbox.style" => "checkbox_style",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
                 "style.control.toggle.disabled_color" => "toggle_disabled_color",
@@ -1865,6 +1866,19 @@ pub fn set_toggle_border_width(width: f32) {
 pub fn slider_corner_radius() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("slider_corner_radius").unwrap_or(4.0)
+}
+
+/// The checkbox's render style: `style.control.checkbox.style = "round"` swaps
+/// the square box for the ring-and-dot mark (see `Checkbox::paint_round_mark`),
+/// with the mark on the LEFT of the label the way a list row reads. Anything
+/// else is the square style.
+pub fn checkbox_round() -> bool {
+    lazy_init_style_registry();
+    get_style_registry()
+        .read()
+        .unwrap()
+        .get_string("checkbox_style")
+        .is_some_and(|s| s == "round")
 }
 
 /// The toggle's render style: `style.control.toggle.style = "slide"` swaps the

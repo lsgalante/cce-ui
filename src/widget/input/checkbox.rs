@@ -31,9 +31,15 @@ pub struct Checkbox {
     label: Option<String>,
     hovered: bool,
     focused: bool,
+    /// Round style: a ring-and-dot mark on the left of the label instead of the
+    /// square box on the right. Seeded from `style.control.checkbox.style`.
+    round: bool,
 }
 
 impl Checkbox {
+    /// The round mark's radius: a 14px disc, the size cce-list's rows always drew.
+    pub const ROUND_RADIUS: f32 = 7.0;
+
     pub fn new() -> Adapted<Checkbox> {
         Adapted::new(Checkbox {
             checked: false,
@@ -42,6 +48,7 @@ impl Checkbox {
             label: None,
             hovered: false,
             focused: false,
+            round: crate::layout::checkbox_round(),
         })
     }
 
@@ -51,6 +58,33 @@ impl Checkbox {
 
     pub fn checked(&self) -> bool {
         self.checked
+    }
+
+    /// Select the round style regardless of config (a list row wants it whatever
+    /// the DE-wide setting says).
+    pub fn set_round(&mut self, round: bool) {
+        self.round = round;
+    }
+
+    pub fn round(&self) -> bool {
+        self.round
+    }
+
+    /// The round style's mark, centred on (`cx`, `cy`): a dim ring, and a solid
+    /// dot in the toggle-on colour when checked. Shared with hosts that draw
+    /// their own rows (cce-list) so a list's marks and a `Checkbox` agree pixel
+    /// for pixel.
+    pub fn paint_round_mark(ctx: &mut PaintCtx, cx: f32, cy: f32, radius: f32, checked: bool) {
+        ctx.border(
+            Rect { x: cx - radius, y: cy - radius, width: 2.0 * radius, height: 2.0 * radius },
+            (radius, radius, radius, radius),
+            [0.0, 0.0, 0.0, 0.0],
+            colors::TEXT_DIM,
+            1.5,
+        );
+        if checked {
+            ctx.circle(cx, cy, radius - 3.0, colors::TOGGLE_ON);
+        }
     }
 
     /// Hover state, also settable directly for immediate-mode hosts that do their own
@@ -86,7 +120,7 @@ impl Paint for Checkbox {
         // is the colored box itself. Style-property paths (demo `widget_vertices`) read this.
         // Width isn't known here, so mirror the legacy intent via the label: labeled checkboxes
         // are the wide rows.
-        if self.label.is_some() {
+        if self.label.is_some() || self.round {
             [0.0, 0.0, 0.0, 0.0]
         } else {
             self.box_color()
@@ -99,6 +133,25 @@ impl Paint for Checkbox {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
+        if self.round {
+            // Round style: the mark leads and the label follows, a list row's
+            // reading order. Standalone, the mark fills the rect.
+            let r = if self.label.is_some() { Self::ROUND_RADIUS } else { (w.min(h) / 2.0).max(1.0) };
+            let (cx, cy) = if self.label.is_some() { (x + r, y + h / 2.0) } else { (x + w / 2.0, y + h / 2.0) };
+            Self::paint_round_mark(ctx, cx, cy, r, self.checked);
+            if let Some(ref label) = self.label {
+                let (_, font_size) = crate::layout::control_label_font_parsed();
+                let ty = crate::layout::align_text_y(y, h, font_size, 0.0);
+                ctx.text(
+                    label.clone(),
+                    cx + r + 8.0,
+                    ty,
+                    font_size,
+                    colors::control_label_color_for_state(self.hovered, self.focused),
+                );
+            }
+            return;
+        }
         if w > 30.0 {
             // Wide mode: label on the left, 18px box on the right — the legacy `extra_quads`
             // geometry verbatim.
