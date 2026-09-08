@@ -293,13 +293,10 @@ static SECTION_PADDING: RwLock<f32> = RwLock::new(8.0);
 pub const DEFAULT_CONTROL_HEIGHT: f32 = 24.0;
 
 /// The one gap between controls — one control height — in BOTH axes: what every
-/// layout strategy's `Default` puts between children's content boxes and around
-/// them, and what the legacy row builders advance by. A detached label hangs in
-/// the gap above its control (a strategy places content boxes; see
-/// `WidgetHost::label_strip`), which is why the gap is a control height and not
-/// a few pixels: it holds a label strip (font + margin) with room to spare, so
-/// the space between two controls reads the same whether or not a label sits in
-/// it, and the same as the space beside them.
+/// layout strategy's `Default` puts between children's blocks (a detached label
+/// and the control below it, see `WidgetHost::label_strip`) and around them, and
+/// what the legacy row builders advance by. One number, one module, so the space
+/// beside a control and the space below it read the same.
 pub const CONTROL_GAP: f32 = DEFAULT_CONTROL_HEIGHT;
 
 /// The one inset from a control's edge to its text: the field text of a TextBox,
@@ -307,6 +304,22 @@ pub const CONTROL_GAP: f32 = DEFAULT_CONTROL_HEIGHT;
 /// justified Button or Toggle label, a Slider's readout. Fields in a column line
 /// their text up because they all use this.
 pub const CONTROL_TEXT_INSET: f32 = 8.0;
+
+/// A carve that stays INSIDE its rect. A recess, boss or trough wall straddles the
+/// rect edge it is given — half its depth outside — so a well carved at a widget's
+/// rect edge painted past the widget's box, and the gap beside a well read up to
+/// half a depth smaller than the gap beside a raised plate (whose roll is inside).
+/// Every widget carves the rect this returns instead: inset by half the depth, the
+/// radii reduced by the same so the OUTER silhouette keeps the configured radius.
+/// The widget's footprint is then its rect, and the gap is the gap.
+pub fn carve_inside(rect: crate::scene::layout::Rect, radii: crate::scene::paint::Radii, depth: f32) -> (crate::scene::layout::Rect, crate::scene::paint::Radii) {
+    let g = depth * 0.5;
+    let r = |r: f32| if r > 0.0 { (r - g).max(0.0) } else { 0.0 };
+    (
+        crate::scene::layout::Rect { x: rect.x + g, y: rect.y + g, width: (rect.width - depth).max(0.0), height: (rect.height - depth).max(0.0) },
+        (r(radii.0), r(radii.1), r(radii.2), r(radii.3)),
+    )
+}
 
 /// The one inset from a control's left edge to its detached label above it — the
 /// x offset the adapter draws the label at, and the tab hugging that label in the
@@ -4732,11 +4745,10 @@ impl LayoutStrategy for FlexLayout {
 
     fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &mut crate::context::UiContext) -> f32 {
         let (cur_x, cur_y) = (x, y);
-        // Content boxes: a detached label hangs above its control in the gap (or
-        // this lead row of headroom), so labeled and unlabeled children line up
-        // by content and the gap between controls is the gap.
+        // Blocks: the label row (`label_lead`) above every child's content, the
+        // gap between blocks, so a row's controls are level and a carve-out tab
+        // sits a full gap from its neighbour.
         let lead = crate::widget::container::container_layout::label_lead(children);
-        let (cur_x, cur_y) = (cur_x, cur_y + lead);
         match self.direction {
             FlexDirection::Row => {
                 let mut cur_x = cur_x;
@@ -4747,7 +4759,7 @@ impl LayoutStrategy for FlexLayout {
                         let child_h = crate::widget::container::container_layout::content_height(child);
                         let use_h = if child_h > 0.0 { child_h } else { h };
                         child.layout(
-                            crate::widget::Point { x: cur_x, y: cur_y },
+                            crate::widget::Point { x: cur_x, y: cur_y + lead },
                             crate::widget::LayoutConstraints::new(child_w, child_w, use_h, use_h),
                             ctx,
                         );
@@ -4764,11 +4776,11 @@ impl LayoutStrategy for FlexLayout {
                         let child_h = crate::widget::container::container_layout::content_height(child);
                         let use_h = if child_h > 0.0 { child_h } else { 44.0 };
                         child.layout(
-                            crate::widget::Point { x, y: cur_y },
+                            crate::widget::Point { x, y: cur_y + lead },
                             crate::widget::LayoutConstraints::new(w, w, use_h, use_h),
                             ctx,
                         );
-                        cur_y += use_h + self.spacing;
+                        cur_y += lead + use_h + self.spacing;
                     }
                 }
                 (cur_y - y).max(0.0)

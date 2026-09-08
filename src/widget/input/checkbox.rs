@@ -324,13 +324,14 @@ impl Toggle {
         let radius = crate::layout::toggle_corner_radius();
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
         if let Some(btn) = self.slide_button(rect) {
+            let (btn, radii) = crate::layout::carve_inside(btn, (radius, radius, radius, radius), depth);
             return vec![ReliefCarve {
                 kind: CarveKind::Trough,
                 x: btn.x,
                 y: btn.y,
                 w: btn.width,
                 h: btn.height,
-                radii: (radius, radius, radius, radius),
+                radii,
                 depth,
                 edges: (true, true, true, true),
             }];
@@ -338,7 +339,12 @@ impl Toggle {
         if !self.raised {
             return Vec::new();
         }
-        self.rocker_reliefs(rect)
+        // The carves stay inside the pill (`layout::carve_inside`): the halves are
+        // cut from the inset rect (the hinge keeps the pill's centre line), the
+        // faces (`flat_faces`) keep the full one — the walls shade over their edges.
+        let (inset, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
+        let r = radii.0;
+        self.rocker_reliefs(inset)
             .into_iter()
             .map(|(half, radii, walls, raised)| ReliefCarve {
                 kind: if raised { CarveKind::Boss } else { CarveKind::Recess { tint: None } },
@@ -346,7 +352,7 @@ impl Toggle {
                 y: half.y,
                 w: half.width,
                 h: half.height,
-                radii,
+                radii: (radii.0.min(r), radii.1.min(r), radii.2.min(r), radii.3.min(r)),
                 depth,
                 edges: walls,
             })

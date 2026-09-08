@@ -209,8 +209,9 @@ pub trait WidgetHost {
     /// The height of the detached-label strip above this widget's content: zero for
     /// unlabeled and inline-label widgets. A widget's occupied rect is its content plus
     /// this strip, whichever legacy convention its `set_rect` follows; `layout` lands
-    /// the content at the origin and the strip above it, in the gap a strategy leaves
-    /// between rows (`layout::CONTROL_GAP` holds one).
+    /// the content at the origin and the strip above it. A strategy reserves that
+    /// row above every child's content (`container_layout::label_lead`) and puts
+    /// `layout::CONTROL_GAP` between the blocks.
     fn label_strip(&self) -> f32 { 0.0 }
 
     fn mark_dirty(&mut self, ctx: &mut UiContext) {

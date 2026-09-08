@@ -475,6 +475,17 @@ impl Dropdown {
             }
             // Flush inset plate: groove ring down, beveled lip back up, face
             // level with the surface (transparent raw fill = edges only).
+            // Carved INSIDE the trigger's rect (`layout::carve_inside`): the
+            // groove's outer edge lands on the rect, so everything below —
+            // which outsets the ring by half the depth — starts from the rect
+            // inset by that much, radii reduced to keep the outer silhouette.
+            let (inner, r4t) = crate::layout::carve_inside(
+                Rect { x, y, width: w, height: visual_h },
+                (r4[0], r4[1], r4[2], r4[3]),
+                depth,
+            );
+            let (x, y, w, visual_h) = (inner.x, inner.y, inner.width, inner.height);
+            let r4 = [r4t.0, r4t.1, r4t.2, r4t.3];
             let face = if raw_bg[3] > 0.001 { bg_color } else { [0.0; 4] };
             let strip = self.label_top();
             if strip > 0.0 {
@@ -1027,7 +1038,12 @@ impl Paint for Dropdown {
         };
         if self.raised {
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            pc.inset_plate(face, ux, uy, uw, uh, radius, depth);
+            let (t, tr) = crate::layout::carve_inside(
+                crate::scene::layout::Rect { x: ux, y: uy, width: uw, height: uh },
+                (radius, radius, radius, radius),
+                depth,
+            );
+            pc.inset_plate(face, t.x, t.y, t.width, t.height, tr.0, depth);
         } else {
             pc.rect_with_radius(self.border_color(), ux, uy, uw, uh, radius);
             pc.rect_with_radius(face, ux + 1.0, uy + 1.0, uw - 2.0, uh - 2.0, (radius - 1.0).max(0.0));

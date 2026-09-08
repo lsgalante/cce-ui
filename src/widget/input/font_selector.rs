@@ -158,7 +158,8 @@ impl Paint for FontSelector {
             // The closed-dropdown chrome: a flush inset trough with a transparent
             // face, the state fill rounded to sit inside it.
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            ctx.inset_plate(rect, (r, r, r, r), [0.0; 4], depth);
+            let (trough, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
+            ctx.inset_plate(trough, radii, [0.0; 4], depth);
             let wash = if self.pressed {
                 Some(colors::button_press_color())
             } else if self.hovered {

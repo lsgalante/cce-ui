@@ -379,7 +379,8 @@ impl Paint for Button {
         // surfaces, and the edges-only groove would stack a permanent carved
         // ring on every idle row of a list.
         if let Some((face, r, depth, c)) = self.inset_face(rect) {
-            ctx.inset_plate(face, (r, r, r, r), c, depth);
+            let (trough, radii) = crate::layout::carve_inside(face, (r, r, r, r), depth);
+            ctx.inset_plate(trough, radii, c, depth);
         } else {
             // ListRow also skips the border idiom below: it draws the border
             // color as a FULL rect with the fill inset over it, which only

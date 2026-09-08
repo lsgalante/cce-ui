@@ -66,13 +66,14 @@ impl Paint for UsageBar {
             // the carve, rounded like the sliders' tracks.
             let radius = crate::layout::slider_corner_radius();
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            let inset = depth * 0.5;
+            let inset = depth;
             let floor = Rect { x: rect.x + inset, y: rect.y + inset, width: rect.width - 2.0 * inset, height: rect.height - 2.0 * inset };
             let fill_w = floor.width * self.value;
             if fill_w > 0.0 {
                 ctx.rounded_rect(Rect { width: fill_w, ..floor }, radius.min(floor.height / 2.0), (true, true, true, true), self.fill_color);
             }
-            ctx.recess(rect, (radius, radius, radius, radius), depth);
+            let (well, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
+            ctx.recess(well, radii, depth);
             return;
         }
         ctx.quad(rect, self.bg_color);

@@ -479,13 +479,16 @@ impl Paint for MenuBar {
                 // — carving there too would cut a second lip into the same pixels. One wall
                 // straddling the boundary intrudes only half its width, so the cap is looser
                 // than the trough's.
+                // The wall stays inside the bar (`layout::carve_inside`).
                 let depth = crate::layout::bar_wall_width().min(rect.height * 0.6);
-                ctx.recess_edges(rect, (0.0, 0.0, 0.0, 0.0), depth, (false, false, true, false));
+                let bar = Rect { height: rect.height - depth * 0.5, ..rect };
+                ctx.recess_edges(bar, (0.0, 0.0, 0.0, 0.0), depth, (false, false, true, false));
             } else {
                 // Inset from the plate edge: a real trough, walled all round, its corners
                 // rounded by the roll itself.
                 let depth = crate::layout::bar_wall_width().min(rect.height * 0.4);
-                ctx.recess(rect, (depth, depth, depth, depth), depth);
+                let (well, radii) = crate::layout::carve_inside(rect, (depth, depth, depth, depth), depth);
+                ctx.recess(well, radii, depth);
             }
         } else {
             // Background: always the plain quad — the rounded-against-parent variant required a
@@ -506,7 +509,8 @@ impl Paint for MenuBar {
             let trough = Rect { x: r.0, y: r.1 + (r.3 - trough_h) / 2.0, width: r.2, height: trough_h };
             let radius = crate::layout::dropdown_corner_radius();
             let depth = crate::layout::bevel_width().min(trough_h * 0.2);
-            ctx.inset_plate(trough, (radius, radius, radius, radius), [0.0; 4], depth);
+            let (trough, radii) = crate::layout::carve_inside(trough, (radius, radius, radius, radius), depth);
+            ctx.inset_plate(trough, radii, [0.0; 4], depth);
             if let Some(c) = fill {
                 ctx.rounded_rect(trough, radius, (true, true, true, true), c);
             }

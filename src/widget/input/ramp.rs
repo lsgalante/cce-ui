@@ -1340,7 +1340,8 @@ impl Paint for Ramp {
             pc.border(graph, radii, [0.0; 4], [0.0, 0.0, 0.0, a], t);
         }
         let depth = crate::layout::bevel_width().min(graph.height * 0.2);
-        pc.recess(graph, radii, depth);
+        let (well, radii) = crate::layout::carve_inside(graph, radii, depth);
+        pc.recess(well, radii, depth);
         if !self.controls_collapsed {
             let dummy = UiContext::new();
             self.preset_dropdown.paint_self(&dummy, pc);

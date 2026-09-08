@@ -119,7 +119,12 @@ impl ColorSelector {
         let field_w = rect.width * 0.65;
         let radius = crate::layout::textbox_corner_radius();
         let depth = crate::layout::bevel_width().min(well_h * 0.2);
-        Some((rect.x, rect.y, field_w, well_h, radius, depth))
+        let (well, radii) = crate::layout::carve_inside(
+            Rect { x: rect.x, y: rect.y, width: field_w, height: well_h },
+            (radius, radius, radius, radius),
+            depth,
+        );
+        Some((well.x, well.y, well.width, well.height, radii.0, depth))
     }
 
 }

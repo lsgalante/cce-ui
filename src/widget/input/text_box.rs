@@ -1219,11 +1219,12 @@ impl TextBox {
             height: self.rect.height - top,
         };
         let depth = crate::layout::bevel_width().min(well.height * 0.2);
+        let (well, radii) = crate::layout::carve_inside(well, (radius, radius, radius, radius), depth);
         let tint = self.editing.then(|| {
             let hc = crate::color::highlight_primary_color();
             [hc[0], hc[1], hc[2]]
         });
-        Some((well, radius, depth, tint))
+        Some((well, radii.0, depth, tint))
     }
 }
 

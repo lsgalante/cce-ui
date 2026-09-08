@@ -151,7 +151,12 @@ impl Slider {
         let g = self.geom(rect);
         let radius = crate::layout::slider_corner_radius();
         let depth = crate::layout::bevel_width().min(g.h * 0.2);
-        Some((g.track_x, g.y, g.track_w, g.h, radius, depth))
+        let (well, radii) = crate::layout::carve_inside(
+            Rect { x: g.track_x, y: g.y, width: g.track_w, height: g.h },
+            (radius, radius, radius, radius),
+            depth,
+        );
+        Some((well.x, well.y, well.width, well.height, radii.0, depth))
     }
 
     /// The thumb knob's circle (cx, cy, radius, color) for hosts that draw this
@@ -521,12 +526,12 @@ impl Paint for Slider {
         }
 
         // Fill up to the thumb center. Recessed style insets the fill onto the
-        // well's flat floor (past the wall's inner half-span), so the liquid
-        // sits in the well instead of climbing its walls.
+        // well's flat floor (past the wall, which is carved inside the track), so
+        // the liquid sits in the well instead of climbing its walls.
         let thumb_x = g.track_x + self.value * (g.track_w - g.thumb_size);
         if let Some(fill_color) = colors::slider_fill() {
             let (fx, fy, fmax_w, fh) = if self.recessed {
-                let inset = recess_t * 0.5;
+                let inset = recess_t;
                 (g.track_x + inset, g.y + inset, g.track_w - 2.0 * inset, g.h - 2.0 * inset)
             } else {
                 (g.track_x, g.y, g.track_w, g.h)
@@ -869,6 +874,11 @@ impl Adapted<RangeSlider> {
 /// left-only bridge carries the left wall across the fillet span. Unlabeled, one
 /// plain recess.
 pub(crate) fn carve_labeled_well(ctx: &mut PaintCtx, track: Rect, strip: f32, label_w: f32, radius: f32, depth: f32) {
+    // Carve INSIDE the track (`layout::carve_inside`): every piece derives from
+    // this rect, so the whole composition — tab, fillet, bridge — moves in with it
+    // and the outer walls land on the track's edges.
+    let (track, radii) = crate::layout::carve_inside(track, (radius, radius, radius, radius), depth);
+    let radius = radii.0;
     let track_end = track.x + track.width;
     if strip > 0.0 {
         // Labeled: the label sits in a CARVE-OUT tab, the section-
@@ -877,18 +887,28 @@ pub(crate) fn carve_labeled_well(ctx: &mut PaintCtx, track: Rect, strip: f32, la
         // track's well; the well's top wall picks up right of the
         // tab's throat.
         let inset = crate::layout::DETACHED_LABEL_INSET; // the label's x offset
-        let tab_w = (label_w + 2.0 * inset).max(2.0 * radius + 8.0).min(track.width);
+        let fr = 6.0_f32.min(strip * 0.5);
+        let mut tab_w = (label_w + 2.0 * inset).max(2.0 * radius + 8.0).min(track.width);
+        // A throat too short for the fillet and a run of top wall past it reads
+        // as a notch beside the tab: then the tab spans the whole track (the
+        // Slider2D's pad, a narrow slider) and the well's top wall is the tab's.
+        if track.width - tab_w < 2.0 * fr + 4.0 {
+            tab_w = track.width;
+        }
         let tab_r = track.x + tab_w;
         // The labeled-Dropdown composition: pieces extend `depth`
         // past interior seams (host-fade crossfade), the tab's right
         // wall ends at the fillet's vertical tangent (or it ghosts
         // through the arc), and a left-only bridge carries the left
         // wall across the fillet span.
-        let fr = 6.0_f32.min(strip * 0.5);
-        let filleted = track_end - tab_r > fr + 4.0;
+        let filleted = track_end - tab_r > 2.0 * fr + 4.0;
         let tab_bottom = if filleted { track.y - fr } else { track.y };
+        // The tab's crossfade extension past its bottom seam is capped at the
+        // fillet radius: a deep wall (a tall well's) otherwise ran on below the
+        // well's top edge as a stub beside the fillet.
+        let ext = if filleted { depth.min(fr) } else { depth };
         ctx.recess_edges(
-            Rect { x: track.x, y: track.y - strip, width: tab_w, height: tab_bottom - (track.y - strip) + depth },
+            Rect { x: track.x, y: track.y - strip, width: tab_w, height: tab_bottom - (track.y - strip) + ext },
             (radius, radius.min(strip * 0.5), 0.0, 0.0),
             depth,
             (true, true, false, true),

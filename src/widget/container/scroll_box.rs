@@ -43,11 +43,9 @@ pub fn paint_relief_scrollbar(
     let depth = crate::layout::bevel_width().min(sb_w * 0.35);
     let radii = (r, r, r, r);
     use crate::scene::layout::Rect;
-    pc.recess(
-        Rect { x: sb_x, y: sb_track_y, width: sb_w, height: sb_track_h },
-        radii,
-        depth,
-    );
+    let (track, track_radii) =
+        crate::layout::carve_inside(Rect { x: sb_x, y: sb_track_y, width: sb_w, height: sb_track_h }, radii, depth);
+    pc.recess(track, track_radii, depth);
     pc.bevel(
         Rect { x: sb_x, y: thumb_y, width: sb_w, height: thumb_h },
         radii,

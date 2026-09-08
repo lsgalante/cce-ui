@@ -122,7 +122,8 @@ impl Paint for Trackpad {
             let radius = crate::layout::textbox_corner_radius();
             let depth = crate::layout::bevel_width().min(visual_h * 0.2);
             ctx.rounded_rect(area, radius, (true, true, true, true), [0.0, 0.0, 0.0, 0.18]);
-            ctx.recess(area, (radius, radius, radius, radius), depth);
+            let (well, radii) = crate::layout::carve_inside(area, (radius, radius, radius, radius), depth);
+            ctx.recess(well, radii, depth);
         } else {
             // 1. Background
             ctx.quad(area, [0.11, 0.11, 0.16, 0.85]);

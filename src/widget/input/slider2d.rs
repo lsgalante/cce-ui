@@ -92,11 +92,16 @@ impl Layout for Slider2D {
     }
 
 
-    /// A 64px pad, or wide enough for its label's carve-out tab (the tab is clipped
-    /// to the pad and the label spilled past a 64px one).
+    /// A 64px pad, or wide enough for its label's carve-out tab plus a filleted
+    /// throat beside it (the tab is clipped to the pad; the label spilled past a
+    /// 64px one, and a throat too short for the fillet reads as a notch).
     fn intrinsic_size(&self) -> Option<Size> {
         let label_w = crate::widget::input::slider::detached_label_width(&self.label);
-        let tab_w = if label_w > 0.0 { label_w + 2.0 * crate::layout::DETACHED_LABEL_INSET + 16.0 } else { 0.0 };
+        let tab_w = if label_w > 0.0 {
+            label_w + 2.0 * crate::layout::DETACHED_LABEL_INSET + 24.0 + crate::layout::bevel_width()
+        } else {
+            0.0
+        };
         Some(Size::new(64.0_f32.max(tab_w), 64.0))
     }
 

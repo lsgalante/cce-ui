@@ -353,10 +353,12 @@ impl Paint for Breadcrumb {
                         c[3] = -(c[3] * Self::RAISED_FACE_OPACITY);
                         ctx.bevel(run_rect, (r, r, r, r), c, depth);
                     } else {
-                        ctx.boss(run_rect, (r, r, r, r), depth);
+                        let (plateau, radii) = crate::layout::carve_inside(run_rect, (r, r, r, r), depth);
+                        ctx.boss(plateau, radii, depth);
                     }
                 } else {
-                    ctx.inset_plate(run_rect, (r, r, r, r), face, depth);
+                    let (trough, radii) = crate::layout::carve_inside(run_rect, (r, r, r, r), depth);
+                    ctx.inset_plate(trough, radii, face, depth);
                 }
                 for (a, b) in self.seams(rect) {
                     ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);

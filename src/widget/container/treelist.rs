@@ -957,8 +957,7 @@ impl Paint for TreeList {
         // (the retired legacy_focus_highlight overlay).
         if crate::layout::control_relief() {
             let depth = crate::layout::bevel_width().min(h * 0.2);
-            let well = Rect { x, y, width: w, height: h };
-            let radii = (radius, radius, radius, radius);
+            let (well, radii) = crate::layout::carve_inside(Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), depth);
             if self.focused {
                 let hc = crate::color::highlight_primary_color();
                 pc.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);

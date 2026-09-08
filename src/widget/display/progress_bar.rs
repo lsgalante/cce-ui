@@ -54,7 +54,7 @@ impl Paint for ProgressBar {
             // floor (past the wall's inner half-span), the carve comes after it so
             // the walls' shading modulates what they cross.
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            let inset = depth * 0.5;
+            let inset = depth;
             let floor = Rect { x: rect.x + inset, y: rect.y + inset, width: rect.width - 2.0 * inset, height: rect.height - 2.0 * inset };
             let fill_w = floor.width * self.value.clamp(0.0, 1.0);
             if fill_w > 0.0 {
@@ -65,7 +65,8 @@ impl Paint for ProgressBar {
                     colors::progress_fill(),
                 );
             }
-            ctx.recess(rect, (radius, radius, radius, radius), depth);
+            let (well, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
+            ctx.recess(well, radii, depth);
             return;
         }
         // Track.

@@ -505,7 +505,8 @@ pub mod context_menu {
                 frosted[3] = -crate::color::menu_opacity();
                 ctx.plate(rect, (r, r, r, r), frosted, depth);
             } else {
-                ctx.boss(rect, (r, r, r, r), depth);
+                let (plateau, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
+                ctx.boss(plateau, radii, depth);
             }
 
             if let Some(h_idx) = self.hovered_item {

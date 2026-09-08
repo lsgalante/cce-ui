@@ -116,9 +116,12 @@ pub fn content_height(child: &dyn WidgetHost) -> f32 {
     child.preferred_height().unwrap_or(child.rect().3 - child.label_strip())
 }
 
-/// The headroom a strategy leaves above its first row so the first row's detached
-/// labels have somewhere to hang: the tallest label strip among the children (every
-/// later row's labels hang in the gap). Zero when nothing is labeled.
+/// The label row a strategy reserves above EVERY child's content: the tallest
+/// detached-label strip among the children, zero when nothing is labeled. A block
+/// is label + control; the strategies place blocks and put the gap between them,
+/// in both axes, so a carve-out tab (which makes the label part of a control's
+/// silhouette) sits a full gap from its neighbour. Reserving the row for every
+/// child — an unlabeled one leaves it empty — keeps a row's controls level.
 pub fn label_lead(children: &[*mut (dyn WidgetHost + 'static)]) -> f32 {
     children.iter().map(|&c| unsafe { (*c).label_strip() }).fold(0.0, f32::max)
 }
@@ -164,10 +167,10 @@ impl crate::layout::LayoutStrategy for VerticalLayout {
     fn layout(&self, x: f32, y: f32, w: f32, _h: f32, children: &[*mut (dyn WidgetHost + 'static)], ctx: &mut UiContext) -> f32 {
         let left_x = x + self.padding_x;
         let available_w = (w - 2.0 * self.padding_x).max(1.0);
-        // Content boxes: a child's detached label hangs above its content in the
-        // gap before it (the first row's in this lead), so mixed children line up
-        // by content and the space between controls is the gap.
-        let mut current_y = y + self.padding_y + label_lead(children);
+        // Blocks: the label row (`label_lead`) then the content, the gap between
+        // blocks.
+        let lead = label_lead(children);
+        let mut current_y = y + self.padding_y;
 
         for &child_ptr in children {
             unsafe {
@@ -175,26 +178,27 @@ impl crate::layout::LayoutStrategy for VerticalLayout {
                 let ch = content_height(child);
                 let use_h = if ch > 0.0 { ch } else { 44.0 };
                 child.layout(
-                    Point { x: left_x, y: current_y },
+                    Point { x: left_x, y: current_y + lead },
                     LayoutConstraints::new(available_w, available_w, use_h, use_h),
                     ctx,
                 );
-                current_y += use_h + self.spacing;
+                current_y += lead + use_h + self.spacing;
             }
         }
         (current_y - y).max(0.0)
     }
 
     fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn WidgetHost + 'static)], ctx: &UiContext) -> Size {
-        let mut total_h = self.padding_y * 2.0 + label_lead(children);
+        let mut total_h = self.padding_y * 2.0;
         let mut max_w = 0.0f32;
         let spacing = self.spacing;
+        let lead = label_lead(children);
 
         for (i, &child_ptr) in children.iter().enumerate() {
             unsafe {
                 let size = (*child_ptr).measure(constraints, ctx);
                 max_w = max_w.max(size.width);
-                total_h += size.height;
+                total_h += lead + size.height;
                 if i > 0 {
                     total_h += spacing;
                 }
@@ -272,9 +276,9 @@ impl crate::layout::LayoutStrategy for GridLayout {
         let available_w = (w - 2.0 * self.padding_x - total_gap).max(1.0);
         let col_w = available_w / cols as f32;
         
-        // Content boxes (see VerticalLayout): labels hang in the gaps, the first
-        // row's in the lead.
-        let mut col_heights = vec![y + self.padding_y + label_lead(children); cols];
+        // Blocks (see VerticalLayout): the label row, then the content.
+        let lead = label_lead(children);
+        let mut col_heights = vec![y + self.padding_y; cols];
 
         for &child_ptr in children {
             unsafe {
@@ -294,11 +298,11 @@ impl crate::layout::LayoutStrategy for GridLayout {
                 let cx = x + self.padding_x + min_col as f32 * (col_w + self.gap);
                 let cy = col_heights[min_col];
                 child.layout(
-                    Point { x: cx, y: cy },
+                    Point { x: cx, y: cy + lead },
                     LayoutConstraints::new(col_w, col_w, use_h, use_h),
                     ctx,
                 );
-                col_heights[min_col] += use_h + self.gap;
+                col_heights[min_col] += lead + use_h + self.gap;
             }
         }
         
@@ -308,7 +312,8 @@ impl crate::layout::LayoutStrategy for GridLayout {
 
     fn measure(&self, constraints: LayoutConstraints, children: &[*mut (dyn WidgetHost + 'static)], ctx: &UiContext) -> Size {
         let cols = self.columns.max(1);
-        let mut col_heights = vec![self.padding_y + label_lead(children); cols];
+        let lead = label_lead(children);
+        let mut col_heights = vec![self.padding_y; cols];
         let total_gap = self.gap * (cols - 1) as f32;
         let available_w = (constraints.max_width - 2.0 * self.padding_x - total_gap).max(1.0);
         let col_w = available_w / cols as f32;
@@ -326,7 +331,7 @@ impl crate::layout::LayoutStrategy for GridLayout {
                         min_col = i;
                     }
                 }
-                col_heights[min_col] += size.height + self.gap;
+                col_heights[min_col] += lead + size.height + self.gap;
             }
         }
         
@@ -460,7 +465,7 @@ impl crate::layout::LayoutStrategy for ColumnsLayout {
         let total_padding = self.padding_x * 2.0;
         let available_w = (w - total_padding - total_spacing).max(1.0);
         let col_w = available_w / count as f32;
-        // Content boxes: the columns' labels hang in the lead above them.
+        // Blocks: the label row above the columns' content.
         let lead = label_lead(children);
         let use_h = (h - 2.0 * self.padding_y - lead).max(1.0);
         let start_y = y + self.padding_y + lead;
@@ -605,9 +610,9 @@ impl crate::layout::LayoutStrategy for MosaicLayout {
         let total_padding_x = self.padding_x * 2.0;
         let available_w = (w - total_padding_x).max(1.0);
 
-        // Content boxes (see VerticalLayout): labels hang in the gaps, the first
-        // row's in the lead.
-        let mut packer = Packer::new(x + self.padding_x, y + self.padding_y + label_lead(children), available_w, self.gap);
+        // Blocks (see VerticalLayout): each packed as label row + content.
+        let lead = label_lead(children);
+        let mut packer = Packer::new(x + self.padding_x, y + self.padding_y, available_w, self.gap);
 
         for &child_ptr in children {
             unsafe {
@@ -617,9 +622,9 @@ impl crate::layout::LayoutStrategy for MosaicLayout {
                 let child_h = content_height(child);
                 let use_h = if child_h > 0.0 { child_h } else { 44.0 };
                 
-                let (px, py) = packer.pack(child_w, use_h);
+                let (px, py) = packer.pack(child_w, lead + use_h);
                 child.layout(
-                    Point { x: px, y: py },
+                    Point { x: px, y: py + lead },
                     LayoutConstraints::new(child_w.min(available_w), child_w.min(available_w), use_h, use_h),
                     ctx,
                 );
@@ -637,12 +642,13 @@ impl crate::layout::LayoutStrategy for MosaicLayout {
         let total_padding_x = self.padding_x * 2.0;
         let available_w = (constraints.max_width - total_padding_x).max(1.0);
 
-        let mut packer = Packer::new(self.padding_x, self.padding_y + label_lead(children), available_w, self.gap);
+        let lead = label_lead(children);
+        let mut packer = Packer::new(self.padding_x, self.padding_y, available_w, self.gap);
 
         for &child_ptr in children {
             unsafe {
                 let size = (*child_ptr).measure(constraints, ctx);
-                packer.pack(size.width, size.height);
+                packer.pack(size.width, lead + size.height);
             }
         }
 
@@ -694,7 +700,7 @@ impl crate::layout::LayoutStrategy for ReverseMosaicLayout {
         let available_w = (w - total_padding_x).max(1.0);
 
         let lead = label_lead(children);
-        let mut packer = Packer::new(self.padding_x, self.padding_y + lead, available_w, self.gap);
+        let mut packer = Packer::new(self.padding_x, self.padding_y, available_w, self.gap);
         let mut temp_positions = Vec::with_capacity(count);
 
         for &child_ptr in children {
@@ -705,8 +711,10 @@ impl crate::layout::LayoutStrategy for ReverseMosaicLayout {
                 let child_h = content_height(child);
                 let use_h = if child_h > 0.0 { child_h } else { 44.0 };
                 
-                let (px, py) = packer.pack(child_w, use_h);
-                temp_positions.push((px, py, child_w, use_h));
+                // The block (label row + content) is packed; the content lands
+                // `lead` below its top, scaled with the rest.
+                let (px, py) = packer.pack(child_w, lead + use_h);
+                temp_positions.push((px, py, child_w, lead + use_h));
             }
         }
 
@@ -726,7 +734,7 @@ impl crate::layout::LayoutStrategy for ReverseMosaicLayout {
         let src_h = (y_max - y_min).max(1.0);
 
         let dst_w = available_w;
-        let dst_h = (h - 2.0 * self.padding_y - lead).max(1.0);
+        let dst_h = (h - 2.0 * self.padding_y).max(1.0);
 
         let scale_x = dst_w / src_w;
         let scale_y = dst_h / src_h;
@@ -737,9 +745,9 @@ impl crate::layout::LayoutStrategy for ReverseMosaicLayout {
                 let (px, py, pw, ph) = temp_positions[i];
 
                 let new_x = x + self.padding_x + (px - x_min) * scale_x;
-                let new_y = y + self.padding_y + lead + (py - y_min) * scale_y;
+                let new_y = y + self.padding_y + (py - y_min) * scale_y + lead * scale_y;
                 let new_w = pw * scale_x;
-                let new_h = ph * scale_y;
+                let new_h = (ph - lead) * scale_y;
 
                 child.layout(
                     Point { x: new_x, y: new_y },

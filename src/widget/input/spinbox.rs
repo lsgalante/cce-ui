@@ -169,7 +169,9 @@ impl Spinbox {
         }
         let radius = crate::layout::spinbox_corner_radius();
         let depth = crate::layout::bevel_width().min(g.h * 0.2);
-        let well = (Rect { x: g.x, y: g.y, width: g.w, height: g.h }, radius, depth);
+        let (well_rect, well_radii) =
+            crate::layout::carve_inside(Rect { x: g.x, y: g.y, width: g.w, height: g.h }, (radius, radius, radius, radius), depth);
+        let well = (well_rect, well_radii.0, depth);
         if g.btn_w <= 0.0 || g.btn_h <= 0.0 {
             return Some((well, None));
         }

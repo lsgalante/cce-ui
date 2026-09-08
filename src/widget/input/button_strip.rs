@@ -351,7 +351,8 @@ impl crate::widget::Paint for ButtonStrip {
         let depth = if self.recessed {
             let short = if self.vertical { sw } else { sh };
             let depth = crate::layout::bevel_width().min(short * 0.2);
-            pc.recess(Rect { x: sx, y: sy, width: sw, height: sh }, (radius, radius, radius, radius), depth);
+            let (well, radii) = crate::layout::carve_inside(Rect { x: sx, y: sy, width: sw, height: sh }, (radius, radius, radius, radius), depth);
+            pc.recess(well, radii, depth);
             depth
         } else {
             0.0
@@ -377,7 +378,8 @@ impl crate::widget::Paint for ButtonStrip {
                 let inset = depth * 0.5;
                 let plateau = Rect { x: r.0 + inset, y: r.1 + inset, width: (r.2 - 2.0 * inset).max(0.0), height: (r.3 - 2.0 * inset).max(0.0) };
                 let pr = (radius - inset).max(0.0);
-                pc.boss(plateau, (pr, pr, pr, pr), depth);
+                let (plateau, radii) = crate::layout::carve_inside(plateau, (pr, pr, pr, pr), depth);
+                pc.boss(plateau, radii, depth);
             }
 
             if self.vertical {

@@ -69,12 +69,12 @@ impl Paint for KeybindRecorder {
         if self.recessed {
             let radius = crate::layout::textbox_corner_radius();
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            let radii = (radius, radius, radius, radius);
+            let (well, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
             if self.recording {
                 let hc = crate::color::highlight_primary_color();
-                ctx.recess_tinted(rect, radii, depth, [hc[0], hc[1], hc[2]]);
+                ctx.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);
             } else {
-                ctx.recess(rect, radii, depth);
+                ctx.recess(well, radii, depth);
             }
             self.paint_text(rect, ctx);
             return;
