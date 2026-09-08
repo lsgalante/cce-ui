@@ -37,7 +37,12 @@ impl Adapted<UsageBar> {
     }
 }
 
-impl Layout for UsageBar {}
+impl Layout for UsageBar {
+    /// A track, the progress bar's height.
+    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
+        Some(crate::scene::layout::Size::new(0.0, crate::layout::progressbar_height()))
+    }
+}
 
 impl Paint for UsageBar {
     fn color(&self) -> [f32; 4] {

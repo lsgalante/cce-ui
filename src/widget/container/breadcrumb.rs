@@ -278,7 +278,12 @@ impl Breadcrumb {
     }
 }
 
-impl Layout for Breadcrumb {}
+impl Layout for Breadcrumb {
+    /// The segments are button plates, so the bar is one button row tall.
+    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
+        Some(crate::scene::layout::Size::new(0.0, crate::layout::button_height()))
+    }
+}
 
 impl Paint for Breadcrumb {
     fn color(&self) -> [f32; 4] {

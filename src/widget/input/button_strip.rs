@@ -285,6 +285,15 @@ impl ButtonStrip {
 }
 
 impl crate::widget::Layout for ButtonStrip {
+    /// A horizontal strip is one button row tall; a vertical one is content-sized.
+    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
+        if self.vertical {
+            None
+        } else {
+            Some(crate::scene::layout::Size::new(0.0, crate::layout::button_height()))
+        }
+    }
+
     // The legacy set_rect override: regenerate the rotated tab labels only when the rect
     // actually changed.
     fn rect_assigned(&mut self, rect: crate::scene::layout::Rect) {

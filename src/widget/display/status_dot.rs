@@ -23,6 +23,9 @@ pub struct StatusDot {
 }
 
 impl StatusDot {
+    /// The dot's default side.
+    pub const SIZE: f32 = 12.0;
+
     pub fn new(status: DotStatus) -> Adapted<StatusDot> {
         Adapted::new(StatusDot { status })
     }
@@ -32,7 +35,12 @@ impl StatusDot {
     }
 }
 
-impl Layout for StatusDot {}
+impl Layout for StatusDot {
+    /// A dot: a fixed small square unless the host sizes it.
+    fn intrinsic_size(&self) -> Option<crate::scene::layout::Size> {
+        Some(crate::scene::layout::Size::new(StatusDot::SIZE, StatusDot::SIZE))
+    }
+}
 
 impl Paint for StatusDot {
     fn color(&self) -> [f32; 4] {

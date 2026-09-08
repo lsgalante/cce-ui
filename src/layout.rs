@@ -285,15 +285,25 @@ pub fn parse_font_string(s: &str) -> (String, Option<f32>) {
 }
 
 static SECTION_PADDING: RwLock<f32> = RwLock::new(8.0);
-static SPINBOX_HEIGHT: RwLock<f32> = RwLock::new(26.0);
+/// The height every text-bearing control falls back to when its own
+/// `style.control.<name>.height` is unset: button, toggle (and the checkbox
+/// row), dropdown, textbox (and the keybind recorder), spinbox, font selector,
+/// colour selector, button strip, breadcrumb. One number, so a form built from
+/// defaults lines up; a per-control key is the deliberate exception.
+pub const DEFAULT_CONTROL_HEIGHT: f32 = 24.0;
+/// The same for the track-shaped controls: slider, range slider, progress bar,
+/// usage bar.
+pub const DEFAULT_TRACK_HEIGHT: f32 = 16.0;
+
+static SPINBOX_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
 static SPINBOX_BUTTON_PADDING: RwLock<f32> = RwLock::new(0.0);
-static COLOR_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(22.0);
-static TEXTBOX_HEIGHT: RwLock<f32> = RwLock::new(44.0);
-static FONT_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(44.0);
-static SLIDER_HEIGHT: RwLock<f32> = RwLock::new(28.0);
-static PROGRESSBAR_HEIGHT: RwLock<f32> = RwLock::new(24.0);
-static RANGESLIDER_HEIGHT: RwLock<f32> = RwLock::new(28.0);
-static TOGGLE_HEIGHT: RwLock<f32> = RwLock::new(44.0);
+static COLOR_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
+static TEXTBOX_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
+static FONT_SELECTOR_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
+static SLIDER_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_TRACK_HEIGHT);
+static PROGRESSBAR_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_TRACK_HEIGHT);
+static RANGESLIDER_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_TRACK_HEIGHT);
+static TOGGLE_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
 static COLOR_SELECTOR_FONT: RwLock<String> = RwLock::new(String::new());
 static COLOR_SELECTOR_PREVIEW_CORNER_RADIUS: RwLock<f32> = RwLock::new(4.0);
 static COLOR_SELECTOR_PREVIEW_MARGIN: RwLock<f32> = RwLock::new(0.0);
@@ -309,7 +319,7 @@ static BUTTON_FONT: RwLock<String> = RwLock::new(String::new());
 
 static PAGINATOR_TAB_PADDING_X: RwLock<f32> = RwLock::new(10.0);
 static BUTTON_PADDING: RwLock<f32> = RwLock::new(14.0);
-static BUTTON_HEIGHT: RwLock<f32> = RwLock::new(40.0);
+static BUTTON_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
 static RAMP_HEIGHT: RwLock<f32> = RwLock::new(32.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
@@ -321,7 +331,7 @@ static TREE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static TREE_BLUR: RwLock<f32> = RwLock::new(0.0);
 
 static PLATE_PADDING: RwLock<f32> = RwLock::new(20.0);
-static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(44.0);
+static DROPDOWN_HEIGHT: RwLock<f32> = RwLock::new(DEFAULT_CONTROL_HEIGHT);
 static NESTED_SECTION_LABEL_ALIGNMENT: RwLock<u8> = RwLock::new(0);
 static TOUCHPAD_NATURAL_SCROLL: RwLock<bool> = RwLock::new(false);
 
