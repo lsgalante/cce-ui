@@ -433,11 +433,6 @@ impl Layout for Slider {
         false // legacy Slider::set_rect stored the assigned rect verbatim
     }
 
-    /// Detached label x inset — keeps the label clear of its carve-out tab's
-    /// left wall (the Dropdown value).
-    fn detached_label_inset(&self) -> f32 {
-        4.0
-    }
 
 
     fn intrinsic_size(&self) -> Option<Size> {
@@ -881,7 +876,7 @@ pub(crate) fn carve_labeled_well(ctx: &mut PaintCtx, track: Rect, strip: f32, la
         // recessed well hugging the label run, bottom open into the
         // track's well; the well's top wall picks up right of the
         // tab's throat.
-        let inset = 4.0; // Layout::detached_label_inset — the label's x offset
+        let inset = crate::layout::DETACHED_LABEL_INSET; // the label's x offset
         let tab_w = (label_w + 2.0 * inset).max(2.0 * radius + 8.0).min(track.width);
         let tab_r = track.x + tab_w;
         // The labeled-Dropdown composition: pieces extend `depth`

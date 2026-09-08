@@ -1295,9 +1295,6 @@ impl Layout for TextBox {
         false
     }
 
-    fn detached_label_inset(&self) -> f32 {
-        4.0
-    }
 
     /// One row for a single-line box; a multiline box has no natural height of its own —
     /// the host sizes it, and a layout strategy leaves its assigned rect alone.

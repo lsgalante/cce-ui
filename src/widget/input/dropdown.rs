@@ -495,7 +495,7 @@ impl Dropdown {
                     .as_deref()
                     .map(|l| crate::widget::display::measure_text_width(l, &fam, fsize))
                     .unwrap_or(0.0);
-                let inset = 4.0; // Layout::detached_label_inset — the label's x offset
+                let inset = crate::layout::DETACHED_LABEL_INSET; // the label's x offset
                 let tab_w = (text_w + 2.0 * inset + 2.0 * g)
                     .max(2.0 * orad.0 + 8.0)
                     .min(outer_r - outer_x);
@@ -904,9 +904,6 @@ impl Layout for Dropdown {
         false
     }
 
-    fn detached_label_inset(&self) -> f32 {
-        4.0
-    }
 
     /// Content size for the scene layout engine (Phase 2b). A normal dropdown is wide enough for
     /// the widest option (via `content_width`, which already includes the arrow/padding inset), so

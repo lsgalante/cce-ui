@@ -200,7 +200,18 @@ pub trait WidgetHost {
     /// implementor) always owns a base; test shims carry one via `impl_widget_base!`.
     fn base(&self) -> &Widget;
     fn base_mut(&mut self) -> &mut Widget;
+    /// The height a layout should allot this widget: its content height plus the
+    /// detached-label strip above it, whichever label convention the widget follows
+    /// (see [`WidgetHost::label_inflation`]). Assigning it through [`WidgetHost::layout`]
+    /// lands a rect exactly this tall. `None` when the widget has no natural height.
     fn preferred_height(&self) -> Option<f32> { None }
+
+    /// How far past an assigned rect this widget grows on `set_rect` to make room for
+    /// its detached label — the legacy inflating convention (ProgressBar, ButtonStrip,
+    /// ...). Zero for widgets that keep the assigned rect and draw the label inside it
+    /// (Slider, Dropdown, ...), and for inline-label widgets. `layout` subtracts it, so
+    /// both conventions land the occupied height they were allotted.
+    fn label_inflation(&self) -> f32 { 0.0 }
 
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
         let b = self.base_mut();

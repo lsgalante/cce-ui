@@ -291,6 +291,23 @@ static SECTION_PADDING: RwLock<f32> = RwLock::new(8.0);
 /// colour selector, button strip, breadcrumb. One number, so a form built from
 /// defaults lines up; a per-control key is the deliberate exception.
 pub const DEFAULT_CONTROL_HEIGHT: f32 = 24.0;
+
+/// The one gap between controls: what every layout strategy's `Default` puts
+/// between children and around them, and what the legacy row builders advance
+/// by. Containers may set their own, but one number is the rhythm.
+pub const CONTROL_GAP: f32 = 8.0;
+
+/// The one inset from a control's edge to its text: the field text of a TextBox,
+/// Dropdown, Spinbox, FontSelector, KeybindRecorder or ColorSelector, a left-
+/// justified Button or Toggle label, a Slider's readout. Fields in a column line
+/// their text up because they all use this.
+pub const CONTROL_TEXT_INSET: f32 = 8.0;
+
+/// The one inset from a control's left edge to its detached label above it — the
+/// x offset the adapter draws the label at, and the tab hugging that label in the
+/// carve-out compositions (Slider, Dropdown, RangeSlider). Every labeled control
+/// uses it, so a column of labels is one line.
+pub const DETACHED_LABEL_INSET: f32 = 4.0;
 /// The same for the track-shaped controls: slider, range slider, progress bar,
 /// usage bar.
 pub const DEFAULT_TRACK_HEIGHT: f32 = 16.0;
@@ -3672,7 +3689,11 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     if let Some(w_id) = id {
         ctx.register_widget(w_id, w as *mut T as *mut (dyn WidgetHost + 'static));
     }
-    w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
+    // `wh` is the legacy content height — a widget whose detached label inflates its
+    // rect grows past it. `layout` speaks occupied heights (label included), so hand
+    // it the box the widget will land in.
+    let occupied = wh + w.label_inflation();
+    w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, occupied, occupied), ctx);
 
     // Shape, which on this path nobody else does. A flat host consumes
     // `all_quads`, so `prepare_text` — where a TextBox records the per-glyph x
@@ -4036,10 +4057,12 @@ impl Column {
     }
 
     pub fn widget<T: WidgetHost + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, mut wh: f32, ctx: &mut UiContext) {
-        if let Some(pref) = w.preferred_height() {
-            wh = pref;
-        }
         let top_room = crate::widget::label_offset(w);
+        if let Some(pref) = w.preferred_height() {
+            // Preferred heights are occupied (label included); this builder adds
+            // the label room itself below.
+            wh = pref - top_room;
+        }
         let total_h = wh + top_room;
         let x = self.ax(x_off);
         let y = self.ay();
@@ -4056,7 +4079,7 @@ impl Column {
             base_x: self.ox + self.cx,
             y: row_y,
             cursor_x: 0.0,
-            spacing: 8.0,
+            spacing: CONTROL_GAP,
         };
         f(&mut row);
         self.y = self.y + h;
@@ -4088,7 +4111,9 @@ impl<'a> Row<'a> {
 
     pub fn widget<T: WidgetHost + 'static>(&mut self, w: &mut T, ww: f32, mut wh: f32, ctx: &mut UiContext) {
         if let Some(pref) = w.preferred_height() {
-            wh = pref;
+            // Preferred heights are occupied (label included); `render_widget`
+            // takes the content height and adds the label room itself.
+            wh = pref - crate::widget::label_offset(w);
         }
         render_widget(self.pc, w, self.base_x + self.cursor_x, self.y, ww, wh, ctx);
         self.cursor_x += ww + self.spacing;
@@ -4216,11 +4241,13 @@ impl Section {
     }
 
     pub fn widget<T: WidgetHost + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
+        let top_room = crate::widget::label_offset(w);
         if let Some(pref) = w.preferred_height() {
-            wh = pref;
+            // Preferred heights are occupied (label included); this builder adds
+            // the label room itself below.
+            wh = pref - top_room;
         }
         let pad = self.padding();
-        let top_room = crate::widget::label_offset(w);
         let total_h = wh + top_room;
 
         let name = w.type_name();
@@ -4704,7 +4731,7 @@ impl LayoutStrategy for FlexLayout {
         self.spacing
     }
 
-    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], _ctx: &mut crate::context::UiContext) -> f32 {
+    fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &mut crate::context::UiContext) -> f32 {
         let mut cur_x = x;
         let mut cur_y = y;
         match self.direction {
@@ -4715,7 +4742,11 @@ impl LayoutStrategy for FlexLayout {
                         let child_w = child.rect().2;
                         let child_h = child.preferred_height().unwrap_or(child.rect().3);
                         let use_h = if child_h > 0.0 { child_h } else { h };
-                        child.set_rect(cur_x, cur_y, child_w, use_h);
+                        child.layout(
+                            crate::widget::Point { x: cur_x, y: cur_y },
+                            crate::widget::LayoutConstraints::new(child_w, child_w, use_h, use_h),
+                            ctx,
+                        );
                         cur_x += child_w + self.spacing;
                     }
                 }
@@ -4727,7 +4758,11 @@ impl LayoutStrategy for FlexLayout {
                         let child = &mut *child_ptr;
                         let child_h = child.preferred_height().unwrap_or(child.rect().3);
                         let use_h = if child_h > 0.0 { child_h } else { 44.0 };
-                        child.set_rect(x, cur_y, w, use_h);
+                        child.layout(
+                            crate::widget::Point { x, y: cur_y },
+                            crate::widget::LayoutConstraints::new(w, w, use_h, use_h),
+                            ctx,
+                        );
                         cur_y += use_h + self.spacing;
                     }
                 }

@@ -188,11 +188,6 @@ impl Layout for Float3 {
         false
     }
 
-    /// Detached label x inset — the Slider/Dropdown value, so the group label lines up with a
-    /// slider row's.
-    fn detached_label_inset(&self) -> f32 {
-        4.0
-    }
 
     /// The three rows alone: the adapter adds the detached-label strip itself
     /// (`Adapted::preferred_height`), as it does for every non-inflating widget.

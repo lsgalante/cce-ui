@@ -275,9 +275,6 @@ impl Layout for Spinbox {
     }
 
 
-    fn detached_label_inset(&self) -> f32 {
-        4.0 // legacy Control::control_label x offset
-    }
 
     fn intrinsic_size(&self) -> Option<Size> {
         Some(Size::new(0.0, crate::layout::spinbox_height()))
@@ -371,10 +368,10 @@ impl Paint for Spinbox {
                     // cannot carry.
                     let accent = colors::highlight_primary_color();
                     ctx.quad(
-                        Rect { x: g.x + 4.0, y: g.y + g.h - 4.0, width: g.w * 0.55 - 8.0, height: 1.5 },
+                        Rect { x: g.x + crate::layout::CONTROL_TEXT_INSET, y: g.y + g.h - 4.0, width: g.w * 0.55 - 8.0, height: 1.5 },
                         accent,
                     );
-                    let cursor_x = (g.x + 4.0 + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
+                    let cursor_x = (g.x + crate::layout::CONTROL_TEXT_INSET + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
                     let cursor_y = g.y + (g.h - 14.0) / 2.0;
                     ctx.quad(Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 }, [0.80, 0.80, 0.85, 1.0]);
                 }
@@ -416,7 +413,7 @@ impl Paint for Spinbox {
                 );
             }
             if self.editing {
-                let cursor_x = (g.x + 4.0 + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
+                let cursor_x = (g.x + crate::layout::CONTROL_TEXT_INSET + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
                 let cursor_y = g.y + (g.h - 14.0) / 2.0;
                 ctx.rounded_rect(
                     Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 },
@@ -438,7 +435,7 @@ impl Paint for Spinbox {
                 ctx.quad(Rect { x: g.x, y: g.y, width: 1.0, height: g.h }, border_color);
                 ctx.quad(Rect { x: g.x + g.w - 1.0, y: g.y, width: 1.0, height: g.h }, border_color);
 
-                let cursor_x = (g.x + 4.0 + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
+                let cursor_x = (g.x + crate::layout::CONTROL_TEXT_INSET + self.caret_offset(self.cursor_idx)).min(g.x + g.w * 0.55 - 4.0);
                 let cursor_y = g.y + (g.h - 14.0) / 2.0;
                 ctx.quad(Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 }, [0.80, 0.80, 0.85, 1.0]);
             }
@@ -447,9 +444,9 @@ impl Paint for Spinbox {
         // Value, unit, and -/+ glyphs.
         let tc = colors::spinbox_text_color();
         let text_color = [(tc[0] * 255.0) as u8, (tc[1] * 255.0) as u8, (tc[2] * 255.0) as u8];
-        ctx.text(self.value_text(), g.x + 4.0, crate::layout::align_text_y(g.y, g.h, 14.0, 0.0), 14.0, text_color);
+        ctx.text(self.value_text(), g.x + crate::layout::CONTROL_TEXT_INSET, crate::layout::align_text_y(g.y, g.h, 14.0, 0.0), 14.0, text_color);
         if let Some(ref unit) = self.unit {
-            ctx.text(unit.clone(), g.x + 4.0 + 36.0, crate::layout::align_text_y(g.y, g.h, 11.0, 0.0), 11.0, [0x73, 0x73, 0x7a]);
+            ctx.text(unit.clone(), g.x + crate::layout::CONTROL_TEXT_INSET + 36.0, crate::layout::align_text_y(g.y, g.h, 11.0, 0.0), 11.0, [0x73, 0x73, 0x7a]);
         }
         if g.btn_w > 0.0 {
             let dec_center_x = g.split_dec + g.pad + g.btn_w * 0.5;
@@ -495,7 +492,7 @@ impl Input for Spinbox {
                 } else if *px < g.split_dec {
                     self.begin_edit(false);
                     self.cursor_idx = self
-                        .x_to_idx(px - (g.x + 4.0))
+                        .x_to_idx(px - (g.x + crate::layout::CONTROL_TEXT_INSET))
                         .min(self.edit_buffer.chars().count());
                     ectx.request_focus();
                     true

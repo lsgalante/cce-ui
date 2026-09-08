@@ -264,7 +264,7 @@ impl Paint for ColorSelector {
                 let cursor_text: String = self.edit_buffer.chars().take(self.cursor_idx).collect();
                 crate::widget::display::measure_text(&cursor_text, font_size)
             });
-            let caret_x = rect.x + 4.0 + text_w;
+            let caret_x = rect.x + crate::layout::CONTROL_TEXT_INSET + text_w;
             let caret_h = font_size * 1.15;
             let caret_y = rect.y + (visual_h - caret_h) / 2.0;
             quads.push((caret_x, caret_y, 1.5, caret_h, [0.80, 0.80, 0.85, 1.0]));
@@ -367,7 +367,7 @@ impl Paint for ColorSelector {
             let depth = crate::layout::bevel_width().min(ph * 0.2);
             ctx.bevel(swatch, (preview_radius, preview_radius, preview_radius, preview_radius), linear_c, depth);
             let hex = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
-            ctx.text(hex, rect.x + 4.0, crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0), 12.0, [0xcc, 0xcc, 0xd4]);
+            ctx.text(hex, rect.x + crate::layout::CONTROL_TEXT_INSET, crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0), 12.0, [0xcc, 0xcc, 0xd4]);
             return;
         }
 
@@ -437,7 +437,7 @@ impl Paint for ColorSelector {
         let hex = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
         ctx.text(
             hex,
-            rect.x + 4.0,
+            rect.x + crate::layout::CONTROL_TEXT_INSET,
             crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0),
             12.0,
             [0xcc, 0xcc, 0xd4],

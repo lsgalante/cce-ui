@@ -157,8 +157,8 @@ mod tests {
         assert_eq!(quads[0].1, 10.0 + offset, "track is painted below the label region");
         assert_eq!(quads[0].3, 8.0, "track keeps the assigned height");
 
-        // preferred_height forwards from the narrow intrinsic size.
-        assert_eq!(WidgetHost::preferred_height(&bar), Some(crate::layout::progressbar_height()));
+        // preferred_height is the occupied height: the intrinsic size plus the label strip.
+        assert_eq!(WidgetHost::preferred_height(&bar), Some(crate::layout::progressbar_height() + offset));
         // Runtime type-name matching still sees "ProgressBar", not Adapted<..>.
         assert_eq!(WidgetHost::type_name(&bar), "ProgressBar");
     }

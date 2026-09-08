@@ -91,11 +91,6 @@ impl Layout for Slider2D {
         false // the Slider rule: the detached label eats into the assigned rect
     }
 
-    /// Detached label x inset — keeps the label clear of its carve-out tab's
-    /// left wall (the Dropdown/Slider value).
-    fn detached_label_inset(&self) -> f32 {
-        4.0
-    }
 
     fn intrinsic_size(&self) -> Option<Size> {
         Some(Size::new(64.0, 64.0))
@@ -156,7 +151,7 @@ impl Paint for Slider2D {
                 .as_deref()
                 .map(|l| crate::widget::display::measure_text_width(l, &fam, fsize))
                 .unwrap_or(0.0);
-            let inset = 4.0; // Layout::detached_label_inset — the label's x offset
+            let inset = crate::layout::DETACHED_LABEL_INSET; // the label's x offset
             let tab_top = rect.y - strip;
             let ring_top = rect.y;
             let tab_w = (text_w + 2.0 * inset + 4.0)
