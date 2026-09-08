@@ -92,8 +92,16 @@ impl Layout for Slider2D {
     }
 
 
+    /// A 64px pad, or wide enough for its label's carve-out tab (the tab is clipped
+    /// to the pad and the label spilled past a 64px one).
     fn intrinsic_size(&self) -> Option<Size> {
-        Some(Size::new(64.0, 64.0))
+        let label_w = crate::widget::input::slider::detached_label_width(&self.label);
+        let tab_w = if label_w > 0.0 { label_w + 2.0 * crate::layout::DETACHED_LABEL_INSET + 16.0 } else { 0.0 };
+        Some(Size::new(64.0_f32.max(tab_w), 64.0))
+    }
+
+    fn intrinsic_measure_width(&self) -> bool {
+        true
     }
 }
 
@@ -115,7 +123,6 @@ impl Paint for Slider2D {
         // (the ramp graph's look in miniature), recess rim drawn last so its
         // shading falls over the content at the edges.
         let radius = crate::layout::slider_corner_radius().max(4.0);
-        let radii = (radius, radius, radius, radius);
         ctx.rounded_rect(rect, radius, (true, true, true, true), [0.08, 0.08, 0.10, 1.0]);
 
         // Crosshair through the thumb — the pad's read of both axis values.
@@ -138,82 +145,16 @@ impl Paint for Slider2D {
         );
 
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        let strip = self.label_top();
-        if strip > 0.0 {
-            // Labeled: the label sits in a CARVE-OUT tab (the Dropdown's
-            // labeled-relief idiom) — a recessed well hugging the label run,
-            // its bottom open into the pad's recess ring below. Right of the
-            // tab, a concave fillet rounds the throat and the ring's normal
-            // top wall resumes.
-            let (fam, fsize) = crate::layout::control_label_font_detached_parsed();
-            let text_w = self
-                .label
-                .as_deref()
-                .map(|l| crate::widget::display::measure_text_width(l, &fam, fsize))
-                .unwrap_or(0.0);
-            let inset = crate::layout::DETACHED_LABEL_INSET; // the label's x offset
-            let tab_top = rect.y - strip;
-            let ring_top = rect.y;
-            let tab_w = (text_w + 2.0 * inset + 4.0)
-                .max(2.0 * radius + 8.0)
-                .min(rect.width);
-            let tab_r = rect.x + tab_w;
-            let fr = 6.0_f32.min(strip * 0.5);
-            let filleted = rect.x + rect.width - tab_r > fr + 4.0;
-            let tab_bottom = if filleted { ring_top - fr } else { ring_top };
-            ctx.recess_edges(
-                Rect { x: rect.x, y: tab_top, width: tab_w, height: tab_bottom - tab_top + depth },
-                (radius, radius.min(strip * 0.5), 0.0, 0.0),
-                depth,
-                (true, true, false, true),
-            );
-            if filleted {
-                ctx.recess_edges(
-                    Rect { x: rect.x, y: ring_top - fr, width: tab_w, height: fr + depth },
-                    (0.0, 0.0, 0.0, 0.0),
-                    depth,
-                    (false, false, false, true),
-                );
-            }
-            // The well's ring minus its top wall, which resumes right of the
-            // tab's throat.
-            ctx.recess_edges(rect, (0.0, 0.0, radius, radius), depth, (false, true, true, true));
-            if filleted {
-                ctx.concave_fillet(
-                    tab_r + fr,
-                    ring_top - fr,
-                    fr,
-                    depth,
-                    std::f32::consts::FRAC_PI_2,
-                    false,
-                );
-                ctx.recess_edges(
-                    Rect {
-                        x: tab_r + fr - depth,
-                        y: ring_top,
-                        width: rect.x + rect.width - tab_r - fr + depth,
-                        height: rect.height,
-                    },
-                    (0.0, radius, 0.0, 0.0),
-                    depth,
-                    (true, false, false, false),
-                );
-            } else if rect.x + rect.width - tab_r > 0.5 {
-                ctx.recess_edges(
-                    Rect {
-                        x: tab_r - depth,
-                        y: ring_top,
-                        width: rect.x + rect.width - tab_r + depth,
-                        height: rect.height,
-                    },
-                    (0.0, radius, 0.0, 0.0),
-                    depth,
-                    (true, false, false, false),
-                );
-            }
-        } else {
-            ctx.recess(rect, radii, depth);
-        }
+        // The well's ring, with a labeled pad's label in a carve-out tab — the one
+        // labeled-well composition the sliders share (`carve_labeled_well`).
+        crate::widget::input::slider::carve_labeled_well(
+            ctx,
+            rect,
+            self.label_top(),
+            crate::widget::input::slider::detached_label_width(&self.label),
+            radius,
+            depth,
+        );
     }
 }
 

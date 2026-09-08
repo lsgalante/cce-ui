@@ -712,6 +712,17 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     /// The rect the wrapped widget paints into: the widget's rect minus the detached-label
     /// region at the top (zero inset when there is no label, or when the widget draws its label
     /// inline — `Widget::label_offset` / [`Layout::inline_label`]).
+    /// How far past an assigned rect `set_rect` grows this widget for its detached
+    /// label — the legacy inflating convention; zero for the eating convention and
+    /// for inline labels.
+    fn label_inflation(&self) -> f32 {
+        if Layout::inline_label(&self.inner) || !Layout::inflates_label_rect(&self.inner) {
+            0.0
+        } else {
+            self.base.label_offset()
+        }
+    }
+
     fn content_rect(&self) -> Rect {
         let top = if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() };
         Rect {
@@ -1104,11 +1115,13 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // The WidgetHost default (measure + set_rect), plus recursive child layout for visible
         // containers — the ctx-carrying half of the arrangement the model can't do in
         // `arrange_children`.
-        // `measure` speaks occupied heights; `set_rect` re-adds the inflating
-        // convention's label strip, so hand it the content height and land exactly
-        // the measured box.
+        // `origin` is the CONTENT box's top-left and `measure` its height; the detached
+        // label hangs in the strip above, so the occupied rect starts `strip` higher.
+        // `set_rect` speaks the widget's legacy convention: an inflating widget grows
+        // by the strip itself, one whose label eats into its rect needs it included.
         let size = self.measure(constraints, ctx);
-        self.set_rect(origin.x, origin.y, size.width, size.height - self.label_inflation());
+        let strip = self.label_strip();
+        self.set_rect(origin.x, origin.y - strip, size.width, size.height + strip - self.label_inflation());
         let host_id = self.base.id();
         Layout::register_embedded_children(&mut self.inner, host_id, ctx);
     }
@@ -1167,24 +1180,15 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         }
     }
 
-    /// The height a layout should allot: the widget's intrinsic content height plus its
-    /// detached-label strip — the OCCUPIED height, the same number under either label
-    /// convention. `layout` lands exactly this: it hands `set_rect` the content height
-    /// for an inflating widget (which then grows by the strip) and the whole height for
-    /// one whose label eats into its rect. One rule, so a column of mixed controls keeps
-    /// one rhythm — before this, an inflating widget's label sat in the gap after it.
+    /// The intrinsic content height — the control below the label. Which legacy
+    /// `set_rect` convention the widget follows (rect inflated by the label, or the
+    /// label eating into it) is `layout`'s business, not the caller's.
     fn preferred_height(&self) -> Option<f32> {
-        let size = Layout::intrinsic_size(&self.inner)?;
-        let strip = if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() };
-        Some(size.height + strip)
+        Layout::intrinsic_size(&self.inner).map(|s| s.height)
     }
 
-    fn label_inflation(&self) -> f32 {
-        if Layout::inline_label(&self.inner) || !Layout::inflates_label_rect(&self.inner) {
-            0.0
-        } else {
-            self.base.label_offset()
-        }
+    fn label_strip(&self) -> f32 {
+        if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() }
     }
 
     /// The `WidgetHost::measure` default, except the width consults the intrinsic size when the
@@ -1196,7 +1200,8 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         } else {
             w
         };
-        let pref_h = self.preferred_height().unwrap_or(h);
+        // Content height: the intrinsic one, else the landed rect less its label strip.
+        let pref_h = self.preferred_height().unwrap_or(h - self.label_strip());
         crate::widget::Size {
             width: pref_w.clamp(constraints.min_width, constraints.max_width),
             height: pref_h.clamp(constraints.min_height, constraints.max_height),
@@ -1693,14 +1698,14 @@ mod tests {
         Rect { x, y, width: w, height: h }
     }
 
-    /// One rhythm for labeled controls whichever label convention they follow: the
-    /// preferred height is the OCCUPIED height (content + label strip) for the inflating
-    /// kind (ProgressBar) and the eating kind (Slider, Spinbox, Dropdown) alike, and
-    /// `layout` lands a rect exactly that tall with the full content height inside it —
-    /// so a strategy allotting preferred heights neither squashes a track to the label's
-    /// leftovers nor lets a label spill into the gap below it.
+    /// One rhythm for labeled controls whichever legacy convention they follow: the
+    /// preferred height is the CONTENT height for the inflating kind (ProgressBar) and
+    /// the eating kind (Slider, Spinbox, Dropdown) alike, and `layout` places that
+    /// content at the origin with the label strip hanging above it — so a strategy
+    /// placing content boxes lines mixed controls up by content, neither squashes a
+    /// track to the label's leftovers nor lets a label spill into the gap below.
     #[test]
-    fn labeled_controls_occupy_exactly_their_preferred_height() {
+    fn labeled_controls_land_their_content_at_the_origin_with_the_label_above() {
         use crate::widget::{Dropdown, LayoutConstraints, Point, ProgressBar, Slider, Spinbox};
         let mut ctx = UiContext::new();
         let mut slider = Slider::new().with_label("Gain");
@@ -1717,10 +1722,12 @@ mod tests {
             ("progress bar", &mut bar, crate::layout::progressbar_height()),
         ] {
             let pref = w.preferred_height().expect(name);
-            assert!((pref - (content + strip)).abs() < 0.01, "{name}: preferred {pref} is content {content} + strip {strip}");
-            w.layout(Point { x: 0.0, y: 0.0 }, LayoutConstraints::new(100.0, 100.0, pref, pref), &mut ctx);
-            let landed = w.rect().3;
-            assert!((landed - pref).abs() < 0.01, "{name}: landed {landed} for preferred {pref}");
+            assert!((pref - content).abs() < 0.01, "{name}: preferred {pref} is the content height {content}");
+            assert!((w.label_strip() - strip).abs() < 0.01, "{name}: one label strip");
+            w.layout(Point { x: 0.0, y: 100.0 }, LayoutConstraints::new(100.0, 100.0, pref, pref), &mut ctx);
+            let (_, top, _, landed) = w.rect();
+            assert!((top - (100.0 - strip)).abs() < 0.01, "{name}: the label hangs above the origin (top {top})");
+            assert!((landed - (content + strip)).abs() < 0.01, "{name}: occupied {landed} = content + strip");
             let painted = landed - crate::widget::label_offset(w);
             assert!((painted - content).abs() < 0.01, "{name}: content {painted}, wanted {content}");
         }

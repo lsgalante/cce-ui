@@ -292,10 +292,15 @@ static SECTION_PADDING: RwLock<f32> = RwLock::new(8.0);
 /// defaults lines up; a per-control key is the deliberate exception.
 pub const DEFAULT_CONTROL_HEIGHT: f32 = 24.0;
 
-/// The one gap between controls: what every layout strategy's `Default` puts
-/// between children and around them, and what the legacy row builders advance
-/// by. Containers may set their own, but one number is the rhythm.
-pub const CONTROL_GAP: f32 = 8.0;
+/// The one gap between controls — one control height — in BOTH axes: what every
+/// layout strategy's `Default` puts between children's content boxes and around
+/// them, and what the legacy row builders advance by. A detached label hangs in
+/// the gap above its control (a strategy places content boxes; see
+/// `WidgetHost::label_strip`), which is why the gap is a control height and not
+/// a few pixels: it holds a label strip (font + margin) with room to spare, so
+/// the space between two controls reads the same whether or not a label sits in
+/// it, and the same as the space beside them.
+pub const CONTROL_GAP: f32 = DEFAULT_CONTROL_HEIGHT;
 
 /// The one inset from a control's edge to its text: the field text of a TextBox,
 /// Dropdown, Spinbox, FontSelector, KeybindRecorder or ColorSelector, a left-
@@ -3689,11 +3694,11 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
     if let Some(w_id) = id {
         ctx.register_widget(w_id, w as *mut T as *mut (dyn WidgetHost + 'static));
     }
-    // `wh` is the legacy content height — a widget whose detached label inflates its
-    // rect grows past it. `layout` speaks occupied heights (label included), so hand
-    // it the box the widget will land in.
-    let occupied = wh + w.label_inflation();
-    w.layout(crate::widget::Point { x, y }, crate::widget::LayoutConstraints::new(ww, ww, occupied, occupied), ctx);
+    // The legacy contract: `y` is the top of the detached label, `wh` the content
+    // height below it. `layout` takes the CONTENT origin (the label hangs above it),
+    // so step down by the strip.
+    let strip = w.label_strip();
+    w.layout(crate::widget::Point { x, y: y + strip }, crate::widget::LayoutConstraints::new(ww, ww, wh, wh), ctx);
 
     // Shape, which on this path nobody else does. A flat host consumes
     // `all_quads`, so `prepare_text` — where a TextBox records the per-glyph x
@@ -4057,12 +4062,10 @@ impl Column {
     }
 
     pub fn widget<T: WidgetHost + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, x_off: f32, ww: f32, mut wh: f32, ctx: &mut UiContext) {
-        let top_room = crate::widget::label_offset(w);
         if let Some(pref) = w.preferred_height() {
-            // Preferred heights are occupied (label included); this builder adds
-            // the label room itself below.
-            wh = pref - top_room;
+            wh = pref;
         }
+        let top_room = crate::widget::label_offset(w);
         let total_h = wh + top_room;
         let x = self.ax(x_off);
         let y = self.ay();
@@ -4111,9 +4114,7 @@ impl<'a> Row<'a> {
 
     pub fn widget<T: WidgetHost + 'static>(&mut self, w: &mut T, ww: f32, mut wh: f32, ctx: &mut UiContext) {
         if let Some(pref) = w.preferred_height() {
-            // Preferred heights are occupied (label included); `render_widget`
-            // takes the content height and adds the label room itself.
-            wh = pref - crate::widget::label_offset(w);
+            wh = pref;
         }
         render_widget(self.pc, w, self.base_x + self.cursor_x, self.y, ww, wh, ctx);
         self.cursor_x += ww + self.spacing;
@@ -4241,13 +4242,11 @@ impl Section {
     }
 
     pub fn widget<T: WidgetHost + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
-        let top_room = crate::widget::label_offset(w);
         if let Some(pref) = w.preferred_height() {
-            // Preferred heights are occupied (label included); this builder adds
-            // the label room itself below.
-            wh = pref - top_room;
+            wh = pref;
         }
         let pad = self.padding();
+        let top_room = crate::widget::label_offset(w);
         let total_h = wh + top_room;
 
         let name = w.type_name();
@@ -4732,15 +4731,20 @@ impl LayoutStrategy for FlexLayout {
     }
 
     fn layout(&self, x: f32, y: f32, w: f32, h: f32, children: &[*mut (dyn crate::widget::WidgetHost + 'static)], ctx: &mut crate::context::UiContext) -> f32 {
-        let mut cur_x = x;
-        let mut cur_y = y;
+        let (cur_x, cur_y) = (x, y);
+        // Content boxes: a detached label hangs above its control in the gap (or
+        // this lead row of headroom), so labeled and unlabeled children line up
+        // by content and the gap between controls is the gap.
+        let lead = crate::widget::container::container_layout::label_lead(children);
+        let (cur_x, cur_y) = (cur_x, cur_y + lead);
         match self.direction {
             FlexDirection::Row => {
+                let mut cur_x = cur_x;
                 for &child_ptr in children {
                     unsafe {
                         let child = &mut *child_ptr;
                         let child_w = child.rect().2;
-                        let child_h = child.preferred_height().unwrap_or(child.rect().3);
+                        let child_h = crate::widget::container::container_layout::content_height(child);
                         let use_h = if child_h > 0.0 { child_h } else { h };
                         child.layout(
                             crate::widget::Point { x: cur_x, y: cur_y },
@@ -4753,10 +4757,11 @@ impl LayoutStrategy for FlexLayout {
                 (cur_x - x).max(0.0)
             }
             FlexDirection::Column => {
+                let mut cur_y = cur_y;
                 for &child_ptr in children {
                     unsafe {
                         let child = &mut *child_ptr;
-                        let child_h = child.preferred_height().unwrap_or(child.rect().3);
+                        let child_h = crate::widget::container::container_layout::content_height(child);
                         let use_h = if child_h > 0.0 { child_h } else { 44.0 };
                         child.layout(
                             crate::widget::Point { x, y: cur_y },

@@ -200,18 +200,18 @@ pub trait WidgetHost {
     /// implementor) always owns a base; test shims carry one via `impl_widget_base!`.
     fn base(&self) -> &Widget;
     fn base_mut(&mut self) -> &mut Widget;
-    /// The height a layout should allot this widget: its content height plus the
-    /// detached-label strip above it, whichever label convention the widget follows
-    /// (see [`WidgetHost::label_inflation`]). Assigning it through [`WidgetHost::layout`]
-    /// lands a rect exactly this tall. `None` when the widget has no natural height.
+    /// The widget's natural CONTENT height — the control below its detached label, if
+    /// any. What a layout strategy allots; [`WidgetHost::layout`] places that content
+    /// box at the origin it is given and hangs the label ([`WidgetHost::label_strip`])
+    /// above it. `None` when the widget has no natural height.
     fn preferred_height(&self) -> Option<f32> { None }
 
-    /// How far past an assigned rect this widget grows on `set_rect` to make room for
-    /// its detached label — the legacy inflating convention (ProgressBar, ButtonStrip,
-    /// ...). Zero for widgets that keep the assigned rect and draw the label inside it
-    /// (Slider, Dropdown, ...), and for inline-label widgets. `layout` subtracts it, so
-    /// both conventions land the occupied height they were allotted.
-    fn label_inflation(&self) -> f32 { 0.0 }
+    /// The height of the detached-label strip above this widget's content: zero for
+    /// unlabeled and inline-label widgets. A widget's occupied rect is its content plus
+    /// this strip, whichever legacy convention its `set_rect` follows; `layout` lands
+    /// the content at the origin and the strip above it, in the gap a strategy leaves
+    /// between rows (`layout::CONTROL_GAP` holds one).
+    fn label_strip(&self) -> f32 { 0.0 }
 
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
         let b = self.base_mut();
