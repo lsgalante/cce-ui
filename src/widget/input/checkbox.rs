@@ -24,6 +24,10 @@ fn parse_bool(val: &str) -> Option<bool> {
     }
 }
 
+/// A ring-and-dot check mark with an optional label to its right: a 14px ring in
+/// the dim text colour, filled with a dot in the toggle-on colour when checked —
+/// the mark cce-list's rows have always drawn (they call `paint_round_mark` for
+/// it). Standalone, the mark fills the rect.
 pub struct Checkbox {
     checked: bool,
     just_clicked: bool,
@@ -31,13 +35,10 @@ pub struct Checkbox {
     label: Option<String>,
     hovered: bool,
     focused: bool,
-    /// Round style: a ring-and-dot mark on the left of the label instead of the
-    /// square box on the right. Seeded from `style.control.checkbox.style`.
-    round: bool,
 }
 
 impl Checkbox {
-    /// The round mark's radius: a 14px disc, the size cce-list's rows always drew.
+    /// The labelled mark's radius: a 14px disc.
     pub const ROUND_RADIUS: f32 = 7.0;
 
     pub fn new() -> Adapted<Checkbox> {
@@ -48,7 +49,6 @@ impl Checkbox {
             label: None,
             hovered: false,
             focused: false,
-            round: crate::layout::checkbox_round(),
         })
     }
 
@@ -60,20 +60,9 @@ impl Checkbox {
         self.checked
     }
 
-    /// Select the round style regardless of config (a list row wants it whatever
-    /// the DE-wide setting says).
-    pub fn set_round(&mut self, round: bool) {
-        self.round = round;
-    }
-
-    pub fn round(&self) -> bool {
-        self.round
-    }
-
-    /// The round style's mark, centred on (`cx`, `cy`): a dim ring, and a solid
-    /// dot in the toggle-on colour when checked. Shared with hosts that draw
-    /// their own rows (cce-list) so a list's marks and a `Checkbox` agree pixel
-    /// for pixel.
+    /// The mark, centred on (`cx`, `cy`): a dim ring, and a solid dot in the
+    /// toggle-on colour when checked. Shared with hosts that draw their own rows
+    /// (cce-list) so a list's marks and a `Checkbox` agree pixel for pixel.
     pub fn paint_round_mark(ctx: &mut PaintCtx, cx: f32, cy: f32, radius: f32, checked: bool) {
         ctx.border(
             Rect { x: cx - radius, y: cy - radius, width: 2.0 * radius, height: 2.0 * radius },
@@ -96,16 +85,6 @@ impl Checkbox {
     pub fn set_hovered(&mut self, hovered: bool) {
         self.hovered = hovered;
     }
-
-    fn box_color(&self) -> [f32; 4] {
-        if self.checked {
-            colors::checkbox_checked()
-        } else if self.hovered {
-            colors::checkbox_hover()
-        } else {
-            colors::checkbox_bg()
-        }
-    }
 }
 
 impl Layout for Checkbox {
@@ -116,15 +95,8 @@ impl Layout for Checkbox {
 
 impl Paint for Checkbox {
     fn color(&self) -> [f32; 4] {
-        // Legacy mode split: wide (labeled row) has a transparent widget background; standalone
-        // is the colored box itself. Style-property paths (demo `widget_vertices`) read this.
-        // Width isn't known here, so mirror the legacy intent via the label: labeled checkboxes
-        // are the wide rows.
-        if self.label.is_some() || self.round {
-            [0.0, 0.0, 0.0, 0.0]
-        } else {
-            self.box_color()
-        }
+        // The mark is painted; the widget itself has no background.
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     fn sync_label(&mut self, label: &str) {
@@ -133,72 +105,17 @@ impl Paint for Checkbox {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-        if self.round {
-            // Round style: the mark leads and the label follows, a list row's
-            // reading order. Standalone, the mark fills the rect.
-            let r = if self.label.is_some() { Self::ROUND_RADIUS } else { (w.min(h) / 2.0).max(1.0) };
-            let (cx, cy) = if self.label.is_some() { (x + r, y + h / 2.0) } else { (x + w / 2.0, y + h / 2.0) };
-            Self::paint_round_mark(ctx, cx, cy, r, self.checked);
-            if let Some(ref label) = self.label {
-                let (_, font_size) = crate::layout::control_label_font_parsed();
-                let ty = crate::layout::align_text_y(y, h, font_size, 0.0);
-                ctx.text(
-                    label.clone(),
-                    cx + r + 8.0,
-                    ty,
-                    font_size,
-                    colors::control_label_color_for_state(self.hovered, self.focused),
-                );
-            }
-            return;
-        }
-        if w > 30.0 {
-            // Wide mode: label on the left, 18px box on the right — the legacy `extra_quads`
-            // geometry verbatim.
-            let box_size = 18.0f32;
-            let box_x = x + w - box_size - 8.0;
-            let box_y = y + (h - box_size) / 2.0;
-
-            ctx.quad(Rect { x: box_x, y: box_y, width: box_size, height: box_size }, self.box_color());
-
-            let border_color = if self.hovered {
-                [0.35, 0.35, 0.40, 1.0]
-            } else {
-                [0.25, 0.25, 0.30, 1.0]
-            };
-            ctx.quad(Rect { x: box_x, y: box_y, width: box_size, height: 1.0 }, border_color);
-            ctx.quad(Rect { x: box_x, y: box_y + box_size - 1.0, width: box_size, height: 1.0 }, border_color);
-            ctx.quad(Rect { x: box_x, y: box_y, width: 1.0, height: box_size }, border_color);
-            ctx.quad(Rect { x: box_x + box_size - 1.0, y: box_y, width: 1.0, height: box_size }, border_color);
-
-            if self.checked {
-                let pad = 5.0f32;
-                ctx.quad(
-                    Rect { x: box_x + pad, y: box_y + pad, width: box_size - 2.0 * pad, height: box_size - 2.0 * pad },
-                    [1.0, 1.0, 1.0, 0.9],
-                );
-            }
-        } else {
-            // Standalone mode: the widget IS the box. The colored background was legacy
-            // `color()`; emitting it here puts it on every render path (the legacy
-            // `render_widget` path never drew it — same latent-invisibility class as StatusDot).
-            ctx.quad(rect, self.box_color());
-            if self.checked {
-                let pad_x = w * 0.25;
-                let pad_y = h * 0.25;
-                ctx.quad(
-                    Rect { x: x + pad_x, y: y + pad_y, width: w - 2.0 * pad_x, height: h - 2.0 * pad_y },
-                    [1.0, 1.0, 1.0, 0.9],
-                );
-            }
-        }
-
+        // The mark leads and the label follows, a list row's reading order.
+        // Standalone, the mark fills the rect.
+        let r = if self.label.is_some() { Self::ROUND_RADIUS } else { (w.min(h) / 2.0).max(1.0) };
+        let (cx, cy) = if self.label.is_some() { (x + r, y + h / 2.0) } else { (x + w / 2.0, y + h / 2.0) };
+        Self::paint_round_mark(ctx, cx, cy, r, self.checked);
         if let Some(ref label) = self.label {
             let (_, font_size) = crate::layout::control_label_font_parsed();
             let ty = crate::layout::align_text_y(y, h, font_size, 0.0);
             ctx.text(
                 label.clone(),
-                x + 8.0,
+                cx + r + 8.0,
                 ty,
                 font_size,
                 colors::control_label_color_for_state(self.hovered, self.focused),
@@ -701,31 +618,28 @@ mod tests {
         assert!(cb.take_change(), "set_value_string marked the change");
     }
 
-    /// Wide (labeled) mode reproduces the legacy `extra_quads` geometry through the bridge:
-    /// box bg + 4 border edges (+ indicator when checked), and the label text with a
-    /// hover-dependent color.
+    /// A labelled checkbox paints its ring-and-dot mark on the left and the label after
+    /// it: no quads at all, one circle through the bridge once checked.
     #[test]
-    fn checkbox_wide_mode_bridge_parity() {
+    fn checkbox_paints_ring_and_dot() {
         let ctx = UiContext::new();
         let mut cb = Checkbox::new().with_label("Enable");
         WidgetHost::set_rect(&mut cb, 0.0, 0.0, 200.0, 24.0);
 
-        let quads = WidgetHost::extra_quads(&cb);
-        // Unchecked: box bg + 4 border edges = 5 quads, at the legacy box position.
-        assert_eq!(quads.len(), 5);
-        let (box_x, box_y, box_size) = (200.0 - 18.0 - 8.0, (24.0 - 18.0) / 2.0, 18.0);
-        assert_eq!(quads[0], (box_x, box_y, box_size, box_size, colors::checkbox_bg()));
+        assert!(WidgetHost::extra_quads(&cb).is_empty());
+        assert!(WidgetHost::extra_circles(&cb).is_empty());
 
-        // Hover flips the box + border colors (tracked from MouseEnter, not base state).
-        cb.inner_mut().hovered = true;
-        let quads = WidgetHost::extra_quads(&cb);
-        assert_eq!(quads[0].4, colors::checkbox_hover());
+        cb.inner_mut().set_checked(true);
+        let circles = WidgetHost::extra_circles(&cb);
+        assert_eq!(circles.len(), 1);
+        let r = Checkbox::ROUND_RADIUS;
+        assert_eq!(circles[0], (r, 12.0, r - 3.0, colors::TOGGLE_ON));
 
-        // Label text comes through the prim-derived text bridge at the legacy position.
+        // Label text comes through the prim-derived text bridge, after the mark.
         let labels = cb.own_text_labels();
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "Enable");
-        assert_eq!(labels[0].x, 8.0);
+        assert_eq!(labels[0].x, 2.0 * r + 8.0);
 
         // Inline label => no set_rect inflation.
         assert_eq!(WidgetHost::rect(&cb), (0.0, 0.0, 200.0, 24.0));
