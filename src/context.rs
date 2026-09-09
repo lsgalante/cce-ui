@@ -577,7 +577,8 @@ impl UiContext {
     /// Returns whether focus moved. The runner calls this for Tab when the app
     /// opts in (`Application::plate_navigation`).
     pub fn focus_step(&mut self, reverse: bool) -> bool {
-        let mut stops: Vec<(i32, i32, WidgetId)> = Vec::new();
+        // (y, bottom, x, id) per stop.
+        let mut found: Vec<(f32, f32, f32, WidgetId)> = Vec::new();
         for (id, ptr) in self.tree.iter_registered() {
             if ptr.is_null() {
                 continue;
@@ -590,21 +591,37 @@ impl UiContext {
             if width <= 0.0 || height <= 0.0 {
                 continue;
             }
-            stops.push((y.round() as i32, x.round() as i32, id));
+            found.push((y, y + height, x, id));
         }
-        if stops.is_empty() {
+        if found.is_empty() {
             return false;
         }
-        stops.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        // Reading order: rows first, x within a row. A stop joins the current
+        // row when its top lies above the row's first stop's bottom — a 12px
+        // checkbox centred a few px below the 26px button beside it is on the
+        // button's row, not a row of its own.
+        found.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut rows: Vec<Vec<(f32, f32, f32, WidgetId)>> = Vec::new();
+        for s in found {
+            match rows.last_mut() {
+                Some(row) if s.0 < row[0].1 => row.push(s),
+                _ => rows.push(vec![s]),
+            }
+        }
+        let mut stops: Vec<WidgetId> = Vec::new();
+        for mut row in rows {
+            row.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+            stops.extend(row.into_iter().map(|s| s.3));
+        }
         let n = stops.len();
-        let current = self.focused_widget.and_then(|f| stops.iter().position(|s| s.2 == f));
+        let current = self.focused_widget.and_then(|f| stops.iter().position(|s| *s == f));
         let next = match (current, reverse) {
             (Some(i), false) => (i + 1) % n,
             (Some(i), true) => (i + n - 1) % n,
             (None, false) => 0,
             (None, true) => n - 1,
         };
-        let id = stops[next].2;
+        let id = stops[next];
         if self.focused_widget == Some(id) {
             return false;
         }
@@ -1199,8 +1216,9 @@ mod focus_step_tests {
         let mut a = Button::new(0.0, 0.0, 80.0, 24.0).with_label("A");
         let mut b = Button::new(0.0, 0.0, 80.0, 24.0).with_label("B");
         let mut t = TextBox::new("well".to_string());
-        // Placed out of registration order: b is right of a on the first row, t below.
-        WidgetHost::set_rect(&mut b, 100.0, 10.0, 80.0, 24.0);
+        // Placed out of registration order: b is right of a on the first row (and a
+        // few px lower — a shorter control centred on the row, still the same row), t below.
+        WidgetHost::set_rect(&mut b, 100.0, 16.0, 80.0, 12.0);
         WidgetHost::set_rect(&mut a, 10.0, 10.0, 80.0, 24.0);
         WidgetHost::set_rect(&mut t, 10.0, 50.0, 200.0, 24.0);
         for w in [&mut b as &mut dyn WidgetHost, &mut a, &mut t] {

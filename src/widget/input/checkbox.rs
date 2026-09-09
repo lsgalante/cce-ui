@@ -541,12 +541,21 @@ impl Paint for Toggle {
                     Justification::Center => x + (w - est_w) / 2.0,
                 }
             };
+            // Focused: the label lit in the highlight — a rocker's halves carve
+            // partial rings (the hinge wall is open), which cannot be tinted, so
+            // the label is the toggle's focus cue.
+            let label_color = if self.focused {
+                let c = colors::to_srgb(crate::color::highlight_primary_color());
+                [(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8]
+            } else {
+                colors::control_label_color_for_state(self.hovered, false)
+            };
             ctx.text(
                 label.clone(),
                 tx,
                 crate::layout::align_text_y(y, h, font_size, 0.0),
                 font_size,
-                colors::control_label_color_for_state(self.hovered, self.focused),
+                label_color,
             );
         }
     }

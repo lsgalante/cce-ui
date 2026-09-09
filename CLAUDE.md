@@ -145,6 +145,8 @@ What this buys, and where the code is heading:
   The focus ring is the plate's own silhouette: `ControlPlate::with_tint`
   lights the rim (a tinted `Trough`, `Boss` or `Bevel`), the same treatment a
   well's `recess_tinted` gives its rim while editing — never extra geometry.
+  A Checkbox lights the ring its mark already draws; a Toggle lights its
+  label (its rocker halves carve partial rings, which cannot be tinted).
   Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector are plates;
   TextBox, Spinbox, ColorSelector, KeybindRecorder, TreeList are wells. A new
   focusable widget declares its role and handles `FocusIn` / `FocusOut`.
