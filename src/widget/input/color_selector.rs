@@ -116,11 +116,12 @@ impl ColorSelector {
             return None;
         }
         let well_h = crate::layout::color_selector_height().min(rect.height);
-        let field_w = rect.width * 0.65;
         let radius = crate::layout::textbox_corner_radius();
         let depth = crate::layout::bevel_width().min(well_h * 0.2);
+        // One well across the whole control: the hex text and the swatch are
+        // segments of its floor (the Breadcrumb composition), not two parts.
         let (well, radii) = crate::layout::carve_inside(
-            Rect { x: rect.x, y: rect.y, width: field_w, height: well_h },
+            Rect { x: rect.x, y: rect.y, width: rect.width, height: well_h },
             (radius, radius, radius, radius),
             depth,
         );
@@ -327,48 +328,79 @@ impl Paint for ColorSelector {
         };
 
         if self.recessed {
-            // The well first (the caret quad above rides over it), then the swatch
-            // as a raised bevel plate of the colour — over a checker when the
-            // colour carries alpha, so the transparency reads through the plate.
+            // The Breadcrumb composition: ONE well across the whole control,
+            // the hex text on its floor at the left and the swatch as the
+            // colour laid flush on the floor's right segment (the well's
+            // rounded end is its own), the two parted by a seam groove. The
+            // caret quad first (it rides on the floor), the carve after the
+            // fills so the walls' shading falls over both, the seam last so it
+            // dies into the well's rolled edge. Over a checker where the
+            // colour carries alpha, so the transparency reads through.
             for (qx, qy, qw, qh, qc) in quads.drain(..) {
                 ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
             }
-            if let Some((wx, wy, ww, wh, radius, depth)) = self.field_relief(rect) {
-                let well = Rect { x: wx, y: wy, width: ww, height: wh };
-                let radii = (radius, radius, radius, radius);
-                if self.editing {
-                    let hc = crate::color::highlight_primary_color();
-                    ctx.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);
-                } else {
-                    ctx.recess(well, radii, depth);
-                }
-            }
-            let swatch = Rect { x: px, y: py, width: pw, height: ph };
+            let Some((wx, wy, ww, wh, radius, depth)) = self.field_relief(rect) else {
+                return;
+            };
+            let well = Rect { x: wx, y: wy, width: ww, height: wh };
+            // The floor: past the wall's inner half-span (the ProgressBar's inset).
+            let floor = Rect {
+                x: rect.x + depth,
+                y: rect.y + depth,
+                width: (rect.width - 2.0 * depth).max(0.0),
+                height: (visual_h - 2.0 * depth).max(0.0),
+            };
+            let seam_x = pick_x;
+            let swatch = Rect { x: seam_x, y: floor.y, width: (floor.x + floor.width - seam_x).max(0.0), height: floor.height };
+            let sr = crate::layout::textbox_corner_radius().min(swatch.height * 0.5);
+            let right_end = (false, true, true, false);
             if self.with_alpha {
-                let mut checker = Vec::new();
-                add_rounded_rect(&mut checker, [0.8, 0.8, 0.8, 1.0], px, py, pw, ph, preview_radius);
-                let grid_size = 6.0;
-                let cols = (pw / grid_size).ceil() as i32;
-                let rows = (ph / grid_size).ceil() as i32;
+                ctx.rounded_rect(swatch, sr, right_end, [0.8, 0.8, 0.8, 1.0]);
+                // The white cells, those at the right edge trimmed to the end's
+                // arc at their own row (the Breadcrumb's banded-wash sampling).
+                let grid = 6.0;
+                let cols = (swatch.width / grid).ceil() as i32;
+                let rows = (swatch.height / grid).ceil() as i32;
+                let arc = |yc: f32| -> f32 {
+                    let dy = if yc < swatch.y + sr {
+                        sr - (yc - swatch.y)
+                    } else if yc > swatch.y + swatch.height - sr {
+                        yc - (swatch.y + swatch.height - sr)
+                    } else {
+                        return 0.0;
+                    };
+                    sr - (sr * sr - dy * dy).max(0.0).sqrt()
+                };
                 for r in 0..rows {
                     for c in 0..cols {
                         if (r + c) % 2 == 1 {
-                            let qx = px + c as f32 * grid_size;
-                            let qy = py + r as f32 * grid_size;
-                            let qw = grid_size.min(px + pw - qx);
-                            let qh = grid_size.min(py + ph - qy);
+                            let qx = swatch.x + c as f32 * grid;
+                            let qy = swatch.y + r as f32 * grid;
+                            let qh = grid.min(swatch.y + swatch.height - qy);
+                            let right_edge = swatch.x + swatch.width - arc(qy + qh * 0.5);
+                            let qw = grid.min(right_edge - qx);
                             if qw > 0.0 && qh > 0.0 {
-                                checker.push((qx, qy, qw, qh, [1.0, 1.0, 1.0, 1.0]));
+                                ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, [1.0, 1.0, 1.0, 1.0]);
                             }
                         }
                     }
                 }
-                for (qx, qy, qw, qh, qc) in checker {
-                    ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
-                }
             }
-            let depth = crate::layout::bevel_width().min(ph * 0.2);
-            ctx.bevel(swatch, (preview_radius, preview_radius, preview_radius, preview_radius), linear_c, depth);
+            ctx.rounded_rect(swatch, sr, right_end, linear_c);
+            let radii = (radius, radius, radius, radius);
+            if self.editing {
+                let hc = crate::color::highlight_primary_color();
+                ctx.recess_tinted(well, radii, depth, [hc[0], hc[1], hc[2]]);
+            } else {
+                ctx.recess(well, radii, depth);
+            }
+            ctx.groove(
+                (seam_x, well.y),
+                (seam_x, well.y + well.height),
+                crate::widget::Breadcrumb::SEAM_WIDTH,
+                depth,
+                well,
+            );
             let hex = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
             ctx.text(hex, rect.x + crate::layout::CONTROL_TEXT_INSET, crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0), 12.0, [0xcc, 0xcc, 0xd4]);
             return;

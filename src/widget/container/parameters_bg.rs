@@ -1212,9 +1212,9 @@ impl ParametersBg {
                     .as_ref()
                     .map(|w| (w as &dyn WidgetHost, crate::layout::spinbox_corner_radius(), false))
             } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-                // The hex field's well only (`ColorSelector::field_relief`, the
-                // same geometry its paint carves); the swatch's bevel plate is
-                // a fill with its own lit edge and stays on the widget's paint.
+                // The control's one well (`ColorSelector::field_relief`, the
+                // same geometry its paint carves); the swatch is a fill on its
+                // floor and the seam a groove, both on the widget's paint.
                 if let Some(c) = &self.colors[i] {
                     let (x, y, w, h) = c.rect();
                     let ty = c.label_strip();
