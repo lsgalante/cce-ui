@@ -379,9 +379,13 @@ impl crate::widget::Paint for ButtonStrip {
                 pc.rounded_rect(seg, seg_r, (true, true, true, true), bg_color);
             }
             if self.recessed && Some(i) == self.selected {
-                // The selected segment: a plateau raised back out of the well.
-                let (plateau, radii) = crate::layout::carve_inside(seg, (seg_r, seg_r, seg_r, seg_r), depth);
-                pc.boss(plateau, radii, depth);
+                // The selected segment: a raised control plate standing on the
+                // well floor, faceless (the floor shows through), at the well's
+                // depth.
+                pc.control_plate(
+                    &crate::widget::ControlPlate::control(seg, seg_r, crate::widget::PlateStance::Raised, [0.0; 4])
+                        .with_depth(depth),
+                );
             }
 
             if self.vertical {

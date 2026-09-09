@@ -451,26 +451,19 @@ impl Dropdown {
                     r4[3] = (pr - g_left).max(0.0) * cf;
                 }
             }
-            // Flush inset plate: groove ring down, beveled lip back up, face
-            // level with the surface (transparent raw fill = edges only).
-            // Carved INSIDE the trigger's rect (`layout::carve_inside`): the
-            // groove's outer edge lands on the rect, so everything below —
-            // which outsets the ring by half the depth — starts from the rect
-            // inset by that much, radii reduced to keep the outer silhouette.
-            let (inner, r4t) = crate::layout::carve_inside(
+            // The trigger is a flush control plate (groove ring down, beveled
+            // lip back up, face level with the surface; a transparent raw
+            // fill = edges only), its footprint the trigger's rect and its
+            // silhouette the frame-adjusted radii.
+            let plate = crate::widget::ControlPlate::control(
                 Rect { x, y, width: w, height: visual_h },
-                (r4[0], r4[1], r4[2], r4[3]),
-                depth,
-            );
-            let (x, y, w, visual_h) = (inner.x, inner.y, inner.width, inner.height);
-            let r4 = [r4t.0, r4t.1, r4t.2, r4t.3];
-            let face = if raw_bg[3] > 0.001 { bg_color } else { [0.0; 4] };
-            ctx.inset_plate(
-                Rect { x, y, width: w, height: visual_h },
-                (r4[0], r4[1], r4[2], r4[3]),
-                face,
-                depth,
-            );
+                radius,
+                crate::widget::PlateStance::Flush,
+                crate::widget::ControlPlate::face_from_fill(raw_bg),
+            )
+            .with_radii((r4[0], r4[1], r4[2], r4[3]))
+            .with_depth(depth);
+            ctx.control_plate(&plate);
             return;
         }
         if radius <= 0.0 {

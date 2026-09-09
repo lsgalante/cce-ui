@@ -139,6 +139,7 @@ pub struct LayoutTree {
     pub children: HashMap<WidgetId, Vec<WidgetId>>,
 }
 
+pub use crate::scene::paint::{ControlPlate, PlateStance};
 pub use crate::context::UiContext;
 
 #[derive(Debug, Clone, PartialEq)]

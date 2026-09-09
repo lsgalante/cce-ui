@@ -329,15 +329,8 @@ impl Paint for Breadcrumb {
                 // face, which is what the boss run always did here; an opaque
                 // one makes both controls that color. Mirrors
                 // `Dropdown::paint_background`'s `face` exactly.
-                let raw_bg = crate::color::dropdown_background_color();
-                let face = if raw_bg[3] > 0.001 {
-                    let mut c = raw_bg;
-                    c[3] = 1.0;
-                    c
-                } else {
-                    [0.0; 4]
-                };
-                if self.raised {
+                let face = crate::widget::ControlPlate::face_from_fill(crate::color::dropdown_background_color());
+                let (stance, face) = if self.raised {
                     // The floating stance: the run rises out of the surface as
                     // ONE beveled plate — fill and raised roll in a single
                     // lighting pass. The face is deliberately translucent
@@ -348,18 +341,17 @@ impl Paint for Breadcrumb {
                     // legible over live content beneath. A transparent
                     // configured fill keeps the boss degradation: edges only,
                     // the surface as the face.
-                    if face[3] > 0.001 {
-                        let mut c = face;
+                    let mut c = face;
+                    if c[3] > 0.001 {
                         c[3] = -(c[3] * Self::RAISED_FACE_OPACITY);
-                        ctx.bevel(run_rect, (r, r, r, r), c, depth);
-                    } else {
-                        let (plateau, radii) = crate::layout::carve_inside(run_rect, (r, r, r, r), depth);
-                        ctx.boss(plateau, radii, depth);
                     }
+                    (crate::widget::PlateStance::Raised, c)
                 } else {
-                    let (trough, radii) = crate::layout::carve_inside(run_rect, (r, r, r, r), depth);
-                    ctx.inset_plate(trough, radii, face, depth);
-                }
+                    (crate::widget::PlateStance::Flush, face)
+                };
+                ctx.control_plate(
+                    &crate::widget::ControlPlate::control(run_rect, r, stance, face).with_depth(depth),
+                );
                 for (a, b) in self.seams(rect) {
                     ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);
                 }

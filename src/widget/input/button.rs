@@ -185,15 +185,11 @@ impl Button {
         }
     }
 
-    /// The flush inset plate this Button's `paint` draws, as `(rect, corner
-    /// radius, depth, face colour)` — `None` when it draws none (flat styling,
-    /// or a ListRow, which is a transparent-until-hover surface and would wear
-    /// a permanent carved ring on every idle row).
-    ///
-    /// The single source `paint` and the flat-path bridge in
-    /// `layout::render_widget` both read, so a flat host's groove can't drift
-    /// from the drawn one.
-    pub fn inset_face(&self, rect: Rect) -> Option<(Rect, f32, f32, [f32; 4])> {
+    /// The control plate this Button's `paint` draws — flush, at the button
+    /// radius, its state colour as the face — or `None` when it draws none
+    /// (flat styling, or a ListRow / MenuItem, transparent-until-hover
+    /// surfaces that would wear a permanent carved ring on every idle row).
+    pub fn plate(&self, rect: Rect) -> Option<crate::widget::ControlPlate> {
         if !self.raised
             || self.kind == ButtonKind::ListRow
             || self.kind == ButtonKind::MenuItem
@@ -201,8 +197,13 @@ impl Button {
             return None;
         }
         let radius = crate::layout::button_corner_radius();
-        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        Some((rect, radius, depth, self.color()))
+        Some(crate::widget::ControlPlate::control(rect, radius, crate::widget::PlateStance::Flush, self.color()))
+    }
+
+    /// [`Button::plate`] as the legacy `(rect, corner radius, depth, face
+    /// colour)` tuple — the flat-path bridge's view of the same plate.
+    pub fn inset_face(&self, rect: Rect) -> Option<(Rect, f32, f32, [f32; 4])> {
+        self.plate(rect).map(|p| (p.rect, p.radii.0, p.depth, p.face))
     }
 }
 
@@ -378,9 +379,8 @@ impl Paint for Button {
         // List rows are exempt: they are transparent-until-hover/selected
         // surfaces, and the edges-only groove would stack a permanent carved
         // ring on every idle row of a list.
-        if let Some((face, r, depth, c)) = self.inset_face(rect) {
-            let (trough, radii) = crate::layout::carve_inside(face, (r, r, r, r), depth);
-            ctx.inset_plate(trough, radii, c, depth);
+        if let Some(plate) = self.plate(rect) {
+            ctx.control_plate(&plate);
         } else {
             // ListRow also skips the border idiom below: it draws the border
             // color as a FULL rect with the fill inset over it, which only

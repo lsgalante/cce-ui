@@ -138,13 +138,16 @@ What this buys, and where the code is heading:
 - **Navigation is stated in plate terms.** Focus moves between plates, a press
   acts on a plate, a well opens for typing. Hit testing and focus rings are the
   plate's silhouette.
-- **One plate spec, not five copies.** Button, Dropdown, FontSelector,
-  Breadcrumb and ButtonStrip each re-derive the same carve-inside, radius,
-  depth and transparent-face rules today (the Breadcrumb comments that it
-  mirrors the Dropdown's face logic exactly). The intended direction is a
-  shared plate spec (stance, radius, depth, face) and one paint entry point
-  those controls draw through — migrated behaviour-preserving and verified
-  pixel-identical in a shadow session.
+- **One plate spec per rung, not five copies.** The root and pane rungs are
+  `scene::paint::PlateSpec` (RFC 7b, painted by `PaintCtx::plate`). The
+  control rung is `scene::paint::ControlPlate` (re-exported from `widget`):
+  footprint, per-corner silhouette, `PlateStance` (raised or flush), face and
+  depth, painted by `PaintCtx::control_plate` — the ONE place a control face's
+  relief is composed (raised with a face = bevel; raised faceless = carve
+  inside + boss; flush = carve inside + inset plate). Button, Dropdown,
+  FontSelector, Breadcrumb and the ButtonStrip's selected plateau draw through
+  it; the migration was prim-identical against a dump of every face. A new
+  control face goes through `ControlPlate`, never a hand-rolled carve.
 - **Radii are configured per rung, overridden per widget.** Today every
   control has its own `corner_radius` key with a separate default, which is how
   the ColorSelector's swatch drifted to 4px while the field beside it used 8.

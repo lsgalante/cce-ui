@@ -137,6 +137,78 @@ impl PlateSpec {
 /// faces and another for the edges drawn over them (cce-files' `rects` vs
 /// `reliefs`).
 ///
+/// How a control plate sits on the surface beneath it — see "Plates, wells
+/// and seams" in `CLAUDE.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlateStance {
+    /// Floats above the surface: a [`Prim::Bevel`] when it has a face of its
+    /// own, an edges-only [`Prim::Boss`] carved inside its footprint when the
+    /// face is transparent (the surface below shows through as the face).
+    Raised,
+    /// Level with the surface inside a groove ring: a [`Prim::Trough`] carved
+    /// inside its footprint, with the face as a flat fill when it has one
+    /// ([`PaintCtx::inset_plate`]).
+    Flush,
+}
+
+/// A control plate: the thing you press, at the control rung of the plate
+/// ladder. One description for every control face — Button, Dropdown,
+/// FontSelector, Breadcrumb, a ButtonStrip's selected plateau — so their
+/// carve-inside, radius, depth and transparent-face rules cannot drift.
+/// Painted by [`PaintCtx::control_plate`]. The root and pane rungs of the
+/// ladder are [`PlateSpec`]; this is the same idea one rung down.
+///
+/// `rect` is the plate's footprint, the OUTER edge of its silhouette; the
+/// carve is taken inside it ([`crate::layout::carve_inside`]), so the gap
+/// beside the plate is the gap. `radii` is the silhouette, per corner (a
+/// Dropdown nested concentrically in a frame corner adjusts each). `face`
+/// is the plate's own fill; transparent means the surface below IS the face
+/// (a negative alpha is the blur-behind frost, a real face). `depth` is the
+/// relief's wall width — [`ControlPlate::control`] takes the DE relief width
+/// capped at a fifth of the height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ControlPlate {
+    pub rect: Rect,
+    pub radii: Radii,
+    pub stance: PlateStance,
+    pub face: [f32; 4],
+    pub depth: f32,
+}
+
+impl ControlPlate {
+    /// A control plate at `rect` with a uniform corner `radius`: depth from
+    /// the DE relief width, capped at a fifth of the plate's height.
+    pub fn control(rect: Rect, radius: f32, stance: PlateStance, face: [f32; 4]) -> Self {
+        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+        Self { rect, radii: (radius, radius, radius, radius), stance, face, depth }
+    }
+
+    /// Per-corner silhouette (a concentric corner-frame adjustment).
+    pub fn with_radii(mut self, radii: Radii) -> Self {
+        self.radii = radii;
+        self
+    }
+
+    /// An explicit wall width — a plate that shares its depth with the well
+    /// it stands in, or one capped by its short side rather than its height.
+    pub fn with_depth(mut self, depth: f32) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// A control plate's face from a configured fill: an opaque one is the
+    /// face (alpha forced to 1 — a translucent face would blend into the
+    /// relief's shading and read as a second material); a transparent one
+    /// leaves the surface below as the face (edges only).
+    pub fn face_from_fill(raw: [f32; 4]) -> [f32; 4] {
+        if raw[3] > 0.001 {
+            [raw[0], raw[1], raw[2], 1.0]
+        } else {
+            [0.0; 4]
+        }
+    }
+}
+
 /// Call the family **relief primitives**, not "bevel primitives": `Bevel` is one
 /// specific member — a filled rounded rect plus a lit roll on its lip — and a
 /// groove, a fillet or a sphere is not a bevel in any sense. "Relief" is also
@@ -945,6 +1017,28 @@ impl PaintCtx {
     ) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Boss { rect, radii, depth, edges, tint: Some(tint) });
+    }
+
+    /// Paint a control plate — see [`ControlPlate`]. The ONE place a control face's
+    /// relief is composed: raised with a face is a `bevel` on the footprint;
+    /// raised without one carves inside and raises a `boss`; flush carves
+    /// inside and lays an `inset_plate` (trough plus face).
+    pub fn control_plate(&mut self, plate: &ControlPlate) {
+        match plate.stance {
+            PlateStance::Raised => {
+                // abs(): a negative alpha is the frost sentinel, a real face.
+                if plate.face[3].abs() > 0.001 {
+                    self.bevel(plate.rect, plate.radii, plate.face, plate.depth);
+                } else {
+                    let (plateau, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
+                    self.boss(plateau, radii, plate.depth);
+                }
+            }
+            PlateStance::Flush => {
+                let (trough, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
+                self.inset_plate(trough, radii, plate.face, plate.depth);
+            }
+        }
     }
 
     /// A flush inset control: `rect`'s plate sits SUNKEN into the surface with

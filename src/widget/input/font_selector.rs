@@ -155,11 +155,9 @@ impl Paint for FontSelector {
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let r = crate::layout::font_selector_corner_radius();
         if self.raised {
-            // The closed-dropdown chrome: a flush inset trough with a transparent
-            // face, the state fill rounded to sit inside it.
-            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            let (trough, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
-            ctx.inset_plate(trough, radii, [0.0; 4], depth);
+            // The closed-dropdown chrome: a flush control plate with a
+            // transparent face, the state fill rounded to sit inside it.
+            ctx.control_plate(&crate::widget::ControlPlate::control(rect, r, crate::widget::PlateStance::Flush, [0.0; 4]));
             let wash = if self.pressed {
                 Some(colors::button_press_color())
             } else if self.hovered {
