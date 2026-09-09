@@ -246,13 +246,7 @@ impl Paint for ColorSelector {
         // real text wells draw no fill, so even a neutral one read as "the
         // color selector has a background". Neutral greys for the frame; the
         // caret is the editing affordance.
-        let border_color = if self.editing {
-            [0.45, 0.45, 0.52, 1.0]
-        } else if self.hovered {
-            [0.25, 0.25, 0.35, 1.0]
-        } else {
-            [0.18, 0.18, 0.24, 1.0]
-        };
+        let border_color = crate::colors::well_frame_color(self.hovered, self.editing);
 
         // A real frame, not a border-quad-under-fill-quad: with no fill, the
         // old full-rect border quad would read as a solid slab. Rounded at the

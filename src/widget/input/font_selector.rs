@@ -140,7 +140,9 @@ impl Layout for FontSelector {
 
 impl Paint for FontSelector {
     fn color(&self) -> [f32; 4] {
-        [0.08, 0.08, 0.12, 1.0]
+        // The plate shows through in both styles: a transparent-faced flush
+        // plate raised, the shared well frame flat.
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     fn widget_font(&self) -> Option<String> {
@@ -178,16 +180,9 @@ impl Paint for FontSelector {
             self.paint_labels(rect, ctx);
             return;
         }
-        // The flat style: the framed dark field, rounded at the selector's radius.
-        let bg_color = [0.08, 0.08, 0.12, 1.0];
-        let border_color = if self.pressed {
-            [0.30, 0.50, 0.32, 1.0]
-        } else if self.hovered {
-            [0.25, 0.25, 0.35, 1.0]
-        } else {
-            [0.18, 0.18, 0.24, 1.0]
-        };
-        ctx.border(rect, (r, r, r, r), bg_color, border_color, 1.0);
+        // The flat style: the one well frame (`colors::well_frame_color`) over
+        // the plate, lit while pressed, rounded at the selector's radius.
+        ctx.border(rect, (r, r, r, r), [0.0; 4], colors::well_frame_color(self.hovered, self.pressed), 1.0);
 
         self.paint_labels(rect, ctx);
     }

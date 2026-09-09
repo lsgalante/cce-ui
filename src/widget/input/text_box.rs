@@ -1502,13 +1502,7 @@ impl Paint for TextBox {
                     // the tinted recess rim (rounded path) / editing border, not a
                     // surface swap.
                     let bg_color = crate::colors::textbox_background_color();
-                    let border_color = if self.editing {
-                        [0.20, 0.50, 0.85, 1.0]
-                    } else if self.hovered {
-                        [0.25, 0.25, 0.35, 1.0]
-                    } else {
-                        [0.18, 0.18, 0.24, 1.0]
-                    };
+                    let border_color = crate::colors::well_frame_color(self.hovered, self.editing);
                     quads.push((self.rect.x, self.rect.y + top, self.rect.width, visual_h, border_color));
                     quads.push((self.rect.x + border_w, self.rect.y + top + border_w, self.rect.width - 2.0 * border_w, visual_h - 2.0 * border_w, bg_color));
                 }
@@ -1524,13 +1518,7 @@ impl Paint for TextBox {
 
             // One background regardless of focus (see the flat path above).
             let bg_color = crate::colors::textbox_background_color();
-            let border_color = if self.editing {
-                [0.20, 0.50, 0.85, 1.0]
-            } else if self.hovered {
-                [0.25, 0.25, 0.35, 1.0]
-            } else {
-                [0.18, 0.18, 0.24, 1.0]
-            };
+            let border_color = crate::colors::well_frame_color(self.hovered, self.editing);
 
             if self.draw_bg_border {
                 let corners = (true, true, true, true);

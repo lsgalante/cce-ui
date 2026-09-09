@@ -1210,7 +1210,7 @@ impl PaintCtx {
     /// over whatever runs to the edge. Under `relief` it is the recess carved
     /// inside `rect` ([`crate::layout::carve_inside`], the wall the DE width
     /// capped at a fifth of the height — every well's rule); flat, the
-    /// hairline frame ([`crate::colors::WELL_FRAME`]).
+    /// hairline frame every well shares ([`crate::colors::well_frame_color`]).
     pub fn well_rim(&mut self, rect: Rect, radius: f32, relief: bool) {
         let radii = (radius, radius, radius, radius);
         if relief {
@@ -1218,7 +1218,7 @@ impl PaintCtx {
             let (well, radii) = crate::layout::carve_inside(rect, radii, depth);
             self.recess(well, radii, depth);
         } else {
-            self.border(rect, radii, [0.0; 4], crate::colors::WELL_FRAME, 1.0);
+            self.border(rect, radii, [0.0; 4], crate::colors::well_frame_color(false, false), 1.0);
         }
     }
 

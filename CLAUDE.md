@@ -130,6 +130,9 @@ widget does not fit one of them, say so rather than stretching a word.
   the plate darkened for its floor (`colors::WELL_FLOOR`) and the recess for
   its rim, through `PaintCtx::well_floor` / `well_rim` (`canvas_well`),
   rounded like the text wells. The Ramp editor's plot is the reference look.
+  With relief off, a well is its frame: the one hairline
+  `colors::well_frame_color` gives every well (lit in the highlight while it
+  is active, the relief rim's focus cue), and still no floor of its own.
 - **A group is a lasso.** `widget::Group` owns nothing: it is a set of member
   ids, and its frame is the padded hull of wherever the host's layout put
   them, with a title tab flush on the top edge — the section's frame

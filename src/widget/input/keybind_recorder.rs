@@ -17,7 +17,7 @@ pub struct KeybindRecorder {
     /// Recessed style, the TextBox's: the field is a well carved into the
     /// plate below with no fill of its own, its rim lit in the highlight
     /// accent while recording (the TextBox's editing treatment). Defaults to
-    /// `control_relief()`; the flat style keeps the framed dark field.
+    /// `control_relief()`; the flat style is the shared well frame.
     recessed: bool,
     /// Keyboard focus (FocusIn / FocusOut): Enter / Space arm recording.
     focused: bool,
@@ -65,7 +65,8 @@ impl Layout for KeybindRecorder {
 
 impl Paint for KeybindRecorder {
     fn color(&self) -> [f32; 4] {
-        [0.08, 0.08, 0.12, 1.0]
+        // A well: the plate is its floor, in both styles.
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     /// The field text in the TextBox's font: both are wells you type into.
@@ -87,18 +88,12 @@ impl Paint for KeybindRecorder {
             self.paint_text(rect, ctx);
             return;
         }
-        let border_color = if self.recording {
-            colors::HIGHLIGHT_PRIMARY
-        } else if self.pressed {
-            [0.30, 0.50, 0.32, 1.0]
-        } else if self.hovered {
-            [0.25, 0.25, 0.35, 1.0]
-        } else {
-            [0.18, 0.18, 0.24, 1.0]
-        };
-        // The framed dark field, rounded like the text wells.
+        // The flat style: the one well frame (`colors::well_frame_color`), lit
+        // while recording, over the plate — no floor of its own, like the
+        // TextBox it stands beside. Rounded like the text wells.
         let radius = crate::layout::textbox_corner_radius();
-        ctx.border(rect, (radius, radius, radius, radius), [0.08, 0.08, 0.12, 1.0], border_color, 1.0);
+        let frame = colors::well_frame_color(self.hovered, self.recording || self.pressed);
+        ctx.border(rect, (radius, radius, radius, radius), [0.0; 4], frame, 1.0);
 
         self.paint_text(rect, ctx);
     }

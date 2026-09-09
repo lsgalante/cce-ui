@@ -916,8 +916,28 @@ pub const TEXT_DIM: [f32; 4] = [0.53, 0.53, 0.60, 1.0];
 pub const WELL_FLOOR: [f32; 4] = [0.0, 0.0, 0.0, 0.18];
 /// [`WELL_FLOOR`] risen toward the plate: a clickable canvas's hover cue.
 pub const WELL_FLOOR_LIFTED: [f32; 4] = [0.0, 0.0, 0.0, 0.10];
-/// The hairline a canvas well is framed with when relief is off.
-pub const WELL_FRAME: [f32; 4] = [0.28, 0.28, 0.38, 1.0];
+/// The hairline a well is framed with when relief is off, idle; see
+/// [`well_frame_color`].
+pub const WELL_FRAME: [f32; 4] = [0.18, 0.18, 0.24, 1.0];
+/// [`WELL_FRAME`] under the pointer.
+pub const WELL_FRAME_HOVER: [f32; 4] = [0.25, 0.25, 0.35, 1.0];
+
+/// The frame a flat well is drawn in — the one hairline every well (text,
+/// keybind, colour and font fields, the canvases) wears when relief is off:
+/// neutral greys idle and hovered, the highlight accent while the well is
+/// active (editing, recording, pressed) — the colour the relief wells light
+/// their rims with, so the two styles share one focus cue. A flat well has no
+/// floor of its own any more than a relief one: the plate is the floor.
+pub fn well_frame_color(hovered: bool, active: bool) -> [f32; 4] {
+    if active {
+        let c = highlight_primary_color();
+        [c[0], c[1], c[2], 1.0]
+    } else if hovered {
+        WELL_FRAME_HOVER
+    } else {
+        WELL_FRAME
+    }
+}
 pub const TEXT_HEADER: [f32; 4] = [0.90, 0.90, 0.95, 1.0];
 pub const TEXT_ACCENT: [f32; 4] = [0.56, 0.83, 0.56, 1.0];
 
