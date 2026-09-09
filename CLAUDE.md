@@ -145,7 +145,9 @@ widget does not fit one of them, say so rather than stretching a word.
 - **Segments are plates or floors sharing one silhouette, parted by seams.**
   A seam is a `Groove` cut across the shared surface, dying into its rolled
   edge: Breadcrumb segments, ButtonStrip segments, the ColorSelector's
-  text/swatch split. One silhouette, one relief pass, seams between.
+  text/swatch split. One silhouette, one relief pass, seams between. A
+  `Separator` is the same cut made in the plate it sits on, with no segment
+  to part: a groove that dies out at its own ends (flat: a hairline).
 - **Marks and bands sit outside this vocabulary on purpose.** The round
   Checkbox mark is a mark; the Slider's swelling band is a band. Do not call
   them plates or wells.
