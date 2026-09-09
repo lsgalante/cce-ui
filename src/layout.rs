@@ -8,6 +8,12 @@ use std::sync::OnceLock;
 pub struct StyleRegistry {
     pub floats: HashMap<String, f32>,
     pub strings: HashMap<String, String>,
+    /// Slots whose config value carried a unit (`width=(mm)2.0`). Read
+    /// through `get_float` like any other number, resolved against the
+    /// process metric (`crate::units::metric`) at EVERY read, so a metric
+    /// that arrives after config load — outputs come in after the first
+    /// style read — or changes with the display is honoured live.
+    pub lens: HashMap<String, crate::units::Len>,
 }
 
 impl StyleRegistry {
@@ -15,19 +21,41 @@ impl StyleRegistry {
         Self {
             floats: HashMap::new(),
             strings: HashMap::new(),
+            lens: HashMap::new(),
         }
     }
 
     pub fn get_float(&self, key: &str) -> Option<f32> {
+        if let Some(len) = self.lens.get(key) {
+            return Some(len.to_px());
+        }
         self.floats.get(key).copied()
+    }
+
+    /// The slot as a length with its unit: the configured `Len` when one was
+    /// given, else the plain number as logical px. For editors that show the
+    /// unit the user chose rather than the resolved pixel count.
+    pub fn get_len(&self, key: &str) -> Option<crate::units::Len> {
+        if let Some(len) = self.lens.get(key) {
+            return Some(*len);
+        }
+        self.floats.get(key).map(|v| crate::units::Len::px(*v))
     }
 
     pub fn get_string(&self, key: &str) -> Option<String> {
         self.strings.get(key).cloned()
     }
 
+    /// A plain number wins over any earlier unit value for the slot — a
+    /// runtime `set_float` is the newest opinion.
     pub fn set_float(&mut self, key: &str, val: f32) {
+        self.lens.remove(key);
         self.floats.insert(key.to_string(), val);
+    }
+
+    pub fn set_len(&mut self, key: &str, len: crate::units::Len) {
+        self.floats.remove(key);
+        self.lens.insert(key.to_string(), len);
     }
 
     pub fn set_string(&mut self, key: &str, val: String) {
@@ -451,6 +479,9 @@ pub fn reload_config() {
                 if let Ok(mut registry) = get_style_registry().write() {
                     if let Ok(f_val) = val_str.parse::<f32>() {
                         registry.set_float(&key, f_val);
+                    } else if let Some(len) = crate::units::Len::parse(val_str) {
+                        // `(mm)2.0` arrived as the string `2mm`.
+                        registry.set_len(&key, len);
                     } else {
                         registry.set_string(&key, val_str.to_string());
                     }
@@ -5845,6 +5876,31 @@ impl crate::widget::ContainerLayout for RadialLayout {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unit_slots_resolve_through_the_metric_at_read_time() {
+        use crate::units::{Len, Metric, MetricSource};
+        let mut reg = super::StyleRegistry::new();
+        reg.set_len("probe_width", Len::mm(2.0));
+        let assumed = Metric::assumed(1.0);
+        // The registry resolves against the process metric; pin it to a
+        // known value for the read, then restore.
+        let before = crate::units::metric();
+        crate::units::set_metric(assumed);
+        let px_assumed = reg.get_float("probe_width").unwrap();
+        assert!((px_assumed - 2.0 * 96.0 / 25.4).abs() < 1e-3, "{px_assumed}");
+        let panel = Metric::from_sizes(2.0, (1920.0, 1200.0), (344.0, 215.0), MetricSource::Measured).unwrap();
+        crate::units::set_metric(panel);
+        let px_panel = reg.get_float("probe_width").unwrap();
+        assert!((px_panel - 2.0 * panel.px_per_mm).abs() < 1e-3, "{px_panel}");
+        assert_ne!(px_assumed, px_panel, "a metric change is honoured without a reload");
+        assert_eq!(reg.get_len("probe_width"), Some(Len::mm(2.0)));
+        // A plain number written later wins, and reads back as px.
+        reg.set_float("probe_width", 7.0);
+        assert_eq!(reg.get_float("probe_width"), Some(7.0));
+        assert_eq!(reg.get_len("probe_width"), Some(Len::px(7.0)));
+        crate::units::set_metric(before);
+    }
+
     use super::*;
 
     struct MockRenderTarget {

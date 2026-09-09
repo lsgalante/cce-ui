@@ -4240,10 +4240,12 @@ impl<A: Application> OutputHandler for EngineState<A> {
     fn new_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {
         let scale = crate::wayland::detect_scale_factor(&self.output_state);
         crate::scale::set_scale_factor(scale as f32);
+        crate::units::set_metric(crate::wayland::detect_metric(&self.output_state, scale));
     }
     fn update_output(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {
         let scale = crate::wayland::detect_scale_factor(&self.output_state);
         crate::scale::set_scale_factor(scale as f32);
+        crate::units::set_metric(crate::wayland::detect_metric(&self.output_state, scale));
     }
     fn output_destroyed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _output: wl_output::WlOutput) {}
 }
@@ -5573,6 +5575,7 @@ fn run_session<'l, A: Application>(
     let scale = detect_scale_factor(&engine_state.output_state);
     engine_state.scale_factor = scale;
     crate::scale::set_scale_factor(scale as f32);
+    crate::units::set_metric(crate::wayland::detect_metric(&engine_state.output_state, scale));
 
     // A reconnect re-attaches the SAME app: its state is the thing worth
     // saving, and `A::new` would both discard it and hand a fresh Sender to

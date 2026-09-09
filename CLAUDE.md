@@ -264,7 +264,46 @@ cce-system-interface) to confirm behavior, not just the test suite.
   name) → a file on disk, plus `upload_themed` to rasterize/decode and upload it.
   **Not** `lib.rs`'s `upload_icon`, which loads a *bundled* cce-icons glyph by its
   own name for in-widget use; this one resolves names any installed app may ship.
-- `file_dialog.rs` (rfd), `scale.rs` (HiDPI), `wayland.rs` (surface/scale detection).
+- `file_dialog.rs` (rfd), `scale.rs` (HiDPI), `wayland.rs` (surface/scale detection, and
+  `detect_metric` — the display's logical px per mm from its `wl_output` geometry).
+- `units.rs` — lengths with units and the display metric; see the Units section below.
+
+## Units — logical px inside, real lengths at the edges
+
+The toolkit's working unit is and stays the **logical pixel**: every layout
+node, style slot and widget measure is an `f32` of logical px. `units.rs`
+adds the bridge to real lengths, in two parts:
+
+- **`Len`** — a value with a unit (`px`, `mm`, `cm`, `in`, `pt`), parsed from
+  `"2mm"` and resolved to logical px through a `Metric`. In config a length
+  carries its unit as a KDL type annotation, the same way `(rgba)` and
+  `(relief)` do: `width=(mm)2.0`. A bare number is a logical px, forever —
+  nothing migrates. `config::kdl_to_json` turns an annotated number into the
+  string `"2mm"`; the writer turns it back into `(mm)2`; `reload_config`
+  stores it in the style registry's `lens` map, and `get_float` resolves it
+  against the live metric at every read. So `layout::bevel_width()` and every
+  other getter are unit-aware without knowing it, and a metric that arrives
+  after config load (outputs come in after the first style read) or changes
+  with the display is honoured without a reload. `get_len` returns the
+  configured unit for editors that should show what the user typed.
+- **`Metric`** — logical px per mm for the display this process is on, plus
+  its **source**: `measured` (EDID via `wl_output` geometry, or the
+  compositor's configured `size_mm` in its place — the client cannot tell
+  them apart; `ccectl outputs` can), `forced` (`CCE_FORCE_PPI`), or
+  `assumed` — the CSS 96 px/in convention when nothing is known (a headless
+  shadow, a projector with no EDID). The source is carried so fabrication
+  can refuse a guess: `Metric::is_real()`. The window runner installs it
+  beside `scale::set_scale_factor` (`units::set_metric`); apps read
+  `units::metric()`, `units::mm(v)`, or `Len::to_px()`.
+
+Why not millimetres inside: UI sizes are perceptual and angular, not physical
+— a hit target should not become 8 mm on a projector three metres away.
+Documents and fabrication content live in real units and convert at view
+time. Two domains, one bridge.
+
+On the live laptop panel (3840×2400 over 344×215 mm at scale 2) the metric is
+5.58 logical px/mm (141.8 ppi); the default 9.3 px relief roll is 1.67 mm, and
+the 96 ppi assumption would have called it 2.46 mm.
 
 ## Fonts & assets
 
@@ -291,4 +330,7 @@ All opt-in, all read once, all quiet when unset — set one and run any client.
 - `CCE_PRESENT_DEBUG=1` — swapchain present/acquire tracing.
 - `CCE_VK_DEVICE=<substring>` — force a physical device; `CCE_VK_RT=0` disables ray tracing.
 - `CCE_FORCE_SCALE=<f>` — override HiDPI scale detection.
+- `CCE_FORCE_PPI=<f>` — pin the display metric (logical px per inch) regardless of what
+  the outputs report; a headless shadow has no EDID and would run `assumed`. The live
+  panel is 141.8.
 - `CCE_UI_FAULT_RECONNECT=1` — exercise the Wayland reconnect path.

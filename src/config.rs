@@ -1,6 +1,45 @@
 use std::fs;
 use serde_json::Value;
 
+/// A unit-annotated number (`width=(mm)2.0`, `(px)9.3`, `(in)0.5`,
+/// `(pt)6`) becomes the JSON string `"2mm"` — the form
+/// `crate::units::Len::parse` reads — so the unit survives the JSON hop
+/// into the style registry, where it resolves against the live metric at
+/// every read. A bare number stays a number: a logical px, as always.
+fn unit_entry_to_json(value: f64, entry: &kdl::KdlEntry) -> Option<serde_json::Value> {
+    let ty = entry.ty()?.value();
+    let len = crate::units::Len::from_annotated(value as f32, ty)?;
+    Some(serde_json::Value::String(len.serialize()))
+}
+
+fn int_entry_to_json(value: i64, entry: &kdl::KdlEntry) -> serde_json::Value {
+    unit_entry_to_json(value as f64, entry)
+        .unwrap_or_else(|| serde_json::Value::Number(serde_json::Number::from(value)))
+}
+
+fn float_entry_to_json(value: f64, entry: &kdl::KdlEntry) -> serde_json::Value {
+    if let Some(v) = unit_entry_to_json(value, entry) {
+        return v;
+    }
+    let mut val_f = value;
+    if let Some(ty) = entry.ty() {
+        let ty_str = ty.value();
+        if let Some(range_str) = ty_str.strip_prefix("f64:") {
+            if let Some(dash_idx) = range_str.find('-') {
+                let min_str = range_str[..dash_idx].trim();
+                let max_str = range_str[dash_idx + 1..].trim();
+                if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
+                    val_f = val_f.clamp(min_f, max_f);
+                }
+            }
+        }
+    }
+    match serde_json::Number::from_f64(val_f) {
+        Some(num) => serde_json::Value::Number(num),
+        None => serde_json::Value::Null,
+    }
+}
+
 fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
     let mut map = serde_json::Map::new();
     for node in doc.nodes() {
@@ -16,28 +55,8 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
                     kdl::KdlValue::Base2(i) |
                     kdl::KdlValue::Base8(i) |
                     kdl::KdlValue::Base10(i) |
-                    kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
-                    kdl::KdlValue::Base10Float(f) => {
-                        let mut val_f = *f;
-                        if let Some(ty) = entry.ty() {
-                            let ty_str = ty.value();
-                            if ty_str.starts_with("f64:") {
-                                let range_str = ty_str.trim_start_matches("f64:");
-                                if let Some(dash_idx) = range_str.find('-') {
-                                    let min_str = &range_str[..dash_idx].trim();
-                                    let max_str = &range_str[dash_idx + 1..].trim();
-                                    if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
-                                        val_f = val_f.clamp(min_f, max_f);
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(num) = serde_json::Number::from_f64(val_f) {
-                            serde_json::Value::Number(num)
-                        } else {
-                            serde_json::Value::Null
-                        }
-                    }
+                    kdl::KdlValue::Base16(i) => int_entry_to_json(*i, entry),
+                    kdl::KdlValue::Base10Float(f) => float_entry_to_json(*f, entry),
                     kdl::KdlValue::String(s) |
                     kdl::KdlValue::RawString(s) => serde_json::Value::String(s.clone()),
                     kdl::KdlValue::Null => serde_json::Value::Null,
@@ -58,28 +77,8 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
                                 kdl::KdlValue::Base2(i) |
                                 kdl::KdlValue::Base8(i) |
                                 kdl::KdlValue::Base10(i) |
-                                kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
-                                kdl::KdlValue::Base10Float(f) => {
-                                    let mut val_f = *f;
-                                    if let Some(ty) = entry.ty() {
-                                        let ty_str = ty.value();
-                                        if ty_str.starts_with("f64:") {
-                                            let range_str = ty_str.trim_start_matches("f64:");
-                                            if let Some(dash_idx) = range_str.find('-') {
-                                                let min_str = &range_str[..dash_idx].trim();
-                                                let max_str = &range_str[dash_idx + 1..].trim();
-                                                if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
-                                                    val_f = val_f.clamp(min_f, max_f);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if let Some(num) = serde_json::Number::from_f64(val_f) {
-                                        serde_json::Value::Number(num)
-                                    } else {
-                                        serde_json::Value::Null
-                                    }
-                                }
+                                kdl::KdlValue::Base16(i) => int_entry_to_json(*i, entry),
+                                kdl::KdlValue::Base10Float(f) => float_entry_to_json(*f, entry),
                                 kdl::KdlValue::String(s) |
                                 kdl::KdlValue::RawString(s) => serde_json::Value::String(s.clone()),
                                 kdl::KdlValue::Null => serde_json::Value::Null,
@@ -135,28 +134,8 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
                     kdl::KdlValue::Base2(i) |
                     kdl::KdlValue::Base8(i) |
                     kdl::KdlValue::Base10(i) |
-                    kdl::KdlValue::Base16(i) => serde_json::Value::Number(serde_json::Number::from(*i)),
-                    kdl::KdlValue::Base10Float(f) => {
-                        let mut val_f = *f;
-                        if let Some(ty) = entry.ty() {
-                            let ty_str = ty.value();
-                            if ty_str.starts_with("f64:") {
-                                let range_str = ty_str.trim_start_matches("f64:");
-                                if let Some(dash_idx) = range_str.find('-') {
-                                    let min_str = &range_str[..dash_idx].trim();
-                                    let max_str = &range_str[dash_idx + 1..].trim();
-                                    if let (Ok(min_f), Ok(max_f)) = (min_str.parse::<f64>(), max_str.parse::<f64>()) {
-                                        val_f = val_f.clamp(min_f, max_f);
-                                    }
-                                }
-                            }
-                        }
-                        if let Some(num) = serde_json::Number::from_f64(val_f) {
-                            serde_json::Value::Number(num)
-                        } else {
-                            serde_json::Value::Null
-                        }
-                    }
+                    kdl::KdlValue::Base16(i) => int_entry_to_json(*i, entry),
+                    kdl::KdlValue::Base10Float(f) => float_entry_to_json(*f, entry),
                     kdl::KdlValue::String(s) |
                     kdl::KdlValue::RawString(s) => serde_json::Value::String(s.clone()),
                     kdl::KdlValue::Null => serde_json::Value::Null,
@@ -413,6 +392,10 @@ pub fn update_kdl_in_memory_typed(doc: &mut kdl::KdlDocument, key: &str, value: 
 
     let (kdl_val, mut kdl_ty) = if let Ok(b) = value.parse::<bool>() {
         (kdl::KdlValue::Bool(b), Some("bool".to_string()))
+    } else if let Some(len) = crate::units::Len::parse(value) {
+        // `2mm` → `(mm)2.0`: the unit rides as the annotation, the value
+        // stays a number the editor's spinbox can step.
+        (kdl::KdlValue::Base10Float(len.value as f64), Some(len.unit.suffix().to_string()))
     } else if value.starts_with('#') {
         let s_clean = value.trim_start_matches('#');
         let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
@@ -432,6 +415,12 @@ pub fn update_kdl_in_memory_typed(doc: &mut kdl::KdlDocument, key: &str, value: 
 
     if let Some(ref ext_ty) = existing_ty {
         if ext_ty.starts_with("menu:") || ext_ty == "button" || ext_ty.starts_with("button:") || ext_ty == "vec2i" || ext_ty == "radian" || ext_ty == "bevel" || ext_ty == "keybind" {
+            kdl_ty = Some(ext_ty.clone());
+        }
+        // A bare number written over a unit-annotated slot keeps the unit:
+        // typing 3 into a `(mm)` field means 3 mm, not a silent fall back
+        // to logical px.
+        if crate::units::Unit::parse(ext_ty).is_some() && matches!(kdl_val, kdl::KdlValue::Base10Float(_) | kdl::KdlValue::Base10(_)) && kdl_ty.as_deref().map_or(true, |t| t == "f64" || t == "i64") {
             kdl_ty = Some(ext_ty.clone());
         }
     }
@@ -824,6 +813,38 @@ pub fn get_kdl_type_annotations(kdl_content: &str, key_paths: &[String]) -> Vec<
 #[cfg(test)]
 mod tests {
     #[test]
+    fn unit_annotations_become_len_strings() {
+        let v = parse_kdl_to_json("style {\n    relief width=(mm)2.0 depth=(f64)0.15 lip=(px)6\n    ruler (in)0.5\n}\n");
+        assert_eq!(v["style"]["relief"]["width"], serde_json::json!("2mm"));
+        assert_eq!(v["style"]["relief"]["depth"], serde_json::json!(0.15));
+        assert_eq!(v["style"]["relief"]["lip"], serde_json::json!("6px"));
+        assert_eq!(v["style"]["ruler"], serde_json::json!("0.5in"));
+    }
+
+    #[test]
+    fn unit_strings_write_back_annotated() {
+        let v = serde_json::json!({"style": {"relief": {"width": "2mm", "depth": 0.15}}});
+        let out = json_to_kdl_string(&v);
+        assert!(out.contains("width=(mm)2\n") || out.contains("width=(mm)2 "), "{out}");
+        assert!(out.contains("depth=(f64)0.15"), "{out}");
+        let back = parse_kdl_to_json(&out);
+        assert_eq!(back["style"]["relief"]["width"], serde_json::json!("2mm"));
+    }
+
+    #[test]
+    fn typed_write_keeps_and_sets_units() {
+        let mut doc: kdl::KdlDocument = "style {\n    relief width=(mm)2.0\n}\n".parse().unwrap();
+        // A bare number over a (mm) slot stays mm.
+        assert!(update_kdl_in_memory_typed(&mut doc, "style.relief.width", "3", "style", None));
+        let v = parse_kdl_to_json(&doc.to_string());
+        assert_eq!(v["style"]["relief"]["width"], serde_json::json!("3mm"));
+        // A suffixed value sets the unit.
+        assert!(update_kdl_in_memory_typed(&mut doc, "style.relief.width", "0.25in", "style", None));
+        let v = parse_kdl_to_json(&doc.to_string());
+        assert_eq!(v["style"]["relief"]["width"], serde_json::json!("0.25in"));
+    }
+
+    #[test]
     fn app_name_strips_the_kernels_deleted_marker() {
         use super::app_name_from_exe_basename as name;
         assert_eq!(name("cce-status-interface"), "cce-status-interface");
@@ -1200,7 +1221,9 @@ pub fn value_to_kdl_with_annotations(
                                 }
                             }
                             serde_json::Value::String(s) => {
-                                if let Some(anno) = annotations.get(&prop_path) {
+                                if let Some(len) = crate::units::Len::parse(s) {
+                                    (crate::units::fmt_num(len.value), Some(len.unit.suffix().to_string()))
+                                } else if let Some(anno) = annotations.get(&prop_path) {
                                     if anno == "vec2i" {
                                         (s.clone(), Some(anno.clone()))
                                     } else {
@@ -1270,7 +1293,9 @@ pub fn value_to_kdl_with_annotations(
                     }
                 }
                 serde_json::Value::String(s) => {
-                    if let Some(anno) = annotations.get(&current_path) {
+                    if let Some(len) = crate::units::Len::parse(s) {
+                        (crate::units::fmt_num(len.value), Some(len.unit.suffix().to_string()))
+                    } else if let Some(anno) = annotations.get(&current_path) {
                         if anno == "vec2i" {
                             (s.clone(), Some(anno.clone()))
                         } else {

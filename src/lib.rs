@@ -9,6 +9,7 @@ pub mod wayland;
 pub mod protocol;
 pub mod engine;
 pub mod scale;
+pub mod units;
 pub mod backend;
 pub mod context;
 pub mod scene;
