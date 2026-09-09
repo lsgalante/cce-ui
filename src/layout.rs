@@ -5938,24 +5938,24 @@ mod tests {
         use crate::units::{Len, Metric, MetricSource};
         let mut reg = super::StyleRegistry::new();
         reg.set_len("probe_width", Len::mm(2.0));
+        // `get_float` resolves against the PROCESS metric at read time — the
+        // same number `Len::to_px` gives — so it tracks whatever the metric
+        // is now, not what it was at load. (The metric itself is left alone:
+        // it is process-global and the suite runs in parallel.)
+        let live = reg.get_float("probe_width").unwrap();
+        assert!((live - Len::mm(2.0).to_px()).abs() < 1e-4, "{live}");
+        // Two metrics give two answers for the one stored length.
         let assumed = Metric::assumed(1.0);
-        // The registry resolves against the process metric; pin it to a
-        // known value for the read, then restore.
-        let before = crate::units::metric();
-        crate::units::set_metric(assumed);
-        let px_assumed = reg.get_float("probe_width").unwrap();
-        assert!((px_assumed - 2.0 * 96.0 / 25.4).abs() < 1e-3, "{px_assumed}");
         let panel = Metric::from_sizes(2.0, (1920.0, 1200.0), (344.0, 215.0), MetricSource::Measured).unwrap();
-        crate::units::set_metric(panel);
-        let px_panel = reg.get_float("probe_width").unwrap();
-        assert!((px_panel - 2.0 * panel.px_per_mm).abs() < 1e-3, "{px_panel}");
-        assert_ne!(px_assumed, px_panel, "a metric change is honoured without a reload");
+        let (a, b) = (Len::mm(2.0).resolve(&assumed), Len::mm(2.0).resolve(&panel));
+        assert!((a - 2.0 * 96.0 / 25.4).abs() < 1e-3, "{a}");
+        assert!((b - 2.0 * panel.px_per_mm).abs() < 1e-3, "{b}");
+        assert_ne!(a, b);
         assert_eq!(reg.get_len("probe_width"), Some(Len::mm(2.0)));
         // A plain number written later wins, and reads back as px.
         reg.set_float("probe_width", 7.0);
         assert_eq!(reg.get_float("probe_width"), Some(7.0));
         assert_eq!(reg.get_len("probe_width"), Some(Len::px(7.0)));
-        crate::units::set_metric(before);
     }
 
     use super::*;
