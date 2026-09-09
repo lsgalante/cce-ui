@@ -637,9 +637,14 @@ impl TreeList {
 }
 
 impl Layout for TreeList {
-    /// The legacy `set_rect` body: cache the rect on the internal base and arrange the
-    /// field widgets (search box, add-key button, popover box, scroll box).
-    fn rect_assigned(&mut self, rect: Rect) {
+    /// The legacy `set_rect` body: cache the CONTENT rect on the internal base and
+    /// arrange the field widgets (search box, add-key button, popover box, scroll box)
+    /// in it. The content rect, not `rect_assigned`'s block: the adapter's block holds
+    /// the detached label strip above the content, and `paint` draws the well at the
+    /// content rect — fields placed from the block sat one strip above the well, the
+    /// search box straddling its top edge over the label and the header row's text
+    /// clipped away outside its bounds (the gallery's labelled tree).
+    fn arrange_children(&mut self, rect: Rect, _host: *mut (dyn WidgetHost + 'static)) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
         self.base.x = x;
         self.base.y = y;
@@ -1418,6 +1423,27 @@ unsafe impl Sync for TreeList {}
 mod tests {
     use super::*;
     use crate::context::UiContext;
+
+    /// A labelled tree's fields sit in its content rect, below the label strip — where
+    /// `paint` draws the well — not at the top of the block the adapter is given.
+    #[test]
+    fn a_labelled_trees_fields_are_in_its_content_rect() {
+        let mut tree_list = TreeList::new().with_label("TreeList");
+        let strip = tree_list.label_strip();
+        assert!(strip > 0.0, "a detached label has a strip");
+        tree_list.set_rect(10.0, 52.0, 380.0, 200.0 + strip);
+        let content_y = 52.0 + strip;
+        let (_, sy, _, sh) = tree_list.search_box.rect();
+        assert_eq!(sy, content_y + 6.0, "the search box is inside the well, one margin down");
+        let (_, by, _, _) = tree_list.add_key_btn.rect();
+        assert_eq!(by, sy, "the add-key button shares the search row");
+        let header_y = content_y + sh + 12.0;
+        assert_eq!(tree_list.scroll_box.base.y, header_y + 26.0, "the rows start under the header");
+        let labels = tree_list.own_labels();
+        let key = labels.iter().find(|(l, _)| l.text == "Key").expect("a Key header");
+        assert_eq!(key.0.y, header_y + 6.0, "the header text is in the header band");
+        assert_eq!(tree_list.scroll_box.base.y + tree_list.scroll_box.base.h, 52.0 + strip + 200.0, "the rows end at the block's bottom");
+    }
 
     #[test]
     fn test_treelist_blocks_window_drag() {
