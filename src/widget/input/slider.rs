@@ -650,6 +650,12 @@ pub fn band_profile(track_x: f32, track_w: f32, h: f32, x: f32, centers: &[f32],
 /// column per pixel with a hair of overlap so AA seams can't open. The one
 /// painter behind Slider, RangeSlider and Float3's rows.
 pub fn paint_band_shape(ctx: &mut PaintCtx, track_x: f32, track_w: f32, cy: f32, color: [f32; 4], profile: &dyn Fn(f32) -> f32) {
+    paint_band_shape_colored(ctx, track_x, track_w, cy, &|_| color, profile);
+}
+
+/// [`paint_band_shape`] with the band's colour sampled per column
+/// (`color_at(x)`): a RangeSlider lights only the swell the keyboard is on.
+pub fn paint_band_shape_colored(ctx: &mut PaintCtx, track_x: f32, track_w: f32, cy: f32, color_at: &dyn Fn(f32) -> [f32; 4], profile: &dyn Fn(f32) -> f32) {
     const WELL_GAP: f32 = 4.0;
     const WELL_WALL: f32 = 3.0;
     const WALL_STEPS: usize = 3;
@@ -691,7 +697,7 @@ pub fn paint_band_shape(ctx: &mut PaintCtx, track_x: f32, track_w: f32, cy: f32,
     for i in 0..steps {
         let x = track_x + i as f32 * step_w;
         let h = profile(x + step_w * 0.5);
-        ctx.quad(Rect { x, y: cy - h * 0.5, width: step_w + 0.3, height: h }, color);
+        ctx.quad(Rect { x, y: cy - h * 0.5, width: step_w + 0.3, height: h }, color_at(x + step_w * 0.5));
     }
 }
 
@@ -727,15 +733,24 @@ impl Paint for RangeSlider {
         let range = w - thumb_size;
         let lo = x + self.value_low * range + thumb_size / 2.0;
         let hi = x + self.value_high * range + thumb_size / 2.0;
-        // A band has no rim to light: focused, the band itself is the highlight.
-        let color = if self.active_thumb.is_some() {
-            colors::rangeslider_thumb_drag()
-        } else if self.focused {
-            crate::color::highlight_primary_color()
-        } else {
-            colors::rangeslider_thumb()
+        // A band has no rim to light: focused, the swell the keyboard is on
+        // is the highlight — the colour rides the swell's own bell, so it
+        // blooms over that end and fades back to the band along its flanks.
+        let base = if self.active_thumb.is_some() { colors::rangeslider_thumb_drag() } else { colors::rangeslider_thumb() };
+        let focus_center = self.focused.then(|| if matches!(self.focus_end, ActiveThumb::Low) { lo } else { hi });
+        let hl = crate::color::highlight_primary_color();
+        let bulge_w = crate::layout::slider_bulge_width().max(2.0);
+        let color_at = |px: f32| -> [f32; 4] {
+            let Some(c) = focus_center else { return base };
+            let t = ((px - c) / bulge_w).clamp(-1.0, 1.0);
+            let bell = 0.5 * (1.0 + (std::f32::consts::PI * t).cos());
+            let mut out = base;
+            for k in 0..4 {
+                out[k] = base[k] + (hl[k] - base[k]) * bell;
+            }
+            out
         };
-        paint_band_shape(ctx, x, w, y + h * 0.5, color, &|px| band_profile(x, w, h, px, &[lo, hi], Some((lo, hi))));
+        paint_band_shape_colored(ctx, x, w, y + h * 0.5, &color_at, &|px| band_profile(x, w, h, px, &[lo, hi], Some((lo, hi))));
     }
 }
 
