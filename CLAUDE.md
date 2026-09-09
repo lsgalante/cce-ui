@@ -148,11 +148,15 @@ What this buys, and where the code is heading:
   FontSelector, Breadcrumb and the ButtonStrip's selected plateau draw through
   it; the migration was prim-identical against a dump of every face. A new
   control face goes through `ControlPlate`, never a hand-rolled carve.
-- **Radii are configured per rung, overridden per widget.** Today every
-  control has its own `corner_radius` key with a separate default, which is how
-  the ColorSelector's swatch drifted to 4px while the field beside it used 8.
-  The intended shape is a default radius per rung (root, pane, control) with
-  the per-widget keys as overrides.
+- **Radii are configured per rung, overridden per widget.** Root:
+  `style.surface.plate.root.corner_radius` (`color::root_plate_corner_radius`).
+  Pane: `plate_corner_radius`, falling back to the root's. Control:
+  `style.control.corner_radius` (`layout::control_corner_radius`, default 8) —
+  every control-scale getter (button, dropdown, font selector, slider,
+  spinbox, textbox, toggle, list and tree wells; the ColorSelector's two via
+  the textbox) falls back to it when the widget's own `corner_radius` key is
+  unset, so a per-widget key is an override, not a requirement. Do not give a
+  new control-scale radius getter a literal default; fall back to the rung.
 
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 

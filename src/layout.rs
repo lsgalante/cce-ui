@@ -67,6 +67,9 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.list.font_color" | "style.data.list.font_color" => "list_font_color",
                 "style.control.breadcrumb.font" => "breadcrumb_font",
 
+                // The control rung's default radius: every control-scale
+                // `corner_radius` below falls back to it when its own key is unset.
+                "style.control.corner_radius" => "control_corner_radius",
                 "style.control.button.padding" => "button_padding",
                 "style.control.button.height" => "button_height",
                 "style.control.button.corner_radius" => "button_corner_radius",
@@ -1854,7 +1857,7 @@ pub fn control_relief() -> bool {
 
 pub fn toggle_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("toggle_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("toggle_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_toggle_corner_radius(radius: f32) {
@@ -1894,7 +1897,7 @@ pub fn set_toggle_border_width(width: f32) {
 
 pub fn slider_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("slider_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("slider_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 /// The toggle's render style: `style.control.toggle.style = "slide"` swaps the
@@ -2776,9 +2779,28 @@ pub fn set_color_selector_corner_radius(radius: f32) {
     }
 }
 
+/// The control rung's corner radius (`style.control.corner_radius`): the
+/// default every control-scale radius getter falls back to when the widget's
+/// own `corner_radius` key is unset — buttons, dropdowns, font selectors,
+/// sliders, spinboxes, text boxes, toggles, and the list and tree wells. The
+/// per-widget keys are overrides on top of it. See "Plates, wells and seams"
+/// in `CLAUDE.md`; the pane and root rungs are `plate_corner_radius` and
+/// `crate::color::root_plate_corner_radius`.
+pub fn control_corner_radius() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("control_corner_radius").unwrap_or(8.0)
+}
+
+pub fn set_control_corner_radius(radius: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("control_corner_radius", radius);
+    }
+}
+
 pub fn button_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("button_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("button_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_button_corner_radius(radius: f32) {
@@ -2790,7 +2812,7 @@ pub fn set_button_corner_radius(radius: f32) {
 
 pub fn spinbox_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("spinbox_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("spinbox_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_spinbox_corner_radius(radius: f32) {
@@ -2940,7 +2962,7 @@ pub fn set_spinbox_button_padding(padding: f32) {
 
 pub fn textbox_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("textbox_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("textbox_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_textbox_corner_radius(radius: f32) {
@@ -2989,7 +3011,7 @@ pub fn set_textbox_multiline_border_width(width: f32) {
 
 pub fn list_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("list_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("list_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_list_corner_radius(radius: f32) {
@@ -3001,7 +3023,7 @@ pub fn set_list_corner_radius(radius: f32) {
 
 pub fn tree_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("tree_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("tree_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_tree_corner_radius(radius: f32) {
@@ -3160,7 +3182,7 @@ pub fn set_graph_connector_activation_radius(radius: f32) {
 
 pub fn font_selector_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("font_selector_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("font_selector_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_font_selector_corner_radius(radius: f32) {
@@ -3172,7 +3194,7 @@ pub fn set_font_selector_corner_radius(radius: f32) {
 
 pub fn dropdown_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("dropdown_corner_radius").unwrap_or(4.0)
+    get_style_registry().read().unwrap().get_float("dropdown_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_dropdown_corner_radius(radius: f32) {
@@ -6109,6 +6131,19 @@ mod tests {
         let padding = spinbox_button_padding();
         println!("Parsed spinbox button padding: {}", padding);
         assert!(padding >= 0.0);
+    }
+
+    /// The control rung's key flattens to `control_corner_radius`, beside a
+    /// widget's own override — the config shape `control corner_radius=8 { button corner_radius=10 }`.
+    #[test]
+    fn control_rung_radius_flattens_beside_widget_overrides() {
+        let val: serde_json::Value = serde_json::json!({
+            "style": { "control": { "corner_radius": 8, "button": { "corner_radius": 10 } } }
+        });
+        let mut flat = String::new();
+        flatten_json_to_flat_props(&val, "", &mut flat);
+        assert!(flat.lines().any(|l| l.starts_with("control_corner_radius")), "{flat}");
+        assert!(flat.lines().any(|l| l.starts_with("button_corner_radius")), "{flat}");
     }
 
     #[test]
