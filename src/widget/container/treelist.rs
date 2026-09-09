@@ -1718,7 +1718,14 @@ impl TreeList {
                     }
                 }
                 TreeElement::Leaf { name, indent, val, original_idx, .. } => {
-                    let val_str = serde_json::to_string(val).unwrap_or_default();
+                    // A unit-suffixed string (`"2mm"`, what `(mm)2.0` reads
+                    // as) shows as the length it is — `2 mm` — not a quoted
+                    // string; its unit is its type below.
+                    let len = val.as_str().and_then(crate::units::Len::parse);
+                    let val_str = match len {
+                        Some(l) => format!("{} {}", crate::units::fmt_num(l.value), l.unit.suffix()),
+                        None => serde_json::to_string(val).unwrap_or_default(),
+                    };
                     // Generous shaping cap only — the column bounds clip the
                     // visible text at the list edge. (char-based: the old
                     // byte slice could panic on multibyte text.)
@@ -1766,6 +1773,8 @@ impl TreeList {
                                 Some("keybind")
                             } else if name == "font" || name.ends_with("_font") || name.ends_with(".font") {
                                 Some("font")
+                            } else if let Some(l) = len {
+                                Some(l.unit.suffix())
                             } else {
                                 None
                             }
