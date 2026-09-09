@@ -52,7 +52,7 @@ pub struct Button {
     focused: bool,
     /// Raised style: the background is an SDF-lit `Bevel` plate — fill plus a
     /// rolled, lit edge — instead of a flat fill + border stroke.
-    raised: bool,
+    raised: Option<bool>,
 }
 
 impl std::fmt::Debug for Button {
@@ -70,6 +70,13 @@ impl std::fmt::Debug for Button {
 }
 
 impl Button {
+    /// The style in force: the per-widget override (`with_raised`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn raised(&self) -> bool {
+        self.raised.unwrap_or_else(crate::layout::control_relief)
+    }
+
     fn model(kind: ButtonKind) -> Button {
         Button {
             pressed: false,
@@ -86,7 +93,7 @@ impl Button {
             icon_alpha: 1.0,
             hovered: false,
             focused: false,
-            raised: crate::layout::control_relief(),
+            raised: None,
         }
     }
 
@@ -190,7 +197,7 @@ impl Button {
     /// (flat styling, or a ListRow / MenuItem, transparent-until-hover
     /// surfaces that would wear a permanent carved ring on every idle row).
     pub fn plate(&self, rect: Rect) -> Option<crate::widget::ControlPlate> {
-        if !self.raised
+        if !self.raised()
             || self.kind == ButtonKind::ListRow
             || self.kind == ButtonKind::MenuItem
         {
@@ -232,7 +239,7 @@ impl Adapted<Button> {
 
     /// Raised style: see the `raised` field.
     pub fn with_raised(mut self, raised: bool) -> Self {
-        self.raised = raised;
+        self.raised = Some(raised);
         self
     }
 

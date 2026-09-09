@@ -233,7 +233,7 @@ pub struct Toggle {
     /// beveled edges, the state half a raised plateau, the other recessed
     /// (see `rocker_reliefs` and the paint impl) — and the flat style's
     /// state gradient is dropped.
-    raised: bool,
+    raised: Option<bool>,
     /// The slide style's animated button position, 0 (left/off) → 1 (right/on).
     /// Chases `toggled` in `tick` after a click; programmatic state syncs
     /// (`set_toggled`, `set_value_string`) snap it, so only user interaction
@@ -245,6 +245,13 @@ pub struct Toggle {
 }
 
 impl Toggle {
+    /// The style in force: the per-widget override (`with_raised`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn raised(&self) -> bool {
+        self.raised.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new() -> Adapted<Toggle> {
         Adapted::new(Toggle {
             toggled: false,
@@ -253,7 +260,7 @@ impl Toggle {
             hovered: false,
             focused: false,
             justify: Justification::Center,
-            raised: crate::layout::control_relief(),
+            raised: None,
             slide_t: 0.0,
             slide_override: None,
         })
@@ -369,7 +376,7 @@ impl Toggle {
                 edges: (true, true, true, true),
             }];
         }
-        if !self.raised {
+        if !self.raised() {
             return Vec::new();
         }
         // The carves stay inside the pill (`layout::carve_inside`): the halves are
@@ -442,7 +449,7 @@ impl Adapted<Toggle> {
 
     /// Raised style: see the `raised` field.
     pub fn with_raised(mut self, raised: bool) -> Self {
-        self.raised = raised;
+        self.raised = Some(raised);
         self
     }
 

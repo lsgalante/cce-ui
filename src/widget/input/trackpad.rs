@@ -23,17 +23,24 @@ pub struct Trackpad {
     /// Recessed style: the touch area is a well carved into the plate below,
     /// a faint dark wash for its floor, instead of the framed dark pane.
     /// Defaults to `control_relief()`.
-    recessed: bool,
+    recessed: Option<bool>,
 }
 
 impl Trackpad {
+    /// The style in force: the per-widget override (`with_recessed`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new() -> Adapted<Trackpad> {
         Adapted::new(Trackpad {
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             label: None,
             hovered: false,
             fingers: Vec::new(),
-            recessed: crate::layout::control_relief(),
+            recessed: None,
         })
     }
 
@@ -45,7 +52,7 @@ impl Trackpad {
 impl Adapted<Trackpad> {
     /// Recessed style: see the `recessed` field.
     pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 }
@@ -96,7 +103,7 @@ impl Paint for Trackpad {
         // opening shares (`PaintCtx::canvas_well`), rounded like the text wells;
         // the fingers draw over the rim.
         let radius = crate::layout::textbox_corner_radius();
-        ctx.canvas_well(area, radius, self.recessed, false);
+        ctx.canvas_well(area, radius, self.recessed(), false);
 
         // 3. Fingers
         for finger in &self.fingers {

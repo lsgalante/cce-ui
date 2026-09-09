@@ -35,7 +35,7 @@ pub struct ColorSelector {
     /// (the TextBox's, rim lit while editing) and the swatch a raised bevel
     /// plate of its colour, instead of the hairline frame and the flat swatch
     /// with its glow. Defaults to `control_relief()`.
-    recessed: bool,
+    recessed: Option<bool>,
 }
 
 impl Clone for ColorSelector {
@@ -63,6 +63,13 @@ impl Clone for ColorSelector {
 }
 
 impl ColorSelector {
+    /// The style in force: the per-widget override (`with_recessed`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(color: [u8; 3]) -> Adapted<ColorSelector> {
         Adapted::new(ColorSelector {
             color,
@@ -81,7 +88,7 @@ impl ColorSelector {
             live_rx: None,
             revert_hex: None,
             glyph_offsets: Vec::new(),
-            recessed: crate::layout::control_relief(),
+            recessed: None,
         })
     }
 
@@ -103,7 +110,7 @@ impl ColorSelector {
             live_rx: None,
             revert_hex: None,
             glyph_offsets: Vec::new(),
-            recessed: crate::layout::control_relief(),
+            recessed: None,
         })
     }
 
@@ -112,7 +119,7 @@ impl ColorSelector {
     /// widget's assigned content `rect`, or None when the style is off. The same
     /// geometry `paint` carves (untinted).
     pub fn field_relief(&self, rect: Rect) -> Option<(f32, f32, f32, f32, f32, f32)> {
-        if !self.recessed {
+        if !self.recessed() {
             return None;
         }
         let well_h = crate::layout::color_selector_height().min(rect.height);
@@ -133,7 +140,7 @@ impl ColorSelector {
 impl Adapted<ColorSelector> {
     /// Recessed style: see the `recessed` field.
     pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 
@@ -251,7 +258,7 @@ impl Paint for ColorSelector {
         // A real frame, not a border-quad-under-fill-quad: with no fill, the
         // old full-rect border quad would read as a solid slab. Rounded at the
         // selector's radius like the well it stands in for.
-        if !self.recessed {
+        if !self.recessed() {
             let fr = crate::layout::color_selector_corner_radius();
             ctx.border(rect, (fr, fr, fr, fr), [0.0; 4], border_color, 1.0);
         }
@@ -321,7 +328,7 @@ impl Paint for ColorSelector {
             }
         };
 
-        if self.recessed {
+        if self.recessed() {
             // The Breadcrumb composition: ONE well across the whole control,
             // the hex text on its floor at the left and the swatch as the
             // colour laid flush on the floor's right segment (the well's

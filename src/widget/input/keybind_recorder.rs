@@ -18,12 +18,19 @@ pub struct KeybindRecorder {
     /// plate below with no fill of its own, its rim lit in the highlight
     /// accent while recording (the TextBox's editing treatment). Defaults to
     /// `control_relief()`; the flat style is the shared well frame.
-    recessed: bool,
+    recessed: Option<bool>,
     /// Keyboard focus (FocusIn / FocusOut): Enter / Space arm recording.
     focused: bool,
 }
 
 impl KeybindRecorder {
+    /// The style in force: the per-widget override (`with_recessed`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(value: String) -> Adapted<KeybindRecorder> {
         Adapted::new(KeybindRecorder {
             value,
@@ -31,7 +38,7 @@ impl KeybindRecorder {
             just_changed: false,
             pressed: false,
             hovered: false,
-            recessed: crate::layout::control_relief(),
+            recessed: None,
             focused: false,
         })
     }
@@ -52,7 +59,7 @@ impl KeybindRecorder {
 impl Adapted<KeybindRecorder> {
     /// Recessed style: see the `recessed` field.
     pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 }
@@ -75,7 +82,7 @@ impl Paint for KeybindRecorder {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        if self.recessed {
+        if self.recessed() {
             let radius = crate::layout::textbox_corner_radius();
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
             let (well, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);

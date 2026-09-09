@@ -14,19 +14,26 @@ pub struct ProgressBar {
     /// plate below — no track fill, the plate is the floor — with the progress
     /// fill inset onto that floor. Defaults to `control_relief()`; the flat
     /// style keeps the filled, rounded track.
-    recessed: bool,
+    recessed: Option<bool>,
 }
 
 impl ProgressBar {
+    /// The style in force: the per-widget override (`with_recessed`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(value: f32) -> Adapted<ProgressBar> {
-        Adapted::new(ProgressBar { value, recessed: crate::layout::control_relief() })
+        Adapted::new(ProgressBar { value, recessed: None })
     }
 }
 
 impl Adapted<ProgressBar> {
     /// Recessed style: see the `recessed` field.
     pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 }
@@ -49,7 +56,7 @@ impl Paint for ProgressBar {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let radius = crate::layout::slider_corner_radius();
-        if self.recessed {
+        if self.recessed() {
             // The Slider's recessed composition: the fill sits on the well's flat
             // floor (past the wall's inner half-span), the carve comes after it so
             // the walls' shading modulates what they cross.

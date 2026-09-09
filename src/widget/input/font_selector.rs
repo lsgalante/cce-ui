@@ -20,13 +20,20 @@ pub struct FontSelector {
     /// with a transparent face (the plate shows through), the hover and press
     /// states a wash inside it. Defaults to `control_relief()`; the flat style
     /// keeps the framed dark field.
-    raised: bool,
+    raised: Option<bool>,
     /// Keyboard focus (FocusIn / FocusOut): lights the plate's rim and arms
     /// Enter / Space to open the picker.
     focused: bool,
 }
 
 impl FontSelector {
+    /// The style in force: the per-widget override (`with_raised`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn raised(&self) -> bool {
+        self.raised.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(font_family: String) -> Adapted<FontSelector> {
         Adapted::new(FontSelector {
             font_family,
@@ -34,7 +41,7 @@ impl FontSelector {
             pressed: false,
             hovered: false,
             child: Arc::new(Mutex::new(None)),
-            raised: crate::layout::control_relief(),
+            raised: None,
             focused: false,
         })
     }
@@ -127,7 +134,7 @@ impl FontSelector {
 impl Adapted<FontSelector> {
     /// Raised style: see the `raised` field.
     pub fn with_raised(mut self, raised: bool) -> Self {
-        self.raised = raised;
+        self.raised = Some(raised);
         self
     }
 }
@@ -160,7 +167,7 @@ impl Paint for FontSelector {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let r = crate::layout::font_selector_corner_radius();
-        if self.raised {
+        if self.raised() {
             // The closed-dropdown chrome: a flush control plate with a
             // transparent face, the state fill rounded to sit inside it.
             ctx.control_plate(

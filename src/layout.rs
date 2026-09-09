@@ -1847,12 +1847,23 @@ pub fn bar_wall_width() -> f32 {
 
 /// DE-wide default for the controls' relief styling (`window_manager.control_relief`
 /// in config.kdl, default on): raised Button/Toggle/Dropdown plates, recessed
-/// TextBox/Slider wells, recessed MenuBar/StatusBar bands. Widgets read this at
-/// construction; the per-widget `with_raised` / `with_recessed` / `with_recess`
-/// builders override it either way. `0` reverts the whole DE to the flat look.
+/// TextBox/Slider wells, recessed MenuBar/StatusBar bands. Widgets read this
+/// LIVE, at paint and layout, so [`set_control_relief`] restyles every control
+/// in the process at once; the per-widget `with_raised` / `with_recessed` /
+/// `with_recess` builders pin one widget either way. `0` reverts the whole DE
+/// to the flat look.
 pub fn control_relief() -> bool {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("control_relief").map(|v| v != 0.0).unwrap_or(true)
+}
+
+/// Switch the controls' relief styling at runtime — the gallery's Style
+/// dropdown. Every widget without a per-widget override follows on its next
+/// paint; the caller asks for a rebuild. Not persisted: a config reload puts
+/// the configured value back.
+pub fn set_control_relief(relief: bool) {
+    lazy_init_style_registry();
+    get_style_registry().write().unwrap().set_float("control_relief", if relief { 1.0 } else { 0.0 });
 }
 
 pub fn toggle_corner_radius() -> f32 {

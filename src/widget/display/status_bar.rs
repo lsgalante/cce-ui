@@ -24,10 +24,17 @@ pub struct StatusBar {
     /// background fill of its own, just the shaded wall facing the content, so the plate
     /// shows through. `bg_color` is ignored while this is set — see
     /// [`Adapted::<StatusBar>::with_recess`].
-    pub recessed: bool,
+    pub recessed: Option<bool>,
 }
 
 impl StatusBar {
+    /// The style in force: the per-widget override (`with_recess`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new() -> Adapted<StatusBar> {
         Adapted::new(StatusBar {
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
@@ -36,7 +43,7 @@ impl StatusBar {
             text_offset_x: None,
             text_color: None,
             bg_color: None,
-            recessed: crate::layout::control_relief(),
+            recessed: None,
         })
     }
 
@@ -92,7 +99,7 @@ impl Adapted<StatusBar> {
     /// (facing the content) — the other three sides are the plate's outer edge, which
     /// carries its own roll.
     pub fn with_recess(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 }
@@ -137,7 +144,7 @@ impl Paint for StatusBar {
     /// default `all_rounded_quads` path) — plus the text label (the legacy `text_labels`
     /// body; deliberately no `widget_font`, see module docs).
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        if self.recessed {
+        if self.recessed() {
             // The recess shading is a light/shadow overlay — whatever the plate painted
             // here shows through modulated, so no surface color is needed.
             // Capped against the bar's own height so a deep DE-wide roll can't swallow it

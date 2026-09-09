@@ -28,13 +28,20 @@ pub struct ButtonStrip {
     /// floor; the selected segment is a plateau raised back out of it, hover
     /// and press a wash. Defaults to `control_relief()`; the flat style keeps
     /// the plain state quads.
-    pub recessed: bool,
+    pub recessed: Option<bool>,
     /// Keyboard focus (FocusIn / FocusOut): the selected segment's plate wears
     /// the ring; arrows move the selection, Enter / Space press it.
     focused: bool,
 }
 
 impl ButtonStrip {
+    /// The style in force: the per-widget override (`with_recessed`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
         Self {
             x,
@@ -54,14 +61,14 @@ impl ButtonStrip {
             last_scale: None,
             inherit_menubar_font: false,
             label: None,
-            recessed: crate::layout::control_relief(),
+            recessed: None,
             focused: false,
         }
     }
 
     /// Recessed style: see the `recessed` field.
     pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 
@@ -352,7 +359,7 @@ impl crate::widget::Paint for ButtonStrip {
         // through `all_rounded_quads`, which the Paginator aggregates).
         let (sx, sy, sw, sh) = self.rect();
         let radius = crate::layout::button_corner_radius();
-        let depth = if self.recessed {
+        let depth = if self.recessed() {
             let short = if self.vertical { sw } else { sh };
             let depth = crate::layout::bevel_width().min(short * 0.2);
             let (well, radii) = crate::layout::carve_inside(Rect { x: sx, y: sy, width: sw, height: sh }, (radius, radius, radius, radius), depth);
@@ -376,12 +383,12 @@ impl crate::widget::Paint for ButtonStrip {
             // The segment's footprint: in the well, inset by the wall's inner
             // half-span so it stands on the floor (the selected plateau's rect);
             // flat, the item rect itself. The state fill and the plateau share it.
-            let inset = if self.recessed { depth * 0.5 } else { 0.0 };
+            let inset = if self.recessed() { depth * 0.5 } else { 0.0 };
             let seg = Rect { x: r.0 + inset, y: r.1 + inset, width: (r.2 - 2.0 * inset).max(0.0), height: (r.3 - 2.0 * inset).max(0.0) };
             let seg_r = (radius - inset).max(0.0);
             let focus_ring = self.focused && Some(i) == self.selected;
             if bg_color != [0.0, 0.0, 0.0, 0.0] {
-                if focus_ring && !self.recessed {
+                if focus_ring && !self.recessed() {
                     // Flat: no rim to light, so the selected fill wears a hairline
                     // ring in the highlight.
                     let t = crate::widget::ControlPlate::focus_tint();
@@ -390,7 +397,7 @@ impl crate::widget::Paint for ButtonStrip {
                     pc.rounded_rect(seg, seg_r, (true, true, true, true), bg_color);
                 }
             }
-            if self.recessed && Some(i) == self.selected {
+            if self.recessed() && Some(i) == self.selected {
                 // The selected segment: a raised control plate standing on the
                 // well floor, faceless (the floor shows through), at the well's
                 // depth — its rim lit while the strip holds keyboard focus.

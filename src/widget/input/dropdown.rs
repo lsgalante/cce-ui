@@ -106,7 +106,7 @@ pub struct Dropdown {
     corner_frame: Option<((f32, f32, f32, f32), f32, (bool, bool, bool, bool))>,
     /// Raised style: the closed control's background is an SDF-lit `Bevel`
     /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
-    raised: bool,
+    raised: Option<bool>,
     /// Keyboard focus (FocusIn / FocusOut): lights the trigger plate's rim.
     focused: bool,
     /// The open menu REPLACES the trigger instead of growing out of it: no
@@ -138,6 +138,13 @@ pub struct Dropdown {
 }
 
 impl Dropdown {
+    /// The style in force: the per-widget override (`with_raised`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn raised(&self) -> bool {
+        self.raised.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(options: Vec<String>, selected: usize) -> Adapted<Dropdown> {
         Adapted::new(Dropdown {
             options,
@@ -154,7 +161,7 @@ impl Dropdown {
             label: None,
             hovered: false,
             corner_frame: None,
-            raised: crate::layout::control_relief(),
+            raised: None,
             focused: false,
             menu_replaces_trigger: false,
             anim_from: 0.0,
@@ -425,7 +432,7 @@ impl Dropdown {
         // flat outlines, which a rolled edge replaces). A transparent
         // configured fill degrades to a Boss: edges only, plate as the face —
         // judged on the RAW alpha, before the opacity force above.
-        if self.raised {
+        if self.raised() {
             let depth = crate::layout::bevel_width().min(visual_h * 0.2);
             // Concentric corner_frame adjustment applies to the relief too: a
             // corner nested at equal gaps into the frame follows its curve.
@@ -737,7 +744,7 @@ impl Dropdown {
 impl Adapted<Dropdown> {
     /// Raised style: see the `raised` field.
     pub fn with_raised(mut self, raised: bool) -> Self {
-        self.raised = raised;
+        self.raised = Some(raised);
         self
     }
 
@@ -906,7 +913,7 @@ impl Paint for Dropdown {
             c[3] = -crate::color::menu_opacity();
             c
         };
-        if self.raised {
+        if self.raised() {
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
             let (t, tr) = crate::layout::carve_inside(
                 crate::scene::layout::Rect { x: ux, y: uy, width: uw, height: uh },

@@ -36,7 +36,7 @@ pub struct MenuBar {
     /// Draw as a recess carved into the window root plate instead of as an opaque bar:
     /// no background fill of its own, just shaded edges, so the plate shows through.
     /// `color` is ignored while this is set — see [`Adapted::<MenuBar>::with_recess`].
-    pub recessed: bool,
+    pub recessed: Option<bool>,
     pub title: String,
     pub menus: Adapted<ButtonStrip>,
     pub menu_items: Vec<String>,
@@ -65,6 +65,13 @@ pub struct MenuBar {
 }
 
 impl MenuBar {
+    /// The style in force: the per-widget override (`with_recess`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(x: f32, y: f32, w: f32, h: f32) -> Adapted<MenuBar> {
         let mut bar = Adapted::new(MenuBar {
             visible: true,
@@ -72,7 +79,7 @@ impl MenuBar {
             curved_circle: None,
             blur: false,
             color: None,
-            recessed: crate::layout::control_relief(),
+            recessed: None,
             title: String::new(),
             menus: Adapted::new(ButtonStrip::new(x, y, w, h).with_inherit_menubar_font(true)),
             menu_items: Vec::new(),
@@ -359,7 +366,7 @@ impl Adapted<MenuBar> {
     /// than a slab sitting on it. Shading follows the DE-wide `light_source_position` /
     /// `bevel_depth` config, inverted so the light-facing edges are the shadowed ones.
     pub fn with_recess(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 
@@ -464,7 +471,7 @@ impl Paint for MenuBar {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        if self.recessed {
+        if self.recessed() {
             // No background of our own: carve the root plate instead. The recess shading is
             // a light/shadow overlay, so whatever the plate painted here (fill, rim
             // gradient, blur) shows through modulated.

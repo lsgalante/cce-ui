@@ -105,10 +105,17 @@ pub struct TextBox {
     rect: Rect,
     /// Recessed style: a `Recess` overlay is carved over the box's own fill —
     /// an inset well, the input-direction counterpart of the raised controls.
-    recessed: bool,
+    recessed: Option<bool>,
 }
 
 impl TextBox {
+    /// The style in force: the per-widget override (`with_recessed`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(text: String) -> Adapted<TextBox> {
         let (style_family, style_size) = crate::layout::control_label_font_detached_parsed();
         let editor_state = TextEditorState::new(text.clone());
@@ -151,7 +158,7 @@ impl TextBox {
             label: None,
             hovered: false,
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
-            recessed: crate::layout::control_relief(),
+            recessed: None,
         })
     }
 
@@ -1186,7 +1193,7 @@ impl TextBox {
     /// the bridge is exactly how the two would drift apart.
     pub fn well(&self) -> Option<(Rect, f32, f32, Option<[f32; 3]>)> {
         let radius = crate::layout::textbox_corner_radius();
-        if radius <= 0.0 || !self.recessed || !self.draw_bg_border {
+        if radius <= 0.0 || !self.recessed() || !self.draw_bg_border {
             return None;
         }
         let top = self.label_top();
@@ -1209,7 +1216,7 @@ impl TextBox {
 impl Adapted<TextBox> {
     /// Recessed style: see the `recessed` field.
     pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 
@@ -1526,7 +1533,7 @@ impl Paint for TextBox {
                 // well — the plate below is its floor, so the flat border and
                 // bg rects are skipped entirely. An opaque fill (e.g. the edit
                 // color while editing) draws as usual and gets carved.
-                let bare = self.recessed && bg_color[3] <= 0.001;
+                let bare = self.recessed() && bg_color[3] <= 0.001;
                 if !bare {
                     ctx.rounded_rect(Rect { x, y: self.rect.y + top, width: w, height: visual_h }, radius, corners, border_color);
                     ctx.rounded_rect(

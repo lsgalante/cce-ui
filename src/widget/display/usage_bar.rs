@@ -14,16 +14,23 @@ pub struct UsageBar {
     /// Recessed-track style, the ProgressBar's: a well carved into the plate,
     /// `bg_color` unused (the plate is the floor), the fill inset onto it.
     /// Defaults to `control_relief()`.
-    recessed: bool,
+    recessed: Option<bool>,
 }
 
 impl UsageBar {
+    /// The style in force: the per-widget override (`with_recessed`) when set, else
+    /// the DE's `control_relief`, read live so a runtime switch
+    /// (`layout::set_control_relief`) restyles every control at once.
+    fn recessed(&self) -> bool {
+        self.recessed.unwrap_or_else(crate::layout::control_relief)
+    }
+
     pub fn new(value: f32) -> Adapted<UsageBar> {
         Adapted::new(UsageBar {
             value: value.clamp(0.0, 1.0),
             fill_color: [0.30, 0.50, 0.32, 1.0], // green-ish
             bg_color: [0.15, 0.15, 0.24, 1.0],   // dark-ish
-            recessed: crate::layout::control_relief(),
+            recessed: None,
         })
     }
 
@@ -43,7 +50,7 @@ impl Adapted<UsageBar> {
 
     /// Recessed style: see the `recessed` field.
     pub fn with_recessed(mut self, recessed: bool) -> Self {
-        self.recessed = recessed;
+        self.recessed = Some(recessed);
         self
     }
 }
@@ -61,7 +68,7 @@ impl Paint for UsageBar {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        if self.recessed {
+        if self.recessed() {
             // The ProgressBar's recessed composition: fill on the well floor, then
             // the carve, rounded like the sliders' tracks.
             let radius = crate::layout::slider_corner_radius();
