@@ -567,16 +567,11 @@ impl UiContext {
         self.focused_widget.is_some()
     }
 
-    /// Keyboard navigation in plate terms (see "Plates, wells and seams" in
-    /// `CLAUDE.md`): move focus to the next (`reverse` = previous) plate or
-    /// well in reading order. The stops are the registered, visible widgets
-    /// with a `focus_role` and a non-empty rect, ordered by row (y) then x;
-    /// the traversal wraps, and with nothing focused the first (or last) stop
-    /// takes it. Focusing goes through `set_focused_id`, so the new stop gets
-    /// its `FocusIn` — a well opens for typing, a plate arms Enter / Space.
-    /// Returns whether focus moved. The runner calls this for Tab when the app
-    /// opts in (`Application::plate_navigation`).
-    pub fn focus_step(&mut self, reverse: bool) -> bool {
+    /// The keyboard stops in reading order (row, then x): the registered,
+    /// visible, on-screen widgets with a `focus_role`. Rows are bucketed by
+    /// vertical overlap, so a short control centred beside a taller one is on
+    /// its row. `CCE_FOCUS_DEBUG=1` prints them.
+    fn focus_stops(&self) -> Vec<WidgetId> {
         // (y, bottom, x, id) per stop.
         let mut found: Vec<(f32, f32, f32, WidgetId)> = Vec::new();
         for (id, ptr) in self.tree.iter_registered() {
@@ -602,7 +597,7 @@ impl UiContext {
             if std::env::var_os("CCE_FOCUS_DEBUG").is_some() {
                 eprintln!("[focus] no stops: no registered, visible widget with a focus role and a rect");
             }
-            return false;
+            return Vec::new();
         }
         // Reading order: rows first, x within a row. A stop joins the current
         // row when its top lies above the row's first stop's bottom — a 12px
@@ -621,20 +616,88 @@ impl UiContext {
             row.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
             stops.extend(row.into_iter().map(|s| s.3));
         }
-        // CCE_FOCUS_DEBUG=1: the stops in walk order, with what each is.
+        stops
+    }
+
+    /// The stops in WALK order, clustered: a registered `Group`'s members are
+    /// one contiguous run, placed where the group's first member falls in
+    /// reading order and ordered among themselves by reading order; every
+    /// other stop is a run of one. A member of two groups belongs to the
+    /// group that comes first. Tab walks the runs end to end
+    /// (`focus_step`); the group chords jump between them (`focus_step_group`).
+    pub fn focus_clusters(&self) -> Vec<Vec<WidgetId>> {
+        let stops = self.focus_stops();
+        if stops.is_empty() {
+            return Vec::new();
+        }
+        // Each group's member positions among the stops, groups ordered by
+        // their first member.
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for (_, ptr) in self.tree.iter_registered() {
+            if ptr.is_null() {
+                continue;
+            }
+            let w = unsafe { &*ptr };
+            let Some(g) = w.as_any().downcast_ref::<crate::widget::Group>() else { continue };
+            let mut pos: Vec<usize> = g.members().iter().filter_map(|m| stops.iter().position(|s| s == m)).collect();
+            pos.sort_unstable();
+            pos.dedup();
+            if !pos.is_empty() {
+                groups.push(pos);
+            }
+        }
+        groups.sort_by_key(|p| p[0]);
+        let mut claimed = vec![false; stops.len()];
+        let mut clusters: Vec<(usize, Vec<WidgetId>)> = Vec::new();
+        for pos in groups {
+            let free: Vec<usize> = pos.into_iter().filter(|&i| !claimed[i]).collect();
+            if free.is_empty() {
+                continue;
+            }
+            for &i in &free {
+                claimed[i] = true;
+            }
+            clusters.push((free[0], free.iter().map(|&i| stops[i]).collect()));
+        }
+        for (i, id) in stops.iter().enumerate() {
+            if !claimed[i] {
+                clusters.push((i, vec![*id]));
+            }
+        }
+        clusters.sort_by_key(|c| c.0);
+        let clusters: Vec<Vec<WidgetId>> = clusters.into_iter().map(|c| c.1).collect();
+        // CCE_FOCUS_DEBUG=1: the runs in walk order, with what each stop is.
         if std::env::var_os("CCE_FOCUS_DEBUG").is_some() {
-            for (i, id) in stops.iter().enumerate() {
-                if let Some(ptr) = self.tree.get_ptr(*id) {
-                    let w = unsafe { &*ptr };
-                    let (x, y, width, height) = w.rect();
-                    eprintln!(
-                        "[focus] stop {i}: {} {:?} at ({x:.0},{y:.0} {width:.0}x{height:.0}){}",
-                        w.type_name(),
-                        w.focus_role(),
-                        if self.focused_widget == Some(*id) { " <- focused" } else { "" }
-                    );
+            for (ci, run) in clusters.iter().enumerate() {
+                for (i, id) in run.iter().enumerate() {
+                    if let Some(ptr) = self.tree.get_ptr(*id) {
+                        let w = unsafe { &*ptr };
+                        let (x, y, width, height) = w.rect();
+                        eprintln!(
+                            "[focus] run {ci} stop {i}: {} {:?} at ({x:.0},{y:.0} {width:.0}x{height:.0}){}",
+                            w.type_name(),
+                            w.focus_role(),
+                            if self.focused_widget == Some(*id) { " <- focused" } else { "" }
+                        );
+                    }
                 }
             }
+        }
+        clusters
+    }
+
+    /// Keyboard navigation in plate terms (see "Plates, wells and seams" in
+    /// `CLAUDE.md`): move focus to the next (`reverse` = previous) plate or
+    /// well in walk order — reading order, a group's members walked together
+    /// (`focus_clusters`). The traversal wraps, and with nothing focused the
+    /// first (or last) stop takes it. Focusing goes through `set_focused_id`,
+    /// so the new stop gets its `FocusIn` — a well opens for typing, a plate
+    /// arms Enter / Space. Returns whether focus moved. The runner calls this
+    /// for Tab when the app opts in (`Application::plate_navigation`).
+    pub fn focus_step(&mut self, reverse: bool) -> bool {
+        let stops: Vec<WidgetId> = self.focus_clusters().into_iter().flatten().collect();
+        if stops.is_empty() {
+            return false;
         }
         let n = stops.len();
         let current = self.focused_widget.and_then(|f| stops.iter().position(|s| *s == f));
@@ -645,6 +708,32 @@ impl UiContext {
             (None, true) => n - 1,
         };
         let id = stops[next];
+        if self.focused_widget == Some(id) {
+            return false;
+        }
+        self.set_focused_id(id);
+        true
+    }
+
+    /// Jump to the next (`reverse` = previous) run of `focus_clusters` — the
+    /// next group, or the next ungrouped stop — landing on its first stop;
+    /// wraps. The runner calls this for the `focus_next_group` /
+    /// `focus_prev_group` chords (input.kdl, cce-ui domain; defaults
+    /// `ctrl+tab` / `ctrl+shift+tab`) when the app opts in.
+    pub fn focus_step_group(&mut self, reverse: bool) -> bool {
+        let clusters = self.focus_clusters();
+        if clusters.is_empty() {
+            return false;
+        }
+        let n = clusters.len();
+        let current = self.focused_widget.and_then(|f| clusters.iter().position(|c| c.contains(&f)));
+        let next = match (current, reverse) {
+            (Some(i), false) => (i + 1) % n,
+            (Some(i), true) => (i + n - 1) % n,
+            (None, false) => 0,
+            (None, true) => n - 1,
+        };
+        let id = clusters[next][0];
         if self.focused_widget == Some(id) {
             return false;
         }
@@ -1267,6 +1356,25 @@ mod focus_step_tests {
         let mut sep = crate::widget::Separator::new(0.0, 0.0, 10.0, 1.0, [1.0; 4]);
         WidgetHost::set_rect(&mut sep, 300.0, 10.0, 10.0, 1.0);
         assert_eq!(WidgetHost::focus_role(&sep), crate::widget::FocusRole::None);
+
+        // A group's members walk together, where the group's first member falls:
+        // grouping a and t (skipping b, which sits between them in reading order)
+        // makes the walk a, t, b — and the group chord jumps a -> b -> a.
+        let mut g = crate::widget::Group::new(vec![ia, it]);
+        let (gid, gptr) = (g.base().id(), &mut g as *mut dyn WidgetHost);
+        let gptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(gptr) };
+        ctx.register_widget(gid, gptr);
+        assert_eq!(ctx.focus_clusters(), vec![vec![ia, it], vec![ib]]);
+        ctx.set_focused_id(ia);
+        assert!(ctx.focus_step(false));
+        assert!(ctx.is_focused_id(it), "the group's second member before the ungrouped stop");
+        assert!(ctx.focus_step(false));
+        assert!(ctx.is_focused_id(ib));
+        assert!(ctx.focus_step_group(false));
+        assert!(ctx.is_focused_id(ia), "the group chord wraps to the group's first stop");
+        assert!(ctx.focus_step_group(false));
+        assert!(ctx.is_focused_id(ib), "then to the next run");
+        ctx.unregister_widget(gid);
 
         // A plate parked off-screen (the hidden-editor idiom) is not a stop either.
         let mut parked = Button::new(0.0, 0.0, 1.0, 1.0).with_label("parked");

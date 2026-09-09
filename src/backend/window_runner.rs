@@ -3530,6 +3530,10 @@ pub struct EngineState<A: Application> {
     pub ctrl_pressed: bool,
     /// The `undo` / `redo` chords, resolved from `input.kdl` at startup.
     pub undo_chord: String,
+    /// `focus_next_group` / `focus_prev_group` (input.kdl, cce-ui domain):
+    /// the plate-navigation group jump, for apps that opt in.
+    pub group_next_chord: String,
+    pub group_prev_chord: String,
     pub redo_chord: String,
     pub shift_pressed: bool,
     pub alt_pressed: bool,
@@ -4849,20 +4853,25 @@ impl<A: Application> EngineState<A> {
     /// keyboard focus to the next / previous plate or well. Returns whether it
     /// moved; otherwise the key is dispatched as usual.
     fn route_plate_navigation(&mut self, event: &KeyEvent, rebuild: &mut bool) -> bool {
-        if event.state != ElementState::Pressed
-            || event.logical_key != Key::Named(NamedKey::Tab)
-            || self.ctrl_pressed
-            || self.alt_pressed
-            || self.logo_pressed
-        {
+        if event.state != ElementState::Pressed {
             return false;
         }
-        let reverse = self.shift_pressed;
+        // The group jump first (its chords carry ctrl); then a bare Tab.
+        let group_next = crate::widget::match_key_shortcut(event, &self.group_next_chord);
+        let group_prev = !group_next && crate::widget::match_key_shortcut(event, &self.group_prev_chord);
+        let bare_tab = event.logical_key == Key::Named(NamedKey::Tab)
+            && !self.ctrl_pressed
+            && !self.alt_pressed
+            && !self.logo_pressed;
+        if !group_next && !group_prev && !bare_tab {
+            return false;
+        }
+        let reverse = if bare_tab { self.shift_pressed } else { group_prev };
         let app = self.inner.as_mut().unwrap();
         if !app.plate_navigation() {
             return false;
         }
-        let moved = app.ui_context_mut().is_some_and(|ctx| ctx.focus_step(reverse));
+        let moved = app.ui_context_mut().is_some_and(|ctx| if bare_tab { ctx.focus_step(reverse) } else { ctx.focus_step_group(reverse) });
         if moved {
             app.focus_stepped();
             *rebuild = true;
@@ -5469,6 +5478,8 @@ fn run_session<'l, A: Application>(
         ctrl_pressed: false,
         undo_chord: crate::input::app_chord("undo", "ctrl+z"),
         redo_chord: crate::input::app_chord("redo", "ctrl+shift+z"),
+        group_next_chord: crate::input::app_chord("focus_next_group", "ctrl+tab"),
+        group_prev_chord: crate::input::app_chord("focus_prev_group", "ctrl+shift+tab"),
         shift_pressed: false,
         alt_pressed: false,
         logo_pressed: false,

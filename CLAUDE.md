@@ -148,7 +148,11 @@ What this buys, and where the code is heading:
   widget is to the keyboard: a `Plate` (a thing you press — Enter / Space act
   on it while focused), a `Well` (opens for typing when focused), or `None`
   (not a stop). `UiContext::focus_step` walks the stops in reading order (row,
-  then x), wrapping; the runner calls it for Tab / Shift+Tab when the app opts
+  then x) with a `Group`'s members as one contiguous run where the group's
+  first member falls (`focus_clusters`), wrapping; `focus_step_group` jumps
+  between runs (input.kdl `focus_next_group` / `focus_prev_group`, defaults
+  `ctrl+tab` / `ctrl+shift+tab`). The runner calls them for Tab / Shift+Tab
+  and the chords when the app opts
   in with `Application::plate_navigation` (default off, so an app that routes
   Tab itself — a terminal, a web view, its own field order — is undisturbed)
   and tells the app through `Application::focus_stepped` — an app that caches
