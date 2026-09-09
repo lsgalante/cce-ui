@@ -1331,6 +1331,17 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // hatch until their hosts adopt the walk), else the standard own-labels bridge (prim
         // text + the detached base label, one font, text_bounds or the scroll-ancestor clip).
         if subtree {
+            // The detached label is the adapter's, not the widget's: a subtree painter
+            // authors its own text but knows nothing of the label strip above its
+            // content (TreeList, Spreadsheet, Ramp), so the bridge's base-label half
+            // still runs for it — in the detached-label font, like every control's.
+            // Skipping it left a labelled tree's strip reserved but blank.
+            if self.visible() && !Layout::inline_label(&self.inner) {
+                let font = Some(crate::layout::control_label_font_detached());
+                for tl in self.base_label_fallback() {
+                    ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font.clone(), None);
+                }
+            }
             return;
         }
         let labels = if Paint::serves_legacy_labels(&self.inner) {
@@ -1669,6 +1680,34 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
 
 #[cfg(test)]
 mod tests {
+    /// A subtree painter's own text passes through verbatim, and the adapter still
+    /// draws the detached label above its content — the widget cannot, it does not
+    /// know about the label.
+    #[test]
+    fn a_subtree_painters_detached_label_is_drawn() {
+        use crate::scene::paint::PaintCtx;
+        use crate::widget::{TreeList, WidgetHost};
+        let ui = crate::context::UiContext::new();
+        let mut tree = TreeList::new().with_label("TreeList");
+        let strip = tree.label_strip();
+        assert!(strip > 0.0);
+        tree.set_rect(0.0, 0.0, 300.0, 200.0 + strip);
+        let mut pc = PaintCtx::new();
+        WidgetHost::paint_self(&tree, &ui, &mut pc);
+        let texts: Vec<(String, f32)> = pc
+            .finish()
+            .items
+            .into_iter()
+            .filter_map(|it| match it.prim {
+                crate::scene::paint::Prim::Text { text, y, .. } => Some((text, y)),
+                _ => None,
+            })
+            .collect();
+        let label = texts.iter().find(|(t, _)| t == "TreeList").expect("the detached label is drawn");
+        assert_eq!(label.1, 0.0, "on the strip above the content");
+        assert!(texts.iter().any(|(t, _)| t == "Key"), "the tree's own header text still passes through");
+    }
+
     use super::*;
     use crate::widget::PathController;
     use crate::scene::layout::{Rect, Size};
