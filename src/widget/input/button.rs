@@ -472,8 +472,13 @@ impl Paint for Button {
 }
 
 impl Input for Button {
+    /// A plate — except a ListRow or MenuItem, which wears no plate (see
+    /// [`Button::plate`]): a list's rows are walked by the list, not by Tab.
     fn focus_role(&self) -> crate::widget::FocusRole {
-        crate::widget::FocusRole::Plate
+        match self.kind {
+            ButtonKind::ListRow | ButtonKind::MenuItem => crate::widget::FocusRole::None,
+            _ => crate::widget::FocusRole::Plate,
+        }
     }
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
