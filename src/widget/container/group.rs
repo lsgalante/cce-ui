@@ -111,15 +111,15 @@ impl Group {
             if !w.visible() {
                 continue;
             }
-            let (x, mut y, ww, mut hh) = w.rect();
+            let (x, y, ww, hh) = w.rect();
             if ww <= 0.0 || hh <= 0.0 || x + ww <= 0.0 || y + hh <= 0.0 {
                 continue;
             }
-            // A labelled control's detached label hangs in the strip above its
-            // rect: the lasso wraps the label too.
-            let strip = w.label_strip();
-            y -= strip;
-            hh += strip;
+            // The rect IS the block — a labelled control's detached label strip
+            // is already in it (`WidgetHost::label_strip`: "a widget's rect is
+            // always its content plus this strip"), so the lasso wraps the label
+            // by taking the rect as is. Subtracting the strip here again pushed
+            // every labelled member's hull one strip too high, and the tab with it.
             hull = Some(match hull {
                 None => (x, y, x + ww, y + hh),
                 Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x + ww), y1.max(y + hh)),
@@ -277,7 +277,7 @@ impl Input for Group {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Button, WidgetHost};
+    use crate::widget::{Button, Slider, WidgetHost};
 
     fn register(ctx: &mut UiContext, w: &mut dyn WidgetHost) -> WidgetId {
         let id = w.base().id();
@@ -301,6 +301,23 @@ mod tests {
         let f = g.inner().frame(&ctx).expect("members on screen");
         assert_eq!((f.body.x, f.body.y, f.body.width, f.body.height), (90.0, 40.0, 180.0, 90.0));
         assert!(f.tab.is_none(), "no label, no tab");
+    }
+
+    /// A labelled member's rect already holds its label strip; the hull takes the
+    /// rect as it is, not the rect less another strip.
+    #[test]
+    fn a_labelled_members_strip_is_counted_once() {
+        let mut ctx = UiContext::new();
+        let mut s = Slider::new().with_label("Amount");
+        let strip = s.label_strip();
+        assert!(strip > 0.0, "a detached label has a strip");
+        // The block: strip + control, as `layout` lands it.
+        WidgetHost::set_rect(&mut s, 100.0, 50.0, 160.0, 16.0 + strip);
+        let ids = vec![register(&mut ctx, &mut s)];
+        let g = Group::new(ids).with_padding(10.0);
+        let f = g.inner().frame(&ctx).unwrap();
+        assert_eq!(f.body.y, 40.0, "one padding above the block, not a strip more");
+        assert_eq!(f.body.height, 16.0 + strip + 20.0);
     }
 
     /// Fit to plate: a side near the plate's edge takes it (one padding in), a
