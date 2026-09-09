@@ -150,9 +150,10 @@ What this buys, and where the code is heading:
   Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector, ButtonStrip
   (arrows move the selection between its segment plates) and Breadcrumb
   (arrows walk its visible segments, Enter navigates) are plates; TextBox,
-  Spinbox, ColorSelector, KeybindRecorder, TreeList and Slider (a band, but
+  Spinbox, ColorSelector, KeybindRecorder, TreeList, Slider (a band, but
   entered and adjusted in place — arrows step it, Enter opens the readout)
-  are wells. A new focusable widget declares its role and handles `FocusIn`
+  and RangeSlider (one stop, two ends: arrows step the focused end, Up / Down
+  switch ends) are wells. A new focusable widget declares its role and handles `FocusIn`
   / `FocusOut`.
 - **One plate spec per rung, not five copies.** The root and pane rungs are
   `scene::paint::PlateSpec` (RFC 7b, painted by `PaintCtx::plate`). The

@@ -574,6 +574,10 @@ pub struct RangeSlider {
     pub(crate) active_thumb: Option<ActiveThumb>,
     drag_offset: f32,
     label: Option<String>,
+    /// Keyboard focus (FocusIn / FocusOut): the band lights; `focus_end` is
+    /// the end the arrows move (Up / Down switch it), starting at the low end.
+    focused: bool,
+    focus_end: ActiveThumb,
 }
 
 impl RangeSlider {
@@ -584,6 +588,8 @@ impl RangeSlider {
             active_thumb: None,
             drag_offset: 0.0,
             label: None,
+            focused: false,
+            focus_end: ActiveThumb::Low,
         })
     }
 
@@ -721,14 +727,66 @@ impl Paint for RangeSlider {
         let range = w - thumb_size;
         let lo = x + self.value_low * range + thumb_size / 2.0;
         let hi = x + self.value_high * range + thumb_size / 2.0;
-        let color = if self.active_thumb.is_some() { colors::rangeslider_thumb_drag() } else { colors::rangeslider_thumb() };
+        // A band has no rim to light: focused, the band itself is the highlight.
+        let color = if self.active_thumb.is_some() {
+            colors::rangeslider_thumb_drag()
+        } else if self.focused {
+            crate::color::highlight_primary_color()
+        } else {
+            colors::rangeslider_thumb()
+        };
         paint_band_shape(ctx, x, w, y + h * 0.5, color, &|px| band_profile(x, w, h, px, &[lo, hi], Some((lo, hi))));
     }
 }
 
 impl Input for RangeSlider {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
+    }
+
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
+            Event::FocusIn => {
+                self.focused = true;
+                self.focus_end = ActiveThumb::Low;
+                true
+            }
+            Event::FocusOut => {
+                self.focused = false;
+                true
+            }
+            Event::KeyInput(key_event) => {
+                // One stop, two ends: Left / Right step the focused end by a
+                // wheel notch inside the other end's bound, Up / Down switch
+                // ends, Home / End send the focused end to its limit.
+                if !self.focused || key_event.state != ElementState::Pressed {
+                    return false;
+                }
+                let low = matches!(self.focus_end, ActiveThumb::Low);
+                let (cur, min, max) = if low {
+                    (self.value_low, 0.0, self.value_high)
+                } else {
+                    (self.value_high, self.value_low, 1.0)
+                };
+                let target = match key_event.logical_key {
+                    Key::Named(NamedKey::ArrowLeft) => cur - 0.02,
+                    Key::Named(NamedKey::ArrowRight) => cur + 0.02,
+                    Key::Named(NamedKey::Home) => min,
+                    Key::Named(NamedKey::End) => max,
+                    Key::Named(NamedKey::ArrowUp) | Key::Named(NamedKey::ArrowDown) => {
+                        self.focus_end = if low { ActiveThumb::High } else { ActiveThumb::Low };
+                        return true;
+                    }
+                    _ => return false,
+                };
+                let target = target.clamp(min, max);
+                if low {
+                    self.value_low = target;
+                } else {
+                    self.value_high = target;
+                }
+                true
+            }
             Event::MouseWheel { delta, x: px, y: py, .. } => {
                 let Some(ui) = ectx.ui.as_deref_mut() else { return false };
                 if !ui.scroll_gesture_new && ui.scroll_initiate_widget_id != Some(ectx.id) {
@@ -942,6 +1000,29 @@ mod focus_tests {
 
     fn press(key: NamedKey) -> Event {
         Event::KeyInput(KeyEvent { logical_key: Key::Named(key), state: ElementState::Pressed, text: None, repeat: false, ctrl: false, shift: false, alt: false })
+    }
+
+    /// A focused range: Right steps the low end, Down switches to the high end,
+    /// Left steps it, End sends it to 1, and the low end can never pass the high.
+    #[test]
+    fn range_arrows_step_the_focused_end_and_up_down_switch() {
+        let mut ctx = UiContext::new();
+        let mut r = RangeSlider::new().with_values(0.2, 0.8);
+        WidgetHost::set_rect(&mut r, 0.0, 0.0, 200.0, 16.0);
+        assert!(!r.handle_event(&press(NamedKey::ArrowRight), &mut ctx), "unfocused: not this range's key");
+        r.handle_event(&Event::FocusIn, &mut ctx);
+        assert!(r.handle_event(&press(NamedKey::ArrowRight), &mut ctx));
+        let (lo, hi) = r.inner().values();
+        assert!((lo - 0.22).abs() < 1e-5 && (hi - 0.8).abs() < 1e-5, "the low end moved");
+        assert!(r.handle_event(&press(NamedKey::ArrowDown), &mut ctx));
+        assert!(r.handle_event(&press(NamedKey::ArrowLeft), &mut ctx));
+        let (lo, hi) = r.inner().values();
+        assert!((lo - 0.22).abs() < 1e-5 && (hi - 0.78).abs() < 1e-5, "then the high end");
+        assert!(r.handle_event(&press(NamedKey::End), &mut ctx));
+        assert_eq!(r.inner().values().1, 1.0);
+        assert!(r.handle_event(&press(NamedKey::ArrowUp), &mut ctx));
+        assert!(r.handle_event(&press(NamedKey::End), &mut ctx));
+        assert_eq!(r.inner().values(), (1.0, 1.0), "the low end stops at the high end");
     }
 
     /// A focused band steps by a wheel notch on the arrows, jumps on Home / End,
