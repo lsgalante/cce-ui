@@ -116,6 +116,11 @@ impl Group {
         self.padding + self.tab_height()
     }
 
+    /// The padding between the members' hull and the frame.
+    pub fn padding(&self) -> f32 {
+        self.padding
+    }
+
     /// The members' hull: the union of the registered, visible, on-screen members' rects.
     fn hull(&self, ui: &UiContext) -> Option<Rect> {
         let mut hull: Option<(f32, f32, f32, f32)> = None;
@@ -160,7 +165,12 @@ impl Group {
             // side within `snap` of that seat — or past it — takes it, moving
             // OUTWARD only: a member that already sits in the padding zone keeps
             // the frame outside itself, up to the plate's own edge. A snapped
-            // top leaves the tab room inside the plate.
+            // top seats one tab lower, so the title stays inside the plate — but
+            // never lower than the plate's edge: the frame is clamped to the
+            // plate on every side, and a member flush with the plate's top keeps
+            // the wall on that edge with the tab rising above it. The tab never
+            // covers a member; a host that wants it inside the plate lays the
+            // members out one `headroom` down (the fit's seat).
             let (l, t) = (plate.x, plate.y);
             let (rr, b) = (plate.x + plate.width, plate.y + plate.height);
             let top_room = if title.is_some() { tab_h } else { 0.0 };
@@ -170,13 +180,14 @@ impl Group {
             let snap_r = (rr - p) - x1 <= self.snap;
             let snap_b = (b - p) - y1 <= self.snap;
             let nx0 = if snap_l { x0.min(l + p).max(l) } else { x0 };
-            let ny0 = if snap_t { y0.min(t + p + top_room).max(t + top_room) } else { y0 };
+            let ny0 = if snap_t { y0.min(t + p + top_room).max(t) } else { y0 };
             let nx1 = if snap_r { x1.max(rr - p).min(rr) } else { x1 };
             let ny1 = if snap_b { y1.max(b - p).min(b) } else { y1 };
             body = Rect { x: nx0, y: ny0, width: nx1 - nx0, height: ny1 - ny0 };
             // A corner on the plate's corner follows its curve, concentrically —
-            // at the inset the two sides actually landed at.
-            let cr = |a: f32, bb: f32| (pr - a.max(bb)).max(0.0);
+            // at the inset the two sides actually landed at (a tab above the
+            // plate counts as no inset).
+            let cr = |a: f32, bb: f32| (pr - a.max(bb).max(0.0)).max(0.0);
             radii = (
                 if snap_l && snap_t { cr(nx0 - l, ny0 - top_room - t) } else { r },
                 if snap_r && snap_t { cr(rr - nx1, ny0 - top_room - t) } else { r },
@@ -365,6 +376,34 @@ mod tests {
         let loose = Group::new(vec![a.base().id()]).with_padding(10.0).with_plate(plate, 16.0);
         assert_eq!(loose.inner().frame(&ctx).unwrap().body.x, 10.0);
         assert_eq!(loose.inner().frame(&ctx).unwrap().radii.0, crate::layout::plate_corner_radius());
+    }
+
+    /// A member flush with the plate's top: the wall stops on the plate's edge and
+    /// the tab rises above the plate — it never lands on the member.
+    #[test]
+    fn a_fitted_tab_never_covers_a_member() {
+        let mut ctx = UiContext::new();
+        let mut a = Button::new(0.0, 0.0, 80.0, 24.0);
+        WidgetHost::set_rect(&mut a, 0.0, 0.0, 80.0, 24.0);
+        let ids = vec![register(&mut ctx, &mut a)];
+        let plate = Rect { x: 0.0, y: 0.0, width: 400.0, height: 300.0 };
+        let g = Group::new(ids).with_label("Tab").with_padding(10.0).with_plate(plate, 16.0).with_fit(true);
+        let f = g.inner().frame(&ctx).unwrap();
+        let tab = f.tab.expect("labelled");
+        assert_eq!((f.body.x, f.body.y), (0.0, 0.0), "the frame stops on the plate's edges");
+        assert_eq!(tab.y + tab.height, f.body.y, "the tab sits on the body's top edge");
+        assert!(tab.y < 0.0, "so it rises above the plate rather than onto the member");
+        assert_eq!(f.radii.0, 16.0, "no inset: the corner is the plate's own");
+        // Laid out at the fit's seat — one headroom down, one padding in — the same
+        // group keeps the tab inside the plate with an even padding around the member.
+        let (head, pad) = (g.inner().headroom(), g.inner().padding());
+        let mut seated = Button::new(0.0, 0.0, 80.0, 24.0);
+        WidgetHost::set_rect(&mut seated, 2.0 * pad, head + pad, 80.0, 24.0);
+        let sid = register(&mut ctx, &mut seated);
+        let gs = Group::new(vec![sid]).with_label("Tab").with_padding(10.0).with_plate(plate, 16.0).with_fit(true);
+        let fs = gs.inner().frame(&ctx).unwrap();
+        assert_eq!((fs.body.x, fs.body.y), (pad, head), "on the seat: one padding in, the tab's room above");
+        assert_eq!(fs.tab.unwrap().y, pad, "the tab is inside the plate");
     }
 
     /// A labelled group carries a title tab flush on the body's top edge.
