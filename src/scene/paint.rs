@@ -1196,6 +1196,40 @@ impl PaintCtx {
         self.trough_tinted(rect, radii, depth, tint);
     }
 
+    /// A canvas well's floor — the opening you look into or draw in (a
+    /// Trackpad, a Slider2D pad, a bevel or ramp preview). It darkens the plate
+    /// it is cut from ([`crate::colors::WELL_FLOOR`]) rather than painting a
+    /// floor of its own, so every canvas sits in the one material. `lifted` is
+    /// a clickable canvas's hover cue: the floor rises toward the plate.
+    pub fn well_floor(&mut self, rect: Rect, radius: f32, lifted: bool) {
+        let tint = if lifted { crate::colors::WELL_FLOOR_LIFTED } else { crate::colors::WELL_FLOOR };
+        self.rounded_rect(rect, radius, (true, true, true, true), tint);
+    }
+
+    /// A canvas well's rim, drawn AFTER the content so the wall's shading falls
+    /// over whatever runs to the edge. Under `relief` it is the recess carved
+    /// inside `rect` ([`crate::layout::carve_inside`], the wall the DE width
+    /// capped at a fifth of the height — every well's rule); flat, the
+    /// hairline frame ([`crate::colors::WELL_FRAME`]).
+    pub fn well_rim(&mut self, rect: Rect, radius: f32, relief: bool) {
+        let radii = (radius, radius, radius, radius);
+        if relief {
+            let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+            let (well, radii) = crate::layout::carve_inside(rect, radii, depth);
+            self.recess(well, radii, depth);
+        } else {
+            self.border(rect, radii, [0.0; 4], crate::colors::WELL_FRAME, 1.0);
+        }
+    }
+
+    /// [`well_floor`](Self::well_floor) then [`well_rim`](Self::well_rim) in
+    /// one call — a canvas whose content is drawn over the rim (a Trackpad's
+    /// fingers). Content that should slide under the wall draws between the two.
+    pub fn canvas_well(&mut self, rect: Rect, radius: f32, relief: bool, lifted: bool) {
+        self.well_floor(rect, radius, lifted);
+        self.well_rim(rect, radius, relief);
+    }
+
     /// Emit one [`crate::layout::ReliefCarve`]. The shared application point:
     /// a widget's `paint` carves through here, and a flat host re-emits the
     /// carves it collected through here too, so the two can only ever draw the

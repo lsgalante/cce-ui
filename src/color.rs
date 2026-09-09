@@ -909,6 +909,15 @@ pub const SPLITTER_DRAG: [f32; 4] = [0.50, 0.50, 0.60, 1.0];
 
 pub const TEXT_FG: [f32; 4] = [0.80, 0.80, 0.85, 1.0];
 pub const TEXT_DIM: [f32; 4] = [0.53, 0.53, 0.60, 1.0];
+
+/// A canvas well's floor: the plate darkened, not a fill of its own, so every
+/// opening you look into — Trackpad, Slider2D, the bevel and ramp previews —
+/// is cut from the one material ([`crate::scene::paint::PaintCtx::well_floor`]).
+pub const WELL_FLOOR: [f32; 4] = [0.0, 0.0, 0.0, 0.18];
+/// [`WELL_FLOOR`] risen toward the plate: a clickable canvas's hover cue.
+pub const WELL_FLOOR_LIFTED: [f32; 4] = [0.0, 0.0, 0.0, 0.10];
+/// The hairline a canvas well is framed with when relief is off.
+pub const WELL_FRAME: [f32; 4] = [0.28, 0.28, 0.38, 1.0];
 pub const TEXT_HEADER: [f32; 4] = [0.90, 0.90, 0.95, 1.0];
 pub const TEXT_ACCENT: [f32; 4] = [0.56, 0.83, 0.56, 1.0];
 

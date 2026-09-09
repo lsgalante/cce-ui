@@ -96,15 +96,15 @@ impl Paint for Slider2D {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // The well: a dark floor read as an opening cut into the host's plate
-        // (the ramp graph's look in miniature), recess rim drawn last so its
-        // shading falls over the content at the edges.
-        let radius = crate::layout::slider_corner_radius().max(4.0);
-        ctx.rounded_rect(rect, radius, (true, true, true, true), [0.08, 0.08, 0.10, 1.0]);
+        // The well: the shared canvas floor (`PaintCtx::well_floor`) read as an
+        // opening cut into the host's plate, rim drawn last so its shading
+        // falls over the content at the edges. Rounded like the text wells.
+        let radius = crate::layout::textbox_corner_radius();
+        ctx.well_floor(rect, radius, false);
 
         // Crosshair through the thumb — the pad's read of both axis values.
         let (cx, cy) = self.thumb_center(rect);
-        let line = [0.25, 0.25, 0.28, 0.6];
+        let line = [1.0, 1.0, 1.0, 0.16];
         ctx.quad(Rect { x: rect.x + 2.0, y: cy - 0.5, width: rect.width - 4.0, height: 1.0 }, line);
         ctx.quad(Rect { x: cx - 0.5, y: rect.y + 2.0, width: 1.0, height: rect.height - 4.0 }, line);
 
@@ -121,11 +121,9 @@ impl Paint for Slider2D {
             [1.0, 1.0, 1.0, 0.9],
         );
 
-        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        // The well's ring, carved inside the pad's rect (`layout::carve_inside`); the
+        // The well's rim (`PaintCtx::well_rim`), carved inside the pad's rect; the
         // control label above is the adapter's, outside the well like every control's.
-        let (inner, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
-        ctx.recess(inner, radii, depth);
+        ctx.well_rim(rect, radius, crate::layout::control_relief());
     }
 }
 

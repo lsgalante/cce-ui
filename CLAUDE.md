@@ -125,6 +125,11 @@ widget does not fit one of them, say so rather than stretching a word.
   the trackpad pane, the ColorSelector's recess. Things you press are plates;
   things you enter are wells. A well's floor can carry fills (a progress
   fill, a colour swatch) — those are segments of the floor, not plates.
+  A **canvas well** is a well you look into or draw in — Trackpad, Slider2D,
+  the bevel and ramp previews — and every one is cut from the same material:
+  the plate darkened for its floor (`colors::WELL_FLOOR`) and the recess for
+  its rim, through `PaintCtx::well_floor` / `well_rim` (`canvas_well`),
+  rounded like the text wells. The Ramp editor's plot is the reference look.
 - **A group is a lasso.** `widget::Group` owns nothing: it is a set of member
   ids, and its frame is the padded hull of wherever the host's layout put
   them, with a title tab flush on the top edge — the section's frame

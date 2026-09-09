@@ -74,10 +74,10 @@ impl Paint for BevelPreview {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // The opening: a dark well, slightly lifted on hover (the click cue).
-        let radius = 4.0f32;
-        let bg = if self.hovered { [0.12, 0.12, 0.15, 1.0] } else { [0.08, 0.08, 0.10, 1.0] };
-        ctx.rounded_rect(rect, radius, (true, true, true, true), bg);
+        // The opening: the shared canvas well (`PaintCtx::well_floor`), its floor
+        // lifted on hover (the click cue); the rim is drawn last, over the content.
+        let radius = crate::layout::textbox_corner_radius();
+        ctx.well_floor(rect, radius, self.hovered);
 
         // Mini cutaway: plateau band, the wall over a square-ish domain, then
         // the floor — cce-relief's `draw_section` reduced to swatch scale.
@@ -139,6 +139,8 @@ impl Paint for BevelPreview {
             ctx.vector(prev.0, prev.1, x, y, 1.5, col, Cap::Round);
             prev = (x, y);
         }
+
+        ctx.well_rim(rect, radius, crate::layout::control_relief());
     }
 }
 

@@ -79,7 +79,8 @@ impl Paint for Trackpad {
     }
 
     fn color(&self) -> [f32; 4] {
-        [0.11, 0.11, 0.16, 0.85]
+        // The floor is the canvas well's (`paint`); no base fill of its own.
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     fn sync_label(&mut self, label: &str) {
@@ -91,20 +92,11 @@ impl Paint for Trackpad {
         let (x, y, w, visual_h) = self.touch_area();
 
         let area = Rect { x, y, width: w, height: visual_h };
-        if self.recessed {
-            // 1+2. A well in the plate: a faint dark floor (the fingers need the
-            // contrast) and the carve around it, rounded like the text wells.
-            let radius = crate::layout::textbox_corner_radius();
-            let depth = crate::layout::bevel_width().min(visual_h * 0.2);
-            ctx.rounded_rect(area, radius, (true, true, true, true), [0.0, 0.0, 0.0, 0.18]);
-            let (well, radii) = crate::layout::carve_inside(area, (radius, radius, radius, radius), depth);
-            ctx.recess(well, radii, depth);
-        } else {
-            // 1+2. The framed dark pane, rounded like the text wells.
-            let radius = crate::layout::textbox_corner_radius();
-            let border_color = [0.28, 0.28, 0.38, 1.0];
-            ctx.border(area, (radius, radius, radius, radius), [0.11, 0.11, 0.16, 0.85], border_color, 1.0);
-        }
+        // 1+2. A canvas well in the plate — the floor tint and rim every draw-in
+        // opening shares (`PaintCtx::canvas_well`), rounded like the text wells;
+        // the fingers draw over the rim.
+        let radius = crate::layout::textbox_corner_radius();
+        ctx.canvas_well(area, radius, self.recessed, false);
 
         // 3. Fingers
         for finger in &self.fingers {
