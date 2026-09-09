@@ -1073,6 +1073,84 @@ impl PaintCtx {
         }
     }
 
+    /// A section's well — the settings app's union carve, the ONE shape a
+    /// section or a [`crate::widget::Group`] is cut into the plate with: the
+    /// `body` carved as a recess with `radii` (TL, TR, BR, BL), and when there
+    /// is a title `tab` (flush on the body's top edge, at its left), the tab
+    /// carved WITH it as one shape — the tab bottom-open, one piece owning the
+    /// body's whole right run so its corners are real turns, a left piece
+    /// carrying the left wall, the pieces extending past their interior seam by
+    /// `depth` so the walls crossfade there instead of notching — and the
+    /// throat's inside corner rounded by a concave fillet.
+    pub fn section_well(&mut self, body: Rect, tab: Option<Rect>, radii: Radii, depth: f32) {
+        let (cx, cy, cw, ch) = (body.x, body.y, body.width, body.height);
+        let (tl, tr, br, bl) = radii;
+        let Some(t) = tab else {
+            self.recess_edges(body, radii, depth, (true, true, true, true));
+            return;
+        };
+        let (tx, ty, tw, th) = (t.x, t.y, t.width, t.height);
+        let rt = tl.max(tr).min(th * 0.45);
+        let throat_r = tx + tw;
+        // The designer's SECTION_FILLET_R.
+        let rho = 10.0f32;
+        let body_lr = |x_run: f32, pc: &mut Self| {
+            pc.recess_edges(
+                Rect { x: x_run, y: cy, width: cx + cw - x_run, height: ch },
+                (0.0, tr, br, 0.0),
+                depth,
+                (true, true, true, false),
+            );
+            pc.recess_edges(
+                Rect { x: cx, y: cy, width: x_run + depth - cx, height: ch },
+                (0.0, 0.0, 0.0, bl),
+                depth,
+                (false, false, true, true),
+            );
+        };
+        if cx + cw > throat_r + 2.0 * rho {
+            // Filleted throat: the tab's right wall ends at the fillet's vertical
+            // tangent, a left-only bridge carries the left wall across the span.
+            self.recess_edges(
+                Rect { x: tx, y: ty, width: tw, height: (cy - rho) - ty + depth },
+                (rt, rt, 0.0, 0.0),
+                depth,
+                (true, true, false, true),
+            );
+            self.recess_edges(
+                Rect { x: tx, y: cy - rho, width: tw, height: rho + depth },
+                (0.0, 0.0, 0.0, 0.0),
+                depth,
+                (false, false, false, true),
+            );
+            body_lr(throat_r + rho - depth, self);
+            self.concave_fillet(throat_r + rho, cy - rho, rho, depth, std::f32::consts::FRAC_PI_2, false);
+        } else if cx + cw > throat_r + 0.5 {
+            // Too narrow for the fillet: the plain square throat.
+            self.recess_edges(
+                Rect { x: tx, y: ty, width: tw, height: (cy - ty) + depth },
+                (rt, rt, 0.0, 0.0),
+                depth,
+                (true, true, false, true),
+            );
+            body_lr(throat_r - depth, self);
+        } else {
+            // The tab spans the body: no top wall at all.
+            self.recess_edges(
+                Rect { x: tx, y: ty, width: tw, height: (cy - ty) + depth },
+                (rt, rt, 0.0, 0.0),
+                depth,
+                (true, true, false, true),
+            );
+            self.recess_edges(
+                Rect { x: cx, y: cy, width: cw, height: ch },
+                (0.0, 0.0, br, bl),
+                depth,
+                (false, true, true, true),
+            );
+        }
+    }
+
     /// A flush inset control: `rect`'s plate sits SUNKEN into the surface with
     /// its face level with it — a valley seam runs the boundary, the surface
     /// falling into it on the way out and the control's own face rising back

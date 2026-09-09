@@ -125,6 +125,15 @@ widget does not fit one of them, say so rather than stretching a word.
   the trackpad pane, the ColorSelector's recess. Things you press are plates;
   things you enter are wells. A well's floor can carry fills (a progress
   fill, a colour swatch) — those are segments of the floor, not plates.
+- **A group is a lasso.** `widget::Group` owns nothing: it is a set of member
+  ids, and its frame is the padded hull of wherever the host's layout put
+  them, with a title tab flush on the top edge — the section's frame
+  (`PaintCtx::section_well` under relief, the section outline otherwise), so
+  a group is a segment of the plate it sits on, parted by a section carve
+  rather than a seam. Given its plate (`with_plate`) and `with_fit`, sides
+  within `snap` of the plate's edge take the edge one padding in and corners
+  on the plate's corner follow it concentrically: on a narrow pane a group is
+  that pane's inset lining, on a wide one a lasso. A group never hits.
 - **Segments are plates or floors sharing one silhouette, parted by seams.**
   A seam is a `Groove` cut across the shared surface, dying into its rolled
   edge: Breadcrumb segments, ButtonStrip segments, the ColorSelector's

@@ -565,6 +565,7 @@ pub use self::input::{
     format_ramp_spec, parse_ramp_spec
 };
 pub use self::container::{
+    Group, GroupFrame,
     ContainerLayout, OverlayLayout, ManualLayout, VerticalLayout, GridLayout, AdaptiveGridLayout,
     ColumnsLayout, MosaicLayout, ReverseMosaicLayout,
     ContentBg, ParametersBg,
