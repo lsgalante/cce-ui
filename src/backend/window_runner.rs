@@ -3302,6 +3302,13 @@ pub trait Application: Sized + 'static {
     fn plate_navigation(&self) -> bool {
         false
     }
+
+    /// Keyboard focus just moved by the toolkit's Tab traversal. An app that
+    /// caches its geometry until its own rebuild flag (relief carves collected
+    /// in a view pass, widget lists built on layout) raises that flag here, so
+    /// the new ring is drawn; an app that paints fresh every frame needs
+    /// nothing. Default: nothing.
+    fn focus_stepped(&mut self) {}
     /// Keyboard focus entered/left the window (the compositor keyboard-focuses
     /// the focused window, so this is the "am I the focused window" signal —
     /// e.g. for focus-dependent chrome). Default: ignore.
@@ -4855,13 +4862,12 @@ impl<A: Application> EngineState<A> {
         if !app.plate_navigation() {
             return false;
         }
-        if let Some(ctx) = app.ui_context_mut() {
-            if ctx.focus_step(reverse) {
-                *rebuild = true;
-                return true;
-            }
+        let moved = app.ui_context_mut().is_some_and(|ctx| ctx.focus_step(reverse));
+        if moved {
+            app.focus_stepped();
+            *rebuild = true;
         }
-        false
+        moved
     }
 
     fn route_history_chord(&mut self, event: &KeyEvent, rebuild: &mut bool) -> bool {

@@ -141,7 +141,12 @@ What this buys, and where the code is heading:
   (not a stop). `UiContext::focus_step` walks the stops in reading order (row,
   then x), wrapping; the runner calls it for Tab / Shift+Tab when the app opts
   in with `Application::plate_navigation` (default off, so an app that routes
-  Tab itself — a terminal, a web view, its own field order — is undisturbed).
+  Tab itself — a terminal, a web view, its own field order — is undisturbed)
+  and tells the app through `Application::focus_stepped` — an app that caches
+  its geometry until its own rebuild flag raises it there. The walk needs the
+  app's context exposed (`ui_context_mut`); the ring reaches flat-path hosts
+  through `RenderTarget::inset_plate_tinted` and `CarveKind::Boss { tint }`.
+  `CCE_FOCUS_DEBUG=1` prints the stops in walk order.
   The focus ring is the plate's own silhouette: `ControlPlate::with_tint`
   lights the rim (a tinted `Trough`, `Boss` or `Bevel`), the same treatment a
   well's `recess_tinted` gives its rim while editing — never extra geometry.

@@ -594,6 +594,9 @@ impl UiContext {
             found.push((y, y + height, x, id));
         }
         if found.is_empty() {
+            if std::env::var_os("CCE_FOCUS_DEBUG").is_some() {
+                eprintln!("[focus] no stops: no registered, visible widget with a focus role and a rect");
+            }
             return false;
         }
         // Reading order: rows first, x within a row. A stop joins the current
@@ -612,6 +615,21 @@ impl UiContext {
         for mut row in rows {
             row.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
             stops.extend(row.into_iter().map(|s| s.3));
+        }
+        // CCE_FOCUS_DEBUG=1: the stops in walk order, with what each is.
+        if std::env::var_os("CCE_FOCUS_DEBUG").is_some() {
+            for (i, id) in stops.iter().enumerate() {
+                if let Some(ptr) = self.tree.get_ptr(*id) {
+                    let w = unsafe { &*ptr };
+                    let (x, y, width, height) = w.rect();
+                    eprintln!(
+                        "[focus] stop {i}: {} {:?} at ({x:.0},{y:.0} {width:.0}x{height:.0}){}",
+                        w.type_name(),
+                        w.focus_role(),
+                        if self.focused_widget == Some(*id) { " <- focused" } else { "" }
+                    );
+                }
+            }
         }
         let n = stops.len();
         let current = self.focused_widget.and_then(|f| stops.iter().position(|s| *s == f));
