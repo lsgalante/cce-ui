@@ -217,6 +217,13 @@ pub trait WidgetHost {
     /// `layout::CONTROL_GAP` between the blocks.
     fn label_strip(&self) -> f32 { self.base().label_offset() }
 
+    /// Where the detached label is drawn: the strip above the content, as wide as the
+    /// label's text. `None` for an unlabeled widget and for an inline label. The label
+    /// may be wider than the widget's rect (a StatusDot's, a Checkbox's) — the rect is
+    /// the content's width, and the text runs past it — so anything wrapping a widget
+    /// as a block (a `Group`'s hull) unions this with the rect.
+    fn detached_label_rect(&self) -> Option<crate::scene::layout::Rect> { None }
+
     fn mark_dirty(&mut self, ctx: &mut UiContext) {
         let b = self.base_mut();
         if b.dirty {

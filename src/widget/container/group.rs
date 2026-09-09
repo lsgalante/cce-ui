@@ -142,10 +142,19 @@ impl Group {
             // always its content plus this strip"), so the lasso wraps the label
             // by taking the rect as is. Subtracting the strip here again pushed
             // every labelled member's hull one strip too high, and the tab with it.
-            hull = Some(match hull {
-                None => (x, y, x + ww, y + hh),
-                Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x + ww), y1.max(y + hh)),
-            });
+            // Widthwise the rect is the content's: a label wider than its control
+            // (a StatusDot's) runs past it, so the label's own box joins the hull
+            // or the wall cuts through the text.
+            let mut grow = |x: f32, y: f32, w: f32, h: f32| {
+                hull = Some(match hull {
+                    None => (x, y, x + w, y + h),
+                    Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x + w), y1.max(y + h)),
+                });
+            };
+            grow(x, y, ww, hh);
+            if let Some(l) = w.detached_label_rect() {
+                grow(l.x, l.y, l.width, l.height);
+            }
         }
         hull.map(|(x0, y0, x1, y1)| Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 })
     }
@@ -305,7 +314,7 @@ impl Input for Group {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widget::{Button, Slider, WidgetHost};
+    use crate::widget::{Button, DotStatus, Slider, StatusDot, WidgetHost};
 
     fn register(ctx: &mut UiContext, w: &mut dyn WidgetHost) -> WidgetId {
         let id = w.base().id();
@@ -346,6 +355,25 @@ mod tests {
         let f = g.inner().frame(&ctx).unwrap();
         assert_eq!(f.body.y, 40.0, "one padding above the block, not a strip more");
         assert_eq!(f.body.height, 16.0 + strip + 20.0);
+    }
+
+    /// A label wider than its control's rect is in the hull: the frame closes past
+    /// the text, not through it.
+    #[test]
+    fn a_members_wide_label_is_in_the_hull() {
+        let mut ctx = UiContext::new();
+        let mut dot = StatusDot::new(DotStatus::Inactive).with_label("StatusDot (inactive)");
+        let strip = dot.label_strip();
+        let size = StatusDot::SIZE;
+        WidgetHost::set_rect(&mut dot, 100.0, 50.0, size, size + strip);
+        let label = dot.detached_label_rect().expect("a detached label");
+        assert!(label.width > size, "the label text is wider than the dot");
+        let ids = vec![register(&mut ctx, &mut dot)];
+        let g = Group::new(ids).with_padding(10.0);
+        let f = g.inner().frame(&ctx).unwrap();
+        assert_eq!(f.body.x, 90.0, "the left is the rect's");
+        assert_eq!(f.body.x + f.body.width, label.x + label.width + 10.0, "the right is the label's");
+        assert_eq!(f.body.height, size + strip + 20.0, "the label strip adds no height: it is in the rect");
     }
 
     /// Fit to plate: a side near the plate's edge takes it (one padding in), a

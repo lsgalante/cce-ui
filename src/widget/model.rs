@@ -1191,6 +1191,18 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         if Layout::inline_label(&self.inner) { 0.0 } else { self.base.label_offset() }
     }
 
+    /// The detached label's box, as `base_label_fallback` places the text: at the
+    /// label inset on the strip above the content, measured in the detached-label font.
+    fn detached_label_rect(&self) -> Option<Rect> {
+        if Layout::inline_label(&self.inner) {
+            return None;
+        }
+        let label = self.base.label.as_deref()?;
+        let (fam, size) = crate::layout::control_label_font_detached_parsed();
+        let width = crate::widget::display::measure_text_width(label, &fam, size);
+        Some(Rect { x: self.base.x + Layout::detached_label_inset(&self.inner), y: self.base.y, width, height: self.label_strip() })
+    }
+
     /// The `WidgetHost::measure` default, except the width consults the intrinsic size when the
     /// widget opts in ([`Layout::intrinsic_measure_width`] — Dropdown's `auto_width`).
     fn measure(&self, constraints: crate::widget::LayoutConstraints, _ctx: &UiContext) -> crate::widget::Size {
