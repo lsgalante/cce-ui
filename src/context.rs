@@ -591,6 +591,11 @@ impl UiContext {
             if width <= 0.0 || height <= 0.0 {
                 continue;
             }
+            // Parked off-screen (the hidden-editor idiom: a 1x1 rect at
+            // (-1000, -1000)) — nothing to see, so not a stop.
+            if x + width <= 0.0 || y + height <= 0.0 {
+                continue;
+            }
             found.push((y, y + height, x, id));
         }
         if found.is_empty() {
@@ -1262,5 +1267,16 @@ mod focus_step_tests {
         let mut sep = crate::widget::Separator::new(0.0, 0.0, 10.0, 1.0, [1.0; 4]);
         WidgetHost::set_rect(&mut sep, 300.0, 10.0, 10.0, 1.0);
         assert_eq!(WidgetHost::focus_role(&sep), crate::widget::FocusRole::None);
+
+        // A plate parked off-screen (the hidden-editor idiom) is not a stop either.
+        let mut parked = Button::new(0.0, 0.0, 1.0, 1.0).with_label("parked");
+        WidgetHost::set_rect(&mut parked, -1000.0, -1000.0, 1.0, 1.0);
+        let (pid, pptr) = (parked.base().id(), &mut parked as *mut dyn WidgetHost);
+        let pptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(pptr) };
+        ctx.register_widget(pid, pptr);
+        for _ in 0..4 {
+            ctx.focus_step(false);
+            assert!(!ctx.is_focused_id(pid), "the parked plate never takes focus");
+        }
     }
 }
