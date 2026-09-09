@@ -99,6 +99,23 @@ impl Group {
         (fam, size.unwrap_or(14.0))
     }
 
+    /// The title tab's height — zero without a label.
+    pub fn tab_height(&self) -> f32 {
+        match self.label.as_deref().filter(|l| !l.is_empty()) {
+            Some(_) => self.title_font().1 + 8.0,
+            None => 0.0,
+        }
+    }
+
+    /// The vertical room this lasso takes ABOVE its members' hull: the padding
+    /// and the title tab. A lasso is laid out by its members, so a host that
+    /// places them in rows leaves this much between the row before and the
+    /// first member — the row a strategy would reserve for the title were the
+    /// group its child — or the tab lands on that row.
+    pub fn headroom(&self) -> f32 {
+        self.padding + self.tab_height()
+    }
+
     /// The members' hull: the union of the registered, visible, on-screen members' rects.
     fn hull(&self, ui: &UiContext) -> Option<Rect> {
         let mut hull: Option<(f32, f32, f32, f32)> = None;
@@ -137,7 +154,7 @@ impl Group {
         let mut radii = (r, r, r, r);
         let title = self.label.as_deref().filter(|l| !l.is_empty());
         let (fam, size) = self.title_font();
-        let tab_h = size + 8.0;
+        let tab_h = self.tab_height();
         if let (true, Some((plate, pr))) = (self.fit, self.plate) {
             // The frame's natural seat is one padding inside the plate's edge. A
             // side within `snap` of that seat — or past it — takes it, moving
