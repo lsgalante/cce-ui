@@ -47,13 +47,14 @@ pub enum Unit {
     Px,
     Mm,
     Cm,
+    M,
     In,
     Pt,
 }
 
 impl Unit {
     /// Every unit, in the order a unit toggle should cycle them.
-    pub const ALL: [Unit; 5] = [Unit::Px, Unit::Mm, Unit::Cm, Unit::In, Unit::Pt];
+    pub const ALL: [Unit; 6] = [Unit::Px, Unit::Mm, Unit::Cm, Unit::M, Unit::In, Unit::Pt];
 
     /// The config suffix / KDL type annotation: `px`, `mm`, `cm`, `in`, `pt`.
     pub fn suffix(self) -> &'static str {
@@ -61,6 +62,7 @@ impl Unit {
             Unit::Px => "px",
             Unit::Mm => "mm",
             Unit::Cm => "cm",
+            Unit::M => "m",
             Unit::In => "in",
             Unit::Pt => "pt",
         }
@@ -73,6 +75,7 @@ impl Unit {
             "px" => Some(Unit::Px),
             "mm" => Some(Unit::Mm),
             "cm" => Some(Unit::Cm),
+            "m" | "metre" | "meter" | "metres" | "meters" => Some(Unit::M),
             "in" | "inch" | "inches" => Some(Unit::In),
             "pt" => Some(Unit::Pt),
             _ => None,
@@ -91,6 +94,7 @@ impl Unit {
             Unit::Px => None,
             Unit::Mm => Some(1.0),
             Unit::Cm => Some(10.0),
+            Unit::M => Some(1000.0),
             Unit::In => Some(MM_PER_INCH),
             Unit::Pt => Some(MM_PER_INCH / PT_PER_INCH),
         }
@@ -228,6 +232,9 @@ impl Len {
     }
     pub const fn cm(value: f32) -> Self {
         Len::new(value, Unit::Cm)
+    }
+    pub const fn m(value: f32) -> Self {
+        Len::new(value, Unit::M)
     }
     pub const fn inches(value: f32) -> Self {
         Len::new(value, Unit::In)
@@ -385,7 +392,7 @@ mod tests {
 
     #[test]
     fn parse_and_serialize_roundtrip() {
-        for s in ["2mm", "0.5in", "12px", "6pt", "1.25cm"] {
+        for s in ["2mm", "0.5in", "12px", "6pt", "1.25cm", "0.3m"] {
             let l = Len::parse(s).unwrap();
             assert_eq!(l.serialize(), s, "{s}");
         }

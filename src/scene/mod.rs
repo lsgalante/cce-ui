@@ -7,6 +7,7 @@
 
 pub mod anim;
 pub mod arena;
+pub mod heightfield;
 pub mod layout;
 pub mod paint;
 pub mod painter;

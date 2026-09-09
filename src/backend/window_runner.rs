@@ -3906,6 +3906,22 @@ impl<A: Application> EngineState<A> {
         }
 
         let (mut verts, mut dl_batches, dl_images, plate_features) = tessellate_display_list(&dl, logical_w, logical_h, scale_factor as f32);
+        // A pending height-field export (`CCE_HEIGHTMAP`, or an app's
+        // `scene::heightfield::request`): the plates of THIS frame, sampled
+        // as the geometry the shader is about to shade.
+        if let Some(req) = crate::scene::heightfield::take_request() {
+            let s = scale_factor as f32;
+            let (pw, ph) = ((logical_w * s).round() as usize, (logical_h * s).round() as usize);
+            let hf = crate::scene::heightfield::HeightField::from_frame(&dl_batches, &plate_features, pw, ph, s);
+            let (lo, hi) = hf.range_px();
+            match crate::scene::heightfield::export_png(&hf, &req.path, req.mm_per_sample) {
+                Ok(()) => log::info!(
+                    "[heightfield] wrote {} ({}x{} px, {:.3}..{:.3} mm, metric {})",
+                    req.path.display(), pw, ph, lo / hf.px_per_mm, hi / hf.px_per_mm, hf.source.as_str()
+                ),
+                Err(e) => log::warn!("[heightfield] export to {} failed: {e}", req.path.display()),
+            }
+        }
         // custom_vertices (e.g. graph geometry) is appended as a final unclipped batch drawn on top.
         let pre_custom = verts.len() as u32;
         self.inner.as_mut().unwrap().custom_vertices(&mut verts, LogicalSize::new(logical_w, logical_h), scale_factor);

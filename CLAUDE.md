@@ -223,6 +223,11 @@ Modules:
   intersections. `renders_own_subtree` is an escape hatch for legacy subtree painters.
 - `anim.rs` — `Animated<T>` (tween + spring + easing), the Phase 4 animation primitive replacing
   ad-hoc bool flips.
+- `heightfield.rs` — the relief as a height field: the geometry the plate shader shades
+  (plate rolls, CSG features, free carves) integrated back from the slopes it lights,
+  sampled per physical px and exported as a 16-bit PNG + JSON sidecar in millimetres
+  through the display metric. `CCE_HEIGHTMAP=<file>` in any client's environment, or
+  `heightfield::request` from an app. See the Units section.
 
 ### `WidgetHost` (formerly the `Element` god-trait)
 
@@ -312,6 +317,14 @@ carries the drop as `h=` (a length: `h=0.5mm`, or bare px) beside `w=` and
 its section's depth numbers read in mm when the metric is real, and Save
 writes `height` as a `(mm)` length then, px otherwise.
 
+**And the relief can leave the screen.** `scene/heightfield.rs` integrates the
+height curves the shader only differentiates and samples a frame's plates into a
+height field — plates stack, carves etch, exactly the composite model the shader
+lights — then writes it as a 16-bit PNG whose sidecar carries the pitch and range
+in millimetres via the metric. A pinned `height=(mm)0.3` is 0.3 mm in that file.
+The sidecar states the metric's source; on an assumed metric the millimetres are
+a guess, and a fabrication tool should say so.
+
 Why not millimetres inside: UI sizes are perceptual and angular, not physical
 — a hit target should not become 8 mm on a projector three metres away.
 Documents and fabrication content live in real units and convert at view
@@ -349,4 +362,7 @@ All opt-in, all read once, all quiet when unset — set one and run any client.
 - `CCE_FORCE_PPI=<f>` — pin the display metric (logical px per inch) regardless of what
   the outputs report; a headless shadow has no EDID and would run `assumed`. The live
   panel is 141.8.
+- `CCE_HEIGHTMAP=<file.png>` — export the client's third rendered frame as a relief
+  height field (16-bit greyscale PNG + `<file>.json` sidecar: pitch, range in mm, datum,
+  metric source); `CCE_HEIGHTMAP_MM=<mm>` resamples to that pitch. `scene/heightfield.rs`.
 - `CCE_UI_FAULT_RECONNECT=1` — exercise the Wayland reconnect path.
