@@ -3572,7 +3572,7 @@ pub enum CarveKind {
     /// `tint` lights the rim in the focus accent (`recess_tinted`).
     Recess { tint: Option<[f32; 3]> },
     /// Interior one step UP ([`crate::scene::paint::PaintCtx::boss_edges`]).
-    Boss,
+    Boss { tint: Option<[f32; 3]> },
     /// A FLUSH inset ([`crate::scene::paint::PaintCtx::trough_edges`]): the
     /// interior stays level with the surface and a valley seam runs the
     /// boundary — the closed dropdown's chrome, for a control that is part
@@ -3614,6 +3614,12 @@ pub trait RenderTarget {
     /// Hosts without relief prims degrade to a flat rounded fill.
     fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, _depth: f32) {
         self.rect_with_radius(color, x, y, w, h, radius);
+    }
+    /// [`inset_plate`](Self::inset_plate) with the rim lit — the focused
+    /// control plate's ring (`ControlPlate::with_tint`). Hosts without relief
+    /// prims draw the plain plate.
+    fn inset_plate_tinted(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, _tint: [f32; 3]) {
+        self.inset_plate(color, x, y, w, h, radius, depth);
     }
     /// One step carve from a widget's `paint` ([`ReliefCarve`]) — offered here
     /// for the same reason as `inset_plate`: the legacy `all_quads` stream
@@ -3838,10 +3844,14 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                     pending_face = Some((rect, radii, fill));
                 }
             }
-            Prim::Trough { rect, radii, depth, .. } => {
+            Prim::Trough { rect, radii, depth, tint, .. } => {
                 let face = pending_face.take().map(|(_, _, fill)| fill).unwrap_or([0.0; 4]);
                 let (r1, r2, r3, r4) = radii;
-                pc.inset_plate(face, rect.x, rect.y, rect.width, rect.height, r1.max(r2).max(r3).max(r4), depth);
+                let r = r1.max(r2).max(r3).max(r4);
+                match tint {
+                    Some(t) => pc.inset_plate_tinted(face, rect.x, rect.y, rect.width, rect.height, r, depth, t),
+                    None => pc.inset_plate(face, rect.x, rect.y, rect.width, rect.height, r, depth),
+                }
             }
             Prim::Bevel { rect, radii, color, .. } => {
                 if color[3].abs() > 0.001 {
@@ -3860,9 +3870,9 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                     edges,
                 });
             }
-            Prim::Boss { rect, radii, depth, edges, .. } => {
+            Prim::Boss { rect, radii, depth, edges, tint } => {
                 pc.relief_carve(&ReliefCarve {
-                    kind: CarveKind::Boss,
+                    kind: CarveKind::Boss { tint },
                     x: rect.x,
                     y: rect.y,
                     w: rect.width,

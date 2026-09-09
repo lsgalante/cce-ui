@@ -1193,7 +1193,7 @@ impl ParametersBg {
                         let rect = Rect { x, y: y + ty, width: w, height: h - ty };
                         for c in t.inner().flat_carves(rect) {
                             let raised = match c.kind {
-                                crate::layout::CarveKind::Boss => true,
+                                crate::layout::CarveKind::Boss { .. } => true,
                                 crate::layout::CarveKind::Recess { .. } => false,
                                 crate::layout::CarveKind::Trough => continue,
                             };

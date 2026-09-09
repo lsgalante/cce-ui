@@ -376,7 +376,7 @@ impl Toggle {
         self.rocker_reliefs(inset)
             .into_iter()
             .map(|(half, radii, walls, raised)| ReliefCarve {
-                kind: if raised { CarveKind::Boss } else { CarveKind::Recess { tint: None } },
+                kind: if raised { CarveKind::Boss { tint: None } } else { CarveKind::Recess { tint: None } },
                 x: half.x,
                 y: half.y,
                 w: half.width,

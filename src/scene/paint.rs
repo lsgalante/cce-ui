@@ -1066,13 +1066,7 @@ impl PaintCtx {
             PlateStance::Flush => {
                 let (trough, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
                 match plate.tint {
-                    Some(t) => {
-                        // `inset_plate`'s face fill, then the trough with its rim lit.
-                        if plate.face[3].abs() > 0.001 {
-                            self.border(trough, radii, plate.face, [0.0; 4], 0.0);
-                        }
-                        self.trough_tinted(trough, radii, plate.depth, t);
-                    }
+                    Some(t) => self.inset_plate_tinted(trough, radii, plate.face, plate.depth, t),
                     None => self.inset_plate(trough, radii, plate.face, plate.depth),
                 }
             }
@@ -1114,6 +1108,16 @@ impl PaintCtx {
         self.trough(rect, radii, depth);
     }
 
+    /// [`inset_plate`](Self::inset_plate) with the rim lit — the focused flush
+    /// control plate's ring (`ControlPlate::with_tint`); the face fill as
+    /// there, the trough tinted.
+    pub fn inset_plate_tinted(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32, tint: [f32; 3]) {
+        if color[3].abs() > 0.001 {
+            self.border(rect, radii, color, [0.0; 4], 0.0);
+        }
+        self.trough_tinted(rect, radii, depth, tint);
+    }
+
     /// Emit one [`crate::layout::ReliefCarve`]. The shared application point:
     /// a widget's `paint` carves through here, and a flat host re-emits the
     /// carves it collected through here too, so the two can only ever draw the
@@ -1126,7 +1130,10 @@ impl PaintCtx {
     pub fn carve(&mut self, c: &crate::layout::ReliefCarve) {
         let rect = Rect { x: c.x, y: c.y, width: c.w, height: c.h };
         match c.kind {
-            crate::layout::CarveKind::Boss => self.boss_edges(rect, c.radii, c.depth, c.edges),
+            crate::layout::CarveKind::Boss { tint: Some(t) } if c.edges == (true, true, true, true) => {
+                self.boss_edges_tinted(rect, c.radii, c.depth, c.edges, t)
+            }
+            crate::layout::CarveKind::Boss { .. } => self.boss_edges(rect, c.radii, c.depth, c.edges),
             crate::layout::CarveKind::Recess { tint: Some(t) }
                 if c.edges == (true, true, true, true) =>
             {
@@ -1427,6 +1434,9 @@ impl crate::layout::RenderTarget for PaintCtx {
     }
     fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32) {
         PaintCtx::inset_plate(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), color, depth);
+    }
+    fn inset_plate_tinted(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: [f32; 3]) {
+        PaintCtx::inset_plate_tinted(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), color, depth, tint);
     }
     fn relief_carve(&mut self, carve: &crate::layout::ReliefCarve) {
         PaintCtx::carve(self, carve);
