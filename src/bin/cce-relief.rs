@@ -18,6 +18,15 @@
 //! there, which is how a stack whose geometry looks reasonable can still read
 //! hot.
 //!
+//! The knobs under the section: the wall curve's Shoulder / Base / Bias,
+//! then **Light** (the `bevel_depth` slot — how hard the light falls across
+//! the wall; not a length), **Width** (the wall's run, logical px) and
+//! **Height** (the wall's drop, logical px; 0 = follow the width at the
+//! analytic ratio). Height is the fabrication axis: the section's depth
+//! numbers read in millimetres whenever the display metric is real
+//! (`cce_ui::units`), and Save writes `style.surface.relief.height` as a
+//! `(mm)` length then, px otherwise.
+//!
 //! Every edit applies live to this process (the
 //! popup's own plate, wells, and buttons ARE the preview) and logs the
 //! sampled spec to stdout; Save persists to `~/.config/cce/config.kdl`
@@ -56,11 +65,14 @@ use wayland_client::QueueHandle;
 const HEADER_FONT_SIZE: f32 = 13.0;
 const HEADER_COLOR: [u8; 3] = [0x9a, 0x9a, 0xa4];
 
-/// Knob ranges: depth (how hard the light falls across the wall) and width
-/// (how far the wall runs, logical px). Defaults per `layout::bevel_depth` /
-/// `bevel_width`.
+/// Knob ranges: light (how hard the light falls across the wall — the
+/// `bevel_depth` slot, NOT a length), width (how far the wall runs, logical
+/// px) and height (how far it drops, logical px; 0 = follow the width at
+/// the analytic ratio, the pre-height look). Defaults per
+/// `layout::bevel_depth` / `bevel_width` / `bevel_height`.
 const DEPTH_RANGE: (f32, f32) = (0.0, 0.6);
 const WIDTH_RANGE: (f32, f32) = (2.0, 24.0);
+const HEIGHT_RANGE: (f32, f32) = (0.0, 24.0);
 
 /// Sample count for the spec written to config — enough that the 32-slot
 /// renderer LUT sees the curve, few enough that the config line stays sane.
@@ -102,7 +114,7 @@ fn content_height(width: f32) -> f32 {
     let button_h = 26.0;
     let status_h = HEADER_FONT_SIZE + 4.0;
     let fixed = knob_h + gap
-        + 5.0 * (knob_h + gap)
+        + 6.0 * (knob_h + gap)
         + button_h + 8.0 + status_h + 2.0 * gap;
     let natural = (w - 2.0 * CUT_MARGIN - GUTTER_L - 2.0 * MIN_BAND)
         + 2.0 * CUT_MARGIN
@@ -442,6 +454,7 @@ struct BevelPopup {
     edge: ProfileKnobs,
     depth_slider: Adapted<Slider>,
     width_slider: Adapted<Slider>,
+    height_slider: Adapted<Slider>,
     save_button: Adapted<Button>,
     /// Cancel = discard-and-close: edits are live only in THIS process, so
     /// with nothing persisted, closing IS the discard (same as Escape).
@@ -516,14 +529,24 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
     let avail_h = sec_h - 2.0 * m - UNDERSIDE - GUTTER_B;
 
     let run = shape.run();
+    // Drop over run: the material's pinned height against the DE roll width
+    // (`layout::carve_depth_ratio`), the roll's own rise for the edge roll.
+    // Everything below scales the shape's unit drop by it, so the section
+    // shows the geometry the shader shades — a 0.5 mm drop over a 2 mm wall
+    // draws at that slope, not at the analytic 0.6.
+    let ratio = if matches!(shape, Shape::EdgeRoll) {
+        cce_ui::layout::roll_height_ratio()
+    } else {
+        cce_ui::layout::carve_depth_ratio()
+    };
     // Vertical extent of THIS shape, sampled — a ridge lives above the surface,
     // a recess below, a trough only half a drop down.
     let (mut h_lo, mut h_hi) = (0.0f32, 0.0f32);
     for i in 0..=64 {
         let t = run * i as f32 / 64.0;
         if let Some(hv) = shape.height(profile, t) {
-            h_lo = h_lo.min(hv);
-            h_hi = h_hi.max(hv);
+            h_lo = h_lo.min(hv * ratio);
+            h_hi = h_hi.max(hv * ratio);
         }
     }
     let h_span = (h_hi - h_lo).max(0.25);
@@ -552,12 +575,22 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
     // drops — 0 at the surrounding surface, positive down into the material.
     let grid = [0.25f32, 0.25, 0.28, 0.6];
     let num_color = [0x84u8, 0x84, 0x92];
+    // The depth numbers are REAL lengths: one wall width of drop is
+    // `bevel_width` logical px, shown in millimetres when the display metric
+    // is measured or configured, in px when it is only assumed.
+    let metric = cce_ui::units::metric();
+    let wall_px = cce_ui::layout::bevel_width();
+    let (axis_unit, per_wall) = if metric.is_real() {
+        ("mm", wall_px * metric.mm_per_px())
+    } else {
+        ("px", wall_px)
+    };
     let mut gh = (h_lo / 0.25).round() * 0.25;
     while gh <= h_hi + 1e-3 {
         let gy = y_zero + gh * unit;
         pc.quad(Rect { x: x0, y: gy, width: wall_w, height: 1.0 }, grid);
         pc.text_with(
-            format!("{gh:.2}"),
+            format!("{:.2}", gh * per_wall),
             rect.x + m + 2.0,
             gy - 5.0,
             10.0,
@@ -593,9 +626,9 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
         } else if inside {
             shape
                 .height(profile, t_of(x))
-                .map(|hv| y_zero + hv * unit)
+                .map(|hv| y_zero + hv * ratio * unit)
         } else if has_floor {
-            shape.height(profile, run).map(|hv| y_zero + hv * unit)
+            shape.height(profile, run).map(|hv| y_zero + hv * ratio * unit)
         } else {
             None // past the silhouette: air
         }
@@ -650,6 +683,17 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
         );
         rt += 0.25;
     }
+    // The depth axis's unit, in the left gutter on the run-number row —
+    // the one spot no excursion of the section can reach.
+    pc.text_with(
+        axis_unit.to_string(),
+        rect.x + m + 2.0,
+        slab_bot + 3.0,
+        10.0,
+        num_color,
+        Some("monospace".to_string()),
+        None,
+    );
 
     // THE SHADING STRIP: what the shader will actually put on screen along
     // this section, as opposed to the geometry drawn above it.
@@ -923,6 +967,17 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
 }
 
 impl BevelPopup {
+    /// The pinned drop as the length it should be written as: millimetres
+    /// when the display metric is real, logical px when it is only assumed.
+    fn height_len(&self, px: f32) -> cce_ui::units::Len {
+        let m = cce_ui::units::metric();
+        if m.is_real() {
+            cce_ui::units::Len::mm(((px * m.mm_per_px()) * 1000.0).round() / 1000.0)
+        } else {
+            cce_ui::units::Len::px(px)
+        }
+    }
+
     /// The selected shape. The dropdown index is the ONLY source; read it
     /// through here so layout and paint cannot disagree about it.
     fn active_shape(&self) -> Shape {
@@ -942,7 +997,7 @@ impl BevelPopup {
         self.active_shape().curve()
     }
 
-    fn root_ids(&self) -> [WidgetId; 12] {
+    fn root_ids(&self) -> [WidgetId; 13] {
         [
             self.profile_dropdown.id(),
             self.edge_dropdown.id(),
@@ -954,12 +1009,13 @@ impl BevelPopup {
             self.edge.bias.id(),
             self.depth_slider.id(),
             self.width_slider.id(),
+            self.height_slider.id(),
             self.save_button.id(),
             self.cancel_button.id(),
         ]
     }
 
-    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 12] {
+    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 13] {
         [
             self.profile_dropdown.as_ptr_mut(),
             self.edge_dropdown.as_ptr_mut(),
@@ -971,6 +1027,7 @@ impl BevelPopup {
             self.edge.bias.as_ptr_mut(),
             self.depth_slider.as_ptr_mut(),
             self.width_slider.as_ptr_mut(),
+            self.height_slider.as_ptr_mut(),
             self.save_button.as_ptr_mut(),
             self.cancel_button.as_ptr_mut(),
         ]
@@ -1021,6 +1078,16 @@ impl BevelPopup {
             println!("width {v:.2}");
             self.needs_rebuild = true;
         }
+        if self.height_slider.take_change() {
+            let v = self.height_slider.inner().get_scaled_value();
+            // 0 = follow the width (`layout::bevel_height` reads 0 as unset).
+            if let Ok(mut reg) = cce_ui::layout::get_style_registry().write() {
+                reg.set_float("bevel_height", v);
+            }
+            let m = cce_ui::units::metric();
+            println!("height {v:.2}px = {:.3}mm ({})", v * m.mm_per_px(), m.source.as_str());
+            self.needs_rebuild = true;
+        }
         if self.save_button.take_click() {
             self.save_to_config();
             self.needs_rebuild = true;
@@ -1042,9 +1109,11 @@ impl BevelPopup {
         // section is not part of a feature material; an untouched analytic
         // wall writes no profile at all.
         if let Some(key) = self.target_key.clone() {
+            let h = self.height_slider.inner().get_scaled_value();
             let spec = cce_ui::relief_spec::ReliefSpec {
                 width: self.width_slider.inner().get_scaled_value(),
-                depth: Some(self.depth_slider.inner().get_scaled_value()),
+                height: (h > 0.0).then(|| self.height_len(h)),
+                light: Some(self.depth_slider.inner().get_scaled_value()),
                 knobs: Some(self.wall.values()),
                 profile: self.wall.custom.then(|| self.wall.last_spec.clone()),
             };
@@ -1077,7 +1146,24 @@ impl BevelPopup {
         let wb = |key: &str, value: &str| {
             cce_ui::config::write_config_value_typed(&p, key, value, "style", Some("bevel"))
         };
-        let ok = w("style.surface.relief.depth", &depth)
+        // The pinned drop is a LENGTH: written in millimetres when the
+        // display metric is real (fabrication reads it straight), in logical
+        // px when it is only assumed; 0 = follow the width.
+        let h = self.height_slider.inner().get_scaled_value();
+        let height_ok = if h > 0.0 {
+            let len = self.height_len(h);
+            cce_ui::config::write_config_value_typed(
+                &p,
+                "style.surface.relief.height",
+                &cce_ui::units::fmt_num(len.value),
+                "style",
+                Some(len.unit.suffix()),
+            )
+        } else {
+            w("style.surface.relief.height", "0")
+        };
+        let ok = height_ok
+            & w("style.surface.relief.depth", &depth)
             & w("style.surface.relief.width", &width)
             & w("style.surface.relief.profile", &self.wall.last_spec)
             & w("style.surface.relief.edge_profile", &self.edge.last_spec)
@@ -1147,6 +1233,15 @@ impl Application for BevelPopup {
         let rel_f32 = |k: &str| {
             target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_f64()).map(|f| f as f32)
         };
+        // A length key: a bare number is logical px, a `(mm)`-annotated one
+        // arrives as the string "0.3mm" and resolves through the metric.
+        let rel_len = |k: &str| {
+            target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| {
+                v.as_f64()
+                    .map(|f| f as f32)
+                    .or_else(|| v.as_str().and_then(cce_ui::units::Len::parse).map(|l| l.to_px()))
+            })
+        };
         // `--key` seeds: the single `(relief)` value at that key wins over
         // both the target file's material keys and the registry. Installing
         // it live BEFORE the knob structs are built means the preview shows
@@ -1163,8 +1258,11 @@ impl Application for BevelPopup {
         if let Some(ks) = &key_spec {
             if let Ok(mut reg) = cce_ui::layout::get_style_registry().write() {
                 reg.set_float("bevel_width", ks.width);
-                if let Some(d) = ks.depth {
+                if let Some(d) = ks.light {
                     reg.set_float("bevel_depth", d);
+                }
+                if let Some(h) = ks.height {
+                    reg.set_len("bevel_height", h);
                 }
             }
             cce_ui::layout::install_wall_profile_spec(ks.profile.as_deref());
@@ -1186,14 +1284,32 @@ impl Application for BevelPopup {
 
         let depth = key_spec
             .as_ref()
-            .and_then(|s| s.depth)
+            .and_then(|s| s.light)
+            .or_else(|| rel_f32("light"))
             .or_else(|| rel_f32("depth"))
             .unwrap_or_else(cce_ui::layout::bevel_depth);
+        let height = key_spec
+            .as_ref()
+            .and_then(|s| s.height)
+            .map(|l| l.to_px())
+            .or_else(|| rel_len("height"))
+            .or_else(cce_ui::layout::bevel_height)
+            .unwrap_or(0.0);
         let width = key_spec
             .as_ref()
             .map(|s| s.width)
             .or_else(|| rel_f32("width"))
             .unwrap_or_else(cce_ui::layout::bevel_width);
+        // The seeds ARE the material this window previews: install them so
+        // the section, the strip and the popup's own plate show the target
+        // file's width / light / height from the first frame, not the
+        // DE-wide registry's until a knob moves. (A `--key` spec was
+        // installed above already; this repeats it harmlessly.)
+        if let Ok(mut reg) = cce_ui::layout::get_style_registry().write() {
+            reg.set_float("bevel_depth", depth);
+            reg.set_float("bevel_width", width);
+            reg.set_float("bevel_height", height);
+        }
         // A key target labels the window by the key, not the file.
         let target_label = match &target_key {
             Some(k) => {
@@ -1204,6 +1320,7 @@ impl Application for BevelPopup {
         };
         let (dmin, dmax) = DEPTH_RANGE;
         let (wmin, wmax) = WIDTH_RANGE;
+        let (hmin, hmax) = HEIGHT_RANGE;
         // The persisted per-app plate opacity, falling back to the DE look.
         // New path first, then the pre-rename one, so an existing opacity
         // setting keeps working without a migration step.
@@ -1232,7 +1349,7 @@ impl Application for BevelPopup {
             wall: ProfileKnobs::new(wall_seed, cce_ui::layout::bevel_profile_slopes().is_some()),
             edge: ProfileKnobs::new(edge_seed, cce_ui::layout::roll_profile_slopes().is_some()),
             depth_slider: Slider::new()
-                .with_label("Depth")
+                .with_label("Light")
                 .with_range(dmin, dmax)
                 .with_value(((depth - dmin) / (dmax - dmin)).clamp(0.0, 1.0))
                 .with_readout(true)
@@ -1242,6 +1359,13 @@ impl Application for BevelPopup {
                 .with_label("Width")
                 .with_range(wmin, wmax)
                 .with_value(((width - wmin) / (wmax - wmin)).clamp(0.0, 1.0))
+                .with_readout(true)
+                .with_decimals(1)
+                .with_scroll(true),
+            height_slider: Slider::new()
+                .with_label("Height")
+                .with_range(hmin, hmax)
+                .with_value(((height - hmin) / (hmax - hmin)).clamp(0.0, 1.0))
                 .with_readout(true)
                 .with_decimals(1)
                 .with_scroll(true),
@@ -1342,13 +1466,13 @@ impl Application for BevelPopup {
             let knob_h = 22.0 + strip;
             let button_h = 26.0;
             let status_h = HEADER_FONT_SIZE + 4.0;
-            // Rows above/below the cutaway: the selector row, then FIVE
+            // Rows above/below the cutaway: the selector row, then SIX
             // stacked sliders, then buttons and status. Stacked rather than
             // gridded because a slider's label and readout want the full width
             // — three to a row truncated both, and the two-wide Depth/Width row
             // set a different rhythm again for no reason.
             let fixed = knob_h + gap                      // selector row
-                + 5.0 * (knob_h + gap)                    // Shoulder..Width
+                + 6.0 * (knob_h + gap)                    // Shoulder..Height
                 + button_h + 8.0 + status_h + 2.0 * gap;  // buttons + status
             // The cutaway absorbs spare height — but only up to its NATURAL
             // height for this width (the proportional square domain plus
@@ -1400,6 +1524,8 @@ impl Application for BevelPopup {
             self.depth_slider.set_rect(x, y, w, knob_h);
             y += knob_h + gap;
             self.width_slider.set_rect(x, y, w, knob_h);
+            y += knob_h + gap;
+            self.height_slider.set_rect(x, y, w, knob_h);
             y += knob_h + gap;
             self.save_button.set_rect(x, y, 96.0, button_h);
             self.cancel_button.set_rect(x + 96.0 + 12.0, y, 96.0, button_h);
@@ -1463,6 +1589,7 @@ impl Application for BevelPopup {
             &knobs.bias,
             &self.depth_slider,
             &self.width_slider,
+            &self.height_slider,
         ] {
             cce_ui::scene::painter::paint_root_into(&self.ui_context, s, &mut pc);
         }

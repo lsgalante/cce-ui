@@ -131,7 +131,7 @@ const PLATE_FEATURE_BYTES: usize = 48;
 /// shader2d's WindowInfo UBO: [size/clip vec4][bevel-profile meta vec4]
 /// [8 vec4 of profile slope samples].
 // [size/clip vec4][carve profile meta + 8 vec4][roll profile meta + 8 vec4].
-const WINDOW_INFO_BYTES: vk::DeviceSize = 304;
+const WINDOW_INFO_BYTES: vk::DeviceSize = 320;
 
 pub(crate) struct AllocatedBuffer {
     pub(crate) buffer: vk::Buffer,
@@ -251,6 +251,10 @@ pub struct VkRenderer {
     /// The bevel-profile generation `window_info` was last written with —
     /// `draw_frame_2d` rewrites the UBO when the layout global moves on.
     profile_gen: u64,
+    /// The pinned relief heights (carve drop, roll rise) in physical px as
+    /// last uploaded in WindowInfo — compared each frame, since editors set
+    /// them straight into the style registry with no generation counter.
+    relief_uploaded: (f32, f32),
     /// Same for the edge (roll) profile LUT.
     roll_profile_gen: u64,
     plate_features: AllocatedBuffer,
@@ -866,6 +870,7 @@ impl VkRenderer {
             backdrop_sampler,
             window_info,
             profile_gen: 0,
+            relief_uploaded: (0.0, 0.0),
             roll_profile_gen: 0,
             plate_features,
             frames,
@@ -902,10 +907,19 @@ impl VkRenderer {
         (self.corner_radius_px * crate::layout::corner_span_factor()).min(cap)
     }
 
+    /// The pinned relief heights in physical px, 0 = follow the width.
+    fn relief_px(&self) -> (f32, f32) {
+        let s = crate::scale::scale_factor().max(0.001);
+        (
+            crate::layout::bevel_height().map_or(0.0, |h| h * s),
+            crate::layout::roll_height().map_or(0.0, |h| h * s),
+        )
+    }
+
     fn write_window_info(&mut self) {
         // [size/clip vec4][carve profile meta vec4][8 vec4 carve slopes]
-        // [roll profile meta vec4][8 vec4 roll slopes] — must stay in
-        // lockstep with shader2d's WindowInfo.
+        // [roll profile meta vec4][8 vec4 roll slopes][relief heights vec4]
+        // — must stay in lockstep with shader2d's WindowInfo.
         let mut data = [0.0f32; WINDOW_INFO_BYTES as usize / 4];
         data[0] = self.extent.width as f32;
         data[1] = self.extent.height as f32;
@@ -921,6 +935,10 @@ impl VkRenderer {
             data[41] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
             data[44..44 + slopes.len()].copy_from_slice(&slopes);
         }
+        let relief = self.relief_px();
+        data[76] = relief.0;
+        data[77] = relief.1;
+        self.relief_uploaded = relief;
         self.profile_gen = crate::layout::bevel_profile_generation();
         self.roll_profile_gen = crate::layout::roll_profile_generation();
         if let Some(allocation) = self.window_info.allocation.as_mut() {
@@ -1543,6 +1561,7 @@ impl VkRenderer {
             // both are valid profiles, so the one-frame mix is benign.
             if self.profile_gen != crate::layout::bevel_profile_generation()
                 || self.roll_profile_gen != crate::layout::roll_profile_generation()
+                || self.relief_uploaded != self.relief_px()
             {
                 self.write_window_info();
             }

@@ -19,7 +19,8 @@
 
 /// Ambient floor of the plate lighting model. Mirrors `PLATE_AMBIENT`.
 pub const PLATE_AMBIENT: f32 = 0.55;
-/// Recess depth as a fraction of the roll width. Mirrors `RECESS_DEPTH`.
+/// A carve's drop as a fraction of its wall width when the material pins no
+/// height (`layout::bevel_height`). Mirrors `RECESS_DEPTH`.
 pub const RECESS_DEPTH: f32 = 0.6;
 
 /// Amplitude of the bright crest hugging a raised plate's silhouette.
@@ -47,6 +48,13 @@ pub struct Material {
     pub spec: f32,
     pub shininess: f32,
     pub curvature: f32,
+    /// A carve's drop over its run (`layout::carve_depth_ratio`): the
+    /// geometry the slopes are scaled by. [`RECESS_DEPTH`] unless a height is
+    /// pinned. Not in `to_array` — the shader reads it from `WindowInfo`.
+    pub carve_depth: f32,
+    /// The plate roll's rise over its run (`layout::roll_height_ratio`):
+    /// 1 for the quarter-round.
+    pub roll_height: f32,
 }
 
 impl Material {
@@ -59,6 +67,8 @@ impl Material {
             spec: 0.4,
             shininess: 24.0,
             curvature: 0.2,
+            carve_depth: crate::layout::carve_depth_ratio(),
+            roll_height: crate::layout::roll_height_ratio(),
         }
     }
 
@@ -143,14 +153,14 @@ pub fn carve_shade(
             let up = if mode == CarveMode::Ridge { 1.0 } else { -1.0 };
             let rising = if u <= 0.5 { 1.0 } else { -1.0 } * up;
             (
-                rising * 0.5 * RECESS_DEPTH * 2.0 * slope_at(w),
+                rising * 0.5 * mat.carve_depth * 2.0 * slope_at(w),
                 -up * mat.curvature * (w * std::f32::consts::TAU).sin(),
             )
         }
         _ => {
             let dir = if mode == CarveMode::Boss { 1.0 } else { -1.0 };
             (
-                dir * RECESS_DEPTH * slope_at(u),
+                dir * mat.carve_depth * slope_at(u),
                 -dir * mat.curvature * (u * std::f32::consts::TAU).sin(),
             )
         }
@@ -202,7 +212,7 @@ pub fn plate_surface(
     if !(0.0..=1.0).contains(&f) {
         return None;
     }
-    let slope = roll_slope_at(f);
+    let slope = roll_slope_at(f) * mat.roll_height;
     let sv = [facing[0] * slope, facing[1] * slope];
     let n = {
         let len = (sv[0] * sv[0] + sv[1] * sv[1] + 1.0).sqrt();
@@ -290,6 +300,19 @@ mod tests {
                 assert!(v.abs() < 1e-4, "{mode:?} at u={u} shaded {v}, expected 0");
             }
         }
+    }
+
+    /// A pinned height is geometry: a deeper carve tilts its wall more and
+    /// shades harder, with nothing else changed.
+    #[test]
+    fn deeper_carve_shades_harder() {
+        let light = light_vector();
+        let shallow = Material { carve_depth: 0.3, ..Material::from_style() };
+        let deep = Material { carve_depth: 1.2, ..Material::from_style() };
+        let at = |m: &Material| carve_shade(CarveMode::Recess, 0.5, [-1.0, 0.0], &analytic_carve_slope, light, m).abs();
+        assert!(at(&deep) > at(&shallow) * 1.5, "deep {} vs shallow {}", at(&deep), at(&shallow));
+        // And the flat plateaus still composite to nothing.
+        assert!(carve_shade(CarveMode::Recess, 0.0, [-1.0, 0.0], &analytic_carve_slope, light, &deep).abs() < 1e-4);
     }
 
     /// Ridge and trough are the same wall with the height sign flipped, so

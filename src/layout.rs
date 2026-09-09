@@ -146,8 +146,14 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 // (these shade every bevel/boss/recess in the toolkit — the
                 // compositor never read them, so the old window_manager
                 // spelling survives only as a compat alias).
-                "style.surface.relief.depth" | "window_manager.bevel_depth" => "bevel_depth",
+                // `depth` is the light strength, not a length — `light` is
+                // the honest spelling, `depth` the one every config has.
+                "style.surface.relief.depth" | "style.surface.relief.light" | "window_manager.bevel_depth" => "bevel_depth",
                 "style.surface.relief.width" | "window_manager.bevel_width" => "bevel_width",
+                // The geometric heights, both lengths (unit-aware): a carve's
+                // drop and the plate roll's rise. Unset = follow the width.
+                "style.surface.relief.height" => "bevel_height",
+                "style.surface.relief.edge_height" => "roll_height",
                 // Ramp-spec strings for the custom wall/roll profiles
                 // (written by cce-relief, installed by reload_config).
                 "style.surface.relief.profile" => "bevel_profile_spec",
@@ -1715,6 +1721,57 @@ pub fn bevel_shader() -> bool {
 pub fn bevel_width() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("bevel_width").unwrap_or(9.3)
+}
+
+/// A carve's geometric drop when the material pins one
+/// (`style.surface.relief.height`, a length — `(mm)0.3` resolves through
+/// the display metric), in logical px. `None` = follow the wall width at the
+/// analytic ratio ([`crate::scene::relief_shade::RECESS_DEPTH`]), the look
+/// every config had before heights existed. A configured 0 reads as unset,
+/// which is how an editor puts a material back on "follow".
+pub fn bevel_height() -> Option<f32> {
+    lazy_init_style_registry();
+    get_style_registry()
+        .read()
+        .unwrap()
+        .get_float("bevel_height")
+        .filter(|h| h.is_finite() && *h > 0.0)
+}
+
+/// The plate roll's rise when pinned (`style.surface.relief.edge_height`, a
+/// length), logical px. `None` = a quarter-round of radius `bevel_width`.
+pub fn roll_height() -> Option<f32> {
+    lazy_init_style_registry();
+    get_style_registry()
+        .read()
+        .unwrap()
+        .get_float("roll_height")
+        .filter(|h| h.is_finite() && *h > 0.0)
+}
+
+/// The drop of a carve whose wall runs `wall` logical px: the pinned height
+/// when there is one, else the analytic ratio of the wall — saturating at the
+/// DE's roll width, so a wall wider than the plate's own perimeter roll
+/// spreads the same step over a longer run (a softer transition) instead of
+/// cutting proportionally deeper. The tessellator's CSG features and the
+/// shader's free carves both derive from this rule.
+pub fn carve_depth_px(wall: f32) -> f32 {
+    match bevel_height() {
+        Some(h) => h,
+        None => crate::scene::relief_shade::RECESS_DEPTH * wall.min(bevel_width()),
+    }
+}
+
+/// Drop over run for a wall of the DE roll width — what the shading twin
+/// scales its slopes by.
+pub fn carve_depth_ratio() -> f32 {
+    let w = bevel_width().max(0.001);
+    carve_depth_px(w) / w
+}
+
+/// Rise over run of the plate roll: 1 (the quarter-round) unless pinned.
+pub fn roll_height_ratio() -> f32 {
+    roll_height().map_or(1.0, |h| h / bevel_width().max(0.001))
 }
 
 /// Sample count of the custom bevel profile LUT ([`set_bevel_profile_keys`]).

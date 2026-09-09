@@ -296,6 +296,22 @@ adds the bridge to real lengths, in two parts:
   beside `scale::set_scale_factor` (`units::set_metric`); apps read
   `units::metric()`, `units::mm(v)`, or `Len::to_px()`.
 
+**Relief has a real depth axis now.** `style.surface.relief.width` (the wall's
+run) and the new **`height`** (a carve's drop) and **`edge_height`** (the plate
+roll's rise) are all lengths — `height=(mm)0.3` is honest geometry, resolved
+through the metric. Unset, a carve drops `relief_shade::RECESS_DEPTH` (0.6) of
+its wall (saturating at the DE roll width) and the roll is a quarter-round of
+radius width — the look every config had. `style.surface.relief.depth` is NOT a
+length: it is the light strength (`bevel_depth` → `Material.strength`), and
+**`light`** is its honest alias. `layout::carve_depth_px` states the drop rule
+once for the tessellator's CSG features and, through `WindowInfo.relief_meta`,
+the shader's free carves; `carve_depth_ratio` / `roll_height_ratio` feed the
+shading twin (`Material.carve_depth` / `roll_height`). A `(relief)` value
+carries the drop as `h=` (a length: `h=0.5mm`, or bare px) beside `w=` and
+`d=` (light; `l=` reads as an alias). `cce-relief`'s Height knob is the editor:
+its section's depth numbers read in mm when the metric is real, and Save
+writes `height` as a `(mm)` length then, px otherwise.
+
 Why not millimetres inside: UI sizes are perceptual and angular, not physical
 — a hit target should not become 8 mm on a projector three metres away.
 Documents and fabrication content live in real units and convert at view

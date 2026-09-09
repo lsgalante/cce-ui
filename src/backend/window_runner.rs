@@ -2115,12 +2115,11 @@ pub fn tessellate_display_list(
                         if !edges.2 { y1 += ext; }
                         if !edges.3 { x0 -= ext; }
                         let t_px = *depth * scale;
-                        // Depth saturates at the DE's nominal roll width: a wall
-                        // wider than the plate's own perimeter roll spreads that
-                        // same step over the longer run — a softer transition —
-                        // instead of cutting proportionally deeper (which would
-                        // keep the wall just as steep no matter how wide it got).
-                        let k_mag = RECESS_DEPTH_RATIO * t_px.min(crate::layout::bevel_width() * scale);
+                        // The carve's drop: the material's pinned height, else
+                        // the analytic ratio of the wall saturating at the DE's
+                        // roll width (`layout::carve_depth_px` states the rule
+                        // once for this path and the shader's free carves).
+                        let k_mag = crate::layout::carve_depth_px(*depth) * scale;
                         // Negative depth = raised (Boss); the shader's summed
                         // slope vectors and curvature sign follow it.
                         let k_px = if raised { -k_mag } else { k_mag };
@@ -2610,10 +2609,6 @@ pub fn tessellate_display_list(
 
     (verts, batches, images, features)
 }
-
-/// A carve's depth as a fraction of its transition width — must match the
-/// shader's `RECESS_DEPTH` (used by the mode-2 overlay fallback).
-const RECESS_DEPTH_RATIO: f32 = 0.6;
 
 /// The push-constant block for a raised SDF-lit plate over `rect` (logical px in,
 /// physical px out). Corner radii clamp to the half-extent cap the SDF needs.

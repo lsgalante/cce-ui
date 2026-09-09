@@ -27,6 +27,13 @@ struct WindowInfo {
     // the roll's descent progress: 0 at the face join, 1 at the silhouette.
     roll_meta: vec4f,
     roll_profile: array<vec4f, 8>,
+    // Pinned relief heights in physical px (cce_ui::layout::bevel_height /
+    // roll_height): x = a carve's drop, y = the plate roll's rise. 0 = follow
+    // the wall width — RECESS_DEPTH × width for a carve, a quarter-round of
+    // radius width for the roll. Divided by the batch's own wall width
+    // (p_light.w) they become the slope scale, so a pinned 0.5 mm drop is
+    // the same geometry whatever wall it is cut with.
+    relief_meta: vec4f,
 }
 
 @group(0) @binding(2) var<uniform> window_info: WindowInfo;
@@ -268,6 +275,14 @@ fn roll_spec_wrap(sv: vec2f) -> f32 {
 const ROLL_CUT: f32 = 0.8;
 
 fn roll_slope(f: f32) -> f32 {
+    let t = max(rrect_clip.p_light.w, 0.001);
+    let rr = select(1.0, window_info.relief_meta.y / t, window_info.relief_meta.y > 0.0);
+    return roll_slope_unit(f) * rr;
+}
+
+// The unit-rise roll (a quarter-round of radius t, or the custom edge LUT);
+// roll_slope scales it by the pinned rise.
+fn roll_slope_unit(f: f32) -> f32 {
     // Custom edge profile: sample the uploaded ramp LUT. Face pixels saturate
     // at f = 0 (the roll band's interior end), so taper the slope to zero
     // there or every face pixel would inherit the curve's start slope; the
@@ -671,6 +686,9 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         wedge = select(0.0, 1.0, rel <= 1.5707964);
     }
     let u = clamp(fd / t + 0.5, 0.0, 1.0);
+    // Drop over run: the pinned height against THIS carve's wall, else the
+    // analytic ratio (the tessellator's CSG features apply the same rule).
+    let cd = select(RECESS_DEPTH, window_info.relief_meta.x / t, window_info.relief_meta.x > 0.0);
     var slope = 0.0;
     var curv = 0.0;
     if (eff == MODE_RIDGE || eff == MODE_TROUGH) {
@@ -684,7 +702,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let w = clamp(select(2.0 * u, 2.0 - 2.0 * u, u > 0.5), 0.0, 1.0);
         let up = select(-1.0, 1.0, eff == MODE_RIDGE);
         let rising = select(-1.0, 1.0, u <= 0.5) * up;
-        slope = rising * 0.5 * RECESS_DEPTH * 2.0 * carve_slope(w);
+        slope = rising * 0.5 * cd * 2.0 * carve_slope(w);
         // Each half-wall is a boss wall: concave fillet at its base, convex
         // shoulder toward the crest — and ZERO at the plateaus and crest, so
         // flat ground composites to exactly nothing (a constant term here
@@ -698,7 +716,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // normally, smootherstep (zero second derivative at the plateaus)
         // under a continuous-curvature corner_shape — shading eases in and out
         // instead of starting on a line.
-        slope = dir * RECESS_DEPTH * carve_slope(u);
+        slope = dir * cd * carve_slope(u);
         // Curvature: the convex shoulder catches ambient light, the concave
         // fillet self-occludes — on the outer half for a recess, inner for a
         // boss.
