@@ -147,9 +147,13 @@ What this buys, and where the code is heading:
   well's `recess_tinted` gives its rim while editing — never extra geometry.
   A Checkbox lights the ring its mark already draws; a Toggle lights its
   label (its rocker halves carve partial rings, which cannot be tinted).
-  Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector are plates;
-  TextBox, Spinbox, ColorSelector, KeybindRecorder, TreeList are wells. A new
-  focusable widget declares its role and handles `FocusIn` / `FocusOut`.
+  Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector, ButtonStrip
+  (arrows move the selection between its segment plates) and Breadcrumb
+  (arrows walk its visible segments, Enter navigates) are plates; TextBox,
+  Spinbox, ColorSelector, KeybindRecorder, TreeList and Slider (a band, but
+  entered and adjusted in place — arrows step it, Enter opens the readout)
+  are wells. A new focusable widget declares its role and handles `FocusIn`
+  / `FocusOut`.
 - **One plate spec per rung, not five copies.** The root and pane rungs are
   `scene::paint::PlateSpec` (RFC 7b, painted by `PaintCtx::plate`). The
   control rung is `scene::paint::ControlPlate` (re-exported from `widget`):

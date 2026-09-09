@@ -59,6 +59,11 @@ pub struct Breadcrumb {
     /// than sitting inset into a toolbar. Flat (non-relief) styling and the
     /// seams are identical in both stances.
     pub raised: bool,
+    /// Keyboard focus (FocusIn / FocusOut): the run's rim lights and a cursor
+    /// segment (`focus_seg`, a logical index) wears the wash; the arrows walk
+    /// the visible segments, Enter / Space navigate to the cursor's.
+    focused: bool,
+    focus_seg: Option<usize>,
 }
 
 impl Breadcrumb {
@@ -69,6 +74,8 @@ impl Breadcrumb {
             hovered_seg: None,
             clicked_seg: None,
             right_clicked_seg: None,
+            focused: false,
+            focus_seg: None,
             network_opacity: 1.0,
             raised: false,
         })
@@ -350,10 +357,19 @@ impl Paint for Breadcrumb {
                     (crate::widget::PlateStance::Flush, face)
                 };
                 ctx.control_plate(
-                    &crate::widget::ControlPlate::control(run_rect, r, stance, face).with_depth(depth),
+                    &crate::widget::ControlPlate::control(run_rect, r, stance, face)
+                        .with_depth(depth)
+                        .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint)),
                 );
                 for (a, b) in self.seams(rect) {
                     ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);
+                }
+            } else if self.focused {
+                // Flat: no rim to light, so the run wears a hairline ring in the highlight.
+                let t = crate::widget::ControlPlate::focus_tint();
+                ctx.border(run_rect, (r, r, r, r), self.bg_color(), [t[0], t[1], t[2], 1.0], 1.0);
+                for (a, b) in self.seams(rect) {
+                    ctx.vector(a.0, a.1, b.0, b.1, 1.0, [0.0, 0.0, 0.0, 0.25], crate::scene::paint::Cap::Flat);
                 }
             } else {
                 ctx.rounded_rect(run_rect, r, (true, true, true, true), self.bg_color());
@@ -369,7 +385,17 @@ impl Paint for Breadcrumb {
         // same seam-lean and corner-arc math the seams and run box use.
         // ~24 plain Quads, hover-only — and Quads survive the flat hosts'
         // rounded-quad bridge, so cce-files' mirror gets the same shape.
-        if let Some(hovered) = self.hovered_seg {
+        // The hover wash, and the keyboard cursor's wash in the highlight while
+        // the run holds focus — the same banded silhouette.
+        let mut washes: Vec<(usize, [f32; 4])> = Vec::new();
+        if let Some(h) = self.hovered_seg {
+            washes.push((h, [1.0, 1.0, 1.0, 0.06]));
+        }
+        if let (true, Some(f)) = (self.focused, self.focus_seg) {
+            let t = crate::widget::ControlPlate::focus_tint();
+            washes.push((f, [t[0], t[1], t[2], 0.18]));
+        }
+        for (hovered, wash) in washes {
             if let (Some((sx0, sw)), Some((rx, ry, rw, rh))) = (
                 segs.iter().find(|s| s.logical == Some(hovered)).map(|s| (s.x, s.w)),
                 self.run_box(rect),
@@ -390,7 +416,6 @@ impl Paint for Breadcrumb {
                     };
                     rr - (rr * rr - dy * dy).max(0.0).sqrt()
                 };
-                let wash = [1.0, 1.0, 1.0, 0.06];
                 let mut y = hy;
                 while y < hy + hh {
                     let bh = 1.0f32.min(hy + hh - y);
@@ -436,8 +461,61 @@ impl Input for Breadcrumb {
         self.seg_at(rect, px, py).is_some()
     }
 
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Plate
+    }
+
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
+            Event::FocusIn => {
+                self.focused = true;
+                // The cursor starts on the current directory (the last segment).
+                self.focus_seg = self.path.len().checked_sub(1);
+                true
+            }
+            Event::FocusOut => {
+                self.focused = false;
+                self.focus_seg = None;
+                true
+            }
+            Event::KeyInput(key_event) => {
+                // Left / Right walk the VISIBLE segments (the ellipsis is not a
+                // stop); Enter / Space navigate to the cursor's segment, the click.
+                if !self.focused || key_event.state != crate::widget::ElementState::Pressed {
+                    return false;
+                }
+                let logicals: Vec<usize> =
+                    self.visible_segs(ectx.rect).into_iter().filter_map(|s| s.logical).collect();
+                match key_event.logical_key {
+                    crate::widget::Key::Named(crate::widget::NamedKey::ArrowLeft)
+                    | crate::widget::Key::Named(crate::widget::NamedKey::ArrowRight) => {
+                        if logicals.is_empty() {
+                            return false;
+                        }
+                        let right = key_event.logical_key == crate::widget::Key::Named(crate::widget::NamedKey::ArrowRight);
+                        let pos = self.focus_seg.and_then(|f| logicals.iter().position(|l| *l == f));
+                        let next = match (pos, right) {
+                            (Some(p), true) => (p + 1).min(logicals.len() - 1),
+                            (Some(p), false) => p.saturating_sub(1),
+                            (None, true) => 0,
+                            (None, false) => logicals.len() - 1,
+                        };
+                        self.focus_seg = Some(logicals[next]);
+                        true
+                    }
+                    crate::widget::Key::Named(crate::widget::NamedKey::Enter)
+                    | crate::widget::Key::Named(crate::widget::NamedKey::Space) => {
+                        match self.focus_seg {
+                            Some(i) if i < self.path.len() => {
+                                self.clicked_seg = Some(i);
+                                true
+                            }
+                            _ => false,
+                        }
+                    }
+                    _ => false,
+                }
+            }
             Event::PointerMove { x: px, y: py, .. } => {
                 let r = ectx.rect;
                 let was = self.hovered;
@@ -751,5 +829,33 @@ mod tests {
         let mut breadcrumb = Breadcrumb::new();
         PathController::set_path(&mut *breadcrumb, &["a".to_string()]);
         assert_eq!(breadcrumb.path, vec!["a".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use crate::widget::{ElementState, Event, Key, KeyEvent, NamedKey, UiContext, WidgetHost};
+
+    fn press(key: NamedKey) -> Event {
+        Event::KeyInput(KeyEvent { logical_key: Key::Named(key), state: ElementState::Pressed, text: None, repeat: false, ctrl: false, shift: false, alt: false })
+    }
+
+    /// Focus lands the cursor on the current directory; Left walks back a
+    /// visible segment; Enter navigates to the cursor's segment (the click).
+    #[test]
+    fn cursor_walks_segments_and_enter_navigates() {
+        let mut ctx = UiContext::new();
+        let mut b = Breadcrumb::new();
+        b.set_path(&["home".to_string(), "lsgalante".to_string(), "projects".to_string()]);
+        WidgetHost::set_rect(&mut b, 10.0, 20.0, 400.0, 26.0);
+        b.handle_event(&Event::FocusIn, &mut ctx);
+        assert_eq!(b.inner().focus_seg, Some(2), "cursor on the current directory");
+        assert!(b.handle_event(&press(NamedKey::ArrowLeft), &mut ctx));
+        assert_eq!(b.inner().focus_seg, Some(1));
+        assert!(b.handle_event(&press(NamedKey::Enter), &mut ctx));
+        assert_eq!(b.inner().clicked_seg, Some(1), "Enter is the click on the cursor's segment");
+        b.handle_event(&Event::FocusOut, &mut ctx);
+        assert_eq!(b.inner().focus_seg, None);
     }
 }

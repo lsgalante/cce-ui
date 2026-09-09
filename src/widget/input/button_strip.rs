@@ -29,6 +29,9 @@ pub struct ButtonStrip {
     /// and press a wash. Defaults to `control_relief()`; the flat style keeps
     /// the plain state quads.
     pub recessed: bool,
+    /// Keyboard focus (FocusIn / FocusOut): the selected segment's plate wears
+    /// the ring; arrows move the selection, Enter / Space press it.
+    focused: bool,
 }
 
 impl ButtonStrip {
@@ -52,6 +55,7 @@ impl ButtonStrip {
             inherit_menubar_font: false,
             label: None,
             recessed: crate::layout::control_relief(),
+            focused: false,
         }
     }
 
@@ -375,16 +379,25 @@ impl crate::widget::Paint for ButtonStrip {
             let inset = if self.recessed { depth * 0.5 } else { 0.0 };
             let seg = Rect { x: r.0 + inset, y: r.1 + inset, width: (r.2 - 2.0 * inset).max(0.0), height: (r.3 - 2.0 * inset).max(0.0) };
             let seg_r = (radius - inset).max(0.0);
+            let focus_ring = self.focused && Some(i) == self.selected;
             if bg_color != [0.0, 0.0, 0.0, 0.0] {
-                pc.rounded_rect(seg, seg_r, (true, true, true, true), bg_color);
+                if focus_ring && !self.recessed {
+                    // Flat: no rim to light, so the selected fill wears a hairline
+                    // ring in the highlight.
+                    let t = crate::widget::ControlPlate::focus_tint();
+                    pc.border(seg, (seg_r, seg_r, seg_r, seg_r), bg_color, [t[0], t[1], t[2], 1.0], 1.0);
+                } else {
+                    pc.rounded_rect(seg, seg_r, (true, true, true, true), bg_color);
+                }
             }
             if self.recessed && Some(i) == self.selected {
                 // The selected segment: a raised control plate standing on the
                 // well floor, faceless (the floor shows through), at the well's
-                // depth.
+                // depth — its rim lit while the strip holds keyboard focus.
                 pc.control_plate(
                     &crate::widget::ControlPlate::control(seg, seg_r, crate::widget::PlateStance::Raised, [0.0; 4])
-                        .with_depth(depth),
+                        .with_depth(depth)
+                        .with_tint(focus_ring.then(crate::widget::ControlPlate::focus_tint)),
                 );
             }
 
@@ -449,8 +462,45 @@ impl crate::widget::Input for ButtonStrip {
         changed
     }
 
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Plate
+    }
+
     fn on_event(&mut self, event: &Event, _ectx: &mut crate::widget::EventCtx) -> bool {
         match event {
+            Event::FocusIn => {
+                self.focused = true;
+                true
+            }
+            Event::FocusOut => {
+                self.focused = false;
+                true
+            }
+            Event::KeyInput(key_event) => {
+                // The segments are plates in a row: the arrows along the strip's
+                // axis move the selection (a keyboard press of the neighbour),
+                // Enter / Space press the selected one again.
+                if !self.focused || key_event.state != ElementState::Pressed || self.buttons.is_empty() {
+                    return false;
+                }
+                let n = self.buttons.len();
+                let step: Option<isize> = match key_event.logical_key {
+                    Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowUp) => Some(-1),
+                    Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowDown) => Some(1),
+                    Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => Some(0),
+                    _ => None,
+                };
+                let Some(step) = step else { return false };
+                let target = match (self.selected, step) {
+                    (Some(i), 0) => i,
+                    (None, _) => if step < 0 { n - 1 } else { 0 },
+                    (Some(i), s) => ((i as isize + s).rem_euclid(n as isize)) as usize,
+                };
+                self.selected = Some(target);
+                self.just_clicked = Some(target);
+                self.generate_rotated_labels();
+                true
+            }
             Event::MouseButton { button, state, x: px, y: py, .. } => {
                 if *button != MouseButton::Left {
                     return false;
@@ -589,5 +639,35 @@ impl ButtonStrip {
             }
         }
         labels
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use crate::widget::{Event, KeyEvent, UiContext, WidgetHost};
+
+    fn press(key: NamedKey) -> Event {
+        Event::KeyInput(KeyEvent { logical_key: Key::Named(key), state: ElementState::Pressed, text: None, repeat: false, ctrl: false, shift: false, alt: false })
+    }
+
+    /// Focused, the arrows move the selection between the segment plates (a
+    /// keyboard press of the neighbour, so hosts see a click), wrapping; Enter
+    /// presses the selected one again.
+    #[test]
+    fn arrows_move_the_selection_and_enter_presses_it() {
+        let mut ctx = UiContext::new();
+        let mut s = Adapted::new(ButtonStrip::new(0.0, 0.0, 200.0, 28.0).with_buttons(vec!["One".into(), "Two".into(), "Three".into()]).with_selected(Some(0)));
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 28.0);
+        assert!(!s.handle_event(&press(NamedKey::ArrowRight), &mut ctx), "unfocused: not this strip's key");
+        s.handle_event(&Event::FocusIn, &mut ctx);
+        assert!(s.handle_event(&press(NamedKey::ArrowRight), &mut ctx));
+        assert_eq!(s.selected(), Some(1));
+        assert_eq!(s.inner_mut().take_click(), Some(1), "hosts see a click");
+        assert!(s.handle_event(&press(NamedKey::ArrowLeft), &mut ctx));
+        assert!(s.handle_event(&press(NamedKey::ArrowLeft), &mut ctx));
+        assert_eq!(s.selected(), Some(2), "wraps");
+        assert!(s.handle_event(&press(NamedKey::Enter), &mut ctx));
+        assert_eq!(s.inner_mut().take_click(), Some(2));
     }
 }

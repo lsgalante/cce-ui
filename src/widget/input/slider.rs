@@ -43,6 +43,9 @@ pub struct Slider {
     /// exponential decay instead of stopping dead.
     scroll_vel: f32,
     last_wheel: Option<std::time::Instant>,
+    /// Keyboard focus (FocusIn / FocusOut): the band lights in the highlight;
+    /// the arrows adjust, Home / End go to the ends, Enter opens the readout.
+    focused: bool,
     /// Readout / edit-buffer display precision (decimal places).
     decimals: usize,
 }
@@ -64,6 +67,7 @@ impl Slider {
             label: None,
             scroll_vel: 0.0,
             last_wheel: None,
+            focused: false,
             decimals: 2,
         })
     }
@@ -150,7 +154,14 @@ impl Slider {
     /// The slider: the band spanning the whole track, swelling at the value
     /// (`paint_band_shape`).
     fn paint_band(&self, g: &SliderGeom, ctx: &mut PaintCtx) {
-        let color = if self.dragging { colors::slider_thumb_drag() } else { colors::slider_thumb() };
+        // A band has no rim to light: focused, the band itself is the highlight.
+        let color = if self.dragging {
+            colors::slider_thumb_drag()
+        } else if self.focused {
+            crate::color::highlight_primary_color()
+        } else {
+            colors::slider_thumb()
+        };
         paint_band_shape(ctx, g.track_x, g.track_w, g.y + g.h * 0.5, color, &|x| self.band_height_at(g, x));
     }
 
@@ -384,6 +395,33 @@ impl Input for Slider {
                 }
                 false
             }
+            Event::FocusIn => {
+                self.focused = true;
+                true
+            }
+            Event::KeyInput(key_event) if !self.editing => {
+                // A focused band: the arrows step the value by a wheel notch,
+                // Home / End go to the ends, Enter opens the readout for typing.
+                if !self.focused || key_event.state != ElementState::Pressed {
+                    return false;
+                }
+                let target = match key_event.logical_key {
+                    Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowDown) => self.value - 0.02,
+                    Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowUp) => self.value + 0.02,
+                    Key::Named(NamedKey::Home) => 0.0,
+                    Key::Named(NamedKey::End) => 1.0,
+                    Key::Named(NamedKey::Enter) if self.show_readout => {
+                        self.editing = true;
+                        self.edit_buffer = self.scaled_string();
+                        return true;
+                    }
+                    _ => return false,
+                };
+                self.scroll_vel = 0.0;
+                self.last_wheel = None;
+                self.set_value_marking(target.clamp(0.0, 1.0));
+                true
+            }
             Event::KeyInput(key_event) => {
                 if !self.editing || key_event.state != ElementState::Pressed {
                     return false;
@@ -425,11 +463,16 @@ impl Input for Slider {
             }
             // Focus loss commits the readout edit (legacy `unfocus` override).
             Event::FocusOut => {
+                self.focused = false;
                 self.commit_edit();
-                false
+                true
             }
             _ => false,
         }
+    }
+
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
     }
 
     fn opens_context_menu(&self) -> bool {
@@ -889,5 +932,36 @@ fn probe_slider_bridge() {
         ));
         assert!(sl.inner().value() < before, "scroll up decreases value");
         assert!(sl.take_change());
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use crate::widget::{Event, KeyEvent, UiContext, WidgetHost};
+
+    fn press(key: NamedKey) -> Event {
+        Event::KeyInput(KeyEvent { logical_key: Key::Named(key), state: ElementState::Pressed, text: None, repeat: false, ctrl: false, shift: false, alt: false })
+    }
+
+    /// A focused band steps by a wheel notch on the arrows, jumps on Home / End,
+    /// and opens its readout on Enter; unfocused it ignores the keys.
+    #[test]
+    fn arrows_step_the_band_and_enter_opens_the_readout() {
+        let mut ctx = UiContext::new();
+        let mut s = Slider::new().with_readout(true);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 16.0);
+        let v0 = s.inner().value;
+        assert!(!s.handle_event(&press(NamedKey::ArrowRight), &mut ctx));
+        assert_eq!(s.inner().value, v0, "unfocused: untouched");
+        s.handle_event(&Event::FocusIn, &mut ctx);
+        assert!(s.handle_event(&press(NamedKey::ArrowRight), &mut ctx));
+        assert!((s.inner().value - (v0 + 0.02)).abs() < 1e-5);
+        assert!(s.handle_event(&press(NamedKey::End), &mut ctx));
+        assert_eq!(s.inner().value, 1.0);
+        assert!(s.handle_event(&press(NamedKey::Home), &mut ctx));
+        assert_eq!(s.inner().value, 0.0);
+        assert!(s.handle_event(&press(NamedKey::Enter), &mut ctx));
+        assert!(s.inner().editing, "Enter opens the readout for typing");
     }
 }
