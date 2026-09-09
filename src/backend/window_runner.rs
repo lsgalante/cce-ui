@@ -5228,12 +5228,27 @@ impl<A: Application> wayland_client::Dispatch<ZwpPointerGesturePinchV1, ()> for 
 }
 
 /// Why a session's event loop stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SessionEnd {
     /// The app asked to exit.
     AppExit,
-    /// The compositor connection died. The `Application` is intact and can be
+    /// The compositor connection died while the compositor itself may well be
+    /// alive — a broken transport. The `Application` is intact and can be
     /// re-attached to a fresh connection.
     ConnectionLost,
+    /// Nothing answered at the display socket: the compositor this app
+    /// belonged to is gone. A deliberate exit unlinks the socket and a crash
+    /// leaves it refusing; either way there is no session left to rejoin.
+    NoCompositor,
+}
+
+/// What [`run`] does once a session has ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AfterSession {
+    /// Leave the process-lifetime loop: run `on_exit` and quit.
+    Exit,
+    /// Sleep this long, then open a fresh session on the same `Application`.
+    Reconnect(std::time::Duration),
 }
 
 /// How many consecutive failed reconnects before giving up. Reset once a
@@ -5241,6 +5256,51 @@ enum SessionEnd {
 /// its connection twice in a day still gets a full budget the second time.
 const RECONNECT_ATTEMPTS: u32 = 8;
 const RECONNECT_RESET: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Decide whether a finished session is followed by another.
+///
+/// `lived` is how long the session that just ended lasted, `has_app` whether
+/// an `Application` exists to carry over, and `attempt` the running count of
+/// consecutive reconnects (reset here once a session outlives
+/// [`RECONNECT_RESET`]).
+///
+/// Only a lost connection is retried, and only while the compositor is still
+/// there to reconnect to. A reconnect is a repair of THIS session's transport
+/// — the fd-exhaustion break `raise_fd_limit` documents — not a way to outlive
+/// the compositor. When the connect itself fails the compositor has exited,
+/// and it has already saved this window for restore: the next compositor
+/// respawns the app from `state.json` on its own. A client that kept
+/// retrying instead (the backoff below spans ~25s) reattached to that
+/// successor beside the respawned copy, and every restore after a forced
+/// exit or a crash came up with two of each cce-ui window. So the process
+/// exits, as a Wayland client whose display went away always has.
+fn after_session(
+    end: SessionEnd,
+    has_app: bool,
+    lived: std::time::Duration,
+    attempt: &mut u32,
+) -> AfterSession {
+    match end {
+        SessionEnd::AppExit | SessionEnd::NoCompositor => AfterSession::Exit,
+        SessionEnd::ConnectionLost => {
+            // Nothing to preserve if we never got as far as building the
+            // app — that is a failure to start, not a lost window.
+            if !has_app {
+                return AfterSession::Exit;
+            }
+            if lived > RECONNECT_RESET {
+                *attempt = 0;
+            }
+            *attempt += 1;
+            if *attempt > RECONNECT_ATTEMPTS {
+                return AfterSession::Exit;
+            }
+            AfterSession::Reconnect(std::time::Duration::from_millis(
+                100 * (1 << (*attempt).min(6)),
+            ))
+        }
+    }
+}
 
 /// Raise this process's file-descriptor soft limit toward its hard limit.
 ///
@@ -5297,6 +5357,12 @@ fn raise_fd_limit() {
 /// channel** matters as much as keeping the app: worker threads hold clones of
 /// its `Sender` (cce-terminal's pty reader is the canonical case), and a fresh
 /// channel would orphan them into a live-but-deaf process.
+///
+/// What is repaired is the transport, never the compositor: a reconnect only
+/// goes through while the compositor that owned the lost session is still
+/// listening. If the connect itself fails the compositor has exited, and the
+/// process exits with it — see [`after_session`] for why staying alive there
+/// duplicated every window on the next session restore.
 ///
 /// Caveat: GPU resources belong to the renderer, so a rebuild re-runs
 /// [`Application::renderer_init`]. Images uploaded outside it (e.g. in
@@ -5364,27 +5430,27 @@ pub fn run<A: Application>() {
         app = returned_app;
         sources_registered = true;
 
-        match end {
-            SessionEnd::AppExit => break,
-            SessionEnd::ConnectionLost => {
-                // Nothing to preserve if we never got as far as building the
-                // app — that is a failure to start, not a lost window.
-                if app.is_none() {
-                    log::error!("[window_runner] no compositor connection; giving up");
-                    break;
-                }
-                if started.elapsed() > RECONNECT_RESET {
-                    attempt = 0;
-                }
-                attempt += 1;
-                if attempt > RECONNECT_ATTEMPTS {
-                    log::error!(
+        match after_session(end, app.is_some(), started.elapsed(), &mut attempt) {
+            AfterSession::Exit => {
+                match end {
+                    SessionEnd::AppExit => {}
+                    SessionEnd::NoCompositor if app.is_some() => log::warn!(
+                        "[window_runner] compositor is gone; exiting (its successor restores the session itself)"
+                    ),
+                    SessionEnd::NoCompositor => {
+                        log::error!("[window_runner] no compositor connection; giving up")
+                    }
+                    SessionEnd::ConnectionLost if app.is_some() => log::error!(
                         "[window_runner] connection lost; giving up after {} attempts",
                         attempt - 1
-                    );
-                    break;
+                    ),
+                    SessionEnd::ConnectionLost => {
+                        log::error!("[window_runner] no compositor connection; giving up")
+                    }
                 }
-                let backoff = std::time::Duration::from_millis(100 * (1 << attempt.min(6)));
+                break;
+            }
+            AfterSession::Reconnect(backoff) => {
                 log::warn!(
                     "[window_runner] compositor connection lost; reconnecting in {backoff:?} (attempt {attempt})"
                 );
@@ -5413,7 +5479,7 @@ fn run_session<'l, A: Application>(
         Ok(c) => c,
         Err(e) => {
             log::error!("[window_runner] cannot connect to compositor: {e}");
-            return (existing_app, SessionEnd::ConnectionLost);
+            return (existing_app, SessionEnd::NoCompositor);
         }
     };
     let (globals, mut event_queue) = match registry_queue_init(&conn) {
@@ -5969,6 +6035,104 @@ mod near_roll_fallback_tests {
         assert_eq!(
             near_roll_fallback_reason(&carve, 6.0, &HOST, ROLL, &[occluder], true),
             Some("the feature budget is full")
+        );
+    }
+}
+
+#[cfg(test)]
+mod reconnect_tests {
+    use super::{after_session, AfterSession, SessionEnd, RECONNECT_ATTEMPTS, RECONNECT_RESET};
+    use std::time::Duration;
+
+    const LONG: Duration = Duration::from_secs(60);
+    const SHORT: Duration = Duration::from_millis(50);
+
+    #[test]
+    fn app_exit_ends_the_process() {
+        let mut attempt = 0;
+        assert_eq!(after_session(SessionEnd::AppExit, true, LONG, &mut attempt), AfterSession::Exit);
+        assert_eq!(attempt, 0);
+    }
+
+    #[test]
+    fn lost_transport_reconnects_with_backoff() {
+        let mut attempt = 0;
+        assert_eq!(
+            after_session(SessionEnd::ConnectionLost, true, LONG, &mut attempt),
+            AfterSession::Reconnect(Duration::from_millis(200))
+        );
+        assert_eq!(attempt, 1);
+        assert_eq!(
+            after_session(SessionEnd::ConnectionLost, true, SHORT, &mut attempt),
+            AfterSession::Reconnect(Duration::from_millis(400))
+        );
+        assert_eq!(attempt, 2);
+    }
+
+    /// The compositor exited (its socket is unlinked, or refusing after a
+    /// crash). It saved this window for restore, so the successor respawns
+    /// the app itself; a client that waited for it reattached beside the
+    /// respawned copy, and the restore came up with two of every window.
+    #[test]
+    fn compositor_gone_exits_instead_of_waiting_for_a_successor() {
+        let mut attempt = 0;
+        assert_eq!(
+            after_session(SessionEnd::NoCompositor, true, LONG, &mut attempt),
+            AfterSession::Exit
+        );
+        // Even mid-budget: a reconnect that finds nobody listening is the
+        // compositor leaving, not another transport break.
+        let mut attempt = 3;
+        assert_eq!(
+            after_session(SessionEnd::NoCompositor, true, SHORT, &mut attempt),
+            AfterSession::Exit
+        );
+    }
+
+    #[test]
+    fn nothing_to_carry_over_gives_up() {
+        let mut attempt = 0;
+        assert_eq!(
+            after_session(SessionEnd::ConnectionLost, false, SHORT, &mut attempt),
+            AfterSession::Exit
+        );
+        assert_eq!(
+            after_session(SessionEnd::NoCompositor, false, SHORT, &mut attempt),
+            AfterSession::Exit
+        );
+    }
+
+    #[test]
+    fn budget_is_bounded_and_resets_after_a_long_session() {
+        let mut attempt = 0;
+        for _ in 0..RECONNECT_ATTEMPTS {
+            assert!(matches!(
+                after_session(SessionEnd::ConnectionLost, true, SHORT, &mut attempt),
+                AfterSession::Reconnect(_)
+            ));
+        }
+        assert_eq!(
+            after_session(SessionEnd::ConnectionLost, true, SHORT, &mut attempt),
+            AfterSession::Exit
+        );
+        // A session that outlived the reset window earns a fresh budget.
+        assert_eq!(
+            after_session(SessionEnd::ConnectionLost, true, RECONNECT_RESET + SHORT, &mut attempt),
+            AfterSession::Reconnect(Duration::from_millis(200))
+        );
+        assert_eq!(attempt, 1);
+    }
+
+    #[test]
+    fn backoff_caps_at_six_point_four_seconds() {
+        let mut attempt = 6;
+        assert_eq!(
+            after_session(SessionEnd::ConnectionLost, true, SHORT, &mut attempt),
+            AfterSession::Reconnect(Duration::from_millis(6400))
+        );
+        assert_eq!(
+            after_session(SessionEnd::ConnectionLost, true, SHORT, &mut attempt),
+            AfterSession::Reconnect(Duration::from_millis(6400))
         );
     }
 }
