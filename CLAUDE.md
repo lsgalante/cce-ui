@@ -96,6 +96,61 @@ list** (`window_runner.rs` ~1799). Two ways an app feeds it:
 So every app, migrated or not, renders through the same tessellate step. `custom_vertices` is
 appended as a final unclipped batch drawn on top.
 
+## Plates, wells and seams — the surface vocabulary
+
+Everything cce draws is a lit surface, and the words below name those surfaces
+so that a description of how a screen should look or behave can be given in
+them. Use them in code comments, commit messages, and conversation; when a new
+widget does not fit one of them, say so rather than stretching a word.
+
+- **A plate is any lit, bounded surface with a silhouette and a stance.** The
+  silhouette is its corner radius (the DE's superellipse corner family,
+  `corner_shape`). The stance is how it sits on the surface beneath it:
+  - **raised** — it floats above that surface, drawn as a `Bevel` (fill plus
+    rolled edge) or a `Boss` (edges only, the surface below as its face):
+    menus, popovers, raised buttons, a ButtonStrip's selected plateau, a
+    Breadcrumb in its floating stance.
+  - **flush** — it sits level with that surface inside a groove ring, drawn as
+    an `inset_plate`: buttons, dropdown triggers, breadcrumb runs, font
+    selectors. Its face is the surface below unless a fill is configured.
+- **Plates nest, and the ladder has three rungs of the same object.** The
+  **root plate** is a window's background (RFC 7a; `plate { root }` in
+  config). **Pane plates** are the surfaces controls and content sit on inside
+  a window; they carry the corner dock (`widget/plate_dock.rs`). **Control
+  plates** are the things you press. A control plate is not a different kind
+  of object from a root plate — it is a plate at a smaller scale.
+- **Wells are not plates.** A well is an opening cut into a plate that you look
+  into or type into, drawn as a `Recess` (a `Trough` when it holds a moving
+  part): text boxes, keybind and spinbox fields, slider and progress tracks,
+  the trackpad pane, the ColorSelector's recess. Things you press are plates;
+  things you enter are wells. A well's floor can carry fills (a progress
+  fill, a colour swatch) — those are segments of the floor, not plates.
+- **Segments are plates or floors sharing one silhouette, parted by seams.**
+  A seam is a `Groove` cut across the shared surface, dying into its rolled
+  edge: Breadcrumb segments, ButtonStrip segments, the ColorSelector's
+  text/swatch split. One silhouette, one relief pass, seams between.
+- **Marks and bands sit outside this vocabulary on purpose.** The round
+  Checkbox mark is a mark; the Slider's swelling band is a band. Do not call
+  them plates or wells.
+
+What this buys, and where the code is heading:
+
+- **Navigation is stated in plate terms.** Focus moves between plates, a press
+  acts on a plate, a well opens for typing. Hit testing and focus rings are the
+  plate's silhouette.
+- **One plate spec, not five copies.** Button, Dropdown, FontSelector,
+  Breadcrumb and ButtonStrip each re-derive the same carve-inside, radius,
+  depth and transparent-face rules today (the Breadcrumb comments that it
+  mirrors the Dropdown's face logic exactly). The intended direction is a
+  shared plate spec (stance, radius, depth, face) and one paint entry point
+  those controls draw through — migrated behaviour-preserving and verified
+  pixel-identical in a shadow session.
+- **Radii are configured per rung, overridden per widget.** Today every
+  control has its own `corner_radius` key with a separate default, which is how
+  the ColorSelector's swatch drifted to 4px while the field beside it used 8.
+  The intended shape is a default radius per rung (root, pane, control) with
+  the per-widget keys as overrides.
+
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 
 `src/scene/` is a **retained scene graph being grown additively** to replace three overlaid legacy
