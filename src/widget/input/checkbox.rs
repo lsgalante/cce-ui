@@ -107,6 +107,10 @@ impl Paint for Checkbox {
         [0.0, 0.0, 0.0, 0.0]
     }
 
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::control_label_font())
+    }
+
     fn sync_label(&mut self, label: &str) {
         self.label = Some(label.to_string());
     }

@@ -68,6 +68,11 @@ impl Paint for KeybindRecorder {
         [0.08, 0.08, 0.12, 1.0]
     }
 
+    /// The field text in the TextBox's font: both are wells you type into.
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::control_label_font_detached())
+    }
+
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         if self.recessed {
             let radius = crate::layout::textbox_corner_radius();
@@ -108,8 +113,9 @@ impl KeybindRecorder {
         } else {
             (self.value.clone(), [221, 221, 226])
         };
-        let text_y = crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0);
-        ctx.text(display_text, rect.x + 8.0, text_y, 12.0, color);
+        let (_, font_size) = crate::layout::control_label_font_detached_parsed();
+        let text_y = crate::layout::align_text_y(rect.y, rect.height, font_size, 0.0);
+        ctx.text(display_text, rect.x + 8.0, text_y, font_size, color);
     }
 }
 

@@ -791,6 +791,14 @@ impl Ramp {
     /// lands on that key.
     const KEY_RING_R: f32 = 26.0;
 
+    /// The key ring radius on THIS plot: the editor's full ring, shrunk so a
+    /// peg never outgrows the plot it sits in (an inline ramp a control high
+    /// draws pegs a few px across, not 26px discs swallowing the curve).
+    fn key_ring_r(&self) -> f32 {
+        let plot = self.plot_rect();
+        Self::KEY_RING_R.min((plot.height * 0.45).max(4.0))
+    }
+
     /// Inner margin between the graph opening's walls and the plotted 0..1
     /// domain, so the 0 and 1 gridlines (and their axis numbers) sit visibly
     /// inside the opening instead of on the walls.
@@ -1171,12 +1179,13 @@ impl Paint for Ramp {
         // stroked once, and each fill keeps to its own side.
         {
             let plot = self.plot_rect();
-            let ring_r = Self::KEY_RING_R; // roll-band centerline
+            let ring_r = self.key_ring_r(); // roll-band centerline
             // The disc surface: flat top out to the roll band's inner edge,
-            // then the rolled perimeter out to ring_r + 2.5.
+            // then the rolled perimeter out to ring_r + 2.5. Band and rim
+            // shrink with the ring so a small peg keeps a flat top.
             let base = [0.5f32, 0.75, 1.0];
-            let fill_r = ring_r - 3.0;
-            let rim_t = 6.0f32;
+            let fill_r = (ring_r - 3.0).max(ring_r * 0.5);
+            let rim_t = 6.0f32.min(ring_r * 0.25).max(1.0);
             // Bevel light: the DE light azimuth the plate shading uses.
             let az = crate::layout::light_source_position();
             let tau = std::f32::consts::TAU;
@@ -1512,7 +1521,7 @@ impl Input for Ramp {
             // Grab the NEAREST key whose ring contains the press — the rings
             // are the pegs' visual extent, and nearest-center also matches the
             // foam walls (perpendicular bisectors) where rings overlap.
-            let hit_r = Self::KEY_RING_R + 2.5;
+            let hit_r = self.key_ring_r() + 2.5;
             let mut best: Option<(usize, f32)> = None;
             for (idx, key) in self.keys.iter().enumerate() {
                 let cx = plot.x + key.pos * plot.width;
@@ -1659,7 +1668,7 @@ impl Input for Ramp {
                 // cursor. Latching also selects the key, so the pad tracks.
                 let plot = self.plot_rect();
                 if ui.scroll_gesture_new {
-                    let hit_r = Self::KEY_RING_R + 2.5;
+                    let hit_r = self.key_ring_r() + 2.5;
                     let mut best: Option<(usize, f32)> = None;
                     for (idx, key) in self.keys.iter().enumerate() {
                         let cx = plot.x + key.pos * plot.width;

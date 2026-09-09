@@ -74,6 +74,10 @@ impl Layout for Trackpad {
 }
 
 impl Paint for Trackpad {
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::control_label_font())
+    }
+
     fn color(&self) -> [f32; 4] {
         [0.11, 0.11, 0.16, 0.85]
     }
@@ -126,7 +130,8 @@ impl Paint for Trackpad {
             );
         }
 
-        // 4. The "Touchpad Area" hint (the control label is the adapter's).
+        // 4. The "Touchpad Area" hint (the control label is the adapter's), in
+        //    the label font like every other word a control draws.
         ctx.text(
             "Touchpad Area".to_string(),
             x + 12.0,

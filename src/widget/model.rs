@@ -983,14 +983,20 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
     }
 
     /// The paint-walk view of `own_labels_with_font_and_bounds`: prim-derived text carries the
-    /// widget's content font ([`Paint::text_font`]); the detached base label keeps
-    /// `widget_font` either way (via `own_labels_with_prim_font`).
+    /// widget's content font ([`Paint::text_font`]); the detached base label is drawn in the
+    /// configured detached-label font either way (via `own_labels_with_prim_font`).
     fn own_labels_for_walk(&self, ctx: &UiContext) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
         self.own_labels_with_prim_font(ctx, Paint::text_font(&self.inner))
     }
 
     fn own_labels_with_prim_font(&self, _ctx: &UiContext, prim_font: Option<String>) -> Vec<(TextLabel, Option<String>, Option<[f32; 4]>)> {
-        let base_font = Paint::widget_font(&self.inner);
+        // The detached label is the adapter's, not the widget's: one font for every
+        // control's label — `style.control.label.font_detached`, whose size
+        // `base_label_fallback` already takes — whatever font the widget's own content
+        // uses (a TreeList's rows, a Breadcrumb's segments) or does not declare. A
+        // widget with no `widget_font` used to fall back to the engine's sans default
+        // here, so half the gallery's labels were in a different face.
+        let base_font = Some(crate::layout::control_label_font_detached());
         let mut fonted: Vec<(TextLabel, Option<String>)> = Vec::new();
         if self.visible() {
             fonted.extend(

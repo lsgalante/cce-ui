@@ -79,6 +79,11 @@ impl Layout for InteractiveListItem {
 }
 
 impl Paint for InteractiveListItem {
+    /// A list row's text is in the list font — the rows of a TreeList, a menu's items.
+    fn widget_font(&self) -> Option<String> {
+        Some(crate::layout::list_font())
+    }
+
     fn color(&self) -> [f32; 4] {
         let theme = colors::active_theme();
         if self.selected {
