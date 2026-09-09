@@ -1079,6 +1079,9 @@ impl Paint for TreeList {
 }
 
 impl Input for TreeList {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
+    }
     fn blocks_root_plate_drag(&self) -> bool {
         true
     }

@@ -567,6 +567,51 @@ impl UiContext {
         self.focused_widget.is_some()
     }
 
+    /// Keyboard navigation in plate terms (see "Plates, wells and seams" in
+    /// `CLAUDE.md`): move focus to the next (`reverse` = previous) plate or
+    /// well in reading order. The stops are the registered, visible widgets
+    /// with a `focus_role` and a non-empty rect, ordered by row (y) then x;
+    /// the traversal wraps, and with nothing focused the first (or last) stop
+    /// takes it. Focusing goes through `set_focused_id`, so the new stop gets
+    /// its `FocusIn` — a well opens for typing, a plate arms Enter / Space.
+    /// Returns whether focus moved. The runner calls this for Tab when the app
+    /// opts in (`Application::plate_navigation`).
+    pub fn focus_step(&mut self, reverse: bool) -> bool {
+        let mut stops: Vec<(i32, i32, WidgetId)> = Vec::new();
+        for (id, ptr) in self.tree.iter_registered() {
+            if ptr.is_null() {
+                continue;
+            }
+            let w = unsafe { &*ptr };
+            if w.focus_role() == crate::widget::FocusRole::None || !w.visible() {
+                continue;
+            }
+            let (x, y, width, height) = w.rect();
+            if width <= 0.0 || height <= 0.0 {
+                continue;
+            }
+            stops.push((y.round() as i32, x.round() as i32, id));
+        }
+        if stops.is_empty() {
+            return false;
+        }
+        stops.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        let n = stops.len();
+        let current = self.focused_widget.and_then(|f| stops.iter().position(|s| s.2 == f));
+        let next = match (current, reverse) {
+            (Some(i), false) => (i + 1) % n,
+            (Some(i), true) => (i + n - 1) % n,
+            (None, false) => 0,
+            (None, true) => n - 1,
+        };
+        let id = stops[next].2;
+        if self.focused_widget == Some(id) {
+            return false;
+        }
+        self.set_focused_id(id);
+        true
+    }
+
     // `navigate_focus` (tree-walk ctrl-nav) is DELETED (the plumbing retype): it had
     // zero callers — its `focus::navigate_focus` twin was the one wired up, and that one
     // walked an empty dummy context (provably inert). Section-level keyboard nav lives
@@ -1138,5 +1183,48 @@ mod tests {
 
         assert!(ctx.drag_allowed_at(200.0, 200.0), "empty surface is draggable");
         assert!(!ctx.drag_allowed_at(20.0, 20.0), "a drag-blocking widget denies the drag");
+    }
+}
+
+#[cfg(test)]
+mod focus_step_tests {
+    use super::*;
+    use crate::widget::{Button, TextBox, WidgetHost};
+
+    /// Tab walks plates and wells in reading order (row, then x), wraps, and
+    /// Shift+Tab walks back; a focused well opened for typing on the way.
+    #[test]
+    fn focus_step_walks_plates_and_wells_in_reading_order() {
+        let mut ctx = UiContext::new();
+        let mut a = Button::new(0.0, 0.0, 80.0, 24.0).with_label("A");
+        let mut b = Button::new(0.0, 0.0, 80.0, 24.0).with_label("B");
+        let mut t = TextBox::new("well".to_string());
+        // Placed out of registration order: b is right of a on the first row, t below.
+        WidgetHost::set_rect(&mut b, 100.0, 10.0, 80.0, 24.0);
+        WidgetHost::set_rect(&mut a, 10.0, 10.0, 80.0, 24.0);
+        WidgetHost::set_rect(&mut t, 10.0, 50.0, 200.0, 24.0);
+        for w in [&mut b as &mut dyn WidgetHost, &mut a, &mut t] {
+            let (id, ptr) = (w.base().id(), w as *mut dyn WidgetHost);
+            let ptr = unsafe { std::mem::transmute::<*mut dyn WidgetHost, *mut (dyn WidgetHost + 'static)>(ptr) };
+            ctx.register_widget(id, ptr);
+        }
+        let (ia, ib, it) = (a.id(), b.id(), t.id());
+
+        assert!(ctx.focus_step(false));
+        assert!(ctx.is_focused_id(ia), "first stop: the top-left plate");
+        assert!(ctx.focus_step(false));
+        assert!(ctx.is_focused_id(ib), "then the plate to its right");
+        assert!(ctx.focus_step(false));
+        assert!(ctx.is_focused_id(it), "then the well on the next row");
+        assert!(t.editing, "a well opens for typing when focused");
+        assert!(ctx.focus_step(false));
+        assert!(ctx.is_focused_id(ia), "wraps to the first stop");
+        assert!(ctx.focus_step(true));
+        assert!(ctx.is_focused_id(it), "Shift+Tab wraps back to the last");
+
+        // A widget with no role is not a stop.
+        let mut sep = crate::widget::Separator::new(0.0, 0.0, 10.0, 1.0, [1.0; 4]);
+        WidgetHost::set_rect(&mut sep, 300.0, 10.0, 10.0, 1.0);
+        assert_eq!(WidgetHost::focus_role(&sep), crate::widget::FocusRole::None);
     }
 }

@@ -135,9 +135,19 @@ widget does not fit one of them, say so rather than stretching a word.
 
 What this buys, and where the code is heading:
 
-- **Navigation is stated in plate terms.** Focus moves between plates, a press
-  acts on a plate, a well opens for typing. Hit testing and focus rings are the
-  plate's silhouette.
+- **Navigation is stated in plate terms.** `Input::focus_role` says what a
+  widget is to the keyboard: a `Plate` (a thing you press — Enter / Space act
+  on it while focused), a `Well` (opens for typing when focused), or `None`
+  (not a stop). `UiContext::focus_step` walks the stops in reading order (row,
+  then x), wrapping; the runner calls it for Tab / Shift+Tab when the app opts
+  in with `Application::plate_navigation` (default off, so an app that routes
+  Tab itself — a terminal, a web view, its own field order — is undisturbed).
+  The focus ring is the plate's own silhouette: `ControlPlate::with_tint`
+  lights the rim (a tinted `Trough`, `Boss` or `Bevel`), the same treatment a
+  well's `recess_tinted` gives its rim while editing — never extra geometry.
+  Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector are plates;
+  TextBox, Spinbox, ColorSelector, KeybindRecorder, TreeList are wells. A new
+  focusable widget declares its role and handles `FocusIn` / `FocusOut`.
 - **One plate spec per rung, not five copies.** The root and pane rungs are
   `scene::paint::PlateSpec` (RFC 7b, painted by `PaintCtx::plate`). The
   control rung is `scene::paint::ControlPlate` (re-exported from `widget`):

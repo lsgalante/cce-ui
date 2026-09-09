@@ -452,6 +452,9 @@ impl Paint for Spinbox {
 }
 
 impl Input for Spinbox {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
+    }
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
             Event::PointerMove { x: px, y: py, .. } => {

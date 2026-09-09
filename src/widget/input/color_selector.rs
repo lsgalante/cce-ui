@@ -481,6 +481,9 @@ impl Paint for ColorSelector {
 }
 
 impl Input for ColorSelector {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
+    }
     fn opens_context_menu(&self) -> bool {
         true
     }

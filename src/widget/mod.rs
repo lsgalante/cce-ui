@@ -140,6 +140,7 @@ pub struct LayoutTree {
 }
 
 pub use crate::scene::paint::{ControlPlate, PlateStance};
+pub use crate::widget::model::FocusRole;
 pub use crate::context::UiContext;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -513,6 +514,12 @@ pub trait WidgetHost {
     /// the flags-off channel can't be folded into `corner_radii`.
     fn corner_style(&self) -> (f32, (bool, bool, bool, bool)) {
         (12.0, (false, false, false, false))
+    }
+
+    /// This widget's part in keyboard navigation — `Input::focus_role` through
+    /// the adapter; `FocusRole::None` for anything that is not a plate or a well.
+    fn focus_role(&self) -> FocusRole {
+        FocusRole::None
     }
 
     fn corner_radii(&self) -> CornerRadii {

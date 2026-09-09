@@ -1946,12 +1946,13 @@ pub fn tessellate_display_list(
             Prim::Recess { rect, radii, depth, edges, .. }
             | Prim::Boss { rect, radii, depth, edges, .. }
             | Prim::Ridge { rect, radii, depth, edges }
-            | Prim::Trough { rect, radii, depth, edges }
+            | Prim::Trough { rect, radii, depth, edges, .. }
                 if shader_plates =>
             {
                 let tint = match &item.prim {
                     Prim::Recess { tint, .. } => *tint,
                     Prim::Boss { tint, .. } => *tint,
+                    Prim::Trough { tint, .. } => *tint,
                     _ => None,
                 };
                 // Recess carves down into the surface; Boss raises a plateau out
@@ -2270,7 +2271,7 @@ pub fn tessellate_display_list(
                     EdgeKind::Step, &mut verts,
                 );
             }
-            Prim::Trough { rect, radii, depth, edges } => {
+            Prim::Trough { rect, radii, depth, edges, .. } => {
                 // Legacy approximation, the Ridge arm's two steps with the light
                 // signs swapped: down at the boundary, back up half a width in.
                 // The banded machinery has no valley profile, so this is the old
@@ -3289,6 +3290,16 @@ pub trait Application: Sized + 'static {
 
     /// Redo — see [`undo`](Self::undo).
     fn redo(&mut self, _needs_rebuild: &mut bool) -> bool {
+        false
+    }
+
+    /// Opt into the toolkit's keyboard navigation in plate terms: Tab and
+    /// Shift+Tab move focus to the next / previous plate or well in reading
+    /// order (`UiContext::focus_step`), a press (Enter / Space) acts on the
+    /// focused plate, a well opens for typing when focused. Default false: an
+    /// app that routes Tab itself (a terminal, a web view, its own field
+    /// order) is undisturbed. See "Plates, wells and seams" in `CLAUDE.md`.
+    fn plate_navigation(&self) -> bool {
         false
     }
     /// Keyboard focus entered/left the window (the compositor keyboard-focuses
@@ -4826,6 +4837,33 @@ impl<A: Application> EngineState<A> {
     /// it; otherwise the key is dispatched as usual, so an app with its own
     /// scheme is undisturbed. Runs for repeats too — holding the chord walks
     /// the history like holding Backspace walks the text.
+    /// The toolkit's Tab traversal, for apps that opt in
+    /// (`Application::plate_navigation`): a bare Tab / Shift+Tab press moves
+    /// keyboard focus to the next / previous plate or well. Returns whether it
+    /// moved; otherwise the key is dispatched as usual.
+    fn route_plate_navigation(&mut self, event: &KeyEvent, rebuild: &mut bool) -> bool {
+        if event.state != ElementState::Pressed
+            || event.logical_key != Key::Named(NamedKey::Tab)
+            || self.ctrl_pressed
+            || self.alt_pressed
+            || self.logo_pressed
+        {
+            return false;
+        }
+        let reverse = self.shift_pressed;
+        let app = self.inner.as_mut().unwrap();
+        if !app.plate_navigation() {
+            return false;
+        }
+        if let Some(ctx) = app.ui_context_mut() {
+            if ctx.focus_step(reverse) {
+                *rebuild = true;
+                return true;
+            }
+        }
+        false
+    }
+
     fn route_history_chord(&mut self, event: &KeyEvent, rebuild: &mut bool) -> bool {
         if event.state != ElementState::Pressed {
             return false;
@@ -4945,7 +4983,9 @@ impl<A: Application> EngineState<A> {
         }
 
         let mut rebuild = false;
-        if self.route_history_chord(&custom_event, &mut rebuild) {
+        if self.route_history_chord(&custom_event, &mut rebuild)
+            || self.route_plate_navigation(&custom_event, &mut rebuild)
+        {
             self.redraw = true;
             return;
         }
@@ -5761,7 +5801,9 @@ fn run_session<'l, A: Application>(
                     }
 
                     let mut key_rebuild = false;
-                    if engine_state.route_history_chord(&custom_event, &mut key_rebuild) {
+                    if engine_state.route_history_chord(&custom_event, &mut key_rebuild)
+                        || engine_state.route_plate_navigation(&custom_event, &mut key_rebuild)
+                    {
                         engine_state.redraw = true;
                     } else if let Some(msg) = engine_state.inner.as_mut().unwrap().handle_key_input(&custom_event, &mut key_rebuild) {
                         let mut update_rebuild = false;

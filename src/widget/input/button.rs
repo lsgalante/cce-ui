@@ -197,7 +197,12 @@ impl Button {
             return None;
         }
         let radius = crate::layout::button_corner_radius();
-        Some(crate::widget::ControlPlate::control(rect, radius, crate::widget::PlateStance::Flush, self.color()))
+        // Keyboard focus lights the plate's own rim — the ring IS the silhouette.
+        let tint = self.focused.then(crate::widget::ControlPlate::focus_tint);
+        Some(
+            crate::widget::ControlPlate::control(rect, radius, crate::widget::PlateStance::Flush, self.color())
+                .with_tint(tint),
+        )
     }
 
     /// [`Button::plate`] as the legacy `(rect, corner radius, depth, face
@@ -467,6 +472,9 @@ impl Paint for Button {
 }
 
 impl Input for Button {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Plate
+    }
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {
@@ -620,5 +628,32 @@ mod tests {
         let mut b = b;
         b.set_selected(true);
         assert!(b.selected);
+    }
+}
+
+#[cfg(test)]
+mod focus_ring_tests {
+    use super::*;
+    use crate::scene::paint::{PaintCtx, Prim};
+    use crate::widget::{Event, WidgetHost};
+
+    /// The focus ring is the plate's own rim lit: focused, the trough carries
+    /// the highlight tint; unfocused, the same trough untinted — no extra geometry.
+    #[test]
+    fn focus_lights_the_plate_rim() {
+        let mut ctx = crate::widget::UiContext::new();
+        let mut b = Button::new(0.0, 0.0, 120.0, 26.0).with_label("Plate").with_raised(true);
+        WidgetHost::set_rect(&mut b, 10.0, 20.0, 120.0, 26.0);
+        let rect = Rect { x: 10.0, y: 20.0, width: 120.0, height: 26.0 };
+        let troughs = |b: &Adapted<Button>| -> Vec<Option<[f32; 3]>> {
+            let mut pc = PaintCtx::new();
+            Paint::paint(b.inner(), rect, &mut pc);
+            pc.finish().items.into_iter().filter_map(|i| match i.prim { Prim::Trough { tint, .. } => Some(tint), _ => None }).collect()
+        };
+        assert_eq!(troughs(&b), vec![None], "unfocused: one untinted trough");
+        b.handle_event(&Event::FocusIn, &mut ctx);
+        assert_eq!(troughs(&b), vec![Some(crate::widget::ControlPlate::focus_tint())], "focused: the rim lit");
+        b.handle_event(&Event::FocusOut, &mut ctx);
+        assert_eq!(troughs(&b), vec![None]);
     }
 }

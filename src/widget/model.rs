@@ -381,6 +381,17 @@ impl EventCtx<'_> {
 /// events are hit-gated by the adapter *before* they reach [`on_event`](Input::on_event), so a
 /// narrow widget never re-implements the "am I actually under the cursor?" boilerplate that every
 /// legacy `mouse_input` override carries.
+/// A widget's part in keyboard navigation — see [`Input::focus_role`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusRole {
+    /// Not a stop: the traversal skips it.
+    None,
+    /// A plate — a thing you press. Enter / Space act on it while focused.
+    Plate,
+    /// A well — a thing you enter. It opens for typing when focused.
+    Well,
+}
+
 pub trait Input {
     /// Whether the point `(x, y)` hits this widget, given its laid-out `rect`. Override for
     /// non-rectangular hit shapes. Default: containment (edges inclusive, matching the legacy
@@ -410,6 +421,16 @@ pub trait Input {
     /// no ctx by design). Default: no.
     fn opens_context_menu(&self) -> bool {
         false
+    }
+
+    /// What this widget is to keyboard navigation — see "Plates, wells and
+    /// seams" in `CLAUDE.md`. A [`FocusRole::Plate`] is a thing you press
+    /// (Enter / Space act on it while focused); a [`FocusRole::Well`] opens
+    /// for typing when focused. Both are stops for `UiContext::focus_step`.
+    /// Default: [`FocusRole::None`] — skipped by the traversal. A widget that
+    /// declares a role must handle `FocusIn` / `FocusOut`.
+    fn focus_role(&self) -> FocusRole {
+        FocusRole::None
     }
 
     /// Container hit policy: hit whenever any [`Layout::child_visible`] child hits (Layer,
@@ -1227,6 +1248,9 @@ impl<W: Layout + Paint + Input + 'static> WidgetHost for Adapted<W> {
         // 12.0 / all-off mirrors the `WidgetHost` default for widgets without a corner style.
         Paint::corner_style(&self.inner, self.content_rect())
             .unwrap_or((12.0, (false, false, false, false)))
+    }
+    fn focus_role(&self) -> FocusRole {
+        Input::focus_role(&self.inner)
     }
     fn solid_border(&self) -> Option<([f32; 4], f32)> {
         Paint::solid_border(&self.inner)

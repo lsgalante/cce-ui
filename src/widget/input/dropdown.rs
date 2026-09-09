@@ -107,6 +107,8 @@ pub struct Dropdown {
     /// Raised style: the closed control's background is an SDF-lit `Bevel`
     /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
     raised: bool,
+    /// Keyboard focus (FocusIn / FocusOut): lights the trigger plate's rim.
+    focused: bool,
     /// The open menu REPLACES the trigger instead of growing out of it: no
     /// trigger band (display text + ▼) in the open surface, the rows alone,
     /// with the menu's edge anchored where the trigger's was (its bottom for
@@ -153,6 +155,7 @@ impl Dropdown {
             hovered: false,
             corner_frame: None,
             raised: crate::layout::control_relief(),
+            focused: false,
             menu_replaces_trigger: false,
             anim_from: 0.0,
             anim_start: None,
@@ -462,7 +465,8 @@ impl Dropdown {
                 crate::widget::ControlPlate::face_from_fill(raw_bg),
             )
             .with_radii((r4[0], r4[1], r4[2], r4[3]))
-            .with_depth(depth);
+            .with_depth(depth)
+            .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint));
             ctx.control_plate(&plate);
             return;
         }
@@ -990,6 +994,9 @@ impl Paint for Dropdown {
 }
 
 impl Input for Dropdown {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Plate
+    }
     /// The legacy geometric test: the widget rect (edges inclusive), extended to the open
     /// popover. `rect` is the full base rect (label strip included), as legacy `hit_test` used.
     fn hit(&self, rect: Rect, x: f32, y: f32) -> bool {
@@ -1157,11 +1164,13 @@ impl Input for Dropdown {
             Event::FocusIn => {
                 // Legacy `focus()` claimed the global focus slot on every direct call
                 // (test-interface focuses the ramp's preset dropdown this way).
+                self.focused = true;
                 ectx.request_focus();
                 false
             }
             Event::FocusOut => {
                 // Legacy `unfocus` closed the dropdown.
+                self.focused = false;
                 self.begin_close();
                 false
             }

@@ -173,6 +173,9 @@ pub struct ControlPlate {
     pub stance: PlateStance,
     pub face: [f32; 4],
     pub depth: f32,
+    /// The rim lit in this colour: the keyboard-focus ring, drawn on the
+    /// plate's own silhouette rather than as extra geometry. `None` unlit.
+    pub tint: Option<[f32; 3]>,
 }
 
 impl ControlPlate {
@@ -180,7 +183,21 @@ impl ControlPlate {
     /// the DE relief width, capped at a fifth of the plate's height.
     pub fn control(rect: Rect, radius: f32, stance: PlateStance, face: [f32; 4]) -> Self {
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        Self { rect, radii: (radius, radius, radius, radius), stance, face, depth }
+        Self { rect, radii: (radius, radius, radius, radius), stance, face, depth, tint: None }
+    }
+
+    /// Light the rim — the focus ring on the plate's silhouette. Pass the
+    /// highlight colour while the control holds keyboard focus, `None` otherwise.
+    pub fn with_tint(mut self, tint: Option<[f32; 3]>) -> Self {
+        self.tint = tint;
+        self
+    }
+
+    /// The DE's focus-ring colour for a plate rim: the highlight accent, the
+    /// same the wells light their rims with while editing.
+    pub fn focus_tint() -> [f32; 3] {
+        let c = crate::color::highlight_primary_color();
+        [c[0], c[1], c[2]]
     }
 
     /// Per-corner silhouette (a concentric corner-frame adjustment).
@@ -475,7 +492,10 @@ pub enum Prim {
     /// `edges` and the host-box fade behave exactly as [`Prim::Recess`]'s.
     /// SDF path only; the legacy banded tessellation approximates it with the
     /// old two-step stack (like `Ridge`, which approximates itself there).
-    Trough { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool) },
+    ///
+    /// `tint` lights the rim like [`Prim::Recess`]'s — the focus treatment of a
+    /// flush control plate (`PaintCtx::control_plate`).
+    Trough { rect: Rect, radii: Radii, depth: f32, edges: (bool, bool, bool, bool), tint: Option<[f32; 3]> },
     /// The window's glass slab: a rounded fill plus a rolled, lit edge around its whole
     /// perimeter, drawn at full size. Distinct from `Bevel`, which insets its fill by
     /// `depth` — a plate must fill the window exactly, or the compositor's rounded window
@@ -914,7 +934,10 @@ impl PaintCtx {
                 None => self.boss_edges(rect, radii, depth, edges),
             },
             Prim::Ridge { rect, radii, depth, edges } => self.ridge_edges(rect, radii, depth, edges),
-            Prim::Trough { rect, radii, depth, edges } => self.trough_edges(rect, radii, depth, edges),
+            Prim::Trough { rect, radii, depth, edges, tint } => match tint {
+                Some(t) => self.trough_tinted(rect, radii, depth, t),
+                None => self.trough_edges(rect, radii, depth, edges),
+            },
             Prim::Plate { rect, radii, color, depth, shape } => {
                 self.plate_shaped(rect, radii, color, depth, shape)
             }
@@ -1028,15 +1051,30 @@ impl PaintCtx {
             PlateStance::Raised => {
                 // abs(): a negative alpha is the frost sentinel, a real face.
                 if plate.face[3].abs() > 0.001 {
-                    self.bevel(plate.rect, plate.radii, plate.face, plate.depth);
+                    match plate.tint {
+                        Some(t) => self.bevel_tinted(plate.rect, plate.radii, plate.face, plate.depth, t),
+                        None => self.bevel(plate.rect, plate.radii, plate.face, plate.depth),
+                    }
                 } else {
                     let (plateau, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
-                    self.boss(plateau, radii, plate.depth);
+                    match plate.tint {
+                        Some(t) => self.boss_edges_tinted(plateau, radii, plate.depth, (true, true, true, true), t),
+                        None => self.boss(plateau, radii, plate.depth),
+                    }
                 }
             }
             PlateStance::Flush => {
                 let (trough, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
-                self.inset_plate(trough, radii, plate.face, plate.depth);
+                match plate.tint {
+                    Some(t) => {
+                        // `inset_plate`'s face fill, then the trough with its rim lit.
+                        if plate.face[3].abs() > 0.001 {
+                            self.border(trough, radii, plate.face, [0.0; 4], 0.0);
+                        }
+                        self.trough_tinted(trough, radii, plate.depth, t);
+                    }
+                    None => self.inset_plate(trough, radii, plate.face, plate.depth),
+                }
             }
         }
     }
@@ -1116,7 +1154,14 @@ impl PaintCtx {
         edges: (bool, bool, bool, bool),
     ) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Trough { rect, radii, depth, edges });
+        self.push(Prim::Trough { rect, radii, depth, edges, tint: None });
+    }
+
+    /// [`PaintCtx::trough`] with the rim lit — see `Prim::Trough::tint` (the
+    /// focused flush control plate).
+    pub fn trough_tinted(&mut self, rect: Rect, radii: Radii, depth: f32, tint: [f32; 3]) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Trough { rect, radii, depth, edges: (true, true, true, true), tint: Some(tint) });
     }
 
     /// Raise a rim along `rect`'s boundary — see `Prim::Ridge`. `depth` is the

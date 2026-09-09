@@ -21,6 +21,9 @@ pub struct FontSelector {
     /// states a wash inside it. Defaults to `control_relief()`; the flat style
     /// keeps the framed dark field.
     raised: bool,
+    /// Keyboard focus (FocusIn / FocusOut): lights the plate's rim and arms
+    /// Enter / Space to open the picker.
+    focused: bool,
 }
 
 impl FontSelector {
@@ -32,6 +35,7 @@ impl FontSelector {
             hovered: false,
             child: Arc::new(Mutex::new(None)),
             raised: crate::layout::control_relief(),
+            focused: false,
         })
     }
 
@@ -157,7 +161,10 @@ impl Paint for FontSelector {
         if self.raised {
             // The closed-dropdown chrome: a flush control plate with a
             // transparent face, the state fill rounded to sit inside it.
-            ctx.control_plate(&crate::widget::ControlPlate::control(rect, r, crate::widget::PlateStance::Flush, [0.0; 4]));
+            ctx.control_plate(
+                &crate::widget::ControlPlate::control(rect, r, crate::widget::PlateStance::Flush, [0.0; 4])
+                    .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint)),
+            );
             let wash = if self.pressed {
                 Some(colors::button_press_color())
             } else if self.hovered {
@@ -202,7 +209,36 @@ impl FontSelector {
     }
 }
 
+impl FontSelector {
+    /// Spawn `cce-fonts --select` (once — a picker already open keeps it); the
+    /// tick reaps it. The press of this plate, by pointer or by key.
+    fn open_picker(&mut self) {
+        let mut child_guard = self.child.lock().unwrap();
+        if child_guard.is_none() {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let local_fonts = std::path::Path::new(&home).join(".local/bin/cce-fonts");
+            let cmd_path = if local_fonts.exists() {
+                local_fonts.to_string_lossy().into_owned()
+            } else {
+                "cce-fonts".to_string()
+            };
+            if let Ok(child) = std::process::Command::new(&cmd_path)
+                .arg("--select")
+                .arg(&self.font_family)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+            {
+                *child_guard = Some(child);
+            }
+        }
+    }
+}
+
 impl Input for FontSelector {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Plate
+    }
+
     fn wants_tick(&self) -> bool {
         true
     }
@@ -236,6 +272,27 @@ impl Input for FontSelector {
 
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
+            Event::FocusIn => {
+                self.focused = true;
+                false
+            }
+            Event::FocusOut => {
+                self.focused = false;
+                false
+            }
+            Event::KeyInput(key_event) => {
+                // A focused plate is pressed by Enter / Space, as a Button is.
+                if !self.focused || key_event.state != ElementState::Pressed {
+                    return false;
+                }
+                match key_event.logical_key {
+                    Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                        self.open_picker();
+                        true
+                    }
+                    _ => false,
+                }
+            }
             Event::MouseButton { button, state, x, y, .. } => {
                 if *button != MouseButton::Left {
                     return false;
@@ -250,24 +307,7 @@ impl Input for FontSelector {
                         let inside = *x >= r.x && *x <= r.x + r.width && *y >= r.y && *y <= r.y + r.height;
                         if self.pressed && inside {
                             self.pressed = false;
-                            let mut child_guard = self.child.lock().unwrap();
-                            if child_guard.is_none() {
-                                let home = std::env::var("HOME").unwrap_or_default();
-                                let local_fonts = std::path::Path::new(&home).join(".local/bin/cce-fonts");
-                                let cmd_path = if local_fonts.exists() {
-                                    local_fonts.to_string_lossy().into_owned()
-                                } else {
-                                    "cce-fonts".to_string()
-                                };
-                                if let Ok(child) = std::process::Command::new(&cmd_path)
-                                    .arg("--select")
-                                    .arg(&self.font_family)
-                                    .stdout(std::process::Stdio::piped())
-                                    .spawn()
-                                {
-                                    *child_guard = Some(child);
-                                }
-                            }
+                            self.open_picker();
                             return true;
                         }
                         let was = self.pressed;

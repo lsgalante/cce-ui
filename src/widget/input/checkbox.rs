@@ -64,11 +64,19 @@ impl Checkbox {
     /// toggle-on colour when checked. Shared with hosts that draw their own rows
     /// (cce-list) so a list's marks and a `Checkbox` agree pixel for pixel.
     pub fn paint_round_mark(ctx: &mut PaintCtx, cx: f32, cy: f32, radius: f32, checked: bool) {
+        Self::paint_round_mark_ringed(ctx, cx, cy, radius, checked, colors::TEXT_DIM);
+    }
+
+    /// [`Checkbox::paint_round_mark`] with the ring in `ring` — the mark's
+    /// silhouette lit in the highlight colour is its keyboard-focus ring (a
+    /// mark is not a plate, so it has no rim to tint; the ring it already
+    /// draws is the silhouette).
+    pub fn paint_round_mark_ringed(ctx: &mut PaintCtx, cx: f32, cy: f32, radius: f32, checked: bool, ring: [f32; 4]) {
         ctx.border(
             Rect { x: cx - radius, y: cy - radius, width: 2.0 * radius, height: 2.0 * radius },
             (radius, radius, radius, radius),
             [0.0, 0.0, 0.0, 0.0],
-            colors::TEXT_DIM,
+            ring,
             1.5,
         );
         if checked {
@@ -109,7 +117,9 @@ impl Paint for Checkbox {
         // Standalone, the mark fills the rect.
         let r = if self.label.is_some() { Self::ROUND_RADIUS } else { (w.min(h) / 2.0).max(1.0) };
         let (cx, cy) = if self.label.is_some() { (x + r, y + h / 2.0) } else { (x + w / 2.0, y + h / 2.0) };
-        Self::paint_round_mark(ctx, cx, cy, r, self.checked);
+        // Focused: the mark's own ring lit in the highlight colour.
+        let ring = if self.focused { crate::color::highlight_primary_color() } else { colors::TEXT_DIM };
+        Self::paint_round_mark_ringed(ctx, cx, cy, r, self.checked, ring);
         if let Some(ref label) = self.label {
             let (_, font_size) = crate::layout::control_label_font_parsed();
             let ty = crate::layout::align_text_y(y, h, font_size, 0.0);
@@ -125,6 +135,9 @@ impl Paint for Checkbox {
 }
 
 impl Input for Checkbox {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Plate
+    }
     fn on_event(&mut self, event: &Event, _ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {
@@ -149,6 +162,22 @@ impl Input for Checkbox {
             Event::FocusOut => {
                 self.focused = false;
                 false
+            }
+            Event::KeyInput(key_event) => {
+                // A focused plate is pressed by Enter / Space, as a Button is.
+                if !self.focused || key_event.state != ElementState::Pressed {
+                    return false;
+                }
+                match key_event.logical_key {
+                    crate::widget::Key::Named(crate::widget::NamedKey::Enter)
+                    | crate::widget::Key::Named(crate::widget::NamedKey::Space) => {
+                        self.checked = !self.checked;
+                        self.just_clicked = true;
+                        self.just_changed = true;
+                        true
+                    }
+                    _ => false,
+                }
             }
             _ => false,
         }
@@ -524,6 +553,9 @@ impl Paint for Toggle {
 }
 
 impl Input for Toggle {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Plate
+    }
     fn on_event(&mut self, event: &Event, _ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, .. } => {
@@ -546,6 +578,21 @@ impl Input for Toggle {
             Event::FocusOut => {
                 self.focused = false;
                 false
+            }
+            Event::KeyInput(key_event) => {
+                // A focused plate is pressed by Enter / Space, as a Button is.
+                if !self.focused || key_event.state != ElementState::Pressed {
+                    return false;
+                }
+                match key_event.logical_key {
+                    crate::widget::Key::Named(crate::widget::NamedKey::Enter)
+                    | crate::widget::Key::Named(crate::widget::NamedKey::Space) => {
+                        self.toggled = !self.toggled;
+                        self.just_toggled = true;
+                        true
+                    }
+                    _ => false,
+                }
             }
             _ => false,
         }

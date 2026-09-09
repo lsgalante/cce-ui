@@ -1594,6 +1594,9 @@ impl Paint for TextBox {
 }
 
 impl Input for TextBox {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
+    }
     /// Advances the wheel glide / trackpad coast behind the scroll offsets.
     /// Cheap when idle (the common case); `wants_tick` is unconditional
     /// because it is sampled once at registration.

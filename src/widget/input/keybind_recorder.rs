@@ -19,6 +19,8 @@ pub struct KeybindRecorder {
     /// accent while recording (the TextBox's editing treatment). Defaults to
     /// `control_relief()`; the flat style keeps the framed dark field.
     recessed: bool,
+    /// Keyboard focus (FocusIn / FocusOut): Enter / Space arm recording.
+    focused: bool,
 }
 
 impl KeybindRecorder {
@@ -30,6 +32,7 @@ impl KeybindRecorder {
             pressed: false,
             hovered: false,
             recessed: crate::layout::control_relief(),
+            focused: false,
         })
     }
 
@@ -111,6 +114,9 @@ impl KeybindRecorder {
 }
 
 impl Input for KeybindRecorder {
+    fn focus_role(&self) -> crate::widget::FocusRole {
+        crate::widget::FocusRole::Well
+    }
     fn on_event(&mut self, event: &Event, ectx: &mut EventCtx) -> bool {
         match event {
             Event::MouseButton { button, state, x, y, .. } => {
@@ -139,10 +145,21 @@ impl Input for KeybindRecorder {
                     }
                 }
             }
-            Event::KeyInput(key_event) => {
-                if !self.recording {
+            Event::KeyInput(key_event) if !self.recording => {
+                // A focused well not yet recording: Enter / Space arm it (the
+                // click's job, by key). Anything else is not this field's.
+                if !self.focused || key_event.state != ElementState::Pressed {
                     return false;
                 }
+                match key_event.logical_key {
+                    Key::Named(NamedKey::Enter) | Key::Named(NamedKey::Space) => {
+                        self.recording = true;
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            Event::KeyInput(key_event) => {
                 let Some(ui) = ectx.ui.as_deref_mut() else {
                     return false;
                 };
@@ -236,7 +253,12 @@ impl Input for KeybindRecorder {
                 self.hovered = false;
                 false
             }
+            Event::FocusIn => {
+                self.focused = true;
+                false
+            }
             Event::FocusOut => {
+                self.focused = false;
                 self.recording = false;
                 false
             }
