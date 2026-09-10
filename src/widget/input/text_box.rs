@@ -2233,10 +2233,15 @@ mod tests {
     #[test]
     fn test_textbox_line_wrap_disabled_horizontal_scrolling() {
         let _dummy = crate::context::UiContext::new();
-        crate::layout::set_textbox_line_wrap(false);
 
-        let mut tb = TextBox::new("Very long text that should not wrap and instead scroll horizontally".to_string());
+        // Wrap is stated on the widget (`line_wrap_override`), not on the
+        // process-global `textbox_line_wrap` — this box is single-line, which
+        // is already unwrapped, and the override says so whatever the config
+        // does. The global would be visible to every other test in parallel.
+        let mut tb = TextBox::new("Very long text that should not wrap and instead scroll horizontally".to_string())
+            .with_line_wrap(false);
         tb.set_rect(10.0, 10.0, 100.0, 30.0);
+        assert!(!tb.line_wrap_enabled());
 
         assert_eq!(tb.scroll_x, 0.0);
 
@@ -2245,8 +2250,6 @@ mod tests {
         tb.scroll_to_cursor();
 
         assert!(tb.scroll_x > 0.0, "scroll_x should be scrolled horizontally to keep the cursor visible");
-
-        crate::layout::set_textbox_line_wrap(true);
     }
 
     #[test]
@@ -2270,23 +2273,18 @@ mod tests {
         assert_eq!(tb.edit_buffer, "");
     }
 
+    /// A single-line box's border is always the hairline; a multiline box's
+    /// is whatever `textbox_multiline_border_width` resolves to. Read, never
+    /// written: that width is a process global and the suite runs in
+    /// parallel, so setting it here would widen every other test's borders.
     #[test]
     fn test_multiline_textbox_border_width() {
         let _dummy = crate::context::UiContext::new();
-        crate::layout::set_textbox_multiline_border_width(1.0);
         let tb_single = TextBox::new("Singleline".to_string()).with_multiline(false);
         let tb_multi = TextBox::new("Multiline".to_string()).with_multiline(true);
 
-        // Default border width
+        let configured = crate::layout::textbox_multiline_border_width();
         assert_eq!(tb_single.border_width(), 1.0);
-        assert_eq!(tb_multi.border_width(), 1.0);
-
-        // Configure custom border width
-        crate::layout::set_textbox_multiline_border_width(4.5);
-        assert_eq!(tb_single.border_width(), 1.0);
-        assert_eq!(tb_multi.border_width(), 4.5);
-
-        // Reset to default
-        crate::layout::set_textbox_multiline_border_width(1.0);
+        assert_eq!(tb_multi.border_width(), configured);
     }
 }

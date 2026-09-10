@@ -2095,12 +2095,22 @@ mod ramp_sampling_tests {
 /// this process restyles on the next frame. Empty or single-key lists clear
 /// back to the analytic profile ([`clear_bevel_profile`]).
 pub fn set_bevel_profile_keys(keys: &[(f32, f32)], smooth: bool) {
-    if keys.len() < 2 {
+    let Some(lut) = ramp_profile_lut(keys, smooth) else {
         clear_bevel_profile();
         return;
-    }
-    *BEVEL_PROFILE.write().unwrap() = Some(ramp_slope_lut(keys, smooth));
+    };
+    *BEVEL_PROFILE.write().unwrap() = Some(lut);
     BEVEL_PROFILE_GEN.fetch_add(1, std::sync::atomic::Ordering::Release);
+}
+
+/// What a key list installs: its slope LUT, or `None` for a degenerate list
+/// (fewer than two keys is no curve at all) — the caller clears back to the
+/// analytic profile. The pure half of `set_*_profile_keys`.
+fn ramp_profile_lut(keys: &[(f32, f32)], smooth: bool) -> Option<[f32; BEVEL_PROFILE_SAMPLES]> {
+    if keys.len() < 2 {
+        return None;
+    }
+    Some(ramp_slope_lut(keys, smooth))
 }
 
 /// A ramp key list sampled into the shader's slope LUT — slot `i` holds the
@@ -2122,11 +2132,11 @@ fn ramp_slope_lut(keys: &[(f32, f32)], smooth: bool) -> [f32; BEVEL_PROFILE_SAMP
 /// shader's `roll_slope` samples it in place of the analytic superellipse
 /// quadrant. Empty or single-key lists clear back to the analytic roll.
 pub fn set_roll_profile_keys(keys: &[(f32, f32)], smooth: bool) {
-    if keys.len() < 2 {
+    let Some(lut) = ramp_profile_lut(keys, smooth) else {
         clear_roll_profile();
         return;
-    }
-    *ROLL_PROFILE.write().unwrap() = Some(ramp_slope_lut(keys, smooth));
+    };
+    *ROLL_PROFILE.write().unwrap() = Some(lut);
     ROLL_PROFILE_GEN.fetch_add(1, std::sync::atomic::Ordering::Release);
 }
 
@@ -6693,40 +6703,36 @@ mod tests {
         assert!(d1 > 0.0);
     }
 
+    // The `Once`-initialised style getters below are checked against the
+    // statics their config pass fills, under whatever the live config says.
+    // None of them WRITES: these are process globals and the suite runs in
+    // parallel, so a set/restore window is visible to every other test — and
+    // a "restore" that writes a hardcoded literal (as these did) clobbers a
+    // non-default config permanently. What a getter here can actually get
+    // wrong is which static it reads, and that is what these pin.
+
     #[test]
     fn test_nested_section_label_alignment() {
-        let _ = nested_section_label_alignment();
-        set_nested_section_label_alignment(1);
-        assert_eq!(nested_section_label_alignment(), 1);
-        set_nested_section_label_alignment(2);
-        assert_eq!(nested_section_label_alignment(), 2);
-        set_nested_section_label_alignment(0);
-        assert_eq!(nested_section_label_alignment(), 0);
+        let align = nested_section_label_alignment();
+        assert_eq!(align, *super::NESTED_SECTION_LABEL_ALIGNMENT.read().unwrap());
 
-        let _ = nested_section_label_offset();
-        set_nested_section_label_offset(15.0);
-        assert_eq!(nested_section_label_offset(), 15.0);
-        set_nested_section_label_offset(0.0);
-        assert_eq!(nested_section_label_offset(), 0.0);
+        let offset = nested_section_label_offset();
+        assert_eq!(offset, *super::NESTED_SECTION_LABEL_OFFSET.read().unwrap());
+        assert!(offset.is_finite(), "label offset {offset}");
     }
 
     #[test]
     fn test_dropdown_height() {
-        let _ = dropdown_height();
-        set_dropdown_height(48.0);
-        assert_eq!(dropdown_height(), 48.0);
-        set_dropdown_height(44.0);
-        assert_eq!(dropdown_height(), 44.0);
+        let h = dropdown_height();
+        assert_eq!(h, *super::DROPDOWN_HEIGHT.read().unwrap());
+        assert!(h.is_finite() && h > 0.0, "dropdown height {h}");
     }
 
     #[test]
     fn test_column_gap() {
-        println!("LIST FONT: {:?}", list_font());
-        let _ = column_gap();
-        set_column_gap(24.0);
-        assert_eq!(column_gap(), 24.0);
-        set_column_gap(16.0);
-        assert_eq!(column_gap(), 16.0);
+        let gap = column_gap();
+        assert_eq!(gap, *super::COLUMN_GAP.read().unwrap());
+        assert!(gap.is_finite() && gap >= 0.0, "column gap {gap}");
     }
 
     #[test]
@@ -6844,9 +6850,11 @@ mod tests {
     /// A registry-backed style pinned by one test is invisible to a test
     /// beside it.
     ///
-    /// `test_graph_style_configuration` below pins ~20 of these and restores
-    /// none. Before the per-thread overlay that reached every test running
-    /// alongside — provably: `dual_geometry_views_stay_consistent` bakes
+    /// The graph-style test below used to pin ~20 of these and restore none
+    /// (it now reads the live registry instead: see
+    /// `graph_style_getters_resolve_their_own_registry_keys`). Before the
+    /// per-thread overlay that reached every test running alongside —
+    /// provably: `dual_geometry_views_stay_consistent` bakes
     /// quads with `graph_node_corner_radius`, then re-reads the getter to
     /// compare, and a write landing between the two made them disagree.
     #[test]
@@ -6859,58 +6867,62 @@ mod tests {
         assert_eq!(elsewhere, base, "a thread beside it must still see the shared base");
     }
 
+    /// Every graph style getter resolves the registry key it is named for,
+    /// falling back to its own documented default — checked against the live
+    /// registry as it stands. Nothing is written: the style registry and the
+    /// colour statics are process-global and the suite runs in parallel, so a
+    /// set/assert here would be visible to every other test (this one used to
+    /// set all twenty-one and restore none).
     #[test]
-    fn test_graph_style_configuration() {
-        // Trigger load_colors_once first so it doesn't overwrite values later
-        let _ = crate::color::page_low_color();
+    fn graph_style_getters_resolve_their_own_registry_keys() {
+        fn stored(key: &str) -> Option<f32> {
+            crate::layout::lazy_init_style_registry();
+            let reg = crate::layout::get_style_registry().read().unwrap();
+            reg.get_float(key)
+        }
 
-        set_graph_spacing_x(200.0);
-        set_graph_spacing_y(100.0);
-        set_graph_grid_snap(true);
-        set_graph_blur(0.8);
-        set_graph_node_corner_radius(8.0);
-        set_graph_wire_size(10.0);
-        set_graph_wire_activation_radius(15.0);
-        set_graph_connector_size(12.0);
-        set_graph_connector_activation_radius(18.0);
+        assert_eq!(graph_spacing_x(), stored("graph_spacing_x").unwrap_or(150.0));
+        assert_eq!(graph_spacing_y(), stored("graph_spacing_y").unwrap_or(75.0));
+        assert_eq!(graph_grid_snap(), stored("graph_grid_snap").unwrap_or(0.0) != 0.0);
+        assert_eq!(graph_blur(), stored("graph_blur").unwrap_or(0.0));
+        assert_eq!(graph_node_corner_radius(), stored("graph_node_corner_radius").unwrap_or(4.0));
+        assert_eq!(graph_wire_size(), stored("graph_wire_size").unwrap_or(6.0));
+        assert_eq!(
+            graph_wire_activation_radius(),
+            stored("graph_wire_activation_radius").unwrap_or(9.0)
+        );
+        assert_eq!(graph_connector_size(), stored("graph_connector_size").unwrap_or(8.0));
+        assert_eq!(
+            graph_connector_activation_radius(),
+            stored("graph_connector_activation_radius").unwrap_or(12.0)
+        );
 
-        assert_eq!(graph_spacing_x(), 200.0);
-        assert_eq!(graph_spacing_y(), 100.0);
-        assert_eq!(graph_grid_snap(), true);
-        assert_eq!(graph_blur(), 0.8);
-        assert_eq!(graph_node_corner_radius(), 8.0);
-        assert_eq!(graph_wire_size(), 10.0);
-        assert_eq!(graph_wire_activation_radius(), 15.0);
-        assert_eq!(graph_connector_size(), 12.0);
-        assert_eq!(graph_connector_activation_radius(), 18.0);
-
-        crate::color::set_graph_cell_color([0.1, 0.2, 0.3]);
-        crate::color::set_graph_gap_color([0.4, 0.5, 0.6]);
-        crate::color::set_graph_node_color([0.7, 0.8, 0.9, 1.0]);
-        crate::color::set_graph_node_selected_color([0.9, 0.8, 0.7, 1.0]);
-        crate::color::set_graph_node_drag_color([0.5, 0.5, 0.5, 1.0]);
-        crate::color::set_node_color([0.7, 0.8, 0.9, 1.0]);
-        crate::color::set_node_selected_color([0.9, 0.8, 0.7, 1.0]);
-        crate::color::set_node_drag_color([0.5, 0.5, 0.5, 1.0]);
-        crate::color::set_graph_wire_color([0.1, 0.1, 0.1, 1.0]);
-        crate::color::set_graph_wire_highlight_color([0.2, 0.2, 0.2, 1.0]);
-        crate::color::set_graph_connector_color([0.3, 0.3, 0.3, 1.0]);
-        crate::color::set_graph_connector_highlight_color([0.4, 0.4, 0.4, 1.0]);
-
-        let cell_color = crate::color::graph_cell_color();
-        assert_eq!(cell_color, [0.1, 0.2, 0.3]);
-        let gap_color = crate::color::graph_gap_color();
-        assert_eq!(gap_color, [0.4, 0.5, 0.6]);
-        assert_eq!(crate::color::graph_node_color(), [0.7, 0.8, 0.9, 1.0]);
-        assert_eq!(crate::color::graph_node_selected_color(), [0.9, 0.8, 0.7, 1.0]);
-        assert_eq!(crate::color::graph_node_drag_color(), [0.5, 0.5, 0.5, 1.0]);
-        assert_eq!(crate::color::node_color(), [0.7, 0.8, 0.9, 1.0]);
-        assert_eq!(crate::color::node_selected_color(), [0.9, 0.8, 0.7, 1.0]);
-        assert_eq!(crate::color::node_drag_color(), [0.5, 0.5, 0.5, 1.0]);
-        assert_eq!(crate::color::graph_wire_color(), [0.1, 0.1, 0.1, 1.0]);
-        assert_eq!(crate::color::graph_wire_highlight_color(), [0.2, 0.2, 0.2, 1.0]);
-        assert_eq!(crate::color::graph_connector_color(), [0.3, 0.3, 0.3, 1.0]);
-        assert_eq!(crate::color::graph_connector_highlight_color(), [0.4, 0.4, 0.4, 1.0]);
+        // The graph colours live behind statics in `color`, out of this
+        // module's reach; what is checkable without writing them is that each
+        // resolves to a real, in-gamut colour rather than an unparsed or
+        // uninitialised one.
+        let rgb: [(&str, [f32; 3]); 2] = [
+            ("graph_cell", crate::color::graph_cell_color()),
+            ("graph_gap", crate::color::graph_gap_color()),
+        ];
+        for (name, c) in rgb {
+            assert!(c.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)), "{name}: {c:?}");
+        }
+        let rgba: [(&str, [f32; 4]); 10] = [
+            ("graph_node", crate::color::graph_node_color()),
+            ("graph_node_selected", crate::color::graph_node_selected_color()),
+            ("graph_node_drag", crate::color::graph_node_drag_color()),
+            ("node", crate::color::node_color()),
+            ("node_selected", crate::color::node_selected_color()),
+            ("node_drag", crate::color::node_drag_color()),
+            ("graph_wire", crate::color::graph_wire_color()),
+            ("graph_wire_highlight", crate::color::graph_wire_highlight_color()),
+            ("graph_connector", crate::color::graph_connector_color()),
+            ("graph_connector_highlight", crate::color::graph_connector_highlight_color()),
+        ];
+        for (name, c) in rgba {
+            assert!(c.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)), "{name}: {c:?}");
+        }
     }
 
     #[test]
@@ -6980,31 +6992,34 @@ mod tests {
         assert!((w3.h - 82.857).abs() < 0.01);
     }
 
+    /// The LUT is checked on `ramp_profile_lut`, the pure half of
+    /// `set_bevel_profile_keys` / `set_roll_profile_keys` — installing it
+    /// would restyle every wall in the process, and the suite runs in
+    /// parallel.
     #[test]
     fn bevel_profile_lut_integrates_to_the_curves_net_rise() {
+        let n = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
+        let net_rise = |slopes: [f32; crate::layout::BEVEL_PROFILE_SAMPLES]| -> f32 {
+            slopes.iter().map(|s| s / n).sum()
+        };
+
         // The identity 0→1 curve: slopes sum/N to its net rise of 1 (the same
         // total step the analytic smoothstep carries).
-        crate::layout::set_bevel_profile_keys(&[(0.0, 0.0), (1.0, 1.0)], true);
-        let slopes = crate::layout::bevel_profile_slopes().expect("profile installed");
-        let n = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
-        let rise: f32 = slopes.iter().map(|s| s / n).sum();
+        let slopes = super::ramp_profile_lut(&[(0.0, 0.0), (1.0, 1.0)], true).expect("a curve");
+        let rise = net_rise(slopes);
         assert!((rise - 1.0).abs() < 0.001, "net rise {rise}");
 
         // A rim curve that returns to its start height nets zero.
-        crate::layout::set_bevel_profile_keys(
-            &[(0.0, 0.5), (0.2, 1.0), (0.8, 1.0), (1.0, 0.5)],
-            false,
-        );
-        let slopes = crate::layout::bevel_profile_slopes().unwrap();
-        let rise: f32 = slopes.iter().map(|s| s / n).sum();
+        let slopes =
+            super::ramp_profile_lut(&[(0.0, 0.5), (0.2, 1.0), (0.8, 1.0), (1.0, 0.5)], false)
+                .expect("a curve");
+        let rise = net_rise(slopes);
         assert!(rise.abs() < 0.001, "net rise {rise}");
 
-        // Degenerate key lists clear back to the analytic profile; the
-        // generation moves on every change so renderers re-upload.
-        let gen = crate::layout::bevel_profile_generation();
-        crate::layout::set_bevel_profile_keys(&[(0.0, 1.0)], false);
-        assert!(crate::layout::bevel_profile_slopes().is_none());
-        assert!(crate::layout::bevel_profile_generation() > gen);
+        // Degenerate key lists are no curve at all — the installers take that
+        // `None` as "clear back to the analytic profile".
+        assert!(super::ramp_profile_lut(&[(0.0, 1.0)], false).is_none());
+        assert!(super::ramp_profile_lut(&[], true).is_none());
     }
 
     #[test]
