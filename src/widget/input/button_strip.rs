@@ -146,6 +146,14 @@ impl ButtonStrip {
         self.last_padding = Some(current_padding);
         let current_font = self.current_font();
         self.last_font = Some(current_font);
+        // Recorded BEFORE the horizontal early-out below. It used to be set
+        // only on the vertical path, so a horizontal strip's `tick` saw
+        // `last_scale == None` on every frame, regenerated, and reported a
+        // change — one ButtonStrip made its whole window redraw at 60 fps
+        // forever (cce-gallery, and through it the compositor, sat at ~15%
+        // CPU with nothing happening).
+        let scale = crate::scale::scale_factor().max(1.0);
+        self.last_scale = Some(scale);
 
         self.tab_text_quads.clear();
         if !self.vertical || self.buttons.is_empty() {
@@ -162,8 +170,6 @@ impl ButtonStrip {
         let inactive_b = (active_b as f32 * 0.78) as u8;
 
         let (font_fam, font_size) = self.current_font_parsed();
-        let scale = crate::scale::scale_factor().max(1.0);
-        self.last_scale = Some(scale);
 
         for (i, page_name) in self.buttons.iter().enumerate() {
             let color = if self.selected == Some(i) {
