@@ -6580,16 +6580,16 @@ mod tests {
         }
     }
 
+    /// The vstack flow is checked against the LIVE style — the label margin, the
+    /// detached-label font and the section padding are process-global and the suite
+    /// runs in parallel, so pinning them here would be a window every other test
+    /// could see (a label measured in one font by its own call and in another by the
+    /// group hull's is exactly the flake this cost us). Every expectation below is
+    /// derived from the getters instead, so the flow holds under any config.
     #[test]
     fn test_vstack_flow() {
-        let orig_margin = label_margin();
-        set_label_margin(6.0);
-        let orig_font = control_label_font();
-        set_control_label_font("Berkeley Mono 12");
-        let orig_font_detached = control_label_font_detached();
-        set_control_label_font_detached("Berkeley Mono 12");
-        let _ = section_padding();
-        set_section_padding(8.0);
+        // `Section` seats its first column one `margin_x` in from its left edge.
+        let first_col_x = 10.0 + 2.0 * section_padding() + Section::DEFAULT_MARGIN_X;
         let mut mock_pc = MockRenderTarget { rects: Vec::new() };
         let mut sec = Section::new(&mut mock_pc, 10.0, 20.0, 200.0, "Test Section");
         
@@ -6601,7 +6601,7 @@ mod tests {
         stack.add_widget(&mut w1, 50.0, 30.0, &mut dummy);
 
         // Standard margin should be applied
-        assert_eq!(w1.x, 38.0);
+        assert_eq!(w1.x, first_col_x);
         assert_eq!(w1.y, start_y);
 
         let mut w2 = MockWidget { base: crate::widget::Widget::new(), x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
@@ -6618,10 +6618,8 @@ mod tests {
         let offset = w3.base.label_offset();
         
         // Third widget has label, so its y should be shifted by offset
+        assert!(offset > 0.0, "a labelled widget has a strip");
         assert_eq!(w3.base.y, start_y + 30.0 + 10.0 + 40.0 + 10.0 + offset);
-        set_label_margin(orig_margin);
-        set_control_label_font(&orig_font);
-        set_control_label_font_detached(&orig_font_detached);
     }
 
     #[test]
