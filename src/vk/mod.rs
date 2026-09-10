@@ -39,7 +39,9 @@ mod scene;
 mod text;
 
 pub use core::VkCore;
-pub use image::{free_image, upload_rgba, ImageQuad};
+pub use image::{
+    free_image, recycle_buffer, update_pixels, upload_pixels, upload_rgba, ImageQuad, PixelFormat,
+};
 pub use renderer::{Batch2D, Frame2D, PlatePush, VkRenderer, MAX_PLATE_FEATURES};
 pub use rt::{RtCamera, RtMaterial, RtOffscreen, RtTriangle};
 pub use scene::{MeshId, SceneDraw, Vertex3D};
