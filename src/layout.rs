@@ -135,7 +135,6 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.textbox.background_edit_color" | "style.textbox.background_edit_color" | "style.data.textbox.background_edit_color" => "textbox_background_edit_color",
                 "style.control.textbox.multiline.line_wrap" | "style.textbox.multiline.line_wrap" | "style.data.textbox.multiline.line_wrap" => "textbox_line_wrap",
                 "style.control.textbox.multiline.border_width" | "style.textbox.multiline.border_width" | "style.data.textbox.multiline.border_width" => "textbox_multiline_border_width",
-                "style.control.toggle.style" => "toggle_style",
                 "style.control.toggle.height" => "toggle_height",
                 "style.control.toggle.border_width" => "toggle_border_width",
                 "style.control.toggle.disabled_color" => "toggle_disabled_color",
@@ -1999,20 +1998,6 @@ pub fn slider_corner_radius() -> f32 {
     get_style_registry().read().unwrap().get_float("slider_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
-/// The toggle's render style: `style.control.toggle.style = "slide"` swaps the
-/// rocker/gradient pill for a half-width button that slides between the left
-/// (off) and right (on) ends of the widget (see `Toggle::paint`). Anything
-/// else — or unset — keeps the default look, so apps opt in per-config.
-pub fn toggle_slide() -> bool {
-    lazy_init_style_registry();
-    get_style_registry()
-        .read()
-        .unwrap()
-        .get_string("toggle_style")
-        .is_some_and(|s| s == "slide")
-}
-
-
 /// The slider band's knobs (`style.control.slider.*`): the flat band's thickness,
 /// and the swell's half-span / peak height around the value position. The band —
 /// a thin full-range band that swells at the value — is the one slider style.
@@ -3642,10 +3627,10 @@ pub fn set_rangeslider_height(height: f32) {
 /// One step carve a widget's `paint` draws, handed to a flat-path host through
 /// [`RenderTarget::relief_carve`] so it can re-emit it as a real prim.
 ///
-/// Geometry always comes from the WIDGET (`TextBox::well`, `Toggle::
-/// rocker_reliefs` / `slide_button`), never re-derived here — a second copy of
-/// that math in the bridge is exactly how the flat host's carve and the drawn
-/// one drift apart.
+/// Geometry always comes from the WIDGET (`TextBox::well`, `Toggle::well` /
+/// `Toggle::slide_plate`), never re-derived here — a second copy of that math
+/// in the bridge is exactly how the flat host's carve and the drawn one drift
+/// apart.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ReliefCarve {
     pub kind: CarveKind,
@@ -3658,9 +3643,9 @@ pub struct ReliefCarve {
     /// Full width of the step's transition band.
     pub depth: f32,
     /// Which walls the carve has (top, right, bottom, left). A suppressed wall
-    /// means the step runs flush to its neighbour there — the rocker's hinge,
-    /// where the raised half and the recessed one meet in ONE step rather than
-    /// two facing walls.
+    /// means the step runs flush to its neighbour there — a Spinbox's field
+    /// running into its button column, where the two meet in ONE step rather
+    /// than two facing walls.
     pub edges: (bool, bool, bool, bool),
 }
 
@@ -3726,7 +3711,7 @@ pub trait RenderTarget {
     ///
     /// The default is deliberately a NO-OP, not a fill. These controls have
     /// transparent faces by design (the host surface IS the well floor / the
-    /// rocker plate), so the carve is their entire decoration — a host that
+    /// plate's face), so the carve is their entire decoration — a host that
     /// can't carve has nothing truthful to draw, and a solid box here would
     /// paint every text field a flat slab it never had.
     fn relief_carve(&mut self, _carve: &ReliefCarve) {}

@@ -16,6 +16,20 @@ use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Justification, Layout, MouseButton, Paint,
 };
 
+/// A rect shrunk by `g` on every side, its uniform corner radius shrunk to
+/// match so the inner silhouette stays concentric with the outer one.
+fn inset(rect: Rect, radius: f32, g: f32) -> (Rect, f32) {
+    (
+        Rect {
+            x: rect.x + g,
+            y: rect.y + g,
+            width: (rect.width - 2.0 * g).max(0.0),
+            height: (rect.height - 2.0 * g).max(0.0),
+        },
+        (radius - g).max(0.0),
+    )
+}
+
 fn parse_bool(val: &str) -> Option<bool> {
     match val.trim().to_lowercase().as_str() {
         "true" | "1" | "yes" | "on" => Some(true),
@@ -219,6 +233,14 @@ impl Input for Checkbox {
     }
 }
 
+/// A plate that slides in a well: the toggle's footprint is a track carved
+/// into the plate it sits on, and a half-width control plate stands on that
+/// well's floor at the left (off) or right (on) end, gliding between them.
+///
+/// That is the ONE toggle style. The rocker — two flat half faces with a
+/// hinge between them, the state half tipped out toward the light — is gone,
+/// and with it the per-widget and per-config style switch it was chosen by
+/// (`style.control.toggle.style`, `Toggle::with_slide`).
 #[derive(Debug, Clone)]
 pub struct Toggle {
     toggled: bool,
@@ -226,22 +248,18 @@ pub struct Toggle {
     label: Option<String>,
     hovered: bool,
     focused: bool,
-    /// Where the label sits across the pill. Mirrors `Button::justify` — same enum, same
+    /// Where the label sits across the track. Mirrors `Button::justify` — same enum, same
     /// 8px edge inset — so the two read as one control set wherever they share a column.
     justify: Justification,
-    /// Raised style: the pill renders as a rocker — two flat half faces with
-    /// beveled edges, the state half a raised plateau, the other recessed
-    /// (see `rocker_reliefs` and the paint impl) — and the flat style's
-    /// state gradient is dropped.
+    /// Relief style: the track is a real carved well and the glider a raised
+    /// plate standing in it. Without it the track falls back to the hairline
+    /// frame every well shares and the plate to a lit face — see `paint`.
     raised: Option<bool>,
-    /// The slide style's animated button position, 0 (left/off) → 1 (right/on).
+    /// The glider's animated position along its well, 0 (left/off) → 1 (right/on).
     /// Chases `toggled` in `tick` after a click; programmatic state syncs
     /// (`set_toggled`, `set_value_string`) snap it, so only user interaction
     /// animates.
     slide_t: f32,
-    /// Per-widget slide-style override; `None` follows the DE config
-    /// (`style.control.toggle.style`).
-    slide_override: Option<bool>,
 }
 
 impl Toggle {
@@ -262,15 +280,7 @@ impl Toggle {
             justify: Justification::Center,
             raised: None,
             slide_t: 0.0,
-            slide_override: None,
         })
-    }
-
-    /// The slide style (config `style.control.toggle.style = "slide"`, or
-    /// `with_slide` per widget): a half-width button gliding between the
-    /// ends instead of the rocker.
-    pub fn slide(&self) -> bool {
-        self.slide_override.unwrap_or_else(crate::layout::toggle_slide)
     }
 
     pub fn set_label(&mut self, label: &str) {
@@ -286,153 +296,89 @@ impl Toggle {
         self.toggled
     }
 
-    /// The slide style's button (config `style.control.toggle.style =
-    /// "slide"`): half the widget wide, gliding between the left (off) and
-    /// right (on) ends by the animated `slide_t`. `None` when the style is
-    /// off — legacy-view hosts fall back to `rocker_reliefs`.
-    pub fn slide_button(&self, rect: Rect) -> Option<Rect> {
-        if !self.slide() {
-            return None;
-        }
-        let bw = rect.width * 0.5;
-        Some(Rect {
-            x: rect.x + self.slide_t * (rect.width - bw),
-            y: rect.y,
-            width: bw,
-            height: rect.height,
-        })
-    }
-
-    /// The rocker's two halves over `rect` as FLAT relief steps: (half rect,
-    /// per-corner radii, (top, right, bottom, left) walls, raised). The state
-    /// half (top when on, bottom when off) is a plateau raised out of the
-    /// surface (raised → `boss_edges`), the other falls away (`recess_edges`).
-    /// Both faces stay flat — the lit read comes from `face_light`, not a
-    /// tilt gradient. The hinge wall is open on both so the halves meet in a
-    /// single step, not a double-shaded trough.
-    pub fn rocker_reliefs(
-        &self,
-        rect: Rect,
-    ) -> [(Rect, (f32, f32, f32, f32), (bool, bool, bool, bool), bool); 2] {
-        let r = crate::layout::toggle_corner_radius();
-        let half_h = rect.height / 2.0;
-        let top = Rect { x: rect.x, y: rect.y, width: rect.width, height: half_h };
-        let bottom =
-            Rect { x: rect.x, y: rect.y + half_h, width: rect.width, height: rect.height - half_h };
-        let top_half = (top, (r, r, 0.0, 0.0), (true, true, false, true));
-        let bottom_half = (bottom, (0.0, 0.0, r, r), (false, true, true, true));
-        let (state, other) = if self.toggled { (top_half, bottom_half) } else { (bottom_half, top_half) };
-        [(state.0, state.1, state.2, true), (other.0, other.1, other.2, false)]
-    }
-
-    /// The face-light overlays this Toggle paints: `(rect, radius, corners,
-    /// color)`. The rocker's two half faces carry them; the slide style has
-    /// none (its glider is pure relief). Empty when the light works out to
-    /// nothing.
+    /// The well the glider lives in: the toggle's whole footprint carved one
+    /// step down. Taken through [`crate::layout::carve_inside`], so the walls
+    /// stay inside the rect and the gap beside a toggle is the gap, exactly as
+    /// a TextBox's well is taken. `(rect, per-corner radii, wall width)`.
     ///
-    /// The single source `paint` and the flat-path bridge in
-    /// `layout::render_widget` both read — a Toggle paints NO fill in any
-    /// style, so on a flat host these overlays plus [`Toggle::flat_carves`]
-    /// are the ENTIRE control; without them the row was a bare label.
-    pub fn flat_faces(&self, rect: Rect) -> Vec<(Rect, f32, (bool, bool, bool, bool), [f32; 4])> {
-        if self.slide() {
-            return Vec::new();
-        }
-        let radius = crate::layout::toggle_corner_radius();
-        self.rocker_reliefs(rect)
-            .into_iter()
-            .filter_map(|(half, radii, _, _)| {
-                let light = self.face_light(radii.0 > 0.0);
-                if light[3] <= 0.001 {
-                    return None;
-                }
-                let corners = (radii.0 > 0.0, radii.1 > 0.0, radii.2 > 0.0, radii.3 > 0.0);
-                Some((half, radius, corners, light))
-            })
-            .collect()
+    /// The SINGLE source for the track geometry: `paint` carves it here and
+    /// [`Toggle::slide_plate`] measures the floor from it.
+    pub fn well(&self, rect: Rect) -> (Rect, crate::scene::paint::Radii, f32) {
+        let r = crate::layout::toggle_corner_radius();
+        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+        let (well, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
+        (well, radii, depth)
     }
 
-    /// The carves this Toggle paints — the glider's flush seam ring in the
-    /// slide style (a trough: the pad's face stays level with the plate, the
-    /// closed dropdown's chrome, so only the valley around it and its
-    /// position say where the state is), the rocker's raised/recessed halves
-    /// otherwise (only under `raised` styling; without it the faces' light
-    /// stands alone). Companion to [`Toggle::flat_faces`]; see there for why
-    /// both exist.
+    /// The sliding plate, as `(footprint, corner radius, wall width)`: half the
+    /// well's floor wide, gliding between the floor's ends by the animated
+    /// `slide_t` — left is off, right is on.
+    ///
+    /// It stands ON the floor — the flat region inside the well's walls, which
+    /// start half a wall in from the well's own boundary — and its roll abuts
+    /// that floor's edge instead of shading over the well's wall. Its corners
+    /// run concentric with the well's.
+    ///
+    /// Its wall is HALF the well's. A plate in a well is the shallower part of
+    /// the pair, and at a control's height it has to be: a toggle is 24px, a
+    /// well wall 4.8, and two full-depth walls stacked leave the boss no flat
+    /// top at all — its own walls meet in the middle and the plate reads as a
+    /// ridge drawn across the track rather than a thing standing in it.
+    pub fn slide_plate(&self, rect: Rect) -> (Rect, f32, f32) {
+        let (well, radii, wd) = self.well(rect);
+        let (floor, floor_r) = inset(well, radii.0, wd * 0.5);
+        let pd = (wd * 0.5).max(1.0);
+        let (travel, pr) = inset(floor, floor_r, pd * 0.5);
+        let pw = travel.width * 0.5;
+        let plate = Rect {
+            x: travel.x + self.slide_t * (travel.width - pw),
+            y: travel.y,
+            width: pw,
+            height: travel.height,
+        };
+        (plate, pr, pd)
+    }
+
+    /// The carves this Toggle paints: the track's well (a `Recess`) and the
+    /// glider standing in it (a `Boss`, the faceless raised plate
+    /// [`crate::scene::paint::PaintCtx::control_plate`] emits) — in that order,
+    /// the order `paint` emits them.
+    ///
+    /// Exists because a Toggle paints NO fill in any state: on a legacy-view
+    /// host (`ParametersBg::reliefs`) these carves are the ENTIRE control, and
+    /// without them the row is a bare label. Empty without `raised` styling,
+    /// where the frame and the lit face stand in for them.
     pub fn flat_carves(&self, rect: Rect) -> Vec<crate::layout::ReliefCarve> {
         use crate::layout::{CarveKind, ReliefCarve};
-        let radius = crate::layout::toggle_corner_radius();
-        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        if let Some(btn) = self.slide_button(rect) {
-            let (btn, radii) = crate::layout::carve_inside(btn, (radius, radius, radius, radius), depth);
-            return vec![ReliefCarve {
-                kind: CarveKind::Trough,
-                x: btn.x,
-                y: btn.y,
-                w: btn.width,
-                h: btn.height,
-                radii,
-                depth,
-                edges: (true, true, true, true),
-            }];
-        }
         if !self.raised() {
             return Vec::new();
         }
-        // The carves stay inside the pill (`layout::carve_inside`): the halves are
-        // cut from the inset rect (the hinge keeps the pill's centre line), the
-        // faces (`flat_faces`) keep the full one — the walls shade over their edges.
-        let (inset, radii) = crate::layout::carve_inside(rect, (radius, radius, radius, radius), depth);
-        let r = radii.0;
-        self.rocker_reliefs(inset)
-            .into_iter()
-            .map(|(half, radii, walls, raised)| ReliefCarve {
-                kind: if raised { CarveKind::Boss { tint: None } } else { CarveKind::Recess { tint: None } },
-                x: half.x,
-                y: half.y,
-                w: half.width,
-                h: half.height,
-                radii: (radii.0.min(r), radii.1.min(r), radii.2.min(r), radii.3.min(r)),
+        let all = (true, true, true, true);
+        let (well, well_radii, depth) = self.well(rect);
+        let (plate, pr, pd) = self.slide_plate(rect);
+        let (boss, boss_radii) = crate::layout::carve_inside(plate, (pr, pr, pr, pr), pd);
+        vec![
+            ReliefCarve {
+                kind: CarveKind::Recess { tint: None },
+                x: well.x,
+                y: well.y,
+                w: well.width,
+                h: well.height,
+                radii: well_radii,
                 depth,
-                edges: walls,
-            })
-            .collect()
-    }
-
-    /// A rocker face's UNIFORM lighting overlay, evaluated under the SAME DE
-    /// light the relief primitives answer to: `light_source_position` through the plate
-    /// model (shader2d's `plate_shade` — ambient floor, diffuse off the
-    /// normal, expressed relative to the flat face). The rocker reads as a
-    /// bent plate: the state half tilts OUT toward the viewer, the other IN,
-    /// so each half has ONE slightly tipped normal — the overlay stays
-    /// uniform (the faces keep their flat-step read) but its sign and amount
-    /// swing with the light azimuth exactly like the walls' shading, and the
-    /// whole thing scales with `bevel_depth` through the same strength term.
-    /// Mirrors `tessellate_display_list`'s `plate_light` construction and
-    /// shader2d's `PLATE_AMBIENT` / `flat_shade` — keep the three in sync.
-    pub fn face_light(&self, top_half: bool) -> [f32; 4] {
-        const AMBIENT: f32 = 0.55; // shader2d PLATE_AMBIENT
-        const FACE_TILT: f32 = 0.5; // the rocker plate's slope, as dh over dy
-        let az = crate::layout::light_source_position();
-        let el = std::f32::consts::FRAC_PI_4; // plate_light's elevation
-        let (ly, lz) = (-az.sin() * el.cos(), el.sin());
-        // The state half tilts out (outer edge toward the viewer), the other
-        // in. A heightfield normal is (0, -dh/dy, 1): a top OUT half rises
-        // toward -y, tipping its normal to +y; every other case follows.
-        let out = top_half == self.toggled;
-        let ny = if top_half == out { FACE_TILT } else { -FACE_TILT };
-        // Faces pivot about the horizontal hinge, so only the light's y and
-        // z components reach the dot product — azimuth enters through ly.
-        let dot = ((ny * ly + lz) / (1.0 + ny * ny).sqrt()).max(0.0);
-        let flat = AMBIENT + (1.0 - AMBIENT) * lz;
-        let diff = AMBIENT + (1.0 - AMBIENT) * dot;
-        let strength = crate::layout::bevel_depth() / 0.15;
-        let v = (diff / flat - 1.0) * strength;
-        if v >= 0.0 {
-            [1.0, 1.0, 1.0, v.min(1.0)]
-        } else {
-            [0.0, 0.0, 0.0, (-v).min(1.0)]
-        }
+                edges: all,
+            },
+            ReliefCarve {
+                kind: CarveKind::Boss { tint: None },
+                x: boss.x,
+                y: boss.y,
+                w: boss.width,
+                h: boss.height,
+                radii: boss_radii,
+                depth: pd,
+                edges: all,
+            },
+        ]
     }
 }
 
@@ -450,12 +396,6 @@ impl Adapted<Toggle> {
     /// Raised style: see the `raised` field.
     pub fn with_raised(mut self, raised: bool) -> Self {
         self.raised = Some(raised);
-        self
-    }
-
-    /// Slide style for this widget regardless of the config (see `Toggle::slide`).
-    pub fn with_slide(mut self, slide: bool) -> Self {
-        self.slide_override = Some(slide);
         self
     }
 }
@@ -497,76 +437,70 @@ impl Paint for Toggle {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
+        use crate::scene::paint::{ControlPlate, PlateStance};
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-        let slide = self.slide();
 
-        // A toggle paints NO fill of its own, in any style: it is worked out
-        // of the plate it sits on, so the plate's own material shows through
-        // and the state reads from light and relief — the DE's transparent-face
+        // A toggle paints NO fill of its own: it is worked out of the plate it
+        // sits on, so the plate's own material (tint, blur, whatever it is)
+        // shows through both the well's floor and the glider's face, and the
+        // state reads from light and relief alone — the DE's transparent-face
         // convention (closed dropdowns, inset troughs). The state colors this
         // used to tint with (enabled/disabled/background) are retired with the
         // rest of the toggle's palette.
-        if slide {
-            // The slide style: the widget is the track; a half-width button
-            // glides between its ends with the state (animated in `tick`).
-            // With no fill the button is a flush inset pad of the plate — the
-            // valley seam around it (a trough, the closed dropdown's chrome)
-            // and its position ARE the read (left off, right on). The seam
-            // also reaches legacy-view hosts through `flat_carves` (see
-            // `ParametersBg::troughs`).
-            for carve in self.flat_carves(rect) {
-                ctx.carve(&carve);
-            }
+        let (well, well_radii, depth) = self.well(rect);
+        let (plate, plate_r, plate_depth) = self.slide_plate(rect);
+        if self.raised() {
+            // The track is a WELL — the same recess a TextBox carves — and the
+            // glider is a control plate standing on its floor, raised faceless
+            // (a `Boss`, the surface below as its face). Its position IS the
+            // read: left off, right on, animated in `tick`. Both also reach
+            // legacy-view hosts through `flat_carves` (see
+            // `ParametersBg::reliefs`), which must emit them in this order.
+            ctx.recess(well, well_radii, depth);
+            let focus = if self.focused { Some(ControlPlate::focus_tint()) } else { None };
+            ctx.control_plate(
+                &ControlPlate::control(plate, plate_r, PlateStance::Raised, [0.0; 4])
+                    .with_depth(plate_depth)
+                    .with_tint(focus),
+            );
         } else {
-            // The rocker: two FLAT half faces (see `rocker_reliefs`) — the
-            // state half tipped out toward the light, the other away — each
-            // carrying its uniform `face_light` overlay, a neutral light/shade
-            // over the plate rather than a color. Under `control_relief` the
-            // halves additionally wear their beveled step (state half a raised
-            // plateau, the other recessed, hinge wall open so they meet in a
-            // single step); without it that same lighting stands alone. The
-            // flat style's hue gradient is gone with the rest of the palette,
-            // so the two styles now differ only by the relief they were named
-            // for.
-            for (half, r, corners, light) in self.flat_faces(rect) {
-                ctx.rounded_rect(half, r, corners, light);
-            }
-            for carve in self.flat_carves(rect) {
-                ctx.carve(&carve);
-            }
+            // Relief off: a well is its frame — the one hairline every well
+            // falls back to, lit while focused, exactly `well_rim`'s flat arm —
+            // and the plate standing in it is a lit face, the neutral overlay
+            // the DE gives a surface it cannot carve (what the rocker's halves
+            // wore). Scaled by the relief strength, as that lighting was.
+            //
+            // The plate's overlay is a ROUNDED RECT on purpose: the legacy
+            // reverse bridge reads only those, never a `Border`, so a
+            // legacy-view host (`ParametersBg`, whose carves are gated on
+            // relief) still shows which end the plate is at.
+            let bw = crate::layout::toggle_border_width().max(1.0);
+            ctx.border(well, well_radii, [0.0; 4], colors::well_frame_color(self.hovered, self.focused), bw);
+            let lit = (0.16 * (crate::layout::bevel_depth() / 0.15)).clamp(0.0, 0.5);
+            ctx.rounded_rect(plate, plate_r, (true, true, true, true), [1.0, 1.0, 1.0, lit]);
         }
 
         if let Some(ref label) = self.label {
             let (font_fam, font_size) = crate::layout::control_label_font_parsed();
             let est_w = crate::widget::display::measure_text_width(label, &font_fam, font_size);
-            let tx = if slide {
-                // Fixed left alignment — the label never moves. When the
-                // glider covers it, the text shows through the glass: glyphs
-                // render in the engine's later text pass, over the button's
-                // mostly-transparent fill.
-                x + 8.0
-            } else {
-                match self.justify {
-                    Justification::Left => x + 8.0,
-                    Justification::Right => x + w - est_w - 8.0,
-                    Justification::Center => x + (w - est_w) / 2.0,
-                }
+            let tx = match self.justify {
+                Justification::Left => x + crate::layout::CONTROL_TEXT_INSET,
+                Justification::Right => x + w - est_w - crate::layout::CONTROL_TEXT_INSET,
+                Justification::Center => x + (w - est_w) / 2.0,
             };
-            // Focused: the label lit in the highlight — a rocker's halves carve
-            // partial rings (the hinge wall is open), which cannot be tinted, so
-            // the label is the toggle's focus cue.
-            let label_color = if self.focused {
-                let c = colors::to_srgb(crate::color::highlight_primary_color());
-                [(c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8]
-            } else {
-                colors::control_label_color_for_state(self.hovered, false)
-            };
+            // The label never moves with the state. When the glider covers it
+            // the text shows through: the plate carries no face of its own, and
+            // the glyphs land in the engine's later text pass either way.
+            //
+            // Focus is the glider plate's own lit rim (`ControlPlate::with_tint`)
+            // — the ring every other plate wears, which the rocker's partial
+            // carves could not — so the label stays the label.
             ctx.text(
                 label.clone(),
                 tx,
                 crate::layout::align_text_y(y, h, font_size, 0.0),
                 font_size,
-                label_color,
+                colors::control_label_color_for_state(self.hovered, false),
             );
         }
     }
@@ -618,13 +552,10 @@ impl Input for Toggle {
         }
     }
 
-    /// Slide-style glide: the button position chases the state after a click
-    /// (~90ms exponential settle). Programmatic syncs snap instead — see
+    /// The glide: the plate's position in its well chases the state after a
+    /// click (~90ms exponential settle). Programmatic syncs snap instead — see
     /// `set_toggled` / `set_value_string` — so only user interaction animates.
     fn tick(&mut self, dt: f32, _rect: Rect) -> bool {
-        if !self.slide() {
-            return false;
-        }
         let target = if self.toggled { 1.0 } else { 0.0 };
         let d = target - self.slide_t;
         if d.abs() < 0.001 {
@@ -737,42 +668,92 @@ mod tests {
     }
 
     #[test]
-    fn toggle_click_and_gradient_switches_halves() {
+    fn toggle_click_glides_the_plate_across_its_well() {
         let mut ctx = UiContext::new();
         let mut t = Toggle::new();
         let (id, ptr) = (t.id(), t.as_ptr_mut());
         ctx.register_widget(id, ptr);
         WidgetHost::set_rect(&mut t, 0.0, 0.0, 60.0, 30.0);
 
-        // Geometry is config-dependent (rounded vs square, gradient vs rocker);
-        // assert the invariant that holds in all styles: the state side flips —
-        // the flat style's gradient half, the relief style's raised half.
+        let rect = Rect { x: 0.0, y: 0.0, width: 60.0, height: 30.0 };
         let painted = |t: &Adapted<Toggle>| {
             let mut pc = crate::scene::paint::PaintCtx::new();
-            crate::widget::Paint::paint(
-                t.inner(),
-                Rect { x: 0.0, y: 0.0, width: 60.0, height: 30.0 },
-                &mut pc,
-            );
-            pc.finish()
-                .items
-                .into_iter()
-                .map(|i| format!("{:?}", i.prim))
-                .collect::<Vec<_>>()
+            crate::widget::Paint::paint(t.inner(), rect, &mut pc);
+            pc.finish().items.into_iter().map(|i| format!("{:?}", i.prim)).collect::<Vec<_>>()
         };
         let before = painted(&t);
+        let plate_x = |t: &Adapted<Toggle>| t.inner().slide_plate(rect).0.x;
+        let left = plate_x(&t);
 
         assert!(ctx.propagate_event(&click_at(30.0, 15.0), id), "toggle consumed the click");
         assert!(t.toggled());
         assert!(t.take_click());
 
-        assert!(
-            painted(&t) != before,
-            "toggling changes the emitted geometry (state side switches halves)",
-        );
+        // A click sets the target; the plate GLIDES there (`tick`), so the
+        // geometry only moves once time passes — the rocker's halves used to
+        // swap on the press itself.
+        assert_eq!(plate_x(&t), left, "the click alone does not move the plate");
+        for _ in 0..60 {
+            crate::widget::Input::tick(t.inner_mut(), 1.0 / 60.0, rect);
+        }
+        assert!(plate_x(&t) > left, "the plate glided toward the on end");
+        assert!(painted(&t) != before, "toggling changes the emitted geometry");
 
         // preferred_height forwards the legacy toggle height.
         assert_eq!(WidgetHost::preferred_height(&t), Some(crate::layout::toggle_height()));
+    }
+
+    /// The plate stands ON the well's floor, clear of its walls by one wall
+    /// width on every side, and travels between the floor's ends: off is flush
+    /// left, on is flush right, and it never reaches outside the toggle's rect.
+    #[test]
+    fn toggle_plate_lives_inside_the_well() {
+        let rect = Rect { x: 10.0, y: 4.0, width: 120.0, height: 24.0 };
+        let mut t = Toggle::new();
+
+        let (well, _, depth) = t.inner().well(rect);
+        assert!(well.x >= rect.x && well.y >= rect.y, "the well carves inside the rect");
+
+        // The floor is the flat region inside the well's walls; the plate's own
+        // (half-depth) roll abuts its edge, so the plate is inset one more
+        // half-wall of its own from there.
+        let (off, _, pd) = t.inner().slide_plate(rect);
+        assert!((pd - depth * 0.5).abs() < 1e-4, "the plate's wall is half the well's");
+        let edge = depth * 0.5 + pd * 0.5;
+        assert!((off.x - (well.x + edge)).abs() < 1e-4, "off sits at the travel's left end");
+        assert!((off.y - (well.y + edge)).abs() < 1e-4, "and clear of the floor's top");
+        assert!(
+            off.height > pd * 2.0,
+            "the plate keeps a flat top: a boss no taller than its own wall is a ridge",
+        );
+
+        t.set_toggled(true); // programmatic syncs snap, so this is the on-end geometry
+        let (on, _, _) = t.inner().slide_plate(rect);
+        assert!(on.x > off.x, "on is to the right of off");
+        assert!(
+            (on.x + on.width - (well.x + well.width - edge)).abs() < 1e-4,
+            "on sits flush against the travel's right end",
+        );
+        assert!(on.x + on.width <= rect.x + rect.width, "and never leaves the toggle's rect");
+        assert!((off.width * 2.0 - (well.width - 2.0 * edge)).abs() < 1e-4, "half the travel wide");
+    }
+
+    /// The carves a legacy-view host re-emits (`ParametersBg::reliefs`) are the
+    /// well then the plate, in the order `paint` emits them — and nothing at
+    /// all with relief off, where the flat frames stand in.
+    #[test]
+    fn toggle_flat_carves_are_the_well_then_the_plate() {
+        use crate::layout::CarveKind;
+        let rect = Rect { x: 0.0, y: 0.0, width: 120.0, height: 24.0 };
+        let t = Toggle::new().with_raised(true);
+        let carves = t.inner().flat_carves(rect);
+        assert_eq!(carves.len(), 2);
+        assert!(matches!(carves[0].kind, CarveKind::Recess { .. }), "the track's well first");
+        assert!(matches!(carves[1].kind, CarveKind::Boss { .. }), "then the plate standing in it");
+        assert!(carves.iter().all(|c| c.edges == (true, true, true, true)), "both are full rings");
+
+        let flat = Toggle::new().with_raised(false);
+        assert!(flat.inner().flat_carves(rect).is_empty(), "relief off carves nothing");
     }
 
     #[test]

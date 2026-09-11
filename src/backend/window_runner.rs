@@ -1977,7 +1977,8 @@ pub fn tessellate_display_list(
                 // quad to keep that shading out of the drawn pixels — a clip
                 // the plate's whole-surface draw does not have, so grouped it
                 // smears the extended walls across the plate. Union pieces
-                // (section wells, rocker halves) are exactly these.
+                // (section wells, a spinbox's field and button run) are
+                // exactly these.
                 // A tinted carve also never groups: a CSG feature is geometry only,
                 // so the tint could only land on the whole plate's specular.
                 let full_ring = *edges == (true, true, true, true);

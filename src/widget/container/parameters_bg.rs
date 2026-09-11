@@ -1076,8 +1076,8 @@ impl ParametersBg {
     /// draws these AFTER the flat quads, so the walls' shading modulates the
     /// fills they cross (the order the widgets' own paints use). Tuple:
     /// (x, y, w, h, per-corner radii, depth, raised, walls) — raised maps to
-    /// `PaintCtx::boss_edges`, flat to `recess_edges`; the toggles' rocker
-    /// halves are why radii/walls are per-entry.
+    /// `PaintCtx::boss_edges`, flat to `recess_edges`; a toggle's well and
+    /// the plate standing in it are why radii/walls are per-entry.
     #[allow(clippy::type_complexity)]
     pub fn reliefs(
         &self,
@@ -1179,13 +1179,12 @@ impl ParametersBg {
             } else if p.2 == "button" {
                 self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
             } else if p.2 == "toggle" || p.2 == "checkbox" {
-                // The rocker's bg pill and its faces' uniform light overlays
-                // (`Toggle::face_light`) arrive through the rounded-quad view;
-                // the entries here are the widget's own step carves
-                // (`Toggle::flat_carves`, exactly what its paint emits): the
-                // rocker's two flat halves, the state half a raised plateau,
-                // the other recessed, hinge wall open on both. The slide
-                // glider is a trough, not a step, and rides [`Self::troughs`].
+                // A toggle paints no fill at all, so these carves — the
+                // widget's own (`Toggle::flat_carves`, exactly what its paint
+                // emits, in the order it emits them) — ARE the control: the
+                // track's well (a recess) and the plate gliding on its floor
+                // (a boss). Neither is flush, so nothing here rides
+                // [`Self::troughs`].
                 if let Some(t) = &self.toggles[i] {
                     let (x, y, w, h) = t.rect();
                     if w > 0.0 && h > 0.0 {
@@ -1249,7 +1248,7 @@ impl ParametersBg {
     /// for [`crate::scene::paint::PaintCtx::trough_edges`], drawn by the host
     /// AFTER [`Self::reliefs`]. These are the rows' FLUSH inset controls — the
     /// textpick picker button, the spinbox's -/+ run, the dropdown trigger
-    /// (the widget's own `inset_plate`) and the slide toggle's glider: faces
+    /// (the widget's own `inset_plate`): faces
     /// level with the surface they sit in, so the control reads as part of
     /// the plate, marked off by its seam alone. On the sides a control adjoins its well, the WELL'S
     /// OWN WALL is the seam's far side (the face reaches the wall's base and
@@ -1310,23 +1309,9 @@ impl ParametersBg {
                         out.push((x, y + ty, w, h - ty, (r, r, r, r), depth, (true, true, true, true)));
                     }
                 }
-            } else if p.2 == "toggle" || p.2 == "checkbox" {
-                // The slide glider's seam ring — the trough entries of the
-                // widget's own carves (`Toggle::flat_carves`); its rocker
-                // steps ride [`Self::reliefs`].
-                if let Some(t) = &self.toggles[i] {
-                    let (x, y, w, h) = t.rect();
-                    if w > 0.0 && h > 0.0 {
-                        let ty = t.label_strip();
-                        let rect = Rect { x, y: y + ty, width: w, height: h - ty };
-                        for c in t.inner().flat_carves(rect) {
-                            if matches!(c.kind, crate::layout::CarveKind::Trough) {
-                                out.push((c.x, c.y, c.w, c.h, c.radii, c.depth, c.edges));
-                            }
-                        }
-                    }
-                }
             }
+            // A toggle contributes nothing here: its well and its glider plate
+            // are a recess and a boss, and both ride [`Self::reliefs`].
         }
         out
     }

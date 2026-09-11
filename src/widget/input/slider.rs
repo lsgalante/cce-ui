@@ -646,7 +646,7 @@ pub fn band_profile(track_x: f32, track_w: f32, h: f32, x: f32, centers: &[f32],
 /// hand-shaded per column from the same profile the fill samples: a shadow band
 /// hugging the top contour, a lit band along the bottom (the DE light sits
 /// upper-left), stepped alphas like the legacy banded bevels, amplitude riding
-/// `bevel_depth` like the rocker's `face_light`. Then the band itself, one
+/// `bevel_depth` like every other relief wall's. Then the band itself, one
 /// column per pixel with a hair of overlap so AA seams can't open. The one
 /// painter behind Slider, RangeSlider and Float3's rows.
 pub fn paint_band_shape(ctx: &mut PaintCtx, track_x: f32, track_w: f32, cy: f32, color: [f32; 4], profile: &dyn Fn(f32) -> f32) {
