@@ -533,6 +533,11 @@ impl Input for ColorSelector {
         // the picker launched with.
         let mut redraw = false;
         if let Some(rx) = &self.live_rx {
+            // A live picker session is activity: the runner sleeps between
+            // ticks when nothing is animating, and these lines come from a
+            // reader thread it cannot see, so keep the frame cadence for as
+            // long as the picker is open.
+            redraw = true;
             let mut lines = Vec::new();
             let mut disconnected = false;
             loop {

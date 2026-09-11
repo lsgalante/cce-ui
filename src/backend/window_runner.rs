@@ -3173,6 +3173,18 @@ pub trait Application: Sized + 'static {
     fn grid_patch(&mut self, _x: f64, _y: f64, _w: f64, _h: f64, _scale: f64) {}
     fn update(&mut self, msg: Self::Message, needs_rebuild: &mut bool, exit: &mut bool);
     fn tick(&mut self, dt: f32, needs_rebuild: &mut bool);
+    /// How long the runner may sleep between `tick`s while the window is
+    /// idle — nothing to draw, no animation, no key held, no frame callback
+    /// outstanding. `None` (the default) lets it sleep until a Wayland
+    /// event or a message on the app's calloop `Sender` arrives, bounded by
+    /// [`IDLE_DISPATCH`]. Override with `Some` ONLY if your `tick` polls
+    /// something the loop cannot see — a `std::sync::mpsc` receiver drained
+    /// in `tick`, say — because with the default that poll waits for the
+    /// next unrelated event. The better fix is to send through the calloop
+    /// `Sender` handed to `new`, which wakes the loop by itself.
+    fn idle_poll_interval(&self) -> Option<std::time::Duration> {
+        None
+    }
     /// On-top overlay quads drawn after the display list and its text (e.g. the status bar's
     /// tray-hover highlights). Deliberately separate from the single paint path.
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
@@ -3449,6 +3461,9 @@ fn is_repeatable_key(key: &Key) -> bool {
         _ => false,
     }
 }
+
+/// Default cap on the runner's idle sleep — see `Application::idle_poll_interval`.
+pub const IDLE_DISPATCH: std::time::Duration = std::time::Duration::from_millis(1000);
 
 pub struct EngineState<A: Application> {
     pub registry_state: RegistryState,
@@ -5735,6 +5750,25 @@ fn run_session<'l, A: Application>(
         *FLAG.get_or_init(|| std::env::var_os("CCE_PRESENT_DEBUG").is_some())
     }
 
+    /// Loop cadence while something is in motion: one tick per frame.
+    const ACTIVE_DISPATCH: std::time::Duration = std::time::Duration::from_millis(16);
+
+    /// Upper bound on an idle sleep. The loop is woken early by any Wayland
+    /// event or calloop-channel message, so this only caps how long an
+    /// app-side poll that bypasses both (see `Application::idle_poll_interval`)
+    /// can wait. `CCE_UI_IDLE_MS` overrides it — `16` restores the old
+    /// always-ticking loop for a bisect.
+    fn idle_dispatch() -> std::time::Duration {
+        static IDLE: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
+        *IDLE.get_or_init(|| {
+            std::env::var("CCE_UI_IDLE_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .map(std::time::Duration::from_millis)
+                .unwrap_or(IDLE_DISPATCH)
+        })
+    }
+
     /// Seconds after session start at which to inject a simulated connection
     /// loss, from `CCE_UI_FAULT_RECONNECT`. Resolved once: this is read from
     /// the per-iteration path.
@@ -5753,6 +5787,15 @@ fn run_session<'l, A: Application>(
     let mut last_tick = std::time::Instant::now();
     let mut end = SessionEnd::AppExit;
     let session_start = std::time::Instant::now();
+    // The loop's cadence. ACTIVE while anything is in motion (a redraw
+    // pending or just done, an animation, a held key, the post-activity
+    // warm-down); otherwise the app's own poll interval or IDLE_DISPATCH.
+    // Before 2026-09-11 this was a flat 16 ms whatever the state: every
+    // cce-ui client woke 60 times a second forever — ~1200 wakeups/s across
+    // a session's twenty clients — and each wake ran tick, desired_size,
+    // title and margin checks for nothing.
+    let mut next_timeout = ACTIVE_DISPATCH;
+    let mut slept_idle = false;
     loop {
         // Frame callbacks arrive with a p50 of 0ms but a ~0.5s tail, while the
         // compositor's own trace shows it firing them within one or two vsyncs
@@ -5764,7 +5807,7 @@ fn run_session<'l, A: Application>(
         } else {
             None
         };
-        if let Err(e) = event_loop.dispatch(std::time::Duration::from_millis(16), &mut engine_state) {
+        if let Err(e) = event_loop.dispatch(next_timeout, &mut engine_state) {
             log::error!("[window_runner] event loop error, ending session: {e:?}");
             end = SessionEnd::ConnectionLost;
             break;
@@ -5815,6 +5858,12 @@ fn run_session<'l, A: Application>(
         last_tick = now;
         if dt > 0.1 {
             dt = 0.1;
+        }
+        // Waking from an idle sleep: the interval is not animation time. An
+        // animation an event just started must take its first step at frame
+        // size, not leap 100 ms in one tick.
+        if slept_idle {
+            dt = dt.min(1.0 / 60.0);
         }
 
         let mut rebuild = false;
@@ -5963,10 +6012,12 @@ fn run_session<'l, A: Application>(
             engine_state.warm_until =
                 Some(std::time::Instant::now() + std::time::Duration::from_millis(200));
         }
+        let mut rendered = false;
         if engine_state.redraw && !engine_state.frame_callback_pending {
             engine_state.redraw = false;
             if engine_state.first_configure_received {
                 engine_state.render();
+                rendered = true;
             }
         } else if !engine_state.redraw
             && !engine_state.frame_callback_pending
@@ -5977,8 +6028,26 @@ fn run_session<'l, A: Application>(
             // Warm-down re-render of the cached frame, paced by frame callbacks.
             if engine_state.first_configure_received {
                 engine_state.render();
+                rendered = true;
             }
         }
+
+        // Anything still moving keeps the frame cadence; a frame callback
+        // outstanding on its own does not (it arrives as an event) unless a
+        // redraw is queued behind it, which is what the starvation fallback
+        // above times. `redraw` still set here means the frame was withheld
+        // (callback pending, or no configure yet) and must be retried soon.
+        let warm = engine_state
+            .warm_until
+            .is_some_and(|t| std::time::Instant::now() < t);
+        let busy = engine_state.redraw || rendered || warm || engine_state.pressed_key.is_some();
+        next_timeout = if busy {
+            ACTIVE_DISPATCH
+        } else {
+            let app_poll = engine_state.inner.as_ref().unwrap().idle_poll_interval();
+            app_poll.map_or(idle_dispatch(), |d| d.min(idle_dispatch()))
+        };
+        slept_idle = !busy;
     }
 
     // Tear the session down: drop its Wayland source from the persistent loop
