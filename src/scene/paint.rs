@@ -124,14 +124,15 @@ impl PlateSpec {
 /// The **relief primitives** are the members of this enum that describe a lit
 /// surface rather than a flat fill: [`Prim::Bevel`], [`Prim::Plate`],
 /// [`Prim::Recess`], [`Prim::Boss`], [`Prim::Ridge`], [`Prim::ConcaveFillet`],
-/// [`Prim::Groove`] and [`Prim::Sphere`]. They share one lighting model — the
+/// [`Prim::Groove`], [`Prim::Lattice`] and [`Prim::Sphere`]. They share one lighting model — the
 /// DE's light vector, roll width and profile, per-pixel through shader2d's
 /// SDF branch (see `crate::layout::bevel_shader`) — and split in two:
 ///
 /// - **plates** carry their own fill: `Bevel`, `Plate`. Shader mode 1.
 /// - **carves** emit shading ONLY, no fill, over whatever is already painted
-///   beneath: `Recess`, `Boss`, `Ridge`, `ConcaveFillet`, `Groove`. Modes 2-4
-///   and 6-8. (`Sphere`, mode 5, is neither — a lit ball under the same model.)
+///   beneath: `Recess`, `Boss`, `Ridge`, `ConcaveFillet`, `Groove`, `Lattice`.
+///   Modes 2-4, 6-8 and 13. (`Sphere`, mode 5, is neither — a lit ball under
+///   the same model.)
 ///
 /// That split is load-bearing for flat-path hosts, which need one list for the
 /// faces and another for the edges drawn over them (cce-files' `rects` vs
@@ -579,6 +580,24 @@ pub enum Prim {
     /// plate dies into the plate's own rolled edge instead of ending on a hard line.
     /// SDF path only — the legacy banded tessellation draws nothing (like `Ridge`).
     Groove { a: (f32, f32), b: (f32, f32), width: f32, depth: f32, host: Rect },
+    /// A periodic field of identical rounded-box wells — every cell of a grid
+    /// carved into whatever is painted beneath, as ONE surface. The wells
+    /// repeat every `period` (x, y) with one cell centred at `origin`, each
+    /// `cell` (w, h) big with `radius` corners; the wall runs from the cell
+    /// edge OUTWARD over `depth` px (floor at the edge, plateau one run out),
+    /// so a rail between two cells carries one wall from each side and the
+    /// rail face is whatever the runs leave. Shading lands only inside `rect`.
+    ///
+    /// This exists because a lattice drawn as one [`Prim::Recess`] per cell is
+    /// N independent overlays: where four rounded rings meet at a crossing
+    /// their shadings stack in colour space and read as overlapping effects,
+    /// not a junction. Here the pixel is folded into the period and the
+    /// distance is to the NEAREST cell — the union of every well — evaluated
+    /// once, so the rail centre lines and the diagonals at each crossing are
+    /// true mitres, and the cost is one draw regardless of how many cells the
+    /// surface holds (a free carve per cell also runs into the per-frame
+    /// feature budget long before a zoomed-out grid does). SDF path only.
+    Lattice { rect: Rect, period: (f32, f32), origin: (f32, f32), cell: (f32, f32), radius: f32, depth: f32 },
     /// Text in sRGB u8 (the `TextLabel` convention). `font` is a font string for
     /// `get_text_buffer` (family, or "family:size"); `bounds` is a logical `[l, t, r, b]` clip
     /// for the glyph pass (Phase 6: the backend renders these through the glyph pass when the app
@@ -961,6 +980,9 @@ impl PaintCtx {
                 self.concave_fillet(cx, cy, radius, depth, start, raised)
             }
             Prim::Groove { a, b, width, depth, host } => self.groove(a, b, width, depth, host),
+            Prim::Lattice { rect, period, origin, cell, radius, depth } => {
+                self.lattice(rect, period, origin, cell, radius, depth)
+            }
             Prim::Image { image, rect, alpha } => self.image(image, rect, alpha),
         }
         None
@@ -977,6 +999,23 @@ impl PaintCtx {
             depth,
             host,
         });
+    }
+
+    /// A periodic field of rounded wells carved as one surface — see
+    /// [`Prim::Lattice`]. `origin` is any one cell's centre; `rect` bounds the
+    /// shading. All logical px, like every other carve.
+    pub fn lattice(
+        &mut self,
+        rect: Rect,
+        period: (f32, f32),
+        origin: (f32, f32),
+        cell: (f32, f32),
+        radius: f32,
+        depth: f32,
+    ) {
+        let (ox, oy) = self.offset;
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Lattice { rect, period, origin: (origin.0 + ox, origin.1 + oy), cell, radius, depth });
     }
 
     pub fn border(&mut self, rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32) {

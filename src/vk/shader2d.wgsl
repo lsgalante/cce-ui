@@ -139,6 +139,7 @@ const MODE_TROUGH: i32 = 9;       // sunken valley straddling the boundary
 const MODE_DROPLET: i32 = 10;     // hanging water droplet clinging to the box top
 const MODE_ROLL: i32 = 11;        // fill-less rolled perimeter, composited as an overlay
 const MODE_DROPLET_SCRIM: i32 = 12; // flat feathered fill of the droplet silhouette
+const MODE_LATTICE: i32 = 13;     // periodic well field: nearest-cell carve, one evaluation
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -673,6 +674,25 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let s = dot(c, nrm);
         fd = abs(s) - rrect_clip.p_rect.z;
         fgd = nrm * select(-1.0, 1.0, s >= 0.0);
+        eff = MODE_RECESS;
+    } else if (mode == MODE_LATTICE) {
+        // MODE_LATTICE: a periodic field of identical rounded wells. Fold
+        // the pixel into the period about one cell's centre (p_rect.xy;
+        // period in p_host.xy) and take the box distance to THAT cell —
+        // identical axis-aligned boxes centred in their period cells, so
+        // the folded cell is always the nearest one and this is the exact
+        // union distance of every well. One profile evaluation, so the
+        // rails between cells and the diagonals at each crossing are true
+        // mitres instead of stacked per-cell overlays. The wall runs from
+        // the cell edge OUTWARD: floor at the edge, plateau one run out —
+        // the +t/2 shifts the shared path's boundary-straddling band so it
+        // spans [edge, edge + t]. Rejoins the free-carve path as a recess.
+        let per = max(rrect_clip.p_host.xy, vec2f(1e-3));
+        var c = frag - rrect_clip.p_rect.xy;
+        c = c - per * round(c / per);
+        let lg = rr_sdf_grad(c, vec4f(0.0, 0.0, rrect_clip.p_rect.zw), rrect_clip.p_radii);
+        fd = -lg.z + 0.5 * t;
+        fgd = lg.xy;
         eff = MODE_RECESS;
     } else if (mode == MODE_FILLET_DOWN || mode == MODE_FILLET_UP) {
         eff = mode - FILLET_TO_STEP;

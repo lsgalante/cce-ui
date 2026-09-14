@@ -1712,7 +1712,7 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
         P::DropletScrim { .. } => "DropletScrim",
         P::ConcaveFillet { .. } => "ConcaveFillet",
-        P::Groove { .. } => "Groove", P::Glow { .. } => "Glow",
+        P::Groove { .. } => "Groove", P::Lattice { .. } => "Lattice", P::Glow { .. } => "Glow",
         P::Text { .. } => "Text", P::Image { .. } => "Image",
     }
 }
@@ -2542,6 +2542,30 @@ pub fn tessellate_display_list(
                     );
                 }
             }
+            Prim::Lattice { rect, period, origin, cell, radius, depth } if shader_plates => {
+                // A periodic well field (shader mode 13): one cover quad over
+                // `rect`; the shader folds each pixel into the period and
+                // measures the nearest cell, so the whole lattice is a single
+                // evaluation. p_rect = one cell's centre + half-extents,
+                // p_radii = the corner radius, p_host.xy = the period; the
+                // host-box fade sides are pushed far out (a lattice never
+                // fades against a host — its own rect bounds it).
+                let (pw, ph) = (period.0.max(1e-3), period.1.max(1e-3));
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, [0.0; 4]));
+                plate = Some(crate::vk::PlatePush {
+                    rect: [origin.0 * scale, origin.1 * scale, cell.0 * 0.5 * scale, cell.1 * 0.5 * scale],
+                    radii: [*radius * scale; 4],
+                    light: [plate_light[0], plate_light[1], plate_light[2], *depth * scale],
+                    material: plate_mat,
+                    host: [pw * scale, ph * scale, 1e6, 1e6],
+                    specular_tint: [1.0, 1.0, 1.0, 0.0],
+                    mode: 13.0,
+                    shape: crate::layout::corner_shape(),
+                });
+            }
+            // Legacy banded path: no periodic wall — the lattice draws nothing
+            // there, like the fillet (A/B comparison path only).
+            Prim::Lattice { .. } => {}
         }
         let end = verts.len() as u32;
         if end == start {

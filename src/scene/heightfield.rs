@@ -217,6 +217,7 @@ const MODE_FILLET_UP: i32 = 7;
 const MODE_GROOVE: i32 = 8;
 const MODE_TROUGH: i32 = 9;
 const MODE_ROLL: i32 = 11;
+const MODE_LATTICE: i32 = 13;
 
 impl HeightField {
     /// Sample one frame's plate batches, in draw order, over a `width` ×
@@ -237,7 +238,7 @@ impl HeightField {
         for b in batches {
             let Some(p) = b.plate else { continue };
             let mode = p.mode.round() as i32;
-            if !matches!(mode, 1..=9 | 11) {
+            if !matches!(mode, 1..=9 | 11 | 13) {
                 continue;
             }
             let shape = p.shape.clamp(2.0, 16.0);
@@ -253,7 +254,10 @@ impl HeightField {
                     let r = p.rect[2] + t;
                     (p.rect[0] - r, p.rect[1] - r, p.rect[0] + r, p.rect[1] + r)
                 }
-                MODE_GROOVE => (0.0, 0.0, width as f32, height as f32),
+                // A lattice's shading is bounded by its cover quad, which the
+                // batch does not record; the one consumer (cce-grid) covers
+                // its whole surface, so the window is the honest bound.
+                MODE_GROOVE | MODE_LATTICE => (0.0, 0.0, width as f32, height as f32),
                 _ => (
                     p.rect[0] - p.rect[2] - t - 2.0,
                     p.rect[1] - p.rect[3] - t - 2.0,
@@ -329,6 +333,19 @@ impl HeightField {
                             let fd = s.abs() - p.rect[2];
                             let u = (fd / t + 0.5).clamp(0.0, 1.0);
                             -carve_drop * (1.0 - prof.carve_height(u))
+                        }
+                        MODE_LATTICE => {
+                            // Fold into the period about one cell's centre and
+                            // measure that cell — the union distance of every
+                            // well (see the shader's MODE_LATTICE). Positive
+                            // outside the cell; the wall runs from the edge
+                            // outward over t, floor at the edge.
+                            let (px, py) = (p.host[0].max(1e-3), p.host[1].max(1e-3));
+                            let c = (pt.0 - p.rect[0], pt.1 - p.rect[1]);
+                            let c = (c.0 - px * (c.0 / px).round(), c.1 - py * (c.1 / py).round());
+                            let d_out = rr_sdf(c, [0.0, 0.0, p.rect[2], p.rect[3]], p.radii, shape, t);
+                            let u = (1.0 - d_out / t).clamp(0.0, 1.0);
+                            -carve_drop * prof.carve_height(u)
                         }
                         MODE_FILLET_DOWN | MODE_FILLET_UP => {
                             let (cx, cy) = (pt.0 - p.rect[0], pt.1 - p.rect[1]);
@@ -507,6 +524,41 @@ mod tests {
         let floor = hf.px[50 * 100 + 50];
         assert!((floor + RECESS_DEPTH * 10.0).abs() < 1e-3, "floor {floor}");
         assert_eq!(hf.px[5 * 100 + 5], 0.0);
+    }
+
+    #[test]
+    fn a_lattice_is_one_surface_with_plateau_rails_and_mitred_crossings() {
+        // Period 50, cells 30 wide (gap 20), wall 10 = the half-gap, one
+        // cell centred at (25, 25). p_rect = cell centre + half-extents,
+        // p_host.xy = period, radii 4 (the fixture's).
+        let mut b = plate([25.0, 25.0, 15.0, 15.0], 10.0, [50.0, 50.0, 1e6, 1e6]);
+        b.plate.as_mut().unwrap().mode = 13.0;
+        let hf = HeightField::from_frame(&[b], &[], 100, 100, 1.0);
+        let at = |x: usize, y: usize| hf.px[y * 100 + x];
+        let drop = RECESS_DEPTH * 10.0;
+        // Every cell floor, not just the one the push names: (25,25) and
+        // its period neighbour (75,75).
+        assert!((at(25, 25) + drop).abs() < 1e-3, "floor {}", at(25, 25));
+        assert!((at(75, 75) + drop).abs() < 1e-3, "neighbour floor {}", at(75, 75));
+        // The rail centre line between two cells is exactly one run from
+        // either edge: plateau, not a doubled wall. Pixel centres straddle
+        // the line by half a px (49.5 and 50.5 are each 9.5 from a cell), so
+        // the two samples sit a hair into opposite walls — equal, and within
+        // the wall's first half-px of drop.
+        assert!((at(49, 25) - at(50, 25)).abs() < 1e-3, "rail centre symmetric {} {}", at(49, 25), at(50, 25));
+        assert!(at(50, 25) > -0.1 && at(50, 25) <= 0.0, "rail centre {}", at(50, 25));
+        assert!(at(50, 25) > at(45, 25), "rail centre above the wall");
+        // The crossing where four cells meet is farther from every cell than
+        // the wall runs: plateau — the mitre the per-cell rings never gave.
+        assert!(at(50, 50).abs() < 1e-3, "crossing {}", at(50, 50));
+        // Halfway out the wall is between floor and plateau, on both sides
+        // of the rail (one wall from each cell, symmetric). Pixel centres:
+        // 45.5 is 5.5 past the first cell's edge at 40, 54.5 is 5.5 before
+        // the neighbour's edge at 60.
+        let w1 = at(45, 25);
+        let w2 = at(54, 25);
+        assert!(w1 < 0.0 && w1 > -drop, "wall {w1}");
+        assert!((w1 - w2).abs() < 1e-3, "walls symmetric {w1} {w2}");
     }
 
     #[test]
