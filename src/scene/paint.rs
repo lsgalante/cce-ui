@@ -124,15 +124,15 @@ impl PlateSpec {
 /// The **relief primitives** are the members of this enum that describe a lit
 /// surface rather than a flat fill: [`Prim::Bevel`], [`Prim::Plate`],
 /// [`Prim::Recess`], [`Prim::Boss`], [`Prim::Ridge`], [`Prim::ConcaveFillet`],
-/// [`Prim::Groove`], [`Prim::Lattice`] and [`Prim::Sphere`]. They share one lighting model — the
+/// [`Prim::Groove`], [`Prim::Lattice`], [`Prim::CarveUnion`] and [`Prim::Sphere`]. They share one lighting model — the
 /// DE's light vector, roll width and profile, per-pixel through shader2d's
 /// SDF branch (see `crate::layout::bevel_shader`) — and split in two:
 ///
 /// - **plates** carry their own fill: `Bevel`, `Plate`. Shader mode 1.
 /// - **carves** emit shading ONLY, no fill, over whatever is already painted
-///   beneath: `Recess`, `Boss`, `Ridge`, `ConcaveFillet`, `Groove`, `Lattice`.
-///   Modes 2-4, 6-8 and 13. (`Sphere`, mode 5, is neither — a lit ball under
-///   the same model.)
+///   beneath: `Recess`, `Boss`, `Ridge`, `ConcaveFillet`, `Groove`, `Lattice`,
+///   `CarveUnion`. Modes 2-4, 6-8, 13 and 14. (`Sphere`, mode 5, is neither —
+///   a lit ball under the same model.)
 ///
 /// That split is load-bearing for flat-path hosts, which need one list for the
 /// faces and another for the edges drawn over them (cce-files' `rects` vs
@@ -598,6 +598,28 @@ pub enum Prim {
     /// surface holds (a free carve per cell also runs into the per-frame
     /// feature budget long before a zoomed-out grid does). SDF path only.
     Lattice { rect: Rect, period: (f32, f32), origin: (f32, f32), cell: (f32, f32), radius: f32, depth: f32 },
+    /// Several rounded boxes carved (`raised` false) or raised (`raised`
+    /// true) as ONE shape: the union of the boxes is the well, and its wall
+    /// follows the union's outline — straddling it by ±`depth`/2 like every
+    /// carve boundary — through a single profile evaluation per pixel. An L,
+    /// a T, a plus, a slot with a round end: any outline boxes can compose.
+    ///
+    /// The alternative, one [`Prim::Recess`] per box, is N overlays that
+    /// each shade their own full outline: where two boxes overlap, each
+    /// draws a wall straight through the other's interior, and where their
+    /// walls cross the shadings stack in colour space — the junction reads
+    /// as two effects laid over each other, not one shape. Here the pixel's
+    /// distance is to the NEAREST box (the union SDF), so a box's wall
+    /// vanishes wherever it runs inside another, and an inside corner is a
+    /// sharp mitre (round it with [`Prim::ConcaveFillet`] if it must be
+    /// concave-rounded — the union has no radius there by construction).
+    ///
+    /// The boxes ride the frame's plate-feature buffer (the same slots CSG
+    /// carves use, 64 per frame), so a union costs one draw plus one slot
+    /// per box. When the budget cannot hold all of a union's boxes the
+    /// tessellator keeps as many as fit — a degraded shape rather than none —
+    /// and says so under `CCE_PLATE_DEBUG`. SDF path only.
+    CarveUnion { boxes: Vec<(Rect, Radii)>, depth: f32, raised: bool },
     /// Text in sRGB u8 (the `TextLabel` convention). `font` is a font string for
     /// `get_text_buffer` (family, or "family:size"); `bounds` is a logical `[l, t, r, b]` clip
     /// for the glyph pass (Phase 6: the backend renders these through the glyph pass when the app
@@ -983,6 +1005,7 @@ impl PaintCtx {
             Prim::Lattice { rect, period, origin, cell, radius, depth } => {
                 self.lattice(rect, period, origin, cell, radius, depth)
             }
+            Prim::CarveUnion { boxes, depth, raised } => self.carve_union(boxes, depth, raised),
             Prim::Image { image, rect, alpha } => self.image(image, rect, alpha),
         }
         None
@@ -1016,6 +1039,17 @@ impl PaintCtx {
         let (ox, oy) = self.offset;
         let rect = self.apply_offset(rect);
         self.push(Prim::Lattice { rect, period, origin: (origin.0 + ox, origin.1 + oy), cell, radius, depth });
+    }
+
+    /// Carve (or raise, with `raised`) the union of `boxes` as one shape with
+    /// one wall — see [`Prim::CarveUnion`]. `depth` is the wall's run in px,
+    /// as for [`PaintCtx::recess`].
+    pub fn carve_union(&mut self, boxes: Vec<(Rect, Radii)>, depth: f32, raised: bool) {
+        let boxes: Vec<(Rect, Radii)> = boxes.into_iter().map(|(r, radii)| (self.apply_offset(r), radii)).collect();
+        if boxes.is_empty() {
+            return;
+        }
+        self.push(Prim::CarveUnion { boxes, depth, raised });
     }
 
     pub fn border(&mut self, rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32) {

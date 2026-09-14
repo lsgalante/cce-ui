@@ -218,6 +218,7 @@ const MODE_GROOVE: i32 = 8;
 const MODE_TROUGH: i32 = 9;
 const MODE_ROLL: i32 = 11;
 const MODE_LATTICE: i32 = 13;
+const MODE_UNION: i32 = 14;
 
 impl HeightField {
     /// Sample one frame's plate batches, in draw order, over a `width` ×
@@ -238,7 +239,7 @@ impl HeightField {
         for b in batches {
             let Some(p) = b.plate else { continue };
             let mode = p.mode.round() as i32;
-            if !matches!(mode, 1..=9 | 11 | 13) {
+            if !matches!(mode, 1..=9 | 11 | 13 | 14) {
                 continue;
             }
             let shape = p.shape.clamp(2.0, 16.0);
@@ -258,6 +259,13 @@ impl HeightField {
                 // batch does not record; the one consumer (cce-grid) covers
                 // its whole surface, so the window is the honest bound.
                 MODE_GROOVE | MODE_LATTICE => (0.0, 0.0, width as f32, height as f32),
+                // A union's push rect is its boxes' bounding box.
+                MODE_UNION => (
+                    p.rect[0] - p.rect[2] - t - 2.0,
+                    p.rect[1] - p.rect[3] - t - 2.0,
+                    p.rect[0] + p.rect[2] + t + 2.0,
+                    p.rect[1] + p.rect[3] + t + 2.0,
+                ),
                 _ => (
                     p.rect[0] - p.rect[2] - t - 2.0,
                     p.rect[1] - p.rect[3] - t - 2.0,
@@ -346,6 +354,21 @@ impl HeightField {
                             let d_out = rr_sdf(c, [0.0, 0.0, p.rect[2], p.rect[3]], p.radii, shape, t);
                             let u = (1.0 - d_out / t).clamp(0.0, 1.0);
                             -carve_drop * prof.carve_height(u)
+                        }
+                        MODE_UNION => {
+                            // Nearest box of the run — the union SDF — through
+                            // one profile (see the shader's MODE_UNION).
+                            let mut best = f32::MAX;
+                            for feat in features.iter().skip(f_off).take(f_cnt) {
+                                let fd = rr_sdf(pt, [feat[0], feat[1], feat[2], feat[3]], [feat[4], feat[5], feat[6], feat[7]], shape, t);
+                                best = best.min(fd);
+                            }
+                            if best == f32::MAX {
+                                continue;
+                            }
+                            let u = (-best / t + 0.5).clamp(0.0, 1.0);
+                            let sign = if p.radii[0] > 0.5 { 1.0 } else { -1.0 };
+                            sign * carve_drop * prof.carve_height(u)
                         }
                         MODE_FILLET_DOWN | MODE_FILLET_UP => {
                             let (cx, cy) = (pt.0 - p.rect[0], pt.1 - p.rect[1]);
@@ -559,6 +582,35 @@ mod tests {
         let w2 = at(54, 25);
         assert!(w1 < 0.0 && w1 > -drop, "wall {w1}");
         assert!((w1 - w2).abs() < 1e-3, "walls symmetric {w1} {w2}");
+    }
+
+    #[test]
+    fn a_carve_union_is_one_wall_around_the_union_of_its_boxes() {
+        // An L: a 60×20 bar across the top and a 20×60 bar down the left,
+        // sharing the corner square (10..30). Wall 8, radii 4 (fixture).
+        let bar_h = [40.0, 20.0, 30.0, 10.0, 4.0, 4.0, 4.0, 4.0, 8.0, 0.0, 0.0, 0.0];
+        let bar_v = [20.0, 40.0, 10.0, 30.0, 4.0, 4.0, 4.0, 4.0, 8.0, 0.0, 0.0, 0.0];
+        let mut b = plate([40.0, 40.0, 30.0, 30.0], 8.0, [0.0, 2.0, 1e6, 1e6]);
+        b.plate.as_mut().unwrap().mode = 14.0;
+        b.plate.as_mut().unwrap().radii = [0.0; 4];
+        let hf = HeightField::from_frame(&[b], &[bar_h, bar_v], 100, 100, 1.0);
+        let at = |x: usize, y: usize| hf.px[y * 100 + x];
+        let drop = RECESS_DEPTH * 8.0;
+        // Deep inside either bar: the full drop, once.
+        assert!((at(55, 20) + drop).abs() < 1e-3, "top bar {}", at(55, 20));
+        assert!((at(20, 55) + drop).abs() < 1e-3, "left bar {}", at(20, 55));
+        // The shared corner square lies inside BOTH boxes. With one recess
+        // per box, each box's wall would run straight through the other's
+        // interior here (the vertical bar's right wall at x = 30 crosses the
+        // top bar). As a union the interior is flat floor: exactly one drop.
+        assert!((at(25, 20) + drop).abs() < 1e-3, "corner interior {}", at(25, 20));
+        assert!((at(20, 25) + drop).abs() < 1e-3, "corner interior {}", at(20, 25));
+        // Well outside: the base.
+        assert_eq!(at(80, 80), 0.0);
+        // The wall straddles the union outline by ±t/2 = 4: sampled 2 px
+        // outside the top bar's lower edge (y = 30), on the wall.
+        let wall = at(55, 32);
+        assert!(wall < 0.0 && wall > -drop, "wall {wall}");
     }
 
     #[test]

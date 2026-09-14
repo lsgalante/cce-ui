@@ -1712,7 +1712,8 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
         P::DropletScrim { .. } => "DropletScrim",
         P::ConcaveFillet { .. } => "ConcaveFillet",
-        P::Groove { .. } => "Groove", P::Lattice { .. } => "Lattice", P::Glow { .. } => "Glow",
+        P::Groove { .. } => "Groove", P::Lattice { .. } => "Lattice",
+        P::CarveUnion { .. } => "CarveUnion", P::Glow { .. } => "Glow",
         P::Text { .. } => "Text", P::Image { .. } => "Image",
     }
 }
@@ -2566,6 +2567,81 @@ pub fn tessellate_display_list(
             // Legacy banded path: no periodic wall — the lattice draws nothing
             // there, like the fillet (A/B comparison path only).
             Prim::Lattice { .. } => {}
+            Prim::CarveUnion { boxes, depth, raised } if shader_plates => {
+                // The union of several boxes as ONE wall (shader mode 14): the
+                // boxes go into the frame's feature buffer as a contiguous run
+                // and the shader takes the nearest one per pixel. The cover
+                // quad is the union's bounding box grown by the wall's reach;
+                // off-shape corners of it sit at the plateau and shade nothing.
+                let budget = crate::vk::MAX_PLATE_FEATURES.saturating_sub(features.len());
+                let take = boxes.len().min(budget);
+                if take < boxes.len() && plate_debug() {
+                    eprintln!(
+                        "plate-carve: union of {} boxes gets {} — feature budget full ({} used)",
+                        boxes.len(), take, features.len()
+                    );
+                }
+                if take == 0 {
+                    continue;
+                }
+                let kept = &boxes[..take];
+                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for (r, _) in kept {
+                    x0 = x0.min(r.x);
+                    y0 = y0.min(r.y);
+                    x1 = x1.max(r.x + r.width);
+                    y1 = y1.max(r.y + r.height);
+                }
+                let infl = *depth * 0.5 + 2.0;
+                verts.extend(quad_vertices(
+                    x0 - infl, y0 - infl,
+                    (x1 - x0) + 2.0 * infl, (y1 - y0) + 2.0 * infl,
+                    sw, sh, [0.0; 4],
+                ));
+                let off = features.len() as f32;
+                for (r, radii) in kept {
+                    features.push([
+                        (r.x + r.width * 0.5) * scale,
+                        (r.y + r.height * 0.5) * scale,
+                        r.width * 0.5 * scale,
+                        r.height * 0.5 * scale,
+                        radii.0 * scale,
+                        radii.1 * scale,
+                        radii.2 * scale,
+                        radii.3 * scale,
+                        *depth * scale,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ]);
+                }
+                // The run is complete: a plate with an open feature run must
+                // not append past it (its features would no longer be
+                // contiguous), so it is closed here like any other appender.
+                last_feature_plate = None;
+                plate = Some(crate::vk::PlatePush {
+                    rect: [
+                        (x0 + x1) * 0.5 * scale,
+                        (y0 + y1) * 0.5 * scale,
+                        (x1 - x0) * 0.5 * scale,
+                        (y1 - y0) * 0.5 * scale,
+                    ],
+                    // x: the raised flag; the shader reads nothing else here.
+                    radii: [if *raised { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+                    light: [plate_light[0], plate_light[1], plate_light[2], *depth * scale],
+                    material: plate_mat,
+                    // Feature run [offset, count] (the renderer rebases the
+                    // offset onto the frame slot, as for mode 1); zw far out
+                    // so the host-box fade never applies.
+                    host: [off, take as f32, 1e6, 1e6],
+                    specular_tint: [1.0, 1.0, 1.0, 0.0],
+                    mode: 14.0,
+                    shape: crate::layout::corner_shape(),
+                });
+            }
+            // Legacy banded path: no union — nothing is drawn there, like the
+            // fillet and the lattice (A/B comparison path only).
+            Prim::CarveUnion { .. } => {}
         }
         let end = verts.len() as u32;
         if end == start {

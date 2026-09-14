@@ -85,7 +85,8 @@ pub struct PlatePush {
     pub material: [f32; 4],
     /// Mode 1: `[feature offset, feature count, 0, 0]` into the frame's
     /// `plate_features` — the carves CSG'd out of this plate (the renderer adds
-    /// the frame slot's base offset at record time). Mode 2: the host-plate box
+    /// the frame slot's base offset at record time). Mode 14 uses the same
+    /// `[offset, count]` for the union's boxes. Mode 2: the host-plate box
     /// (center + half-extents) a free recess fades out against; far-away sides
     /// (±1e5) disable the fade.
     pub host: [f32; 4],
@@ -1935,9 +1936,10 @@ impl VkRenderer {
                                 pc[20..24].copy_from_slice(&p.material);
                                 pc[24..28].copy_from_slice(&p.host);
                                 pc[28..32].copy_from_slice(&p.specular_tint);
-                                if p.mode == 1.0 {
+                                if p.mode == 1.0 || p.mode == 14.0 {
                                     // Rebase the feature offset onto this
-                                    // frame's UBO slot.
+                                    // frame's UBO slot (a plate's CSG carves,
+                                    // or a union carve's boxes).
                                     pc[24] += (frame_index * MAX_PLATE_FEATURES) as f32;
                                 }
                             }

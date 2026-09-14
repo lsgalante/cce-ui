@@ -140,6 +140,7 @@ const MODE_DROPLET: i32 = 10;     // hanging water droplet clinging to the box t
 const MODE_ROLL: i32 = 11;        // fill-less rolled perimeter, composited as an overlay
 const MODE_DROPLET_SCRIM: i32 = 12; // flat feathered fill of the droplet silhouette
 const MODE_LATTICE: i32 = 13;     // periodic well field: nearest-cell carve, one evaluation
+const MODE_UNION: i32 = 14;       // union of feature boxes carved/raised as one wall
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -694,6 +695,27 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         fd = -lg.z + 0.5 * t;
         fgd = lg.xy;
         eff = MODE_RECESS;
+    } else if (mode == MODE_UNION) {
+        // MODE_UNION: the boxes in the feature run p_host.xy = [offset,
+        // count] are one shape — the pixel's distance is to the NEAREST box
+        // (the union SDF, min over the run), with that box's gradient, so a
+        // box's wall vanishes inside another and the outline is evaluated
+        // once. p_radii.x = 1 raises the union (boss) instead of carving it.
+        let u_off = u32(rrect_clip.p_host.x);
+        let u_cnt = u32(rrect_clip.p_host.y);
+        var best = 1e9;
+        var bgrad = vec2f(0.0, -1.0);
+        for (var i = 0u; i < u_cnt; i = i + 1u) {
+            let feat = plate_features.items[u_off + i];
+            let fg = rr_sdf_grad(frag, feat.rect, feat.radii);
+            if (fg.z < best) {
+                best = fg.z;
+                bgrad = fg.xy;
+            }
+        }
+        fd = -best;
+        fgd = bgrad;
+        eff = select(MODE_RECESS, MODE_BOSS, rrect_clip.p_radii.x > 0.5);
     } else if (mode == MODE_FILLET_DOWN || mode == MODE_FILLET_UP) {
         eff = mode - FILLET_TO_STEP;
         let c = frag - rrect_clip.p_rect.xy;
