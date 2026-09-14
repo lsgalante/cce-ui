@@ -40,8 +40,10 @@ impl Application for DemoApp {
         WindowSettings {
             title: "carve union demo".into(),
             app_id: "cce-carve-union-demo".into(),
-            width: 760,
-            height: 560,
+            // CCE_DEMO_W / CCE_DEMO_H override the size — handy when the
+            // window doubles as a snap/tiling probe in a shadow session.
+            width: std::env::var("CCE_DEMO_W").ok().and_then(|v| v.parse().ok()).unwrap_or(760),
+            height: std::env::var("CCE_DEMO_H").ok().and_then(|v| v.parse().ok()).unwrap_or(560),
             fullscreen: false,
             min_size: None,
         }
