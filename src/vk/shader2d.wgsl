@@ -692,18 +692,22 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // and with a run of half a rail the crossings read as big sweeping
         // arcs while the cells themselves keep tight corners. A moulding
         // does not offset its corners, it mitres them — so the outer edge is
-        // the cell box grown by the run with the SAME corner radius, and the
-        // wall is the fraction of the way across the band between the two
-        // contours (u = 1 at the cell edge, 0 at the outer contour). On the
-        // straight rails that is exactly distance / run; around a corner the
-        // band widens along the diagonal and four walls meet on the mitre
-        // lines. Lit by the cell's gradient. The -t/2 recentres the shared
-        // path's boundary-straddling band on [edge, edge + t].
+        // the cell box grown by the run with SHARP corners, and the wall is
+        // the fraction of the way across the band between the two contours
+        // (u = 1 at the cell edge, 0 at the outer contour). On the straight
+        // rails that is exactly distance / run; around a corner the band
+        // widens along the diagonal and four walls meet on the mitre lines.
+        // Sharp, not the cell's radius, so that where the run is half the
+        // rail the four outer boxes meet at a point and the crest lines run
+        // continuously through the crossing as hips — a rounded outer corner
+        // left a flat lozenge on top of every crossing. Lit by the cell's
+        // gradient. The -t/2 recentres the shared path's boundary-straddling
+        // band on [edge, edge + t].
         let per = max(rrect_clip.p_host.xy, vec2f(1e-3));
         var c = frag - rrect_clip.p_rect.xy;
         c = c - per * round(c / per);
         let lg = rr_sdf_grad(c, vec4f(0.0, 0.0, rrect_clip.p_rect.zw), rrect_clip.p_radii);
-        let lo = rr_sdf_grad(c, vec4f(0.0, 0.0, rrect_clip.p_rect.zw + vec2f(t)), rrect_clip.p_radii);
+        let lo = rr_sdf_grad(c, vec4f(0.0, 0.0, rrect_clip.p_rect.zw + vec2f(t)), vec4f(0.0));
         let band = max(lg.z - lo.z, 1e-3);
         let frac = clamp(lg.z / band, 0.0, 1.0);
         fd = (0.5 - frac) * t;

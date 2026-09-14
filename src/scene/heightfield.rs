@@ -349,14 +349,15 @@ impl HeightField {
                             // outside the cell; the wall runs from the edge
                             // outward over t, floor at the edge.
                             // Mitred, not offset: the wall's outer edge is the
-                            // cell grown by t at the SAME corner radius, and u
-                            // is the fraction across the band between the two
+                            // cell grown by t with SHARP corners (crest lines
+                            // meet at a crossing as hips), and u is the
+                            // fraction across the band between the two
                             // contours (1 at the cell edge, 0 at the outer).
                             let (px, py) = (p.host[0].max(1e-3), p.host[1].max(1e-3));
                             let c = (pt.0 - p.rect[0], pt.1 - p.rect[1]);
                             let c = (c.0 - px * (c.0 / px).round(), c.1 - py * (c.1 / py).round());
                             let d_in = rr_sdf(c, [0.0, 0.0, p.rect[2], p.rect[3]], p.radii, shape, t);
-                            let d_out = rr_sdf(c, [0.0, 0.0, p.rect[2] + t, p.rect[3] + t], p.radii, shape, t);
+                            let d_out = rr_sdf(c, [0.0, 0.0, p.rect[2] + t, p.rect[3] + t], [0.0; 4], shape, t);
                             let frac = (d_in / (d_in - d_out).max(1e-3)).clamp(0.0, 1.0);
                             -carve_drop * prof.carve_height(1.0 - frac)
                         }
@@ -584,15 +585,16 @@ mod tests {
         assert!((at(49, 25) - at(50, 25)).abs() < 1e-3, "rail centre symmetric {} {}", at(49, 25), at(50, 25));
         assert!(at(50, 25) > -0.1 && at(50, 25) <= 0.0, "rail centre {}", at(50, 25));
         assert!(at(50, 25) > at(45, 25), "rail centre above the wall");
-        // The crossing where four cells meet is outside every cell's outer
-        // contour: plateau — the mitre the per-cell rings never gave.
-        assert!(at(50, 50).abs() < 1e-3, "crossing {}", at(50, 50));
-        // The outer contour keeps the CELL's corner radius (4), not radius +
-        // run (14): the wall reaches to within a corner's rounding of the
-        // crossing centre. (48.5, 48.5) sits 0.46 px inside the outer box's
-        // corner arc — a hair of carve — where an offset-curve outer contour
-        // (13.7 px from the cell, past the 10 px run) would be flat.
-        assert!(at(48, 48) < 0.0 && at(48, 48) > -0.15, "near-crossing {}", at(48, 48));
+        // The crossing where four cells meet: the four sharp-cornered outer
+        // contours meet exactly at the centre, so the crest is a point there
+        // (the pixel centre sits half a px into one quadrant's wall) — no
+        // flat lozenge, the mitre the per-cell rings never gave.
+        assert!(at(50, 50) <= 0.0 && at(50, 50) > -0.1, "crossing {}", at(50, 50));
+        // Just off the centre along the diagonal the hip is already falling:
+        // inside the outer box by 1.5 px on both axes, a definite carve —
+        // where an offset-curve outer contour (13.7 px from the cell, past
+        // the 10 px run) would be flat.
+        assert!(at(48, 48) < -0.1 && at(48, 48) > -drop, "hip {}", at(48, 48));
         // On the rail centre line the outer contour is straight: plateau all
         // the way up to the crossing's corner rounding (the same half-px
         // straddle as above: 49.5 and 50.5 sit a hair into opposite walls).
