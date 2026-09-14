@@ -685,14 +685,28 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // union distance of every well. One profile evaluation, so the
         // rails between cells and the diagonals at each crossing are true
         // mitres instead of stacked per-cell overlays. The wall runs from
-        // the cell edge OUTWARD: floor at the edge, plateau one run out —
-        // the +t/2 shifts the shared path's boundary-straddling band so it
-        // spans [edge, edge + t]. Rejoins the free-carve path as a recess.
+        // the cell edge OUTWARD: floor at the edge, plateau one run out.
+        //
+        // The wall's outer edge is NOT the offset curve (every point one run
+        // from the cell): that contour rounds each corner at radius + run,
+        // and with a run of half a rail the crossings read as big sweeping
+        // arcs while the cells themselves keep tight corners. A moulding
+        // does not offset its corners, it mitres them — so the outer edge is
+        // the cell box grown by the run with the SAME corner radius, and the
+        // wall is the fraction of the way across the band between the two
+        // contours (u = 1 at the cell edge, 0 at the outer contour). On the
+        // straight rails that is exactly distance / run; around a corner the
+        // band widens along the diagonal and four walls meet on the mitre
+        // lines. Lit by the cell's gradient. The -t/2 recentres the shared
+        // path's boundary-straddling band on [edge, edge + t].
         let per = max(rrect_clip.p_host.xy, vec2f(1e-3));
         var c = frag - rrect_clip.p_rect.xy;
         c = c - per * round(c / per);
         let lg = rr_sdf_grad(c, vec4f(0.0, 0.0, rrect_clip.p_rect.zw), rrect_clip.p_radii);
-        fd = -lg.z + 0.5 * t;
+        let lo = rr_sdf_grad(c, vec4f(0.0, 0.0, rrect_clip.p_rect.zw + vec2f(t)), rrect_clip.p_radii);
+        let band = max(lg.z - lo.z, 1e-3);
+        let frac = clamp(lg.z / band, 0.0, 1.0);
+        fd = (0.5 - frac) * t;
         fgd = lg.xy;
         eff = MODE_RECESS;
     } else if (mode == MODE_UNION) {

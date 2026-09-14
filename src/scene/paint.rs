@@ -587,6 +587,10 @@ pub enum Prim {
     /// edge OUTWARD over `depth` px (floor at the edge, plateau one run out),
     /// so a rail between two cells carries one wall from each side and the
     /// rail face is whatever the runs leave. Shading lands only inside `rect`.
+    /// The wall's outer edge is MITRED, not offset: it is the cell grown by
+    /// the run at the same `radius`, so a crossing keeps the cell's corner
+    /// rounding instead of sweeping at `radius + depth`, and the four walls
+    /// meet on the diagonals.
     ///
     /// This exists because a lattice drawn as one [`Prim::Recess`] per cell is
     /// N independent overlays: where four rounded rings meet at a crossing
