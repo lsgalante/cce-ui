@@ -617,6 +617,9 @@ pub enum Prim {
     /// vanishes wherever it runs inside another, and an inside corner is a
     /// sharp mitre (round it with [`Prim::ConcaveFillet`] if it must be
     /// concave-rounded — the union has no radius there by construction).
+    /// Outer corners are mitred like [`Prim::Lattice`]'s: the wall band runs
+    /// between each box shrunk and grown by half the run at the box's own
+    /// radius, so a corner keeps its radius instead of sweeping wider.
     ///
     /// The boxes ride the frame's plate-feature buffer (the same slots CSG
     /// carves use, 64 per frame), so a union costs one draw plus one slot

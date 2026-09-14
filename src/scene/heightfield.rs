@@ -361,17 +361,25 @@ impl HeightField {
                             -carve_drop * prof.carve_height(1.0 - frac)
                         }
                         MODE_UNION => {
-                            // Nearest box of the run — the union SDF — through
-                            // one profile (see the shader's MODE_UNION).
-                            let mut best = f32::MAX;
+                            // Mitred per box (band between the box shrunk and
+                            // grown by t/2 at its own radius), union = the box
+                            // the point is deepest in (see the shader's
+                            // MODE_UNION). One profile.
+                            let hw = 0.5 * t;
+                            let mut best = f32::MIN;
                             for feat in features.iter().skip(f_off).take(f_cnt) {
-                                let fd = rr_sdf(pt, [feat[0], feat[1], feat[2], feat[3]], [feat[4], feat[5], feat[6], feat[7]], shape, t);
-                                best = best.min(fd);
+                                let radii = [feat[4], feat[5], feat[6], feat[7]];
+                                let inner = [feat[0], feat[1], (feat[2] - hw).max(0.5), (feat[3] - hw).max(0.5)];
+                                let outer = [feat[0], feat[1], feat[2] + hw, feat[3] + hw];
+                                let d_in = rr_sdf(pt, inner, radii, shape, t);
+                                let d_out = rr_sdf(pt, outer, radii, shape, t);
+                                let frac = (d_in / (d_in - d_out).max(1e-3)).clamp(0.0, 1.0);
+                                best = best.max((0.5 - frac) * t);
                             }
-                            if best == f32::MAX {
+                            if best == f32::MIN {
                                 continue;
                             }
-                            let u = (-best / t + 0.5).clamp(0.0, 1.0);
+                            let u = (best / t + 0.5).clamp(0.0, 1.0);
                             let sign = if p.radii[0] > 0.5 { 1.0 } else { -1.0 };
                             sign * carve_drop * prof.carve_height(u)
                         }
@@ -627,6 +635,12 @@ mod tests {
         // outside the top bar's lower edge (y = 30), on the wall.
         let wall = at(55, 32);
         assert!(wall < 0.0 && wall > -drop, "wall {wall}");
+        // Mitred outer corner: the band's outer contour is the bar grown by
+        // t/2 at the bar's own radius 4, so (72.5, 8.5) — 1.1 px inside that
+        // contour's corner arc — carries a hair of wall, where an offset
+        // contour (radius 8, the point 4.5 px from the bar) would be flat.
+        let corner = at(72, 8);
+        assert!(corner < 0.0 && corner > -0.5 * drop, "mitred corner {corner}");
     }
 
     #[test]

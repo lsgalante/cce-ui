@@ -711,23 +711,34 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         eff = MODE_RECESS;
     } else if (mode == MODE_UNION) {
         // MODE_UNION: the boxes in the feature run p_host.xy = [offset,
-        // count] are one shape — the pixel's distance is to the NEAREST box
-        // (the union SDF, min over the run), with that box's gradient, so a
-        // box's wall vanishes inside another and the outline is evaluated
-        // once. p_radii.x = 1 raises the union (boss) instead of carving it.
+        // count] are one shape. Each box's wall is MITRED like the lattice's:
+        // the band runs between the box shrunk by t/2 and the box grown by
+        // t/2, both at the box's own corner radius, and the pixel's position
+        // is its fraction across that band (an offset band would round the
+        // outer corners at radius + t/2). The union takes the box the pixel
+        // is deepest in — max over the run of the band coordinate, with that
+        // box's gradient — so a box's wall vanishes inside another and the
+        // outline is evaluated once. p_radii.x = 1 raises the union (boss)
+        // instead of carving it.
         let u_off = u32(rrect_clip.p_host.x);
         let u_cnt = u32(rrect_clip.p_host.y);
-        var best = 1e9;
+        let hw = 0.5 * t;
+        var best = -1e9;
         var bgrad = vec2f(0.0, -1.0);
         for (var i = 0u; i < u_cnt; i = i + 1u) {
             let feat = plate_features.items[u_off + i];
-            let fg = rr_sdf_grad(frag, feat.rect, feat.radii);
-            if (fg.z < best) {
-                best = fg.z;
-                bgrad = fg.xy;
+            let inner = vec4f(feat.rect.xy, max(feat.rect.zw - vec2f(hw), vec2f(0.5)));
+            let outer = vec4f(feat.rect.xy, feat.rect.zw + vec2f(hw));
+            let gi = rr_sdf_grad(frag, inner, feat.radii);
+            let go = rr_sdf_grad(frag, outer, feat.radii);
+            let band = max(gi.z - go.z, 1e-3);
+            let fdi = (0.5 - clamp(gi.z / band, 0.0, 1.0)) * t;
+            if (fdi > best) {
+                best = fdi;
+                bgrad = gi.xy;
             }
         }
-        fd = -best;
+        fd = best;
         fgd = bgrad;
         eff = select(MODE_RECESS, MODE_BOSS, rrect_clip.p_radii.x > 0.5);
     } else if (mode == MODE_FILLET_DOWN || mode == MODE_FILLET_UP) {
