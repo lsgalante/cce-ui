@@ -241,38 +241,16 @@ impl Ramp {
         self.just_changed = true;
     }
     
+    /// The curve's value at `t` — [`crate::layout::sample_ramp_keys`], the
+    /// DE's one ramp interpolation, so what this widget draws is exactly
+    /// what every consumer of its spec string evaluates.
     pub fn get_interpolated_value(&self, t: f32) -> f32 {
-        if self.keys.is_empty() {
-            return 0.0;
-        }
-        if t <= self.keys[0].pos {
-            return self.keys[0].value;
-        }
-        if t >= self.keys[self.keys.len() - 1].pos {
-            return self.keys[self.keys.len() - 1].value;
-        }
-        
-        for i in 0..self.keys.len() - 1 {
-            let k1 = &self.keys[i];
-            let k2 = &self.keys[i+1];
-            if t >= k1.pos && t <= k2.pos {
-                let range = k2.pos - k1.pos;
-                if range.abs() < 0.0001 {
-                    return k1.value;
-                }
-                let w = (t - k1.pos) / range;
-                if self.line_type_dropdown.selected == 1 {
-                    let w_smooth = w * w * (3.0 - 2.0 * w);
-                    return k1.value * (1.0 - w_smooth) + k2.value * w_smooth;
-                } else {
-                    return k1.value * (1.0 - w) + k2.value * w;
-                }
-            }
-        }
-        self.keys[0].value
+        let keys: Vec<(f32, f32)> = self.keys.iter().map(|k| (k.pos, k.value)).collect();
+        crate::layout::sample_ramp_keys(&keys, self.smooth(), t)
     }
 
-    /// Whether segments blend with smoothstep (the Bezier line type) vs linearly.
+    /// Whether the curve is the smooth (monotone cubic) line type vs straight
+    /// segments — see [`crate::layout::sample_ramp_keys`].
     pub fn smooth(&self) -> bool {
         self.line_type_dropdown.selected == 1
     }

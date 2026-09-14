@@ -43,36 +43,10 @@ impl RampPreview {
         }
     }
 
-    /// The curve's value at `t` — endpoint-clamped, per-segment linear or
-    /// smoothstep, mirroring `Ramp::get_interpolated_value` and the policy
-    /// crate's `ramp_value`.
+    /// The curve's value at `t` — [`crate::layout::sample_ramp_keys`], the
+    /// same interpolation `Ramp` draws and every consumer evaluates.
     fn value_at(&self, t: f32) -> f32 {
-        let keys = &self.keys;
-        if keys.is_empty() {
-            return 0.0;
-        }
-        if t <= keys[0].0 {
-            return keys[0].1;
-        }
-        if t >= keys[keys.len() - 1].0 {
-            return keys[keys.len() - 1].1;
-        }
-        for pair in keys.windows(2) {
-            let (p1, v1) = pair[0];
-            let (p2, v2) = pair[1];
-            if t >= p1 && t <= p2 {
-                let range = p2 - p1;
-                if range.abs() < 1e-4 {
-                    return v1;
-                }
-                let mut w = (t - p1) / range;
-                if self.smooth {
-                    w = w * w * (3.0 - 2.0 * w);
-                }
-                return v1 * (1.0 - w) + v2 * w;
-            }
-        }
-        keys[keys.len() - 1].1
+        crate::layout::sample_ramp_keys(&self.keys, self.smooth, t)
     }
 }
 
