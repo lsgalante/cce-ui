@@ -17,6 +17,8 @@
 //     cce-window-manager {
 //         close_window "super+q"
 //         spawn "super+d" command="cce-cloud --apps"
+//         focus_left "swipe3_left"     // a touchpad gesture chord: swipe|pinch,
+//                                      // optional finger count, direction
 //     }
 //     cce-ui {
 //         open_search "ctrl+f"         // toolkit-wide widget defaults
@@ -36,9 +38,9 @@
 //         }
 //     }
 //
-// The chord is the first string argument (a `(keybind)` type annotation is
-// accepted and ignored); a `key="..."` property works too. Extra properties
-// (e.g. `command=` for spawn) ride along on the entry.
+// The chord is the first string argument (a `(keybind)` or `(gesture)` type
+// annotation is accepted and ignored); a `key="..."` property works too.
+// Extra properties (e.g. `command=` for spawn) ride along on the entry.
 //
 // Resolution order for an app is `<app>.<name>` → `cce-ui.<name>`; widgets
 // match the resolved chord string with `widget::match_key_shortcut`. The
