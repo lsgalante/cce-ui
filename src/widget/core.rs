@@ -337,8 +337,18 @@ pub mod context_menu {
     /// are drawn selects the entry above the one under the cursor.
     pub const ROW_H: f32 = 24.0;
 
-    /// Point size of a menu label.
-    const LABEL_SIZE: f32 = 12.0;
+    /// The face a menu label is drawn in: the DE's menu font, family and
+    /// size — the same `menubar_font` the menubar's own drop-downs use
+    /// ([`crate::widget::container::menu`]). A menu that hardcodes 12.0 and
+    /// leaves the family unset renders in the default sans while the list or
+    /// breadcrumb beneath it wears the configured face.
+    ///
+    /// Consumers need the family too: a [`TextLabel`] carries only a size, so
+    /// whoever turns these labels into text prims passes this family alongside
+    /// them (`pc.text_with(.., Some(family), ..)`).
+    pub fn label_font() -> (String, f32) {
+        crate::layout::menubar_font_parsed()
+    }
 
     /// A toolkit color as the `[u8; 3]` a [`TextLabel`] carries.
     fn rgb8(c: [f32; 4]) -> [u8; 3] {
@@ -384,8 +394,17 @@ pub mod context_menu {
             self.y = y;
             self.options = options;
             self.h = self.options.len() as f32 * ROW_H;
-            let max_len = self.options.iter().map(|s| s.len()).max().unwrap_or(0);
-            self.w = ((max_len as f32 * 7.5) + 24.0).max(120.0);
+            // Width from the SHAPED widest label, not `bytes * 7.5`: that
+            // estimate is a different face's advance (and counts bytes, so a
+            // non-ASCII label over-measures), which is how a menu ends up
+            // either clipping its longest entry or padded out past it.
+            let (family, size) = label_font();
+            let widest = self
+                .options
+                .iter()
+                .map(|s| crate::widget::display::measure_text_width(s, &family, size))
+                .fold(0.0f32, f32::max);
+            self.w = (widest + 24.0).max(120.0);
             self.visible = true;
             self.hovered_item = None;
             self.target = Some(target);
@@ -580,6 +599,37 @@ pub mod context_menu {
             quads
         }
 
+        /// [`paint`](Self::paint) plus the label run, in the menu font.
+        ///
+        /// A [`TextLabel`] carries a size but no family, so a consumer that
+        /// hand-rolls `paint()` + a `text_labels()` loop has to remember to
+        /// pass [`label_font`]'s family itself — and every one of them passed
+        /// `None`, which is why menus rendered in the default sans over lists
+        /// wearing the configured face. This is the call that cannot forget
+        /// it; prefer it over the pair.
+        pub fn paint_with_labels(&self, ctx: &mut crate::scene::paint::PaintCtx) {
+            self.paint(ctx);
+            if !self.visible {
+                return;
+            }
+            let (family, _) = label_font();
+            // The menu's own rect: the engine's popover clamp exempts exactly
+            // these bounds, so the labels render inside the plate instead of
+            // being clipped to the page content beneath it.
+            let bounds = Some([self.x, self.y, self.x + self.w, self.y + self.h]);
+            for label in self.text_labels() {
+                ctx.text_with(
+                    label.text,
+                    label.x,
+                    label.y,
+                    label.font_size,
+                    label.color,
+                    Some(family.clone()),
+                    bounds,
+                );
+            }
+        }
+
         pub fn text_labels(&self) -> Vec<TextLabel> {
             let mut labels = Vec::new();
             if !self.visible { return labels; }
@@ -588,7 +638,8 @@ pub mod context_menu {
                 if opt == "-" {
                     continue;
                 }
-                let iy = self.y + idx as f32 * ROW_H + (ROW_H - LABEL_SIZE) / 2.0;
+                let (_, label_size) = label_font();
+                let iy = self.y + idx as f32 * ROW_H + (ROW_H - label_size) / 2.0;
                 // The toolkit's semantic colors rather than greys hand-mixed
                 // against the old near-black fill: on the plate's mid-slate the
                 // header's 0x70 was a step above its background and read as
@@ -605,7 +656,7 @@ pub mod context_menu {
                     text: opt.clone(),
                     x: self.x + 8.0,
                     y: iy,
-                    font_size: 12.0,
+                    font_size: label_size,
                     color: text_color,
                 });
             }
@@ -671,6 +722,12 @@ pub mod context_menu {
 
     pub fn text_labels() -> Vec<TextLabel> {
         CONTEXT_MENU.with(|m| m.borrow().text_labels())
+    }
+
+    /// Plate and labels in one call — see
+    /// [`ContextMenuState::paint_with_labels`].
+    pub fn paint_with_labels(ctx: &mut crate::scene::paint::PaintCtx) {
+        CONTEXT_MENU.with(|m| m.borrow().paint_with_labels(ctx));
     }
 }
 
