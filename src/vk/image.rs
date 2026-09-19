@@ -80,6 +80,9 @@ enum Pending {
 
 static PENDING: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
+/// How many image tables have been built in this process. See
+/// [`renderer_epoch`].
+static STAGES_BUILT: AtomicU32 = AtomicU32::new(0);
 /// Pixel buffers the renderer has finished with, waiting to be refilled.
 /// Bounded: a streaming caller needs one or two in flight, and holding more
 /// frame-sized buffers than that is just memory.
@@ -144,6 +147,27 @@ fn retire_buffer(mut buf: Vec<u8>) {
         buf.clear();
         pool.push(buf);
     }
+}
+
+/// Which renderer's image table the ids handed out right now belong to.
+///
+/// `0` until the first renderer exists, and again for the whole life of that
+/// first renderer: uploads queued before it was built (from `Application::new`
+/// and from anything the app did on the way to its first frame) are drained
+/// into it, so they are that epoch's images, not a previous one's.
+/// Every later renderer — `window_runner` builds one per session, and a lost
+/// Wayland transport starts a new session around the same `Application` —
+/// counts as the next epoch.
+///
+/// This is what lets a long-lived cache of image ids notice that its ids have
+/// stopped naming anything. It is the cheap half of the contract; the other
+/// half is the app's, because only the app knows how to produce the pixels
+/// again (see [`Application::renderer_init`], and `upload_icon` for the
+/// toolkit's own use of this).
+///
+/// [`Application::renderer_init`]: crate::engine::Application::renderer_init
+pub fn renderer_epoch() -> u32 {
+    STAGES_BUILT.load(Ordering::Relaxed).saturating_sub(1)
 }
 
 /// Queue an image's GPU resources for destruction.
@@ -232,6 +256,10 @@ impl ImageStage {
         render_pass: vk::RenderPass,
         frames_in_flight: usize,
     ) -> Self {
+        // One image table per renderer, so this is the renderer count — see
+        // `renderer_epoch`, which is what tells a cache of ids that its
+        // renderer is gone.
+        STAGES_BUILT.fetch_add(1, Ordering::Relaxed);
         unsafe {
             let bindings = [
                 vk::DescriptorSetLayoutBinding::default()

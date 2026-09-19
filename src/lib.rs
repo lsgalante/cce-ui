@@ -72,14 +72,43 @@ pub fn icons_dir() -> String {
 /// `(image id, pixel w, pixel h)` for `PaintCtx::image` / `ImageView`; cached
 /// per `(name, px)` so widget rebuilds reuse the one upload. `None` when the
 /// icon is missing or unparsable (callers keep a text fallback).
+///
+/// **The cache is per renderer, not per process.** An image id names an entry
+/// in one renderer's image table, and a renderer does not outlive its
+/// session: `window_runner` repairs a lost Wayland transport by opening a new
+/// session around the same `Application`, which rebuilds the renderer and its
+/// image table. A draw for an id that table does not hold is skipped rather
+/// than reported, so a cache that survived the rebuild left every bundled
+/// glyph in the process silently undrawn — a status bar that reconnected kept
+/// its numbers and lost its icons, and the same went for every
+/// [`Button::new_icon`] face, treelist chevron and ramp delete button in the
+/// DE. Keying the cache on [`vk::renderer_epoch`] makes the first lookup after
+/// a rebuild a miss, which re-rasterizes and re-uploads into the live
+/// renderer.
+///
+/// The id cache itself has to stay: this is called from widget rebuilds, so
+/// uploading per call would burn through the renderer's 256-image budget in
+/// seconds. Caching only the decode — what [`icon::upload_themed`] does — is
+/// right for a caller that uploads rarely and owns what it gets back, and
+/// wrong here.
+///
+/// [`Button::new_icon`]: widget::Button::new_icon
 pub fn upload_icon(name: &str, px: u32) -> Option<(u32, u32, u32)> {
     use std::collections::HashMap;
     use std::sync::Mutex;
-    static CACHE: Mutex<Option<HashMap<(String, u32), Option<(u32, u32, u32)>>>> =
+    /// The cached ids, and the renderer epoch they were uploaded to.
+    static CACHE: Mutex<Option<(u32, HashMap<(String, u32), Option<(u32, u32, u32)>>)>> =
         Mutex::new(None);
+    let epoch = crate::vk::renderer_epoch();
     let key = (name.to_string(), px);
     let mut guard = CACHE.lock().unwrap();
-    let cache = guard.get_or_insert_with(HashMap::new);
+    let (cached_epoch, cache) = guard.get_or_insert_with(|| (epoch, HashMap::new()));
+    if *cached_epoch != epoch {
+        // The renderer these ids named is gone, and its image table went with
+        // it — so this is a forget, not a teardown; there is nothing to free.
+        cache.clear();
+        *cached_epoch = epoch;
+    }
     if let Some(hit) = cache.get(&key) {
         return *hit;
     }

@@ -40,7 +40,33 @@ pub struct Button {
     label: Option<String>,
     /// Icon face: an uploaded texture `(image id, pixel w, pixel h)` drawn
     /// centered in place of the label (see [`crate::upload_icon`]).
+    ///
+    /// Set directly by [`Adapted::with_icon`] for an app that owns its own
+    /// upload — and then it is the APP's job to replace it when the renderer
+    /// is rebuilt, because an image id names an entry in one renderer's image
+    /// table and nothing here can produce those pixels again.
+    /// [`icon_name`] is the way out of that for a bundled glyph.
+    ///
+    /// [`Adapted::with_icon`]: Adapted::<Button>::with_icon
+    /// [`icon_name`]: Button::icon_name
     icon: Option<(u32, f32, f32)>,
+    /// A bundled cce-icons glyph name, when the face came from one
+    /// ([`Adapted::with_icon_name`], [`Button::new_icon`]). Takes precedence
+    /// over [`icon`]: the id is then re-resolved through
+    /// [`crate::upload_icon`] on every read rather than captured once.
+    ///
+    /// That indirection is the whole point. An id captured at construction
+    /// dies with its renderer — `window_runner` builds a new one around the
+    /// same `Application` when it repairs a lost Wayland transport, and a
+    /// draw for an id the new image table does not hold is skipped rather
+    /// than reported, so every icon button in the process went blank and
+    /// stayed blank. `upload_icon`'s cache is keyed on the renderer epoch, so
+    /// re-reading through it costs a hash lookup per frame and yields a live
+    /// id on the first frame after a rebuild.
+    ///
+    /// [`Adapted::with_icon_name`]: Adapted::<Button>::with_icon_name
+    /// [`icon`]: Button::icon
+    icon_name: Option<String>,
     /// Opacity of the icon face — the ONLY state lever an icon has, since
     /// `PaintCtx::image` carries no color and images ignore vertex color. A
     /// disabled icon button dims instead of graying its glyph.
@@ -90,6 +116,7 @@ impl Button {
             justify: Justification::Center,
             label: None,
             icon: None,
+            icon_name: None,
             icon_alpha: 1.0,
             hovered: false,
             focused: false,
@@ -131,16 +158,29 @@ impl Button {
     /// rather than on a plate. `fallback` is the label drawn instead when the
     /// icon set is missing on this machine.
     pub fn new_icon(name: &str, fallback: &str, x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
-        let b = Button::adapted(ButtonKind::CopyIcon, x, y, w, h);
-        match crate::upload_icon(name, 32) {
-            Some((id, iw, ih)) => b.with_icon(id, iw as f32, ih as f32),
-            None => b.with_label(fallback),
-        }
+        Button::adapted(ButtonKind::CopyIcon, x, y, w, h).with_icon_name(name, fallback)
     }
 
     /// Whether an icon face is set (hosts size icon buttons square).
     pub fn has_icon(&self) -> bool {
-        self.icon.is_some()
+        self.icon_face().is_some()
+    }
+
+    /// The face to draw: the live id for a named bundled glyph, else whatever
+    /// the app handed to [`Adapted::with_icon`].
+    ///
+    /// Named glyphs re-resolve here instead of being captured, so the face
+    /// survives a renderer rebuild — see the [`icon_name`] field.
+    ///
+    /// [`Adapted::with_icon`]: Adapted::<Button>::with_icon
+    /// [`icon_name`]: Button::icon_name
+    fn icon_face(&self) -> Option<(u32, f32, f32)> {
+        match &self.icon_name {
+            Some(name) => {
+                crate::upload_icon(name, 32).map(|(id, w, h)| (id, w as f32, h as f32))
+            }
+            None => self.icon,
+        }
     }
 
     /// Where the icon face draws inside `rect`: centered, inset one 4px margin
@@ -152,7 +192,7 @@ impl Button {
     /// is neither a quad nor a label. Keeping the geometry here means the icon
     /// lands in the same place on both paths.
     pub fn icon_rect(&self, rect: Rect) -> Option<(u32, Rect, f32)> {
-        let (image, iw, ih) = self.icon?;
+        let (image, iw, ih) = self.icon_face()?;
         let s = (rect.width.min(rect.height) - 8.0).max(4.0);
         let (dw, dh) = if iw >= ih {
             (s, s * ih / iw.max(1.0))
@@ -236,6 +276,23 @@ impl Adapted<Button> {
     pub fn with_icon(mut self, image: u32, w: f32, h: f32) -> Self {
         self.icon = Some((image, w, h));
         self
+    }
+
+    /// Icon face from a bundled cce-icons glyph, by NAME — the form to prefer
+    /// over [`with_icon`] whenever the artwork is one of cce-icons', because
+    /// the id is re-resolved per read and so survives a renderer rebuild (see
+    /// the [`icon_name`] field). `fallback` is the label drawn instead when
+    /// the icon set is missing on this machine.
+    ///
+    /// [`with_icon`]: Adapted::<Button>::with_icon
+    /// [`icon_name`]: Button::icon_name
+    pub fn with_icon_name(mut self, name: &str, fallback: &str) -> Self {
+        if crate::upload_icon(name, 32).is_some() {
+            self.icon_name = Some(name.to_string());
+            self
+        } else {
+            self.with_label(fallback)
+        }
     }
 
     /// Dim the icon face — see the `icon_alpha` field. 1.0 is fully opaque.

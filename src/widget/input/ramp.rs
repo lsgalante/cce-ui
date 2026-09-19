@@ -150,13 +150,11 @@ impl Ramp {
         // (x) and value (y), labeled like the dropdowns.
         let key_pad = Slider2D::new().with_label("Key");
         // A square x-icon button (cce-icons); label fallback if the icon set
-        // is missing on this machine.
-        let del_button = match crate::upload_icon("x", 32) {
-            Some((id, w, h)) => {
-                Button::new(0.0, 0.0, 22.0, 22.0).with_icon(id, w as f32, h as f32)
-            }
-            None => Button::new(0.0, 0.0, 64.0, 22.0).with_label("Delete"),
-        };
+        // is missing on this machine. By NAME, not by a captured id: an id
+        // does not survive the renderer rebuild a reconnect performs, and the
+        // widget outlives the renderer (see `Button::icon_name`).
+        let del_button =
+            Button::new(0.0, 0.0, 22.0, 22.0).with_icon_name("x", "Delete");
         // Short names on purpose: the strip's columns are narrow, and these
         // render inside param rows too ("Bevel (Raised)" used to clip).
         // Labeled: the dropdowns draw their own detached labels, sitting on
