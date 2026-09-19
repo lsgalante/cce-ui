@@ -29,6 +29,11 @@ use crate::widget::{ElementState, Key, KeyEvent, MouseScrollDelta, NamedKey};
 /// scroll or drag release.
 pub const SCROLL_ACTIVE_HOLD: f32 = 0.7;
 
+/// How long (seconds) the raise and the sink take to cross-fade. Coming to the
+/// fore is a fade, not a flip: the bar reads as rising through the host's
+/// frosted plate rather than being swapped for a copy of itself.
+pub const SCROLL_FADE_SECS: f32 = 0.18;
+
 /// The raise/sink hysteresis for scrollbars that idle BEHIND their host's
 /// translucent plate — the designer parameter-pane treatment, shared so every
 /// app's bar behaves the same way. The bar has two depths: *raised* it draws in
@@ -52,6 +57,10 @@ pub struct ScrollbarActivity {
     activity: f32,
     hover: bool,
     raised: bool,
+    /// How far the FORE copy has faded in, 0..=1. Chases `raised` over
+    /// [`SCROLL_FADE_SECS`]; only [`Self::tick`] advances it, so a host that
+    /// drives the latch through `recompute` alone keeps the old hard flip.
+    fade: f32,
 }
 
 impl ScrollbarActivity {
@@ -60,9 +69,17 @@ impl ScrollbarActivity {
     }
 
     /// Whether the bar is currently raised in front of the plate. While false
-    /// it sits behind the plate and must not take input.
+    /// it sits behind the plate and must not take input. This is the LATCH —
+    /// it flips at once, so input never waits on the fade.
     pub fn raised(&self) -> bool {
         self.raised
+    }
+
+    /// Opacity of the fore copy, 0..=1: 0 while fully sunk (only the copy
+    /// behind the plate shows), 1 once risen. Paint with this; gate input on
+    /// [`Self::raised`].
+    pub fn fade(&self) -> f32 {
+        self.fade
     }
 
     /// Refresh the hold window: call on a wheel/keyboard scroll and on a drag
@@ -99,7 +116,21 @@ impl ScrollbarActivity {
         if self.activity > 0.0 {
             self.activity = (self.activity - dt).max(0.0);
         }
-        self.recompute(visible, dragging)
+        let flipped = self.recompute(visible, dragging);
+        // Chase the latch. The step is over the WHOLE range, so a fade
+        // reversed halfway takes proportionally less time rather than
+        // restarting — a flick-scroll-flick does not stutter.
+        let target = if self.raised { 1.0 } else { 0.0 };
+        let step = if SCROLL_FADE_SECS > 0.0 { dt / SCROLL_FADE_SECS } else { 1.0 };
+        let moved = if (self.fade - target).abs() <= step {
+            let done = self.fade != target;
+            self.fade = target;
+            done
+        } else {
+            self.fade += step * (target - self.fade).signum();
+            true
+        };
+        flipped || moved
     }
 }
 
@@ -520,6 +551,16 @@ impl ScrollRegion {
         !self.sink_behind || self.activity.raised()
     }
 
+    /// Opacity of the fore copy of the bar, 0..=1 — see
+    /// [`ScrollbarActivity::fade`]. Always 1 for a region that never sinks.
+    pub fn scrollbar_fade(&self) -> f32 {
+        if self.sink_behind {
+            self.activity.fade()
+        } else {
+            1.0
+        }
+    }
+
     /// Per-frame raise/sink upkeep for sink-behind regions; a `true` return is
     /// the host's repaint signal. True while the post-scroll hold is running,
     /// not just on the flip: the demand-driven frame loop only keeps ticking
@@ -626,8 +667,13 @@ impl ScrollRegion {
         // sink-behind region draws no sunk layer here — its rows sit directly
         // on the host's plate, so the host owns the under-plate emission via
         // `push_scrollbar_prims`.
-        if self.scrollbar_raised() {
-            self.push_scrollbar_prims(pc);
+        // The fore copy fades rather than flips, and keeps drawing all the way
+        // out — gating this on `scrollbar_raised` would cut the fade off at the
+        // latch. The tuple path below is deliberately left on the hard flip:
+        // its hosts have no frosted plate for a sunk bar to show through.
+        let fade = self.scrollbar_fade();
+        if fade > 0.001 {
+            self.push_scrollbar_prims_alpha(pc, fade);
         }
     }
 
@@ -635,18 +681,34 @@ impl ScrollRegion {
     /// host calls it. A sink-behind host emits this twice a frame at most:
     /// under its plate while the bar is sunk, over the content while raised.
     pub fn push_scrollbar_prims(&self, pc: &mut dyn crate::layout::RenderTarget) {
+        self.push_scrollbar_prims_alpha(pc, 1.0);
+    }
+
+    /// [`Self::push_scrollbar_prims`] with the track and thumb scaled to
+    /// `alpha` — what a host draws the FORE copy with while it fades in and
+    /// out. The copy that idles behind the plate is drawn at full alpha; the
+    /// plate over it is what dims and frosts it.
+    pub fn push_scrollbar_prims_alpha(&self, pc: &mut dyn crate::layout::RenderTarget, alpha: f32) {
+        let a = alpha.clamp(0.0, 1.0);
+        if a <= 0.001 {
+            return;
+        }
+        let dim = |mut c: [f32; 4]| {
+            c[3] *= a;
+            c
+        };
         if self.content_h > self.viewport_h {
             // Track and thumb are pills — half-width radius (the designer look).
             let (sb_x, track_y, sb_w, track_h, thumb_y, thumb_h) = self.scrollbar_geom();
             let all = (true, true, true, true);
-            pc.rect_with_radius_corners(crate::color::scrollbar_track_color(), sb_x, track_y, sb_w, track_h, sb_w.min(track_h) * 0.5, all);
-            pc.rect_with_radius_corners(crate::color::scrollbar_thumb_color(), sb_x, thumb_y, sb_w, thumb_h, sb_w.min(thumb_h) * 0.5, all);
+            pc.rect_with_radius_corners(dim(crate::color::scrollbar_track_color()), sb_x, track_y, sb_w, track_h, sb_w.min(track_h) * 0.5, all);
+            pc.rect_with_radius_corners(dim(crate::color::scrollbar_thumb_color()), sb_x, thumb_y, sb_w, thumb_h, sb_w.min(thumb_h) * 0.5, all);
         }
         if self.h_scroll_active() {
             let (track_x, sb_y, track_w, sb_h, thumb_x, thumb_w) = self.h_scrollbar_geom();
             let all = (true, true, true, true);
-            pc.rect_with_radius_corners(crate::color::scrollbar_track_color(), track_x, sb_y, track_w, sb_h, sb_h.min(track_w) * 0.5, all);
-            pc.rect_with_radius_corners(crate::color::scrollbar_thumb_color(), thumb_x, sb_y, thumb_w, sb_h, sb_h.min(thumb_w) * 0.5, all);
+            pc.rect_with_radius_corners(dim(crate::color::scrollbar_track_color()), track_x, sb_y, track_w, sb_h, sb_h.min(track_w) * 0.5, all);
+            pc.rect_with_radius_corners(dim(crate::color::scrollbar_thumb_color()), thumb_x, sb_y, thumb_w, sb_h, sb_h.min(thumb_w) * 0.5, all);
         }
     }
 
@@ -687,6 +749,36 @@ impl ScrollRegion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Coming to the fore is a fade, not a flip: the latch moves at once (so
+    /// input never waits) while the drawn opacity ramps, in and back out.
+    #[test]
+    fn scrollbar_fade_ramps_instead_of_flipping() {
+        let mut a = ScrollbarActivity::new();
+        a.bump();
+        // dt = SCROLL_FADE_SECS / 3, so one tick is a third of the way in.
+        let dt = SCROLL_FADE_SECS / 3.0;
+        a.tick(dt, true, false);
+        assert!(a.raised(), "the latch flips immediately");
+        assert!(a.fade() > 0.0 && a.fade() < 1.0, "part-way faded in, got {}", a.fade());
+        for _ in 0..3 {
+            a.tick(dt, true, false);
+        }
+        assert_eq!(a.fade(), 1.0, "fully in after the fade duration");
+
+        // Let the post-scroll hold expire: the latch drops, then the fade
+        // runs back out rather than vanishing with it.
+        let ticks = (SCROLL_ACTIVE_HOLD / dt).ceil() as i32 + 1;
+        for _ in 0..ticks {
+            a.tick(dt, true, false);
+        }
+        assert!(!a.raised(), "hold expired");
+        assert!(a.fade() < 1.0 && a.fade() >= 0.0, "fading out, got {}", a.fade());
+        for _ in 0..4 {
+            a.tick(dt, true, false);
+        }
+        assert_eq!(a.fade(), 0.0, "fully out");
+    }
 
     fn region() -> ScrollRegion {
         // item_height clamps to list_font + 14, so pick one comfortably above any config.
