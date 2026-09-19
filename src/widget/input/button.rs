@@ -122,12 +122,19 @@ impl Button {
     }
 
     pub fn new_copy_icon(x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
+        Button::new_icon("copy", "📋", x, y, w, h)
+    }
+
+    /// A plateless icon button faced with the bundled cce-icons glyph
+    /// `<name>.svg` (see [`crate::upload_icon`]): transparent until hovered,
+    /// the [`ButtonKind::CopyIcon`] treatment, for glyphs that sit in a bar
+    /// rather than on a plate. `fallback` is the label drawn instead when the
+    /// icon set is missing on this machine.
+    pub fn new_icon(name: &str, fallback: &str, x: f32, y: f32, w: f32, h: f32) -> Adapted<Button> {
         let b = Button::adapted(ButtonKind::CopyIcon, x, y, w, h);
-        // Copy icon face (cce-icons); label fallback if the icon set is
-        // missing on this machine.
-        match crate::upload_icon("copy", 32) {
+        match crate::upload_icon(name, 32) {
             Some((id, iw, ih)) => b.with_icon(id, iw as f32, ih as f32),
-            None => b.with_label("📋"),
+            None => b.with_label(fallback),
         }
     }
 
