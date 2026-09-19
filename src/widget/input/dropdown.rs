@@ -107,6 +107,12 @@ pub struct Dropdown {
     /// Raised style: the closed control's background is an SDF-lit `Bevel`
     /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
     raised: Option<bool>,
+    /// Per-widget override for the trigger plate's FACE, bypassing
+    /// [`ControlPlate::face_from_fill`] on the configured fill. The default
+    /// forces the face opaque; an app that wants its controls made of the
+    /// same frosted material as its panes passes the blur-behind sentinel (a
+    /// negative alpha) here, which that helper would strip.
+    face: Option<[f32; 4]>,
     /// Keyboard focus (FocusIn / FocusOut): lights the trigger plate's rim.
     focused: bool,
     /// The open menu REPLACES the trigger instead of growing out of it: no
@@ -162,6 +168,7 @@ impl Dropdown {
             hovered: false,
             corner_frame: None,
             raised: None,
+            face: None,
             focused: false,
             menu_replaces_trigger: false,
             anim_from: 0.0,
@@ -469,7 +476,7 @@ impl Dropdown {
                 Rect { x, y, width: w, height: visual_h },
                 radius,
                 crate::widget::PlateStance::Flush,
-                crate::widget::ControlPlate::face_from_fill(raw_bg),
+                self.face.unwrap_or_else(|| crate::widget::ControlPlate::face_from_fill(raw_bg)),
             )
             .with_radii((r4[0], r4[1], r4[2], r4[3]))
             .with_depth(depth)
@@ -745,6 +752,12 @@ impl Adapted<Dropdown> {
     /// Raised style: see the `raised` field.
     pub fn with_raised(mut self, raised: bool) -> Self {
         self.raised = Some(raised);
+        self
+    }
+
+    /// Override the trigger plate's face — see the `face` field.
+    pub fn with_face(mut self, face: [f32; 4]) -> Self {
+        self.face = Some(face);
         self
     }
 
