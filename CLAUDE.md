@@ -328,7 +328,7 @@ cce-system-interface) to confirm behavior, not just the test suite.
 
 ## Module map (where things live)
 
-- `layout.rs` (largest file, ~5.7k lines) — fonts + sizing; many `*_font_parsed()` getters and
+- `layout.rs` (largest file, ~6.9k lines) — fonts + sizing; many `*_font_parsed()` getters and
   the `read_preferred_fonts` / font-family resolution used by the cosmic-text path.
 - `color.rs` — color model and named colors (`colors` re-export module in `lib.rs`).
 - `config.rs` — KDL loading and `kdl_to_json` conversion (see workspace `CLAUDE.md` for paths).
@@ -418,7 +418,7 @@ the 96 ppi assumption would have called it 2.46 mm.
 
 `lib.rs` builds the cosmic-text `FontSystem` (re-exported as `cce_ui::cosmic_text` so clients
 need no text dependency of their own). Bundled fonts load from `$CCE_FONTS_DIR` (else
-`~/Dropbox/Fonts`); bundled icons from `$CCE_ICONS_DIR` (else `~/Dropbox/cce/cce-icons/svg`).
+`~/Dropbox/Fonts`); bundled icons from `$CCE_ICONS_DIR` (else `~/projects/cce/cce-icons/svg`).
 System fonts are loaded only when `$CCE_LOAD_SYSTEM_FONTS` is set (or via
 `create_font_system_with_system_fonts()`, used by the font picker). Configured custom font
 families are validated at startup with a warning if missing.
