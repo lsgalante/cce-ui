@@ -5950,6 +5950,27 @@ fn run_session<'l, A: Application>(
             }
         }
         if engine_state.exit {
+            // The close dissolve. It is the COMPOSITOR that fades us — it
+            // ramps our scene subtree's opacity, which takes the backdrop
+            // blur, drop shadow and bevel down with the window; all this side
+            // has to do is not vanish before it finishes. So keep the surface
+            // mapped and the loop turning for exactly as long as the
+            // compositor asked for, then leave. Dispatching (rather than
+            // sleeping) keeps the connection pumped and lets any last
+            // animation finish on screen while the window dissolves.
+            let fade = crate::ipc::request_close_fade();
+            if !fade.is_zero() {
+                let until = std::time::Instant::now() + fade;
+                loop {
+                    let left = until.saturating_duration_since(std::time::Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    if event_loop.dispatch(left.min(ACTIVE_DISPATCH), &mut engine_state).is_err() {
+                        break;
+                    }
+                }
+            }
             break;
         }
 
