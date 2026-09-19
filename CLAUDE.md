@@ -94,6 +94,62 @@ Key methods (see the trait def around `window_runner.rs:1450`):
 The frame loop is demand-driven (single `redraw` dirty bool, gated by a Wayland frame-callback
 vsync) — it idles correctly when nothing changes. Don't add per-frame I/O to the render hot path.
 
+### `renderer_init` — GPU handles do not survive a reconnect
+
+A connection is one **session**. A Wayland transport cannot be repaired once it breaks,
+so `run` opens a *new* session around the same live `Application` — same app state, same
+calloop loop, same message channel, but a new surface, a new swapchain and **a new
+`VkRenderer`**. `renderer_init(&mut self, renderer)` is called once per session: the
+first call is the process's own renderer, every later call is a replacement.
+
+What that costs you: an id from `vk::upload_rgba` names an entry in **one renderer's**
+image table, and `Frame2D` **skips a draw for an unknown id without logging it**. So any
+image id cached across frames — in a struct field, an LRU, a `static` — silently stops
+drawing after a reconnect, while every other part of the window keeps working. That
+asymmetry is the tell: numbers and text intact, pictures gone.
+
+The fix shape, in every client that needed it, is one method:
+
+```rust
+fn renderer_init(&mut self, _r: &mut cce_ui::vk::VkRenderer) {
+    if std::mem::replace(&mut self.seen_renderer, true) {
+        // …drop the dead ids and arrange for the pixels to be produced again
+    }
+}
+```
+
+Act only on the second and later renderer: uploads queued before the first one existed
+are drained into it, so dropping them there just uploads, destroys and re-uploads
+everything before the first frame. Freeing a stale id is always safe and worth doing —
+`ImageStage::destroy_image` returns early on an id it does not hold, and `NEXT_ID` never
+resets, so a stale id can never collide with a live one. The failure is always "draws
+nothing", never "draws the wrong picture".
+
+Three traps, each of which cost a session real time in the 2026-09-19 sweep:
+
+- **A widget can hold the id too.** `Button::with_icon(id, …)` captures what you hand it
+  and outlives the renderer, so invalidating a cache underneath it changes nothing on
+  screen. For bundled cce-icons artwork use `Button::with_icon_name` / `Button::new_icon`,
+  which hold the NAME and re-resolve through `upload_icon` per read; `upload_icon`'s own
+  cache is keyed on `vk::renderer_epoch()`. `with_icon` still means "the app owns this
+  upload", which is right for app-rendered content — and carries the app's duty to
+  re-set it from here. `ImageView` borrows its id on the same terms.
+- **A WPE client does not self-heal.** Nothing provokes a repaint of a page that has
+  finished loading, so `pump` finds no buffer held and the stale id just stays stale.
+  cce-mail replays `MailWebView::last_frame`; cce-browser has to remap the active view,
+  the same nudge `activate` uses. (A page that happens to animate *would* recover on its
+  own, because `update_pixels` recreates an image under an id the new table lacks — which
+  is exactly how this hides from whatever page you test with.)
+- **An in-flight worker result can carry a dead id.** A thread that uploaded just before
+  the drop delivers an id naming nothing, and a store caches it as an entry that draws
+  blank for as long as it stays resident. `cce-preview`'s `PageStore` and `cce-map`'s
+  `TileManager` carry a generation for this and free a mismatched result on arrival.
+
+Verify with `CCE_UI_FAULT_RECONNECT` (below) — **and run the pre-change binary through
+the same fault first.** A fix that passes a test which never reproduced the bug is worth
+nothing, and both of the above traps first showed up as a "fixed" build that still drew
+nothing.
+
 ## Rendering: one paint path (the Phase 3 state)
 
 The backend `render()` **always builds a `scene::paint::DisplayList` and tessellates that single
@@ -376,4 +432,10 @@ All opt-in, all read once, all quiet when unset — set one and run any client.
 - `CCE_HEIGHTMAP=<file.png>` — export the client's third rendered frame as a relief
   height field (16-bit greyscale PNG + `<file>.json` sidecar: pitch, range in mm, datum,
   metric source); `CCE_HEIGHTMAP_MM=<mm>` resamples to that pitch. `scene/heightfield.rs`.
-- `CCE_UI_FAULT_RECONNECT=1` — exercise the Wayland reconnect path.
+- `CCE_UI_FAULT_RECONNECT=<seconds>` — drop the session that many seconds after it
+  starts, exactly as a transport error would, so the reconnect path (and the second
+  `renderer_init`) can be exercised on demand instead of waited for. One-shot per
+  process: the app reconnects and then stays up. A float, so `0.5` works; logs
+  `CCE_UI_FAULT_RECONNECT: dropping the session` at WARN. In a shadow, note that the
+  window MOVES across the reconnect (off-view recall), so capture with
+  `shot-window <id>` and re-read `ctl windows` before any pointer work.
