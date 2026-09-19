@@ -123,9 +123,14 @@ impl Paint for InteractiveListItem {
         };
         let fc = colors::list_font_color();
         let title_col = [(fc[0] * 255.0) as u8, (fc[1] * 255.0) as u8, (fc[2] * 255.0) as u8];
-        ctx.text(self.title.clone(), x + 8.0, title_y, 12.0, title_col);
+        // Clipped to the row. A row's width comes from the LIST, not from its
+        // own text, so a long title or path is routine here — and unbounded it
+        // simply kept drawing past the row's right edge, over the scrollbar and
+        // out of the list.
+        let clip = Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]);
+        ctx.text_with(self.title.clone(), x + 8.0, title_y, 12.0, title_col, None, clip);
         if let Some(ref sub) = self.subtitle {
-            ctx.text(sub.clone(), x + 8.0, title_y + 13.0, 10.0, [140, 140, 153]);
+            ctx.text_with(sub.clone(), x + 8.0, title_y + 13.0, 10.0, [140, 140, 153], None, clip);
         }
     }
 }

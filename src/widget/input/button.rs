@@ -531,12 +531,23 @@ impl Paint for Button {
                 Justification::Right => x + w - est_w - 8.0,
                 Justification::Center => x + (w - est_w) / 2.0,
             };
-            ctx.text(
+            // A button is sized by its ROW, not by its label — `row_layout`
+            // divides a section's width evenly — so a long label in a narrow
+            // button makes every one of these go negative relative to the
+            // plate: centring put a 26-character label 78px to the LEFT of its
+            // own button, running out both sides over whatever sat beside it.
+            // Clamp the start to the plate's text inset, and clip to the plate
+            // itself rather than to that inset, so a label which merely grazes
+            // the inset (the width here is an estimate) is not shaved for it.
+            let tx = tx.max(x + 8.0);
+            ctx.text_with(
                 label.clone(),
                 tx,
                 crate::layout::align_text_y(y, h, font_size, 0.0),
                 font_size,
                 color,
+                None,
+                Some([x, y, x + w, y + h]),
             );
         }
     }
@@ -626,6 +637,42 @@ pub enum PageButton {
 mod tests {
     use super::*;
     use crate::widget::UiContext;
+
+    /// The label is centred with `x + (w - est_w) / 2.0`, which goes NEGATIVE
+    /// relative to the button once the label is wider than the button — the
+    /// text then starts left of the plate and runs out the other side, over
+    /// whatever is next to it. Buttons are sized by their row, not by their
+    /// content (`SectionContext::row_layout` divides the width evenly), so a
+    /// narrow window or a long label reaches this in any app.
+    fn painted_label(label: &str, w: f32) -> (f32, Option<[f32; 4]>) {
+        let b = Button::new(10.0, 20.0, w, 32.0).with_label(label);
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        let rect = crate::scene::layout::Rect { x: 10.0, y: 20.0, width: w, height: 32.0 };
+        <Button as Paint>::paint(&b, rect, &mut pc);
+        let dl = pc.finish();
+        for item in dl.items.iter() {
+            if let crate::scene::paint::Prim::Text { text, x, bounds, .. } = &item.prim {
+                if text == label {
+                    return (*x, *bounds);
+                }
+            }
+        }
+        panic!("button drew no label");
+    }
+
+    #[test]
+    fn button_label_stays_inside_the_button() {
+        let (x, bounds) = painted_label("Force Shutdown Immediately", 60.0);
+        assert!(x >= 10.0, "label started left of the button plate at x={x}");
+        let b = bounds.expect("a button label must be clipped to its plate");
+        assert!(b[0] >= 10.0 && b[2] <= 70.0, "label clip {b:?} escapes the button");
+    }
+
+    #[test]
+    fn a_label_that_fits_is_still_centred() {
+        let (x, _) = painted_label("OK", 120.0);
+        assert!(x > 10.0 && x < 130.0, "a fitting label must stay centred, got {x}");
+    }
 
     fn press(x: f32, y: f32) -> Event {
         Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x, y, local_x: x, local_y: y }

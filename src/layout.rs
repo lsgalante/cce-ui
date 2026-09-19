@@ -4426,9 +4426,25 @@ impl Section {
         Self { left, top, content_y: content_start_y, cw, label_width, is_child, grid, last_col: usize::MAX }
     }
 
+    /// Horizontal inset of content from this section's left edge — the same
+    /// one `row_layout`, the column `Grid` and `widget` use, so everything in
+    /// a section lines up. See `SectionContext::content_margin`.
+    pub fn content_margin(&self) -> f32 {
+        2.0 * self.padding() + 12.0
+    }
+
+    pub fn content_left(&self) -> f32 {
+        self.left + self.content_margin()
+    }
+
+    pub fn content_width(&self) -> f32 {
+        (self.cw - 2.0 * self.content_margin()).max(0.0)
+    }
+
+    /// See `SectionContext::ax` — same mapping, same reason it is no longer
+    /// stepped at `x_off == 12.0`.
     pub fn ax(&self, x_off: f32) -> f32 {
-        let shift = if x_off >= 12.0 { self.padding() } else { 0.0 };
-        self.left + x_off + shift
+        self.left + 2.0 * self.padding() + x_off
     }
 
     pub fn ay(&self) -> f32 { self.content_y }
@@ -4452,7 +4468,17 @@ impl Section {
     }
 
     pub fn text(&mut self, pc: &mut dyn RenderTarget, text: &str, x_off: f32, y_off: f32, font_size: f32, color: [f32; 4]) {
-        pc.text(text, self.ax(x_off), self.ay() + y_off, font_size, color);
+        let x = self.ax(x_off);
+        let y = self.ay() + y_off;
+        // Bounded to the content box, like `SectionContext::text` — text is
+        // the only thing a section draws that is not already sized to fit it.
+        let right = self.content_left() + self.content_width();
+        let bounds = if right > x {
+            Some([x, y - font_size, right, y + 2.0 * font_size])
+        } else {
+            None
+        };
+        pc.text_with_bounds(text, x, y, font_size, color, bounds);
     }
 
     pub fn widget<T: WidgetHost + 'static>(&mut self, pc: &mut dyn RenderTarget, w: &mut T, _x_off: f32, _ww: f32, mut wh: f32, ctx: &mut UiContext) {
@@ -4535,8 +4561,8 @@ impl Section {
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
-        let margin_x = 2.0 * self.padding() + 12.0;
-        let usable_w = self.cw - 2.0 * margin_x;
+        let margin_x = self.content_margin();
+        let usable_w = self.content_width();
         if count == 0 {
             return Vec::new();
         }
@@ -5398,6 +5424,13 @@ impl LayoutStrategy for RadialLayout {
     }
 }
 
+/// Vertical slack for a section's content clip. The clip exists to stop
+/// content escaping its section SIDEWAYS, which is the axis a section's width
+/// actually fixes; a section's height is only known once its content has been
+/// placed, so bounding that axis too would risk cutting content off rather
+/// than keeping it in. Deliberately far larger than any section.
+const SECTION_CLIP_SLACK: f32 = 100_000.0;
+
 pub struct PageLayoutBuilder<'a, P> {
     pub strategy: &'a mut dyn LayoutStrategy,
     pub cx: f32,
@@ -5448,7 +5481,10 @@ impl<'a, P: RenderTarget + Default> PageLayoutBuilder<'a, P> {
         let wh = dummy_ctx.finish();
         let (rx, ry, rw, _) = self.strategy.allocate(width, wh);
         let mut real_ctx = SectionContext::new(final_pc, rx, ry, rw, label, focused, false);
+        let (clip_x, clip_w) = (real_ctx.content_left(), real_ctx.content_width());
+        real_ctx.pc.push_clip_rect(clip_x, ry - SECTION_CLIP_SLACK, clip_w, 2.0 * SECTION_CLIP_SLACK);
         render_fn(&mut real_ctx);
+        real_ctx.pc.pop_clip_rect();
         real_ctx.finish();
         self.idx += 1;
     }
@@ -5463,7 +5499,10 @@ impl<'a, P: RenderTarget + Default> PageLayoutBuilder<'a, P> {
         let wh = dummy_ctx.finish();
         let (rx, ry, rw, _) = self.strategy.allocate(width, wh);
         let mut real_ctx = SectionContext::new(final_pc, rx, ry, rw, label, focused, false);
+        let (clip_x, clip_w) = (real_ctx.content_left(), real_ctx.content_width());
+        real_ctx.pc.push_clip_rect(clip_x, ry - SECTION_CLIP_SLACK, clip_w, 2.0 * SECTION_CLIP_SLACK);
         render_fn(&mut real_ctx);
+        real_ctx.pc.pop_clip_rect();
         real_ctx.finish();
         self.idx += 1;
     }
@@ -5607,9 +5646,42 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         self.row_gap = gap;
     }
 
+    /// Horizontal inset of section CONTENT from the section's left edge.
+    ///
+    /// One number, used by every content placer in here — `row_layout`, the
+    /// column `Grid`, `widget`, `VStack` and `ax` (so `text`) — because they
+    /// share a section and have to line up inside it. The section's border is
+    /// drawn at `left + padding()` (see `finish`), so content clears the
+    /// border by `padding() + 12`.
+    pub fn content_margin(&self) -> f32 {
+        2.0 * self.padding() + 12.0
+    }
+
+    /// Left edge of the content box: where a row, a widget or a `text(_, 12.0,
+    /// ..)` starts.
+    pub fn content_left(&self) -> f32 {
+        self.left + self.content_margin()
+    }
+
+    /// Width of the content box — the section's width less the inset on both
+    /// sides. Nothing a section draws should extend past `content_left() +
+    /// content_width()`.
+    pub fn content_width(&self) -> f32 {
+        (self.cw - 2.0 * self.content_margin()).max(0.0)
+    }
+
+    /// `x_off` px into the content box's coordinate space, where 12.0 is the
+    /// content's own left edge — the offset 46 of the ~55 call sites in the
+    /// tree already pass, and the one that lines text up with the buttons and
+    /// widgets beside it.
+    ///
+    /// This used to add `padding()` only when `x_off >= 12.0`, which made the
+    /// mapping DISCONTINUOUS: asking for 11 instead of 12 moved the text 5px
+    /// LEFT rather than 1px, and silently dropped it out of alignment with
+    /// every row in the same section. `cce-mail` and two others sit on the
+    /// wrong side of that cliff today.
     pub fn ax(&self, x_off: f32) -> f32 {
-        let shift = if x_off >= 12.0 { self.padding() } else { 0.0 };
-        self.left + x_off + shift
+        self.left + 2.0 * self.padding() + x_off
     }
 
     pub fn ay(&self) -> f32 {
@@ -5639,7 +5711,22 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         if y > self.content_start_y {
             y += self.row_gap;
         }
-        self.pc.text(text, self.ax(x_off), y, font_size, color);
+        let x = self.ax(x_off);
+        // Bound it to the content box. A section's text was drawn unbounded,
+        // so a string wider than its section simply kept going — over the
+        // border, over whatever sat to the right, and off the window (the
+        // settings app's GPU names did all three). Rows and widgets have
+        // always been sized to the section; text was the one thing that could
+        // leave it. The vertical band is generous on purpose: it is the
+        // horizontal overrun that has to be cut, and a tight band would
+        // shave descenders.
+        let right = self.content_left() + self.content_width();
+        let bounds = if right > x {
+            Some([x, y - font_size, right, y + 2.0 * font_size])
+        } else {
+            None
+        };
+        self.pc.text_with_bounds(text, x, y, font_size, color, bounds);
         let new_bottom = y + font_size + 4.0;
         self.content_y = new_bottom;
         for h in &mut self.grid.col_heights {
@@ -5736,8 +5823,8 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
     }
 
     pub fn row_layout(&self, count: usize, gap: f32) -> Vec<(f32, f32)> {
-        let margin_x = 2.0 * self.padding() + 12.0;
-        let usable_w = self.cw - 2.0 * margin_x;
+        let margin_x = self.content_margin();
+        let usable_w = self.content_width();
         if count == 0 {
             return Vec::new();
         }
@@ -5751,6 +5838,49 @@ impl<'a, P: RenderTarget> SectionContext<'a, P> {
         }
         cols
     }
+
+    /// A row whose columns are sized to what goes IN them: each gets the width
+    /// it asked for in `needs`, and whatever is left over is shared equally.
+    ///
+    /// `row_layout` splits a row evenly and knows nothing about content, so it
+    /// hands "Reboot" and "Hibernate" the same width — one floats in slack
+    /// while the other is cut off, which is what a row of mismatched labels
+    /// looks like. Sharing the SLACK equally rather than sizing proportionally
+    /// is deliberate: proportional widths would make a two-character label a
+    /// sliver, where what is wanted is "everyone fits, then everyone gets the
+    /// same bonus".
+    ///
+    /// When the needs do not fit, every column is scaled by the same factor, so
+    /// the row still cannot overflow its section and the shortfall is shared
+    /// rather than landing entirely on the last column.
+    pub fn row_layout_for(&self, needs: &[f32], gap: f32) -> Vec<(f32, f32)> {
+        let count = needs.len();
+        if count == 0 {
+            return Vec::new();
+        }
+        let total_gap = gap * (count - 1) as f32;
+        let room = (self.content_width() - total_gap).max(0.0);
+        let total_need: f32 = needs.iter().map(|n| n.max(0.0)).sum();
+
+        let widths: Vec<f32> = if total_need <= room {
+            let extra = (room - total_need) / count as f32;
+            needs.iter().map(|n| n.max(0.0) + extra).collect()
+        } else if total_need > 0.0 {
+            let scale = room / total_need;
+            needs.iter().map(|n| n.max(0.0) * scale).collect()
+        } else {
+            vec![room / count as f32; count]
+        };
+
+        let mut cols = Vec::with_capacity(count);
+        let mut x = self.content_left();
+        for w in widths {
+            cols.push((x, w));
+            x += w + gap;
+        }
+        cols
+    }
+
 
     pub fn row<F>(&mut self, count: usize, gap: f32, h: f32, mut f: F)
     where
@@ -5922,6 +6052,33 @@ impl<'b, 'a, P: RenderTarget> VStack<'b, 'a, P> {
         self.context.spacing(self.spacing);
     }
 
+    /// [`add_row`](Self::add_row) with per-column widths from `needs` — see
+    /// [`SectionContext::row_layout_for`]. For a row of buttons, `needs` is
+    /// each label's measured width plus the plate's own inset.
+    pub fn add_row_for<F>(&mut self, needs: &[f32], gap: f32, h: f32, mut f: F)
+    where
+        F: FnMut(&mut SectionContext<'a, P>, usize, f32, f32),
+    {
+        let max_h = self.context.grid.max_height().max(self.context.content_y);
+        for col_h in &mut self.context.grid.col_heights {
+            *col_h = max_h;
+        }
+        self.context.content_y = max_h;
+
+        let cols = self.context.row_layout_for(needs, gap);
+        for (i, &(x, w)) in cols.iter().enumerate() {
+            self.context.content_y = max_h;
+            f(self.context, i, x, w);
+        }
+
+        let new_bottom = max_h + h;
+        self.context.content_y = new_bottom;
+        for col_h in &mut self.context.grid.col_heights {
+            *col_h = new_bottom;
+        }
+        self.context.spacing(self.spacing);
+    }
+
     pub fn add_row<F>(&mut self, count: usize, gap: f32, h: f32, mut f: F)
     where
         F: FnMut(&mut SectionContext<'a, P>, usize, f32, f32),
@@ -6074,6 +6231,140 @@ mod tests {
             self.rects.push((color, x, y, w, h));
         }
         fn text(&mut self, _content: &str, _x: f32, _y: f32, _size: f32, _color: [f32; 4]) {}
+    }
+
+    #[derive(Default)]
+    struct ProbeTarget {
+        rects: Vec<([f32; 4], f32, f32, f32, f32)>,
+        bounded: Vec<(String, f32, f32, Option<[f32; 4]>)>,
+    }
+
+    impl RenderTarget for ProbeTarget {
+        fn rect(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32) {
+            self.rects.push((color, x, y, w, h));
+        }
+        fn text(&mut self, content: &str, x: f32, y: f32, _size: f32, _color: [f32; 4]) {
+            self.bounded.push((content.to_string(), x, y, None));
+        }
+        fn text_with_bounds(&mut self, content: &str, x: f32, y: f32, _size: f32, _color: [f32; 4], bounds: Option<[f32; 4]>) {
+            self.bounded.push((content.to_string(), x, y, bounds));
+        }
+    }
+
+    /// Everything a section places horizontally — text, button rows, widgets,
+    /// the column grid — must share ONE inset, or content does not line up
+    /// with the content beside it. Text used to sit `padding()` to the left of
+    /// every row in the same section.
+    #[test]
+    fn section_text_and_rows_share_one_inset() {
+        let mut pc = ProbeTarget::default();
+        let (left, cw) = (100.0f32, 320.0f32);
+        let mut sec: SectionContext<'_, ProbeTarget> =
+            SectionContext::new(&mut pc, left, 50.0, cw, "Probe", false, false);
+
+        let cols = sec.row_layout(2, 8.0);
+        assert_eq!(sec.ax(12.0), cols[0].0, "text at the conventional 12.0 must start where a row starts");
+        assert_eq!(sec.ax(12.0), sec.content_left());
+
+        // Symmetric: the right-hand inset from the section border matches the
+        // left-hand one.
+        let pad = sec.padding();
+        let (border_l, border_r) = (left + pad, left + cw - pad);
+        let row_right = cols[1].0 + cols[1].1;
+        assert_eq!(cols[0].0 - border_l, border_r - row_right);
+    }
+
+    /// Even division gives a long label and a short one the same box, so one
+    /// is clipped while the other floats in slack — the row of Suspend /
+    /// Hibernate / Reboot / Power Off that prompted this. `row_layout_for`
+    /// gives each column what it needs and shares the leftover equally.
+    #[test]
+    fn a_row_sized_for_content_fits_every_column() {
+        let mut pc = ProbeTarget::default();
+        let sec: SectionContext<'_, ProbeTarget> =
+            SectionContext::new(&mut pc, 100.0, 50.0, 400.0, "Probe", false, false);
+        let needs = [80.0f32, 30.0, 50.0, 40.0];
+        let cols = sec.row_layout_for(&needs, 8.0);
+
+        for (i, &(_, w)) in cols.iter().enumerate() {
+            assert!(w >= needs[i], "column {i} got {w}, less than the {} it needs", needs[i]);
+        }
+        // The slack is shared equally, so every column overshoots by the same
+        // amount — not proportionally, which would starve the short ones.
+        let slack: Vec<f32> = cols.iter().zip(needs.iter()).map(|(&(_, w), n)| w - n).collect();
+        for s in &slack {
+            assert!((s - slack[0]).abs() < 1.0e-3, "slack shared unevenly: {slack:?}");
+        }
+        // And the row still ends inside the section.
+        let (lx, lw) = *cols.last().unwrap();
+        assert!(lx + lw <= sec.content_left() + sec.content_width() + 1.0e-3);
+    }
+
+    /// When the labels genuinely do not fit, everyone shrinks by the same
+    /// factor rather than the last column absorbing the whole shortfall.
+    #[test]
+    fn an_overfull_row_shrinks_every_column_together() {
+        let mut pc = ProbeTarget::default();
+        let sec: SectionContext<'_, ProbeTarget> =
+            SectionContext::new(&mut pc, 100.0, 50.0, 200.0, "Probe", false, false);
+        let needs = [300.0f32, 150.0];
+        let cols = sec.row_layout_for(&needs, 8.0);
+        let ratio0 = cols[0].1 / needs[0];
+        let ratio1 = cols[1].1 / needs[1];
+        assert!((ratio0 - ratio1).abs() < 1.0e-3, "shrink was not shared: {ratio0} vs {ratio1}");
+        let (lx, lw) = cols[1];
+        assert!(lx + lw <= sec.content_left() + sec.content_width() + 1.0e-3, "overfull row escaped the section");
+    }
+
+    /// `ax` used to add `padding()` only for `x_off >= 12.0`, so asking for one
+    /// pixel less moved content a whole `padding()` the other way. Callers do
+    /// pass 11.0 and 13.0 in this tree, and the step put them in different
+    /// coordinate spaces from each other.
+    #[test]
+    fn section_ax_is_continuous() {
+        let mut pc = ProbeTarget::default();
+        let mut sec: SectionContext<'_, ProbeTarget> =
+            SectionContext::new(&mut pc, 100.0, 50.0, 320.0, "Probe", false, false);
+        for off in [0.0f32, 1.0, 11.0, 11.999, 12.0, 13.0, 24.0] {
+            assert!(
+                (sec.ax(off) - sec.ax(0.0) - off).abs() < 1.0e-3,
+                "ax must be a plain translation; it stepped at {off}"
+            );
+        }
+    }
+
+    /// A string wider than its section used to be drawn unbounded, running over
+    /// the border and out of the window. Every section text now carries bounds
+    /// no wider than the content box.
+    #[test]
+    fn section_text_is_bounded_to_the_content_box() {
+        let mut pc = ProbeTarget::default();
+        let (left, cw) = (100.0f32, 320.0f32);
+        {
+            let mut sec: SectionContext<'_, ProbeTarget> =
+                SectionContext::new(&mut pc, left, 50.0, cw, "Probe", false, false);
+            let right = sec.content_left() + sec.content_width();
+            sec.text(
+                "NVIDIA Corporation AD104M [GeForce RTX 4080 Max-Q / Mobile] and then some",
+                12.0, 0.0, 12.0, [1.0; 4],
+            );
+            assert!(right < left + cw, "content box must sit inside the section");
+        }
+        // Pick our string out by content: the section's own label is drawn
+        // through this target too, and it is not content.
+        let (_, _, _, bounds) = pc
+            .bounded
+            .iter()
+            .find(|(t, ..)| t.starts_with("NVIDIA"))
+            .cloned()
+            .expect("the section text must reach the render target");
+        let b = bounds.expect("section text must be bounded");
+        // Recompute the expectation from the same inputs the section used.
+        let mut pc2 = ProbeTarget::default();
+        let probe: SectionContext<'_, ProbeTarget> =
+            SectionContext::new(&mut pc2, left, 50.0, cw, "Probe", false, false);
+        assert_eq!(b[2], probe.content_left() + probe.content_width());
+        assert!(b[2] <= left + cw - probe.padding(), "bound must not exceed the section border");
     }
 
     struct MockWidget {
