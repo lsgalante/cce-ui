@@ -150,6 +150,26 @@ pub enum PlateStance {
     /// inside its footprint, with the face as a flat fill when it has one
     /// ([`PaintCtx::inset_plate`]).
     Flush,
+    /// No relief at all — the face alone, filling the footprint as a flat
+    /// rounded rect. This is the PANE rung's material brought down to the
+    /// control rung, and it exists because the other two stances cannot give
+    /// a control two things a pane has:
+    ///
+    /// - **Its silhouette IS its rect.** `Raised` and `Flush` both carve
+    ///   inside the footprint, so their visible edge sits half the carve depth
+    ///   in and a control laid out on the same numbers as a pane does not line
+    ///   up with it. Nothing is inset here, so it does.
+    /// - **It can be frosted.** The blur-behind sentinel (a negative alpha)
+    ///   only reaches quads, and the relief stances lay their face through
+    ///   `Border`/`Trough` strokes. This one fills with a quad, so a control
+    ///   can be made of the same frosted material as the pane behind it.
+    ///
+    /// The cost is that a flat fill carries ONE radius, not four: the
+    /// per-corner silhouette a nested relief control computes (Dropdown's
+    /// concentric corner adjustment) has no equivalent here, and `radii.0` is
+    /// used for all four corners. A focus `tint` is drawn as a ring, since
+    /// there is no rim to light.
+    Flat,
 }
 
 /// A control plate: the thing you press, at the control rung of the plate
@@ -1148,6 +1168,25 @@ impl PaintCtx {
                 match plate.tint {
                     Some(t) => self.inset_plate_tinted(trough, radii, plate.face, plate.depth, t),
                     None => self.inset_plate(trough, radii, plate.face, plate.depth),
+                }
+            }
+            PlateStance::Flat => {
+                // abs(): a negative alpha is the frost sentinel, a real face.
+                if plate.face[3].abs() > 0.001 {
+                    // A QUAD deliberately, not the `Border` the relief stances
+                    // fill through: carrying the blur-behind sentinel is half
+                    // the point of this stance, and only quads reach it.
+                    self.rounded_rect(
+                        plate.rect,
+                        plate.radii.0,
+                        (true, true, true, true),
+                        plate.face,
+                    );
+                }
+                if let Some(t) = plate.tint {
+                    // No relief, so no rim to light: the focus ring is drawn as
+                    // one, over the face and keeping the per-corner silhouette.
+                    self.border(plate.rect, plate.radii, [0.0; 4], [t[0], t[1], t[2], 1.0], 1.0);
                 }
             }
         }

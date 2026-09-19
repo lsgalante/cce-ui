@@ -79,6 +79,9 @@ pub struct Button {
     /// Raised style: the background is an SDF-lit `Bevel` plate — fill plus a
     /// rolled, lit edge — instead of a flat fill + border stroke.
     raised: Option<bool>,
+    /// Flat stance ([`crate::widget::PlateStance::Flat`]): the face alone,
+    /// no relief, silhouette equal to the rect. Overrides `raised`.
+    flat: bool,
 }
 
 impl std::fmt::Debug for Button {
@@ -121,6 +124,7 @@ impl Button {
             hovered: false,
             focused: false,
             raised: None,
+            flat: false,
         }
     }
 
@@ -244,17 +248,21 @@ impl Button {
     /// (flat styling, or a ListRow / MenuItem, transparent-until-hover
     /// surfaces that would wear a permanent carved ring on every idle row).
     pub fn plate(&self, rect: Rect) -> Option<crate::widget::ControlPlate> {
-        if !self.raised()
-            || self.kind == ButtonKind::ListRow
-            || self.kind == ButtonKind::MenuItem
-        {
+        if self.kind == ButtonKind::ListRow || self.kind == ButtonKind::MenuItem {
             return None;
         }
+        let stance = if self.flat {
+            crate::widget::PlateStance::Flat
+        } else if self.raised() {
+            crate::widget::PlateStance::Flush
+        } else {
+            return None;
+        };
         let radius = crate::layout::button_corner_radius();
         // Keyboard focus lights the plate's own rim — the ring IS the silhouette.
         let tint = self.focused.then(crate::widget::ControlPlate::focus_tint);
         Some(
-            crate::widget::ControlPlate::control(rect, radius, crate::widget::PlateStance::Flush, self.color())
+            crate::widget::ControlPlate::control(rect, radius, stance, self.color())
                 .with_tint(tint),
         )
     }
@@ -304,6 +312,13 @@ impl Adapted<Button> {
     /// Raised style: see the `raised` field.
     pub fn with_raised(mut self, raised: bool) -> Self {
         self.raised = Some(raised);
+        self
+    }
+
+    /// Draw the face with no relief at all — see
+    /// [`crate::widget::PlateStance::Flat`]. Overrides `with_raised`.
+    pub fn with_flat(mut self, flat: bool) -> Self {
+        self.flat = flat;
         self
     }
 

@@ -253,13 +253,26 @@ What this buys, and where the code is heading:
 - **One plate spec per rung, not five copies.** The root and pane rungs are
   `scene::paint::PlateSpec` (RFC 7b, painted by `PaintCtx::plate`). The
   control rung is `scene::paint::ControlPlate` (re-exported from `widget`):
-  footprint, per-corner silhouette, `PlateStance` (raised or flush), face and
-  depth, painted by `PaintCtx::control_plate` — the ONE place a control face's
-  relief is composed (raised with a face = bevel; raised faceless = carve
-  inside + boss; flush = carve inside + inset plate). Button, Dropdown,
+  footprint, per-corner silhouette, `PlateStance` (raised, flush or flat), face
+  and depth, painted by `PaintCtx::control_plate` — the ONE place a control
+  face's relief is composed (raised with a face = bevel; raised faceless =
+  carve inside + boss; flush = carve inside + inset plate). Button, Dropdown,
   FontSelector, Breadcrumb and the ButtonStrip's selected plateau draw through
   it; the migration was prim-identical against a dump of every face. A new
   control face goes through `ControlPlate`, never a hand-rolled carve.
+- **`Flat` is the stance for a control made of its pane's material.** The two
+  relief stances both carve INSIDE the footprint, which costs a control two
+  things a pane has: its visible edge sits half the carve depth in, so a
+  control laid out on the same numbers as a pane does not line up with one;
+  and its face is laid through a stroke, which the blur-behind sentinel (a
+  negative alpha) does not reach, so it cannot be frosted. `Flat` fills the
+  footprint with a quad and nothing else — silhouette equal to the rect,
+  frost carried, focus `tint` drawn as a ring since there is no rim to light.
+  It carries ONE radius, not four, so the concentric corner adjustment a
+  nested relief control computes has no equivalent. Reach for it when a bar
+  or a toolbar should read as plates at a smaller scale rather than as
+  controls of a different kind (`Button::with_flat`, `Dropdown::with_flat`);
+  leave the relief stances alone for things that should feel pressable.
 - **Radii are configured per rung, overridden per widget.** Root:
   `style.surface.plate.root.corner_radius` (`color::root_plate_corner_radius`).
   Pane: `plate_corner_radius`, falling back to the root's. Control:

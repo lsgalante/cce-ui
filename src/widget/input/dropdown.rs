@@ -107,6 +107,11 @@ pub struct Dropdown {
     /// Raised style: the closed control's background is an SDF-lit `Bevel`
     /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
     raised: Option<bool>,
+    /// Flat stance ([`crate::widget::PlateStance::Flat`]): the trigger's face
+    /// alone, no groove, silhouette equal to its rect. Overrides `raised`.
+    /// The concentric corner adjustment below does not apply — a flat fill
+    /// carries one radius, and the adjustment exists to nest relief outlines.
+    flat: bool,
     /// Per-widget override for the trigger plate's FACE, bypassing
     /// [`ControlPlate::face_from_fill`] on the configured fill. The default
     /// forces the face opaque; an app that wants its controls made of the
@@ -168,6 +173,7 @@ impl Dropdown {
             hovered: false,
             corner_frame: None,
             raised: None,
+            flat: false,
             face: None,
             focused: false,
             menu_replaces_trigger: false,
@@ -439,6 +445,17 @@ impl Dropdown {
         // flat outlines, which a rolled edge replaces). A transparent
         // configured fill degrades to a Boss: edges only, plate as the face —
         // judged on the RAW alpha, before the opacity force above.
+        if self.flat {
+            let plate = crate::widget::ControlPlate::control(
+                Rect { x, y, width: w, height: visual_h },
+                radius,
+                crate::widget::PlateStance::Flat,
+                self.face.unwrap_or_else(|| crate::widget::ControlPlate::face_from_fill(raw_bg)),
+            )
+            .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint));
+            ctx.control_plate(&plate);
+            return;
+        }
         if self.raised() {
             let depth = crate::layout::bevel_width().min(visual_h * 0.2);
             // Concentric corner_frame adjustment applies to the relief too: a
@@ -764,6 +781,13 @@ impl Adapted<Dropdown> {
     /// Override the trigger plate's face — see the `face` field.
     pub fn with_face(mut self, face: [f32; 4]) -> Self {
         self.face = Some(face);
+        self
+    }
+
+    /// Draw the trigger with no relief at all — see
+    /// [`crate::widget::PlateStance::Flat`]. Overrides `with_raised`.
+    pub fn with_flat(mut self, flat: bool) -> Self {
+        self.flat = flat;
         self
     }
 
