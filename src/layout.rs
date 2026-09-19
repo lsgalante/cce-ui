@@ -4,6 +4,57 @@ use std::sync::RwLock;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+/// Per-thread overrides for runtime style writes, under `cfg(test)` only.
+///
+/// Every `graph_*`, corner-radius and control-height slot in this file is
+/// backed by the one process-wide [`STYLE_REGISTRY`], so a test that pins any
+/// of them pins it for every test running beside it. That is the same defect
+/// as the font flake fixed in 1dc0ab1, and it was live:
+/// `test_graph_style_configuration` sets ~20 style values and restores none,
+/// while `dual_geometry_views_stay_consistent` bakes quads with
+/// `graph_node_corner_radius` and then re-reads that getter to compare — so a
+/// write landing between the two makes them disagree. Widening the write
+/// window to 300ms reproduced it on demand.
+///
+/// Fixing it at the registry rather than per accessor covers every slot it
+/// holds in one place, including ones no test pins yet.
+#[cfg(test)]
+mod test_overlay {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static FLOATS: RefCell<HashMap<String, f32>> = RefCell::new(HashMap::new());
+        static LENS: RefCell<HashMap<String, crate::units::Len>> = RefCell::new(HashMap::new());
+        static STRINGS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    }
+    pub fn set_float(k: &str, v: f32) {
+        LENS.with(|m| m.borrow_mut().remove(k));
+        FLOATS.with(|m| m.borrow_mut().insert(k.to_string(), v));
+    }
+    pub fn set_len(k: &str, v: crate::units::Len) {
+        FLOATS.with(|m| m.borrow_mut().remove(k));
+        LENS.with(|m| m.borrow_mut().insert(k.to_string(), v));
+    }
+    pub fn set_string(k: &str, v: String) {
+        STRINGS.with(|m| m.borrow_mut().insert(k.to_string(), v));
+    }
+    pub fn get_float(k: &str) -> Option<f32> {
+        if let Some(l) = LENS.with(|m| m.borrow().get(k).copied()) {
+            return Some(l.to_px());
+        }
+        FLOATS.with(|m| m.borrow().get(k).copied())
+    }
+    pub fn get_len(k: &str) -> Option<crate::units::Len> {
+        if let Some(l) = LENS.with(|m| m.borrow().get(k).copied()) {
+            return Some(l);
+        }
+        FLOATS.with(|m| m.borrow().get(k).copied()).map(crate::units::Len::px)
+    }
+    pub fn get_string(k: &str) -> Option<String> {
+        STRINGS.with(|m| m.borrow().get(k).cloned())
+    }
+}
+
 #[derive(Debug)]
 pub struct StyleRegistry {
     pub floats: HashMap<String, f32>,
@@ -26,6 +77,10 @@ impl StyleRegistry {
     }
 
     pub fn get_float(&self, key: &str) -> Option<f32> {
+        #[cfg(test)]
+        if let Some(v) = test_overlay::get_float(key) {
+            return Some(v);
+        }
         if let Some(len) = self.lens.get(key) {
             return Some(len.to_px());
         }
@@ -36,6 +91,10 @@ impl StyleRegistry {
     /// given, else the plain number as logical px. For editors that show the
     /// unit the user chose rather than the resolved pixel count.
     pub fn get_len(&self, key: &str) -> Option<crate::units::Len> {
+        #[cfg(test)]
+        if let Some(v) = test_overlay::get_len(key) {
+            return Some(v);
+        }
         if let Some(len) = self.lens.get(key) {
             return Some(*len);
         }
@@ -43,22 +102,61 @@ impl StyleRegistry {
     }
 
     pub fn get_string(&self, key: &str) -> Option<String> {
+        #[cfg(test)]
+        if let Some(v) = test_overlay::get_string(key) {
+            return Some(v);
+        }
         self.strings.get(key).cloned()
     }
 
     /// A plain number wins over any earlier unit value for the slot — a
     /// runtime `set_float` is the newest opinion.
     pub fn set_float(&mut self, key: &str, val: f32) {
+        #[cfg(test)]
+        {
+            test_overlay::set_float(key, val);
+            return;
+        }
+        #[cfg(not(test))]
+        self.load_float(key, val);
+    }
+
+    pub fn set_len(&mut self, key: &str, len: crate::units::Len) {
+        #[cfg(test)]
+        {
+            test_overlay::set_len(key, len);
+            return;
+        }
+        #[cfg(not(test))]
+        self.load_len(key, len);
+    }
+
+    pub fn set_string(&mut self, key: &str, val: String) {
+        #[cfg(test)]
+        {
+            test_overlay::set_string(key, val);
+            return;
+        }
+        #[cfg(not(test))]
+        self.load_string(key, val);
+    }
+
+    /// The CONFIG-LOAD writes, as opposed to the runtime `set_*` ones above.
+    /// Kept apart because under `cfg(test)` a runtime set goes to a per-thread
+    /// overlay while the loaded config must stay the shared base every test
+    /// reads — routing config through `set_*` would put one thread's config
+    /// in its overlay and leave every other thread with an empty registry.
+    pub fn load_float(&mut self, key: &str, val: f32) {
         self.lens.remove(key);
         self.floats.insert(key.to_string(), val);
     }
 
-    pub fn set_len(&mut self, key: &str, len: crate::units::Len) {
+    pub fn load_len(&mut self, key: &str, len: crate::units::Len) {
         self.floats.remove(key);
         self.lens.insert(key.to_string(), len);
     }
 
-    pub fn set_string(&mut self, key: &str, val: String) {
+    pub fn load_string(&mut self, key: &str, val: String) {
         self.strings.insert(key.to_string(), val);
     }
 }
@@ -513,12 +611,12 @@ pub fn reload_config() {
                 val_str = trimmed[eq_idx + 1..].trim().trim_matches('"').trim();
                 if let Ok(mut registry) = get_style_registry().write() {
                     if let Ok(f_val) = val_str.parse::<f32>() {
-                        registry.set_float(&key, f_val);
+                        registry.load_float(&key, f_val);
                     } else if let Some(len) = crate::units::Len::parse(val_str) {
                         // `(mm)2.0` arrived as the string `2mm`.
-                        registry.set_len(&key, len);
+                        registry.load_len(&key, len);
                     } else {
-                        registry.set_string(&key, val_str.to_string());
+                        registry.load_string(&key, val_str.to_string());
                     }
                 }
             }
@@ -6742,6 +6840,24 @@ mod tests {
         flatten_json_to_flat_props(&val, "", &mut flat);
         assert!(flat.lines().any(|l| l.starts_with("control_corner_radius")), "{flat}");
         assert!(flat.lines().any(|l| l.starts_with("button_corner_radius")), "{flat}");
+    }
+
+    /// A registry-backed style pinned by one test is invisible to a test
+    /// beside it.
+    ///
+    /// `test_graph_style_configuration` below pins ~20 of these and restores
+    /// none. Before the per-thread overlay that reached every test running
+    /// alongside — provably: `dual_geometry_views_stay_consistent` bakes
+    /// quads with `graph_node_corner_radius`, then re-reads the getter to
+    /// compare, and a write landing between the two made them disagree.
+    #[test]
+    fn a_pinned_style_is_private_to_its_thread() {
+        let base = graph_node_corner_radius();
+        set_graph_node_corner_radius(base + 17.0);
+        assert_eq!(graph_node_corner_radius(), base + 17.0, "the pinning thread sees its own value");
+
+        let elsewhere = std::thread::spawn(graph_node_corner_radius).join().unwrap();
+        assert_eq!(elsewhere, base, "a thread beside it must still see the shared base");
     }
 
     #[test]

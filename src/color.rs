@@ -22,6 +22,56 @@ pub const SLIDER_TRACK: [f32; 4] = [0.18, 0.18, 0.22, 1.0];
 
 use std::sync::RwLock;
 
+/// Per-thread overrides for runtime colour writes, under `cfg(test)` only.
+///
+/// Same defect as the font flake (cce-ui 1dc0ab1) and the style registry
+/// beside it: these are process-wide `RwLock` statics, so a test that pins a
+/// colour pins it for every test running alongside. It was live —
+/// `test_graph_style_configuration` sets a dozen of them and restores none.
+///
+/// Keyed by the address of the static itself, so a slot needs no name
+/// repeated in two places and cannot be typo'd into a silent miss. Config
+/// loading is unaffected: `parse_and_set_colors` writes the statics directly
+/// and never goes through these setters, so the loaded palette stays the
+/// shared base every test thread reads.
+#[cfg(test)]
+mod test_overlay {
+    use std::any::Any;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static MAP: RefCell<HashMap<usize, Box<dyn Any>>> = RefCell::new(HashMap::new());
+    }
+    pub fn get<T: Clone + 'static>(key: usize) -> Option<T> {
+        MAP.with(|m| m.borrow().get(&key).and_then(|b| b.downcast_ref::<T>()).cloned())
+    }
+    pub fn set<T: 'static>(key: usize, val: T) {
+        MAP.with(|m| m.borrow_mut().insert(key, Box::new(val)));
+    }
+}
+
+/// Read a style static, preferring this thread's test override.
+#[inline]
+fn style_read<T: Clone + 'static>(cell: &'static RwLock<T>) -> T {
+    #[cfg(test)]
+    if let Some(v) = test_overlay::get::<T>(cell as *const _ as usize) {
+        return v;
+    }
+    cell.read().unwrap().clone()
+}
+
+/// Write a style static: per-thread under `cfg(test)`, process-wide otherwise.
+#[inline]
+fn style_write<T: Clone + 'static>(cell: &'static RwLock<T>, val: T) {
+    #[cfg(test)]
+    test_overlay::set(cell as *const _ as usize, val);
+    #[cfg(not(test))]
+    if let Ok(mut lock) = cell.write() {
+        *lock = val;
+    }
+}
+
+
 static PAGE_LOW_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0600316, 0.0600316, 0.080219, 1.0]);
 static COLOR_BORDERS_COLOR: RwLock<[f32; 4]> = RwLock::new([0.2039, 0.2039, 0.2530, 1.0]);
 static NODE_COLOR: RwLock<[f32; 4]> = RwLock::new(NODE_IDLE);
@@ -137,13 +187,11 @@ static GRAPH_CONNECTOR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.1, 0.8, 0.4, 1.0
 static GRAPH_CONNECTOR_HIGHLIGHT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.0, 1.0, 0.9, 1.0]);
 
 pub fn button_background_color() -> [f32; 4] {
-    *BUTTON_BACKGROUND_COLOR.read().unwrap()
+    style_read(&BUTTON_BACKGROUND_COLOR)
 }
 
 pub fn set_button_background_color(color: [f32; 4]) {
-    if let Ok(mut lock) = BUTTON_BACKGROUND_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&BUTTON_BACKGROUND_COLOR, color);
 }
 
 pub fn button_hover_color() -> [f32; 4] {
@@ -174,35 +222,29 @@ pub fn button_press_color() -> [f32; 4] {
 
 pub fn node_color() -> [f32; 4] {
     load_colors_once();
-    *NODE_COLOR.read().unwrap()
+    style_read(&NODE_COLOR)
 }
 
 pub fn set_node_color(color: [f32; 4]) {
-    if let Ok(mut lock) = NODE_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&NODE_COLOR, color);
 }
 
 pub fn node_selected_color() -> [f32; 4] {
     load_colors_once();
-    *NODE_SELECTED_COLOR.read().unwrap()
+    style_read(&NODE_SELECTED_COLOR)
 }
 
 pub fn set_node_selected_color(color: [f32; 4]) {
-    if let Ok(mut lock) = NODE_SELECTED_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&NODE_SELECTED_COLOR, color);
 }
 
 pub fn node_drag_color() -> [f32; 4] {
     load_colors_once();
-    *NODE_DRAG_COLOR.read().unwrap()
+    style_read(&NODE_DRAG_COLOR)
 }
 
 pub fn set_node_drag_color(color: [f32; 4]) {
-    if let Ok(mut lock) = NODE_DRAG_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&NODE_DRAG_COLOR, color);
 }
 
 fn read_config() -> Option<String> {
@@ -639,167 +681,137 @@ pub(crate) fn test_color_state_lock() -> std::sync::MutexGuard<'static, ()> {
 
 pub fn dropdown_background_color() -> [f32; 4] {
     load_colors_once();
-    *DROPDOWN_BACKGROUND_COLOR.read().unwrap()
+    style_read(&DROPDOWN_BACKGROUND_COLOR)
 }
 
 pub fn set_dropdown_background_color(color: [f32; 4]) {
-    if let Ok(mut lock) = DROPDOWN_BACKGROUND_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&DROPDOWN_BACKGROUND_COLOR, color);
 }
 
 pub fn textbox_placeholder_text_color() -> [u8; 3] {
     load_colors_once();
-    *TEXTBOX_PLACEHOLDER_TEXT_COLOR.read().unwrap()
+    style_read(&TEXTBOX_PLACEHOLDER_TEXT_COLOR)
 }
 
 pub fn set_textbox_placeholder_text_color(color: [u8; 3]) {
-    if let Ok(mut lock) = TEXTBOX_PLACEHOLDER_TEXT_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&TEXTBOX_PLACEHOLDER_TEXT_COLOR, color);
 }
 
 pub fn textbox_background_color() -> [f32; 4] {
     load_colors_once();
-    *TEXTBOX_BACKGROUND_COLOR.read().unwrap()
+    style_read(&TEXTBOX_BACKGROUND_COLOR)
 }
 
 pub fn set_textbox_background_color(color: [f32; 4]) {
-    if let Ok(mut lock) = TEXTBOX_BACKGROUND_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&TEXTBOX_BACKGROUND_COLOR, color);
 }
 
 pub fn textbox_background_edit_color() -> [f32; 4] {
     load_colors_once();
-    *TEXTBOX_BACKGROUND_EDIT_COLOR.read().unwrap()
+    style_read(&TEXTBOX_BACKGROUND_EDIT_COLOR)
 }
 
 pub fn set_textbox_background_edit_color(color: [f32; 4]) {
-    if let Ok(mut lock) = TEXTBOX_BACKGROUND_EDIT_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&TEXTBOX_BACKGROUND_EDIT_COLOR, color);
 }
 
 pub fn graph_wire_color() -> [f32; 4] {
     load_colors_once();
-    *GRAPH_WIRE_COLOR.read().unwrap()
+    style_read(&GRAPH_WIRE_COLOR)
 }
 
 pub fn set_graph_wire_color(color: [f32; 4]) {
-    if let Ok(mut lock) = GRAPH_WIRE_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_WIRE_COLOR, color);
 }
 
 pub fn graph_wire_highlight_color() -> [f32; 4] {
     load_colors_once();
-    *GRAPH_WIRE_HIGHLIGHT_COLOR.read().unwrap()
+    style_read(&GRAPH_WIRE_HIGHLIGHT_COLOR)
 }
 
 pub fn set_graph_wire_highlight_color(color: [f32; 4]) {
-    if let Ok(mut lock) = GRAPH_WIRE_HIGHLIGHT_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_WIRE_HIGHLIGHT_COLOR, color);
 }
 
 pub fn graph_connector_color() -> [f32; 4] {
     load_colors_once();
-    *GRAPH_CONNECTOR_COLOR.read().unwrap()
+    style_read(&GRAPH_CONNECTOR_COLOR)
 }
 
 pub fn set_graph_connector_color(color: [f32; 4]) {
-    if let Ok(mut lock) = GRAPH_CONNECTOR_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_CONNECTOR_COLOR, color);
 }
 
 pub fn graph_connector_highlight_color() -> [f32; 4] {
     load_colors_once();
-    *GRAPH_CONNECTOR_HIGHLIGHT_COLOR.read().unwrap()
+    style_read(&GRAPH_CONNECTOR_HIGHLIGHT_COLOR)
 }
 
 pub fn set_graph_connector_highlight_color(color: [f32; 4]) {
-    if let Ok(mut lock) = GRAPH_CONNECTOR_HIGHLIGHT_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_CONNECTOR_HIGHLIGHT_COLOR, color);
 }
 
 pub fn graph_node_color() -> [f32; 4] {
     load_colors_once();
-    *GRAPH_NODE_COLOR.read().unwrap()
+    style_read(&GRAPH_NODE_COLOR)
 }
 
 pub fn set_graph_node_color(color: [f32; 4]) {
-    if let Ok(mut lock) = GRAPH_NODE_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_NODE_COLOR, color);
 }
 
 pub fn graph_node_selected_color() -> [f32; 4] {
     load_colors_once();
-    *GRAPH_NODE_SELECTED_COLOR.read().unwrap()
+    style_read(&GRAPH_NODE_SELECTED_COLOR)
 }
 
 pub fn set_graph_node_selected_color(color: [f32; 4]) {
-    if let Ok(mut lock) = GRAPH_NODE_SELECTED_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_NODE_SELECTED_COLOR, color);
 }
 
 pub fn graph_node_drag_color() -> [f32; 4] {
     load_colors_once();
-    *GRAPH_NODE_DRAG_COLOR.read().unwrap()
+    style_read(&GRAPH_NODE_DRAG_COLOR)
 }
 
 pub fn set_graph_node_drag_color(color: [f32; 4]) {
-    if let Ok(mut lock) = GRAPH_NODE_DRAG_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_NODE_DRAG_COLOR, color);
 }
 
 pub fn graph_cell_color() -> [f32; 3] {
     load_colors_once();
-    *GRAPH_CELL_COLOR.read().unwrap()
+    style_read(&GRAPH_CELL_COLOR)
 }
 
 pub fn set_graph_cell_color(color: [f32; 3]) {
-    if let Ok(mut lock) = GRAPH_CELL_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_CELL_COLOR, color);
 }
 
 pub fn graph_gap_color() -> [f32; 3] {
     load_colors_once();
-    *GRAPH_GAP_COLOR.read().unwrap()
+    style_read(&GRAPH_GAP_COLOR)
 }
 
 pub fn set_graph_gap_color(color: [f32; 3]) {
-    if let Ok(mut lock) = GRAPH_GAP_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&GRAPH_GAP_COLOR, color);
 }
 
 pub fn graph_opacity() -> f32 {
     load_colors_once();
-    *GRAPH_OPACITY.read().unwrap()
+    style_read(&GRAPH_OPACITY)
 }
 
 pub fn graph_node_opacity() -> f32 {
     load_colors_once();
-    *GRAPH_NODE_OPACITY.read().unwrap()
+    style_read(&GRAPH_NODE_OPACITY)
 }
 
 pub fn set_graph_node_opacity(opacity: f32) {
-    if let Ok(mut lock) = GRAPH_NODE_OPACITY.write() {
-        *lock = opacity;
-    }
+    style_write(&GRAPH_NODE_OPACITY, opacity);
 }
 
 pub fn set_graph_opacity(opacity: f32) {
-    if let Ok(mut lock) = GRAPH_OPACITY.write() {
-        *lock = opacity;
-    }
+    style_write(&GRAPH_OPACITY, opacity);
 }
 
 pub fn page_low_color() -> [f32; 4] {
@@ -812,43 +824,35 @@ pub fn page_low_color() -> [f32; 4] {
 }
 
 pub fn set_page_low_color(color: [f32; 4]) {
-    if let Ok(mut lock) = PAGE_LOW_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&PAGE_LOW_COLOR, color);
 }
 
 pub fn page_color() -> [f32; 4] {
     load_colors_once();
-    *PAGE_COLOR.read().unwrap()
+    style_read(&PAGE_COLOR)
 }
 
 pub fn set_page_color(color: [f32; 4]) {
-    if let Ok(mut lock) = PAGE_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&PAGE_COLOR, color);
 }
 
 pub fn layer_color() -> [f32; 4] {
     load_colors_once();
-    *LAYER_COLOR.read().unwrap()
+    style_read(&LAYER_COLOR)
 }
 
 pub fn set_layer_color(color: [f32; 4]) {
-    if let Ok(mut lock) = LAYER_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&LAYER_COLOR, color);
 }
 
 
 pub fn color_borders_color() -> [f32; 4] {
     load_colors_once();
-    *COLOR_BORDERS_COLOR.read().unwrap()
+    style_read(&COLOR_BORDERS_COLOR)
 }
 
 pub fn set_color_borders_color(color: [f32; 4]) {
-    if let Ok(mut lock) = COLOR_BORDERS_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&COLOR_BORDERS_COLOR, color);
 }
 
 pub const SLIDER_THUMB: [f32; 4] = [0.60, 0.60, 0.65, 1.0];
@@ -876,13 +880,11 @@ static PARAM_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(PARAM_BG);
 
 pub fn param_bg_color() -> [f32; 4] {
     load_colors_once();
-    *PARAM_BG_COLOR.read().unwrap()
+    style_read(&PARAM_BG_COLOR)
 }
 
 pub fn set_param_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = PARAM_BG_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&PARAM_BG_COLOR, color);
 }
 
 /// The params plate's final fill as the renderer consumes it: the tint scaled
@@ -1110,14 +1112,12 @@ pub fn sidebar_bg_color() -> [f32; 4] {
 }
 
 pub fn set_sidebar_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = SIDEBAR_BG_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&SIDEBAR_BG_COLOR, color);
 }
 
 pub fn highlight_primary_color() -> [f32; 4] {
     load_colors_once();
-    *HIGHLIGHT_PRIMARY_COLOR.read().unwrap()
+    style_read(&HIGHLIGHT_PRIMARY_COLOR)
 }
 
 pub fn set_highlight_primary_color(color: [f32; 4]) {
@@ -1128,30 +1128,28 @@ pub fn set_highlight_primary_color(color: [f32; 4]) {
 
 pub fn menubar_tab_label_color() -> [f32; 4] {
     load_colors_once();
-    *MENUBAR_TAB_LABEL_COLOR.read().unwrap()
+    style_read(&MENUBAR_TAB_LABEL_COLOR)
 }
 
 pub fn set_menubar_tab_label_color(color: [f32; 4]) {
-    if let Ok(mut lock) = MENUBAR_TAB_LABEL_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&MENUBAR_TAB_LABEL_COLOR, color);
 }
 
 pub fn read_opacity_if_configured() -> Option<f32> {
     load_colors_once();
-    *OPACITY.read().unwrap()
+    style_read(&OPACITY)
 }
 
 /// Tint strength for frosted menus/popovers (`/style/surface/menu/opacity`,
 /// default 0.8): the |alpha| of the blur-behind sentinel their plates carry.
 pub fn menu_opacity() -> f32 {
     load_colors_once();
-    *MENU_OPACITY.read().unwrap()
+    style_read(&MENU_OPACITY)
 }
 
 pub fn read_root_plate_opacity_if_configured() -> Option<f32> {
     load_colors_once();
-    *ROOT_PLATE_OPACITY.read().unwrap()
+    style_read(&ROOT_PLATE_OPACITY)
 }
 
 // The toggle's own palette (enabled/disabled/background) is RETIRED: a toggle
@@ -1161,7 +1159,7 @@ pub fn read_root_plate_opacity_if_configured() -> Option<f32> {
 
 pub fn list_bg_color() -> [f32; 4] {
     load_colors_once();
-    *LIST_BG_COLOR.read().unwrap()
+    style_read(&LIST_BG_COLOR)
 }
 
 pub fn set_list_bg_color(color: [f32; 4]) {
@@ -1172,40 +1170,34 @@ pub fn set_list_bg_color(color: [f32; 4]) {
 
 pub fn list_entry_bg_color() -> [f32; 4] {
     load_colors_once();
-    *LIST_ENTRY_BG_COLOR.read().unwrap()
+    style_read(&LIST_ENTRY_BG_COLOR)
 }
 
 pub fn set_list_entry_bg_color(color: [f32; 4]) {
-    if let Ok(mut lock) = LIST_ENTRY_BG_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&LIST_ENTRY_BG_COLOR, color);
 }
 
 pub fn list_entry_highlight_color() -> [f32; 4] {
     load_colors_once();
-    *LIST_ENTRY_HIGHLIGHT_COLOR.read().unwrap()
+    style_read(&LIST_ENTRY_HIGHLIGHT_COLOR)
 }
 
 pub fn set_list_entry_highlight_color(color: [f32; 4]) {
-    if let Ok(mut lock) = LIST_ENTRY_HIGHLIGHT_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&LIST_ENTRY_HIGHLIGHT_COLOR, color);
 }
 
 pub fn list_font_color() -> [f32; 4] {
     load_colors_once();
-    *LIST_FONT_COLOR.read().unwrap()
+    style_read(&LIST_FONT_COLOR)
 }
 
 pub fn set_list_font_color(color: [f32; 4]) {
-    if let Ok(mut lock) = LIST_FONT_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&LIST_FONT_COLOR, color);
 }
 
 pub fn breadcrumb_bg_color() -> [f32; 4] {
     load_colors_once();
-    *BREADCRUMB_BG_COLOR.read().unwrap()
+    style_read(&BREADCRUMB_BG_COLOR)
 }
 
 pub fn set_breadcrumb_bg_color(color: [f32; 4]) {
@@ -1216,7 +1208,7 @@ pub fn set_breadcrumb_bg_color(color: [f32; 4]) {
 
 pub fn popover_bg_color() -> [f32; 4] {
     load_colors_once();
-    *POPOVER_BG_COLOR.read().unwrap()
+    style_read(&POPOVER_BG_COLOR)
 }
 
 pub fn set_popover_bg_color(color: [f32; 4]) {
@@ -1230,66 +1222,58 @@ pub fn set_popover_bg_color(color: [f32; 4]) {
 /// copy of this.
 pub fn root_plate_corner_radius() -> f32 {
     load_colors_once();
-    *ROOT_PLATE_CORNER_RADIUS.read().unwrap()
+    style_read(&ROOT_PLATE_CORNER_RADIUS)
 }
 
 pub fn ramp_background_color() -> [f32; 4] {
     load_colors_once();
-    *RAMP_BACKGROUND_COLOR.read().unwrap()
+    style_read(&RAMP_BACKGROUND_COLOR)
 }
 
 pub fn ramp_border_color() -> [f32; 4] {
     load_colors_once();
-    *RAMP_BORDER_COLOR.read().unwrap()
+    style_read(&RAMP_BORDER_COLOR)
 }
 
 pub fn control_panel_color() -> [f32; 4] {
     load_colors_once();
-    *CONTROL_PANEL_COLOR.read().unwrap()
+    style_read(&CONTROL_PANEL_COLOR)
 }
 
 pub fn set_control_panel_color(color: [f32; 4]) {
-    if let Ok(mut lock) = CONTROL_PANEL_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&CONTROL_PANEL_COLOR, color);
 }
 
 pub fn control_panel_border_color() -> [f32; 4] {
     load_colors_once();
-    *CONTROL_PANEL_BORDER_COLOR.read().unwrap()
+    style_read(&CONTROL_PANEL_BORDER_COLOR)
 }
 
 pub fn set_control_panel_border_color(color: [f32; 4]) {
-    if let Ok(mut lock) = CONTROL_PANEL_BORDER_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&CONTROL_PANEL_BORDER_COLOR, color);
 }
 
 pub fn progress_bg() -> [f32; 4] {
     load_colors_once();
-    *PROGRESS_BG_COLOR.read().unwrap()
+    style_read(&PROGRESS_BG_COLOR)
 }
 
 pub fn set_progress_bg(color: [f32; 4]) {
-    if let Ok(mut lock) = PROGRESS_BG_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&PROGRESS_BG_COLOR, color);
 }
 
 pub fn progress_fill() -> [f32; 4] {
     load_colors_once();
-    *PROGRESS_FILL_COLOR.read().unwrap()
+    style_read(&PROGRESS_FILL_COLOR)
 }
 
 pub fn set_progress_fill(color: [f32; 4]) {
-    if let Ok(mut lock) = PROGRESS_FILL_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&PROGRESS_FILL_COLOR, color);
 }
 
 pub fn button_border_color() -> Option<[f32; 4]> {
     load_colors_once();
-    *BUTTON_BORDER_COLOR.read().unwrap()
+    style_read(&BUTTON_BORDER_COLOR)
 }
 
 pub fn set_button_border_color(color: [f32; 4]) {
@@ -1300,119 +1284,97 @@ pub fn set_button_border_color(color: [f32; 4]) {
 
 pub fn dropdown_border_color() -> [f32; 4] {
     load_colors_once();
-    *DROPDOWN_BORDER_COLOR.read().unwrap()
+    style_read(&DROPDOWN_BORDER_COLOR)
 }
 
 pub fn set_dropdown_border_color(color: [f32; 4]) {
-    if let Ok(mut lock) = DROPDOWN_BORDER_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&DROPDOWN_BORDER_COLOR, color);
 }
 
 pub fn dropdown_text_color() -> [f32; 4] {
     load_colors_once();
-    *DROPDOWN_TEXT_COLOR.read().unwrap()
+    style_read(&DROPDOWN_TEXT_COLOR)
 }
 
 pub fn set_dropdown_text_color(color: [f32; 4]) {
-    if let Ok(mut lock) = DROPDOWN_TEXT_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&DROPDOWN_TEXT_COLOR, color);
 }
 
 
 pub fn slider_thumb() -> [f32; 4] {
     load_colors_once();
-    *SLIDER_THUMB_COLOR.read().unwrap()
+    style_read(&SLIDER_THUMB_COLOR)
 }
 
 pub fn set_slider_thumb(color: [f32; 4]) {
-    if let Ok(mut lock) = SLIDER_THUMB_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&SLIDER_THUMB_COLOR, color);
 }
 
 pub fn slider_thumb_drag() -> [f32; 4] {
     load_colors_once();
-    *SLIDER_THUMB_DRAG_COLOR.read().unwrap()
+    style_read(&SLIDER_THUMB_DRAG_COLOR)
 }
 
 pub fn set_slider_thumb_drag(color: [f32; 4]) {
-    if let Ok(mut lock) = SLIDER_THUMB_DRAG_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&SLIDER_THUMB_DRAG_COLOR, color);
 }
 
 pub fn rangeslider_thumb() -> [f32; 4] {
     load_colors_once();
-    *RANGE_SLIDER_THUMB_COLOR.read().unwrap()
+    style_read(&RANGE_SLIDER_THUMB_COLOR)
 }
 
 pub fn set_rangeslider_thumb(color: [f32; 4]) {
-    if let Ok(mut lock) = RANGE_SLIDER_THUMB_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&RANGE_SLIDER_THUMB_COLOR, color);
 }
 
 pub fn rangeslider_thumb_drag() -> [f32; 4] {
     load_colors_once();
-    *RANGE_SLIDER_THUMB_DRAG_COLOR.read().unwrap()
+    style_read(&RANGE_SLIDER_THUMB_DRAG_COLOR)
 }
 
 pub fn set_rangeslider_thumb_drag(color: [f32; 4]) {
-    if let Ok(mut lock) = RANGE_SLIDER_THUMB_DRAG_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&RANGE_SLIDER_THUMB_DRAG_COLOR, color);
 }
 
 pub fn spinbox_display() -> [f32; 4] {
     load_colors_once();
-    *SPINBOX_DISPLAY_COLOR.read().unwrap()
+    style_read(&SPINBOX_DISPLAY_COLOR)
 }
 
 pub fn set_spinbox_display(color: [f32; 4]) {
-    if let Ok(mut lock) = SPINBOX_DISPLAY_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&SPINBOX_DISPLAY_COLOR, color);
 }
 
 pub fn spinbox_button() -> [f32; 4] {
     load_colors_once();
-    *SPINBOX_BUTTON_COLOR.read().unwrap()
+    style_read(&SPINBOX_BUTTON_COLOR)
 }
 
 pub fn set_spinbox_button(color: [f32; 4]) {
-    if let Ok(mut lock) = SPINBOX_BUTTON_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&SPINBOX_BUTTON_COLOR, color);
 }
 
 pub fn spinbox_button_hover() -> [f32; 4] {
     load_colors_once();
-    *SPINBOX_BUTTON_HOVER_COLOR.read().unwrap()
+    style_read(&SPINBOX_BUTTON_HOVER_COLOR)
 }
 
 pub fn set_spinbox_button_hover(color: [f32; 4]) {
-    if let Ok(mut lock) = SPINBOX_BUTTON_HOVER_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&SPINBOX_BUTTON_HOVER_COLOR, color);
 }
 
 pub fn spinbox_text_color() -> [f32; 4] {
     load_colors_once();
-    *SPINBOX_TEXT_COLOR.read().unwrap()
+    style_read(&SPINBOX_TEXT_COLOR)
 }
 
 pub fn set_spinbox_text_color(color: [f32; 4]) {
-    if let Ok(mut lock) = SPINBOX_TEXT_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&SPINBOX_TEXT_COLOR, color);
 }
 
 pub fn set_root_plate_corner_radius(radius: f32) {
-    if let Ok(mut lock) = ROOT_PLATE_CORNER_RADIUS.write() {
-        *lock = radius;
-    }
+    style_write(&ROOT_PLATE_CORNER_RADIUS, radius);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1483,52 +1445,124 @@ pub fn root_plate_opacity() -> f32 {
     page_low_color()[3]
 }
 
-pub fn tree_background_color() -> [f32; 4] { *TREE_BACKGROUND_COLOR.read().unwrap() }
-pub fn tree_border_color() -> [f32; 4] { *TREE_BORDER_COLOR.read().unwrap() }
-pub fn tree_border_hover_color() -> [f32; 4] { *TREE_BORDER_HOVER_COLOR.read().unwrap() }
-pub fn tree_border_focus_color() -> [f32; 4] { *TREE_BORDER_FOCUS_COLOR.read().unwrap() }
+pub fn tree_background_color() -> [f32; 4] {
+    style_read(&TREE_BACKGROUND_COLOR)
+}
+pub fn tree_border_color() -> [f32; 4] {
+    style_read(&TREE_BORDER_COLOR)
+}
+pub fn tree_border_hover_color() -> [f32; 4] {
+    style_read(&TREE_BORDER_HOVER_COLOR)
+}
+pub fn tree_border_focus_color() -> [f32; 4] {
+    style_read(&TREE_BORDER_FOCUS_COLOR)
+}
 
-pub fn tree_section_bg_color() -> [f32; 4] { *TREE_SECTION_BG_COLOR.read().unwrap() }
-pub fn tree_section_bg_hover_color() -> [f32; 4] { *TREE_SECTION_BG_HOVER_COLOR.read().unwrap() }
+pub fn tree_section_bg_color() -> [f32; 4] {
+    style_read(&TREE_SECTION_BG_COLOR)
+}
+pub fn tree_section_bg_hover_color() -> [f32; 4] {
+    style_read(&TREE_SECTION_BG_HOVER_COLOR)
+}
 
-pub fn tree_leaf_bg_even_color() -> [f32; 4] { *TREE_LEAF_BG_EVEN_COLOR.read().unwrap() }
-pub fn tree_leaf_bg_odd_color() -> [f32; 4] { *TREE_LEAF_BG_ODD_COLOR.read().unwrap() }
-pub fn tree_leaf_bg_hover_color() -> [f32; 4] { *TREE_LEAF_BG_HOVER_COLOR.read().unwrap() }
-pub fn tree_leaf_bg_selected_color() -> [f32; 4] { *TREE_LEAF_BG_SELECTED_COLOR.read().unwrap() }
+pub fn tree_leaf_bg_even_color() -> [f32; 4] {
+    style_read(&TREE_LEAF_BG_EVEN_COLOR)
+}
+pub fn tree_leaf_bg_odd_color() -> [f32; 4] {
+    style_read(&TREE_LEAF_BG_ODD_COLOR)
+}
+pub fn tree_leaf_bg_hover_color() -> [f32; 4] {
+    style_read(&TREE_LEAF_BG_HOVER_COLOR)
+}
+pub fn tree_leaf_bg_selected_color() -> [f32; 4] {
+    style_read(&TREE_LEAF_BG_SELECTED_COLOR)
+}
 
-pub fn tree_section_text_color() -> [f32; 4] { *TREE_SECTION_TEXT_COLOR.read().unwrap() }
-pub fn tree_leaf_text_color() -> [f32; 4] { *TREE_LEAF_TEXT_COLOR.read().unwrap() }
-pub fn tree_leaf_text_selected_color() -> [f32; 4] { *TREE_LEAF_TEXT_SELECTED_COLOR.read().unwrap() }
+pub fn tree_section_text_color() -> [f32; 4] {
+    style_read(&TREE_SECTION_TEXT_COLOR)
+}
+pub fn tree_leaf_text_color() -> [f32; 4] {
+    style_read(&TREE_LEAF_TEXT_COLOR)
+}
+pub fn tree_leaf_text_selected_color() -> [f32; 4] {
+    style_read(&TREE_LEAF_TEXT_SELECTED_COLOR)
+}
 
-pub fn tree_type_text_color() -> [f32; 4] { *TREE_TYPE_TEXT_COLOR.read().unwrap() }
-pub fn tree_value_text_color() -> [f32; 4] { *TREE_VALUE_TEXT_COLOR.read().unwrap() }
-pub fn tree_separator_color() -> [f32; 4] { *TREE_SEPARATOR_COLOR.read().unwrap() }
+pub fn tree_type_text_color() -> [f32; 4] {
+    style_read(&TREE_TYPE_TEXT_COLOR)
+}
+pub fn tree_value_text_color() -> [f32; 4] {
+    style_read(&TREE_VALUE_TEXT_COLOR)
+}
+pub fn tree_separator_color() -> [f32; 4] {
+    style_read(&TREE_SEPARATOR_COLOR)
+}
 
-pub fn set_tree_background_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_BACKGROUND_COLOR.write() { *lock = c; } }
-pub fn set_tree_border_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_BORDER_COLOR.write() { *lock = c; } }
-pub fn set_tree_border_hover_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_BORDER_HOVER_COLOR.write() { *lock = c; } }
-pub fn set_tree_border_focus_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_BORDER_FOCUS_COLOR.write() { *lock = c; } }
+pub fn set_tree_background_color(c: [f32; 4]) {
+    style_write(&TREE_BACKGROUND_COLOR, c);
+}
+pub fn set_tree_border_color(c: [f32; 4]) {
+    style_write(&TREE_BORDER_COLOR, c);
+}
+pub fn set_tree_border_hover_color(c: [f32; 4]) {
+    style_write(&TREE_BORDER_HOVER_COLOR, c);
+}
+pub fn set_tree_border_focus_color(c: [f32; 4]) {
+    style_write(&TREE_BORDER_FOCUS_COLOR, c);
+}
 
-pub fn set_tree_section_bg_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SECTION_BG_COLOR.write() { *lock = c; } }
-pub fn set_tree_section_bg_hover_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SECTION_BG_HOVER_COLOR.write() { *lock = c; } }
+pub fn set_tree_section_bg_color(c: [f32; 4]) {
+    style_write(&TREE_SECTION_BG_COLOR, c);
+}
+pub fn set_tree_section_bg_hover_color(c: [f32; 4]) {
+    style_write(&TREE_SECTION_BG_HOVER_COLOR, c);
+}
 
-pub fn set_tree_leaf_bg_even_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_BG_EVEN_COLOR.write() { *lock = c; } }
-pub fn set_tree_leaf_bg_odd_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_BG_ODD_COLOR.write() { *lock = c; } }
-pub fn set_tree_leaf_bg_hover_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_BG_HOVER_COLOR.write() { *lock = c; } }
-pub fn set_tree_leaf_bg_selected_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_BG_SELECTED_COLOR.write() { *lock = c; } }
+pub fn set_tree_leaf_bg_even_color(c: [f32; 4]) {
+    style_write(&TREE_LEAF_BG_EVEN_COLOR, c);
+}
+pub fn set_tree_leaf_bg_odd_color(c: [f32; 4]) {
+    style_write(&TREE_LEAF_BG_ODD_COLOR, c);
+}
+pub fn set_tree_leaf_bg_hover_color(c: [f32; 4]) {
+    style_write(&TREE_LEAF_BG_HOVER_COLOR, c);
+}
+pub fn set_tree_leaf_bg_selected_color(c: [f32; 4]) {
+    style_write(&TREE_LEAF_BG_SELECTED_COLOR, c);
+}
 
-pub fn set_tree_section_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SECTION_TEXT_COLOR.write() { *lock = c; } }
-pub fn set_tree_leaf_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_TEXT_COLOR.write() { *lock = c; } }
-pub fn set_tree_leaf_text_selected_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_LEAF_TEXT_SELECTED_COLOR.write() { *lock = c; } }
+pub fn set_tree_section_text_color(c: [f32; 4]) {
+    style_write(&TREE_SECTION_TEXT_COLOR, c);
+}
+pub fn set_tree_leaf_text_color(c: [f32; 4]) {
+    style_write(&TREE_LEAF_TEXT_COLOR, c);
+}
+pub fn set_tree_leaf_text_selected_color(c: [f32; 4]) {
+    style_write(&TREE_LEAF_TEXT_SELECTED_COLOR, c);
+}
 
-pub fn set_tree_type_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_TYPE_TEXT_COLOR.write() { *lock = c; } }
-pub fn set_tree_value_text_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_VALUE_TEXT_COLOR.write() { *lock = c; } }
-pub fn set_tree_separator_color(c: [f32; 4]) { if let Ok(mut lock) = TREE_SEPARATOR_COLOR.write() { *lock = c; } }
+pub fn set_tree_type_text_color(c: [f32; 4]) {
+    style_write(&TREE_TYPE_TEXT_COLOR, c);
+}
+pub fn set_tree_value_text_color(c: [f32; 4]) {
+    style_write(&TREE_VALUE_TEXT_COLOR, c);
+}
+pub fn set_tree_separator_color(c: [f32; 4]) {
+    style_write(&TREE_SEPARATOR_COLOR, c);
+}
 
-pub fn scrollbar_track_color() -> [f32; 4] { *SCROLLBAR_TRACK_COLOR.read().unwrap() }
-pub fn set_scrollbar_track_color(c: [f32; 4]) { if let Ok(mut lock) = SCROLLBAR_TRACK_COLOR.write() { *lock = c; } }
-pub fn scrollbar_thumb_color() -> [f32; 4] { *SCROLLBAR_THUMB_COLOR.read().unwrap() }
-pub fn set_scrollbar_thumb_color(c: [f32; 4]) { if let Ok(mut lock) = SCROLLBAR_THUMB_COLOR.write() { *lock = c; } }
+pub fn scrollbar_track_color() -> [f32; 4] {
+    style_read(&SCROLLBAR_TRACK_COLOR)
+}
+pub fn set_scrollbar_track_color(c: [f32; 4]) {
+    style_write(&SCROLLBAR_TRACK_COLOR, c);
+}
+pub fn scrollbar_thumb_color() -> [f32; 4] {
+    style_read(&SCROLLBAR_THUMB_COLOR)
+}
+pub fn set_scrollbar_thumb_color(c: [f32; 4]) {
+    style_write(&SCROLLBAR_THUMB_COLOR, c);
+}
 
 pub fn tree_open_search_key() -> String {
     load_colors_once();
@@ -1536,9 +1570,7 @@ pub fn tree_open_search_key() -> String {
     crate::input::widget_chord("open_search", &legacy, "ctrl+f")
 }
 pub fn set_tree_open_search_key(k: String) {
-    if let Ok(mut lock) = TREE_OPEN_SEARCH_KEY.write() {
-        *lock = k;
-    }
+    style_write(&TREE_OPEN_SEARCH_KEY, k);
 }
 
 pub fn list_open_search_key() -> String {
@@ -1547,9 +1579,7 @@ pub fn list_open_search_key() -> String {
     crate::input::widget_chord("open_search", &legacy, "ctrl+f")
 }
 pub fn set_list_open_search_key(k: String) {
-    if let Ok(mut lock) = LIST_OPEN_SEARCH_KEY.write() {
-        *lock = k;
-    }
+    style_write(&LIST_OPEN_SEARCH_KEY, k);
 }
 
 pub fn list_close_search_key() -> String {
@@ -1558,63 +1588,61 @@ pub fn list_close_search_key() -> String {
     crate::input::widget_chord("close_search", &legacy, "escape")
 }
 pub fn set_list_close_search_key(k: String) {
-    if let Ok(mut lock) = LIST_CLOSE_SEARCH_KEY.write() {
-        *lock = k;
-    }
+    style_write(&LIST_CLOSE_SEARCH_KEY, k);
 }
 
 pub fn root_plate_menubar_color() -> [f32; 4] {
     load_colors_once();
-    *ROOT_PLATE_MENUBAR_COLOR.read().unwrap()
+    style_read(&ROOT_PLATE_MENUBAR_COLOR)
 }
 
 pub fn set_root_plate_menubar_color(c: [f32; 4]) {
-    if let Ok(mut lock) = ROOT_PLATE_MENUBAR_COLOR.write() { *lock = c; }
+    style_write(&ROOT_PLATE_MENUBAR_COLOR, c);
 }
 
 pub fn root_plate_menubar_text_color() -> [f32; 4] {
     load_colors_once();
-    *ROOT_PLATE_MENUBAR_TEXT_COLOR.read().unwrap()
+    style_read(&ROOT_PLATE_MENUBAR_TEXT_COLOR)
 }
 
 pub fn set_root_plate_menubar_text_color(c: [f32; 4]) {
-    if let Ok(mut lock) = ROOT_PLATE_MENUBAR_TEXT_COLOR.write() { *lock = c; }
+    style_write(&ROOT_PLATE_MENUBAR_TEXT_COLOR, c);
 }
 
 pub fn root_plate_menubar_blur() -> bool {
     load_colors_once();
-    *ROOT_PLATE_MENUBAR_BLUR.read().unwrap()
+    style_read(&ROOT_PLATE_MENUBAR_BLUR)
 }
 
 pub fn set_root_plate_menubar_blur(b: bool) {
-    if let Ok(mut lock) = ROOT_PLATE_MENUBAR_BLUR.write() { *lock = b; }
+    style_write(&ROOT_PLATE_MENUBAR_BLUR, b);
 }
 
 pub fn root_plate_statusbar_color() -> [f32; 4] {
     load_colors_once();
-    *ROOT_PLATE_STATUSBAR_COLOR.read().unwrap()
+    style_read(&ROOT_PLATE_STATUSBAR_COLOR)
 }
 
 pub fn set_root_plate_statusbar_color(c: [f32; 4]) {
-    if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_COLOR.write() { *lock = c; }
+    style_write(&ROOT_PLATE_STATUSBAR_COLOR, c);
 }
 
 pub fn root_plate_statusbar_text_color() -> [f32; 4] {
     load_colors_once();
-    *ROOT_PLATE_STATUSBAR_TEXT_COLOR.read().unwrap()
+    style_read(&ROOT_PLATE_STATUSBAR_TEXT_COLOR)
 }
 
 pub fn set_root_plate_statusbar_text_color(c: [f32; 4]) {
-    if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_TEXT_COLOR.write() { *lock = c; }
+    style_write(&ROOT_PLATE_STATUSBAR_TEXT_COLOR, c);
 }
 
 pub fn root_plate_statusbar_blur() -> bool {
     load_colors_once();
-    *ROOT_PLATE_STATUSBAR_BLUR.read().unwrap()
+    style_read(&ROOT_PLATE_STATUSBAR_BLUR)
 }
 
 pub fn set_root_plate_statusbar_blur(b: bool) {
-    if let Ok(mut lock) = ROOT_PLATE_STATUSBAR_BLUR.write() { *lock = b; }
+    style_write(&ROOT_PLATE_STATUSBAR_BLUR, b);
 }
 
 static PLATE_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.15, 0.15, 0.2, 0.95]));
@@ -1633,9 +1661,7 @@ pub fn plate_color() -> Option<[f32; 4]> {
 }
 
 pub fn set_plate_color(c: Option<[f32; 4]>) {
-    if let Ok(mut lock) = PLATE_COLOR.write() {
-        *lock = c;
-    }
+    style_write(&PLATE_COLOR, c);
 }
 
 pub fn plate_border_color() -> Option<[f32; 4]> {
@@ -1647,9 +1673,7 @@ pub fn plate_border_color() -> Option<[f32; 4]> {
 }
 
 pub fn set_plate_border_color(c: Option<[f32; 4]>) {
-    if let Ok(mut lock) = PLATE_BORDER_COLOR.write() {
-        *lock = c;
-    }
+    style_write(&PLATE_BORDER_COLOR, c);
 }
 
 pub fn plate_border_thickness() -> f32 {
@@ -1661,9 +1685,7 @@ pub fn plate_border_thickness() -> f32 {
 }
 
 pub fn set_plate_border_thickness(t: f32) {
-    if let Ok(mut lock) = PLATE_BORDER_THICKNESS.write() {
-        *lock = t;
-    }
+    style_write(&PLATE_BORDER_THICKNESS, t);
 }
 
 pub fn plate_bevel_width() -> f32 {
@@ -1675,9 +1697,7 @@ pub fn plate_bevel_width() -> f32 {
 }
 
 pub fn set_plate_bevel_width(t: f32) {
-    if let Ok(mut lock) = PLATE_BEVEL_WIDTH.write() {
-        *lock = t;
-    }
+    style_write(&PLATE_BEVEL_WIDTH, t);
 }
 
 static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
@@ -1691,13 +1711,11 @@ pub fn plate_blur() -> bool {
 }
 
 pub fn set_plate_blur(b: bool) {
-    if let Ok(mut lock) = PLATE_BLUR.write() {
-        *lock = b;
-    }
+    style_write(&PLATE_BLUR, b);
 }
 
 pub fn control_label_color() -> [f32; 4] {
-    *CONTROL_LABEL_COLOR.read().unwrap()
+    style_read(&CONTROL_LABEL_COLOR)
 }
 
 pub fn control_label_color_u8() -> [u8; 3] {
@@ -1710,17 +1728,15 @@ pub fn control_label_color_u8() -> [u8; 3] {
 }
 
 pub fn set_control_label_color(color: [f32; 4]) {
-    if let Ok(mut lock) = CONTROL_LABEL_COLOR.write() {
-        *lock = color;
-    }
+    style_write(&CONTROL_LABEL_COLOR, color);
 }
 
 pub fn control_label_hover_color() -> Option<[f32; 4]> {
-    *CONTROL_LABEL_HOVER_COLOR.read().unwrap()
+    style_read(&CONTROL_LABEL_HOVER_COLOR)
 }
 
 pub fn control_label_focus_color() -> Option<[f32; 4]> {
-    *CONTROL_LABEL_FOCUS_COLOR.read().unwrap()
+    style_read(&CONTROL_LABEL_FOCUS_COLOR)
 }
 
 pub fn control_label_color_for_state(hovered: bool, focused: bool) -> [u8; 3] {
@@ -1739,7 +1755,7 @@ pub fn control_label_color_for_state(hovered: bool, focused: bool) -> [u8; 3] {
 }
 
 pub fn control_label_color_detached() -> [f32; 4] {
-    *CONTROL_LABEL_COLOR_DETACHED.read().unwrap()
+    style_read(&CONTROL_LABEL_COLOR_DETACHED)
 }
 
 pub fn control_label_color_detached_u8() -> [u8; 3] {
@@ -1752,9 +1768,7 @@ pub fn control_label_color_detached_u8() -> [u8; 3] {
 }
 
 pub fn set_control_label_color_detached(color: [f32; 4]) {
-    if let Ok(mut lock) = CONTROL_LABEL_COLOR_DETACHED.write() {
-        *lock = color;
-    }
+    style_write(&CONTROL_LABEL_COLOR_DETACHED, color);
 }
 
 pub fn control_label_color_detached_for_state(hovered: bool, focused: bool) -> [u8; 3] {
@@ -1855,3 +1869,27 @@ mod color_tests {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A colour pinned by one test is invisible to a test beside it.
+    ///
+    /// The invariant that ends the parallel-flake class here. These statics
+    /// are process-wide, and `test_graph_style_configuration` pins a dozen of
+    /// them without restoring any; before `style_write` became per-thread
+    /// under `cfg(test)`, every test running alongside it saw those values.
+    #[test]
+    fn a_pinned_colour_is_private_to_its_thread() {
+        let base = node_color();
+        let pinned = [0.123, 0.456, 0.789, 1.0];
+        assert_ne!(base, pinned, "pick a value the config cannot already hold");
+
+        set_node_color(pinned);
+        assert_eq!(node_color(), pinned, "the pinning thread sees its own value");
+
+        let elsewhere = std::thread::spawn(node_color).join().unwrap();
+        assert_eq!(elsewhere, base, "a thread beside it must still see the shared base");
+    }
+}
