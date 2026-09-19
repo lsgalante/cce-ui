@@ -4,6 +4,21 @@
 //! [`crate::vk::free_image`] when done — the widget never uploads or frees GPU
 //! resources, so one id can back several views and a dropped view leaks
 //! nothing. `image: None` paints only the optional letterbox floor.
+//!
+//! **Borrowing it means the owner has to replace it when the renderer is
+//! rebuilt.** An image id names an entry in one renderer's image table, and a
+//! renderer does not outlive its session: `window_runner` builds a new one
+//! around the same `Application` when it repairs a lost Wayland transport. A
+//! draw for an id the new table does not hold is skipped rather than
+//! reported, so a view left holding a pre-reconnect id goes blank and stays
+//! blank, with nothing logged. Set the image again from
+//! [`Application::renderer_init`] on every renderer after the first — the
+//! app is the only party that can produce those pixels a second time.
+//! ([`crate::upload_icon`] is the one exception, for bundled glyphs: it
+//! re-resolves itself, and `Button::with_icon_name` is how a widget opts into
+//! that.)
+//!
+//! [`Application::renderer_init`]: crate::engine::Application::renderer_init
 
 use crate::scene::layout::{fit_rect, FitMode, Rect, Size};
 use crate::scene::paint::PaintCtx;
