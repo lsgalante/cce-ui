@@ -318,6 +318,36 @@ pub fn parse_font_string(s: &str) -> (String, Option<f32>) {
 }
 
 static SECTION_PADDING: RwLock<f32> = RwLock::new(8.0);
+
+/// Per-thread overrides for the style values tests pin, active only under
+/// `cfg(test)`.
+///
+/// These values are process-global by design: the toolkit reads them from
+/// config once and every widget sees the same style. That also makes them
+/// shared mutable state BETWEEN tests, and `cargo test` runs tests on
+/// parallel threads. `test_vstack_flow` pins a known font and margin so its
+/// pixel assertions do not depend on the developer's config — and for as
+/// long as it ran, every other test measuring text saw that font. That is
+/// the whole "cce-ui parallel test flake": `a_members_wide_label_is_in_the_hull`
+/// and two `layout::tests` siblings failing perhaps one run in three on a
+/// clean tree, always green at `--test-threads=1`, and blamed on innocent
+/// diffs for weeks.
+///
+/// A lock around the three known victims would have fixed those three. This
+/// fixes the class: a `set_*` is invisible to tests running beside it, and a
+/// future test that pins a style needs no lock and no discipline to remember.
+/// Production is untouched — `cfg(test)` is set only while compiling this
+/// crate's own unit tests, never for downstream crates.
+#[cfg(test)]
+mod test_style {
+    use std::cell::RefCell;
+    thread_local! {
+        pub static CONTROL_LABEL_MARGIN: RefCell<Option<f32>> = const { RefCell::new(None) };
+        pub static SECTION_PADDING: RefCell<Option<f32>> = const { RefCell::new(None) };
+        pub static CONTROL_LABEL_FONT: RefCell<Option<String>> = const { RefCell::new(None) };
+        pub static CONTROL_LABEL_FONT_DETACHED: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+}
 /// The height every text-bearing control falls back to when its own
 /// `style.control.<name>.height` is unset: button, toggle (and the checkbox
 /// row), dropdown, textbox (and the keybind recorder), spinbox, font selector,
@@ -1255,6 +1285,10 @@ fn mod_rest(rest: &str) -> &str {
 }
 
 pub fn control_label_margin() -> f32 {
+    #[cfg(test)]
+    if let Some(v) = test_style::CONTROL_LABEL_MARGIN.with(|c| *c.borrow()) {
+        return v;
+    }
     *CONTROL_LABEL_MARGIN.read().unwrap()
 }
 
@@ -1268,6 +1302,9 @@ pub fn label_margin() -> f32 {
 }
 
 pub fn set_control_label_margin(margin: f32) {
+    #[cfg(test)]
+    test_style::CONTROL_LABEL_MARGIN.with(|c| *c.borrow_mut() = Some(margin));
+    #[cfg(not(test))]
     if let Ok(mut lock) = CONTROL_LABEL_MARGIN.write() {
         *lock = margin;
     }
@@ -1550,6 +1587,10 @@ pub fn section_depth() -> f32 {
 }
 
 pub fn section_padding() -> f32 {
+    #[cfg(test)]
+    if let Some(v) = test_style::SECTION_PADDING.with(|c| *c.borrow()) {
+        return v;
+    }
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
@@ -1572,6 +1613,9 @@ pub fn section_padding() -> f32 {
 }
 
 pub fn set_section_padding(padding: f32) {
+    #[cfg(test)]
+    test_style::SECTION_PADDING.with(|c| *c.borrow_mut() = Some(padding));
+    #[cfg(not(test))]
     if let Ok(mut lock) = SECTION_PADDING.write() {
         *lock = padding;
     }
@@ -2515,6 +2559,10 @@ pub fn set_button_strip_font(font: &str) {
 
 // Control Label Font
 pub fn control_label_font() -> String {
+    #[cfg(test)]
+    if let Some(v) = test_style::CONTROL_LABEL_FONT.with(|c| c.borrow().clone()) {
+        return v;
+    }
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
@@ -2532,6 +2580,9 @@ pub fn control_label_font() -> String {
 }
 
 pub fn control_label_font_parsed() -> (String, f32) {
+    // The parse cache is process-wide, so under test it would hand back one
+    // thread's pinned font to every other. Parsing is cheap; skip it there.
+    #[cfg(not(test))]
     if let Ok(lock) = CONTROL_LABEL_FONT_CACHED.read() {
         if let Some(ref val) = *lock {
             return val.clone();
@@ -2541,6 +2592,7 @@ pub fn control_label_font_parsed() -> (String, f32) {
     let parsed = parse_font_string(&font_str);
     let size = parsed.1.unwrap_or(12.0);
     let val = (parsed.0, size);
+    #[cfg(not(test))]
     if let Ok(mut lock) = CONTROL_LABEL_FONT_CACHED.write() {
         *lock = Some(val.clone());
     }
@@ -2548,9 +2600,13 @@ pub fn control_label_font_parsed() -> (String, f32) {
 }
 
 pub fn set_control_label_font(font: &str) {
+    #[cfg(test)]
+    test_style::CONTROL_LABEL_FONT.with(|c| *c.borrow_mut() = Some(font.to_string()));
+    #[cfg(not(test))]
     if let Ok(mut lock) = CONTROL_LABEL_FONT.write() {
         *lock = font.to_string();
     }
+    #[cfg(not(test))]
     if let Ok(mut lock) = CONTROL_LABEL_FONT_CACHED.write() {
         *lock = None;
     }
@@ -2558,6 +2614,10 @@ pub fn set_control_label_font(font: &str) {
 
 // Control Label Font Detached
 pub fn control_label_font_detached() -> String {
+    #[cfg(test)]
+    if let Some(v) = test_style::CONTROL_LABEL_FONT_DETACHED.with(|c| c.borrow().clone()) {
+        return v;
+    }
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
@@ -2575,6 +2635,9 @@ pub fn control_label_font_detached() -> String {
 }
 
 pub fn control_label_font_detached_parsed() -> (String, f32) {
+    // The parse cache is process-wide, so under test it would hand back one
+    // thread's pinned font to every other. Parsing is cheap; skip it there.
+    #[cfg(not(test))]
     if let Ok(lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.read() {
         if let Some(ref val) = *lock {
             return val.clone();
@@ -2584,6 +2647,7 @@ pub fn control_label_font_detached_parsed() -> (String, f32) {
     let parsed = parse_font_string(&font_str);
     let size = parsed.1.unwrap_or(12.0);
     let val = (parsed.0, size);
+    #[cfg(not(test))]
     if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.write() {
         *lock = Some(val.clone());
     }
@@ -2591,9 +2655,13 @@ pub fn control_label_font_detached_parsed() -> (String, f32) {
 }
 
 pub fn set_control_label_font_detached(font: &str) {
+    #[cfg(test)]
+    test_style::CONTROL_LABEL_FONT_DETACHED.with(|c| *c.borrow_mut() = Some(font.to_string()));
+    #[cfg(not(test))]
     if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED.write() {
         *lock = font.to_string();
     }
+    #[cfg(not(test))]
     if let Ok(mut lock) = CONTROL_LABEL_FONT_DETACHED_CACHED.write() {
         *lock = None;
     }
