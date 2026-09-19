@@ -328,7 +328,7 @@ cce-system-interface) to confirm behavior, not just the test suite.
 
 ## Module map (where things live)
 
-- `layout.rs` (largest file, ~6.9k lines) — fonts + sizing; many `*_font_parsed()` getters and
+- `src/layout.rs` (largest file, ~6.9k lines) — fonts + sizing; many `*_font_parsed()` getters and
   the `read_preferred_fonts` / font-family resolution used by the cosmic-text path.
 - `color.rs` — color model and named colors (`colors` re-export module in `lib.rs`).
 - `config.rs` — KDL loading and `kdl_to_json` conversion (see workspace `CLAUDE.md` for paths).
