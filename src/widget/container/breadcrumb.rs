@@ -440,12 +440,17 @@ impl Paint for Breadcrumb {
         for vs in segs {
             let color =
                 if vs.logical == Some(last_logical) { [0xcc, 0xcc, 0xd4] } else { [0x88, 0x88, 0x99] };
-            ctx.text(
+            // `visible_segs` already drops segments behind a "…" to make the
+            // run fit, but the surviving tail is still measured text against a
+            // fixed bar — bound it so a mismeasure cannot escape the widget.
+            ctx.text_with(
                 vs.text,
                 vs.x + SEG_PAD_X,
                 crate::layout::center_text_y(rect.y, rect.height, size),
                 size,
                 color,
+                None,
+                Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]),
             );
         }
     }

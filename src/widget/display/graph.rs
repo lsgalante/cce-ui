@@ -746,8 +746,11 @@ impl Paint for Graph {
         for (cx, cy, r, c) in self.port_circles(rect) {
             ctx.circle(cx, cy, r, c);
         }
+        // Node names are arbitrary and the canvas is fixed, so a long name on a
+        // node near the right edge used to draw off the graph entirely.
+        let canvas = Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]);
         for l in self.node_labels(rect) {
-            ctx.text(l.text, l.x, l.y, l.font_size, l.color);
+            ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None, canvas);
         }
     }
 

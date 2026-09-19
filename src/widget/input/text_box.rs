@@ -1582,8 +1582,17 @@ impl Paint for TextBox {
             }
         }
 
+        // The content is whatever has been typed, so a line longer than the
+        // well is routine rather than exceptional; the well scrolls, but
+        // nothing stopped the glyphs drawing outside it.
+        let well = Some([
+            self.rect.x,
+            self.rect.y,
+            self.rect.x + self.rect.width,
+            self.rect.y + self.rect.height,
+        ]);
         for tl in self.value_labels() {
-            ctx.text(tl.text, tl.x, tl.y, tl.font_size, tl.color);
+            ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, None, well);
         }
     }
 }

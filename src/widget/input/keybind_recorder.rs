@@ -117,7 +117,16 @@ impl KeybindRecorder {
         };
         let (_, font_size) = crate::layout::control_label_font_detached_parsed();
         let text_y = crate::layout::align_text_y(rect.y, rect.height, font_size, 0.0);
-        ctx.text(display_text, rect.x + 8.0, text_y, font_size, color);
+        // A recorded chord is as long as the keys pressed into it.
+        ctx.text_with(
+            display_text,
+            rect.x + 8.0,
+            text_y,
+            font_size,
+            color,
+            None,
+            Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]),
+        );
     }
 }
 

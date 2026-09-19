@@ -1529,9 +1529,18 @@ impl Paint for ParametersBg {
         }
         let view_min = self.rect.y + 4.0;
         let view_max = self.rect.y + self.rect.height - 4.0;
+        // The y test above culls the scrolled-away rows; it is the pane's
+        // WIDTH that nothing enforced, so a long parameter name ran out of the
+        // pane sideways.
+        let pane = Some([
+            self.rect.x,
+            self.rect.y,
+            self.rect.x + self.rect.width,
+            self.rect.y + self.rect.height,
+        ]);
         for l in self.own_text_labels() {
             if l.y >= view_min - 20.0 && l.y <= view_max + 20.0 {
-                ctx.text(l.text, l.x, l.y, l.font_size, l.color);
+                ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None, pane);
             }
         }
     }

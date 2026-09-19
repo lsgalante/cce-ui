@@ -57,13 +57,81 @@ impl Paint for InfoBox {
         let line_color = colors::control_label_color_u8();
         let pad = crate::layout::plate_padding().max(8.0);
         let line_h = crate::layout::line_height(font_size);
-        ctx.text(self.title.clone(), x + pad, y + pad, font_size, title_color);
+        // Clipped to the box. The title and lines are caller-supplied text in
+        // a box the caller also sizes, so nothing here guarantees they fit.
+        let clip = Some([x + pad, y, x + rect.width - pad, y + rect.height]);
+        ctx.text_with(self.title.clone(), x + pad, y + pad, font_size, title_color, None, clip);
         let mut current_y = y + pad + line_h * 1.4;
         for line in &self.lines {
-            ctx.text(line.clone(), x + pad, current_y, font_size, line_color);
+            ctx.text_with(line.clone(), x + pad, current_y, font_size, line_color, None, clip);
             current_y += line_h;
         }
     }
 }
 
 impl Input for InfoBox {}
+
+
+#[cfg(test)]
+mod bounded_text_audit {
+    use crate::scene::layout::Rect;
+    use crate::scene::paint::{PaintCtx, Prim};
+    use crate::widget::Paint;
+
+    /// Every string a widget paints must carry a clip, so that a value longer
+    /// than the box it was given is cut at the box instead of drawn across
+    /// whatever sits beside it. This is the invariant the whole audit was
+    /// about; it is asserted here over a sample of widgets rather than in each
+    /// of their files so that a NEW widget drawing unbounded text trips it.
+    ///
+    /// The one deliberate exception is `Node`, which draws its name in the
+    /// gutter beside itself and cannot know how much gutter it has — see the
+    /// comment there. It is excluded on purpose, not forgotten.
+    fn unbounded_strings<F: FnOnce(&mut PaintCtx)>(paint: F) -> Vec<String> {
+        let mut pc = PaintCtx::new();
+        paint(&mut pc);
+        pc.finish()
+            .items
+            .iter()
+            .filter_map(|i| match &i.prim {
+                Prim::Text { text, bounds: None, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A box narrower than any of its content — the shape that used to spill.
+    const TIGHT: Rect = Rect { x: 40.0, y: 10.0, width: 50.0, height: 28.0 };
+
+    #[test]
+    fn info_box_text_is_bounded() {
+        let b = super::InfoBox::new(
+            "A title far wider than fifty pixels",
+            vec!["and a line wider still, by some margin".to_string()],
+        );
+        let loose = unbounded_strings(|pc| Paint::paint(&*b, TIGHT, pc));
+        assert!(loose.is_empty(), "InfoBox drew unbounded text: {loose:?}");
+    }
+
+    #[test]
+    fn label_text_is_bounded() {
+        let l = crate::widget::Label::new("a label considerably wider than its box");
+        let loose = unbounded_strings(|pc| Paint::paint(&*l, TIGHT, pc));
+        assert!(loose.is_empty(), "Label drew unbounded text: {loose:?}");
+    }
+
+    #[test]
+    fn slider_readout_is_bounded() {
+        let s = crate::widget::Slider::new();
+        let loose = unbounded_strings(|pc| Paint::paint(&*s, TIGHT, pc));
+        assert!(loose.is_empty(), "Slider drew unbounded text: {loose:?}");
+    }
+
+    #[test]
+    fn checkbox_label_is_bounded() {
+        let mut c = crate::widget::Checkbox::new();
+        c.set_text("a checkbox label much wider than fifty pixels");
+        let loose = unbounded_strings(|pc| Paint::paint(&*c, TIGHT, pc));
+        assert!(loose.is_empty(), "Checkbox drew unbounded text: {loose:?}");
+    }
+}

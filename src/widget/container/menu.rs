@@ -598,7 +598,8 @@ impl Paint for MenuBar {
                     let char_w = crate::widget::display::measure_text(&char_str, font_size);
                     let x_pos = rect.x + (rect.width - char_w) / 2.0;
                     let y_pos = start_y + i as f32 * line_height;
-                    ctx.text(char_str, x_pos, y_pos, font_size, [0x83, 0x83, 0x8a]);
+                    ctx.text_with(char_str, x_pos, y_pos, font_size, [0x83, 0x83, 0x8a], None,
+                        Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]));
                 }
             }
         }
@@ -636,7 +637,8 @@ impl Paint for MenuBar {
                     font_size,
                     text_color,
                 ) {
-                    ctx.text(l.text, l.x, l.y, l.font_size, l.color);
+                    ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None,
+                        Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]));
                 }
             }
         } else if self.vertical {
@@ -654,7 +656,8 @@ impl Paint for MenuBar {
                 for (i, c) in self.display_title().chars().enumerate() {
                     let char_str = c.to_string();
                     let y_pos = start_y + i as f32 * line_height;
-                    ctx.text(char_str, x_pos, y_pos, font_size, text_color);
+                    ctx.text_with(char_str, x_pos, y_pos, font_size, text_color, None,
+                        Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]));
                 }
             }
         } else if !self.title.is_empty() {
@@ -678,11 +681,16 @@ impl Paint for MenuBar {
             } else {
                 rect.x + start_x
             };
-            ctx.text(display_title, x_pos, text_y, font_size, text_color);
+            ctx.text_with(display_title, x_pos, text_y, font_size, text_color, None,
+                Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]));
         }
 
+        // Every word this widget draws is bounded by the widget. A menu's
+        // POPOVER is a separate pass with its own rect, so bounding the bar
+        // here does not clip an open menu.
+        let bar = Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]);
         for l in self.menus.own_labels() {
-            ctx.text(l.text, l.x, l.y, l.font_size, l.color);
+            ctx.text_with(l.text, l.x, l.y, l.font_size, l.color, None, bar);
         }
     }
 

@@ -70,12 +70,23 @@ impl Paint for Label {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        ctx.text(
+        // Bounded to the rect, with two pixels of slack on the right.
+        //
+        // The slack is not cosmetic. A Label reports its own content width
+        // from `measure_text_width`, which is FontSystem-free and therefore an
+        // ESTIMATE; a layout that allocates exactly that width would, on a
+        // hard clip, shave the last glyph of every correctly-sized label the
+        // moment the shaper disagreed with the estimator by a fraction. The
+        // slack absorbs that while still catching the case this bound is for:
+        // a Label handed a box narrower than its text.
+        ctx.text_with(
             self.text.clone(),
             rect.x,
             crate::layout::align_text_y(rect.y, rect.height, self.font_size, 0.0),
             self.font_size,
             self.color,
+            None,
+            Some([rect.x, rect.y, rect.x + rect.width + 2.0, rect.y + rect.height]),
         );
     }
 }

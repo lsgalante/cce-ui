@@ -403,7 +403,18 @@ impl Paint for ColorSelector {
                 well,
             );
             let hex = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
-            ctx.text(hex, rect.x + crate::layout::CONTROL_TEXT_INSET, crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0), 12.0, [0xcc, 0xcc, 0xd4]);
+            // Bounded by the seam: the field is the well left of it, and while
+            // `editing` this holds whatever has been typed, not a 7-character
+            // hex code.
+            ctx.text_with(
+                hex,
+                rect.x + crate::layout::CONTROL_TEXT_INSET,
+                crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0),
+                12.0,
+                [0xcc, 0xcc, 0xd4],
+                None,
+                Some([rect.x, rect.y, seam_x, rect.y + rect.height]),
+            );
             return;
         }
 
@@ -471,12 +482,14 @@ impl Paint for ColorSelector {
         }
 
         let hex = if self.editing { self.edit_buffer.clone() } else { self.value_hex() };
-        ctx.text(
+        ctx.text_with(
             hex,
             rect.x + crate::layout::CONTROL_TEXT_INSET,
             crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0),
             12.0,
             [0xcc, 0xcc, 0xd4],
+            None,
+            Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]),
         );
     }
 }

@@ -188,12 +188,17 @@ impl Paint for Float3 {
         let rows = self.get_row_rects();
         for (i, r) in rows.into_iter().enumerate() {
             let rect = Rect { x: r.0, y: r.1, width: r.2, height: r.3 };
-            ctx.text(
+            // Bounded to the row PLUS its gutter: the axis letter is drawn to
+            // the left of the row rect by design, so the row alone would clip
+            // it away entirely.
+            ctx.text_with(
                 self.axes[i].to_string(),
                 rect.x - AXIS_W + 2.0,
                 crate::layout::align_text_y(rect.y, rect.height, 12.0, 0.0),
                 12.0,
                 [0xaa, 0xaa, 0xbb],
+                None,
+                Some([rect.x - AXIS_W, rect.y, rect.x + rect.width, rect.y + rect.height]),
             );
             Paint::paint(&*self.sliders[i], rect, ctx);
         }

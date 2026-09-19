@@ -115,6 +115,13 @@ impl Paint for Node {
             );
         }
 
+        // Deliberately UNBOUNDED, and the only text in the toolkit that is.
+        // The name is drawn in the gutter to the right of the node box, so a
+        // clip to `rect` would erase every node name on the canvas — and the
+        // node has no idea how much gutter it has, because only the canvas
+        // placing it knows where the next node or the viewport edge is. The
+        // bound for this one belongs to the HOST: clip the node layer, not the
+        // node. Do not fix this by clipping to rect.
         ctx.text(
             self.name.clone(),
             rect.x + rect.width + 8.0,

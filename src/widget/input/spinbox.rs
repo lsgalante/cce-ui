@@ -437,16 +437,23 @@ impl Paint for Spinbox {
         // Value, unit, and -/+ glyphs.
         let tc = colors::spinbox_text_color();
         let text_color = [(tc[0] * 255.0) as u8, (tc[1] * 255.0) as u8, (tc[2] * 255.0) as u8];
-        ctx.text(self.value_text(), g.x + crate::layout::CONTROL_TEXT_INSET, crate::layout::align_text_y(g.y, g.h, 14.0, 0.0), 14.0, text_color);
+        // The value and its unit live in the FIELD, which ends where the -/+
+        // buttons begin (`split_dec`). The caret above is already clamped to
+        // that field; the text it belongs to was not, so a long value ran
+        // under the buttons and out of the control.
+        let field = Some([g.x, g.y, g.split_dec, g.y + g.h]);
+        ctx.text_with(self.value_text(), g.x + crate::layout::CONTROL_TEXT_INSET, crate::layout::align_text_y(g.y, g.h, 14.0, 0.0), 14.0, text_color, None, field);
         if let Some(ref unit) = self.unit {
-            ctx.text(unit.clone(), g.x + crate::layout::CONTROL_TEXT_INSET + 36.0, crate::layout::align_text_y(g.y, g.h, 11.0, 0.0), 11.0, [0x73, 0x73, 0x7a]);
+            ctx.text_with(unit.clone(), g.x + crate::layout::CONTROL_TEXT_INSET + 36.0, crate::layout::align_text_y(g.y, g.h, 11.0, 0.0), 11.0, [0x73, 0x73, 0x7a], None, field);
         }
         if g.btn_w > 0.0 {
             let dec_center_x = g.split_dec + g.pad + g.btn_w * 0.5;
             let inc_center_x = g.split_dec + g.pad + g.btn_w * 1.5;
             let ty = crate::layout::align_text_y(g.y, g.h, 12.0, 0.0);
-            ctx.text("-".to_string(), dec_center_x - 4.0, ty, 12.0, text_color);
-            ctx.text("+".to_string(), inc_center_x - 4.0, ty, 12.0, text_color);
+            let dec_box = Some([g.split_dec + g.pad, g.y, g.split_dec + g.pad + g.btn_w, g.y + g.h]);
+            let inc_box = Some([g.split_dec + g.pad + g.btn_w, g.y, g.split_dec + g.pad + 2.0 * g.btn_w, g.y + g.h]);
+            ctx.text_with("-".to_string(), dec_center_x - 4.0, ty, 12.0, text_color, None, dec_box);
+            ctx.text_with("+".to_string(), inc_center_x - 4.0, ty, 12.0, text_color, None, inc_box);
         }
     }
 }

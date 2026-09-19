@@ -667,12 +667,18 @@ impl Dropdown {
             }
         }
 
-        ctx.text(
+        // Only the chevron is bounded here. The trigger TEXT above fades
+        // character by character toward `right_limit` and drops anything past
+        // 90% — an overflow treatment of its own, which a hard clip would
+        // fight rather than help.
+        ctx.text_with(
             "▼",
             x + w - 18.0,
             crate::layout::center_text_y(content.y, content.height, 10.0),
             10.0,
             [0x83, 0x83, 0x8a],
+            None,
+            Some([content.x, content.y, content.x + content.width, content.y + content.height]),
         );
     }
 

@@ -131,12 +131,16 @@ impl Paint for Trackpad {
 
         // 4. The "Touchpad Area" hint (the control label is the adapter's), in
         //    the label font like every other word a control draws.
-        ctx.text(
+        ctx.text_with(
             "Touchpad Area".to_string(),
             x + 12.0,
             y + visual_h - 22.0,
             11.0,
             [0x73, 0x73, 0x8c],
+            None,
+            // A fixed string in a pad far wider than it, so this is belt and
+            // braces — but a narrow pad is a layout the caller may choose.
+            Some([x, y, x + rect.width, y + visual_h]),
         );
     }
 }

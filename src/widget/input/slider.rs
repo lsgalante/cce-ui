@@ -294,7 +294,18 @@ impl Paint for Slider {
             }
 
             let text = if self.editing { self.edit_buffer.clone() } else { self.scaled_string() };
-            ctx.text(text, rx + 8.0, crate::layout::align_text_y(g.y, g.h, 12.0, 0.0), 12.0, [0xee, 0xee, 0xf0]);
+            // Clipped to the readout well. While `editing` this is whatever the
+            // user has typed, which has no length limit at all — unbounded it
+            // ran straight out of the readout and across the band beside it.
+            ctx.text_with(
+                text,
+                rx + 8.0,
+                crate::layout::align_text_y(g.y, g.h, 12.0, 0.0),
+                12.0,
+                [0xee, 0xee, 0xf0],
+                None,
+                Some([rx, g.y, rx + readout_w, g.y + g.h]),
+            );
         }
 
         self.paint_band(&g, ctx);

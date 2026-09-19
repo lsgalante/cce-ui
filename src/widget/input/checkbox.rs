@@ -141,12 +141,16 @@ impl Paint for Checkbox {
         if let Some(ref label) = self.label {
             let (_, font_size) = crate::layout::control_label_font_parsed();
             let ty = crate::layout::align_text_y(y, h, font_size, 0.0);
-            ctx.text(
+            ctx.text_with(
                 label.clone(),
                 cx + r + 8.0,
                 ty,
                 font_size,
                 colors::control_label_color_for_state(self.hovered, self.focused),
+                None,
+                // The label is caller text and the box is caller-sized; a
+                // control has no business drawing past its own rect.
+                Some([x, y, x + w, y + h]),
             );
         }
     }
@@ -495,12 +499,14 @@ impl Paint for Toggle {
             // Focus is the glider plate's own lit rim (`ControlPlate::with_tint`)
             // — the ring every other plate wears, which the rocker's partial
             // carves could not — so the label stays the label.
-            ctx.text(
+            ctx.text_with(
                 label.clone(),
                 tx,
                 crate::layout::align_text_y(y, h, font_size, 0.0),
                 font_size,
                 colors::control_label_color_for_state(self.hovered, false),
+                None,
+                Some([x, y, x + w, y + h]),
             );
         }
     }
