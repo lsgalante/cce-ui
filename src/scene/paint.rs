@@ -18,7 +18,7 @@
 //! follow-ups.
 
 use crate::scene::layout::Rect;
-use crate::scene::material::{Frost, Material, PlateRole};
+use crate::scene::material::{Material, PlateRole};
 
 /// End-cap style for a [`Prim::Vector`], mirroring the toolkit's line caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,18 +39,18 @@ pub type Radii = (f32, f32, f32, f32);
 /// type. A window root is a plate whose four corners are all window corners;
 /// detaching a pane into its own window is a role flip, nothing more.
 ///
-/// `color` always carries POSITIVE alpha; the frost encoding is applied by
-/// [`Self::fill`] per the role (see the Phase 7b blur-regime note in
-/// `docs/rfc-core-rebuild.md`): a root plate stays positive-alpha (the
-/// COMPOSITOR frosts behind the window), a nested plate with `blur` encodes
-/// the in-app frost pass's negative-alpha sentinel.
+/// The material's tint always carries POSITIVE alpha; the frost encoding is
+/// applied by [`Self::fill`] per the role (see the Phase 7b blur-regime note
+/// in `docs/rfc-core-rebuild.md`): a root plate stays positive-alpha (the
+/// COMPOSITOR frosts behind the window), a nested plate whose material is
+/// [`Frost::Frosted`] encodes the in-app frost pass's negative-alpha sentinel.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlateSpec {
     pub rect: Rect,
-    /// Fill, linear RGBA, alpha positive — the role encoding is `fill()`'s.
-    pub color: [f32; 4],
-    /// Frost the surface (encoding per role; see `fill`).
-    pub blur: bool,
+    /// What the plate is made of: tint, frost and finish
+    /// (`docs/rfc-material.md`). `Material::root()` / `Material::pane()` are
+    /// the rung defaults; `Material::opaque(c)` an app's own colour.
+    pub material: Material,
     /// Which corners lie ON the window silhouette (TL, TR, BR, BL).
     pub window_corners: (bool, bool, bool, bool),
     /// Transition-band width of the rolled perimeter. Negative = the fill-less
@@ -115,11 +115,11 @@ impl PlateSpec {
     }
 
     /// The fill with the role-correct frost encoding: root → alpha forced
-    /// non-negative (the compositor's frost, not ours), nested + `blur` →
+    /// non-negative (the compositor's frost, not ours), nested + frosted →
     /// the in-app frost pass's negative-alpha sentinel. The rule itself is
     /// [`Material::fill_tint`], the one place a negative alpha is written.
     pub fn fill(&self) -> [f32; 4] {
-        Material::fill_tint(self.color, Frost::from_flag(self.blur), self.role())
+        self.material.fill(self.role())
     }
 }
 
@@ -1678,6 +1678,7 @@ impl crate::layout::RenderTarget for PaintCtx {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::material::Frost;
 
     /// RFC Phase 7b: PlateSpec role mechanics — flag derivation from window
     /// geometry, silhouette-vs-nominal radii selection, and the role-encoded
@@ -1706,25 +1707,27 @@ mod tests {
         assert_eq!(r, (nominal, window_r, window_r, nominal));
 
         // Frost encoding by role.
+        let frosted = Frost::Frosted { compression: 0.0, refraction: 0.0, radius: Frost::DEFAULT_RADIUS };
         let mut spec = PlateSpec {
             rect: Rect { x: 0.0, y: 0.0, width: 10.0, height: 10.0 },
-            color: [0.1, 0.2, 0.3, 0.8],
-            blur: true,
+            material: Material::opaque([0.1, 0.2, 0.3, 0.8]).with_frost(frosted),
             window_corners: (true, true, true, true),
             depth: 3.0,
         };
         assert!(spec.is_root());
+        assert_eq!(spec.role(), PlateRole::Root);
         assert!(spec.fill()[3] > 0.0, "root frost is the compositor's; alpha stays positive");
         spec.window_corners = (false, true, true, false);
         assert!(!spec.is_root());
+        assert_eq!(spec.role(), PlateRole::Nested);
         assert!(spec.fill()[3] < 0.0, "nested frost = negative-alpha sentinel");
-        spec.blur = false;
+        spec.material.frost = Frost::Opaque;
         assert_eq!(spec.fill()[3], 0.8, "no frost, no encoding");
 
         // The detach role flip (RFC 7c): a frosted nested pane becomes a
         // root — silhouette corners, and the frost regime flips from the
         // in-app sentinel to the compositor's (alpha back to positive).
-        spec.blur = true;
+        spec.material.frost = frosted;
         assert!(spec.fill()[3] < 0.0);
         let det = spec.detached();
         assert!(det.is_root());
@@ -1746,8 +1749,7 @@ mod tests {
     fn plate_spec_emission_round_trips_the_span() {
         let spec = PlateSpec {
             rect: r(0.0, 0.0, 400.0, 300.0),
-            color: [0.1, 0.2, 0.3, 0.8],
-            blur: false,
+            material: Material::opaque([0.1, 0.2, 0.3, 0.8]),
             window_corners: (true, true, false, false),
             depth: 4.0,
         };
