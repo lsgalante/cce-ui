@@ -260,6 +260,7 @@ pub struct VkRenderer {
     /// them straight into the style registry with no generation counter.
     relief_uploaded: (f32, f32),
     compression_uploaded: f32,
+    refraction_uploaded: f32,
     /// Same for the edge (roll) profile LUT.
     roll_profile_gen: u64,
     plate_features: AllocatedBuffer,
@@ -877,6 +878,7 @@ impl VkRenderer {
             profile_gen: 0,
             relief_uploaded: (0.0, 0.0),
             compression_uploaded: 0.0,
+            refraction_uploaded: 0.0,
             roll_profile_gen: 0,
             plate_features,
             frames,
@@ -920,6 +922,12 @@ impl VkRenderer {
         crate::color::plate_backdrop_compression()
     }
 
+    /// How far a plate's roll refracts its backdrop — tracked for re-upload
+    /// beside the compression, being live-editable config the same way.
+    fn refraction(&self) -> f32 {
+        crate::color::plate_refraction()
+    }
+
     /// The pinned relief heights in physical px, 0 = follow the width.
     fn relief_px(&self) -> (f32, f32) {
         let s = crate::scale::scale_factor().max(0.001);
@@ -956,6 +964,9 @@ impl VkRenderer {
         let compression = self.backdrop_compression();
         data[80] = compression;
         self.compression_uploaded = compression;
+        let refraction = self.refraction();
+        data[81] = refraction;
+        self.refraction_uploaded = refraction;
         self.profile_gen = crate::layout::bevel_profile_generation();
         self.roll_profile_gen = crate::layout::roll_profile_generation();
         if let Some(allocation) = self.window_info.allocation.as_mut() {
@@ -1580,6 +1591,7 @@ impl VkRenderer {
                 || self.roll_profile_gen != crate::layout::roll_profile_generation()
                 || self.relief_uploaded != self.relief_px()
                 || self.compression_uploaded != self.backdrop_compression()
+                || self.refraction_uploaded != self.refraction()
             {
                 self.write_window_info();
             }

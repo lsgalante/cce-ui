@@ -353,6 +353,32 @@ What this buys, and where the code is heading:
   dark backdrop at EVERY k: there is little luminance variation behind the
   plate there to begin with, so "glass" on a dark desktop is carried by the rim
   and bevel, not by the backdrop.
+- **`style.surface.plate.refraction` (0..1, default 0) is the rim, and it buys
+  no legibility.** It is the answer to the other half of the question — not
+  "can I read this" but "is this an object". The roll is a real surface with a
+  real tilt, and `sv_rim` IS that tilt (the unnormalized normal's horizontal
+  part, already computed for the specular), so displacing the backdrop sample
+  along it is what a curved edge does to what you see through it. Scaled by the
+  roll width, so a 12px bevel bends more than a 2px one.
+
+  **It samples the CLEAN backdrop, not the blurred one**, cross-fading to the
+  frosted body on `f*f`. Refraction has to bend something with STRUCTURE or it
+  is invisible: displacing a field already blurred to sigma ~11px just moves
+  smooth values around. A thin edge scattering over a shorter path than a thick
+  middle is also what a real slab does — the droplet branch trades on the same
+  thing ("thin edges are clearer water"). One extra tap, not three: per-channel
+  dispersion inside a band this narrow is invisible once the body is 49 taps,
+  and paying for it would triple the most expensive path in this shader to be
+  erased.
+
+  **The clear rim is exempt from `backdrop_compression`**, in proportion to how
+  clear it is. Compression is a legibility control and the rim carries no text;
+  tone-mapping it pulls the refracted view back toward the plate's own key,
+  which is the exact contrast the rim exists to show. Measured, the two
+  fighting made the effect nearly invisible — exempting the rim made it **5.9x
+  stronger** at the same setting (rim pixel change 1.50 -> 8.86 of 255 at 0.3),
+  with the body still under 0.4. Useful range is ~0.3-0.6; the effect is in the
+  roll and stays there.
 
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 

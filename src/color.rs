@@ -651,6 +651,9 @@ fn parse_and_set_colors(content: &str) {
     {
         if let Ok(mut lock) = PLATE_BACKDROP_COMPRESSION.write() { *lock = (c as f32).clamp(0.0, 1.0); }
     }
+    if let Some(r) = val.pointer("/style/surface/plate/refraction").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = PLATE_REFRACTION.write() { *lock = (r as f32).clamp(0.0, 1.0); }
+    }
     if let Some(blur) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_bool()) {
         if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur; }
     } else if let Some(blur_val) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_f64()) {
@@ -1730,6 +1733,29 @@ pub fn set_plate_backdrop_compression(c: f32) {
     style_write(&PLATE_BACKDROP_COMPRESSION, c.clamp(0.0, 1.0));
 }
 
+/// How far a frosted plate's roll bends what it samples, and how much clearer
+/// its rim is than its frosted body: 0 = a flat window, 1 = full.
+///
+/// This buys no legibility and is not meant to — see
+/// [`plate_backdrop_compression`] for that. What it buys is the plate reading
+/// as an OBJECT: a curved edge displaces the view through it, so the
+/// silhouette stops being where the haze ends and becomes where a slab with a
+/// thickness begins. The two are complementary, and on a dark desktop
+/// especially: compression flattens the body toward the tint, which leaves the
+/// rim as the only place the material can still say what it is.
+///
+/// Default 0.0 — no existing config changes appearance.
+static PLATE_REFRACTION: RwLock<f32> = RwLock::new(0.0);
+
+pub fn plate_refraction() -> f32 {
+    load_colors_once();
+    style_read(&PLATE_REFRACTION)
+}
+
+pub fn set_plate_refraction(r: f32) {
+    style_write(&PLATE_REFRACTION, r.clamp(0.0, 1.0));
+}
+
 static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
 
 pub fn plate_blur() -> bool {
@@ -1935,6 +1961,18 @@ mod tests {
         // last byte off a translucent plate colour does not leave it alone.
         assert!((parse_hex_rgba_linear("#05050840").unwrap()[3] - 0.251).abs() < 0.002);
         assert_eq!(parse_hex_rgba_linear("#050508").unwrap()[3], 1.0);
+    }
+
+    /// Rim refraction defaults OFF and clamps, like its neighbour.
+    #[test]
+    fn plate_refraction_defaults_off_and_clamps() {
+        assert_eq!(plate_refraction(), 0.0, "off unless a config asks");
+        set_plate_refraction(0.6);
+        assert_eq!(plate_refraction(), 0.6);
+        set_plate_refraction(9.0);
+        assert_eq!(plate_refraction(), 1.0);
+        set_plate_refraction(-0.5);
+        assert_eq!(plate_refraction(), 0.0);
     }
 
     /// The plate's backdrop compression defaults OFF and clamps.

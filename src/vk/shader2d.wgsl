@@ -35,8 +35,10 @@ struct WindowInfo {
     // the same geometry whatever wall it is cut with.
     relief_meta: vec4f,
     // x = how hard a frosted plate pulls its backdrop's luminance toward its
-    // own key (0 = untouched, 1 = flat). See `resolve_blur`. Appended last so
-    // the established offsets above keep their indices.
+    // own key (0 = untouched, 1 = flat). See `resolve_blur`.
+    // y = rim refraction: how far the plate's roll displaces what it samples,
+    // and how much CLEARER the rim is than the frosted body. See MODE_PLATE.
+    // Appended last so the established offsets above keep their indices.
     backdrop_meta: vec4f,
 }
 
@@ -501,7 +503,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         }
         var base = vcol;
         if (vcol.a < 0.0) {
-            base = resolve_blur(frag, vcol);
+            base = resolve_blur(frag, vcol, vec2f(0.0), 0.0);
         }
         let t2 = max(rrect_clip.p_light.w, 0.001);
         let u = clamp(din / t2, 0.0, 1.0);
@@ -541,10 +543,6 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         if (aa <= 0.0) {
             discard;
         }
-        var base = vcol;
-        if (vcol.a < 0.0) {
-            base = resolve_blur(frag, vcol);
-        }
         let u = clamp(d / t, 0.0, 1.0);
         let f = 1.0 - u;
         // Host roll slope vector: vertical at the silhouette, flat where the
@@ -555,6 +553,27 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // focused plate's accent ring traces this alone (see the tinted
         // branch), so the wells carved into it never wear the ring too.
         let sv_rim = sv;
+
+        // Rim refraction, resolved BEFORE the shading below because the
+        // backdrop it bends is `base`.
+        //
+        // The roll is a real surface with a real tilt — `sv_rim` IS that tilt
+        // (the horizontal part of the unnormalized normal), already computed
+        // for the specular. Displacing the backdrop sample along it is what a
+        // curved edge does to what you see through it: the view compresses
+        // toward the silhouette and the plate stops being a rectangle of haze
+        // and starts being a slab with a thickness.
+        //
+        // Scaled by the roll width `t`, so a 12px bevel bends more than a 2px
+        // one and the effect tracks the plate's own geometry rather than
+        // drifting off it at another radius. The clarity ramp is f*f — the
+        // clear window belongs to the outer third of the roll, and the face
+        // must reach zero exactly or the whole plate unfrosts.
+        let refr = clamp(window_info.backdrop_meta.y, 0.0, 1.0);
+        var base = vcol;
+        if (vcol.a < 0.0) {
+            base = resolve_blur(frag, vcol, sv_rim * (refr * t), refr * f * f);
+        }
         var extra = PLATE_CREST * f * f * f;
         let f_off = u32(rrect_clip.p_host.x);
         let f_cnt = u32(rrect_clip.p_host.y);
@@ -940,7 +959,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     // Blur-behind plate: negative alpha mixes the (blurred) backdrop with the
     // plate color at |alpha| opacity.
     if (in.color.a < 0.0) {
-        let c = resolve_blur(in.clip_position.xy, in.color);
+        // A plain blur-behind quad has no roll to refract through.
+        let c = resolve_blur(in.clip_position.xy, in.color, vec2f(0.0), 0.0);
         return vec4f(c.rgb, c.a * clip_cov);
     }
 
@@ -951,7 +971,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 // FULLY blurred backdrop is the base (no clean-backdrop passthrough; mixing
 // the clean sample back in at plate opacity left translucent plates barely
 // blurred), tinted by the plate color at |alpha| opacity.
-fn resolve_blur(pos: vec2f, color: vec4f) -> vec4f {
+fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32) -> vec4f {
     let tex_size = vec2f(textureDimensions(t_backdrop));
 
     var blurred = vec4f(0.0);
@@ -972,7 +992,26 @@ fn resolve_blur(pos: vec2f, color: vec4f) -> vec4f {
         }
     }
 
-    let backdrop_color = blurred / total_weight;
+    var backdrop_color = blurred / total_weight;
+
+    // The rim's clear window onto the backdrop.
+    //
+    // Refraction has to sample something with STRUCTURE or it is invisible:
+    // displacing a field that has already been blurred to sigma ~11px moves
+    // smooth values around and reads as nothing at all. So the rim takes a
+    // CLEAN sample, displaced by the roll's tilt, and cross-fades to the
+    // frosted body — which is also what a real slab does, its thin edge
+    // scattering over a shorter path than its thick middle (the droplet
+    // branch already trades on that: "thin edges are clearer water").
+    //
+    // One extra tap, not three: per-channel dispersion inside a band this
+    // narrow is invisible once the body blur is 49 taps, and paying for it
+    // would triple the most expensive path in this shader to be erased.
+    if (clarity > 0.001) {
+        let clean = textureSample(t_backdrop, s_backdrop, (pos + refract) / tex_size);
+        backdrop_color = mix(backdrop_color, clean, clamp(clarity, 0.0, 1.0));
+    }
+
     let opacity = -color.a;
 
     // Luminance-range compression, the plate's legibility control.
@@ -990,7 +1029,12 @@ fn resolve_blur(pos: vec2f, color: vec4f) -> vec4f {
     // SYMMETRIC, pulling a bright backdrop down and a dark one UP, so what it
     // removes is the plate's swing through the ink's luminance rather than
     // the view through it. Hue, chroma and movement all still read.
-    let k = clamp(window_info.backdrop_meta.x, 0.0, 1.0);
+    // Compression is a LEGIBILITY control and the rim carries no text, so the
+    // clear window opened there is exempt in proportion to how clear it is.
+    // Tone-mapping it would pull the refracted view back toward the plate's
+    // own key — the exact contrast the rim exists to show — and the effect
+    // measured nearly invisible with the two fighting.
+    let k = clamp(window_info.backdrop_meta.x, 0.0, 1.0) * (1.0 - clamp(clarity, 0.0, 1.0));
     let W = vec3f(0.2126, 0.7152, 0.0722);
     let bl = dot(backdrop_color.rgb, W);
     let key = dot(color.rgb, W);
