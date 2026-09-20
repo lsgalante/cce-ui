@@ -396,7 +396,19 @@ keeps the `Material` alias. `Frost::Frosted` already carries `radius` at
 - *Exit:* `cargo test -p cce-ui scene::`; the `relief_shade` shader-constant test still
   passes; every client builds; prim dump identical.
 
-**Step 2 — thread it through the rungs.**
+**Step 2 — thread it through the rungs.** *DONE 2026-09-20*, as four commits (2a–2d),
+each prim-identical against a tessellation dump taken before 2a (`tests/plate_golden.rs`,
+148518 lines, two scales × both edge paths). Deviations from the text below, each
+deliberate: `DropletSpec` KEEPS `gleam` / `shine` / `rim` as the config spelling and
+`DropletSpec::finish()` derives the `Finish` the material carries — the runner's hand-packed
+slots are gone, which was the point. `PaintCtx::inset_plate` takes `Option<&Material>`
+(`None` = the surface below is the face), as does `ControlPlate.face`. `well_floor` keeps
+today's overlay emission: switching it to `host.floor()` is not prim-identical for a
+translucent or frosted pane (a darkened fill at the pane's alpha composites differently
+from a darkening overlay on the resolved plate), so it moves to step 3, where pixels may
+change. `Material::from_fill` / `face` bridge the colour-typed flat path
+(`layout::RenderTarget`), which is unchanged. `layout::tree_blur` has no reader and was
+left alone. `Material::popover` is the menu recipe the three menu sites had each spelled.
 - `PlateSpec`, `ControlPlate`, `Prim::Plate`, `Prim::Bevel`, `Prim::Sphere`,
   `Prim::Droplet` carry a `Material`; `PaintCtx` signatures per § 4.
 - `DropletSpec` loses `gleam` / `shine` / `rim` to its material's `Finish`; the runner's

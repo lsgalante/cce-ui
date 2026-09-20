@@ -255,9 +255,16 @@ What this buys, and where the code is heading:
   light: the old `relief_shade::Material`). `docs/rfc-material.md` is the design and
   its phase tracker. `Material::fill_tint` is the ONE place the blur-behind sentinel
   (a negative alpha) is written; `PlateSpec::fill` and `param_plate_fill` call it.
-  Rung defaults: `Material::root()` / `pane()` / `control()`; a well floor is
-  `host.floor(lifted)`. Step 1 only — the rungs still carry `color` + `blur` until
-  step 2 threads the type through.
+  Rung defaults: `Material::root()` / `pane()` / `control()`, `popover(base)` for
+  menus; a well floor is `host.floor(lifted)`. `PlateSpec`, `ControlPlate.face`
+  (`Option<Material>`: `None` = the surface below IS the face) and the prims
+  `Plate` / `Bevel` / `Sphere` / `Droplet` carry one, and `PaintCtx::plate` /
+  `bevel` / `sphere` / `droplet` / `inset_plate` take one; the tessellator reads
+  each prim's fill and push-constant finish from it, and only the carves still take
+  the DE finish. `Material::from_fill` / `face` decode a colour a legacy site still
+  holds (the flat-path `RenderTarget` is colour-typed) — a new site says
+  `Material::opaque` / `with_frost` instead. **`tests/plate_golden.rs` is the exit
+  test for any change that must not move a pixel**: dump before, compare after.
 - **One plate spec per rung, not five copies.** The root and pane rungs are
   `scene::paint::PlateSpec` (RFC 7b, painted by `PaintCtx::plate`). The
   control rung is `scene::paint::ControlPlate` (re-exported from `widget`):
