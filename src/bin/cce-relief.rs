@@ -478,6 +478,13 @@ struct BevelPopup {
     refr_slider: Adapted<Slider>,
     radius_slider: Adapted<Slider>,
     save_button: Adapted<Button>,
+    /// The material the Save target binds its pane rung to, if any — read
+    /// from the `--config` file (this process's own config is not the
+    /// target's), else this process's binding. `material_frosted` says
+    /// whether that material (or the target's legacy pane) is frosted, i.e.
+    /// whether the Frost column has anything to write.
+    material_target: Option<String>,
+    material_frosted: bool,
     /// Cancel = discard-and-close: edits are live only in THIS process, so
     /// with nothing persisted, closing IS the discard (same as Escape).
     cancel_button: Adapted<Button>,
@@ -1086,7 +1093,7 @@ impl BevelPopup {
         let comp = self.comp_slider.inner().get_scaled_value();
         let refr = self.refr_slider.inner().get_scaled_value();
         let radius = self.radius_slider.inner().get_scaled_value();
-        match Self::bound_material() {
+        match self.material_target.clone() {
             Some(name) => {
                 let mut def: MaterialDef = cce_ui::color::named_material(&name).unwrap_or_default();
                 def.spec = Some(spec);
@@ -1094,7 +1101,7 @@ impl BevelPopup {
                 def.curvature = Some(curv);
                 // Only a frosted material has a recipe to edit; an opaque
                 // node stays opaque (the sliders read as "when frosted").
-                if def.frost.is_some() {
+                if def.frost.is_some() || self.material_frosted {
                     def.frost = Some(FrostDef { compression: Some(comp), refraction: Some(refr), radius: Some(radius) });
                 }
                 cce_ui::color::set_named_material(&name, Some(def));
@@ -1123,10 +1130,10 @@ impl BevelPopup {
         let comp = f(self.comp_slider.inner().get_scaled_value());
         let refr = f(self.refr_slider.inner().get_scaled_value());
         let radius = f(self.radius_slider.inner().get_scaled_value());
-        match Self::bound_material() {
+        match self.material_target.clone() {
             Some(name) => {
                 let m = format!("style.surface.material.{name}");
-                let frosted = cce_ui::color::named_material(&name).is_some_and(|d| d.frost.is_some());
+                let frosted = self.material_frosted;
                 w(&format!("{m}.finish.spec"), &spec)
                     & w(&format!("{m}.finish.shininess"), &shine)
                     & w(&format!("{m}.finish.curvature"), &curv)
@@ -1355,12 +1362,12 @@ impl Application for BevelPopup {
 
         // Seeds prefer the target file's own relief keys, falling back to
         // the DE-wide registry for anything it lacks.
-        let target_relief = target_label
+        let target_json = target_label
             .is_some()
             .then(|| std::fs::read_to_string(&config_path).ok())
             .flatten()
-            .map(|c| cce_ui::config::parse_kdl_to_json(&c))
-            .and_then(|v| v.pointer("/style/surface/relief").cloned());
+            .map(|c| cce_ui::config::parse_kdl_to_json(&c));
+        let target_relief = target_json.as_ref().and_then(|v| v.pointer("/style/surface/relief").cloned());
         let rel_str = |k: &str| {
             target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_str().map(String::from))
         };
@@ -1457,15 +1464,58 @@ impl Application for BevelPopup {
         let (hmin, hmax) = HEIGHT_RANGE;
         // The material sliders seed from the pane rung's effective material
         // — the bound node when config binds one, else the DE keys — so they
-        // open on what the panes actually wear.
+        // open on what the panes actually wear. With `--config`, that is the
+        // TARGET file's material, read from the file: this process loads its
+        // own config, and seeding from that would make a Save write this
+        // app's values over the target's (the designer's 0.6 / 0.3 became 0
+        // / 0 that way once).
         let pane = cce_ui::scene::Material::pane();
-        let (comp0, refr0, radius0) = match pane.frost {
+        let tj = target_json.as_ref();
+        let tnum = |p: &str| tj.and_then(|v| v.pointer(p)).and_then(|v| v.as_f64()).map(|f| f as f32);
+        let material_target: Option<String> = match tj {
+            Some(v) => v
+                .pointer("/style/surface/plate/material")
+                .and_then(|b| b.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from),
+            None => Self::bound_material(),
+        };
+        let tdef = |k: &str| material_target.as_deref().map(|n| format!("/style/surface/material/{n}/{k}"));
+        let material_frosted = match tj {
+            Some(v) => tdef("frost").is_some_and(|p| v.pointer(&p).is_some())
+                || (material_target.is_none() && tnum("/style/surface/plate/blur").map_or(
+                    v.pointer("/style/surface/plate/blur").and_then(|b| b.as_bool()).unwrap_or(false),
+                    |f| f > 0.001,
+                )),
+            None => material_target
+                .as_deref()
+                .map_or(pane.frost.is_frosted(), |n| cce_ui::color::named_material(n).is_some_and(|d| d.frost.is_some())),
+        };
+        let finish_seed = |k: &str, process: f32| -> f32 {
+            tdef(&format!("finish/{k}"))
+                .and_then(|p| tnum(&p))
+                .or_else(|| tnum(&format!("/style/surface/relief/{k}")))
+                .unwrap_or(process)
+        };
+        let (pcomp, prefr, pradius) = match pane.frost {
             cce_ui::scene::Frost::Frosted { compression, refraction, radius } => (compression, refraction, radius),
             cce_ui::scene::Frost::Opaque => match cce_ui::scene::Frost::from_style() {
                 cce_ui::scene::Frost::Frosted { compression, refraction, radius } => (compression, refraction, radius),
                 cce_ui::scene::Frost::Opaque => (0.0, 0.0, cce_ui::scene::Frost::DEFAULT_RADIUS),
             },
         };
+        let frost_seed = |k: &str, plate_key: &str, process: f32| -> f32 {
+            tdef(&format!("frost/{k}"))
+                .and_then(|p| tnum(&p))
+                .or_else(|| tnum(&format!("/style/surface/plate/{plate_key}")))
+                .unwrap_or(process)
+        };
+        let comp0 = frost_seed("backdrop_compression", "backdrop_compression", pcomp);
+        let refr0 = frost_seed("refraction", "refraction", prefr);
+        let radius0 = frost_seed("radius", "radius", pradius);
+        let spec0 = finish_seed("spec", pane.finish.spec);
+        let shine0 = finish_seed("shininess", pane.finish.shininess);
+        let curv0 = finish_seed("curvature", pane.finish.curvature);
         let norm = |v: f32, (lo, hi): (f32, f32)| ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
         let material_slider = |label: &str, v: f32, range: (f32, f32), decimals: usize| {
             Slider::new()
@@ -1524,14 +1574,16 @@ impl Application for BevelPopup {
                 .with_readout(true)
                 .with_decimals(1)
                 .with_scroll(true),
-            spec_slider: material_slider("Specular", pane.finish.spec, SPEC_RANGE, 2),
-            shine_slider: material_slider("Shininess", pane.finish.shininess, SHINE_RANGE, 0),
-            curv_slider: material_slider("Curvature", pane.finish.curvature, CURV_RANGE, 2),
+            spec_slider: material_slider("Specular", spec0, SPEC_RANGE, 2),
+            shine_slider: material_slider("Shininess", shine0, SHINE_RANGE, 0),
+            curv_slider: material_slider("Curvature", curv0, CURV_RANGE, 2),
             comp_slider: material_slider("Compression", comp0, COMP_RANGE, 2),
             refr_slider: material_slider("Refraction", refr0, REFR_RANGE, 2),
             radius_slider: material_slider("Blur radius", radius0, RADIUS_RANGE, 1),
             save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
             cancel_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel"),
+            material_target,
+            material_frosted,
             exit_requested: false,
             plate_opacity,
             status: match (&target_key, &target_label) {
