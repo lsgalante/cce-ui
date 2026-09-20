@@ -238,36 +238,44 @@ sites, all of the form `color: …, blur: …`. Each becomes `material: Material
 ```kdl
 style {
     surface {
-        material "glass" {
-            color (rgba)"#05050840"
-            frost backdrop_compression=(f64)0.6 refraction=(f64)0.3
-            finish light=(f64)0.15 spec=(f64)0.4 shininess=(f64)24.0 curvature=(f64)0.2
+        material {
+            glass {
+                color (rgba)"#05050840"
+                frost backdrop_compression=(f64)0.6 refraction=(f64)0.3 radius=(f64)5.5
+                finish light=(f64)0.15 spec=(f64)0.4 shininess=(f64)24.0 curvature=(f64)0.2
+            }
+            plastic {
+                color (rgba)"#26263380"
+                finish light=(f64)0.15 spec=(f64)0.25 shininess=(f64)12.0
+            }
         }
-        material "plastic" {
-            color (rgba)"#26263380"
-            finish light=(f64)0.15 spec=(f64)0.25 shininess=(f64)12.0
-        }
-        plate {
+        plate material="glass" {        // the pane rung
             root material="glass"
-            material "glass"            // the pane rung
         }
-        control material="plastic"
     }
+    control material="plastic"
 }
 ```
 
+(As built: the materials are CHILDREN of one `material` node, named by node name, not
+`material "glass"` with a string argument — the config converter keys objects by node
+name and a node's argument would be lost; and `control` is `style.control`, the node the
+control rung's other keys already live under.)
+
 A `material` node with no `frost` child is `Opaque`. Missing `finish` keys take the rung
-default. A rung with no `material=` binding reads its material from the legacy keys below —
-which is how every existing config keeps its look.
+default; a missing `color` keeps the rung's tint. A rung with no `material=` binding reads
+its material from the legacy keys below — which is how every existing config keeps its
+look. `Material::named(name)` hands an app any defined material for its own surfaces.
 
 ### 5.2 Aliases: every existing key survives
 
 | Existing key | Resolves into |
 |---|---|
-| `style.surface.plate.color` / `.blur` / `.backdrop_compression` / `.refraction` | the pane rung's default material |
+| `style.surface.plate.color` / `.blur` / `.backdrop_compression` / `.refraction` / `.radius` | the pane rung's default material (`radius`, new: the default frost's blur sigma) |
 | `style.surface.param.color`, `style.surface.plate.opacity` | the pane rung's tint |
 | `style.surface.plate.root.color` / `.blur` | the root rung's default material |
 | `style.surface.relief.depth` / `.light` | every rung's `finish.strength` (and the free carves') |
+| `style.surface.relief.spec` / `.shininess` / `.curvature` | the DE finish's other three terms (new; were literals) — every rung's, and the carves' |
 | `style.surface.relief.width` / `.height` / `.edge_height` | unchanged: geometry, not material |
 | `style.surface.control.fill` (and the per-widget fills) | the control rung's tint |
 
@@ -466,7 +474,22 @@ the scale-2 panel and the other two plates differ only by their own recipes.
   batch count before/after on cce-designer's default view (expect +N for the flat frosted
   quads, N small).
 
-**Step 4 — config and editor.**
+**Step 4 — config and editor.** *DONE 2026-09-20.* The named-material nodes and the three
+rung bindings (§ 5.1, in the child-node shape), `MaterialDef::resolve` over the rung's
+legacy material, `Material::named`, the DE finish keys `relief.spec / shininess /
+curvature` and the default frost's `plate.radius`; live reload replaces nodes and bindings
+wholesale. cce-relief grew two columns — Finish (Specular / Shininess / Curvature) and
+Frost (Compression / Refraction / Blur radius) — seeded from the pane rung's effective
+material, applied live, and saved into the bound material's node when the pane is bound,
+else into the DE keys: **Save never restructures a config that has no materials**; the
+named form is opted into by writing the binding. In `--key` mode the material sliders
+are not part of a `(relief)` value and are not written. *Exit:* no live config or backup
+carries a `material` node or binding (grep), so all resolve as before by construction;
+`named_material_round_trips_the_legacy_spelling` pins the designer's `#05050840` / 0.6 /
+0.3 as a bound `glass` to the SAME `Material` as the legacy keys (same Material, same
+bytes — steps 2–3), and `material_keys_write_as_frost_and_finish_props` pins the
+writer's shape. Not exercised: a Save click in the shadow (the utility window is taller
+than the headless output).
 - `material "<name>"` nodes; per-rung `material=` bindings; the alias table (§ 5.2).
 - `cce-relief` grows a Finish section (spec / shininess / curvature) and a Frost section,
   and Save writes a named material.

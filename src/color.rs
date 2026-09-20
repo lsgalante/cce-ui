@@ -659,6 +659,65 @@ fn parse_and_set_colors(content: &str) {
     } else if let Some(blur_val) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur_val > 0.001; }
     }
+    if let Some(r) = val.pointer("/style/surface/plate/radius").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = PLATE_FROST_RADIUS.write() { *lock = (r as f32).max(0.0); }
+    }
+
+    // The DE finish beyond its strength (`relief.depth` / `light`, which
+    // lives in the style registry): the three terms that were literals.
+    let f = |k: &str| val.pointer(&format!("/style/surface/relief/{k}")).and_then(|v| v.as_f64()).map(|v| v as f32);
+    if let Some(v) = f("spec") {
+        if let Ok(mut lock) = FINISH_SPEC.write() { *lock = v.max(0.0); }
+    }
+    if let Some(v) = f("shininess") {
+        if let Ok(mut lock) = FINISH_SHININESS.write() { *lock = v.max(1.0); }
+    }
+    if let Some(v) = f("curvature") {
+        if let Ok(mut lock) = FINISH_CURVATURE.write() { *lock = v.max(0.0); }
+    }
+
+    // Named materials and the rung bindings (RFC material § 5), replaced
+    // wholesale so a reload forgets what config no longer says.
+    {
+        use crate::scene::material::{FrostDef, MaterialDef};
+        let num = |v: Option<&serde_json::Value>| v.and_then(|v| v.as_f64()).map(|v| v as f32);
+        let mut map: Vec<(String, MaterialDef)> = Vec::new();
+        if let Some(obj) = val.pointer("/style/surface/material").and_then(|v| v.as_object()) {
+            for (name, node) in obj {
+                let Some(node) = node.as_object() else { continue };
+                let frost = node.get("frost").map(|fr| match fr.as_object() {
+                    Some(fo) => FrostDef {
+                        compression: num(fo.get("backdrop_compression").or(fo.get("compression"))),
+                        refraction: num(fo.get("refraction")),
+                        radius: num(fo.get("radius")),
+                    },
+                    // A bare `frost` node (no knobs) is frosted at the defaults.
+                    None => FrostDef::default(),
+                });
+                let fin = node.get("finish").and_then(|v| v.as_object());
+                let fk = |k: &str| fin.and_then(|fo| num(fo.get(k)));
+                map.push((
+                    name.clone(),
+                    MaterialDef {
+                        tint: node.get("color").and_then(|v| v.as_str()).and_then(parse_hex),
+                        frost,
+                        light: fk("light").or(fk("depth")),
+                        spec: fk("spec"),
+                        shininess: fk("shininess"),
+                        curvature: fk("curvature"),
+                    },
+                ));
+            }
+        }
+        if let Ok(mut lock) = NAMED_MATERIALS.write() { *lock = map; }
+        let bind = |p: &str| val.pointer(p).and_then(|v| v.as_str()).map(|s| s.to_string()).filter(|s| !s.is_empty());
+        let bindings = [
+            bind("/style/surface/plate/root/material"),
+            bind("/style/surface/plate/material"),
+            bind("/style/control/material"),
+        ];
+        if let Ok(mut lock) = MATERIAL_BINDINGS.write() { *lock = bindings; }
+    }
 }
 
 fn load_colors_once() {
@@ -1752,6 +1811,68 @@ static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
 static FINISH_SPEC: RwLock<f32> = RwLock::new(0.4);
 static FINISH_SHININESS: RwLock<f32> = RwLock::new(24.0);
 static FINISH_CURVATURE: RwLock<f32> = RwLock::new(0.2);
+
+/// The default material's blur radius (`style.surface.plate.radius`, the
+/// kernel sigma in logical px) — [`crate::scene::Frost::DEFAULT_RADIUS`]
+/// unless config says otherwise.
+static PLATE_FROST_RADIUS: RwLock<f32> = RwLock::new(crate::scene::material::Frost::DEFAULT_RADIUS);
+
+pub fn plate_frost_radius() -> f32 {
+    load_colors_once();
+    style_read(&PLATE_FROST_RADIUS)
+}
+pub fn set_plate_frost_radius(r: f32) {
+    style_write(&PLATE_FROST_RADIUS, r.max(0.0));
+}
+
+/// The named materials config defines (`style.surface.material { <name> {…} }`)
+/// and the rung bindings (`plate material=`, `plate { root material= }`,
+/// `control material=`) — see `docs/rfc-material.md` § 5. Replaced wholesale
+/// on every config load, so a node or binding removed from config is gone
+/// after a reload.
+static NAMED_MATERIALS: RwLock<Vec<(String, crate::scene::material::MaterialDef)>> = RwLock::new(Vec::new());
+static MATERIAL_BINDINGS: RwLock<[Option<String>; 3]> = RwLock::new([None, None, None]);
+
+fn rung_index(rung: crate::scene::material::PlateRung) -> usize {
+    match rung {
+        crate::scene::material::PlateRung::Root => 0,
+        crate::scene::material::PlateRung::Pane => 1,
+        crate::scene::material::PlateRung::Control => 2,
+    }
+}
+
+pub fn named_material(name: &str) -> Option<crate::scene::material::MaterialDef> {
+    load_colors_once();
+    style_read(&NAMED_MATERIALS).iter().find(|(n, _)| n == name).map(|(_, d)| d.clone())
+}
+
+/// Every defined material's name, sorted.
+pub fn material_names() -> Vec<String> {
+    load_colors_once();
+    let mut v: Vec<String> = style_read(&NAMED_MATERIALS).into_iter().map(|(n, _)| n).collect();
+    v.sort();
+    v
+}
+
+pub fn set_named_material(name: &str, def: Option<crate::scene::material::MaterialDef>) {
+    let mut list = style_read(&NAMED_MATERIALS);
+    list.retain(|(n, _)| n != name);
+    if let Some(d) = def {
+        list.push((name.to_string(), d));
+    }
+    style_write(&NAMED_MATERIALS, list);
+}
+
+pub fn material_binding(rung: crate::scene::material::PlateRung) -> Option<String> {
+    load_colors_once();
+    style_read(&MATERIAL_BINDINGS)[rung_index(rung)].clone()
+}
+
+pub fn set_material_binding(rung: crate::scene::material::PlateRung, name: Option<String>) {
+    let mut b = style_read(&MATERIAL_BINDINGS);
+    b[rung_index(rung)] = name;
+    style_write(&MATERIAL_BINDINGS, b);
+}
 
 pub fn finish_spec() -> f32 {
     style_read(&FINISH_SPEC)

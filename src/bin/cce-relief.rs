@@ -73,6 +73,16 @@ const HEADER_COLOR: [u8; 3] = [0x9a, 0x9a, 0xa4];
 const DEPTH_RANGE: (f32, f32) = (0.0, 0.6);
 const WIDTH_RANGE: (f32, f32) = (2.0, 24.0);
 const HEIGHT_RANGE: (f32, f32) = (0.0, 24.0);
+/// The finish's three fixed terms and the frost recipe — the material
+/// sections (RFC material step 4). Specular strength, shininess exponent,
+/// curvature/AO strength; luminance compression, rim refraction, blur sigma
+/// in logical px.
+const SPEC_RANGE: (f32, f32) = (0.0, 1.5);
+const SHINE_RANGE: (f32, f32) = (1.0, 64.0);
+const CURV_RANGE: (f32, f32) = (0.0, 1.0);
+const COMP_RANGE: (f32, f32) = (0.0, 1.0);
+const REFR_RANGE: (f32, f32) = (0.0, 1.0);
+const RADIUS_RANGE: (f32, f32) = (0.0, 20.0);
 
 /// Sample count for the spec written to config — enough that the 32-slot
 /// renderer LUT sees the curve, few enough that the config line stays sane.
@@ -114,7 +124,7 @@ fn content_height(width: f32) -> f32 {
     let button_h = 26.0;
     let status_h = HEADER_FONT_SIZE + 4.0;
     let fixed = knob_h + gap
-        + 6.0 * (knob_h + gap)
+        + 9.0 * (knob_h + gap)
         + button_h + 8.0 + status_h + 2.0 * gap;
     let natural = (w - 2.0 * CUT_MARGIN - GUTTER_L - 2.0 * MIN_BAND)
         + 2.0 * CUT_MARGIN
@@ -455,6 +465,18 @@ struct BevelPopup {
     depth_slider: Adapted<Slider>,
     width_slider: Adapted<Slider>,
     height_slider: Adapted<Slider>,
+    /// The Finish column: what the surface does under light beyond its
+    /// strength (`Light` above) — `scene::material::Finish`'s spec /
+    /// shininess / curvature. Applied live to the DE finish, or to the pane
+    /// rung's bound material when config binds one.
+    spec_slider: Adapted<Slider>,
+    shine_slider: Adapted<Slider>,
+    curv_slider: Adapted<Slider>,
+    /// The Frost column: the pane material's recipe — compression,
+    /// refraction, blur radius (`scene::material::Frost`). Same live target.
+    comp_slider: Adapted<Slider>,
+    refr_slider: Adapted<Slider>,
+    radius_slider: Adapted<Slider>,
     save_button: Adapted<Button>,
     /// Cancel = discard-and-close: edits are live only in THIS process, so
     /// with nothing persisted, closing IS the discard (same as Escape).
@@ -997,7 +1019,7 @@ impl BevelPopup {
         self.active_shape().curve()
     }
 
-    fn root_ids(&self) -> [WidgetId; 13] {
+    fn root_ids(&self) -> [WidgetId; 19] {
         [
             self.profile_dropdown.id(),
             self.edge_dropdown.id(),
@@ -1010,12 +1032,18 @@ impl BevelPopup {
             self.depth_slider.id(),
             self.width_slider.id(),
             self.height_slider.id(),
+            self.spec_slider.id(),
+            self.shine_slider.id(),
+            self.curv_slider.id(),
+            self.comp_slider.id(),
+            self.refr_slider.id(),
+            self.radius_slider.id(),
             self.save_button.id(),
             self.cancel_button.id(),
         ]
     }
 
-    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 13] {
+    fn roots(&mut self) -> [*mut (dyn WidgetHost + 'static); 19] {
         [
             self.profile_dropdown.as_ptr_mut(),
             self.edge_dropdown.as_ptr_mut(),
@@ -1028,9 +1056,94 @@ impl BevelPopup {
             self.depth_slider.as_ptr_mut(),
             self.width_slider.as_ptr_mut(),
             self.height_slider.as_ptr_mut(),
+            self.spec_slider.as_ptr_mut(),
+            self.shine_slider.as_ptr_mut(),
+            self.curv_slider.as_ptr_mut(),
+            self.comp_slider.as_ptr_mut(),
+            self.refr_slider.as_ptr_mut(),
+            self.radius_slider.as_ptr_mut(),
             self.save_button.as_ptr_mut(),
             self.cancel_button.as_ptr_mut(),
         ]
+    }
+
+    /// The pane rung's bound material name, when config binds one — the
+    /// target the material sliders edit and Save writes; `None` = the DE
+    /// keys (`style.surface.relief.*` for the finish, `style.surface.plate.*`
+    /// for the frost).
+    fn bound_material() -> Option<String> {
+        cce_ui::color::material_binding(cce_ui::scene::PlateRung::Pane)
+    }
+
+    /// Push the six material sliders into the live style: the bound
+    /// material's node when there is one (so the panes made of it follow),
+    /// else the DE keys every unbound rung reads.
+    fn apply_material_live(&self) {
+        use cce_ui::scene::{FrostDef, MaterialDef};
+        let spec = self.spec_slider.inner().get_scaled_value();
+        let shine = self.shine_slider.inner().get_scaled_value();
+        let curv = self.curv_slider.inner().get_scaled_value();
+        let comp = self.comp_slider.inner().get_scaled_value();
+        let refr = self.refr_slider.inner().get_scaled_value();
+        let radius = self.radius_slider.inner().get_scaled_value();
+        match Self::bound_material() {
+            Some(name) => {
+                let mut def: MaterialDef = cce_ui::color::named_material(&name).unwrap_or_default();
+                def.spec = Some(spec);
+                def.shininess = Some(shine);
+                def.curvature = Some(curv);
+                // Only a frosted material has a recipe to edit; an opaque
+                // node stays opaque (the sliders read as "when frosted").
+                if def.frost.is_some() {
+                    def.frost = Some(FrostDef { compression: Some(comp), refraction: Some(refr), radius: Some(radius) });
+                }
+                cce_ui::color::set_named_material(&name, Some(def));
+            }
+            None => {
+                cce_ui::color::set_finish_spec(spec);
+                cce_ui::color::set_finish_shininess(shine);
+                cce_ui::color::set_finish_curvature(curv);
+                cce_ui::color::set_plate_backdrop_compression(comp);
+                cce_ui::color::set_plate_refraction(refr);
+                cce_ui::color::set_plate_frost_radius(radius);
+            }
+        }
+    }
+
+    /// Persist the material sliders: into the bound material's node
+    /// (`style.surface.material.<name>.finish` / `.frost`) when the pane rung
+    /// is bound, else the DE keys. Never restructures a config that has no
+    /// materials — the named form is opted into by writing the binding.
+    fn save_material(&self, p: &str) -> bool {
+        let f = |v: f32| format!("{v:.3}");
+        let w = |key: &str, value: &str| cce_ui::config::write_config_value(p, key, value, "style");
+        let spec = f(self.spec_slider.inner().get_scaled_value());
+        let shine = f(self.shine_slider.inner().get_scaled_value());
+        let curv = f(self.curv_slider.inner().get_scaled_value());
+        let comp = f(self.comp_slider.inner().get_scaled_value());
+        let refr = f(self.refr_slider.inner().get_scaled_value());
+        let radius = f(self.radius_slider.inner().get_scaled_value());
+        match Self::bound_material() {
+            Some(name) => {
+                let m = format!("style.surface.material.{name}");
+                let frosted = cce_ui::color::named_material(&name).is_some_and(|d| d.frost.is_some());
+                w(&format!("{m}.finish.spec"), &spec)
+                    & w(&format!("{m}.finish.shininess"), &shine)
+                    & w(&format!("{m}.finish.curvature"), &curv)
+                    & (!frosted
+                        || (w(&format!("{m}.frost.backdrop_compression"), &comp)
+                            & w(&format!("{m}.frost.refraction"), &refr)
+                            & w(&format!("{m}.frost.radius"), &radius)))
+            }
+            None => {
+                w("style.surface.relief.spec", &spec)
+                    & w("style.surface.relief.shininess", &shine)
+                    & w("style.surface.relief.curvature", &curv)
+                    & w("style.surface.plate.backdrop_compression", &comp)
+                    & w("style.surface.plate.refraction", &refr)
+                    & w("style.surface.plate.radius", &radius)
+            }
+        }
     }
 
     /// `take_*` plumbing after any routed dispatch — state-gated, so it does
@@ -1086,6 +1199,25 @@ impl BevelPopup {
             }
             let m = cce_ui::units::metric();
             println!("height {v:.2}px = {:.3}mm ({})", v * m.mm_per_px(), m.source.as_str());
+            self.needs_rebuild = true;
+        }
+        let material_moved = self.spec_slider.take_change()
+            | self.shine_slider.take_change()
+            | self.curv_slider.take_change()
+            | self.comp_slider.take_change()
+            | self.refr_slider.take_change()
+            | self.radius_slider.take_change();
+        if material_moved {
+            self.apply_material_live();
+            println!(
+                "material spec {:.3} shininess {:.1} curvature {:.3} | compression {:.3} refraction {:.3} radius {:.1}",
+                self.spec_slider.inner().get_scaled_value(),
+                self.shine_slider.inner().get_scaled_value(),
+                self.curv_slider.inner().get_scaled_value(),
+                self.comp_slider.inner().get_scaled_value(),
+                self.refr_slider.inner().get_scaled_value(),
+                self.radius_slider.inner().get_scaled_value(),
+            );
             self.needs_rebuild = true;
         }
         if self.save_button.take_click() {
@@ -1162,7 +1294,9 @@ impl BevelPopup {
         } else {
             w("style.surface.relief.height", "0")
         };
+        let material_ok = self.save_material(&p);
         let ok = height_ok
+            & material_ok
             & w("style.surface.relief.depth", &depth)
             & w("style.surface.relief.width", &width)
             & w("style.surface.relief.profile", &self.wall.last_spec)
@@ -1321,6 +1455,27 @@ impl Application for BevelPopup {
         let (dmin, dmax) = DEPTH_RANGE;
         let (wmin, wmax) = WIDTH_RANGE;
         let (hmin, hmax) = HEIGHT_RANGE;
+        // The material sliders seed from the pane rung's effective material
+        // — the bound node when config binds one, else the DE keys — so they
+        // open on what the panes actually wear.
+        let pane = cce_ui::scene::Material::pane();
+        let (comp0, refr0, radius0) = match pane.frost {
+            cce_ui::scene::Frost::Frosted { compression, refraction, radius } => (compression, refraction, radius),
+            cce_ui::scene::Frost::Opaque => match cce_ui::scene::Frost::from_style() {
+                cce_ui::scene::Frost::Frosted { compression, refraction, radius } => (compression, refraction, radius),
+                cce_ui::scene::Frost::Opaque => (0.0, 0.0, cce_ui::scene::Frost::DEFAULT_RADIUS),
+            },
+        };
+        let norm = |v: f32, (lo, hi): (f32, f32)| ((v - lo) / (hi - lo)).clamp(0.0, 1.0);
+        let material_slider = |label: &str, v: f32, range: (f32, f32), decimals: usize| {
+            Slider::new()
+                .with_label(label)
+                .with_range(range.0, range.1)
+                .with_value(norm(v, range))
+                .with_readout(true)
+                .with_decimals(decimals)
+                .with_scroll(true)
+        };
         // The persisted per-app plate opacity, falling back to the DE look.
         // New path first, then the pre-rename one, so an existing opacity
         // setting keeps working without a migration step.
@@ -1369,6 +1524,12 @@ impl Application for BevelPopup {
                 .with_readout(true)
                 .with_decimals(1)
                 .with_scroll(true),
+            spec_slider: material_slider("Specular", pane.finish.spec, SPEC_RANGE, 2),
+            shine_slider: material_slider("Shininess", pane.finish.shininess, SHINE_RANGE, 0),
+            curv_slider: material_slider("Curvature", pane.finish.curvature, CURV_RANGE, 2),
+            comp_slider: material_slider("Compression", comp0, COMP_RANGE, 2),
+            refr_slider: material_slider("Refraction", refr0, REFR_RANGE, 2),
+            radius_slider: material_slider("Blur radius", radius0, RADIUS_RANGE, 1),
             save_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Save"),
             cancel_button: Button::new(0.0, 0.0, 0.0, 0.0).with_label("Cancel"),
             exit_requested: false,
@@ -1527,6 +1688,17 @@ impl Application for BevelPopup {
             y += knob_h + gap;
             self.height_slider.set_rect(x, y, w, knob_h);
             y += knob_h + gap;
+            // The material columns: Finish left, Frost right, three rows.
+            let half = ((w - gap) * 0.5).max(60.0);
+            for (l, r) in [
+                (&mut self.spec_slider, &mut self.comp_slider),
+                (&mut self.shine_slider, &mut self.refr_slider),
+                (&mut self.curv_slider, &mut self.radius_slider),
+            ] {
+                l.set_rect(x, y, half, knob_h);
+                r.set_rect(x + half + gap, y, half, knob_h);
+                y += knob_h + gap;
+            }
             self.save_button.set_rect(x, y, 96.0, button_h);
             self.cancel_button.set_rect(x + 96.0 + 12.0, y, 96.0, button_h);
             y += button_h + 8.0;
@@ -1590,6 +1762,12 @@ impl Application for BevelPopup {
             &self.depth_slider,
             &self.width_slider,
             &self.height_slider,
+            &self.spec_slider,
+            &self.shine_slider,
+            &self.curv_slider,
+            &self.comp_slider,
+            &self.refr_slider,
+            &self.radius_slider,
         ] {
             cce_ui::scene::painter::paint_root_into(&self.ui_context, s, &mut pc);
         }

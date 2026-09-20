@@ -381,6 +381,17 @@ What this buys, and where the code is heading:
   vertex from outside the display list falls to the no-recipe branch.
   `examples/frost_pair.rs` is the visual test: three recipes in one window, run in a
   shadow, measured in the RFC's step-3 note.
+- **Named materials in config** (RFC step 4): `style.surface.material { <name> { color;
+  frost …; finish … } }` and a binding per rung — `plate material="…"`, `plate { root
+  material="…" }`, `style.control.material` — resolved by `MaterialDef::resolve` over
+  the rung's legacy material (unset fields fall back; no `frost` child = opaque; a
+  binding wins over the legacy keys; an undefined name warns and degrades to legacy).
+  The DE finish's three fixed terms are `style.surface.relief.spec / shininess /
+  curvature`; the default frost's blur sigma is `style.surface.plate.radius`. cce-relief
+  edits them (Finish and Frost columns) and writes into the bound material's node or the
+  DE keys — never restructuring an unbound config. KDL trap when writing fixtures: two
+  nodes on one line need a `;`, and `a { b }` on one line is a parse error the loader
+  swallows into an empty document.
 - **`style.surface.plate.refraction` (0..1, default 0) is the rim, and it buys
   no legibility.** It is the answer to the other half of the question — not
   "can I read this" but "is this an object". The roll is a real surface with a

@@ -315,7 +315,7 @@ const PROP_NODES: &[&str] = &[
     "gestures", "key_bindings", "pointer_bind", "gesture_bind",
     "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
     "status", "overlay", "root", "desktop", "list", "section", "textbox", "multiline", "editor", "tree",
-    "menubar", "statusbar", "node", "relief"
+    "menubar", "statusbar", "node", "relief", "frost", "finish"
 ];
 
 fn get_or_create_node_mut<'a>(doc: &'a mut kdl::KdlDocument, path: &[&str]) -> Option<&'a mut kdl::KdlNode> {
@@ -812,6 +812,31 @@ pub fn get_kdl_type_annotations(kdl_content: &str, key_paths: &[String]) -> Vec<
 
 #[cfg(test)]
 mod tests {
+    /// A material node's frost and finish are written as PROPERTIES of a
+    /// `frost` / `finish` child (RFC material § 5), created on demand under
+    /// `style.surface.material.<name>`, and read back through the same
+    /// pointer the loader uses.
+    #[test]
+    fn material_keys_write_as_frost_and_finish_props() {
+        use super::{parse_kdl_to_json, update_kdl_in_memory};
+        let mut doc = kdl::KdlDocument::new();
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.frost.backdrop_compression", "0.6", "style"));
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.frost.refraction", "0.3", "style"));
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.finish.spec", "0.4", "style"));
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.color", "#05050840", "style"));
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.plate.material", "glass", "style"));
+        let text = doc.to_string();
+        let val = parse_kdl_to_json(&text);
+        assert_eq!(val.pointer("/style/surface/material/glass/frost/backdrop_compression").and_then(|v| v.as_f64()), Some(0.6), "{text}");
+        assert_eq!(val.pointer("/style/surface/material/glass/frost/refraction").and_then(|v| v.as_f64()), Some(0.3));
+        assert_eq!(val.pointer("/style/surface/material/glass/finish/spec").and_then(|v| v.as_f64()), Some(0.4));
+        assert_eq!(val.pointer("/style/surface/material/glass/color").and_then(|v| v.as_str()), Some("#05050840"));
+        assert_eq!(val.pointer("/style/surface/plate/material").and_then(|v| v.as_str()), Some("glass"));
+        // One `frost` node with two props, not two `frost` nodes.
+        assert_eq!(text.matches("frost").count(), 1, "{text}");
+        assert!(text.contains("(rgba)"), "the colour carries its type: {text}");
+    }
+
     #[test]
     fn unit_annotations_become_len_strings() {
         let v = parse_kdl_to_json("style {\n    relief width=(mm)2.0 depth=(f64)0.15 lip=(px)6\n    ruler (in)0.5\n}\n");

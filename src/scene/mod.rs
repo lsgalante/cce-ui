@@ -16,5 +16,5 @@ pub mod relief_shade;
 pub mod tree;
 
 pub use arena::{Arena, Node, NodeId};
-pub use material::{Finish, Frost, Material, PlateRole};
+pub use material::{Finish, Frost, FrostDef, Material, MaterialDef, PlateRole, PlateRung};
 pub use tree::WidgetTree;
