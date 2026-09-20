@@ -282,30 +282,77 @@ What this buys, and where the code is heading:
   the textbox) falls back to it when the widget's own `corner_radius` key is
   unset, so a per-widget key is an override, not a requirement. Do not give a
   new control-scale radius getter a literal default; fall back to the rung.
+- **A config hex is gamma-decoded; a built-in default colour is not.** The
+  style loader's `parse_hex` runs every channel through `srgb_to_linear`
+  (alpha excepted), so `"#595969"` arrives as `[0.10, 0.10, 0.14]` — which is
+  exactly `PARAM_BG`'s default. The constants in `color.rs` are already
+  linear, so **the hex that pins a default is not that default's floats times
+  255.** `PARAM_BG = [0.10, 0.10, 0.14]` reads as `#1a1a24` if you scale it
+  naively, and `#1a1a24` decodes to `[0.010, 0.010, 0.018]` — a plate ten
+  times darker than the one you were trying to preserve, silently, because
+  both spellings are valid config.
+
+  Round-trip a default with `l2s(c) = 1.055·c^(1/2.4) − 0.055` (the inverse of
+  `srgb_to_linear`) before writing it into a config, or read the value back
+  out of the running app. This cost a measurement round on 2026-09-19: a
+  `backdrop_compression` sweep meant to hold the tint constant was silently
+  sweeping the tint too, and the two halves of the experiment disagreed by 3x
+  on the plate's luminance.
+
+  Two smaller edges of the same knife: an **8-digit** hex keeps its alpha raw
+  (`a/255`, no decode), so `#05050840` really is a quarter opacity; a
+  **6-digit** hex sets alpha to **1.0**, so dropping the last byte off a
+  translucent plate colour makes it fully opaque rather than leaving it
+  alone.
 - **A frosted plate's legibility is `backdrop_compression`, not opacity.**
   Blur destroys a backdrop's spatial DETAIL and preserves its mean LUMINANCE,
   and text contrast is a mean-luminance property — so `resolve_blur`'s closing
   `mix(backdrop, plate, opacity)` hands the backdrop's brightness through at
   `1 - opacity` whatever the kernel does. At the designer dialog's 0.25 that is
   75% of whatever is behind it. Measured on a row label (`#ccccd4`) over the
-  designer's Alt+D plate: **1.20:1 over a white viewport, 6.18:1 over the dark
-  one** — a 5x swing, the bright end of it not a contrast ratio so much as its
-  absence. More blur moves neither number, which is the whole of the "liquid
-  glass" legibility problem, and why refraction and specular cannot help: they
-  are shape cues, and legibility is a luminance budget.
+  designer's Alt+D plate at the stock tint: **1.16:1 over a white viewport,
+  6.65:1 over the dark one** — the bright end not a contrast ratio so much as
+  its absence. More blur moves neither number, which is the whole of the
+  "liquid glass" legibility problem, and why refraction and specular cannot
+  help: they are shape cues, and legibility is a luminance budget.
 
   `style.surface.plate.backdrop_compression` (0..1, `color::plate_backdrop_
   compression`, **default 0** — every existing config keeps today's look)
   remaps the blurred backdrop's luminance toward the plate's own key before
   the tint, holding its chromaticity. It is not opacity and not "darken": it
   is SYMMETRIC, pulling a bright backdrop down and a dark one UP, so both ends
-  converge on the plate's key. The same measurement at 0.85: **4.24:1 and
-  4.33:1** — the contrast stops depending on what is behind the window, which
-  is the actual goal. Hue, chroma and movement still read through it.
+  converge on the plate's key. The contrast stops depending on what is behind
+  the window, which is the actual goal; hue, chroma and movement still read
+  through it.
 
-  Raising it past ~0.9 flattens the view through the glass without buying much
-  more contrast; the convergence point is set by the plate's tint and opacity,
-  so if both ends need to clear 4.5:1 that is the tint to change, not this.
+  **It only works with a tint dark enough to converge ON.** A 24-cell sweep
+  (k x tint x backdrop, 2026-09-20) — contrast on the bright/dark viewports,
+  with `show` the luminance sigma across bare plate (x100), a proxy for how
+  much backdrop still reads through:
+
+  | tint | k=0 | k=0.4 | k=0.6 | k=0.85 |
+  |---|---|---|---|---|
+  | `#595969` (stock) | 1.16 / 6.65 | 2.25 / 4.87 | 3.10 / 4.54 | 4.10 / 4.34 |
+  | `#1a1a24` | 1.23 / 9.97 | 2.99 / 10.34 | **5.08 / 10.53** | 9.36 / 10.70 |
+  | `#050508` | 1.24 / 10.47 | 3.08 / 11.67 | **5.41 / 12.14** | 10.76 / 12.60 |
+  | *show* (bright/dark) | 7.3 / 0.9 | 3.7 / 0.5 | 2.3 / 0.2 | 0.4 / 0.1 |
+
+  Three readings. **The stock tint cannot be rescued at any k** — it never
+  clears 4.5:1 on the bright backdrop, and on the DARK one it gets WORSE as k
+  rises (6.65 -> 4.34), because `#595969` is lighter than the scene and
+  compression lifts the plate toward it. **Tint does nothing without k**: at
+  k=0 the three tints read 1.16/1.23/1.24, indistinguishable, because at 0.25
+  opacity the tint barely participates — which is why "just darken it" was a
+  dead end before this existed. And **k ~ 0.6 is the knee**: both dark tints
+  clear the floor on both backdrops with a third of the backdrop variation
+  intact, where 0.85 doubles contrast for 95% of the remaining glass.
+
+  So the pair is orthogonal, and that is the point: **k buys independence from
+  the backdrop, the tint picks the key it becomes independent at.** cce-designer
+  ships `#05050840` at k=0.6 (5.41:1 / 12.14:1). Note `show` is 0.2-0.9 on a
+  dark backdrop at EVERY k: there is little luminance variation behind the
+  plate there to begin with, so "glass" on a dark desktop is carried by the rim
+  and bevel, not by the backdrop.
 
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 

@@ -1904,6 +1904,39 @@ mod color_tests {
 mod tests {
     use super::*;
 
+    /// The hex that pins a built-in colour is NOT its floats times 255.
+    ///
+    /// The style loader gamma-decodes every config hex; the constants in this
+    /// file are already linear. So `PARAM_BG = [0.10, 0.10, 0.14]` is spelled
+    /// `#595969` in config, and the naive `#1a1a24` decodes to a plate ten
+    /// times darker — silently, both being valid config. Pinned here because
+    /// it cost a measurement round: a sweep meant to hold the tint constant
+    /// was quietly sweeping it, and the two halves disagreed by 3x.
+    #[test]
+    fn the_hex_that_pins_a_default_round_trips_through_the_gamma_decode() {
+        let decoded = parse_hex_rgba_linear("#595969").expect("valid hex");
+        // RGB only — a 6-digit hex carries no alpha, which the asserts at the
+        // bottom cover as its own hazard.
+        for (got, want) in decoded.iter().take(3).zip(PARAM_BG.iter().take(3)) {
+            assert!(
+                (got - want).abs() < 0.005,
+                "#595969 decodes to {decoded:?}, PARAM_BG is {PARAM_BG:?}"
+            );
+        }
+
+        // The naive spelling, and how far off it lands.
+        let naive = parse_hex_rgba_linear("#1a1a24").expect("valid hex");
+        assert!(
+            naive[0] < PARAM_BG[0] / 5.0,
+            "#1a1a24 was supposed to be nowhere near PARAM_BG, got {naive:?}"
+        );
+
+        // Alpha is NOT decoded, and a 6-digit hex means OPAQUE — dropping the
+        // last byte off a translucent plate colour does not leave it alone.
+        assert!((parse_hex_rgba_linear("#05050840").unwrap()[3] - 0.251).abs() < 0.002);
+        assert_eq!(parse_hex_rgba_linear("#050508").unwrap()[3], 1.0);
+    }
+
     /// The plate's backdrop compression defaults OFF and clamps.
     ///
     /// Off is load-bearing: it is the behaviour every config already in the
