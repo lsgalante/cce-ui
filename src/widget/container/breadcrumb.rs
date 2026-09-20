@@ -336,22 +336,23 @@ impl Paint for Breadcrumb {
                 // face, which is what the boss run always did here; an opaque
                 // one makes both controls that color. Mirrors
                 // `Dropdown::paint_background`'s `face` exactly.
-                let face = crate::widget::ControlPlate::face_from_fill(crate::color::dropdown_background_color());
+                let face = crate::scene::Material::control_face(crate::color::dropdown_background_color());
                 let (stance, face) = if self.raised {
                     // The floating stance: the run rises out of the surface as
                     // ONE beveled plate — fill and raised roll in a single
                     // lighting pass. The face is deliberately translucent
                     // ([`Self::RAISED_FACE_OPACITY`] over the configured fill)
-                    // and ALWAYS frosted (negative alpha, the blur-behind
-                    // sentinel): a floating part shows what is under it, and
+                    // and ALWAYS frosted (`Frost::from_style`, the blur-behind
+                    // pass): a floating part shows what is under it, and
                     // at this translucency the frost is what keeps the names
                     // legible over live content beneath. A transparent
                     // configured fill keeps the boss degradation: edges only,
                     // the surface as the face.
-                    let mut c = face;
-                    if c[3] > 0.001 {
-                        c[3] = -(c[3] * Self::RAISED_FACE_OPACITY);
-                    }
+                    let c = face.map(|m| {
+                        let t = m.tint;
+                        m.with_tint([t[0], t[1], t[2], t[3] * Self::RAISED_FACE_OPACITY])
+                            .with_frost(crate::scene::Frost::from_style())
+                    });
                     (crate::widget::PlateStance::Raised, c)
                 } else {
                     (crate::widget::PlateStance::Flush, face)

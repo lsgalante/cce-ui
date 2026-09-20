@@ -262,7 +262,7 @@ impl Button {
         // Keyboard focus lights the plate's own rim — the ring IS the silhouette.
         let tint = self.focused.then(crate::widget::ControlPlate::focus_tint);
         Some(
-            crate::widget::ControlPlate::control(rect, radius, stance, self.color())
+            crate::widget::ControlPlate::control(rect, radius, stance, crate::scene::Material::face(self.color()))
                 .with_tint(tint),
         )
     }
@@ -270,7 +270,7 @@ impl Button {
     /// [`Button::plate`] as the legacy `(rect, corner radius, depth, face
     /// colour)` tuple — the flat-path bridge's view of the same plate.
     pub fn inset_face(&self, rect: Rect) -> Option<(Rect, f32, f32, [f32; 4])> {
-        self.plate(rect).map(|p| (p.rect, p.radii.0, p.depth, p.face))
+        self.plate(rect).map(|p| (p.rect, p.radii.0, p.depth, p.face_fill()))
     }
 }
 

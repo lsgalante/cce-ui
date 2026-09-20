@@ -171,7 +171,7 @@ impl Paint for FontSelector {
             // The closed-dropdown chrome: a flush control plate with a
             // transparent face, the state fill rounded to sit inside it.
             ctx.control_plate(
-                &crate::widget::ControlPlate::control(rect, r, crate::widget::PlateStance::Flush, [0.0; 4])
+                &crate::widget::ControlPlate::control(rect, r, crate::widget::PlateStance::Flush, None)
                     .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint)),
             );
             let wash = if self.pressed {

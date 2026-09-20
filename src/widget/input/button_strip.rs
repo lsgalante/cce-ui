@@ -408,7 +408,7 @@ impl crate::widget::Paint for ButtonStrip {
                 // well floor, faceless (the floor shows through), at the well's
                 // depth — its rim lit while the strip holds keyboard focus.
                 pc.control_plate(
-                    &crate::widget::ControlPlate::control(seg, seg_r, crate::widget::PlateStance::Raised, [0.0; 4])
+                    &crate::widget::ControlPlate::control(seg, seg_r, crate::widget::PlateStance::Raised, None)
                         .with_depth(depth)
                         .with_tint(focus_ring.then(crate::widget::ControlPlate::focus_tint)),
                 );

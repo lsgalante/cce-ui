@@ -25,6 +25,7 @@
 
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{ControlPlate, DropletSpec, PaintCtx, PlateSpec, PlateStance};
+use cce_ui::scene::Material;
 use std::fmt::Write as _;
 
 fn r(x: f32, y: f32, w: f32, h: f32) -> Rect {
@@ -101,7 +102,7 @@ fn scene(sw: f32, sh: f32) -> cce_ui::scene::paint::DisplayList {
         let mut x = 20.0;
         for face in faces {
             for tint in [None, Some(ControlPlate::focus_tint())] {
-                let plate = ControlPlate::control(r(x, y, 36.0, 20.0), 6.0, stance, face).with_tint(tint);
+                let plate = ControlPlate::control(r(x, y, 36.0, 20.0), 6.0, stance, Material::face(face)).with_tint(tint);
                 pc.control_plate(&plate);
                 x += 42.0;
             }
@@ -110,9 +111,9 @@ fn scene(sw: f32, sh: f32) -> cce_ui::scene::paint::DisplayList {
     }
 
     // Inset plates and wells.
-    pc.inset_plate(r(20.0, 290.0, 60.0, 24.0), rr, [0.2, 0.2, 0.24, 1.0], 4.0);
-    pc.inset_plate(r(90.0, 290.0, 60.0, 24.0), rr, [0.0; 4], 4.0);
-    pc.inset_plate_tinted(r(160.0, 290.0, 60.0, 24.0), rr, [0.2, 0.2, 0.24, -0.5], 4.0, [1.0, 0.5, 0.2]);
+    pc.inset_plate(r(20.0, 290.0, 60.0, 24.0), rr, Material::face([0.2, 0.2, 0.24, 1.0]).as_ref(), 4.0);
+    pc.inset_plate(r(90.0, 290.0, 60.0, 24.0), rr, Material::face([0.0; 4]).as_ref(), 4.0);
+    pc.inset_plate_tinted(r(160.0, 290.0, 60.0, 24.0), rr, Material::face([0.2, 0.2, 0.24, -0.5]).as_ref(), 4.0, [1.0, 0.5, 0.2]);
     pc.well_floor(r(230.0, 290.0, 40.0, 24.0), 6.0, false);
     pc.well_floor(r(280.0, 290.0, 40.0, 24.0), 6.0, true);
     pc.canvas_well(r(330.0, 290.0, 40.0, 24.0), 6.0, true, false);

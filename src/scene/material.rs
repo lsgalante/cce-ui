@@ -194,6 +194,14 @@ impl Material {
         if a < 0.0 { m.with_frost(Frost::from_style()) } else { m }
     }
 
+    /// The legacy bridge for a FACE slot: a transparent fill is no face at
+    /// all (`None` — the surface below shows through), anything else is
+    /// [`Material::from_fill`] of it. The `|alpha| > 0.001` test every face
+    /// slot applied, stated once.
+    pub fn face(encoded: [f32; 4]) -> Option<Self> {
+        (encoded[3].abs() > 0.001).then(|| Self::from_fill(encoded))
+    }
+
     /// This material as a plate in `role` carries it: a root plate's frost
     /// is the COMPOSITOR's, so under [`PlateRole::Root`] the client-side
     /// material is opaque — the prim a `PlateSpec` emits carries this, and
@@ -227,7 +235,7 @@ impl Material {
     }
 
     /// A control face from a configured fill, under the rule
-    /// `ControlPlate::face_from_fill` states: an opaque one is the face
+    /// the control rung states: an opaque one is the face
     /// (alpha forced to 1 — a translucent face would blend into the relief's
     /// shading and read as a second material); a transparent one is `None`,
     /// the surface below showing as the face (edges only).
@@ -366,6 +374,9 @@ mod tests {
             }
         }
         assert_eq!(Material::from_fill([0.0, 0.0, 0.0, -0.5]).frost, Frost::from_style());
+        assert!(Material::face([0.3, 0.3, 0.3, 0.0]).is_none(), "transparent = no face");
+        assert!(Material::face([0.3, 0.3, 0.3, -0.5]).is_some_and(|m| m.frost.is_frosted()));
+        assert_eq!(Material::face([0.3, 0.3, 0.3, 0.7]).map(|m| m.tint), Some([0.3, 0.3, 0.3, 0.7]));
     }
 
     /// The control-face rule: opaque or nothing.

@@ -463,7 +463,7 @@ impl Paint for Toggle {
             ctx.recess(well, well_radii, depth);
             let focus = if self.focused { Some(ControlPlate::focus_tint()) } else { None };
             ctx.control_plate(
-                &ControlPlate::control(plate, plate_r, PlateStance::Raised, [0.0; 4])
+                &ControlPlate::control(plate, plate_r, PlateStance::Raised, None)
                     .with_depth(plate_depth)
                     .with_tint(focus),
             );

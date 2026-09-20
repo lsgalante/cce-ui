@@ -882,7 +882,7 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
                     Shape::Boss => pc.boss(tall, sq, unit),
                     Shape::Ridge => pc.ridge(tall, sq, unit),
                     Shape::Trough => pc.trough(tall, sq, unit),
-                    Shape::InsetPlate => pc.inset_plate(tall, sq, [0.0; 4], unit),
+                    Shape::InsetPlate => pc.inset_plate(tall, sq, None, unit),
                     Shape::Groove => {
                         let cx = x0 + unit * (0.5 + GROOVE_FLOOR * 0.5);
                         pc.groove(

@@ -517,7 +517,7 @@ impl Paint for MenuBar {
             let radius = crate::layout::dropdown_corner_radius();
             let depth = crate::layout::bevel_width().min(trough_h * 0.2);
             let (trough, radii) = crate::layout::carve_inside(trough, (radius, radius, radius, radius), depth);
-            ctx.inset_plate(trough, radii, [0.0; 4], depth);
+            ctx.inset_plate(trough, radii, None, depth);
             if let Some(c) = fill {
                 ctx.rounded_rect(trough, radius, (true, true, true, true), c);
             }

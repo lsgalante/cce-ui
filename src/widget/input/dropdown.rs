@@ -113,11 +113,11 @@ pub struct Dropdown {
     /// carries one radius, and the adjustment exists to nest relief outlines.
     flat: bool,
     /// Per-widget override for the trigger plate's FACE, bypassing
-    /// [`ControlPlate::face_from_fill`] on the configured fill. The default
+    /// [`crate::scene::Material::control_face`] on the configured fill. The default
     /// forces the face opaque; an app that wants its controls made of the
     /// same frosted material as its panes passes the blur-behind sentinel (a
     /// negative alpha) here, which that helper would strip.
-    face: Option<[f32; 4]>,
+    face: Option<crate::scene::Material>,
     /// Keyboard focus (FocusIn / FocusOut): lights the trigger plate's rim.
     focused: bool,
     /// The open menu REPLACES the trigger instead of growing out of it: no
@@ -450,7 +450,7 @@ impl Dropdown {
                 Rect { x, y, width: w, height: visual_h },
                 radius,
                 crate::widget::PlateStance::Flat,
-                self.face.unwrap_or_else(|| crate::widget::ControlPlate::face_from_fill(raw_bg)),
+                self.face.or_else(|| crate::scene::Material::control_face(raw_bg)),
             )
             .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint));
             ctx.control_plate(&plate);
@@ -493,7 +493,7 @@ impl Dropdown {
                 Rect { x, y, width: w, height: visual_h },
                 radius,
                 crate::widget::PlateStance::Flush,
-                self.face.unwrap_or_else(|| crate::widget::ControlPlate::face_from_fill(raw_bg)),
+                self.face.or_else(|| crate::scene::Material::control_face(raw_bg)),
             )
             .with_radii((r4[0], r4[1], r4[2], r4[3]))
             .with_depth(depth)
@@ -779,7 +779,7 @@ impl Adapted<Dropdown> {
     }
 
     /// Override the trigger plate's face — see the `face` field.
-    pub fn with_face(mut self, face: [f32; 4]) -> Self {
+    pub fn with_face(mut self, face: crate::scene::Material) -> Self {
         self.face = Some(face);
         self
     }

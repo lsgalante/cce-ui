@@ -185,8 +185,9 @@ pub enum PlateStance {
 /// carve is taken inside it ([`crate::layout::carve_inside`]), so the gap
 /// beside the plate is the gap. `radii` is the silhouette, per corner (a
 /// Dropdown nested concentrically in a frame corner adjusts each). `face`
-/// is the plate's own fill; transparent means the surface below IS the face
-/// (a negative alpha is the blur-behind frost, a real face). `depth` is the
+/// is the plate's own material; `None` means the surface below IS the face
+/// (edges only), and a frosted material is a real face — the frost carried
+/// where the stance can (`Flat`; see [`PlateStance`]). `depth` is the
 /// relief's wall width — [`ControlPlate::control`] takes the DE relief width
 /// capped at a fifth of the height.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -194,7 +195,7 @@ pub struct ControlPlate {
     pub rect: Rect,
     pub radii: Radii,
     pub stance: PlateStance,
-    pub face: [f32; 4],
+    pub face: Option<Material>,
     pub depth: f32,
     /// The rim lit in this colour: the keyboard-focus ring, drawn on the
     /// plate's own silhouette rather than as extra geometry. `None` unlit.
@@ -204,7 +205,7 @@ pub struct ControlPlate {
 impl ControlPlate {
     /// A control plate at `rect` with a uniform corner `radius`: depth from
     /// the DE relief width, capped at a fifth of the plate's height.
-    pub fn control(rect: Rect, radius: f32, stance: PlateStance, face: [f32; 4]) -> Self {
+    pub fn control(rect: Rect, radius: f32, stance: PlateStance, face: Option<Material>) -> Self {
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
         Self { rect, radii: (radius, radius, radius, radius), stance, face, depth, tint: None }
     }
@@ -236,15 +237,18 @@ impl ControlPlate {
         self
     }
 
-    /// A control plate's face from a configured fill: an opaque one is the
-    /// face (alpha forced to 1 — a translucent face would blend into the
-    /// relief's shading and read as a second material); a transparent one
-    /// leaves the surface below as the face (edges only).
-    pub fn face_from_fill(raw: [f32; 4]) -> [f32; 4] {
-        // The rule lives on the material (`Material::control_face`); this is
-        // its `[f32; 4]` spelling until step 2 gives `ControlPlate` a
-        // `face: Option<Material>`.
-        Material::control_face(raw).map_or([0.0; 4], |m| m.tint)
+    /// The face a stance draws: `Some` only for a material with a visible
+    /// tint — a transparent one is the surface below showing through, the
+    /// same as `None`.
+    pub fn faced(&self) -> Option<&Material> {
+        self.face.as_ref().filter(|m| m.tint[3] > 0.001)
+    }
+
+    /// The face as the encoded fill the flat-path bridges consume
+    /// (`Button::inset_face`, cce-system-interface's `ControlCarve`):
+    /// transparent for no face, else the material's nested fill.
+    pub fn face_fill(&self) -> [f32; 4] {
+        self.face.map_or([0.0; 4], |m| m.fill(PlateRole::Nested))
     }
 }
 
@@ -1163,12 +1167,10 @@ impl PaintCtx {
     pub fn control_plate(&mut self, plate: &ControlPlate) {
         match plate.stance {
             PlateStance::Raised => {
-                // abs(): a negative alpha is the frost sentinel, a real face.
-                if plate.face[3].abs() > 0.001 {
-                    let face = Material::from_fill(plate.face);
+                if let Some(face) = plate.faced() {
                     match plate.tint {
-                        Some(t) => self.bevel_tinted(plate.rect, plate.radii, &face, plate.depth, t),
-                        None => self.bevel(plate.rect, plate.radii, &face, plate.depth),
+                        Some(t) => self.bevel_tinted(plate.rect, plate.radii, face, plate.depth, t),
+                        None => self.bevel(plate.rect, plate.radii, face, plate.depth),
                     }
                 } else {
                     let (plateau, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
@@ -1181,13 +1183,12 @@ impl PaintCtx {
             PlateStance::Flush => {
                 let (trough, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
                 match plate.tint {
-                    Some(t) => self.inset_plate_tinted(trough, radii, plate.face, plate.depth, t),
-                    None => self.inset_plate(trough, radii, plate.face, plate.depth),
+                    Some(t) => self.inset_plate_tinted(trough, radii, plate.faced(), plate.depth, t),
+                    None => self.inset_plate(trough, radii, plate.faced(), plate.depth),
                 }
             }
             PlateStance::Flat => {
-                // abs(): a negative alpha is the frost sentinel, a real face.
-                if plate.face[3].abs() > 0.001 {
+                if let Some(face) = plate.faced() {
                     // A QUAD deliberately, not the `Border` the relief stances
                     // fill through: carrying the blur-behind sentinel is half
                     // the point of this stance, and only quads reach it.
@@ -1195,7 +1196,7 @@ impl PaintCtx {
                         plate.rect,
                         plate.radii.0,
                         (true, true, true, true),
-                        plate.face,
+                        face.fill(PlateRole::Nested),
                     );
                 }
                 if let Some(t) = plate.tint {
@@ -1300,10 +1301,10 @@ impl PaintCtx {
     ///
     /// An opaque `color` fills the face; transparent leaves the surface below
     /// showing through as the face.
-    pub fn inset_plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
-        // abs(): negative alpha is the blur-behind frost sentinel, a real
-        // face — only a genuinely transparent color skips the fill.
-        if color[3].abs() > 0.001 {
+    pub fn inset_plate(&mut self, rect: Rect, radii: Radii, face: Option<&Material>, depth: f32) {
+        // A transparent material is no face either — only a visible tint
+        // fills; a frosted one fills with the sentinel.
+        if let Some(face) = face.filter(|m| m.tint[3] > 0.001) {
             // Flat fill only — the relief is the trough's, so the face must not
             // carry a lip of its own (that lip WAS the second wall).
             //
@@ -1315,7 +1316,7 @@ impl PaintCtx {
             // those getters — a change to the legacy surface that has nothing to
             // do with the relief. Border also keeps all four radii, which
             // `Prim::RoundedRect`'s single radius cannot.
-            self.border(rect, radii, color, [0.0; 4], 0.0);
+            self.border(rect, radii, face.fill(PlateRole::Nested), [0.0; 4], 0.0);
         }
         self.trough(rect, radii, depth);
     }
@@ -1323,9 +1324,9 @@ impl PaintCtx {
     /// [`inset_plate`](Self::inset_plate) with the rim lit — the focused flush
     /// control plate's ring (`ControlPlate::with_tint`); the face fill as
     /// there, the trough tinted.
-    pub fn inset_plate_tinted(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32, tint: [f32; 3]) {
-        if color[3].abs() > 0.001 {
-            self.border(rect, radii, color, [0.0; 4], 0.0);
+    pub fn inset_plate_tinted(&mut self, rect: Rect, radii: Radii, face: Option<&Material>, depth: f32, tint: [f32; 3]) {
+        if let Some(face) = face.filter(|m| m.tint[3] > 0.001) {
+            self.border(rect, radii, face.fill(PlateRole::Nested), [0.0; 4], 0.0);
         }
         self.trough_tinted(rect, radii, depth, tint);
     }
@@ -1679,10 +1680,10 @@ impl crate::layout::RenderTarget for PaintCtx {
         self.pop_clip();
     }
     fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32) {
-        PaintCtx::inset_plate(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), color, depth);
+        PaintCtx::inset_plate(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), Material::face(color).as_ref(), depth);
     }
     fn inset_plate_tinted(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: [f32; 3]) {
-        PaintCtx::inset_plate_tinted(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), color, depth, tint);
+        PaintCtx::inset_plate_tinted(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), Material::face(color).as_ref(), depth, tint);
     }
     fn relief_carve(&mut self, carve: &crate::layout::ReliefCarve) {
         PaintCtx::carve(self, carve);
