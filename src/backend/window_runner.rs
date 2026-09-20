@@ -1923,6 +1923,10 @@ pub fn tessellate_display_list(
                 // curvature-matched span.
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
                 let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, mat, false, None);
+                // The plate's own frost recipe rides host.zw (see PlatePush).
+                let [fz, fw] = material.frost.pack(scale);
+                p.host[2] = fz;
+                p.host[3] = fw;
                 // w = 1 marks an accent-tinted plate (the focused-pane
                 // treatment): the shader then colors the WHOLE rolled edge
                 // with the tint, not just the specular glint — matching the
@@ -1951,7 +1955,11 @@ pub fn tessellate_display_list(
                     // Same lit-plate branch; the cover quad is the exact rect so the
                     // silhouette and the compositor's rounded window corners agree.
                     verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
-                    plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, mat, true, *shape));
+                    let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, mat, true, *shape);
+                    let [fz, fw] = material.frost.pack(scale);
+                    p.host[2] = fz;
+                    p.host[3] = fw;
+                    plate = Some(p);
                     made_plate = Some(*rect);
                 }
             }

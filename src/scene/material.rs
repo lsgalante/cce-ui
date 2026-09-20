@@ -75,18 +75,53 @@ pub enum Frost {
         /// How far the plate's roll bends what it samples — the objecthood
         /// control. 0..1. `style.surface.plate.refraction` today.
         refraction: f32,
-        /// Blur radius (the kernel's sigma) in logical px. Carried from step 1
-        /// so `Frost` changes shape once (RFC § 11 (2)); the renderer reads
-        /// it from step 3. [`Frost::DEFAULT_RADIUS`] is today's literal
-        /// kernel; 0 will be a CLEAR plate — one clean sample, tinted.
+        /// Blur radius — the kernel's sigma — in logical px.
+        /// [`Frost::DEFAULT_RADIUS`] is the kernel every frosted plate had;
+        /// 0 is a CLEAR plate: one clean sample, tinted.
         radius: f32,
     },
 }
 
 impl Frost {
-    /// The sigma of `resolve_blur`'s kernel as shipped: 7×7 taps at a 5.5 px
-    /// stride, sigma 2 taps — ≈ 11 logical px at scale 1.
-    pub const DEFAULT_RADIUS: f32 = 11.0;
+    /// The kernel every frosted plate had, as a sigma in logical px.
+    ///
+    /// Before the recipe was per plate, `resolve_blur` sampled a 7×7 kernel
+    /// at a fixed 5.5 PHYSICAL px stride (sigma two taps = 11 physical px)
+    /// — half the blur on a scale-2 panel that it was on a scale-1 one, and
+    /// the panel every frosted surface was tuned on is scale 2. A material
+    /// cannot know the scale, so the default is stated in logical px at the
+    /// value that reproduces the panel exactly: 5.5 logical = 11 physical at
+    /// scale 2. A scale-1 display now gets the same logical blur instead of
+    /// twice it.
+    pub const DEFAULT_RADIUS: f32 = 5.5;
+
+    /// Fixed-point width of `compression` and `refraction` inside one push
+    /// float: `c·4095·4096 + r·4095` is an integer below 2²⁴, exact in f32.
+    /// Mirrors the shader's `FROST_PACK_MAX` / `FROST_PACK_BASE`.
+    pub const PACK_MAX: f32 = 4095.0;
+    pub const PACK_BASE: f32 = 4096.0;
+
+    /// The recipe as the plate branch reads it: `[p_host.z, p_host.w]` —
+    /// compression and refraction packed in `z`, the blur radius in `w` as
+    /// the kernel sigma in PHYSICAL px (the shader samples the backdrop in
+    /// physical px). `Opaque` packs to zeros: nothing reads them, and a
+    /// plate that was never frosted pushes the bytes it always did.
+    pub fn pack(&self, scale: f32) -> [f32; 2] {
+        match *self {
+            Frost::Opaque => [0.0, 0.0],
+            Frost::Frosted { compression, refraction, radius } => {
+                let q = |v: f32| (v.clamp(0.0, 1.0) * Self::PACK_MAX).round();
+                [q(compression) * Self::PACK_BASE + q(refraction), radius.max(0.0) * scale]
+            }
+        }
+    }
+
+    /// The Rust twin of the shader's unpack: `(compression, refraction)`
+    /// from a packed `z`.
+    pub fn unpack(z: f32) -> (f32, f32) {
+        let hi = (z / Self::PACK_BASE).floor();
+        (hi / Self::PACK_MAX, (z - hi * Self::PACK_BASE) / Self::PACK_MAX)
+    }
 
     /// The DE's frost, from the plate-rung keys every frosted surface reads
     /// today (the window-wide recipe, until step 3 makes it per plate).
@@ -387,6 +422,39 @@ mod tests {
         assert!(Material::face([0.3, 0.3, 0.3, 0.0]).is_none(), "transparent = no face");
         assert!(Material::face([0.3, 0.3, 0.3, -0.5]).is_some_and(|m| m.frost.is_frosted()));
         assert_eq!(Material::face([0.3, 0.3, 0.3, 0.7]).map(|m| m.tint), Some([0.3, 0.3, 0.3, 0.7]));
+    }
+
+    /// The pack is exact on its own grid, monotone, and never mixes the two
+    /// halves; the shader's literals are the ones the Rust twin uses.
+    #[test]
+    fn frost_pack_round_trips() {
+        for i in [0u32, 1, 2, 613, 614, 2047, 2048, 4094, 4095] {
+            for j in [0u32, 1, 819, 4095] {
+                let (c, r) = (i as f32 / Frost::PACK_MAX, j as f32 / Frost::PACK_MAX);
+                let f = Frost::Frosted { compression: c, refraction: r, radius: 5.5 };
+                let [z, w] = f.pack(2.0);
+                let (c2, r2) = Frost::unpack(z);
+                assert!((c2 - c).abs() < 1e-6 && (r2 - r).abs() < 1e-6, "{i},{j}: {c},{r} -> {c2},{r2}");
+                assert_eq!(w, 11.0);
+                assert!(z < (1u32 << 24) as f32, "packed value must stay an exact f32 integer");
+            }
+        }
+        // 0.6 / 0.3 (the designer's recipe) survive to better than a 1/255 step.
+        let (c, r) = Frost::unpack(Frost::Frosted { compression: 0.6, refraction: 0.3, radius: 0.0 }.pack(1.0)[0]);
+        assert!((c - 0.6).abs() < 1.0 / 510.0 && (r - 0.3).abs() < 1.0 / 510.0);
+        assert_eq!(Frost::Opaque.pack(2.0), [0.0, 0.0]);
+        assert_eq!(Frost::Frosted { compression: 0.0, refraction: 0.0, radius: 0.0 }.pack(2.0), [0.0, 0.0]);
+
+        let wgsl = include_str!("../vk/shader2d.wgsl");
+        let lit = |name: &str| -> f32 {
+            let rest = wgsl.split(&format!("const {name}: f32 = ")).nth(1).unwrap_or_else(|| panic!("{name} missing"));
+            rest.split(';').next().unwrap().trim().parse().unwrap()
+        };
+        assert_eq!(lit("FROST_PACK_MAX"), Frost::PACK_MAX);
+        assert_eq!(lit("FROST_PACK_BASE"), Frost::PACK_BASE);
+        // The droplet's and the raw-vertex fallback's stride is the panel's
+        // default kernel in physical px: DEFAULT_RADIUS × scale 2 / 2.
+        assert_eq!(lit("LEGACY_STRIDE"), Frost::DEFAULT_RADIUS * 2.0 / 2.0);
     }
 
     /// A popover is the base colour at menu opacity, frosted — the bytes the

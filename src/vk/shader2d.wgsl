@@ -34,12 +34,6 @@ struct WindowInfo {
     // (p_light.w) they become the slope scale, so a pinned 0.5 mm drop is
     // the same geometry whatever wall it is cut with.
     relief_meta: vec4f,
-    // x = how hard a frosted plate pulls its backdrop's luminance toward its
-    // own key (0 = untouched, 1 = flat). See `resolve_blur`.
-    // y = rim refraction: how far the plate's roll displaces what it samples,
-    // and how much CLEARER the rim is than the frosted body. See MODE_PLATE.
-    // Appended last so the established offsets above keep their indices.
-    backdrop_meta: vec4f,
 }
 
 @group(0) @binding(2) var<uniform> window_info: WindowInfo;
@@ -115,7 +109,11 @@ struct RRectClip {
     // [shading strength, specular strength, shininess, curvature/AO strength].
     p_mat: vec4f,
     // Mode 1 (raised plate): xy = [offset, count] into plate_features — the
-    // carves CSG'd out of this plate's material.
+    // carves CSG'd out of this plate's material; z = the plate's FROST
+    // recipe, compression and refraction as 12-bit fixed point in one float
+    // (hi·FROST_PACK_BASE + lo, each over FROST_PACK_MAX — see
+    // material::Frost::pack); w = the blur kernel's sigma in physical px,
+    // 0 = a clear plate (one clean sample). Unread on an opaque plate.
     // Mode 2 (free recess overlay): the host-plate box (center + half-extents)
     // the carve fades out against — a wall flush with the host's edge dies
     // across the host's perimeter roll; far-away sides sit at ±1e5 (no fade).
@@ -132,6 +130,17 @@ var<push_constant> rrect_clip: RRectClip;
 // the `> 5.5` fillet branch or the fillet arm would have swallowed it, taken 4
 // off, and drawn every groove as a ridge. Equality makes a new mode inert
 // wherever it is added rather than silently captured by a neighbour.
+// Frost recipe packing — mirrored by `scene::material::Frost`, checked by
+// its tests against this text.
+const FROST_PACK_MAX: f32 = 4095.0;
+const FROST_PACK_BASE: f32 = 4096.0;
+// The kernel stride a frosted surface with NO recipe uses — the droplet
+// (its push block is full) and a raw negative-alpha vertex from outside the
+// display list: the panel's default kernel (Frost::DEFAULT_RADIUS at scale
+// 2), which is exactly the fixed 5.5 px stride every frosted plate had
+// before recipes were per plate.
+const LEGACY_STRIDE: f32 = 5.5;
+
 const MODE_NONE: i32 = 0;         // not a plate batch
 const MODE_PLATE: i32 = 1;        // raised lit plate: fill + rolled perimeter + CSG carves
 const MODE_RECESS: i32 = 2;       // free carve, interior one step DOWN
@@ -503,7 +512,9 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         }
         var base = vcol;
         if (vcol.a < 0.0) {
-            base = resolve_blur(frag, vcol, vec2f(0.0), 0.0);
+            // No recipe: every p_host slot is the drop's geometry. The
+            // kernel default, no compression (what a drop always drew).
+            base = resolve_blur(frag, vcol, vec2f(0.0), 0.0, 0.0, LEGACY_STRIDE);
         }
         let t2 = max(rrect_clip.p_light.w, 0.001);
         let u = clamp(din / t2, 0.0, 1.0);
@@ -569,10 +580,15 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         // drifting off it at another radius. The clarity ramp is f*f — the
         // clear window belongs to the outer third of the roll, and the face
         // must reach zero exactly or the whole plate unfrosts.
-        let refr = clamp(window_info.backdrop_meta.y, 0.0, 1.0);
+        // The plate's own recipe, from its push block (see RRectClip.p_host).
+        let fz = rrect_clip.p_host.z;
+        let fhi = floor(fz / FROST_PACK_BASE);
+        let k_plate = clamp(fhi / FROST_PACK_MAX, 0.0, 1.0);
+        let refr = clamp((fz - fhi * FROST_PACK_BASE) / FROST_PACK_MAX, 0.0, 1.0);
+        let stride = rrect_clip.p_host.w * 0.5;
         var base = vcol;
         if (vcol.a < 0.0) {
-            base = resolve_blur(frag, vcol, sv_rim * (refr * t), refr * f * f);
+            base = resolve_blur(frag, vcol, sv_rim * (refr * t), refr * f * f, k_plate, stride);
         }
         var extra = PLATE_CREST * f * f * f;
         let f_off = u32(rrect_clip.p_host.x);
@@ -956,11 +972,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         return vec4f(c.rgb, c.a * clip_cov);
     }
 
-    // Blur-behind plate: negative alpha mixes the (blurred) backdrop with the
-    // plate color at |alpha| opacity.
+    // A raw negative-alpha vertex with no plate block: geometry pushed from
+    // outside the display list (a legacy host's own quads). No recipe to
+    // read, so the kernel default and no compression. Everything the
+    // display list frosts is a plate batch and never lands here.
     if (in.color.a < 0.0) {
-        // A plain blur-behind quad has no roll to refract through.
-        let c = resolve_blur(in.clip_position.xy, in.color, vec2f(0.0), 0.0);
+        let c = resolve_blur(in.clip_position.xy, in.color, vec2f(0.0), 0.0, 0.0, LEGACY_STRIDE);
         return vec4f(c.rgb, c.a * clip_cov);
     }
 
@@ -971,28 +988,36 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 // FULLY blurred backdrop is the base (no clean-backdrop passthrough; mixing
 // the clean sample back in at plate opacity left translucent plates barely
 // blurred), tinted by the plate color at |alpha| opacity.
-fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32) -> vec4f {
+//
+// `k_in` is the plate's luminance compression and `stride` its kernel's tap
+// spacing in physical px (sigma = 2 taps); both come from the plate's own
+// push block (MODE_PLATE), or are the no-recipe defaults (droplet, raw
+// vertices). A stride of 0 is a CLEAR plate: one clean sample, tinted.
+fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32, k_in: f32, stride: f32) -> vec4f {
     let tex_size = vec2f(textureDimensions(t_backdrop));
 
-    var blurred = vec4f(0.0);
-    var total_weight = 0.0;
-
-    // 7x7 Gaussian blur kernel, samples every 5.5 px (±16.5px reach,
-    // effective sigma ~11px); the linear sampler between taps papers over
-    // the stride. The old 2.5px stride (±7.5px reach) was technically a
-    // blur but read as plain translucency — fine detail beneath a frosted
-    // menu stayed legible, which is not what frosted glass does.
-    for (var x = -3.0; x <= 3.0; x += 1.0) {
-        for (var y = -3.0; y <= 3.0; y += 1.0) {
-            let offset = vec2f(x, y) * 5.5;
-            let sample_uv = (pos + offset) / tex_size;
-            let weight = exp(-(x*x + y*y) / (2.0 * 2.0 * 2.0));
-            blurred += textureSample(t_backdrop, s_backdrop, sample_uv) * weight;
-            total_weight += weight;
+    var backdrop_color = vec4f(0.0);
+    if (stride <= 0.0) {
+        backdrop_color = textureSample(t_backdrop, s_backdrop, (pos + refract) / tex_size);
+    } else {
+        var blurred = vec4f(0.0);
+        var total_weight = 0.0;
+        // 7x7 Gaussian kernel at `stride` px (sigma two taps, reach ±3
+        // taps); the linear sampler between taps papers over the stride.
+        // The panel default is 5.5 px; a 2.5 px stride was technically a
+        // blur but read as plain translucency — fine detail beneath a
+        // frosted menu stayed legible, which is not what frosted glass does.
+        for (var x = -3.0; x <= 3.0; x += 1.0) {
+            for (var y = -3.0; y <= 3.0; y += 1.0) {
+                let offset = vec2f(x, y) * stride;
+                let sample_uv = (pos + offset) / tex_size;
+                let weight = exp(-(x*x + y*y) / (2.0 * 2.0 * 2.0));
+                blurred += textureSample(t_backdrop, s_backdrop, sample_uv) * weight;
+                total_weight += weight;
+            }
         }
+        backdrop_color = blurred / total_weight;
     }
-
-    var backdrop_color = blurred / total_weight;
 
     // The rim's clear window onto the backdrop.
     //
@@ -1034,7 +1059,7 @@ fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32) -> vec4f
     // Tone-mapping it would pull the refracted view back toward the plate's
     // own key — the exact contrast the rim exists to show — and the effect
     // measured nearly invisible with the two fighting.
-    let k = clamp(window_info.backdrop_meta.x, 0.0, 1.0) * (1.0 - clamp(clarity, 0.0, 1.0));
+    let k = clamp(k_in, 0.0, 1.0) * (1.0 - clamp(clarity, 0.0, 1.0));
     let W = vec3f(0.2126, 0.7152, 0.0722);
     let bl = dot(backdrop_color.rgb, W);
     let key = dot(color.rgb, W);

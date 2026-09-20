@@ -83,9 +83,11 @@ pub struct PlatePush {
     pub light: [f32; 4],
     /// [shading strength, specular strength, shininess, curvature/AO strength].
     pub material: [f32; 4],
-    /// Mode 1: `[feature offset, feature count, 0, 0]` into the frame's
-    /// `plate_features` — the carves CSG'd out of this plate (the renderer adds
-    /// the frame slot's base offset at record time). Mode 14 uses the same
+    /// Mode 1: `[feature offset, feature count, frost z, frost w]` — xy into
+    /// the frame's `plate_features`, the carves CSG'd out of this plate (the
+    /// renderer adds the frame slot's base offset at record time); zw the
+    /// plate's frost recipe, `scene::material::Frost::pack` (compression and
+    /// refraction packed in z, the blur sigma in physical px in w). Mode 14 uses the same
     /// `[offset, count]` for the union's boxes. Mode 2: the host-plate box
     /// (center + half-extents) a free recess fades out against; far-away sides
     /// (±1e5) disable the fade.
@@ -135,7 +137,7 @@ const PLATE_FEATURE_BYTES: usize = 48;
 // [size/clip vec4][carve profile meta][8 carve slopes][roll profile meta]
 // [8 roll slopes][relief heights][backdrop meta] = 21 vec4. Grows only at the
 // END — every offset above is addressed by index from both sides.
-const WINDOW_INFO_BYTES: vk::DeviceSize = 336;
+const WINDOW_INFO_BYTES: vk::DeviceSize = 320;
 
 pub(crate) struct AllocatedBuffer {
     pub(crate) buffer: vk::Buffer,
@@ -259,8 +261,6 @@ pub struct VkRenderer {
     /// last uploaded in WindowInfo — compared each frame, since editors set
     /// them straight into the style registry with no generation counter.
     relief_uploaded: (f32, f32),
-    compression_uploaded: f32,
-    refraction_uploaded: f32,
     /// Same for the edge (roll) profile LUT.
     roll_profile_gen: u64,
     plate_features: AllocatedBuffer,
@@ -877,8 +877,6 @@ impl VkRenderer {
             window_info,
             profile_gen: 0,
             relief_uploaded: (0.0, 0.0),
-            compression_uploaded: 0.0,
-            refraction_uploaded: 0.0,
             roll_profile_gen: 0,
             plate_features,
             frames,
@@ -915,19 +913,6 @@ impl VkRenderer {
         (self.corner_radius_px * crate::layout::corner_span_factor()).min(cap)
     }
 
-    /// How hard a frosted plate compresses its backdrop's luminance toward
-    /// its own key — the plate's legibility control, tracked for re-upload
-    /// like the relief heights because it is live-editable config.
-    fn backdrop_compression(&self) -> f32 {
-        crate::color::plate_backdrop_compression()
-    }
-
-    /// How far a plate's roll refracts its backdrop — tracked for re-upload
-    /// beside the compression, being live-editable config the same way.
-    fn refraction(&self) -> f32 {
-        crate::color::plate_refraction()
-    }
-
     /// The pinned relief heights in physical px, 0 = follow the width.
     fn relief_px(&self) -> (f32, f32) {
         let s = crate::scale::scale_factor().max(0.001);
@@ -940,8 +925,8 @@ impl VkRenderer {
     fn write_window_info(&mut self) {
         // [size/clip vec4][carve profile meta vec4][8 vec4 carve slopes]
         // [roll profile meta vec4][8 vec4 roll slopes][relief heights vec4]
-        // [backdrop meta vec4] — must stay in lockstep with shader2d's
-        // WindowInfo.
+        // — must stay in lockstep with shader2d's WindowInfo. (The frost
+        // recipe is per plate, in its push block, since RFC material step 3.)
         let mut data = [0.0f32; WINDOW_INFO_BYTES as usize / 4];
         data[0] = self.extent.width as f32;
         data[1] = self.extent.height as f32;
@@ -961,12 +946,6 @@ impl VkRenderer {
         data[76] = relief.0;
         data[77] = relief.1;
         self.relief_uploaded = relief;
-        let compression = self.backdrop_compression();
-        data[80] = compression;
-        self.compression_uploaded = compression;
-        let refraction = self.refraction();
-        data[81] = refraction;
-        self.refraction_uploaded = refraction;
         self.profile_gen = crate::layout::bevel_profile_generation();
         self.roll_profile_gen = crate::layout::roll_profile_generation();
         if let Some(allocation) = self.window_info.allocation.as_mut() {
@@ -1590,8 +1569,6 @@ impl VkRenderer {
             if self.profile_gen != crate::layout::bevel_profile_generation()
                 || self.roll_profile_gen != crate::layout::roll_profile_generation()
                 || self.relief_uploaded != self.relief_px()
-                || self.compression_uploaded != self.backdrop_compression()
-                || self.refraction_uploaded != self.refraction()
             {
                 self.write_window_info();
             }
