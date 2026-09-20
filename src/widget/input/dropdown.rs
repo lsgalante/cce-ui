@@ -941,20 +941,15 @@ impl Paint for Dropdown {
         // PaintCtx-backed target; collector hosts degrade to a rounded fill).
         // The trigger's configured fill is usually transparent — the window
         // plate IS its face — so the expansion substitutes the plate color,
-        // FROSTED: the negative-alpha blur-behind sentinel, the same
-        // material the context menu wears (`ContextMenuState::paint`), so
-        // the menu shows the content beneath it blurred and tinted rather
-        // than covering it. The magnitude is the color's own alpha — an
-        // app styled fully opaque stays opaque, matching its windows.
+        // FROSTED: the popover material (`Material::popover`), the same the
+        // context menu wears (`ContextMenuState::paint`), so the menu shows
+        // the content beneath it blurred and tinted rather than covering it.
+        // Encoded here because the flat-path `RenderTarget` speaks colours.
         let radius = crate::layout::dropdown_corner_radius();
         let raw_bg = colors::dropdown_background_color();
         let face = {
-            let mut c = if raw_bg[3] > 0.001 { raw_bg } else { crate::color::page_low_color() };
-            // Magnitude from menu_opacity, not the color's own alpha: page
-            // colors are typically fully opaque, which would resolve the
-            // frost to a solid tint and hide it entirely.
-            c[3] = -crate::color::menu_opacity();
-            c
+            let base = if raw_bg[3] > 0.001 { raw_bg } else { crate::color::page_low_color() };
+            crate::scene::Material::popover(base).fill(crate::scene::PlateRole::Nested)
         };
         if self.raised() {
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);

@@ -213,6 +213,16 @@ impl Material {
         }
     }
 
+    /// The popover material: a menu, a context menu, a dropdown's open
+    /// surface. `base`'s colour at `style.surface.menu.opacity`
+    /// (`color::menu_opacity`) — not the colour's own alpha, since a page
+    /// colour is typically opaque and would resolve the frost to a solid
+    /// tint — and frosted at the DE recipe, so a menu shows the content
+    /// beneath it blurred and tinted rather than covering it.
+    pub fn popover(base: [f32; 4]) -> Self {
+        Self::opaque([base[0], base[1], base[2], crate::color::menu_opacity()]).with_frost(Frost::from_style())
+    }
+
     // ---- derived materials -------------------------------------------------
 
     /// The well floor cut into this plate: the same material with the tint
@@ -377,6 +387,17 @@ mod tests {
         assert!(Material::face([0.3, 0.3, 0.3, 0.0]).is_none(), "transparent = no face");
         assert!(Material::face([0.3, 0.3, 0.3, -0.5]).is_some_and(|m| m.frost.is_frosted()));
         assert_eq!(Material::face([0.3, 0.3, 0.3, 0.7]).map(|m| m.tint), Some([0.3, 0.3, 0.3, 0.7]));
+    }
+
+    /// A popover is the base colour at menu opacity, frosted — the bytes the
+    /// three menu sites used to write by negating an alpha.
+    #[test]
+    fn popover_is_the_menu_recipe() {
+        let m = Material::popover([0.1, 0.2, 0.3, 1.0]);
+        let mut old = [0.1, 0.2, 0.3, 1.0];
+        old[3] = -crate::color::menu_opacity();
+        assert_eq!(m.fill(PlateRole::Nested), old);
+        assert!(m.frost.is_frosted());
     }
 
     /// The control-face rule: opaque or nothing.

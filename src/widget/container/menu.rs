@@ -713,11 +713,11 @@ impl Paint for MenuBar {
             pc.rect([0.02, 0.02, 0.05, 0.08], dx + 3.0, dy + 3.0, dw, dh);
             pc.rect([0.02, 0.02, 0.05, 0.04], dx + 5.0, dy + 5.0, dw, dh);
             pc.rect(theme.surface_border, dx, dy, dw, dh);
-            // Frosted, like the Dropdown popover and the context menu (the
-            // negative-alpha blur-behind sentinel): menus show what is
-            // beneath them blurred and tinted, not covered.
-            let mut bg = theme.surface_bg;
-            bg[3] = -crate::color::menu_opacity();
+            // Frosted, like the Dropdown popover and the context menu: the
+            // popover material (`Material::popover`), encoded for the
+            // colour-typed flat path — menus show what is beneath them
+            // blurred and tinted, not covered.
+            let bg = crate::scene::Material::popover(theme.surface_bg).fill(crate::scene::PlateRole::Nested);
             pc.rect(bg, dx + 1.0, dy + 1.0, dw - 2.0, dh - 2.0);
             if let Some(di) = hovered {
                 let iy = dy + di as f32 * DROPDOWN_ITEM_H;

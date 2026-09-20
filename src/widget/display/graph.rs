@@ -340,17 +340,24 @@ impl Graph {
         }
     }
 
+    /// The graph's plate, as the colour-typed host paints it: the cell
+    /// colour (or a near-transparent black) at the network opacity, and
+    /// under `graph_blur` a frosted material whose tint alpha IS the blur
+    /// value — the knob doubles as the frost's opacity.
     fn bg_color(&self) -> [f32; 4] {
-        let mut c = if self.uniform_background {
+        use crate::scene::{Frost, Material, PlateRole};
+        let c = if self.uniform_background {
             [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity]
         } else {
             [0.0, 0.0, 0.0, 0.01 * self.network_opacity]
         };
         let blur_val = crate::layout::graph_blur();
-        if blur_val > 0.0 {
-            c[3] = -blur_val.abs() * self.network_opacity;
-        }
-        c
+        let m = if blur_val > 0.0 {
+            Material::opaque([c[0], c[1], c[2], blur_val.abs() * self.network_opacity]).with_frost(Frost::from_style())
+        } else {
+            Material::opaque(c)
+        };
+        m.fill(PlateRole::Nested)
     }
 
     /// The grid cells' rounded-corner radius at the current zoom: the desktop

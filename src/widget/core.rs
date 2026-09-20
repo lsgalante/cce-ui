@@ -518,11 +518,10 @@ pub mod context_menu {
             let depth = crate::layout::bevel_width().min(self.h * 0.2);
             let face = crate::color::page_low_color();
             if face[3] > 0.001 {
-                let mut frosted = face;
-                // menu_opacity, not the color's own alpha: an opaque page
-                // color resolved the frost to a solid tint (invisible).
-                frosted[3] = -crate::color::menu_opacity();
-                ctx.plate(rect, (r, r, r, r), &crate::scene::material::Material::from_fill(frosted), depth);
+                // The popover material: the page colour at menu_opacity,
+                // frosted (an opaque page colour would resolve the frost
+                // to a solid tint, invisible).
+                ctx.plate(rect, (r, r, r, r), &crate::scene::material::Material::popover(face), depth);
             } else {
                 let (plateau, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
                 ctx.boss(plateau, radii, depth);
