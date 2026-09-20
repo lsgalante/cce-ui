@@ -450,7 +450,11 @@ dark columns, and the largest per-pixel luminance step across a column edge):
 | compression 0.85, default radius | 0.367 | 0.039 | 0.329 | 0.075 |
 | clear (radius 0) | 0.882 | 0.004 | 0.878 | 0.878 |
 
-Three recipes in one window, each doing what its own numbers say.
+Three recipes in one window, each doing what its own numbers say. **Control:** the same
+example built at the pre-step-3 commit (c86d6f6) in its own shadow draws all three plates
+as the window-wide default (swing 0.795 each); HEAD's default-recipe plate is
+pixel-identical to it (max |diff| 0/255 over the plate), so the default moved nothing on
+the scale-2 panel and the other two plates differ only by their own recipes.
 - `Frost::pack` into `p_host.zw` in mode 1 (§ 6.1's layout); `resolve_blur` reads its
   three arguments; the Droplet clamps to the kernel default.
 - `Flat` faces, `Menu`, `Graph` and the status bar fill promoted to zero-depth plates
