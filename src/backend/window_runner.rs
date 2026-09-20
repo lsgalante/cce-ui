@@ -1844,8 +1844,12 @@ pub fn tessellate_display_list(
     let plate_mat = crate::scene::material::Finish::from_style().to_array();
 
     for item in &dl.items {
-        let start = verts.len() as u32;
+        let mut start = verts.len() as u32;
         let mut plate: Option<crate::vk::PlatePush> = None;
+        // A frosted flat fill promoted to a zero-depth plate batch (below):
+        // it carries a recipe like any plate, but it is ordinary geometry to
+        // the carve grouping — it opens no host and closes the open ones.
+        let mut promoted = false;
         let mut made_plate: Option<crate::scene::layout::Rect> = None;
         // Blur-behind marker: a prim whose FILL alpha is negative asks the
         // renderer to snapshot the frame-so-far before it draws. Every
@@ -1855,7 +1859,7 @@ pub fn tessellate_display_list(
         // content and no blur, which is how the Dropdown popover (Border)
         // and the menubar panels (Quad) shipped visibly unfrosted while the
         // context menu (Plate) worked.
-        let blur_behind = matches!(
+        let mut blur_behind = matches!(
             &item.prim,
             crate::scene::paint::Prim::Quad { color, .. }
             | crate::scene::paint::Prim::RoundedRect { color, .. } if color[3] < 0.0
@@ -1889,6 +1893,42 @@ pub fn tessellate_display_list(
                     clip: item.clip,
                 });
                 continue;
+            }
+            // A frosted FLAT fill — a `Flat` control face, a menu panel, a
+            // popover, an inset plate's face — is a zero-depth plate batch
+            // (RFC material § 6.2): the same shader path as every plate, so
+            // it carries its own frost recipe instead of a window-wide one,
+            // with circular corners (shape 2) and no roll, which is what the
+            // tessellated fill drew. The display list is untouched, so the
+            // legacy bridges that extract RoundedRects still see one.
+            Prim::Quad { rect, color } if shader_plates && color[3] < 0.0 => {
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                plate = Some(flat_frost_push(rect, (0.0, 0.0, 0.0, 0.0), *color, scale, plate_light, plate_mat));
+                promoted = true;
+            }
+            Prim::RoundedRect { rect, radius, corners, color } if shader_plates && color[3] < 0.0 => {
+                let radii = (
+                    if corners.0 { *radius } else { 0.0 },
+                    if corners.1 { *radius } else { 0.0 },
+                    if corners.2 { *radius } else { 0.0 },
+                    if corners.3 { *radius } else { 0.0 },
+                );
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                plate = Some(flat_frost_push(rect, radii, *color, scale, plate_light, plate_mat));
+                promoted = true;
+            }
+            Prim::Border { rect, radii, fill, border, thickness } if shader_plates && fill[3] < 0.0 => {
+                // The fill as its own plate batch, closed here; the stroke
+                // follows as ordinary geometry in the batch the tail makes.
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *fill));
+                let p = flat_frost_push(rect, *radii, *fill, scale, plate_light, plate_mat);
+                let end = verts.len() as u32;
+                plate_stack.clear();
+                batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end, plate: Some(p), blur_behind: true });
+                start = end;
+                blur_behind = false;
+                let cr = crate::widget::CornerRadii::new(radii.0, radii.1, radii.2, radii.3);
+                push_plate_solid_border_vertices(rect.x, rect.y, rect.width, rect.height, cr, *thickness, sw, sh, *border, no, &mut verts);
             }
             Prim::Quad { rect, color } => {
                 // Quads honor an active circle clip like circles/arcs do (the
@@ -2708,6 +2748,9 @@ pub fn tessellate_display_list(
                 }
             }
         }
+        if promoted {
+            plate_stack.clear();
+        }
         batches.push(DlBatch { scissor: item.clip, clip_rrect: item.clip_rrect, start, end, plate, blur_behind });
         if let Some(prect) = made_plate {
             plate_stack.push((batches.len() - 1, prect));
@@ -2751,6 +2794,25 @@ pub fn tessellate_display_list(
 /// exponent actually used, so a circular override (2.0) spans nothing and a
 /// half-extent radius lands on a true circle.
 #[allow(clippy::too_many_arguments)]
+/// The push block of a frosted flat fill promoted to a zero-depth plate: a
+/// mode-1 plate with no roll (`t` = 0.001, so the face is exactly the fill),
+/// circular corners at the nominal radii, and the fill's own frost recipe in
+/// `host.zw` (`Material::from_fill` decodes the sentinel).
+fn flat_frost_push(
+    rect: &crate::scene::layout::Rect,
+    radii: (f32, f32, f32, f32),
+    fill: [f32; 4],
+    scale: f32,
+    light: [f32; 3],
+    material: [f32; 4],
+) -> crate::vk::PlatePush {
+    let mut p = plate_push_raised(rect, radii, 0.0, scale, light, material, false, Some(2.0));
+    let [fz, fw] = crate::scene::material::Material::from_fill(fill).frost.pack(scale);
+    p.host[2] = fz;
+    p.host[3] = fw;
+    p
+}
+
 fn plate_push_raised(
     rect: &crate::scene::layout::Rect,
     radii: (f32, f32, f32, f32),
