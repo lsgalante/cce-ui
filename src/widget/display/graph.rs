@@ -453,11 +453,16 @@ impl Graph {
             }
         }
 
-        // Grid cells + gaps, on rounded pixel boundaries to prevent seams
+        // Grid lines, on rounded pixel boundaries to prevent seams. The
+        // CELLS are not painted: a cell is the pane's own plate showing
+        // through, so it wears the plate material exactly — tint, frost,
+        // finish — and tracks a retint for free. Only the gaps are drawn,
+        // as an overlay in the gap colour at the network opacity. (Until
+        // 2026-09-20 every cell was a tinted quad of its own over the plate,
+        // which is why the network pane never matched the params pane.)
         if self.show_network_grid && self.grid_size_x > 0.0 && self.grid_size_y > 0.0 && !self.uniform_background {
             let step_y = self.grid_size_y + self.skipped_row_h;
             let step_x = self.grid_size_x + self.skipped_col_w;
-            let cell_radius = self.cell_corner_radius();
 
             if step_y >= 4.0 && step_x >= 4.0 {
                 let ry_start = (((rect.y - self.grid_origin_y) / step_y).floor() as i32 - 1).max(-100_000);
@@ -466,6 +471,7 @@ impl Graph {
                 let cx_start = (((rect.x - self.grid_origin_x) / step_x).floor() as i32 - 1).max(-100_000);
                 let cx_end = (((rect.x + rect.width - self.grid_origin_x) / step_x).ceil() as i32 + 1).min(100_000);
 
+                let gap_rgba = [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity];
                 for r in ry_start..=ry_end {
                     let y_cell_start = (self.grid_origin_y + (r as f32) * step_y).round();
                     let y_cell_end = (self.grid_origin_y + (r as f32) * step_y + self.grid_size_y).round();
@@ -479,53 +485,13 @@ impl Graph {
                         let x_cell_end = (self.grid_origin_x + (c as f32) * step_x + self.grid_size_x).round();
                         let x2 = (self.grid_origin_x + ((c + 1) as f32) * step_x).round();
 
-                        let cell_w = x_cell_end - x_cell_start;
                         let gap_w = x2 - x_cell_end;
 
-                        // Right gap (shares cell height), bottom gap (full step width), then the
-                        // cell itself, all on identical rounded boundaries.
-                        push_clipped(
-                            x_cell_end,
-                            y_cell_start,
-                            gap_w,
-                            cell_h,
-                            [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity],
-                            &mut quads,
-                        );
-                        push_clipped(
-                            x_cell_start,
-                            y_cell_end,
-                            x2 - x_cell_start,
-                            gap_h,
-                            [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity],
-                            &mut quads,
-                        );
-                        let cell_rgba = [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity];
-                        if cell_radius >= 0.5 {
-                            // Rounded like the desktop grid's cells: each corner
-                            // that survives the pane clip wears the span-widened
-                            // superellipse arc. The notch is left unpainted on
-                            // purpose — the pane backdrop showing through reads
-                            // as the junction sinking below the cells, like the
-                            // desktop's recess-shaded rails. (A gap-colored
-                            // patch behind the corner was tried and rejected:
-                            // under a translucent cell the stacked alphas make
-                            // every junction glow brighter than its grout.)
-                            let el = x_cell_start >= min_x;
-                            let et = y_cell_start >= min_y;
-                            let er = x_cell_end <= max_x;
-                            let eb = y_cell_end <= max_y;
-                            let corners = (el && et, et && er, er && eb, eb && el);
-                            let rx1 = x_cell_start.max(min_x);
-                            let ry1 = y_cell_start.max(min_y);
-                            let rx2 = (x_cell_start + cell_w).min(max_x);
-                            let ry2 = (y_cell_start + cell_h).min(max_y);
-                            if rx2 - rx1 > 0.0 && ry2 - ry1 > 0.0 {
-                                quads.push((rx1, ry1, rx2 - rx1, ry2 - ry1, cell_rgba, Some(corners)));
-                            }
-                        } else {
-                            push_clipped(x_cell_start, y_cell_start, cell_w, cell_h, cell_rgba, &mut quads);
-                        }
+                        // Right gap (shares cell height), then bottom gap (full
+                        // step width, so it covers the junction), on identical
+                        // rounded boundaries.
+                        push_clipped(x_cell_end, y_cell_start, gap_w, cell_h, gap_rgba, &mut quads);
+                        push_clipped(x_cell_start, y_cell_end, x2 - x_cell_start, gap_h, gap_rgba, &mut quads);
                     }
                 }
             }
