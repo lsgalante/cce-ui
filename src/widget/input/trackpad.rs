@@ -103,7 +103,7 @@ impl Paint for Trackpad {
         // opening shares (`PaintCtx::canvas_well`), rounded like the text wells;
         // the fingers draw over the rim.
         let radius = crate::layout::textbox_corner_radius();
-        ctx.canvas_well(area, radius, self.recessed(), false);
+        ctx.canvas_well(area, radius, &crate::scene::Material::pane(), self.recessed(), false);
 
         // 3. Fingers
         for finger in &self.fingers {

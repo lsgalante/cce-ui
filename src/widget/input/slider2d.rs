@@ -100,7 +100,7 @@ impl Paint for Slider2D {
         // opening cut into the host's plate, rim drawn last so its shading
         // falls over the content at the edges. Rounded like the text wells.
         let radius = crate::layout::textbox_corner_radius();
-        ctx.well_floor(rect, radius, false);
+        ctx.well_floor(rect, radius, &crate::scene::Material::pane(), false);
 
         // Crosshair through the thumb — the pad's read of both axis values.
         let (cx, cy) = self.thumb_center(rect);

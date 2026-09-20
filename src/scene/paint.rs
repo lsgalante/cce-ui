@@ -1332,13 +1332,28 @@ impl PaintCtx {
     }
 
     /// A canvas well's floor — the opening you look into or draw in (a
-    /// Trackpad, a Slider2D pad, a bevel or ramp preview). It darkens the plate
-    /// it is cut from ([`crate::colors::WELL_FLOOR`]) rather than painting a
-    /// floor of its own, so every canvas sits in the one material. `lifted` is
-    /// a clickable canvas's hover cue: the floor rises toward the plate.
-    pub fn well_floor(&mut self, rect: Rect, radius: f32, lifted: bool) {
-        let tint = if lifted { crate::colors::WELL_FLOOR_LIFTED } else { crate::colors::WELL_FLOOR };
-        self.rounded_rect(rect, radius, (true, true, true, true), tint);
+    /// Trackpad, a Slider2D pad, a bevel or ramp preview) — cut into `host`,
+    /// the material of the plate it sits on (`Material::pane()` for a pane).
+    /// `lifted` is a clickable canvas's hover cue: the floor rises toward
+    /// the plate.
+    ///
+    /// An opaque host's floor is that plate darkened, drawn as the darkening
+    /// itself ([`crate::colors::WELL_FLOOR`] over whatever the plate resolved
+    /// to — exact at any plate alpha, and what every floor drew before
+    /// materials). A FROSTED host's floor is deeper glass
+    /// ([`Material::floor`]: the host's material with the tint darkened,
+    /// frost and finish carried), so a well in glass blurs and compresses
+    /// what is under it again instead of being the one opaque patch in a
+    /// frosted pane (RFC material § 11 (3)).
+    pub fn well_floor(&mut self, rect: Rect, radius: f32, host: &Material, lifted: bool) {
+        let fill = if host.frost.is_frosted() {
+            host.floor(lifted).fill(PlateRole::Nested)
+        } else if lifted {
+            crate::colors::WELL_FLOOR_LIFTED
+        } else {
+            crate::colors::WELL_FLOOR
+        };
+        self.rounded_rect(rect, radius, (true, true, true, true), fill);
     }
 
     /// A canvas well's rim, drawn AFTER the content so the wall's shading falls
@@ -1360,8 +1375,8 @@ impl PaintCtx {
     /// [`well_floor`](Self::well_floor) then [`well_rim`](Self::well_rim) in
     /// one call — a canvas whose content is drawn over the rim (a Trackpad's
     /// fingers). Content that should slide under the wall draws between the two.
-    pub fn canvas_well(&mut self, rect: Rect, radius: f32, relief: bool, lifted: bool) {
-        self.well_floor(rect, radius, lifted);
+    pub fn canvas_well(&mut self, rect: Rect, radius: f32, host: &Material, relief: bool, lifted: bool) {
+        self.well_floor(rect, radius, host, lifted);
         self.well_rim(rect, radius, relief);
     }
 

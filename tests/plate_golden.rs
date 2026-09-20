@@ -114,10 +114,12 @@ fn scene(sw: f32, sh: f32) -> cce_ui::scene::paint::DisplayList {
     pc.inset_plate(r(20.0, 290.0, 60.0, 24.0), rr, Material::face([0.2, 0.2, 0.24, 1.0]).as_ref(), 4.0);
     pc.inset_plate(r(90.0, 290.0, 60.0, 24.0), rr, Material::face([0.0; 4]).as_ref(), 4.0);
     pc.inset_plate_tinted(r(160.0, 290.0, 60.0, 24.0), rr, Material::face([0.2, 0.2, 0.24, -0.5]).as_ref(), 4.0, [1.0, 0.5, 0.2]);
-    pc.well_floor(r(230.0, 290.0, 40.0, 24.0), 6.0, false);
-    pc.well_floor(r(280.0, 290.0, 40.0, 24.0), 6.0, true);
-    pc.canvas_well(r(330.0, 290.0, 40.0, 24.0), 6.0, true, false);
-    pc.canvas_well(r(330.0, 320.0, 40.0, 24.0), 6.0, false, true);
+    let pane = Material::pane();
+    let glass = Material::opaque([0.02, 0.02, 0.03, 0.25]).with_frost(cce_ui::scene::Frost::from_style());
+    pc.well_floor(r(230.0, 290.0, 40.0, 24.0), 6.0, &pane, false);
+    pc.well_floor(r(280.0, 290.0, 40.0, 24.0), 6.0, &pane, true);
+    pc.canvas_well(r(330.0, 290.0, 40.0, 24.0), 6.0, &pane, true, false);
+    pc.canvas_well(r(330.0, 320.0, 40.0, 24.0), 6.0, &glass, false, true);
 
     // The lit ball and the water: default spec, and one with its own finish
     // and depth terms.

@@ -263,9 +263,11 @@ impl Material {
     /// The well floor cut into this plate: the same material with the tint
     /// darkened by `WELL_FLOOR`'s strength (`WELL_FLOOR_LIFTED`'s when
     /// `lifted`, the hover cue). Frost and finish carried through — a well in
-    /// glass is deeper glass (RFC § 11 (3)). Over an opaque, fully covering
-    /// plate this is the darkening overlay `PaintCtx::well_floor` draws today,
-    /// exactly; the emission switches to this in step 2.
+    /// glass is deeper glass (RFC § 11 (3)). `PaintCtx::well_floor` draws
+    /// this for a FROSTED host; an opaque host's floor stays the darkening
+    /// overlay, which is this exactly at plate alpha 1 and the honest
+    /// darkening at any other alpha (a darkened fill at the plate's own
+    /// alpha would barely darken a translucent plate).
     pub fn floor(&self, lifted: bool) -> Material {
         let overlay = if lifted { crate::color::WELL_FLOOR_LIFTED } else { crate::color::WELL_FLOOR };
         let keep = 1.0 - overlay[3];
