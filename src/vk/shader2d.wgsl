@@ -34,6 +34,10 @@ struct WindowInfo {
     // (p_light.w) they become the slope scale, so a pinned 0.5 mm drop is
     // the same geometry whatever wall it is cut with.
     relief_meta: vec4f,
+    // x = how hard a frosted plate pulls its backdrop's luminance toward its
+    // own key (0 = untouched, 1 = flat). See `resolve_blur`. Appended last so
+    // the established offsets above keep their indices.
+    backdrop_meta: vec4f,
 }
 
 @group(0) @binding(2) var<uniform> window_info: WindowInfo;
@@ -970,6 +974,33 @@ fn resolve_blur(pos: vec2f, color: vec4f) -> vec4f {
 
     let backdrop_color = blurred / total_weight;
     let opacity = -color.a;
-    let plate_color = vec4f(color.rgb, 1.0);
-    return mix(backdrop_color, plate_color, opacity);
+
+    // Luminance-range compression, the plate's legibility control.
+    //
+    // The blur above destroys the backdrop's spatial DETAIL and preserves its
+    // mean LUMINANCE — and text contrast is a mean-luminance property, so on
+    // its own the mix below hands the backdrop's brightness straight through
+    // at (1 - opacity). At the designer dialog's 0.25 that is 75% of whatever
+    // is behind it: over the dark viewport a row label runs ~12:1, over
+    // something bright ~1.2:1, which is not a contrast ratio so much as its
+    // absence. No amount of extra blur moves either number.
+    //
+    // So remap the backdrop's luminance toward the plate's own key, keeping
+    // its chromaticity. This is not "darken" and not opacity: it is
+    // SYMMETRIC, pulling a bright backdrop down and a dark one UP, so what it
+    // removes is the plate's swing through the ink's luminance rather than
+    // the view through it. Hue, chroma and movement all still read.
+    let k = clamp(window_info.backdrop_meta.x, 0.0, 1.0);
+    let W = vec3f(0.2126, 0.7152, 0.0722);
+    let bl = dot(backdrop_color.rgb, W);
+    let key = dot(color.rgb, W);
+    // `target` is a WGSL reserved word.
+    let keyed = mix(bl, key, k);
+    // Scaling by keyed/bl holds chromaticity exactly, but near black the
+    // ratio explodes (and a lift past 1 would clip a channel), so cross-fade
+    // to the neutral luminance over the bottom of the range instead.
+    let scaled = backdrop_color.rgb * (keyed / max(bl, 1e-4));
+    let compressed = mix(vec3f(keyed), scaled, smoothstep(0.0, 0.05, bl));
+
+    return vec4f(mix(compressed, color.rgb, opacity), 1.0);
 }

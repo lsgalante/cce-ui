@@ -132,7 +132,10 @@ const PLATE_FEATURE_BYTES: usize = 48;
 /// shader2d's WindowInfo UBO: [size/clip vec4][bevel-profile meta vec4]
 /// [8 vec4 of profile slope samples].
 // [size/clip vec4][carve profile meta + 8 vec4][roll profile meta + 8 vec4].
-const WINDOW_INFO_BYTES: vk::DeviceSize = 320;
+// [size/clip vec4][carve profile meta][8 carve slopes][roll profile meta]
+// [8 roll slopes][relief heights][backdrop meta] = 21 vec4. Grows only at the
+// END — every offset above is addressed by index from both sides.
+const WINDOW_INFO_BYTES: vk::DeviceSize = 336;
 
 pub(crate) struct AllocatedBuffer {
     pub(crate) buffer: vk::Buffer,
@@ -256,6 +259,7 @@ pub struct VkRenderer {
     /// last uploaded in WindowInfo — compared each frame, since editors set
     /// them straight into the style registry with no generation counter.
     relief_uploaded: (f32, f32),
+    compression_uploaded: f32,
     /// Same for the edge (roll) profile LUT.
     roll_profile_gen: u64,
     plate_features: AllocatedBuffer,
@@ -872,6 +876,7 @@ impl VkRenderer {
             window_info,
             profile_gen: 0,
             relief_uploaded: (0.0, 0.0),
+            compression_uploaded: 0.0,
             roll_profile_gen: 0,
             plate_features,
             frames,
@@ -908,6 +913,13 @@ impl VkRenderer {
         (self.corner_radius_px * crate::layout::corner_span_factor()).min(cap)
     }
 
+    /// How hard a frosted plate compresses its backdrop's luminance toward
+    /// its own key — the plate's legibility control, tracked for re-upload
+    /// like the relief heights because it is live-editable config.
+    fn backdrop_compression(&self) -> f32 {
+        crate::color::plate_backdrop_compression()
+    }
+
     /// The pinned relief heights in physical px, 0 = follow the width.
     fn relief_px(&self) -> (f32, f32) {
         let s = crate::scale::scale_factor().max(0.001);
@@ -920,7 +932,8 @@ impl VkRenderer {
     fn write_window_info(&mut self) {
         // [size/clip vec4][carve profile meta vec4][8 vec4 carve slopes]
         // [roll profile meta vec4][8 vec4 roll slopes][relief heights vec4]
-        // — must stay in lockstep with shader2d's WindowInfo.
+        // [backdrop meta vec4] — must stay in lockstep with shader2d's
+        // WindowInfo.
         let mut data = [0.0f32; WINDOW_INFO_BYTES as usize / 4];
         data[0] = self.extent.width as f32;
         data[1] = self.extent.height as f32;
@@ -940,6 +953,9 @@ impl VkRenderer {
         data[76] = relief.0;
         data[77] = relief.1;
         self.relief_uploaded = relief;
+        let compression = self.backdrop_compression();
+        data[80] = compression;
+        self.compression_uploaded = compression;
         self.profile_gen = crate::layout::bevel_profile_generation();
         self.roll_profile_gen = crate::layout::roll_profile_generation();
         if let Some(allocation) = self.window_info.allocation.as_mut() {
@@ -1563,6 +1579,7 @@ impl VkRenderer {
             if self.profile_gen != crate::layout::bevel_profile_generation()
                 || self.roll_profile_gen != crate::layout::roll_profile_generation()
                 || self.relief_uploaded != self.relief_px()
+                || self.compression_uploaded != self.backdrop_compression()
             {
                 self.write_window_info();
             }
@@ -2139,5 +2156,59 @@ mod tests {
     #[test]
     fn scene3d_compiles() {
         assert!(!super::scene3d_spirv().is_empty());
+    }
+
+    /// `WINDOW_INFO_BYTES` sizes the uniform buffer AND its descriptor range,
+    /// and `write_window_info` addresses it by float index — all three have to
+    /// agree with shader2d's `WindowInfo` struct, and nothing but a comment
+    /// said so. A field appended to the WGSL without growing the const writes
+    /// the new value past the end of the buffer, which is a validation error
+    /// on a good day and a garbage uniform on a bad one.
+    ///
+    /// Reads the struct out of the shader source rather than duplicating its
+    /// shape here, so it measures the thing it is guarding.
+    #[test]
+    fn window_info_layout_matches_the_uniform_size() {
+        let src = include_str!("shader2d.wgsl");
+        let body = src
+            .split_once("struct WindowInfo {")
+            .expect("WindowInfo moved; this test scans for it")
+            .1
+            .split_once("\n}")
+            .expect("unterminated WindowInfo")
+            .0;
+
+        let mut floats = 0usize;
+        for line in body.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("//") {
+                continue;
+            }
+            let ty = line.split_once(':').expect("field: type").1.trim().trim_end_matches(',');
+            floats += match ty {
+                "f32" => 1,
+                "vec2<f32>" | "vec2f" => 2,
+                "vec4<f32>" | "vec4f" => 4,
+                // std140-ish: an array of vec4 is its element count x 4.
+                t if t.starts_with("array<vec4f,") => {
+                    let n: usize = t
+                        .trim_start_matches("array<vec4f,")
+                        .trim_end_matches('>')
+                        .trim()
+                        .parse()
+                        .expect("array length");
+                    n * 4
+                }
+                other => panic!("WindowInfo field type {other} is not in this test's size table"),
+            };
+        }
+
+        assert_eq!(
+            floats * 4,
+            super::WINDOW_INFO_BYTES as usize,
+            "WindowInfo is {floats} floats ({} bytes); WINDOW_INFO_BYTES says {}",
+            floats * 4,
+            super::WINDOW_INFO_BYTES,
+        );
     }
 }

@@ -645,6 +645,12 @@ fn parse_and_set_colors(content: &str) {
     if let Some(c) = get_color("/style/surface/param/color") {
         if let Ok(mut lock) = PARAM_BG_COLOR.write() { *lock = c; }
     }
+    if let Some(c) = val
+        .pointer("/style/surface/plate/backdrop_compression")
+        .and_then(|v| v.as_f64())
+    {
+        if let Ok(mut lock) = PLATE_BACKDROP_COMPRESSION.write() { *lock = (c as f32).clamp(0.0, 1.0); }
+    }
     if let Some(blur) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_bool()) {
         if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur; }
     } else if let Some(blur_val) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_f64()) {
@@ -1700,6 +1706,30 @@ pub fn set_plate_bevel_width(t: f32) {
     style_write(&PLATE_BEVEL_WIDTH, t);
 }
 
+/// How hard a frosted plate pulls its backdrop's LUMINANCE toward its own key
+/// before tinting: 0 = the backdrop passes through untouched, 1 = flat.
+///
+/// This is the plate's legibility control, and it is NOT opacity. Blur
+/// destroys a backdrop's spatial detail but preserves its mean luminance, and
+/// text contrast is a mean-luminance property — so a frosted plate over
+/// something bright washes out however hard it is blurred, which is the whole
+/// of the "liquid glass" legibility problem. Compression remaps the backdrop's
+/// luminance toward the plate's own, symmetrically: a bright backdrop comes
+/// down and a DARK one comes up, so the plate stops swinging through the ink's
+/// luminance while its hue, chroma and movement still read.
+///
+/// Default 0.0 — the behavior every existing config already has.
+static PLATE_BACKDROP_COMPRESSION: RwLock<f32> = RwLock::new(0.0);
+
+pub fn plate_backdrop_compression() -> f32 {
+    load_colors_once();
+    style_read(&PLATE_BACKDROP_COMPRESSION)
+}
+
+pub fn set_plate_backdrop_compression(c: f32) {
+    style_write(&PLATE_BACKDROP_COMPRESSION, c.clamp(0.0, 1.0));
+}
+
 static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
 
 pub fn plate_blur() -> bool {
@@ -1873,6 +1903,27 @@ mod color_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The plate's backdrop compression defaults OFF and clamps.
+    ///
+    /// Off is load-bearing: it is the behaviour every config already in the
+    /// wild has, and a toolkit-wide default that changed how every frosted
+    /// surface in the DE looks would arrive unannounced in eighteen apps.
+    /// Opting in is a per-app `style.surface.plate.backdrop_compression`.
+    #[test]
+    fn backdrop_compression_defaults_off_and_clamps() {
+        assert_eq!(plate_backdrop_compression(), 0.0, "off unless a config asks");
+
+        set_plate_backdrop_compression(0.85);
+        assert_eq!(plate_backdrop_compression(), 0.85);
+
+        // The shader clamps too, but a nonsense config value should not be
+        // able to reach it and make the plate flat or inverted.
+        set_plate_backdrop_compression(4.0);
+        assert_eq!(plate_backdrop_compression(), 1.0);
+        set_plate_backdrop_compression(-1.0);
+        assert_eq!(plate_backdrop_compression(), 0.0);
+    }
 
     /// A colour pinned by one test is invisible to a test beside it.
     ///

@@ -282,6 +282,30 @@ What this buys, and where the code is heading:
   the textbox) falls back to it when the widget's own `corner_radius` key is
   unset, so a per-widget key is an override, not a requirement. Do not give a
   new control-scale radius getter a literal default; fall back to the rung.
+- **A frosted plate's legibility is `backdrop_compression`, not opacity.**
+  Blur destroys a backdrop's spatial DETAIL and preserves its mean LUMINANCE,
+  and text contrast is a mean-luminance property — so `resolve_blur`'s closing
+  `mix(backdrop, plate, opacity)` hands the backdrop's brightness through at
+  `1 - opacity` whatever the kernel does. At the designer dialog's 0.25 that is
+  75% of whatever is behind it. Measured on a row label (`#ccccd4`) over the
+  designer's Alt+D plate: **1.20:1 over a white viewport, 6.18:1 over the dark
+  one** — a 5x swing, the bright end of it not a contrast ratio so much as its
+  absence. More blur moves neither number, which is the whole of the "liquid
+  glass" legibility problem, and why refraction and specular cannot help: they
+  are shape cues, and legibility is a luminance budget.
+
+  `style.surface.plate.backdrop_compression` (0..1, `color::plate_backdrop_
+  compression`, **default 0** — every existing config keeps today's look)
+  remaps the blurred backdrop's luminance toward the plate's own key before
+  the tint, holding its chromaticity. It is not opacity and not "darken": it
+  is SYMMETRIC, pulling a bright backdrop down and a dark one UP, so both ends
+  converge on the plate's key. The same measurement at 0.85: **4.24:1 and
+  4.33:1** — the contrast stops depending on what is behind the window, which
+  is the actual goal. Hue, chroma and movement still read through it.
+
+  Raising it past ~0.9 flattens the view through the glass without buying much
+  more contrast; the convergence point is set by the plate's tint and opacity,
+  so if both ends need to clear 4.5:1 that is the tint to change, not this.
 
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 
