@@ -9,10 +9,12 @@ pub mod anim;
 pub mod arena;
 pub mod heightfield;
 pub mod layout;
+pub mod material;
 pub mod paint;
 pub mod painter;
 pub mod relief_shade;
 pub mod tree;
 
 pub use arena::{Arena, Node, NodeId};
+pub use material::{Finish, Frost, Material, PlateRole};
 pub use tree::WidgetTree;

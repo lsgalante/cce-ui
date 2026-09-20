@@ -380,7 +380,12 @@ material carries the default and no pixel moves.
 Each step's exit test is named. Steps 1–2 must be **prim-identical** against a display-list
 dump of every client's default view — the technique the `ControlPlate` migration used.
 
-**Step 1 — the type, the rename, the encoding.**
+**Step 1 — the type, the rename, the encoding.** *DONE 2026-09-20.* As specified, plus
+one thing found on the way: five plate getters (`plate_blur` among them) read their
+`RwLock` directly and so could not see a test's per-thread write; they go through
+`style_read` now. `Finish` lives in `material.rs`; `relief_shade` re-exports it and
+keeps the `Material` alias. `Frost::Frosted` already carries `radius` at
+`DEFAULT_RADIUS`, unread until step 3.
 - Add `scene/material.rs`: `Material`, `Frost`, `Finish` (= `relief_shade::Material`
   moved and renamed; `relief_shade` keeps a `pub use` so `cce-relief`, `vk/rt.rs`,
   `cce-designer/geometry.rs` and `vk_smoke.rs` need no edit until they choose to).

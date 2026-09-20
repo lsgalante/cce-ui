@@ -1837,7 +1837,7 @@ pub fn tessellate_display_list(
     // kept near the raised path's crest amplitude: the recess shoulder's
     // brightening lands on the same pixels as its specular line, and the two
     // stack — at 0.5 the step read several times hotter than a plate roll.
-    let plate_mat = crate::scene::relief_shade::Material::from_style().to_array();
+    let plate_mat = crate::scene::material::Finish::from_style().to_array();
 
     for item in &dl.items {
         let start = verts.len() as u32;

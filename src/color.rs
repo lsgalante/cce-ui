@@ -896,18 +896,15 @@ pub fn set_param_bg_color(color: [f32; 4]) {
     style_write(&PARAM_BG_COLOR, color);
 }
 
-/// The params plate's final fill as the renderer consumes it: the tint scaled
-/// by the global plate opacity, alpha negated as the blur-behind marker when
-/// plate blur is on. The single source both `ParametersBg`'s own plate and any
-/// surface that wants to match it (the designer's node bodies) draw from, so
-/// they track a live retint / opacity / blur toggle together.
+/// The params plate's final fill as the renderer consumes it: the pane rung's
+/// material ([`crate::scene::Material::pane`] — the tint at the global plate
+/// opacity, frosted under plate blur) encoded for a nested plate. The single
+/// source both `ParametersBg`'s own plate and any surface that wants to match
+/// it (the designer's node bodies) draw from, so they track a live retint /
+/// opacity / blur toggle together.
 pub fn param_plate_fill() -> [f32; 4] {
-    let mut c = param_bg_color();
-    c[3] *= crate::layout::plate_opacity();
-    if plate_blur() {
-        c[3] = -c[3].abs();
-    }
-    c
+    use crate::scene::material::{Material, PlateRole};
+    Material::pane().fill(PlateRole::Nested)
 }
 
 pub const PANEL_MENU_BG: [f32; 4] = [0.08, 0.08, 0.12, 1.0];
@@ -1663,10 +1660,7 @@ static PLATE_BEVEL_WIDTH: RwLock<f32> = RwLock::new(6.0);
 
 pub fn plate_color() -> Option<[f32; 4]> {
     load_colors_once();
-    if let Ok(lock) = PLATE_COLOR.read() {
-        return *lock;
-    }
-    None
+    style_read(&PLATE_COLOR)
 }
 
 pub fn set_plate_color(c: Option<[f32; 4]>) {
@@ -1675,10 +1669,7 @@ pub fn set_plate_color(c: Option<[f32; 4]>) {
 
 pub fn plate_border_color() -> Option<[f32; 4]> {
     load_colors_once();
-    if let Ok(lock) = PLATE_BORDER_COLOR.read() {
-        return *lock;
-    }
-    None
+    style_read(&PLATE_BORDER_COLOR)
 }
 
 pub fn set_plate_border_color(c: Option<[f32; 4]>) {
@@ -1687,10 +1678,7 @@ pub fn set_plate_border_color(c: Option<[f32; 4]>) {
 
 pub fn plate_border_thickness() -> f32 {
     load_colors_once();
-    if let Ok(lock) = PLATE_BORDER_THICKNESS.read() {
-        return *lock;
-    }
-    1.0
+    style_read(&PLATE_BORDER_THICKNESS)
 }
 
 pub fn set_plate_border_thickness(t: f32) {
@@ -1699,10 +1687,7 @@ pub fn set_plate_border_thickness(t: f32) {
 
 pub fn plate_bevel_width() -> f32 {
     load_colors_once();
-    if let Ok(lock) = PLATE_BEVEL_WIDTH.read() {
-        return *lock;
-    }
-    6.0
+    style_read(&PLATE_BEVEL_WIDTH)
 }
 
 pub fn set_plate_bevel_width(t: f32) {
@@ -1758,12 +1743,38 @@ pub fn set_plate_refraction(r: f32) {
 
 static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
 
+/// The finish's three fixed terms — specular strength, shininess exponent,
+/// curvature/AO strength — as `scene::material::Finish::from_style` reads
+/// them. Until 2026-09-20 these were literals in the finish constructor
+/// (0.4 / 24 / 0.2); the getters exist so the DE's plastic can be edited and
+/// so a named material (RFC material, step 4) has somewhere to land. No config
+/// path yet: the defaults ARE the shipped look.
+static FINISH_SPEC: RwLock<f32> = RwLock::new(0.4);
+static FINISH_SHININESS: RwLock<f32> = RwLock::new(24.0);
+static FINISH_CURVATURE: RwLock<f32> = RwLock::new(0.2);
+
+pub fn finish_spec() -> f32 {
+    style_read(&FINISH_SPEC)
+}
+pub fn set_finish_spec(v: f32) {
+    style_write(&FINISH_SPEC, v.max(0.0));
+}
+pub fn finish_shininess() -> f32 {
+    style_read(&FINISH_SHININESS)
+}
+pub fn set_finish_shininess(v: f32) {
+    style_write(&FINISH_SHININESS, v.max(1.0));
+}
+pub fn finish_curvature() -> f32 {
+    style_read(&FINISH_CURVATURE)
+}
+pub fn set_finish_curvature(v: f32) {
+    style_write(&FINISH_CURVATURE, v.max(0.0));
+}
+
 pub fn plate_blur() -> bool {
     load_colors_once();
-    if let Ok(lock) = PLATE_BLUR.read() {
-        return *lock;
-    }
-    false
+    style_read(&PLATE_BLUR)
 }
 
 pub fn set_plate_blur(b: bool) {

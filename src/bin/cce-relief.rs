@@ -709,7 +709,7 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
     {
         let walls = shape.walls();
         let light = relief_shade::light_vector();
-        let mat = relief_shade::Material::from_style();
+        let mat = cce_ui::scene::material::Finish::from_style();
         // Follow the knobs ONLY when a custom profile is actually installed.
         // Until one is, the shader runs its analytic branch, and predicting
         // from the knob curve instead quietly disagrees with it. The carve case

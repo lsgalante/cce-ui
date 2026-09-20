@@ -18,6 +18,7 @@
 //! follow-ups.
 
 use crate::scene::layout::Rect;
+use crate::scene::material::{Frost, Material, PlateRole};
 
 /// End-cap style for a [`Prim::Vector`], mirroring the toolkit's line caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,17 +108,18 @@ impl PlateSpec {
         self
     }
 
+    /// The frost regime this plate is under: [`PlateRole::Root`] when it IS
+    /// the window's base surface, [`PlateRole::Nested`] otherwise.
+    pub fn role(&self) -> PlateRole {
+        if self.is_root() { PlateRole::Root } else { PlateRole::Nested }
+    }
+
     /// The fill with the role-correct frost encoding: root → alpha forced
     /// non-negative (the compositor's frost, not ours), nested + `blur` →
-    /// the in-app frost pass's negative-alpha sentinel.
+    /// the in-app frost pass's negative-alpha sentinel. The rule itself is
+    /// [`Material::fill_tint`], the one place a negative alpha is written.
     pub fn fill(&self) -> [f32; 4] {
-        let mut c = self.color;
-        if self.is_root() {
-            c[3] = c[3].abs();
-        } else if self.blur {
-            c[3] = -c[3].abs();
-        }
-        c
+        Material::fill_tint(self.color, Frost::from_flag(self.blur), self.role())
     }
 }
 
@@ -239,11 +241,10 @@ impl ControlPlate {
     /// relief's shading and read as a second material); a transparent one
     /// leaves the surface below as the face (edges only).
     pub fn face_from_fill(raw: [f32; 4]) -> [f32; 4] {
-        if raw[3] > 0.001 {
-            [raw[0], raw[1], raw[2], 1.0]
-        } else {
-            [0.0; 4]
-        }
+        // The rule lives on the material (`Material::control_face`); this is
+        // its `[f32; 4]` spelling until step 2 gives `ControlPlate` a
+        // `face: Option<Material>`.
+        Material::control_face(raw).map_or([0.0; 4], |m| m.tint)
     }
 }
 

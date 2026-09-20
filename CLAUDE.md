@@ -250,6 +250,14 @@ What this buys, and where the code is heading:
   and RangeSlider (one stop, two ends: arrows step the focused end, Up / Down
   switch ends) are wells. A new focusable widget declares its role and handles `FocusIn`
   / `FocusOut`.
+- **What a plate is made of is a `scene::Material`** — tint, `Frost` (opaque, or
+  frosted with compression / refraction / radius) and `Finish` (how it answers the
+  light: the old `relief_shade::Material`). `docs/rfc-material.md` is the design and
+  its phase tracker. `Material::fill_tint` is the ONE place the blur-behind sentinel
+  (a negative alpha) is written; `PlateSpec::fill` and `param_plate_fill` call it.
+  Rung defaults: `Material::root()` / `pane()` / `control()`; a well floor is
+  `host.floor(lifted)`. Step 1 only — the rungs still carry `color` + `blur` until
+  step 2 threads the type through.
 - **One plate spec per rung, not five copies.** The root and pane rungs are
   `scene::paint::PlateSpec` (RFC 7b, painted by `PaintCtx::plate`). The
   control rung is `scene::paint::ControlPlate` (re-exported from `widget`):
@@ -484,11 +492,11 @@ roll's rise) are all lengths — `height=(mm)0.3` is honest geometry, resolved
 through the metric. Unset, a carve drops `relief_shade::RECESS_DEPTH` (0.6) of
 its wall (saturating at the DE roll width) and the roll is a quarter-round of
 radius width — the look every config had. `style.surface.relief.depth` is NOT a
-length: it is the light strength (`bevel_depth` → `Material.strength`), and
+length: it is the light strength (`bevel_depth` → `Finish.strength`), and
 **`light`** is its honest alias. `layout::carve_depth_px` states the drop rule
 once for the tessellator's CSG features and, through `WindowInfo.relief_meta`,
 the shader's free carves; `carve_depth_ratio` / `roll_height_ratio` feed the
-shading twin (`Material.carve_depth` / `roll_height`). A `(relief)` value
+shading twin (`Finish.carve_depth` / `roll_height`). A `(relief)` value
 carries the drop as `h=` (a length: `h=0.5mm`, or bare px) beside `w=` and
 `d=` (light; `l=` reads as an alias). `cce-relief`'s Height knob is the editor:
 its section's depth numbers read in mm when the metric is real, and Save

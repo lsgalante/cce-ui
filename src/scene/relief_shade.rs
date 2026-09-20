@@ -12,10 +12,17 @@
 //! the single most common thing you go to the editor to judge.
 //!
 //! **Drift is the hazard**, since WGSL and Rust cannot share a function body.
-//! Two defences: the light vector and material live HERE and the renderer
-//! reads them from here (`window_runner`'s `plate_light`/`plate_mat`), and the
-//! constants below are checked against the shader's own source text by a unit
-//! test. Anything that is only a comment away from disagreeing is not shared.
+//! Two defences: the light vector lives HERE and the finish in
+//! [`crate::scene::material`], and the renderer reads both from there
+//! (`window_runner`'s `plate_light`/`plate_mat`); and the constants below are
+//! checked against the shader's own source text by a unit test. Anything that
+//! is only a comment away from disagreeing is not shared.
+
+/// The finish — how a surface answers light — moved to `scene::material` as
+/// [`Finish`] (RFC material, § 11 (4)). `Material` survives here as an alias
+/// through step 2 so out-of-crate readers build untouched.
+pub use crate::scene::material::Finish;
+pub use crate::scene::material::Finish as Material;
 
 /// Ambient floor of the plate lighting model. Mirrors `PLATE_AMBIENT`.
 pub const PLATE_AMBIENT: f32 = 0.55;
@@ -40,46 +47,9 @@ pub enum CarveMode {
     Trough,
 }
 
-/// The plastic material: `[shading strength, specular strength, shininess,
-/// curvature/AO strength]` as carried in `PlatePush::mat`.
-#[derive(Clone, Copy, Debug)]
-pub struct Material {
-    pub strength: f32,
-    pub spec: f32,
-    pub shininess: f32,
-    pub curvature: f32,
-    /// A carve's drop over its run (`layout::carve_depth_ratio`): the
-    /// geometry the slopes are scaled by. [`RECESS_DEPTH`] unless a height is
-    /// pinned. Not in `to_array` — the shader reads it from `WindowInfo`.
-    pub carve_depth: f32,
-    /// The plate roll's rise over its run (`layout::roll_height_ratio`):
-    /// 1 for the quarter-round.
-    pub roll_height: f32,
-}
-
-impl Material {
-    /// The DE's material, strength tracking `bevel_depth` against the default.
-    /// This is the ONE definition — the renderer's push constants come from
-    /// here too.
-    pub fn from_style() -> Self {
-        Self {
-            strength: crate::layout::bevel_depth() / 0.15,
-            spec: 0.4,
-            shininess: 24.0,
-            curvature: 0.2,
-            carve_depth: crate::layout::carve_depth_ratio(),
-            roll_height: crate::layout::roll_height_ratio(),
-        }
-    }
-
-    pub fn to_array(self) -> [f32; 4] {
-        [self.strength, self.spec, self.shininess, self.curvature]
-    }
-}
-
 /// The DE's light as a unit vector in screen space (+z out of the screen), at
 /// the fixed 45° elevation the renderer uses. The ONE definition, as with
-/// [`Material::from_style`].
+/// [`Finish::from_style`].
 pub fn light_vector() -> [f32; 3] {
     let az = crate::layout::light_source_position();
     let el = std::f32::consts::FRAC_PI_4;
@@ -106,7 +76,7 @@ pub fn analytic_carve_slope(v: f32) -> f32 {
 }
 
 /// Specular term of a tilted surface under the DE light. Mirrors `roll_spec`.
-pub fn roll_spec(sv: [f32; 2], light: [f32; 3], mat: &Material) -> f32 {
+pub fn roll_spec(sv: [f32; 2], light: [f32; 3], mat: &Finish) -> f32 {
     let m = (sv[0] * sv[0] + sv[1] * sv[1]).sqrt();
     if m < 1e-5 {
         return 0.0;
@@ -142,7 +112,7 @@ pub fn carve_shade(
     facing: [f32; 2],
     slope_at: &dyn Fn(f32) -> f32,
     light: [f32; 3],
-    mat: &Material,
+    mat: &Finish,
 ) -> f32 {
     let u = u.clamp(0.0, 1.0);
     let (slope, curv) = match mode {
@@ -207,7 +177,7 @@ pub fn plate_surface(
     facing: [f32; 2],
     roll_slope_at: &dyn Fn(f32) -> f32,
     light: [f32; 3],
-    mat: &Material,
+    mat: &Finish,
 ) -> Option<[f32; 3]> {
     if !(0.0..=1.0).contains(&f) {
         return None;
@@ -279,7 +249,7 @@ mod tests {
     #[test]
     fn plate_face_is_untouched() {
         let light = light_vector();
-        let mat = Material::from_style();
+        let mat = Finish::from_style();
         let base = [0.3f32, 0.4, 0.5];
         let out = plate_surface(base, 0.0, [-1.0, 0.0], &analytic_roll_slope, light, &mat).unwrap();
         for i in 0..3 {
@@ -293,7 +263,7 @@ mod tests {
     #[test]
     fn flat_ground_shades_to_zero() {
         let light = light_vector();
-        let mat = Material::from_style();
+        let mat = Finish::from_style();
         for mode in [CarveMode::Recess, CarveMode::Boss, CarveMode::Ridge, CarveMode::Trough] {
             for u in [0.0f32, 1.0] {
                 let v = carve_shade(mode, u, [-1.0, 0.0], &analytic_carve_slope, light, &mat);
@@ -307,9 +277,9 @@ mod tests {
     #[test]
     fn deeper_carve_shades_harder() {
         let light = light_vector();
-        let shallow = Material { carve_depth: 0.3, ..Material::from_style() };
-        let deep = Material { carve_depth: 1.2, ..Material::from_style() };
-        let at = |m: &Material| carve_shade(CarveMode::Recess, 0.5, [-1.0, 0.0], &analytic_carve_slope, light, m).abs();
+        let shallow = Finish { carve_depth: 0.3, ..Finish::from_style() };
+        let deep = Finish { carve_depth: 1.2, ..Finish::from_style() };
+        let at = |m: &Finish| carve_shade(CarveMode::Recess, 0.5, [-1.0, 0.0], &analytic_carve_slope, light, m).abs();
         assert!(at(&deep) > at(&shallow) * 1.5, "deep {} vs shallow {}", at(&deep), at(&shallow));
         // And the flat plateaus still composite to nothing.
         assert!(carve_shade(CarveMode::Recess, 0.0, [-1.0, 0.0], &analytic_carve_slope, light, &deep).abs() < 1e-4);
@@ -327,7 +297,7 @@ mod tests {
     #[test]
     fn ridge_and_trough_oppose_where_the_wall_is_steep() {
         let light = light_vector();
-        let mat = Material::from_style();
+        let mat = Finish::from_style();
         let sample = |m: CarveMode, u: f32| {
             carve_shade(m, u, [-1.0, 0.0], &analytic_carve_slope, light, &mat)
         };
