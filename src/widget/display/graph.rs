@@ -409,7 +409,14 @@ impl Graph {
         // Half the narrower rail, the same clamp the desktop grid applies.
         let run = (self.skipped_col_w.min(self.skipped_row_h) * 0.5).max(1.0);
 
-        if self.show_network_grid && !self.uniform_background && step_x >= 4.0 && step_y >= 4.0 {
+        // Gated on the grid's visibility ONLY — not on `uniform_background`,
+        // which describes the widget's own background fill (cell colour over
+        // the whole rect vs the near-clear one) and has nothing to say about
+        // relief. The old cell/gap quads were gated on both, and the designer
+        // hard-codes uniform_background = true, so its network grid was never
+        // drawn at all — found 2026-09-20 by counting lattice prims in the
+        // tessellated frame under CCE_PLATE_DEBUG.
+        if self.show_network_grid && step_x >= 4.0 && step_y >= 4.0 {
             pc.lattice(
                 rect,
                 (step_x, step_y),
