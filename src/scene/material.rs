@@ -182,6 +182,29 @@ impl Material {
         Self::opaque(crate::color::button_background_color())
     }
 
+    /// The legacy bridge: a fill as the renderer consumed it before this
+    /// type existed. A negative alpha is the frost sentinel — `Frosted` at
+    /// the DE recipe, tint alpha `|a|`; otherwise `Opaque` with the colour
+    /// as is. `from_fill(c).fill(Nested) == c` for every `c` a caller could
+    /// hand the old API. For a call site that holds an encoded colour; a
+    /// site that knows what it means says `Material::opaque` / `with_frost`.
+    pub fn from_fill(encoded: [f32; 4]) -> Self {
+        let a = encoded[3];
+        let m = Self::opaque([encoded[0], encoded[1], encoded[2], a.abs()]);
+        if a < 0.0 { m.with_frost(Frost::from_style()) } else { m }
+    }
+
+    /// This material as a plate in `role` carries it: a root plate's frost
+    /// is the COMPOSITOR's, so under [`PlateRole::Root`] the client-side
+    /// material is opaque — the prim a `PlateSpec` emits carries this, and
+    /// the tessellator encodes every prim as nested.
+    pub fn for_role(&self, role: PlateRole) -> Self {
+        match role {
+            PlateRole::Root => Material { frost: Frost::Opaque, ..*self },
+            PlateRole::Nested => *self,
+        }
+    }
+
     // ---- derived materials -------------------------------------------------
 
     /// The well floor cut into this plate: the same material with the tint
@@ -327,6 +350,22 @@ mod tests {
         assert_eq!(f.finish, m.finish);
         assert!(m.floor(true).tint[0] > f.tint[0], "lifted rises toward the plate");
         assert_eq!(m.flat_control(), m);
+    }
+
+    /// The legacy bridge round-trips every fill the old API accepted, and
+    /// the role resolution agrees with the encoding function.
+    #[test]
+    fn from_fill_round_trips_and_for_role_matches_fill() {
+        for c in [[0.1, 0.2, 0.3, 0.8], [0.1, 0.2, 0.3, -0.8], [0.0; 4], [0.5, 0.5, 0.5, 1.0]] {
+            let m = Material::from_fill(c);
+            assert_eq!(m.fill(PlateRole::Nested), c, "{c:?}");
+            assert_eq!(m.frost.is_frosted(), c[3] < 0.0);
+            assert!(m.tint[3] >= 0.0, "tint alpha is never negative");
+            for role in [PlateRole::Root, PlateRole::Nested] {
+                assert_eq!(m.for_role(role).fill(PlateRole::Nested), m.fill(role), "{c:?} {role:?}");
+            }
+        }
+        assert_eq!(Material::from_fill([0.0, 0.0, 0.0, -0.5]).frost, Frost::from_style());
     }
 
     /// The control-face rule: opaque or nothing.

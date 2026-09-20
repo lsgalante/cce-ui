@@ -409,7 +409,7 @@ pub trait WidgetHost {
             let cr = self.corner_radii();
             let radii = (cr.top_left, cr.top_right, cr.bottom_right, cr.bottom_left);
             if let Some(depth) = self.plate_bevel() {
-                ctx.bevel(rect, radii, color, depth);
+                ctx.bevel(rect, radii, &crate::scene::material::Material::from_fill(color), depth);
             } else if let Some((border_color, thickness)) = self.solid_border() {
                 ctx.border(rect, radii, color, border_color, thickness);
             } else if color[3].abs() > 0.001 {

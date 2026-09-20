@@ -18,7 +18,7 @@
 //! follow-ups.
 
 use crate::scene::layout::Rect;
-use crate::scene::material::{Material, PlateRole};
+use crate::scene::material::{Finish, Material, PlateRole};
 
 /// End-cap style for a [`Prim::Vector`], mirroring the toolkit's line caps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -414,6 +414,18 @@ impl DropletSpec {
     }
 }
 
+impl DropletSpec {
+    /// The drop's finish: its own gleam, shine and rim in the specular,
+    /// shininess and curvature slots of a [`Finish`] (a drop is wetter than
+    /// the DE's plates), the shading strength the DE's. The material a
+    /// droplet is emitted with carries this — `Material::from_fill(c)
+    /// .with_finish(spec.finish())` — and the tessellator reads it from
+    /// there like any plate's, instead of packing the slots by hand.
+    pub fn finish(&self) -> Finish {
+        Finish { spec: self.gleam, shininess: self.shine, curvature: self.rim, ..Finish::from_style() }
+    }
+}
+
 impl Default for DropletSpec {
     fn default() -> Self {
         // The oval dewdrop: no belly, no sag — one continuous curve from a
@@ -458,7 +470,7 @@ pub enum Prim {
     /// highlight color to mark the plate (the focused-pane treatment) without a
     /// separate border ring. Shader-plates path only; the legacy banded
     /// tessellation ignores it.
-    Bevel { rect: Rect, radii: Radii, color: [f32; 4], depth: f32, tint: [f32; 3] },
+    Bevel { rect: Rect, radii: Radii, material: Material, depth: f32, tint: [f32; 3] },
     /// A recess carved into whatever is already painted underneath — the inverse of
     /// `Bevel`. Emits ONLY the shaded edges, never a fill, so the surface below shows
     /// through the middle: a relief cut into the root plate rather than a plate laid on
@@ -528,7 +540,7 @@ pub enum Prim {
     /// for this one plate — `Some(2.0)` is circular arcs, so a plate whose
     /// radii reach its half-extent is a true circle regardless of the
     /// squircle the rest of the DE wears. `None` follows the DE.
-    Plate { rect: Rect, radii: Radii, color: [f32; 4], depth: f32, shape: Option<f32> },
+    Plate { rect: Rect, radii: Radii, material: Material, depth: f32, shape: Option<f32> },
     Arc { cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4] },
     /// A ring band with radial color interpolation — inner rim → crest
     /// (centerline) → outer rim — for rounded rim bevels (the Ramp's key
@@ -550,7 +562,7 @@ pub enum Prim {
     /// color is the sphere's face color exactly at the lit center, like a
     /// plate's face keeps the app's color. Falls back to a flat circle on the
     /// legacy (`bevel_shader 0`) path.
-    Sphere { cx: f32, cy: f32, radius: f32, color: [f32; 4] },
+    Sphere { cx: f32, cy: f32, radius: f32, material: Material },
     /// A hanging water droplet clinging to the TOP edge of `rect`, lit per pixel
     /// by shader mode 10: the silhouette is a smooth union of a film "sheet"
     /// attached to the top edge (square top corners — the attach line) and a
@@ -563,7 +575,7 @@ pub enum Prim {
     /// plastic). Shape knobs in [`DropletSpec`]. On the legacy (`bevel_shader
     /// 0`) path it degrades to the flat hanging capsule — square top, round
     /// bottom — rather than vanishing.
-    Droplet { rect: Rect, color: [f32; 4], spec: DropletSpec },
+    Droplet { rect: Rect, material: Material, spec: DropletSpec },
     /// The same silhouette as [`Prim::Droplet`] under the same [`DropletSpec`],
     /// filled FLAT and feathered inward: opaque through the interior, fading
     /// to nothing over `feather` px as it approaches the drop's edge. A
@@ -575,7 +587,7 @@ pub enum Prim {
     /// outline with a rounded rect, so the two can never disagree about where
     /// the drop's edge is. On the legacy (`bevel_shader 0`) path it degrades
     /// to the same flat rounded-rect outline `Prim::Droplet` falls back to.
-    DropletScrim { rect: Rect, color: [f32; 4], spec: DropletSpec, feather: f32 },
+    DropletScrim { rect: Rect, material: Material, spec: DropletSpec, feather: f32 },
     /// A concave inside-corner fillet for composed carves: a quarter-arc wall
     /// whose centre `(cx, cy)` sits out in the corner's pocket, shaded with the
     /// same step profile as a `Recess`/`Boss` wall (`raised` flips the sign).
@@ -941,23 +953,24 @@ impl PaintCtx {
     }
 
     /// A sphere-lit circle — see `Prim::Sphere`.
-    pub fn sphere(&mut self, cx: f32, cy: f32, radius: f32, color: [f32; 4]) {
+    pub fn sphere(&mut self, cx: f32, cy: f32, radius: f32, material: &Material) {
         let (ox, oy) = self.offset;
-        self.push(Prim::Sphere { cx: cx + ox, cy: cy + oy, radius, color });
+        self.push(Prim::Sphere { cx: cx + ox, cy: cy + oy, radius, material: *material });
     }
 
     /// A hanging water droplet clinging to `rect`'s top edge — see
     /// [`Prim::Droplet`] and [`DropletSpec`].
     /// See [`Prim::DropletScrim`]. `feather` is how far in from the drop's
     /// edge the fill reaches full opacity, in logical px.
-    pub fn droplet_scrim(&mut self, rect: Rect, color: [f32; 4], spec: DropletSpec, feather: f32) {
+    pub fn droplet_scrim(&mut self, rect: Rect, material: &Material, spec: DropletSpec, feather: f32) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::DropletScrim { rect, color, spec, feather });
+        self.push(Prim::DropletScrim { rect, material: *material, spec, feather });
     }
 
-    pub fn droplet(&mut self, rect: Rect, color: [f32; 4], spec: DropletSpec) {
+    /// The drop's finish is the material's (see [`DropletSpec::finish`]).
+    pub fn droplet(&mut self, rect: Rect, material: &Material, spec: DropletSpec) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Droplet { rect, color, spec });
+        self.push(Prim::Droplet { rect, material: *material, spec });
     }
 
     /// A concave inside-corner fillet — see `Prim::ConcaveFillet`. `start` is
@@ -991,8 +1004,8 @@ impl PaintCtx {
             Prim::Border { rect, radii, fill, border, thickness } => {
                 self.border(rect, radii, fill, border, thickness)
             }
-            Prim::Bevel { rect, radii, color, depth, tint } => {
-                self.bevel_tinted(rect, radii, color, depth, tint)
+            Prim::Bevel { rect, radii, material, depth, tint } => {
+                self.bevel_tinted(rect, radii, &material, depth, tint)
             }
             Prim::Recess { rect, radii, depth, edges, tint } => match tint {
                 Some(t) => self.recess_tinted(rect, radii, depth, t),
@@ -1007,8 +1020,8 @@ impl PaintCtx {
                 Some(t) => self.trough_tinted(rect, radii, depth, t),
                 None => self.trough_edges(rect, radii, depth, edges),
             },
-            Prim::Plate { rect, radii, color, depth, shape } => {
-                self.plate_shaped(rect, radii, color, depth, shape)
+            Prim::Plate { rect, radii, material, depth, shape } => {
+                self.plate_shaped(rect, radii, &material, depth, shape)
             }
             Prim::Arc { cx, cy, radius, thickness, start, end, color } => {
                 self.arc(cx, cy, radius, thickness, start, end, color)
@@ -1020,11 +1033,11 @@ impl PaintCtx {
                 self.vector(x1, y1, x2, y2, thickness, color, cap)
             }
             Prim::Circle { cx, cy, radius, color } => self.circle(cx, cy, radius, color),
-            Prim::Sphere { cx, cy, radius, color } => self.sphere(cx, cy, radius, color),
+            Prim::Sphere { cx, cy, radius, material } => self.sphere(cx, cy, radius, &material),
             Prim::Glow { rect, radius, reach, color } => self.glow(rect, radius, reach, color),
-            Prim::Droplet { rect, color, spec } => self.droplet(rect, color, spec),
-            Prim::DropletScrim { rect, color, spec, feather } => {
-                self.droplet_scrim(rect, color, spec, feather)
+            Prim::Droplet { rect, material, spec } => self.droplet(rect, &material, spec),
+            Prim::DropletScrim { rect, material, spec, feather } => {
+                self.droplet_scrim(rect, &material, spec, feather)
             }
             Prim::ConcaveFillet { cx, cy, radius, depth, start, raised } => {
                 self.concave_fillet(cx, cy, radius, depth, start, raised)
@@ -1085,14 +1098,14 @@ impl PaintCtx {
         self.push(Prim::Border { rect, radii, fill, border, thickness });
     }
 
-    pub fn bevel(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
-        self.bevel_tinted(rect, radii, color, depth, [1.0, 1.0, 1.0]);
+    pub fn bevel(&mut self, rect: Rect, radii: Radii, material: &Material, depth: f32) {
+        self.bevel_tinted(rect, radii, material, depth, [1.0, 1.0, 1.0]);
     }
 
     /// `bevel` with a specular tint — see `Prim::Bevel::tint`.
-    pub fn bevel_tinted(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32, tint: [f32; 3]) {
+    pub fn bevel_tinted(&mut self, rect: Rect, radii: Radii, material: &Material, depth: f32, tint: [f32; 3]) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Bevel { rect, radii, color, depth, tint });
+        self.push(Prim::Bevel { rect, radii, material: *material, depth, tint });
     }
 
     /// Carve a recess into the already-painted surface below. Unlike `bevel`, this fills
@@ -1152,9 +1165,10 @@ impl PaintCtx {
             PlateStance::Raised => {
                 // abs(): a negative alpha is the frost sentinel, a real face.
                 if plate.face[3].abs() > 0.001 {
+                    let face = Material::from_fill(plate.face);
                     match plate.tint {
-                        Some(t) => self.bevel_tinted(plate.rect, plate.radii, plate.face, plate.depth, t),
-                        None => self.bevel(plate.rect, plate.radii, plate.face, plate.depth),
+                        Some(t) => self.bevel_tinted(plate.rect, plate.radii, &face, plate.depth, t),
+                        None => self.bevel(plate.rect, plate.radii, &face, plate.depth),
                     }
                 } else {
                     let (plateau, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
@@ -1438,18 +1452,18 @@ impl PaintCtx {
     /// rolled perimeter (width `-depth`) renders as an overlay — translucent
     /// white screen / black multiply — over whatever is beneath, for a root
     /// plate whose face is not a fill (the designer's full-bleed 3D canvas).
-    /// `color` is ignored; the roll profile, crest and specular are exactly the
+    /// `material` is ignored; the roll profile, crest and specular are exactly the
     /// positive-depth plate's.
-    pub fn plate(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32) {
-        self.plate_shaped(rect, radii, color, depth, None);
+    pub fn plate(&mut self, rect: Rect, radii: Radii, material: &Material, depth: f32) {
+        self.plate_shaped(rect, radii, material, depth, None);
     }
 
     /// [`plate`](Self::plate) with an explicit corner exponent — see
     /// [`Prim::Plate`]'s `shape`. `Some(2.0)` on a plate whose radii are its
     /// half-extent draws a circle; `None` is exactly `plate`.
-    pub fn plate_shaped(&mut self, rect: Rect, radii: Radii, color: [f32; 4], depth: f32, shape: Option<f32>) {
+    pub fn plate_shaped(&mut self, rect: Rect, radii: Radii, material: &Material, depth: f32, shape: Option<f32>) {
         let rect = self.apply_offset(rect);
-        self.push(Prim::Plate { rect, radii, color, depth, shape });
+        self.push(Prim::Plate { rect, radii, material: *material, depth, shape });
     }
 
     /// Emit the plate a [`PlateSpec`] describes: role-resolved per-corner
@@ -1472,7 +1486,7 @@ impl PaintCtx {
     pub fn plate_spec(&mut self, spec: &PlateSpec) {
         let f = crate::layout::corner_span_factor();
         let (tl, tr, br, bl) = spec.radii();
-        self.plate(spec.rect, (tl / f, tr / f, br / f, bl / f), spec.fill(), spec.depth);
+        self.plate(spec.rect, (tl / f, tr / f, br / f, bl / f), &spec.material.for_role(spec.role()), spec.depth);
     }
 
     pub fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {
@@ -1863,7 +1877,7 @@ mod tests {
         ctx.quad(r(0.0, 0.0, 1.0, 1.0), [0.0; 4]);
         ctx.rounded_rect(r(0.0, 0.0, 1.0, 1.0), 2.0, (true, false, true, false), [0.0; 4]);
         ctx.border(r(0.0, 0.0, 10.0, 10.0), (2.0, 2.0, 2.0, 2.0), [0.1; 4], [0.9; 4], 1.5);
-        ctx.bevel(r(0.0, 0.0, 10.0, 10.0), (2.0, 2.0, 2.0, 2.0), [0.3; 4], 2.0);
+        ctx.bevel(r(0.0, 0.0, 10.0, 10.0), (2.0, 2.0, 2.0, 2.0), &Material::opaque([0.3; 4]), 2.0);
         ctx.arc(5.0, 5.0, 4.0, 1.0, 0.0, 3.14, [0.0; 4]);
         ctx.vector(0.0, 0.0, 10.0, 0.0, 1.0, [0.0; 4], Cap::Arrow);
         ctx.circle(5.0, 5.0, 3.0, [0.0; 4]);
@@ -1876,7 +1890,7 @@ mod tests {
         let mut ctx = PaintCtx::new();
         ctx.translate(10.0, 20.0, |ctx| {
             ctx.border(r(0.0, 0.0, 5.0, 5.0), (1.0, 1.0, 1.0, 1.0), [0.0; 4], [1.0; 4], 1.0);
-            ctx.bevel(r(0.0, 0.0, 5.0, 5.0), (1.0, 1.0, 1.0, 1.0), [0.0; 4], 1.0);
+            ctx.bevel(r(0.0, 0.0, 5.0, 5.0), (1.0, 1.0, 1.0, 1.0), &Material::opaque([0.0; 4]), 1.0);
         });
         let list = ctx.finish();
         assert!(matches!(list.items[0].prim, Prim::Border { rect, .. } if rect.x == 10.0 && rect.y == 20.0));

@@ -258,7 +258,7 @@ impl Application for RampPopup {
         pc.plate(
             Rect { x: m, y: m, width: w - 2.0 * m, height: h - 2.0 * m },
             (radius, radius, radius, radius),
-            plate,
+            &cce_ui::scene::Material::from_fill(plate),
             bevel,
         );
 

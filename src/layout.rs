@@ -4223,7 +4223,8 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                     None => pc.inset_plate(face, rect.x, rect.y, rect.width, rect.height, r, depth),
                 }
             }
-            Prim::Bevel { rect, radii, color, .. } => {
+            Prim::Bevel { rect, radii, material, .. } => {
+                let color = material.fill(crate::scene::material::PlateRole::Nested);
                 if color[3].abs() > 0.001 {
                     emit_rounded(pc, rect, radii, color);
                 }

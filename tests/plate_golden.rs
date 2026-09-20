@@ -82,17 +82,17 @@ fn scene(sw: f32, sh: f32) -> cce_ui::scene::paint::DisplayList {
         window_corners: (true, true, true, true),
         depth: -depth,
     });
-    pc.plate_shaped(r(30.0, 170.0, 40.0, 40.0), (20.0, 20.0, 20.0, 20.0), [0.3, 0.3, 0.35, 1.0], 4.0, Some(2.0));
+    pc.plate_shaped(r(30.0, 170.0, 40.0, 40.0), (20.0, 20.0, 20.0, 20.0), &cce_ui::scene::Material::from_fill([0.3, 0.3, 0.35, 1.0]), 4.0, Some(2.0));
 
     // Bare plates the legacy callers emit: an opaque face, a frosted one
     // (negative alpha handed straight in, the menu idiom).
-    pc.plate(r(80.0, 170.0, 60.0, 30.0), rr, [0.13, 0.14, 0.16, 1.0], 4.0);
-    pc.plate(r(150.0, 170.0, 60.0, 30.0), rr, [0.13, 0.14, 0.16, -0.8], 4.0);
+    pc.plate(r(80.0, 170.0, 60.0, 30.0), rr, &cce_ui::scene::Material::from_fill([0.13, 0.14, 0.16, 1.0]), 4.0);
+    pc.plate(r(150.0, 170.0, 60.0, 30.0), rr, &cce_ui::scene::Material::from_fill([0.13, 0.14, 0.16, -0.8]), 4.0);
 
     // Bevels, plain and tinted (the focused-pane ring).
-    pc.bevel(r(220.0, 170.0, 60.0, 30.0), rr, [0.25, 0.25, 0.3, 1.0], 4.0);
-    pc.bevel_tinted(r(290.0, 170.0, 60.0, 30.0), rr, [0.25, 0.25, 0.3, 1.0], 4.0, [0.4, 0.6, 1.0]);
-    pc.bevel_tinted(r(290.0, 205.0, 60.0, 30.0), rr, [0.0; 4], 4.0, [0.4, 0.6, 1.0]);
+    pc.bevel(r(220.0, 170.0, 60.0, 30.0), rr, &cce_ui::scene::Material::from_fill([0.25, 0.25, 0.3, 1.0]), 4.0);
+    pc.bevel_tinted(r(290.0, 170.0, 60.0, 30.0), rr, &cce_ui::scene::Material::from_fill([0.25, 0.25, 0.3, 1.0]), 4.0, [0.4, 0.6, 1.0]);
+    pc.bevel_tinted(r(290.0, 205.0, 60.0, 30.0), rr, &cce_ui::scene::Material::from_fill([0.0; 4]), 4.0, [0.4, 0.6, 1.0]);
 
     // Every control stance × face × tint.
     let faces: [[f32; 4]; 3] = [[0.3, 0.3, 0.36, 1.0], [0.0; 4], [0.3, 0.3, 0.36, -0.6]];
@@ -120,11 +120,11 @@ fn scene(sw: f32, sh: f32) -> cce_ui::scene::paint::DisplayList {
 
     // The lit ball and the water: default spec, and one with its own finish
     // and depth terms.
-    pc.sphere(40.0, 340.0, 10.0, [0.4, 0.4, 0.5, 1.0]);
-    pc.droplet(r(80.0, 330.0, 120.0, 30.0), [0.1, 0.1, 0.12, -0.7], DropletSpec::default());
+    pc.sphere(40.0, 340.0, 10.0, &cce_ui::scene::Material::from_fill([0.4, 0.4, 0.5, 1.0]));
+    pc.droplet(r(80.0, 330.0, 120.0, 30.0), &cce_ui::scene::Material::from_fill([0.1, 0.1, 0.12, -0.7]).with_finish(DropletSpec::default().finish()), DropletSpec::default());
     let wet = DropletSpec::parse("gleam=1.0 shine=16 rim=0.3 clarity=0.5 core=0.4 shadow=0.3 refr=2");
-    pc.droplet(r(220.0, 330.0, 120.0, 30.0), [0.1, 0.1, 0.12, 0.9], wet);
-    pc.droplet_scrim(r(220.0, 365.0, 120.0, 30.0), [0.1, 0.1, 0.12, 0.9], wet, 3.0);
+    pc.droplet(r(220.0, 330.0, 120.0, 30.0), &cce_ui::scene::Material::from_fill([0.1, 0.1, 0.12, 0.9]).with_finish(wet.finish()), wet);
+    pc.droplet_scrim(r(220.0, 365.0, 120.0, 30.0), &cce_ui::scene::Material::from_fill([0.1, 0.1, 0.12, 0.9]), wet, 3.0);
 
     pc.finish()
 }

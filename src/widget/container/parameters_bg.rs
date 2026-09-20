@@ -1506,7 +1506,7 @@ impl Paint for ParametersBg {
             ctx.concave_fillet(fcx, fcy, fr, fd, fs, false);
         }
         for (scx, scy, sr, sc) in self.spheres() {
-            ctx.sphere(scx, scy, sr, sc);
+            ctx.sphere(scx, scy, sr, &crate::scene::material::Material::from_fill(sc));
         }
         self.paint_scene_rows(ctx);
         for (qx, qy, qw, qh, qc) in self.plain_quads() {

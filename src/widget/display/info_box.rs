@@ -42,7 +42,7 @@ impl Paint for InfoBox {
             // control wall, capped by its height like every plate's.
             let fill = colors::plate_color().unwrap_or_else(|| colors::active_theme().surface_bg);
             let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-            ctx.plate(rect, radii, fill, depth);
+            ctx.plate(rect, radii, &crate::scene::material::Material::from_fill(fill), depth);
         } else {
             // Flat: the themed surface in a hairline frame.
             let theme = colors::active_theme();

@@ -112,10 +112,10 @@ pub fn append_widget_plate_radii(w: &dyn WidgetHost, pc: &mut PaintCtx, tint: Op
     let rect = Rect { x, y, width: ww, height: h };
     let tint = tint.unwrap_or([1.0, 1.0, 1.0]);
     if let Some(thickness) = w.plate_bevel() {
-        pc.bevel_tinted(rect, radii_tuple, w.color(), thickness, tint);
+        pc.bevel_tinted(rect, radii_tuple, &crate::scene::material::Material::from_fill(w.color()), thickness, tint);
     } else if let Some((border_color, thickness)) = w.solid_border() {
         if crate::layout::control_relief() {
-            pc.bevel_tinted(rect, radii_tuple, w.color(), crate::colors::plate_bevel_width(), tint);
+            pc.bevel_tinted(rect, radii_tuple, &crate::scene::material::Material::from_fill(w.color()), crate::colors::plate_bevel_width(), tint);
         } else {
             pc.border(rect, radii_tuple, w.color(), border_color, thickness);
         }

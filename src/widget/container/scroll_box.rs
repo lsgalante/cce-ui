@@ -49,7 +49,7 @@ pub fn paint_relief_scrollbar(
     pc.bevel(
         Rect { x: sb_x, y: thumb_y, width: sb_w, height: thumb_h },
         radii,
-        crate::color::scrollbar_thumb_color(),
+        &crate::scene::material::Material::from_fill(crate::color::scrollbar_thumb_color()),
         depth,
     );
 }

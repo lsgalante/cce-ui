@@ -522,7 +522,7 @@ pub mod context_menu {
                 // menu_opacity, not the color's own alpha: an opaque page
                 // color resolved the frost to a solid tint (invisible).
                 frosted[3] = -crate::color::menu_opacity();
-                ctx.plate(rect, (r, r, r, r), frosted, depth);
+                ctx.plate(rect, (r, r, r, r), &crate::scene::material::Material::from_fill(frosted), depth);
             } else {
                 let (plateau, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
                 ctx.boss(plateau, radii, depth);

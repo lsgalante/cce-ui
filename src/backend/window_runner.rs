@@ -1794,6 +1794,7 @@ pub fn tessellate_display_list(
     sh: f32,
     scale: f32,
 ) -> (Vec<Vertex>, Vec<DlBatch>, Vec<DlImage>, Vec<[f32; 12]>) {
+    use crate::scene::material::PlateRole;
     use crate::scene::paint::{Cap, Prim};
     let mut verts: Vec<Vertex> = Vec::new();
     let mut batches: Vec<DlBatch> = Vec::new();
@@ -1833,10 +1834,13 @@ pub fn tessellate_display_list(
     // draw a different material than the renderer applies.
     let plate_light = crate::scene::relief_shade::light_vector();
     // [shading strength (1.0 at the default bevel_depth), specular strength,
-    // shininess, curvature/AO strength] — the plastic material. Curvature is
-    // kept near the raised path's crest amplitude: the recess shoulder's
-    // brightening lands on the same pixels as its specular line, and the two
-    // stack — at 0.5 the step read several times hotter than a plate roll.
+    // shininess, curvature/AO strength] — the DE's finish, for the CARVES,
+    // which shade whatever is beneath them and so take the host's. A prim
+    // that carries a Material (Plate, Bevel, Sphere, Droplet) pushes its own
+    // `material.finish` instead. Curvature is kept near the raised path's
+    // crest amplitude: the recess shoulder's brightening lands on the same
+    // pixels as its specular line, and the two stack — at 0.5 the step read
+    // several times hotter than a plate roll.
     let plate_mat = crate::scene::material::Finish::from_style().to_array();
 
     for item in &dl.items {
@@ -1853,11 +1857,14 @@ pub fn tessellate_display_list(
         // context menu (Plate) worked.
         let blur_behind = matches!(
             &item.prim,
-            crate::scene::paint::Prim::Bevel { color, .. }
-            | crate::scene::paint::Prim::Plate { color, .. }
-            | crate::scene::paint::Prim::Droplet { color, .. }
-            | crate::scene::paint::Prim::Quad { color, .. }
+            crate::scene::paint::Prim::Quad { color, .. }
             | crate::scene::paint::Prim::RoundedRect { color, .. } if color[3] < 0.0
+        ) || matches!(
+            &item.prim,
+            crate::scene::paint::Prim::Bevel { material, .. }
+            | crate::scene::paint::Prim::Plate { material, .. }
+            | crate::scene::paint::Prim::Droplet { material, .. }
+                if material.fill(PlateRole::Nested)[3] < 0.0
         ) || matches!(
             &item.prim,
             crate::scene::paint::Prim::Border { fill, .. } if fill[3] < 0.0
@@ -1905,15 +1912,17 @@ pub fn tessellate_display_list(
             Prim::Glow { rect, radius, reach, color } => {
                 push_glow_vertices(rect.x, rect.y, rect.width, rect.height, *radius, *reach, sw, sh, *color, no, &mut verts);
             }
-            Prim::Bevel { rect, radii, color, depth, tint } if shader_plates => {
+            Prim::Bevel { rect, radii, material, depth, tint } if shader_plates => {
+                let color = material.fill(PlateRole::Nested);
+                let mat = material.finish.to_array();
                 // SDF-lit raised plate: one cover quad; the shader owns fill,
                 // roll shading, corners, and silhouette AA. Nominal corner
                 // radii (scale_corners false): a Bevel is a WIDGET-scale plate
                 // whose silhouette must match the nominal-radius squircles of
                 // the controls around it — only window-scale `Plate`s get the
                 // curvature-matched span.
-                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
-                let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, false, None);
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
+                let mut p = plate_push_raised(rect, *radii, *depth, scale, plate_light, mat, false, None);
                 // w = 1 marks an accent-tinted plate (the focused-pane
                 // treatment): the shader then colors the WHOLE rolled edge
                 // with the tint, not just the specular glint — matching the
@@ -1924,7 +1933,9 @@ pub fn tessellate_display_list(
                 plate = Some(p);
                 made_plate = Some(*rect);
             }
-            Prim::Plate { rect, radii, color, depth, shape } if shader_plates => {
+            Prim::Plate { rect, radii, material, depth, shape } if shader_plates => {
+                let color = material.fill(PlateRole::Nested);
+                let mat = material.finish.to_array();
                 if *depth < 0.0 {
                     // Negative depth = fill-less roll overlay (MODE_ROLL): the
                     // window-edge roll shading alone, screened over whatever is
@@ -1933,14 +1944,14 @@ pub fn tessellate_display_list(
                     // and the batch is NOT opened as a carve host: an overlay
                     // owns no surface for a CSG feature to cut into.
                     verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, [0.0; 4]));
-                    let mut p = plate_push_raised(rect, *radii, -*depth, scale, plate_light, plate_mat, true, *shape);
+                    let mut p = plate_push_raised(rect, *radii, -*depth, scale, plate_light, mat, true, *shape);
                     p.mode = 11.0; // MODE_ROLL
                     plate = Some(p);
                 } else {
                     // Same lit-plate branch; the cover quad is the exact rect so the
                     // silhouette and the compositor's rounded window corners agree.
-                    verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
-                    plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, plate_mat, true, *shape));
+                    verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
+                    plate = Some(plate_push_raised(rect, *radii, *depth, scale, plate_light, mat, true, *shape));
                     made_plate = Some(*rect);
                 }
             }
@@ -2197,7 +2208,8 @@ pub fn tessellate_display_list(
                 ];
                 plate = Some(p);
             }
-            Prim::Bevel { rect, radii, color, depth, tint: _ } => {
+            Prim::Bevel { rect, radii, material, depth, tint: _ } => {
+                let color = material.fill(PlateRole::Nested);
                 // Full-size fill: the lip is now a shading overlay, not a paint of the
                 // outer ring, so the fill must cover the whole rect (the old inset fill
                 // would leave the ring showing whatever lay beneath).
@@ -2205,10 +2217,11 @@ pub fn tessellate_display_list(
                     top_left: radii.0, top_right: radii.1,
                     bottom_right: radii.2, bottom_left: radii.3,
                 };
-                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, corners, sw, sh, *color, no, None, &mut verts);
-                push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, *depth, sw, sh, *color, no, &mut verts);
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, corners, sw, sh, color, no, None, &mut verts);
+                push_plate_bevel_vertices(rect.x, rect.y, rect.width, rect.height, radii.0, *depth, sw, sh, color, no, &mut verts);
             }
-            Prim::Plate { rect, radii, color, depth, .. } => {
+            Prim::Plate { rect, radii, material, depth, .. } => {
+                let color = material.fill(PlateRole::Nested);
                 if *depth < 0.0 {
                     // Fill-less roll overlay (negative-depth sentinel): the banded
                     // legacy tessellation has no overlay compositing, so the roll
@@ -2225,12 +2238,12 @@ pub fn tessellate_display_list(
                     bottom_right: radii.2, bottom_left: radii.3,
                 };
                 push_rounded_rect_vertices_corners(
-                    rect.x, rect.y, rect.width, rect.height, corners, sw, sh, *color, no, None, &mut verts,
+                    rect.x, rect.y, rect.width, rect.height, corners, sw, sh, color, no, None, &mut verts,
                 );
                 push_plate_face_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, no, &mut verts);
                 push_bevel_edge_vertices_radii(
                     rect.x, rect.y, rect.width, rect.height, *radii, *depth,
-                    sw, sh, *color, no, 1.0, &mut verts,
+                    sw, sh, color, no, 1.0, &mut verts,
                 );
             }
             Prim::Recess { rect, radii, depth, edges, .. } => {
@@ -2322,36 +2335,41 @@ pub fn tessellate_display_list(
                     verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
                 }
             }
-            Prim::Sphere { cx, cy, radius, color } if shader_plates => {
+            Prim::Sphere { cx, cy, radius, material } if shader_plates => {
+                let color = material.fill(PlateRole::Nested);
+                let mat = material.finish.to_array();
                 // A hemisphere lit per pixel by the plate branch (mode 5): one
                 // cover quad, its own never-merged batch. The quad overhangs
                 // the disc by 1px for the shader's silhouette anti-aliasing.
                 let d = *radius + 1.0;
-                verts.extend(quad_vertices(cx - d, cy - d, 2.0 * d, 2.0 * d, sw, sh, *color));
+                verts.extend(quad_vertices(cx - d, cy - d, 2.0 * d, 2.0 * d, sw, sh, color));
                 plate = Some(crate::vk::PlatePush {
                     // Center + radius in physical px; the SDF box machinery is
                     // unused in this mode, so .w is free.
                     rect: [cx * scale, cy * scale, radius * scale, 0.0],
                     radii: [0.0; 4],
                     light: [plate_light[0], plate_light[1], plate_light[2], 0.0],
-                    material: plate_mat,
+                    material: mat,
                     host: [0.0; 4],
                     specular_tint: [1.0, 1.0, 1.0, 0.0],
                     mode: 5.0,
                     shape: 2.0,
                 });
             }
-            Prim::Sphere { cx, cy, radius, color } => {
+            Prim::Sphere { cx, cy, radius, material } => {
+                let color = material.fill(PlateRole::Nested);
                 // Legacy path: the flat disc, exactly a Circle.
-                verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, *color, segs(*radius), no));
+                verts.extend(circle_vertices(*cx, *cy, *radius, sw, sh, color, segs(*radius), no));
             }
-            Prim::DropletScrim { rect, color, spec, feather } if shader_plates => {
+            Prim::DropletScrim { rect, material, spec, feather } if shader_plates => {
+                let color = material.fill(PlateRole::Nested);
+                let mat = material.finish.to_array();
                 // Shader mode 12: the droplet's own SDF, filled flat and
                 // feathered inward. No contact shadow, so unlike the lit drop
                 // the cover quad is exactly the box — a scrim never draws
                 // outside the silhouette.
                 let g = droplet_geom(rect, spec);
-                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
                 plate = Some(crate::vk::PlatePush {
                     rect: [
                         (rect.x + rect.width * 0.5) * scale,
@@ -2363,14 +2381,16 @@ pub fn tessellate_display_list(
                     // p_light.w carries the FEATHER here; mode 12 returns
                     // before the shading band it otherwise holds is read.
                     light: [plate_light[0], plate_light[1], plate_light[2], feather.max(0.001) * scale],
-                    material: [plate_mat[0], 0.0, 0.0, 0.0],
+                    material: [mat[0], 0.0, 0.0, 0.0],
                     host: [g.sr * scale, 0.0, 0.0, g.ar * scale],
                     specular_tint: [0.0, 0.0, 0.0, g.bow * scale],
                     mode: 12.0,
                     shape: spec.curve.clamp(2.0, 6.0),
                 });
             }
-            Prim::Droplet { rect, color, spec } if shader_plates => {
+            Prim::Droplet { rect, material, spec } if shader_plates => {
+                let color = material.fill(PlateRole::Nested);
+                let mat = material.finish.to_array();
                 // A water droplet lit by shader mode 10: one cover quad; the
                 // shader owns silhouette (sheet ∪smin belly), dome shading,
                 // fresnel rim and thin-edge clarity. The spec's height
@@ -2388,7 +2408,7 @@ pub fn tessellate_display_list(
                     rect.y,
                     rect.width + 2.0 * sh_reach,
                     rect.height + sh_reach,
-                    sw, sh, *color,
+                    sw, sh, color,
                 ));
                 plate = Some(crate::vk::PlatePush {
                     rect: [
@@ -2400,9 +2420,11 @@ pub fn tessellate_display_list(
                     radii: [sag * scale, br * scale, bw * scale, k * scale],
                     light: [plate_light[0], plate_light[1], plate_light[2], band * scale],
                     // Slots y/z/w feed roll_spec and the rim term directly:
-                    // droplets carry their own gleam/shine/rim instead of the
-                    // DE material's (a drop is wetter than the DE's plates).
-                    material: [plate_mat[0], spec.gleam, spec.shine, spec.rim],
+                    // a droplet's material carries its own gleam/shine/rim
+                    // there (`DropletSpec::finish`; a drop is wetter than the
+                    // DE's plates), so this is the material's finish like any
+                    // plate's.
+                    material: mat,
                     host: [sr * scale, spec.clarity.clamp(0.0, 1.0), spec.dome, ar * scale],
                     // Droplet glints are always white, so the tint RGB slots
                     // carry droplet params instead: x = core density,
@@ -2417,7 +2439,8 @@ pub fn tessellate_display_list(
                     shape: spec.curve.clamp(2.0, 6.0),
                 });
             }
-            Prim::DropletScrim { rect, color, spec, .. } => {
+            Prim::DropletScrim { rect, material, spec, .. } => {
+                let color = material.fill(PlateRole::Nested);
                 // Legacy banded path: no SDF to feather against, so the scrim
                 // degrades to the same flat outline the drop itself does —
                 // hard-edged, but present. A prim with no arm here VANISHES.
@@ -2425,9 +2448,10 @@ pub fn tessellate_display_list(
                 let sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(cap);
                 let ar = (spec.attach.clamp(0.0, 1.0) * rect.height).min(cap);
                 let radii = crate::widget::CornerRadii::new(ar, ar, sr, sr);
-                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, radii, sw, sh, *color, no, None, &mut verts);
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, radii, sw, sh, color, no, None, &mut verts);
             }
-            Prim::Droplet { rect, color, spec } => {
+            Prim::Droplet { rect, material, spec } => {
+                let color = material.fill(PlateRole::Nested);
                 // Legacy banded path: the flat drop outline — attach-tapered
                 // top, round bottom. Degrades the material but keeps the
                 // silhouette (a prim with no arm here VANISHES, it doesn't
@@ -2436,7 +2460,7 @@ pub fn tessellate_display_list(
                 let sr = (spec.sheet_r.clamp(0.0, 1.0) * rect.height).min(cap);
                 let ar = (spec.attach.clamp(0.0, 1.0) * rect.height).min(cap);
                 let radii = crate::widget::CornerRadii::new(ar, ar, sr, sr);
-                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, radii, sw, sh, *color, no, None, &mut verts);
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, radii, sw, sh, color, no, None, &mut verts);
             }
             Prim::ConcaveFillet { cx, cy, radius, depth, start: a0, raised } if shader_plates => {
                 // A quarter-arc carve wall (shader mode 6/7): one cover quad

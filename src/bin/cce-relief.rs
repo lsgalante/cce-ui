@@ -911,7 +911,7 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
                     Shape::EdgeRoll => pc.plate(
                         Rect { x: x1 - 4000.0, y: swatch_y - 400.0, width: 4000.0, height: strip_h + 800.0 },
                         sq,
-                        [plate[0], plate[1], plate[2], 1.0],
+                        &cce_ui::scene::Material::from_fill([plate[0], plate[1], plate[2], 1.0]),
                         unit,
                     ),
                 }
@@ -1563,7 +1563,7 @@ impl Application for BevelPopup {
         pc.plate(
             Rect { x: 0.0, y: 0.0, width: w, height: h },
             (radius, radius, radius, radius),
-            plate,
+            &cce_ui::scene::Material::from_fill(plate),
             bevel,
         );
 
