@@ -315,17 +315,22 @@ Two free floats, three frost scalars. **The layout (decided, § 11 (2)):**
 
 | Slot | Carries | Encoding |
 |---|---|---|
-| `p_host.z` | `compression` and `refraction` | 10-bit fixed point each: `floor(c·1023)·1024 + floor(r·1023)`, an integer < 2²⁰, exact in f32 (24-bit mantissa). Shader: `hi = floor(v / 1024)`, `lo = v − hi·1024`, both `/ 1023`. |
-| `p_host.w` | `radius` | physical px (logical × scale); `0` = one clean sample, no kernel. |
+| `p_host.z` | `compression` and `refraction` | 12-bit fixed point each: `round(c·4095)·4096 + round(r·4095)`, an integer < 2²⁴ — the largest range f32 holds exactly. Shader: `hi = floor(v / 4096)`, `lo = v − hi·4096`, both `/ 4095`. |
+| `p_host.w` | `radius` | the kernel sigma in physical px (logical × scale); `0` = one clean sample, no kernel. |
 
-A `Frost::pack() -> [f32; 2]` / `unpack` pair lives beside the type with a round-trip test
-over the 0..1 grid at 1/1023 steps, and the `relief_shade`-style shader-text test checks
-the two literals (`1024`, `1023`) against `shader2d.wgsl`. 10 bits is 0.001 resolution on
-knobs whose measured useful range is 0.3–0.85 in steps nobody sets finer than 0.05.
+A `Frost::pack(scale) -> [f32; 2]` / `unpack` pair lives beside the type with a round-trip
+test over the grid, and the `relief_shade`-style shader-text test checks the literals
+(`FROST_PACK_BASE`, `FROST_PACK_MAX`, `LEGACY_STRIDE`) against `shader2d.wgsl`. 12 bits is
+0.00024 resolution: the designer's 0.6 / 0.3 survive to better than a 1/255 step (10 bits
+was the first draft; 12 costs nothing since the sum still fits an exact f32 integer).
 
-`resolve_blur` takes the three as arguments (it already takes `refract` and `clarity` from
-the plate branch); the plate branch unpacks `p_host.zw`. The window uniform's
-`backdrop_meta` is retired in the same step — § 6.2 leaves no path without a push block.
+`resolve_blur` takes `k` and the kernel stride as arguments (it already took `refract` and
+`clarity` from the plate branch); the plate branch unpacks `p_host.zw`. The window
+uniform's `backdrop_meta` is retired in the same step. The negative-alpha branch for a
+batch with NO plate block survives as the no-recipe fallback — a raw vertex pushed from
+outside the display list (a legacy host's own quads, or the `bevel_shader 0` path): the
+kernel default (`LEGACY_STRIDE`) and no compression. Everything the display list frosts is
+a plate batch (§ 6.2) and never reaches it.
 
 **The Droplet is the exception.** Mode 10 uses every slot: `p_host` is the sheet radius,
 clarity, dome and attach radius, `p_spec_tint` the core, shadow reach, shadow strength and
@@ -365,13 +370,19 @@ Frost at the control rung is `Flat` only. This is today's rule stated as a type.
 
 `resolve_blur`'s 49 taps are the most expensive path in the shader, and every frosted plate
 pays them. `Frost::Frosted.radius` (§ 3) is the kernel's sigma in logical px, carried in
-`p_host.w` as the tap stride (stride = radius / 2 at the current 7×7 kernel, so today's
-5.5 px stride is `radius ≈ 11`). It joins in step 3 with the other two scalars so `Frost`
-changes shape once (§ 11 (2)). A small control plate blurring at a third of the body's
-radius reads the same and samples a tighter footprint; `radius = 0` short-circuits to one
-clean sample — a *clear* plate, the tint over an unblurred backdrop, which nothing can
-express today. Config exposure (`frost radius=`) waits for step 4; until then every
-material carries the default and no pixel moves.
+`p_host.w` in physical px; the 7×7 kernel's tap stride is half of it. It joins in step 3
+with the other two scalars so `Frost` changes shape once (§ 11 (2)). A small control plate
+blurring at a third of the body's radius reads the same and samples a tighter footprint;
+`radius = 0` short-circuits to one clean sample — a *clear* plate, the tint over an
+unblurred backdrop, which nothing could express before. Config exposure (`frost radius=`)
+waits for step 4.
+
+**`Frost::DEFAULT_RADIUS` is 5.5 logical px, and why it is not 11.** The old kernel was a
+fixed 5.5 PHYSICAL px stride (sigma 11 physical) — half the blur on a scale-2 panel that
+it was on a scale-1 one, and the panel every frosted surface was tuned on is scale 2. A
+material cannot know the scale, so the default is stated in logical px at the value that
+reproduces that panel exactly: 5.5 logical = 11 physical at scale 2. A scale-1 display now
+gets the same logical blur instead of twice it; only headless scale-1 shadows notice.
 
 ---
 
@@ -418,7 +429,28 @@ left alone. `Material::popover` is the menu recipe the three menu sites had each
 - `Graph`'s `graph_blur` and `TreeList`'s `tree_blur` become materials on their plates.
 - *Exit:* prim dump identical, including the status bar's droplet.
 
-**Step 3 — per-plate frost.**
+**Step 3 — per-plate frost.** *DONE 2026-09-20* as 3a–3c plus the measurement below.
+As specified except: the no-recipe fallback branch survives for raw vertices (§ 6.1);
+the pack is 12-bit; `DEFAULT_RADIUS` is 5.5 logical (§ 6.3); promoted fills are
+zero-depth **Bevels** in the tessellator, not `Prim::Plate`s in the display list — a
+widget-scale fill wants nominal radii and circular corners (`shape` 2), and leaving the
+list untouched keeps the legacy bridges that extract `RoundedRect`s working; and the
+well floor (deferred from step 2) is its host's material only for a FROSTED host, an
+opaque host keeping the exact darkening overlay (`PaintCtx::well_floor`).
+Batch count: a frosted quad was already its own never-merged batch (the blur snapshot),
+so promotion adds none; a frosted `Border` splits fill and stroke, +1.
+**Measured** (`examples/frost_pair.rs` in a scale-2 shadow: three plates of the
+designer's tint over a white/black checker, mean sRGB luminance under the bright and
+dark columns, and the largest per-pixel luminance step across a column edge):
+
+| plate | bright | dark | swing | edge step |
+|---|---|---|---|---|
+| bare checker | 0.989 | 0.005 | 0.984 | — |
+| compression 0, default radius | 0.873 | 0.078 | 0.795 | 0.173 |
+| compression 0.85, default radius | 0.367 | 0.039 | 0.329 | 0.075 |
+| clear (radius 0) | 0.882 | 0.004 | 0.878 | 0.878 |
+
+Three recipes in one window, each doing what its own numbers say.
 - `Frost::pack` into `p_host.zw` in mode 1 (§ 6.1's layout); `resolve_blur` reads its
   three arguments; the Droplet clamps to the kernel default.
 - `Flat` faces, `Menu`, `Graph` and the status bar fill promoted to zero-depth plates
@@ -500,12 +532,13 @@ All four resolved 2026-09-20; see § 11. Kept here so the alternatives stay on r
 ## 11. Decisions (resolved 2026-09-20)
 
 1. **Flat frosted quads become zero-depth plates.** One frost path in the shader; `Flat`
-   is literally the pane's material at control scale, and the `MODE_NONE` sentinel branch
-   is retired with the `backdrop_meta` uniform. The batch-count measurement at step 3 is a
+   is literally the pane's material at control scale, and the `backdrop_meta` uniform is
+   retired. (Built: the `MODE_NONE` negative-alpha branch stays as the no-recipe fallback
+   for raw vertices from outside the display list — § 6.1.) The batch-count measurement at step 3 is a
    check on cost, not a vote on the design: a client that measures badly drops frost on
    its flat faces per widget, and the uniform path does not come back.
 2. **`radius` joins `Frost::Frosted` at step 3, in `p_host.w`; compression and refraction
-   share `p_host.z` as 10-bit fixed point.** `Frost` changes shape once. Config exposure of
+   share `p_host.z` as fixed point** (12-bit as built; 10 was the draft). `Frost` changes shape once. Config exposure of
    `radius` waits for step 4. The Droplet, whose push block is full, honours `Frosted` as
    on/off at the kernel default — what it draws today.
 3. **A well floor carries its host's frost.** `floor()` copies the material and darkens the

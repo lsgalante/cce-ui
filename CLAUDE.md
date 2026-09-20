@@ -368,6 +368,19 @@ What this buys, and where the code is heading:
   dark backdrop at EVERY k: there is little luminance variation behind the
   plate there to begin with, so "glass" on a dark desktop is carried by the rim
   and bevel, not by the backdrop.
+- **The recipe is per plate.** Since 2026-09-20 (RFC material step 3) compression,
+  refraction and the blur radius are a plate's own `Material.frost`
+  (`Frost::Frosted { compression, refraction, radius }`), packed into `p_host.zw` of
+  its push block by `Frost::pack` — the two style keys above are the DEFAULT
+  material's values (`Frost::from_style`), not a window setting, and two plates in
+  one window can differ. `radius` is the kernel sigma in logical px;
+  `Frost::DEFAULT_RADIUS` (5.5) reproduces the old fixed 5.5-physical-px stride on
+  the scale-2 panel; 0 is a clear plate. A frosted FLAT fill of any kind (Quad,
+  RoundedRect, Border fill — a `Flat` face, a menu, a popover) is promoted by the
+  tessellator to a zero-depth plate batch so it carries its recipe too; only a raw
+  vertex from outside the display list falls to the no-recipe branch.
+  `examples/frost_pair.rs` is the visual test: three recipes in one window, run in a
+  shadow, measured in the RFC's step-3 note.
 - **`style.surface.plate.refraction` (0..1, default 0) is the rim, and it buys
   no legibility.** It is the answer to the other half of the question — not
   "can I read this" but "is this an object". The roll is a real surface with a
