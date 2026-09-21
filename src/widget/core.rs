@@ -400,15 +400,34 @@ pub mod context_menu {
             self.y = y;
             self.options = options;
             self.h = self.options.len() as f32 * ROW_H + 2.0 * PAD;
-            // Width from the SHAPED widest label, not `bytes * 7.5`: that
-            // estimate is a different face's advance (and counts bytes, so a
-            // non-ASCII label over-measures), which is how a menu ends up
-            // either clipping its longest entry or padded out past it.
+            // Width from the widest label as the RENDERER shapes it —
+            // `shaped_cluster_offsets`, the same cosmic-text buffer cache the
+            // draw reads — not `measure_text_width`. That one rasterizes an
+            // SVG through fontdb and reports inked extent in the named face
+            // alone: a glyph the face lacks (the radio marks "●" / "○" the
+            // designer's pin rows carry, which Berkeley Mono has not) measures
+            // as next to nothing while the draw lands it from a fallback face
+            // a full advance wide, and the label ran off the plate's right
+            // edge (2026-09-21). The inked measure is kept as a floor, so a
+            // host whose font system has no bundled faces never measures
+            // narrower than before.
             let (family, size) = label_font();
             let widest = self
                 .options
                 .iter()
-                .map(|s| crate::widget::display::measure_text_width(s, &family, size))
+                .map(|s| {
+                    let inked = crate::widget::display::measure_text_width(s, &family, size);
+                    let shaped = crate::geometry_font_system()
+                        .lock()
+                        .ok()
+                        .and_then(|mut fs| {
+                            crate::backend::window_runner::shaped_cluster_offsets(&mut fs, s, size, Some(&family))
+                                .last()
+                                .map(|&(_, total)| total)
+                        })
+                        .unwrap_or(0.0);
+                    inked.max(shaped)
+                })
                 .fold(0.0f32, f32::max);
             self.w = (widest + 2.0 * PAD).max(120.0);
             self.visible = true;
@@ -875,5 +894,25 @@ mod context_menu_padding_tests {
         assert_eq!(m.hovered_item, None, "a separator row never hovers");
         m.cursor_moved(110.0, 200.0 + PAD + ROW_H * 2.5);
         assert_eq!(m.hovered_item, Some(2));
+    }
+
+    /// A label with a glyph the menu face lacks — the radio marks the
+    /// designer's pin rows carry — is measured as the renderer shapes it,
+    /// fallback face and all, so the plate is wide enough for what is drawn.
+    /// The SVG-inked measure alone called the mark next to nothing.
+    #[test]
+    fn a_fallback_glyph_widens_the_plate_as_drawn() {
+        let mut m = ContextMenuState::new();
+        m.show(0.0, 0.0, vec!["● Follow Active Editor".into()], 0, WidgetId(1));
+        let (family, size) = super::context_menu::label_font();
+        let drawn = {
+            let mut fs = crate::geometry_font_system().lock().unwrap();
+            crate::backend::window_runner::shaped_cluster_offsets(&mut fs, "● Follow Active Editor", size, Some(&family))
+                .last()
+                .map(|&(_, t)| t)
+                .unwrap()
+        };
+        assert!(drawn > 0.0);
+        assert!(m.w >= drawn + 2.0 * PAD, "plate {} narrower than the drawn label {} plus pads", m.w, drawn);
     }
 }
