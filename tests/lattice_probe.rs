@@ -20,7 +20,7 @@ fn lattice_survives_tessellation_inside_a_clip() {
 }
 
 #[test]
-fn graph_emits_grid_relief() {
+fn graph_emits_flat_grid_lines() {
     use cce_ui::widget::GraphController;
     let mut g = cce_ui::widget::Graph::new();
     g.set_grid_sizes(71.0, 31.0);
@@ -31,9 +31,10 @@ fn graph_emits_grid_relief() {
     g.set_uniform_background(true);
     let mut pc = PaintCtx::new();
     let rect = Rect { x: 40.0, y: 40.0, width: 600.0, height: 300.0 };
-    g.paint_grid_relief(rect, &mut pc);
+    g.paint_grid(rect, &mut pc);
     let dl = pc.finish();
-    let n_lattice = dl.items.iter().filter(|i| matches!(i.prim, Prim::Lattice { .. })).count();
-    let n_groove = dl.items.iter().filter(|i| matches!(i.prim, Prim::Groove { .. })).count();
-    assert_eq!((n_lattice, n_groove), (1, 2));
+    let n_quad = dl.items.iter().filter(|i| matches!(i.prim, Prim::Quad { .. })).count();
+    // ~8 columns x ~10 rows of gap strips (two per cell) plus the two axes.
+    assert!(n_quad > 100, "only {n_quad} quads");
+    assert!(dl.items.iter().all(|i| matches!(i.prim, Prim::Quad { .. })), "flat lines only");
 }

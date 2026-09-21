@@ -266,6 +266,12 @@ impl GraphController for ContentBg {
     fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
     fn grid_origin(&self) -> (f32, f32) { (self.grid_origin_x, self.grid_origin_y) }
     fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
+    /// The same gradient grid its own `paint` draws, for a host walking the quads itself.
+    fn paint_grid(&self, rect: Rect, pc: &mut PaintCtx) {
+        for (qx, qy, qw, qh, qc) in self.grid_quads(rect) {
+            pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
+        }
+    }
     fn take_pending_connection(&mut self) -> Option<(String, String)> { None }
     fn cancel_connecting(&mut self) {}
     fn is_node_rect(&self, _qx: f32, _qy: f32, _qw: f32, _qh: f32) -> bool { false }

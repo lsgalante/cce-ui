@@ -646,10 +646,10 @@ pub trait GraphController {
     /// rounded corners — for hosts that draw the graph's quads themselves
     /// (the designer) and want cells as superellipse tiles.
     fn geometry_quads_tagged(&self, rect: crate::scene::layout::Rect) -> Vec<TaggedQuad>;
-    /// The grid and origin axes as relief carved into what is beneath — for
+    /// The grid lines and origin axes, flat, over what is beneath — for
     /// hosts that draw the graph's quads themselves, called at the point in
-    /// their walk where the grid used to be. Default: no grid.
-    fn paint_grid_relief(&self, _rect: crate::scene::layout::Rect, _pc: &mut crate::scene::paint::PaintCtx) {}
+    /// their walk where the grid goes (under the wires and nodes).
+    fn paint_grid(&self, rect: crate::scene::layout::Rect, pc: &mut crate::scene::paint::PaintCtx);
     /// The pixel rect of the cell an in-flight node drag will deposit on
     /// (`commit_drag`'s resolution), for hosts' drop-target highlight.
     /// None outside a node drag.

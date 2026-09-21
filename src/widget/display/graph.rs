@@ -385,56 +385,63 @@ impl Graph {
         crate::layout::graph_node_corner_radius().min(cell / 2.0)
     }
 
-    /// The grid as relief in whatever the graph is painted over — the pane
-    /// plate: every cell a well carved as ONE lattice (the desktop grid's
-    /// primitive), the rails between them the plate's face, and the origin
-    /// axes two grooves engraved down the rail centrelines beside row and
-    /// column 0. Pure shading: no colour is mixed in, so the pane stays the
-    /// same material as every other plate however wide the rails are. (The
-    /// grid was tinted quads until 2026-09-20 — gap-coloured rails at the
-    /// network opacity — which at the designer's rail widths covered 40% of
-    /// the pane in a second colour; no gap colour could match the plate.)
-    ///
-    /// The wall runs from each cell edge outward over half the narrower gap,
-    /// so a rail carries one wall from each side and keeps a flat centre
-    /// (a single carve per cell would stack at the crossings; the lattice
-    /// mitres them). Relief cannot fade, so the network opacity does not
-    /// apply here — it fades wires and text, which are colour.
-    pub fn paint_grid_relief(&self, rect: Rect, pc: &mut PaintCtx) {
+    /// The grid lines, flat, over whatever the graph is painted on — the
+    /// pane plate: the cells are the plate showing through (no fill of their
+    /// own), and only the gaps are drawn, in the gap colour at the network
+    /// opacity, plus the origin axes as 2px lines down the rail centrelines
+    /// beside row and column 0. Painted per cell — right gap at the cell's
+    /// height, bottom gap at the full step width — so no two strips overlap
+    /// and a crossing carries one alpha, not two. Gated on the grid's
+    /// visibility only: `uniform_background` describes the widget's own
+    /// background fill and the designer hard-codes it true, which is how
+    /// its grid went undrawn until 2026-09-20. (A relief lattice was tried
+    /// in between and read too heavy at the DE's relief depth.)
+    pub fn paint_grid(&self, rect: Rect, pc: &mut PaintCtx) {
         if self.grid_size_x <= 0.0 || self.grid_size_y <= 0.0 {
             return;
         }
+        let (min_x, min_y) = (rect.x, rect.y);
+        let (max_x, max_y) = (rect.x + rect.width, rect.y + rect.height);
+        let clipped = |qx: f32, qy: f32, qw: f32, qh: f32, c: [f32; 4], pc: &mut PaintCtx| {
+            let x1 = qx.max(min_x);
+            let y1 = qy.max(min_y);
+            let x2 = (qx + qw).min(max_x);
+            let y2 = (qy + qh).min(max_y);
+            if x2 > x1 && y2 > y1 {
+                pc.quad(Rect { x: x1, y: y1, width: x2 - x1, height: y2 - y1 }, c);
+            }
+        };
+
         let step_x = self.grid_size_x + self.skipped_col_w;
         let step_y = self.grid_size_y + self.skipped_row_h;
-        // Half the narrower rail, the same clamp the desktop grid applies.
-        let run = (self.skipped_col_w.min(self.skipped_row_h) * 0.5).max(1.0);
-
-        // Gated on the grid's visibility ONLY — not on `uniform_background`,
-        // which describes the widget's own background fill (cell colour over
-        // the whole rect vs the near-clear one) and has nothing to say about
-        // relief. The old cell/gap quads were gated on both, and the designer
-        // hard-codes uniform_background = true, so its network grid was never
-        // drawn at all — found 2026-09-20 by counting lattice prims in the
-        // tessellated frame under CCE_PLATE_DEBUG.
         if self.show_network_grid && step_x >= 4.0 && step_y >= 4.0 {
-            pc.lattice(
-                rect,
-                (step_x, step_y),
-                (self.grid_origin_x + self.grid_size_x * 0.5, self.grid_origin_y + self.grid_size_y * 0.5),
-                (self.grid_size_x, self.grid_size_y),
-                self.cell_corner_radius(),
-                run,
-            );
+            let gap_rgba = [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity];
+            let ry_start = (((rect.y - self.grid_origin_y) / step_y).floor() as i32 - 1).max(-100_000);
+            let ry_end = (((rect.y + rect.height - self.grid_origin_y) / step_y).ceil() as i32 + 1).min(100_000);
+            let cx_start = (((rect.x - self.grid_origin_x) / step_x).floor() as i32 - 1).max(-100_000);
+            let cx_end = (((rect.x + rect.width - self.grid_origin_x) / step_x).ceil() as i32 + 1).min(100_000);
+            // Rounded pixel boundaries, so adjacent strips meet without seams.
+            for r in ry_start..=ry_end {
+                let y_cell_start = (self.grid_origin_y + (r as f32) * step_y).round();
+                let y_cell_end = (self.grid_origin_y + (r as f32) * step_y + self.grid_size_y).round();
+                let y2 = (self.grid_origin_y + ((r + 1) as f32) * step_y).round();
+                for c in cx_start..=cx_end {
+                    let x_cell_start = (self.grid_origin_x + (c as f32) * step_x).round();
+                    let x_cell_end = (self.grid_origin_x + (c as f32) * step_x + self.grid_size_x).round();
+                    let x2 = (self.grid_origin_x + ((c + 1) as f32) * step_x).round();
+                    clipped(x_cell_end, y_cell_start, x2 - x_cell_end, y_cell_end - y_cell_start, gap_rgba, pc);
+                    clipped(x_cell_start, y_cell_end, x2 - x_cell_start, y2 - y_cell_end, gap_rgba, pc);
+                }
+            }
         }
 
-        // Origin axes, down the rail centrelines beside row/column 0 — the
-        // lines the 2px black quads used to draw, now engraved.
-        let axis_w = 2.0;
-        let axis_run = run.min(axis_w);
+        // Origin axes, in the gaps beside row/column 0.
+        let axis = [0.0, 0.0, 0.0, self.network_opacity];
+        let thickness = 2.0;
         let y_center = self.grid_origin_y + self.grid_size_y + self.skipped_row_h / 2.0;
-        pc.groove((rect.x, y_center), (rect.x + rect.width, y_center), axis_w, axis_run, rect);
+        clipped(rect.x, y_center - thickness / 2.0, rect.width, thickness, axis, pc);
         let x_center = self.grid_origin_x - self.skipped_col_w / 2.0;
-        pc.groove((x_center, rect.y), (x_center, rect.y + rect.height), axis_w, axis_run, rect);
+        clipped(x_center - thickness / 2.0, rect.y, thickness, rect.height, axis, pc);
     }
 
     /// The wires / connection preview / grid cells / axes / node bodies / toggles as plain
@@ -505,9 +512,8 @@ impl Graph {
             }
         }
 
-        // The grid and the origin axes are RELIEF, not quads — see
-        // `paint_grid_relief`. Hosts that draw these quads themselves call it
-        // at the same point in their own walk.
+        // The grid lines and the origin axes are `paint_grid`'s — hosts that
+        // draw these quads themselves call it at the same point in their walk.
 
         // Node bodies (culled, not clipped — legacy) + geometry toggles (clipped)
         for i in 0..self.nodes.len() {
@@ -715,12 +721,12 @@ impl Paint for Graph {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // The background is the first entry; the grid relief is carved into
-        // it before the wires and nodes go on top.
+        // The background is the first entry; the grid lines go over it
+        // before the wires and nodes.
         for (i, (qx, qy, qw, qh, r, c, corners)) in self.rounded_geometry(rect).into_iter().enumerate() {
             ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, r, corners, c);
             if i == 0 {
-                self.paint_grid_relief(rect, ctx);
+                self.paint_grid(rect, ctx);
             }
         }
         for (cx, cy, r, c) in self.port_circles(rect) {
@@ -1185,8 +1191,8 @@ impl Graph {
 }
 
 impl GraphController for Graph {
-    fn paint_grid_relief(&self, rect: Rect, pc: &mut PaintCtx) {
-        Graph::paint_grid_relief(self, rect, pc)
+    fn paint_grid(&self, rect: Rect, pc: &mut PaintCtx) {
+        Graph::paint_grid(self, rect, pc)
     }
     fn set_nodes(&mut self, nodes: &[GraphNode]) {
         // Hover carries a node INDEX, so remap it by id across the rebuild
