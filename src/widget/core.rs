@@ -336,6 +336,12 @@ pub mod context_menu {
     /// `24.0`, and a menu whose rows are measured differently from where they
     /// are drawn selects the entry above the one under the cursor.
     pub const ROW_H: f32 = 24.0;
+    /// The plate's padding, the same on every side: the rows start this far
+    /// below the top edge and end this far above the bottom, and the labels
+    /// sit this far in from the left, with the widest label this far from
+    /// the right. Before 2026-09-21 the rows ran flush to the top and bottom
+    /// and the labels had 8px on the left against 16px on the right.
+    pub const PAD: f32 = 8.0;
 
     /// The face a menu label is drawn in: the DE's menu font, family and
     /// size — the same `menubar_font` the menubar's own drop-downs use
@@ -393,7 +399,7 @@ pub mod context_menu {
             self.x = x;
             self.y = y;
             self.options = options;
-            self.h = self.options.len() as f32 * ROW_H;
+            self.h = self.options.len() as f32 * ROW_H + 2.0 * PAD;
             // Width from the SHAPED widest label, not `bytes * 7.5`: that
             // estimate is a different face's advance (and counts bytes, so a
             // non-ASCII label over-measures), which is how a menu ends up
@@ -404,7 +410,7 @@ pub mod context_menu {
                 .iter()
                 .map(|s| crate::widget::display::measure_text_width(s, &family, size))
                 .fold(0.0f32, f32::max);
-            self.w = (widest + 24.0).max(120.0);
+            self.w = (widest + 2.0 * PAD).max(120.0);
             self.visible = true;
             self.hovered_item = None;
             self.target = Some(target);
@@ -421,16 +427,34 @@ pub mod context_menu {
             px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h
         }
 
+        /// The top of row `idx`.
+        pub fn row_y(&self, idx: usize) -> f32 {
+            self.y + PAD + idx as f32 * ROW_H
+        }
+
+        /// The row under `(px, py)`, or `None` outside the plate or in its
+        /// padding — the padding is plate, not a row, so a press there
+        /// neither hovers nor fires row 0.
+        pub fn row_at(&self, px: f32, py: f32) -> Option<usize> {
+            if px < self.x || px > self.x + self.w {
+                return None;
+            }
+            let rel = py - self.y - PAD;
+            if rel < 0.0 {
+                return None;
+            }
+            let idx = (rel / ROW_H) as usize;
+            (idx < self.options.len()).then_some(idx)
+        }
+
         pub fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
             if !self.visible { return false; }
             let was_hovered = self.hovered_item;
             self.hovered_item = None;
-            if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
-                let idx = ((py - self.y) / ROW_H) as usize;
+            if let Some(idx) = self.row_at(px, py) {
                 // A "-" row is a SEPARATOR (the dropdown's convention):
                 // engraved, never hovered, never an action.
-                if idx < self.options.len() && idx >= self.header_count && self.options[idx] != "-"
-                {
+                if idx >= self.header_count && self.options[idx] != "-" {
                     self.hovered_item = Some(idx);
                 }
             }
@@ -447,9 +471,8 @@ pub mod context_menu {
                 return false;
             }
 
-            if px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h {
-                let idx = ((py - self.y) / ROW_H) as usize;
-                if idx < self.options.len() {
+            if self.hit_test(px, py) {
+                if let Some(idx) = self.row_at(px, py) {
                     if idx >= self.header_count {
                         let opt = self.options[idx].clone();
                         if let (Some(target_id), Some(ctx)) = (self.target, ctx) {
@@ -533,10 +556,11 @@ pub mod context_menu {
                 // the first and last rows touch the plate's, and a header row is
                 // never hovered, so the top pair only rounds when there is no
                 // header above.
-                let iy = self.y + h_idx as f32 * ROW_H;
-                let inset = (depth * 0.5).max(2.0);
-                let first = h_idx == self.header_count && self.header_count == 0;
-                let last = h_idx + 1 == self.options.len();
+                // Inside the padding on every side — the rows no longer
+                // touch the plate's edge, so the fill is its own rounded
+                // tablet on the face rather than a band that meets the roll.
+                let iy = self.row_y(h_idx);
+                let inset = (depth * 0.5).max(2.0).max(PAD * 0.5);
                 ctx.rounded_rect(
                     crate::scene::layout::Rect {
                         x: self.x + inset,
@@ -545,7 +569,7 @@ pub mod context_menu {
                         height: ROW_H - 4.0,
                     },
                     (r - inset).max(0.0),
-                    (first, first, last, last),
+                    (true, true, true, true),
                     [0.20, 0.40, 0.65, 0.6],
                 );
             }
@@ -555,8 +579,8 @@ pub mod context_menu {
             // into the menu plate instead of a printed dash.
             for (idx, opt) in self.options.iter().enumerate() {
                 if opt == "-" {
-                    let cy = self.y + idx as f32 * ROW_H + ROW_H * 0.5;
-                    let inset = (depth * 0.5).max(6.0);
+                    let cy = self.row_y(idx) + ROW_H * 0.5;
+                    let inset = (depth * 0.5).max(PAD);
                     ctx.groove(
                         (self.x + inset, cy),
                         (self.x + self.w - inset, cy),
@@ -582,16 +606,16 @@ pub mod context_menu {
             quads.push((self.x + 1.0, self.y + 1.0, self.w - 2.0, self.h - 2.0, [0.06, 0.06, 0.09, 1.0]));
 
             if let Some(h_idx) = self.hovered_item {
-                let iy = self.y + h_idx as f32 * ROW_H;
-                quads.push((self.x + 2.0, iy + 2.0, self.w - 4.0, ROW_H - 4.0, [0.20, 0.40, 0.65, 0.6]));
+                let iy = self.row_y(h_idx);
+                quads.push((self.x + PAD * 0.5, iy + 2.0, self.w - PAD, ROW_H - 4.0, [0.20, 0.40, 0.65, 0.6]));
             }
 
             // Separator rows ("-"): a hairline in place of the engraved
             // groove the plate path cuts.
             for (idx, opt) in self.options.iter().enumerate() {
                 if opt == "-" {
-                    let cy = self.y + idx as f32 * ROW_H + ROW_H * 0.5;
-                    quads.push((self.x + 6.0, cy, self.w - 12.0, 1.0, [0.22, 0.22, 0.28, 1.0]));
+                    let cy = self.row_y(idx) + ROW_H * 0.5;
+                    quads.push((self.x + PAD, cy, self.w - 2.0 * PAD, 1.0, [0.22, 0.22, 0.28, 1.0]));
                 }
             }
 
@@ -638,7 +662,7 @@ pub mod context_menu {
                     continue;
                 }
                 let (_, label_size) = label_font();
-                let iy = self.y + idx as f32 * ROW_H + (ROW_H - label_size) / 2.0;
+                let iy = self.row_y(idx) + (ROW_H - label_size) / 2.0;
                 // The toolkit's semantic colors rather than greys hand-mixed
                 // against the old near-black fill: on the plate's mid-slate the
                 // header's 0x70 was a step above its background and read as
@@ -653,7 +677,7 @@ pub mod context_menu {
 
                 labels.push(TextLabel {
                     text: opt.clone(),
-                    x: self.x + 8.0,
+                    x: self.x + PAD,
                     y: iy,
                     font_size: label_size,
                     color: text_color,
@@ -818,4 +842,38 @@ macro_rules! impl_widget_base {
         fn as_any(&self) -> &dyn std::any::Any { self }
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     };
+}
+
+#[cfg(test)]
+mod context_menu_padding_tests {
+    use super::context_menu::{ContextMenuState, PAD, ROW_H};
+    use crate::widget::WidgetId;
+
+    /// The plate pads its rows evenly: the height is the rows plus a pad
+    /// above and below, the labels sit one pad in from the left with the
+    /// widest one a pad from the right, and the padding is plate — a pointer
+    /// in it hovers no row, and a pointer a row down from the top pad is on
+    /// row 1, not row 0 plus a fraction.
+    #[test]
+    fn rows_sit_inside_an_even_pad() {
+        let mut m = ContextMenuState::new();
+        m.show(100.0, 200.0, vec!["Hide Geometry".into(), "-".into(), "Delete".into()], 0, WidgetId(1));
+        assert_eq!(m.h, 3.0 * ROW_H + 2.0 * PAD);
+        assert!(m.w >= 2.0 * PAD);
+        let labels = m.text_labels();
+        assert!(labels.iter().all(|l| l.x == 100.0 + PAD), "labels start one pad in");
+        assert_eq!(labels[0].y, 200.0 + PAD + (ROW_H - labels[0].font_size) / 2.0, "row 0 starts under the top pad");
+
+        assert_eq!(m.row_at(110.0, 200.0 + PAD * 0.5), None, "the top pad is no row");
+        assert_eq!(m.row_at(110.0, 200.0 + PAD + ROW_H * 0.5), Some(0));
+        assert_eq!(m.row_at(110.0, 200.0 + PAD + ROW_H * 2.5), Some(2));
+        assert_eq!(m.row_at(110.0, 200.0 + m.h - PAD * 0.5), None, "the bottom pad is no row");
+
+        m.cursor_moved(110.0, 200.0 + PAD * 0.5);
+        assert_eq!(m.hovered_item, None);
+        m.cursor_moved(110.0, 200.0 + PAD + ROW_H * 1.5);
+        assert_eq!(m.hovered_item, None, "a separator row never hovers");
+        m.cursor_moved(110.0, 200.0 + PAD + ROW_H * 2.5);
+        assert_eq!(m.hovered_item, Some(2));
+    }
 }
