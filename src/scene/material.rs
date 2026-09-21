@@ -390,9 +390,17 @@ impl Material {
     /// (`color::menu_opacity`) — not the colour's own alpha, since a page
     /// colour is typically opaque and would resolve the frost to a solid
     /// tint — and frosted at the DE recipe, so a menu shows the content
-    /// beneath it blurred and tinted rather than covering it.
+    /// beneath it blurred and tinted rather than covering it, with the
+    /// recipe's compression replaced by the menu's own
+    /// (`style.surface.menu.compression`, `color::menu_compression`): a menu
+    /// is read over whatever it opened above, so it holds its key harder
+    /// than a pane does.
     pub fn popover(base: [f32; 4]) -> Self {
-        Self::opaque([base[0], base[1], base[2], crate::color::menu_opacity()]).with_frost(Frost::from_style())
+        let mut frost = Frost::from_style();
+        if let Frost::Frosted { compression, .. } = &mut frost {
+            *compression = crate::color::menu_compression();
+        }
+        Self::opaque([base[0], base[1], base[2], crate::color::menu_opacity()]).with_frost(frost)
     }
 
     // ---- derived materials -------------------------------------------------
@@ -719,6 +727,22 @@ mod tests {
         old[3] = -crate::color::menu_opacity();
         assert_eq!(m.fill(PlateRole::Nested), old);
         assert!(m.frost.is_frosted());
+    }
+
+    /// A popover's frost compresses at the menu key, not the DE recipe's:
+    /// the two are independent dials.
+    #[test]
+    fn popover_compresses_at_the_menu_key() {
+        let _lock = crate::color::test_color_state_lock();
+        crate::color::set_plate_backdrop_compression(0.1);
+        crate::color::set_menu_compression(0.7);
+        let m = Material::popover([0.1, 0.2, 0.3, 1.0]);
+        let Frost::Frosted { compression, .. } = m.frost else { panic!("popover is frosted") };
+        assert!((compression - 0.7).abs() < 1e-6, "popover compression {compression}");
+        let Frost::Frosted { compression: pane, .. } = Frost::from_style() else { panic!("recipe is frosted") };
+        assert!((pane - 0.1).abs() < 1e-6, "recipe compression {pane}");
+        crate::color::set_plate_backdrop_compression(0.0);
+        crate::color::set_menu_compression(0.6);
     }
 
     /// The control-face rule: opaque or nothing.

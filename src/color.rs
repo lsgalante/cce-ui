@@ -112,6 +112,13 @@ static ROOT_PLATE_MENUBAR_BLUR: RwLock<bool> = RwLock::new(false);
 /// Tint strength of frosted menus/popovers over the blurred backdrop:
 /// 1.0 is fully opaque (frost invisible), lower shows more content through.
 static MENU_OPACITY: RwLock<f32> = RwLock::new(0.8);
+/// Backdrop compression of frosted menus/popovers (`style.surface.menu.
+/// compression`, 0..1): how hard the blurred content beneath a menu is
+/// pulled toward the menu's own key, so the menu holds its legibility over
+/// whatever it opens above. Menu-scoped, overriding the DE recipe's
+/// `plate.backdrop_compression` for popovers only; a menu is read while
+/// something else is going on beneath it, which a pane is not.
+static MENU_COMPRESSION: RwLock<f32> = RwLock::new(0.6);
 
 static ROOT_PLATE_STATUSBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.06, 0.10, 1.0]);
 static ROOT_PLATE_STATUSBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.6666, 0.6666, 0.7333, 1.0]);
@@ -340,6 +347,9 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(o) = val.pointer("/style/surface/menu/opacity").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = MENU_OPACITY.write() { *lock = (o as f32).clamp(0.0, 1.0); }
+    }
+    if let Some(c) = val.pointer("/style/surface/menu/compression").and_then(|v| v.as_f64()) {
+        if let Ok(mut lock) = MENU_COMPRESSION.write() { *lock = (c as f32).clamp(0.0, 1.0); }
     }
 
     let menubar_blur_ptr = val.pointer("/style/surface/plate/root/menubar/blur");
@@ -1210,6 +1220,17 @@ pub fn read_opacity_if_configured() -> Option<f32> {
 pub fn menu_opacity() -> f32 {
     load_colors_once();
     style_read(&MENU_OPACITY)
+}
+
+/// Backdrop compression of frosted menus/popovers
+/// (`/style/surface/menu/compression`, default 0.6) — see `MENU_COMPRESSION`.
+pub fn menu_compression() -> f32 {
+    load_colors_once();
+    style_read(&MENU_COMPRESSION)
+}
+
+pub fn set_menu_compression(c: f32) {
+    style_write(&MENU_COMPRESSION, c.clamp(0.0, 1.0));
 }
 
 pub fn read_root_plate_opacity_if_configured() -> Option<f32> {
