@@ -647,6 +647,14 @@ pub enum Prim {
     /// lines are when the cells are the surface beneath showing through.
     /// SDF path only — the legacy banded tessellation draws nothing.
     Grout { rect: Rect, period: (f32, f32), origin: (f32, f32), cell: (f32, f32), radius: f32, color: [f32; 4] },
+    /// A flat fill of a MATERIAL: `rect` at `radii`, no roll, no rim — the
+    /// material's tint, frosted at the material's own recipe when it is
+    /// frosted. What a frosted `RoundedRect` promotes to, except that the
+    /// recipe is the material's rather than the DE default's, so a fill can
+    /// compress harder (or softer) than the pane it sits on. Opens no carve
+    /// host: carves emitted after it overlay it, as they overlay any flat
+    /// geometry. An opaque material draws as a plain rounded fill.
+    Fill { rect: Rect, radii: Radii, material: Material },
     /// Several rounded boxes carved (`raised` false) or raised (`raised`
     /// true) as ONE shape: the union of the boxes is the well, and its wall
     /// follows the union's outline — straddling it by ±`depth`/2 like every
@@ -1061,6 +1069,7 @@ impl PaintCtx {
             Prim::Grout { rect, period, origin, cell, radius, color } => {
                 self.grout(rect, period, origin, cell, radius, color)
             }
+            Prim::Fill { rect, radii, material } => self.fill_material(rect, radii, &material),
             Prim::CarveUnion { boxes, depth, raised } => self.carve_union(boxes, depth, raised),
             Prim::Image { image, rect, alpha } => self.image(image, rect, alpha),
         }
@@ -1095,6 +1104,12 @@ impl PaintCtx {
         let (ox, oy) = self.offset;
         let rect = self.apply_offset(rect);
         self.push(Prim::Lattice { rect, period, origin: (origin.0 + ox, origin.1 + oy), cell, radius, depth });
+    }
+
+    /// A flat fill of `material` — see [`Prim::Fill`].
+    pub fn fill_material(&mut self, rect: Rect, radii: Radii, material: &Material) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Fill { rect, radii, material: *material });
     }
 
     /// Grout between a periodic field of rounded cells — see [`Prim::Grout`].

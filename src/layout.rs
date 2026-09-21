@@ -260,6 +260,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.relief.profile_knobs" => "bevel_profile_knobs",
                 "style.surface.relief.edge_knobs" => "roll_profile_knobs",
                 "style.container.section.depth" => "section_depth",
+                "style.surface.param.backdrop_compression" => "param_compression",
                 "window_manager.bevel_shader" => "bevel_shader",
                 "window_manager.control_relief" => "control_relief",
                 "window_manager.corner_shape" => "corner_shape",
@@ -1682,6 +1683,19 @@ pub fn set_control_panel_gap(gap: f32) {
 pub fn section_depth() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("section_depth").unwrap_or(1.0)
+}
+
+/// The parameter rows' backdrop compression
+/// (`style.surface.param.backdrop_compression`, 0..1): when set, every
+/// parameter row in a params pane is floored with the pane material frosted
+/// at THIS compression before its controls paint, so each parameter sits on
+/// a tablet that pulls the view toward the tint while the pane around it
+/// stays at its own — the row-scale twin of the designer's node
+/// compression. `None` (unset) draws no floor — the rows are bare, as they
+/// always were.
+pub fn param_compression() -> Option<f32> {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("param_compression").map(|v| v.clamp(0.0, 1.0))
 }
 
 pub fn section_padding() -> f32 {

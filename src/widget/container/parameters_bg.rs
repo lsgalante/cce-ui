@@ -324,6 +324,32 @@ impl ParametersBg {
     /// Each section's boxes: the title box, plus the box wrapping its rows (`None` when the
     /// section is collapsed or has no rows). The shared source for the outline's straight
     /// runs and its corner fillets, so the two halves can't disagree.
+    /// The row floors (`layout::param_compression`): the pane material
+    /// frosted at the configured compression, filled under every visible
+    /// parameter row (headers excepted) before anything else in the pane
+    /// paints, at the control corner radius — each parameter on its own
+    /// tablet, the way the designer's node bodies get their own compression.
+    /// Nothing when the key is unset. Relief only: the flat style has no
+    /// floor language.
+    fn paint_row_floors(&self, ctx: &mut PaintCtx) {
+        let Some(k) = crate::layout::param_compression() else { return };
+        if !crate::layout::control_relief() {
+            return;
+        }
+        let mut mat = crate::scene::Material::pane();
+        if let crate::scene::Frost::Frosted { compression, .. } = &mut mat.frost {
+            *compression = k;
+        }
+        let r = crate::layout::control_corner_radius();
+        let hidden = self.hidden_rows();
+        for (i, (x, y, w, h)) in self.get_param_rects().into_iter().enumerate() {
+            if hidden[i] || h <= 0.0 || self.display_params[i].2 == "section" {
+                continue;
+            }
+            ctx.fill_material(Rect { x, y, width: w, height: h }, (r, r, r, r), &mat);
+        }
+    }
+
     fn section_boxes(&self) -> Vec<((f32, f32, f32, f32), Option<(f32, f32, f32, f32)>)> {
         let rects = self.get_param_rects();
         let full_w = self.rect.width - 2.0 * SECTION_MARGIN;
@@ -1483,6 +1509,7 @@ impl Paint for ParametersBg {
         if !self.visible {
             return;
         }
+        self.paint_row_floors(ctx);
         for (qx, qy, qw, qh, qr, qc, corners) in self.rounded_quads(ui) {
             ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
         }

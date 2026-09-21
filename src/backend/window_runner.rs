@@ -1712,7 +1712,7 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
         P::DropletScrim { .. } => "DropletScrim",
         P::ConcaveFillet { .. } => "ConcaveFillet",
-        P::Groove { .. } => "Groove", P::Lattice { .. } => "Lattice", P::Grout { .. } => "Grout",
+        P::Groove { .. } => "Groove", P::Lattice { .. } => "Lattice", P::Grout { .. } => "Grout", P::Fill { .. } => "Fill",
         P::CarveUnion { .. } => "CarveUnion", P::Glow { .. } => "Glow",
         P::Text { .. } => "Text", P::Image { .. } => "Image",
     }
@@ -1872,6 +1872,9 @@ pub fn tessellate_display_list(
         ) || matches!(
             &item.prim,
             crate::scene::paint::Prim::Border { fill, .. } if fill[3] < 0.0
+        ) || matches!(
+            &item.prim,
+            crate::scene::paint::Prim::Fill { material, .. } if material.fill(PlateRole::Nested)[3] < 0.0
         );
         // Logical [cx, cy, r] → the physical-pixel triple the vertex attribute carries.
         let no = item
@@ -1916,6 +1919,25 @@ pub fn tessellate_display_list(
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
                 plate = Some(flat_frost_push(rect, radii, *color, scale, plate_light, plate_mat));
                 promoted = true;
+            }
+            Prim::Fill { rect, radii, material } if shader_plates && material.frost.is_frosted() => {
+                // A material's flat fill: the frosted promotion above with
+                // the MATERIAL's recipe (compression, refraction, radius)
+                // instead of the DE default's. Zero depth, circular
+                // corners, no host — exactly a promoted RoundedRect.
+                let color = material.fill(PlateRole::Nested);
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
+                let mut p = plate_push_raised(rect, *radii, 0.0, scale, plate_light, plate_mat, false, Some(2.0));
+                let [fz, fw] = material.frost.pack(scale);
+                p.host[2] = fz;
+                p.host[3] = fw;
+                plate = Some(p);
+                promoted = true;
+            }
+            Prim::Fill { rect, radii, material } => {
+                // Opaque (or the legacy path): a plain rounded fill.
+                let cr = crate::widget::CornerRadii::new(radii.0, radii.1, radii.2, radii.3);
+                push_rounded_rect_vertices_corners(rect.x, rect.y, rect.width, rect.height, cr, sw, sh, material.fill(PlateRole::Nested), no, None, &mut verts);
             }
             Prim::Border { rect, radii, fill, border, thickness } if shader_plates && fill[3] < 0.0 => {
                 // The fill as its own plate batch, closed here; the stroke
