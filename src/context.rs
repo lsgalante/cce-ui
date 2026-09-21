@@ -136,33 +136,48 @@ impl UiContext {
     /// name roots by id and the registry is the one place a pointer lives). The root must be
     /// registered — apps already register every widget for focus/coverage — and an
     /// unresolvable root is a loud no-op, never a deref.
+    /// The scroll-gesture bookkeeping every wheel dispatch must pass
+    /// through: a gap over 250ms since the last wheel starts a NEW gesture
+    /// (`scroll_gesture_new`, and the initiator is cleared), a shorter gap
+    /// continues the current one. `propagate_event` calls this for the
+    /// wheels it routes; a host that hands a wheel straight to a widget's
+    /// `handle_event` (the designer's modal dialog, whose panes it dispatches
+    /// itself) calls it first — or the flags stay whatever the last routed
+    /// wheel left, and a pane inside the dialog reads a fresh gesture as the
+    /// tail of one the MAIN pane owned and lets the control under the pointer
+    /// take it (2026-09-20: the Settings list would not scroll after the
+    /// params pane had).
+    pub fn note_scroll_event(&mut self) {
+        let now = std::time::Instant::now();
+        let elapsed_ms = match self.last_scroll_time {
+            None => 999999,
+            Some(last) => now.duration_since(last).as_millis(),
+        };
+        if elapsed_ms >= 5 {
+            let is_new_gesture = elapsed_ms > 250;
+            if is_new_gesture {
+                self.scroll_initiate_widget_id = None;
+                self.scroll_gesture_new = true;
+            } else {
+                self.scroll_gesture_new = false;
+            }
+            if crate::scroll_debug() {
+                eprintln!(
+                    "[scroll] router: gap={elapsed_ms}ms new_gesture={is_new_gesture} initiator={:?}",
+                    self.scroll_initiate_widget_id
+                );
+            }
+            self.last_scroll_time = Some(now);
+        }
+    }
+
     pub fn propagate_event(&mut self, event: &Event, root: WidgetId) -> bool {
         let Some(root_ptr) = self.tree.get_ptr(root) else {
             eprintln!("propagate_event: unregistered/stale root {root:?} — event dropped");
             return false;
         };
         if let Event::MouseWheel { .. } = event {
-            let now = std::time::Instant::now();
-            let elapsed_ms = match self.last_scroll_time {
-                None => 999999,
-                Some(last) => now.duration_since(last).as_millis(),
-            };
-            if elapsed_ms >= 5 {
-                let is_new_gesture = elapsed_ms > 250;
-                if is_new_gesture {
-                    self.scroll_initiate_widget_id = None;
-                    self.scroll_gesture_new = true;
-                } else {
-                    self.scroll_gesture_new = false;
-                }
-                if crate::scroll_debug() {
-                    eprintln!(
-                        "[scroll] router: gap={elapsed_ms}ms new_gesture={is_new_gesture} initiator={:?}",
-                        self.scroll_initiate_widget_id
-                    );
-                }
-                self.last_scroll_time = Some(now);
-            }
+            self.note_scroll_event();
         }
         if let Event::KeyInput(ref key_event) = event {
             let is_scroll_key = match &key_event.logical_key {
