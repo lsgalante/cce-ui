@@ -2609,21 +2609,22 @@ impl Input for ParametersBg {
                 // nobody claimed (dead space, a control at its limit) is still
                 // open to spatial acquisition — the band slider's feel.
                 let pane_owns = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(self_id);
-                // A trackpad gesture over a pane that SCROLLS scrolls it, from
-                // anywhere — a two-finger swipe is a scroll everywhere on the
-                // desktop, and a pane that is mostly controls (the Alt+D
-                // Settings list) was otherwise scrollable only from a label.
-                // A wheel notch still adjusts the control under the pointer,
-                // and in a pane whose content fits a finger gesture still
-                // adjusts by hover, the band slider's feel. Finger-end frames
-                // (no delta) take the same path so the pane's coast starts.
+                // A trackpad gesture is the PANE's, from anywhere — a
+                // two-finger swipe is a scroll everywhere on the desktop, and
+                // a pane that is mostly controls (the Alt+D Settings list)
+                // was otherwise scrollable only from a label. A wheel notch
+                // still adjusts the control under the pointer. Unconditional
+                // since 2026-09-21: the first cut kept hover-adjust for finger
+                // gestures in a pane whose content fits, which made the main
+                // params pane feel different from the Settings list depending
+                // on how many parameters the node had. Finger-end frames (no
+                // delta) take the same path so the pane's coast starts.
                 let finger = matches!(delta, MouseScrollDelta::PixelDelta(_))
                     && matches!(
                         crate::widget::scroll_motion::current_scroll_phase(),
                         crate::widget::ScrollPhase::Finger | crate::widget::ScrollPhase::FingerEnd
                     );
-                let scrollable = self.content_h > self.rect.height + 0.5;
-                let pane_takes = pane_owns || (finger && scrollable);
+                let pane_takes = pane_owns || finger;
                 let rects = self.get_param_rects();
                 for (i, p) in self.display_params.iter_mut().enumerate() {
                     if pane_takes {
@@ -3494,12 +3495,11 @@ mod tests {
         assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane still owns it");
     }
 
-    /// In a pane that scrolls, a trackpad gesture scrolls it from anywhere —
-    /// even beginning on a slider band — while a wheel notch there still
-    /// adjusts the slider; in a pane whose content fits, the finger gesture
-    /// adjusts the slider as before.
+    /// A trackpad gesture is the pane's from anywhere — even beginning on a
+    /// slider band, and even in a pane whose content fits — while a wheel
+    /// notch on the band still adjusts the slider.
     #[test]
-    fn finger_gesture_scrolls_an_overflowing_pane_even_from_a_control() {
+    fn finger_gesture_goes_to_the_pane_even_from_a_control() {
         use crate::widget::{scroll_motion::set_scroll_phase, Position, ScrollPhase};
         let rows = |n: usize| -> Vec<(String, String, String)> {
             (0..n).map(|i| (format!("P{i}"), "1.00".to_string(), "slider:0:2".to_string())).collect()
@@ -3537,7 +3537,8 @@ mod tests {
         p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), bx, by, &mut ctx);
         assert_ne!(values(&p)[1], "1.00", "a wheel notch on the band adjusts the slider");
 
-        // A pane whose content fits: the finger gesture adjusts the slider by hover.
+        // A pane whose content fits: the finger gesture is still the pane's (nothing to
+        // scroll, nothing adjusted) — the same rule whatever the node's parameter count.
         let mut ctx = UiContext::new();
         let mut p = panel(3, 600.0);
         assert!(p.content_h <= 600.0);
@@ -3545,7 +3546,8 @@ mod tests {
         ctx.scroll_gesture_new = true;
         set_scroll_phase(ScrollPhase::Finger);
         p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 0.0, y: -30.0 }), bx, by, &mut ctx);
-        assert_ne!(values(&p)[1], "1.00", "in a fitting pane a finger gesture adjusts the slider");
+        assert!(values(&p).iter().all(|v| v == "1.00"), "a finger gesture never adjusts: {:?}", values(&p));
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane took it");
         set_scroll_phase(ScrollPhase::Wheel);
     }
 }
