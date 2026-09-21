@@ -615,10 +615,13 @@ impl ParametersBg {
         crate::layout::scrollbar_width() * 1.6
     }
 
-    /// The scrollbar's left x. The bar sits a sixth of the plate's width in from the right
-    /// edge — i.e. that gap separates the bar's right edge from the pane's right side.
+    /// The scrollbar's left x: the bar rides the pane's CENTRE line, as
+    /// every sink-behind bar in the DE does (cce-mail's list and body, the
+    /// designer's dialog list) — over the rows, reserving no lane, in front
+    /// only while raised. It sat a sixth of the width in from the right
+    /// edge before 2026-09-21, which beside a centred bar read as off.
     fn scrollbar_x(&self) -> f32 {
-        self.rect.x + self.rect.width - self.scrollbar_w() - self.rect.width / 6.0
+        self.rect.x + (self.rect.width - self.scrollbar_w()) * 0.5
     }
 
     pub fn hit_test_scrollbar(&self, px: f32, py: f32) -> bool {
