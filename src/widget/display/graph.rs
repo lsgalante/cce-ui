@@ -387,15 +387,15 @@ impl Graph {
 
     /// The grid lines, flat, over whatever the graph is painted on — the
     /// pane plate: the cells are the plate showing through (no fill of their
-    /// own), and only the gaps are drawn, in the gap colour at the network
-    /// opacity, plus the origin axes as 2px lines down the rail centrelines
-    /// beside row and column 0. Painted per cell — right gap at the cell's
-    /// height, bottom gap at the full step width — so no two strips overlap
-    /// and a crossing carries one alpha, not two. Gated on the grid's
-    /// visibility only: `uniform_background` describes the widget's own
-    /// background fill and the designer hard-codes it true, which is how
-    /// its grid went undrawn until 2026-09-20. (A relief lattice was tried
-    /// in between and read too heavy at the DE's relief depth.)
+    /// own), and everything outside them is grout in the gap colour at the
+    /// network opacity — ONE [`Prim::Grout`] draw, so the cells' rounded
+    /// corners (the node corner radius, the DE's shared corner language) are
+    /// exact, notch at every crossing included. Plus the origin axes as 2px
+    /// lines down the rail centrelines beside row and column 0. Gated on the
+    /// grid's visibility only: `uniform_background` describes the widget's
+    /// own background fill and the designer hard-codes it true, which is how
+    /// its grid went undrawn until 2026-09-20. (Flat per-cell strips came
+    /// between: seamless, but square-cornered — no quad can paint the notch.)
     pub fn paint_grid(&self, rect: Rect, pc: &mut PaintCtx) {
         if self.grid_size_x <= 0.0 || self.grid_size_y <= 0.0 {
             return;
@@ -416,23 +416,14 @@ impl Graph {
         let step_y = self.grid_size_y + self.skipped_row_h;
         if self.show_network_grid && step_x >= 4.0 && step_y >= 4.0 {
             let gap_rgba = [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity];
-            let ry_start = (((rect.y - self.grid_origin_y) / step_y).floor() as i32 - 1).max(-100_000);
-            let ry_end = (((rect.y + rect.height - self.grid_origin_y) / step_y).ceil() as i32 + 1).min(100_000);
-            let cx_start = (((rect.x - self.grid_origin_x) / step_x).floor() as i32 - 1).max(-100_000);
-            let cx_end = (((rect.x + rect.width - self.grid_origin_x) / step_x).ceil() as i32 + 1).min(100_000);
-            // Rounded pixel boundaries, so adjacent strips meet without seams.
-            for r in ry_start..=ry_end {
-                let y_cell_start = (self.grid_origin_y + (r as f32) * step_y).round();
-                let y_cell_end = (self.grid_origin_y + (r as f32) * step_y + self.grid_size_y).round();
-                let y2 = (self.grid_origin_y + ((r + 1) as f32) * step_y).round();
-                for c in cx_start..=cx_end {
-                    let x_cell_start = (self.grid_origin_x + (c as f32) * step_x).round();
-                    let x_cell_end = (self.grid_origin_x + (c as f32) * step_x + self.grid_size_x).round();
-                    let x2 = (self.grid_origin_x + ((c + 1) as f32) * step_x).round();
-                    clipped(x_cell_end, y_cell_start, x2 - x_cell_end, y_cell_end - y_cell_start, gap_rgba, pc);
-                    clipped(x_cell_start, y_cell_end, x2 - x_cell_start, y2 - y_cell_end, gap_rgba, pc);
-                }
-            }
+            pc.grout(
+                rect,
+                (step_x, step_y),
+                (self.grid_origin_x + self.grid_size_x * 0.5, self.grid_origin_y + self.grid_size_y * 0.5),
+                (self.grid_size_x, self.grid_size_y),
+                self.cell_corner_radius(),
+                gap_rgba,
+            );
         }
 
         // Origin axes, in the gaps beside row/column 0.

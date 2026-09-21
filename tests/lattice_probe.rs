@@ -20,7 +20,7 @@ fn lattice_survives_tessellation_inside_a_clip() {
 }
 
 #[test]
-fn graph_emits_flat_grid_lines() {
+fn graph_emits_grout_and_axes() {
     use cce_ui::widget::GraphController;
     let mut g = cce_ui::widget::Graph::new();
     g.set_grid_sizes(71.0, 31.0);
@@ -33,8 +33,20 @@ fn graph_emits_flat_grid_lines() {
     let rect = Rect { x: 40.0, y: 40.0, width: 600.0, height: 300.0 };
     g.paint_grid(rect, &mut pc);
     let dl = pc.finish();
+    let n_grout = dl.items.iter().filter(|i| matches!(i.prim, Prim::Grout { .. })).count();
     let n_quad = dl.items.iter().filter(|i| matches!(i.prim, Prim::Quad { .. })).count();
-    // ~8 columns x ~10 rows of gap strips (two per cell) plus the two axes.
-    assert!(n_quad > 100, "only {n_quad} quads");
-    assert!(dl.items.iter().all(|i| matches!(i.prim, Prim::Quad { .. })), "flat lines only");
+    assert_eq!((n_grout, n_quad), (1, 2), "one grout draw + two axis lines");
+}
+
+#[test]
+fn grout_tessellates_to_a_mode_15_batch_in_its_colour() {
+    let mut pc = PaintCtx::new();
+    let clip = Rect { x: 40.0, y: 40.0, width: 600.0, height: 300.0 };
+    pc.clip(clip, |pc| pc.grout(clip, (85.0, 43.0), (60.0, 60.0), (71.0, 31.0), 15.5, [0.5, 0.5, 0.5, 0.1]));
+    let dl = pc.finish();
+    let (verts, batches, _, _) = cce_ui::backend::window_runner::tessellate_display_list(&dl, 1280.0, 720.0, 2.0);
+    let modes: Vec<f32> = batches.iter().filter_map(|b| b.plate.as_ref().map(|p| p.mode)).collect();
+    assert_eq!(modes, vec![15.0]);
+    assert_eq!(verts.len(), 6);
+    assert!(verts.iter().all(|v| (v.color[3] - 0.1).abs() < 1e-6), "cover quad carries the grout colour");
 }

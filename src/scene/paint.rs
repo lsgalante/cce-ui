@@ -639,6 +639,14 @@ pub enum Prim {
     /// surface holds (a free carve per cell also runs into the per-frame
     /// feature budget long before a zoomed-out grid does). SDF path only.
     Lattice { rect: Rect, period: (f32, f32), origin: (f32, f32), cell: (f32, f32), radius: f32, depth: f32 },
+    /// `color`, flat, everywhere inside `rect` that is OUTSIDE a periodic
+    /// field of rounded cells — the same field [`Prim::Lattice`] carves
+    /// (`period`, one cell centred at `origin`, each `cell` big with `radius`
+    /// corners), painted as grout rather than shaded. One draw for the whole
+    /// grid, with the cells' superellipse corners exact: what a graph's grid
+    /// lines are when the cells are the surface beneath showing through.
+    /// SDF path only — the legacy banded tessellation draws nothing.
+    Grout { rect: Rect, period: (f32, f32), origin: (f32, f32), cell: (f32, f32), radius: f32, color: [f32; 4] },
     /// Several rounded boxes carved (`raised` false) or raised (`raised`
     /// true) as ONE shape: the union of the boxes is the well, and its wall
     /// follows the union's outline — straddling it by ±`depth`/2 like every
@@ -1050,6 +1058,9 @@ impl PaintCtx {
             Prim::Lattice { rect, period, origin, cell, radius, depth } => {
                 self.lattice(rect, period, origin, cell, radius, depth)
             }
+            Prim::Grout { rect, period, origin, cell, radius, color } => {
+                self.grout(rect, period, origin, cell, radius, color)
+            }
             Prim::CarveUnion { boxes, depth, raised } => self.carve_union(boxes, depth, raised),
             Prim::Image { image, rect, alpha } => self.image(image, rect, alpha),
         }
@@ -1084,6 +1095,14 @@ impl PaintCtx {
         let (ox, oy) = self.offset;
         let rect = self.apply_offset(rect);
         self.push(Prim::Lattice { rect, period, origin: (origin.0 + ox, origin.1 + oy), cell, radius, depth });
+    }
+
+    /// Grout between a periodic field of rounded cells — see [`Prim::Grout`].
+    /// `origin` is any one cell's centre; `rect` bounds the paint.
+    pub fn grout(&mut self, rect: Rect, period: (f32, f32), origin: (f32, f32), cell: (f32, f32), radius: f32, color: [f32; 4]) {
+        let (ox, oy) = self.offset;
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Grout { rect, period, origin: (origin.0 + ox, origin.1 + oy), cell, radius, color });
     }
 
     /// Carve (or raise, with `raised`) the union of `boxes` as one shape with

@@ -156,6 +156,7 @@ const MODE_ROLL: i32 = 11;        // fill-less rolled perimeter, composited as a
 const MODE_DROPLET_SCRIM: i32 = 12; // flat feathered fill of the droplet silhouette
 const MODE_LATTICE: i32 = 13;     // periodic well field: nearest-cell carve, one evaluation
 const MODE_UNION: i32 = 14;       // union of feature boxes carved/raised as one wall
+const MODE_GROUT: i32 = 15;       // flat colour outside a periodic field of rounded cells
 // Fillet modes rejoin the shared free-carve path as their flat equivalents.
 const FILLET_TO_STEP: i32 = 4;    // 6 -> RECESS, 7 -> BOSS
 
@@ -385,6 +386,27 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     // the surface tilt meets the half-vector, ~a third of the way out toward
     // the light) — and, like a plate face, the shade is expressed relative to
     // the flat face so the color at the lit center is exactly the app's.
+    // MODE_GROUT: the vertex colour, flat, everywhere OUTSIDE a periodic
+    // field of identical rounded cells — the grid lines of a graph whose
+    // cells are whatever lies beneath showing through, corners included.
+    // The same fold as MODE_LATTICE (p_rect = one cell's centre and
+    // half-extents, p_host.xy = the period, p_radii = the corner radius),
+    // but no lighting: coverage is the cell SDF's outside, 1px anti-aliased,
+    // so the cells' superellipse corners are exact and the whole grid is one
+    // draw. Flat strips could never paint the notch a rounded cell leaves at
+    // each crossing.
+    if (mode == MODE_GROUT) {
+        let per = max(rrect_clip.p_host.xy, vec2f(1e-3));
+        var gc = frag - rrect_clip.p_rect.xy;
+        gc = gc - per * round(gc / per);
+        let lg = rr_sdf_grad(gc, vec4f(0.0, 0.0, rrect_clip.p_rect.zw), rrect_clip.p_radii);
+        let cov = clamp(lg.z + 0.5, 0.0, 1.0);
+        if (cov <= 0.0) {
+            discard;
+        }
+        return vec4f(vcol.rgb, vcol.a * cov);
+    }
+
     if (mode == MODE_SPHERE) {
         let c = frag - rrect_clip.p_rect.xy;
         let r = max(rrect_clip.p_rect.z, 0.001);

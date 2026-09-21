@@ -1712,7 +1712,7 @@ fn prim_kind(p: &crate::scene::paint::Prim) -> &'static str {
         P::Sphere { .. } => "Sphere", P::Droplet { .. } => "Droplet",
         P::DropletScrim { .. } => "DropletScrim",
         P::ConcaveFillet { .. } => "ConcaveFillet",
-        P::Groove { .. } => "Groove", P::Lattice { .. } => "Lattice",
+        P::Groove { .. } => "Groove", P::Lattice { .. } => "Lattice", P::Grout { .. } => "Grout",
         P::CarveUnion { .. } => "CarveUnion", P::Glow { .. } => "Glow",
         P::Text { .. } => "Text", P::Image { .. } => "Image",
     }
@@ -2636,9 +2636,27 @@ pub fn tessellate_display_list(
                     shape: crate::layout::corner_shape(),
                 });
             }
-            // Legacy banded path: no periodic wall — the lattice draws nothing
-            // there, like the fillet (A/B comparison path only).
-            Prim::Lattice { .. } => {}
+            Prim::Grout { rect, period, origin, cell, radius, color } if shader_plates => {
+                // The lattice's fold, painted flat (shader mode 15): one cover
+                // quad in the grout colour; the shader keeps it outside the
+                // cells. Same push layout as the lattice; light/material are
+                // carried but unread.
+                let (pw, ph) = (period.0.max(1e-3), period.1.max(1e-3));
+                verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, *color));
+                plate = Some(crate::vk::PlatePush {
+                    rect: [origin.0 * scale, origin.1 * scale, cell.0 * 0.5 * scale, cell.1 * 0.5 * scale],
+                    radii: [*radius * scale; 4],
+                    light: [plate_light[0], plate_light[1], plate_light[2], 0.0],
+                    material: plate_mat,
+                    host: [pw * scale, ph * scale, 1e6, 1e6],
+                    specular_tint: [1.0, 1.0, 1.0, 0.0],
+                    mode: 15.0,
+                    shape: crate::layout::corner_shape(),
+                });
+            }
+            // Legacy banded path: no periodic wall — the lattice and the grout
+            // draw nothing there, like the fillet (A/B comparison path only).
+            Prim::Lattice { .. } | Prim::Grout { .. } => {}
             Prim::CarveUnion { boxes, depth, raised } if shader_plates => {
                 // The union of several boxes as ONE wall (shader mode 14): the
                 // boxes go into the frame's feature buffer as a contiguous run
