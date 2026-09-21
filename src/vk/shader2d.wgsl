@@ -1091,7 +1091,15 @@ fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32, k_in: f3
     // ratio explodes (and a lift past 1 would clip a channel), so cross-fade
     // to the neutral luminance over the bottom of the range instead.
     let scaled = backdrop_color.rgb * (keyed / max(bl, 1e-4));
-    let compressed = mix(vec3f(keyed), scaled, smoothstep(0.0, 0.05, bl));
+    let guarded = mix(vec3f(keyed), scaled, smoothstep(0.0, 0.05, bl));
+    // At k = 0 the remap is the identity (keyed == bl, scaled == backdrop),
+    // and the near-black guard must not run either: it cross-fades any
+    // backdrop darker than 5% linear to a neutral grey of equal luminance,
+    // which stripped the hue from every frosted plate over a dark scene
+    // (the designer's navy viewport came through as grey — measured
+    // 2026-09-20). The guard exists for the ratio's blow-up near black,
+    // a hazard only a non-zero k creates, so it applies only then.
+    let compressed = select(guarded, backdrop_color.rgb, k <= 0.0);
 
     return vec4f(mix(compressed, color.rgb, opacity), 1.0);
 }
