@@ -2581,8 +2581,23 @@ impl Input for ParametersBg {
                 // a slider-vs-pane tug-of-war that shifted the rows under the
                 // pointer mid-adjust.
                 let mut wheel_taken = false;
+                // Gesture ownership. A gesture the PANE acquired — its first
+                // event fell on no control and scrolled the rows — stays the
+                // pane's until the gesture ends (`scroll_gesture_new`), however
+                // the rows travel under the pointer meanwhile. Without this a
+                // list scroll ran until a slider's halo or a spinbox row slid
+                // under the pointer, which then took every remaining event of
+                // the same gesture and adjusted a value the user never aimed
+                // at (the Alt+D settings tab, 2026-09-20). A gesture that
+                // began ON a control is that control's, as before, and one
+                // nobody claimed (dead space, a control at its limit) is still
+                // open to spatial acquisition — the band slider's feel.
+                let pane_owns = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(self_id);
                 let rects = self.get_param_rects();
                 for (i, p) in self.display_params.iter_mut().enumerate() {
+                    if pane_owns {
+                        break;
+                    }
                     if p.2.starts_with("slider") {
                         // The capture zone is the slider's own shape halo
                         // (`Slider::scroll_hit` — the band plus the traveling
@@ -2682,6 +2697,8 @@ impl Input for ParametersBg {
                             if crate::scroll_debug() {
                                 eprintln!("[scroll] params: PANE-SCROLL fallback at ({px:.0},{py:.0})");
                             }
+                            // The pane takes the gesture (see `pane_owns`).
+                            ui.scroll_initiate_widget_id = Some(self_id);
                             let max_scroll = (self.content_h - self.rect.height).max(0.0);
                             self.scroll_motion.reconcile(0.0, self.scroll_y);
                             let moved = self.scroll_motion.apply(
@@ -3396,5 +3413,53 @@ mod tests {
         // The panel-scroll path must work when no slider is under the pointer:
         p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), 2.0, 2.0, &mut ctx);
         assert!(p.scroll_y >= before, "scroll never decreases on a downward wheel");
+    }
+
+    /// A gesture the pane acquired stays the pane's: rows travelling under
+    /// the pointer mid-gesture must not hand the wheel to the slider that
+    /// arrives there (the Alt+D settings-tab leak, 2026-09-20). A NEW gesture
+    /// over the same slider still adjusts it.
+    #[test]
+    fn pane_owned_scroll_gesture_is_not_captured_by_a_slider_sliding_under_the_pointer() {
+        let rows: Vec<(String, String, String)> = (0..30)
+            .map(|i| (format!("P{i}"), "1.00".to_string(), "slider:0:2".to_string()))
+            .collect();
+        let fresh = || {
+            let mut p = ParametersBg::new();
+            ParamController::set_display_params(&mut *p, &rows);
+            WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 200.0);
+            p
+        };
+        // A point on a slider's band: row 1's rect, below the label strip.
+        let band_point = |p: &Adapted<ParametersBg>| {
+            let r = p.get_param_rects()[1];
+            (r.0 + r.2 * 0.5, r.1 + r.3 * 0.7)
+        };
+        let values = |p: &Adapted<ParametersBg>| -> Vec<String> { p.display_params.iter().map(|d| d.1.clone()).collect() };
+
+        // Control: a new gesture ON the band adjusts the slider (the point is a real hit).
+        let mut ctx = UiContext::new();
+        let mut p = fresh();
+        let (bx, by) = band_point(&p);
+        ctx.scroll_gesture_new = true;
+        ctx.scroll_initiate_widget_id = None;
+        p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), bx, by, &mut ctx);
+        assert_ne!(values(&p)[1], "1.00", "a new gesture on the band adjusts the slider");
+
+        // The case: the gesture starts on the pane (dead space), the pane owns it...
+        let mut ctx = UiContext::new();
+        let mut p = fresh();
+        ctx.scroll_gesture_new = true;
+        ctx.scroll_initiate_widget_id = None;
+        p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), 2.0, 2.0, &mut ctx);
+        // (The scroll itself is animated by scroll_motion over later ticks, so
+        // ownership — set only on the pane-scroll path — is the witness.)
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane owns the gesture");
+        // ...and the same gesture continuing over a band adjusts nothing.
+        let (bx, by) = band_point(&p);
+        ctx.scroll_gesture_new = false;
+        p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), bx, by, &mut ctx);
+        assert!(values(&p).iter().all(|v| v == "1.00"), "no slider took the pane's gesture: {:?}", values(&p));
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane still owns it");
     }
 }
