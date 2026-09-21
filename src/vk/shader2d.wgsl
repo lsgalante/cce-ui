@@ -1087,18 +1087,23 @@ fn resolve_blur(pos: vec2f, color: vec4f, refract: vec2f, clarity: f32, k_in: f3
     let key = dot(color.rgb, W);
     // `target` is a WGSL reserved word.
     let keyed = mix(bl, key, k);
-    // Scaling by keyed/bl holds chromaticity exactly, but near black the
-    // ratio explodes (and a lift past 1 would clip a channel), so cross-fade
-    // to the neutral luminance over the bottom of the range instead.
-    let scaled = backdrop_color.rgb * (keyed / max(bl, 1e-4));
-    let guarded = mix(vec3f(keyed), scaled, smoothstep(0.0, 0.05, bl));
-    // At k = 0 the remap is the identity (keyed == bl, scaled == backdrop),
-    // and the near-black guard must not run either: it cross-fades any
-    // backdrop darker than 5% linear to a neutral grey of equal luminance,
-    // which stripped the hue from every frosted plate over a dark scene
-    // (the designer's navy viewport came through as grey — measured
-    // 2026-09-20). The guard exists for the ratio's blow-up near black,
-    // a hazard only a non-zero k creates, so it applies only then.
+    // Scaling by keyed/bl holds chromaticity exactly. The hazard is the
+    // RATIO: lifting a near-black backdrop toward a bright key multiplies
+    // its 8-bit chroma by tens — banding, then channels clipping past 1 —
+    // so the guard cross-fades to the neutral key luminance as the lift
+    // grows, over ratio 2..8. Keyed to the ratio rather than to the
+    // backdrop's luminance (the pre-2026-09-20 form: any backdrop under 5%
+    // linear went neutral whenever k was non-zero at all), it is continuous
+    // in k: at k = 0 the ratio is 1 and nothing happens, at a hair above 0
+    // nearly nothing, and a pull DOWN toward a dark key (ratio < 1) never
+    // touches the hue — the measured case: a navy viewport under a
+    // #101018 tint kept going grey at k = 0.01. The select keeps k = 0 an
+    // exact identity (the ratio's 1e-4 floor would otherwise darken true
+    // black by a hair).
+    let ratio = keyed / max(bl, 1e-4);
+    let scaled = backdrop_color.rgb * ratio;
+    let guard = smoothstep(2.0, 8.0, ratio);
+    let guarded = mix(scaled, vec3f(keyed), guard);
     let compressed = select(guarded, backdrop_color.rgb, k <= 0.0);
 
     return vec4f(mix(compressed, color.rgb, opacity), 1.0);
