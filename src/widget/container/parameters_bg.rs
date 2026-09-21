@@ -44,6 +44,12 @@ fn is_text_row(t: &str) -> bool {
 const PICK_W: f32 = 24.0;
 
 pub struct ParametersBg {
+    /// A row VALUE changed inside `tick` (a picker stream folded into its
+    /// row) — for the host's sync, which must not run on every tick that
+    /// merely animated (a scroll glide reports change every frame; syncing
+    /// the whole parameter list on each was the choppy params scroll,
+    /// 2026-09-20). Drained by [`Self::take_tick_value_change`].
+    tick_value_changed: bool,
     rect: Rect,
     display_params: Vec<(String, String, String)>,
     dragging_param: Option<usize>,
@@ -182,6 +188,7 @@ impl ParametersBg {
             drag_offset_y: 0.0,
             activity: crate::widget::ScrollbarActivity::new(),
             scroll_motion: crate::widget::ScrollMotion::new(),
+            tick_value_changed: false,
         })
     }
 
@@ -1413,6 +1420,12 @@ impl ParametersBg {
     /// circles, and field controls). A host rendering this panel through the
     /// legacy hatches calls this with its own `PaintCtx` inside the pane's
     /// scroll clip, after the flat chrome — or the rows draw as bare labels.
+    /// Whether a row value changed inside `tick` since the last call
+    /// (see `tick_value_changed`); clears the flag.
+    pub fn take_tick_value_change(&mut self) -> bool {
+        std::mem::take(&mut self.tick_value_changed)
+    }
+
     pub fn paint_scene_rows(&self, pc: &mut PaintCtx) {
         if !self.visible {
             return;
@@ -1853,7 +1866,10 @@ impl Input for ParametersBg {
             if let Some(c) = &mut self.colors[i] {
                 if c.tick(dt, &mut dummy) {
                     if let Some(val) = c.get_value_string() {
-                        self.display_params[i].1 = val;
+                        if self.display_params[i].1 != val {
+                            self.display_params[i].1 = val;
+                            self.tick_value_changed = true;
+                        }
                     }
                     changed = true;
                 }
