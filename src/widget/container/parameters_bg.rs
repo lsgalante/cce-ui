@@ -50,6 +50,11 @@ pub struct ParametersBg {
     /// the whole parameter list on each was the choppy params scroll,
     /// 2026-09-20). Drained by [`Self::take_tick_value_change`].
     tick_value_changed: bool,
+    /// The label layout the rows were BUILT under (`layout::param_labels_inline`
+    /// at the last rebuild): inline, the pane draws each label in a column
+    /// beside an unlabelled control; stacked, the control carries its own
+    /// label above itself. Read once per rebuild so geometry and widgets agree.
+    inline_labels: bool,
     rect: Rect,
     display_params: Vec<(String, String, String)>,
     dragging_param: Option<usize>,
@@ -164,6 +169,7 @@ impl ParametersBg {
 
     pub fn new() -> Adapted<ParametersBg> {
         Adapted::new(ParametersBg {
+            inline_labels: crate::layout::param_labels_inline(),
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             display_params: Vec::new(),
             dragging_param: None,
@@ -193,6 +199,72 @@ impl ParametersBg {
     }
 
     /// Row `i`'s laid-out height, ignoring collapse (the row-type table).
+    /// Whether row `i` is laid out with its label beside the control. Only
+    /// the rows whose control would otherwise carry a label strip: toggles
+    /// and buttons ARE their label, a ramp keeps its label band, sections
+    /// and code rows have layouts of their own.
+    fn inline_row(&self, i: usize) -> bool {
+        if !self.inline_labels {
+            return false;
+        }
+        let t = self.display_params[i].2.as_str();
+        t.starts_with("slider")
+            || t.starts_with("float3")
+            || t.starts_with("spinbox")
+            || t.starts_with("choice")
+            || is_text_row(t)
+            || t.starts_with("color")
+            || t == "rgb"
+            || t == "rgba"
+    }
+
+    /// The label strip an inline row no longer spends: the control was
+    /// built unlabelled, so the row loses exactly the strip's height.
+    fn inline_strip(&self, i: usize) -> f32 {
+        if self.inline_row(i) { crate::layout::control_label_strip() } else { 0.0 }
+    }
+
+    /// Gap between the label column and the control.
+    const LABEL_GAP: f32 = 16.0;
+
+    /// The inline label's font: the pane's own labels draw in the control
+    /// label font (`Paint::widget_font`), so the column is measured in it —
+    /// family AND size — or the widest label runs into its control.
+    fn inline_label_font() -> (String, f32) {
+        crate::layout::control_label_font_parsed()
+    }
+
+    /// Width of the label column under the inline layout: the widest visible
+    /// inline label plus the gap, clamped to a floor (so a pane of one-word
+    /// labels still reads as a column) and to under half the row (so a long
+    /// label truncates rather than squeezing the control out). Zero when
+    /// nothing is inline.
+    fn label_col_w(&self) -> f32 {
+        if !self.inline_labels {
+            return 0.0;
+        }
+        let (family, size) = Self::inline_label_font();
+        let hidden = self.hidden_rows();
+        let widest = self
+            .display_params
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !hidden[*i] && self.inline_row(*i))
+            .map(|(_, p)| crate::widget::display::measure_text_width(&p.0, &family, size))
+            .fold(0.0f32, f32::max);
+        if widest <= 0.0 {
+            return 0.0;
+        }
+        let row_w = (self.rect.width - 2.0 * ROW_X_INSET).max(0.0);
+        (widest + Self::LABEL_GAP).clamp(72.0f32.min(row_w * 0.45), row_w * 0.45)
+    }
+
+    /// Row `i`'s CONTROL rect: the row rect less the label column when the
+    /// row is inline, the row rect itself otherwise.
+    fn control_rect(&self, r: (f32, f32, f32, f32), i: usize, lw: f32) -> (f32, f32, f32, f32) {
+        if self.inline_row(i) { (r.0 + lw, r.1, (r.2 - lw).max(0.0), r.3) } else { r }
+    }
+
     fn row_height(&self, i: usize) -> f32 {
         let p = &self.display_params[i];
         if p.2 == "code" {
@@ -216,13 +288,13 @@ impl ParametersBg {
             // curve plot (Ramp::graph_h = height − strip).
             260.0
         } else if p.2.starts_with("float3") {
-            Float3::preferred_height(true)
+            Float3::preferred_height(!self.inline_row(i))
         } else if p.2.starts_with("slider") {
-            38.0
+            (38.0 - self.inline_strip(i)).max(22.0)
         } else if is_text_row(&p.2) || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
-            42.0
+            (42.0 - self.inline_strip(i)).max(24.0)
         } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
-            40.0
+            (40.0 - self.inline_strip(i)).max(24.0)
         } else if p.2 == "button" || p.2 == "toggle" || p.2 == "checkbox" {
             24.0
         } else {
@@ -608,7 +680,17 @@ impl ParametersBg {
     }
 
     fn update_slider_rects(&mut self) {
-        let rects = self.get_param_rects();
+        // Inline rows hand their control the row less the label column; the
+        // row rects themselves (`get_param_rects`) stay the full row, which is
+        // what the floors, the section boxes and hit routing measure against.
+        let lw = self.label_col_w();
+        let rects: Vec<(f32, f32, f32, f32)> = self
+            .get_param_rects()
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| self.control_rect(r, i, lw))
+            .collect();
+        let inline: Vec<bool> = (0..self.display_params.len()).map(|i| self.inline_row(i)).collect();
         for (i, s_opt) in self.sliders.iter_mut().enumerate() {
             if let Some(s) = s_opt {
                 let r = rects[i];
@@ -646,7 +728,7 @@ impl ParametersBg {
                     // only the interior left edge. A ring encapsulated
                     // within the bevel doubled the valley on the adjoining
                     // sides.
-                    let label_top = crate::layout::control_label_strip();
+                    let label_top = if inline[i] { 0.0 } else { crate::layout::control_label_strip() };
                     let band_h = r.3 - label_top;
                     let inset = crate::layout::bevel_width().min(band_h * 0.2);
                     let by = r.1 + label_top + inset;
@@ -706,11 +788,27 @@ impl ParametersBg {
         let rects = self.get_param_rects();
         let hidden = self.hidden_rows();
         let mut labels = Vec::new();
+        let lw = self.label_col_w();
+        let (family, size) = Self::inline_label_font();
         for (i, (name, value, ptype)) in self.display_params.iter().enumerate() {
             if hidden[i] {
                 continue;
             }
             let r = rects[i];
+            if self.inline_row(i) {
+                // The pane's own label, in the column beside an unlabelled
+                // control: vertically centred on the row, tail-truncated to
+                // the column.
+                let em = crate::widget::display::measure_text_width("M", &family, size).max(1.0);
+                let cols = ((lw - Self::LABEL_GAP) / em).floor().max(0.0) as usize;
+                labels.push(TextLabel {
+                    text: crate::widget::display::truncate_tail(name, cols),
+                    x: r.0,
+                    y: r.1 + (r.3 - size) * 0.5,
+                    font_size: size,
+                    color: [0xaa, 0xaa, 0xbb],
+                });
+            }
             if ptype.starts_with("slider") {
                 if let Some(s) = &self.sliders[i] {
                     labels.extend(s.own_text_labels());
@@ -2848,6 +2946,10 @@ impl ParamController for ParametersBg {
             self.scroll_y = 0.0;
             self.display_params = params.to_vec();
             self.focused_param = None;
+            // Re-read at every rebuild, so a reloaded style takes effect the
+            // next time the rows are built, and geometry and widgets agree.
+            self.inline_labels = crate::layout::param_labels_inline();
+            let inline = self.inline_labels;
             self.sliders = self.display_params.iter().map(|p| {
                 if p.2.starts_with("slider") {
                     let val = p.1.parse::<f32>().unwrap_or(0.0);
@@ -2857,7 +2959,8 @@ impl ParamController for ParametersBg {
                     } else {
                         0.0
                     };
-                    Some(Slider::new().with_value(t).with_range(min, max).with_readout(true).with_decimals(slider_decimals(&p.2)).with_label(&p.0))
+                    let s = Slider::new().with_value(t).with_range(min, max).with_readout(true).with_decimals(slider_decimals(&p.2));
+                    Some(if inline { s } else { s.with_label(&p.0) })
                 } else {
                     None
                 }
@@ -2866,7 +2969,8 @@ impl ParamController for ParametersBg {
                 if p.2.starts_with("float3") {
                     let (min, max) = parse_slider_range(&p.2);
                     let vals = parse_float3_value(&p.1, min, max);
-                    Some(Float3::new().with_values(vals).with_range(min, max).with_label(&p.0))
+                    let f = Float3::new().with_values(vals).with_range(min, max);
+                    Some(if inline { f } else { f.with_label(&p.0) })
                 } else {
                     None
                 }
@@ -2875,7 +2979,8 @@ impl ParamController for ParametersBg {
                 if p.2.starts_with("spinbox") {
                     let (min, max, step) = parse_spinbox_range(&p.2);
                     let val = p.1.parse::<i32>().unwrap_or(min);
-                    Some(Spinbox::new(val, min, max, step).with_label(&p.0))
+                    let sb = Spinbox::new(val, min, max, step);
+                    Some(if inline { sb } else { sb.with_label(&p.0) })
                 } else {
                     None
                 }
@@ -2894,7 +2999,8 @@ impl ParamController for ParametersBg {
                     let options_str = p.2.strip_prefix("choice:").unwrap_or("");
                     let options: Vec<String> = options_str.split(',').map(|s| s.to_string()).collect();
                     let selected = options.iter().position(|o| o == &p.1).unwrap_or(0);
-                    Some(Dropdown::new(options, selected).with_label(&p.0))
+                    let d = Dropdown::new(options, selected);
+                    Some(if inline { d } else { d.with_label(&p.0) })
                 } else if p.2.starts_with("textpick:") {
                     // The text row's completion picker: a menu-button Dropdown
                     // (fixed glyph, re-fires on repeat picks) beside the box.
@@ -2920,7 +3026,8 @@ impl ParamController for ParametersBg {
             }).collect();
             self.texts = self.display_params.iter().map(|p| {
                 if is_text_row(&p.2) {
-                    Some(TextBox::new(p.1.clone()).with_label(&p.0))
+                    let tb = TextBox::new(p.1.clone());
+                    Some(if inline { tb } else { tb.with_label(&p.0) })
                 } else {
                     None
                 }
@@ -2939,10 +3046,12 @@ impl ParamController for ParametersBg {
                 if p.2 == "rgba" {
                     // Alpha-carrying param: the full picker, 8-digit hex.
                     let col = parse_hex_to_rgba(&p.1).unwrap_or([255, 255, 255, 255]);
-                    Some(ColorSelector::new_rgba(col).with_label(&p.0))
+                    let c = ColorSelector::new_rgba(col);
+                    Some(if inline { c } else { c.with_label(&p.0) })
                 } else if p.2.starts_with("color") || p.2 == "rgb" {
                     let col = parse_hex_to_rgb(&p.1).unwrap_or([255, 255, 255]);
-                    Some(ColorSelector::new(col).with_label(&p.0))
+                    let c = ColorSelector::new(col);
+                    Some(if inline { c } else { c.with_label(&p.0) })
                 } else {
                     None
                 }
@@ -3154,12 +3263,23 @@ mod tests {
         ]);
         assert_eq!(ParamController::node_params(&*p).len(), 3);
         assert!(p.sliders[0].is_some() && p.choices[1].is_some() && p.toggles[2].is_some());
-        // Rows were laid out from the cached rect.
+        // Rows were laid out from the cached rect: the slider's control rect
+        // is the row less the label column when the labels are inline (the
+        // default), the whole row when they are stacked.
+        let lw = p.inner().label_col_w();
+        if p.inner().inline_labels {
+            assert!(lw > 0.0, "inline labels reserve a column");
+            let labels = p.inner().own_text_labels();
+            let size = labels.iter().find(|l| l.text == "Size").expect("the pane draws the inline label");
+            assert_eq!(size.x, ROW_X_INSET, "the label sits at the row's left edge");
+        } else {
+            assert_eq!(lw, 0.0);
+        }
         let (sx, _, sw, _) = p.sliders[0].as_ref().unwrap().rect();
         assert_eq!(
             (sx, sw),
-            (ROW_X_INSET, 300.0 - 2.0 * ROW_X_INSET),
-            "row rect derives from the assigned rect"
+            (ROW_X_INSET + lw, 300.0 - 2.0 * ROW_X_INSET - lw),
+            "control rect derives from the assigned rect and the label column"
         );
     }
 

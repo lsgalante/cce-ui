@@ -261,6 +261,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.relief.edge_knobs" => "roll_profile_knobs",
                 "style.container.section.depth" => "section_depth",
                 "style.surface.param.backdrop_compression" => "param_compression",
+                "style.surface.param.label_layout" => "param_label_layout",
                 "window_manager.bevel_shader" => "bevel_shader",
                 "window_manager.control_relief" => "control_relief",
                 "window_manager.corner_shape" => "corner_shape",
@@ -1699,6 +1700,24 @@ pub fn section_depth() -> f32 {
 pub fn param_compression() -> Option<f32> {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("param_compression").map(|v| v.clamp(0.0, 1.0))
+}
+
+/// Whether a params pane lays each row's label BESIDE its control
+/// (`style.surface.param.label_layout = "inline"`, the default) or lets the
+/// control carry it in the strip above itself (`"stacked"`, the layout every
+/// row had before 2026-09-21). Inline, the pane owns the labels: it measures
+/// a label column off the widest label, hands each control the rest of the
+/// row, and the controls are built unlabelled — an unlabelled control takes
+/// its whole rect (`WidgetHost::label_strip` is zero), so the row is one
+/// control tall. Toggles and buttons carry their label as their own face and
+/// are inline either way.
+pub fn param_labels_inline() -> bool {
+    lazy_init_style_registry();
+    get_style_registry()
+        .read()
+        .unwrap()
+        .get_string("param_label_layout")
+        .map_or(true, |v| v.trim() != "stacked")
 }
 
 pub fn section_padding() -> f32 {
