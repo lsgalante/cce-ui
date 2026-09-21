@@ -277,6 +277,24 @@ fn roll_spec_wrap(sv: vec2f) -> f32 {
     return rrect_clip.p_mat.y * max(pow(prof, shininess) - pow(hv.z, shininess), 0.0);
 }
 
+// How squarely a rim faces the light's azimuth, 0..1 — the weight on the
+// plate crest. The crest was a flat +PLATE_CREST on every side, and on the
+// far (down-light) edges that out-measured the roll's own diffuse fall-off at
+// every point of the profile: a raised plate had a bright rim toward the
+// light and NO dark rim away from it. Weighted this way the near edges keep
+// their crest and the far edges keep only their diffuse shading, so the
+// silhouette reads lit on one side and shadowed on the other, like the
+// glint's counterpart. Light from straight overhead has no near or far side
+// and keeps the crest everywhere.
+fn crest_weight(facing: vec2f) -> f32 {
+    let lxy = rrect_clip.p_light.xy;
+    let m = length(lxy);
+    if (m < 1e-4) {
+        return 1.0;
+    }
+    return max(dot(facing, lxy) / m, 0.0);
+}
+
 // Slope of the raised roll's height profile at f (0 at the face join, 1 at the
 // silhouette). Circular (shape 2): a quarter-round h = sqrt(1 - f²) — tangent-
 // continuous with the face but with a curvature JUMP at the join (1/t → 0), the
@@ -612,7 +630,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         if (vcol.a < 0.0) {
             base = resolve_blur(frag, vcol, sv_rim * (refr * t), refr * f * f, k_plate, stride);
         }
-        var extra = PLATE_CREST * f * f * f;
+        var extra = PLATE_CREST * f * f * f * crest_weight(gd.xy);
         let f_off = u32(rrect_clip.p_host.x);
         let f_cnt = u32(rrect_clip.p_host.y);
         for (var i = 0u; i < f_cnt; i = i + 1u) {
@@ -686,7 +704,7 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let u = clamp(d / t, 0.0, 1.0);
         let f = 1.0 - u;
         let sv = gd.xy * roll_slope(f);
-        let extra = PLATE_CREST * f * f * f;
+        let extra = PLATE_CREST * f * f * f * crest_weight(gd.xy);
         let n = normalize(vec3f(sv, 1.0));
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
         let spec = roll_spec(sv);

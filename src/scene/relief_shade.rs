@@ -160,6 +160,21 @@ pub fn analytic_roll_slope(f: f32) -> f32 {
     }
 }
 
+/// How squarely a rim faces the light's azimuth, 0..1 — the weight on the
+/// plate crest. Mirrors `crest_weight`. The crest used to be a flat
+/// `PLATE_CREST` on every side, which out-measured the far edges' diffuse
+/// fall-off everywhere along the roll, so a raised plate had a lit rim and no
+/// shadowed one; weighted, the down-light edges keep only their diffuse
+/// shading and read as the glint's dark counterpart. A light from straight
+/// overhead has no near or far side and keeps the crest everywhere.
+pub fn crest_weight(facing: [f32; 2], light: [f32; 3]) -> f32 {
+    let m = (light[0] * light[0] + light[1] * light[1]).sqrt();
+    if m < 1e-4 {
+        return 1.0;
+    }
+    ((facing[0] * light[0] + facing[1] * light[1]) / m).max(0.0)
+}
+
 /// The plate's own surface colour across its perimeter roll — mode 1, which is
 /// NOT the free-carve branch and does not composite like one.
 ///
@@ -191,7 +206,7 @@ pub fn plate_surface(
     let ndl = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]).max(0.0);
     let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * ndl;
     // The crest: the ambient-catching convex rim that makes glass read as glass.
-    let extra = PLATE_CREST * f * f * f;
+    let extra = PLATE_CREST * f * f * f * crest_weight(facing, light);
     let shade = 1.0 + (diff / flat_shade(light) - 1.0 + extra) * mat.strength;
     let spec = roll_spec(sv, light, mat) * mat.strength;
     Some([
@@ -242,6 +257,24 @@ mod tests {
         assert_eq!(wgsl_const("RECESS_DEPTH"), RECESS_DEPTH);
         assert_eq!(wgsl_const("PLATE_CREST"), PLATE_CREST);
         assert_eq!(wgsl_const("ROLL_CUT"), ROLL_CUT);
+    }
+
+    /// The crest is light-facing: at the silhouette the edge toward the light
+    /// shades brighter than the face and the edge away from it darker. Before
+    /// the weight, the flat crest left the far edge at or above the face.
+    #[test]
+    fn far_edge_shades_darker_than_the_face() {
+        let light = light_vector();
+        let mat = Finish::from_style();
+        let base = [0.5f32; 3];
+        let lxy = [light[0], light[1]];
+        let m = (lxy[0] * lxy[0] + lxy[1] * lxy[1]).sqrt();
+        let near = [lxy[0] / m, lxy[1] / m];
+        let far = [-near[0], -near[1]];
+        let lit = plate_surface(base, 1.0, near, &analytic_roll_slope, light, &mat).unwrap();
+        let dark = plate_surface(base, 1.0, far, &analytic_roll_slope, light, &mat).unwrap();
+        assert!(lit[0] > base[0] + 0.02, "near edge {} vs face {}", lit[0], base[0]);
+        assert!(dark[0] < base[0] - 0.02, "far edge {} vs face {}", dark[0], base[0]);
     }
 
     /// The plate's face must come through as exactly the app's colour, or a
