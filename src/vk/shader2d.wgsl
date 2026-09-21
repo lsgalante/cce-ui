@@ -168,6 +168,9 @@ const PLATE_AMBIENT: f32 = 0.55;
 // Amplitude of the bright crest line hugging a raised plate's silhouette — the
 // ambient-catching convex rim that makes glass read as glass.
 const PLATE_CREST: f32 = 0.25;
+// The far-edge shade line's strength relative to the glint (roll_shade_line):
+// 1 is the exact mirror; 0.5 keeps dark faces from bottoming out at black.
+const PLATE_SHADE_LINE: f32 = 0.5;
 // Recess depth as a fraction of the roll width (a recess is visually shallower
 // than a raised plate's full quarter-round).
 const RECESS_DEPTH: f32 = 0.6;
@@ -243,11 +246,29 @@ fn rr_sdf_grad(p: vec2f, prect: vec4f, pradii: vec4f) -> vec3f {
 // `sv` is the surface's slope vector — the horizontal part of the unnormalized
 // normal (-∇height, 1): its magnitude is the tilt, its direction the facing.
 fn roll_spec(sv: vec2f) -> f32 {
+    return roll_lobe(sv, rrect_clip.p_light.xyz);
+}
+
+// The glint's dark counterpart: the SAME decoupled lobe — same inset, width
+// and peak — on the edges facing AWAY from the light, which is roll_spec
+// evaluated under the light's azimuth mirrored. Subtracted in colour units
+// exactly as the glint is added, scaled by PLATE_SHADE_LINE. It exists
+// because the diffuse fall-off alone cannot answer the glint: with the
+// ambient floor and the truncated roll the far edge bottoms out near 0.8 of
+// the face, and only in its last pixel, while the glint adds ~0.17 of white
+// over a band — so a raised plate read lit on one side and merely unlit on
+// the other, never shadowed.
+fn roll_shade_line(sv: vec2f) -> f32 {
+    let l = rrect_clip.p_light.xyz;
+    return roll_lobe(sv, vec3f(-l.xy, l.z)) * PLATE_SHADE_LINE;
+}
+
+fn roll_lobe(sv: vec2f, light: vec3f) -> f32 {
     let m = length(sv);
     if (m < 1e-5) {
         return 0.0;
     }
-    let hv = normalize(rrect_clip.p_light.xyz + vec3f(0.0, 0.0, 1.0));
+    let hv = normalize(light + vec3f(0.0, 0.0, 1.0));
     let shininess = rrect_clip.p_mat.z;
     let facing = sv / m;
     let cos_t = inverseSqrt(1.0 + m * m);
@@ -685,7 +706,8 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             );
         }
         let spec = roll_spec(sv);
-        return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength), abs(base.a) * aa);
+        let dark = roll_shade_line(sv);
+        return vec4f(base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength) - vec3f(dark * strength), abs(base.a) * aa);
     }
 
     if (mode == MODE_ROLL) {
@@ -708,7 +730,8 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let n = normalize(vec3f(sv, 1.0));
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
         let spec = roll_spec(sv);
-        let v = (diff / flat_shade - 1.0 + extra + spec) * strength * aa;
+        let dark = roll_shade_line(sv);
+        let v = (diff / flat_shade - 1.0 + extra + spec - dark) * strength * aa;
         if (v >= 0.0) {
             return vec4f(1.0, 1.0, 1.0, min(v, 1.0));
         }

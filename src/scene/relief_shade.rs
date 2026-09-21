@@ -33,6 +33,9 @@ pub const RECESS_DEPTH: f32 = 0.6;
 /// Amplitude of the bright crest hugging a raised plate's silhouette.
 /// Mirrors `PLATE_CREST`.
 pub const PLATE_CREST: f32 = 0.25;
+/// The far-edge shade line's strength relative to the glint. Mirrors
+/// `PLATE_SHADE_LINE`.
+pub const PLATE_SHADE_LINE: f32 = 0.5;
 /// The roll's descent is truncated at this fraction of the quadrant, so the
 /// profile ends on a bounded slope instead of plunging vertical at the
 /// silhouette. Mirrors `ROLL_CUT`.
@@ -93,6 +96,14 @@ pub fn roll_spec(sv: [f32; 2], light: [f32; 3], mat: &Finish) -> f32 {
     let prof = cos_t * hv[2] + sin_t * hxy;
     let az = ((facing[0] * hv[0] + facing[1] * hv[1]) / hxy.max(1e-4)).clamp(0.0, 1.0);
     mat.spec * (prof.powf(mat.shininess) - hv[2].powf(mat.shininess)).max(0.0) * az * az
+}
+
+/// The glint's dark counterpart: [`roll_spec`] under the light's azimuth
+/// mirrored, so the same lobe lands on the edges facing away from the light,
+/// scaled by [`PLATE_SHADE_LINE`]. Mirrors `roll_shade_line`. Subtracted in
+/// colour units where the glint is added.
+pub fn roll_shade_line(sv: [f32; 2], light: [f32; 3], mat: &Finish) -> f32 {
+    roll_spec(sv, [-light[0], -light[1], light[2]], mat) * PLATE_SHADE_LINE
 }
 
 /// The signed shading value one carve contributes at `u` across its wall —
@@ -208,7 +219,7 @@ pub fn plate_surface(
     // The crest: the ambient-catching convex rim that makes glass read as glass.
     let extra = PLATE_CREST * f * f * f * crest_weight(facing, light);
     let shade = 1.0 + (diff / flat_shade(light) - 1.0 + extra) * mat.strength;
-    let spec = roll_spec(sv, light, mat) * mat.strength;
+    let spec = (roll_spec(sv, light, mat) - roll_shade_line(sv, light, mat)) * mat.strength;
     Some([
         (base[0] * shade + spec).clamp(0.0, 1.0),
         (base[1] * shade + spec).clamp(0.0, 1.0),
@@ -257,6 +268,7 @@ mod tests {
         assert_eq!(wgsl_const("RECESS_DEPTH"), RECESS_DEPTH);
         assert_eq!(wgsl_const("PLATE_CREST"), PLATE_CREST);
         assert_eq!(wgsl_const("ROLL_CUT"), ROLL_CUT);
+        assert_eq!(wgsl_const("PLATE_SHADE_LINE"), PLATE_SHADE_LINE);
     }
 
     /// The crest is light-facing: at the silhouette the edge toward the light
