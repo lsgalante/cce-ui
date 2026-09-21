@@ -359,6 +359,15 @@ impl Paint for ColorSelector {
                 ctx.rounded_rect(swatch, sr, right_end, [0.8, 0.8, 0.8, 1.0]);
                 // The white cells, those at the right edge trimmed to the end's
                 // arc at their own row (the Breadcrumb's banded-wash sampling).
+                //
+                // Zero-radius rounded rects, NOT plain quads. The adapter's
+                // legacy plain-quad view (`own_plain_quads`) is this paint
+                // filtered to `Prim::Quad`, and a host that reads that view
+                // beside the paint — the designer, through ParametersBg's
+                // `plain_quads` — draws it AFTER the prims. As quads the
+                // cells came back a second time OVER the colour fill below,
+                // so every colour but white showed a checker as if it were
+                // transparent (invisible with the default white, 2026-09-21).
                 let grid = 6.0;
                 let cols = (swatch.width / grid).ceil() as i32;
                 let rows = (swatch.height / grid).ceil() as i32;
@@ -381,7 +390,12 @@ impl Paint for ColorSelector {
                             let right_edge = swatch.x + swatch.width - arc(qy + qh * 0.5);
                             let qw = grid.min(right_edge - qx);
                             if qw > 0.0 && qh > 0.0 {
-                                ctx.quad(Rect { x: qx, y: qy, width: qw, height: qh }, [1.0, 1.0, 1.0, 1.0]);
+                                ctx.rounded_rect(
+                                    Rect { x: qx, y: qy, width: qw, height: qh },
+                                    0.0,
+                                    (false, false, false, false),
+                                    [1.0, 1.0, 1.0, 1.0],
+                                );
                             }
                         }
                     }
@@ -1035,5 +1049,42 @@ mod tests {
         assert_eq!(cs.color, [255, 0, 0]);
         assert_eq!(cs.alpha, 171);
     }
+    /// The alpha preview's checker must not reach the legacy plain-quad
+    /// view: a host that draws that view beside the paint draws it AFTER the
+    /// prims, and the white cells then landed over the colour fill — a black
+    /// swatch read as a black-and-white checker. The paint keeps its order
+    /// (base, cells, colour on top) and the plain view carries no cells.
+    #[test]
+    fn alpha_checker_stays_out_of_the_plain_quad_view() {
+        use crate::scene::paint::Prim;
+        let mut cs = ColorSelector::new_rgba([0, 0, 0, 255]);
+        cs.recessed = Some(true);
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 40.0 };
+        crate::widget::WidgetHost::set_rect(&mut cs, rect.x, rect.y, rect.width, rect.height);
+        let mut pc = PaintCtx::new();
+        let inner: &ColorSelector = &cs;
+        crate::widget::Paint::paint(inner, rect, &mut pc);
+        let items = pc.finish().items;
+        let last_fill = items
+            .iter()
+            .rposition(|it| matches!(it.prim, Prim::RoundedRect { color, .. } if color == [0.0, 0.0, 0.0, 1.0]))
+            .expect("the colour fill is painted");
+        let white_cells: Vec<usize> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, it)| matches!(it.prim, Prim::RoundedRect { color, radius, .. } if color == [1.0; 4] && radius == 0.0))
+            .map(|(i, _)| i)
+            .collect();
+        assert!(!white_cells.is_empty(), "the checker is painted");
+        assert!(white_cells.iter().all(|&i| i < last_fill), "every cell is under the colour fill");
+        assert!(
+            !items.iter().any(|it| matches!(it.prim, Prim::Quad { color, .. } if color == [1.0; 4])),
+            "no cell is a plain quad, so the legacy plain view cannot carry it"
+        );
+        let plain = crate::widget::WidgetHost::extra_quads(&cs);
+        assert!(plain.iter().all(|q| q.4 != [1.0, 1.0, 1.0, 1.0]), "the plain view has no white cells: {plain:?}");
+    }
+
 }
+
 
