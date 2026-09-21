@@ -295,6 +295,9 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.desktop.grid_cell_width" => "grid_cell_width",
                 "style.surface.desktop.grid_cell_height" => "grid_cell_height",
                 "style.surface.plate.padding" => "plate_padding",
+                // The context menu's own radius (`menu_corner_radius`): a
+                // popover's corner is control-scale, not pane-scale.
+                "style.surface.menu.corner_radius" => "menu_corner_radius",
                 // `style.surface.plate.root.*` is the one spelling of the
                 // root-plate style (RFC Phase 7a). The slot names keep the
                 // historical `root_plate_` prefix; the legacy `root plate.*`
@@ -3584,6 +3587,17 @@ pub fn set_font_selector_corner_radius(radius: f32) {
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("font_selector_corner_radius", radius);
     }
+}
+
+/// The context menu's corner radius (`style.surface.menu.corner_radius`),
+/// falling back to the control rung's. It used to take the pane radius
+/// (`plate_corner_radius`, 12 in the shipped config), which is a corner
+/// too wide for a surface whose labels sit 8px in from its edge: the first
+/// row's text ran off the plate through the arc. A menu is a popover, and
+/// its corner belongs to the control scale, like the dropdown's.
+pub fn menu_corner_radius() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("menu_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn dropdown_corner_radius() -> f32 {

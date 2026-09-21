@@ -514,7 +514,7 @@ pub mod context_menu {
                 width: self.w,
                 height: self.h,
             };
-            let r = crate::layout::plate_corner_radius();
+            let r = crate::layout::menu_corner_radius();
             let depth = crate::layout::bevel_width().min(self.h * 0.2);
             let face = crate::color::page_low_color();
             if face[3] > 0.001 {
