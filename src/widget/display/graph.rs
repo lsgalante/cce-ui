@@ -13,8 +13,8 @@
 //! The grid is a LATTICE OF LINES with one size per axis — the pitch, from the centre of
 //! one line to the centre of the next — and a node is centred on the intersection its
 //! `position` names: node (c, r) sits on `grid_origin + (c * pitch_x, r * pitch_y)`. The
-//! node body's size follows from the pitch ([`Graph::node_size_for_pitch`]). It used to be
-//! a grid of CELLS — a cell size that was also the node size, plus a gap between cells,
+//! node body has a size of its own (`graph_node_width` / `graph_node_height`, scaled with
+//! the zoom), independent of the pitch. It used to be a grid of CELLS — a cell size that was also the node size, plus a gap between cells,
 //! with a node filling its cell — and the cell-and-gap setters survive as a description of
 //! the same lattice for hosts that still speak it (a cell plus its gap is a pitch).
 
@@ -68,8 +68,8 @@ pub struct Graph {
     /// axis. The grid's one size.
     pitch_x: f32,
     pitch_y: f32,
-    /// The node body's size — derived from the pitch by `set_grid_pitch`,
-    /// or set outright by `set_node_size` and the cell-model setters.
+    /// The node body's size — its own (`graph_node_width` / `_height` at
+    /// 100%), independent of the pitch; the cell-model setters set it too.
     node_w: f32,
     node_h: f32,
     /// The lattice intersection node (0, 0) is centred on, window-absolute.
@@ -134,7 +134,8 @@ impl Graph {
 
         let pitch_x = crate::layout::graph_spacing_x();
         let pitch_y = crate::layout::graph_spacing_y();
-        let (node_w, node_h) = Self::node_size_for_pitch(pitch_x, pitch_y);
+        let node_w = crate::layout::graph_node_width();
+        let node_h = crate::layout::graph_node_height();
         let grid_snap_enabled = crate::layout::graph_grid_snap();
 
         let cell_col = crate::color::graph_cell_color();
@@ -185,20 +186,6 @@ impl Graph {
     pub fn set_node_opacity(&mut self, opacity: f32) {
         self.node_opacity = opacity;
     }
-    /// The node body's width as a share of the x pitch, and its height as a
-    /// share of the y pitch. A fifth of the pitch is left between neighbours
-    /// in a row; a third between rows, because that is where the ports float
-    /// and the wires run. They are the proportions the cell grid had (a 150
-    /// cell in a 187.5 step, a 75 cell in a 112.5 step), so nothing moved.
-    pub const NODE_W_OF_PITCH: f32 = 0.8;
-    pub const NODE_H_OF_PITCH: f32 = 2.0 / 3.0;
-
-    /// The node body's size for a grid pitch — the ONE rule, so a host's
-    /// cursor and the widget's nodes cannot disagree about it.
-    pub fn node_size_for_pitch(pitch_x: f32, pitch_y: f32) -> (f32, f32) {
-        (pitch_x * Self::NODE_W_OF_PITCH, pitch_y * Self::NODE_H_OF_PITCH)
-    }
-
     /// The pitch: centre of one grid line to the centre of the next, per axis.
     pub fn grid_pitch(&self) -> (f32, f32) {
         (self.pitch_x, self.pitch_y)
@@ -207,8 +194,8 @@ impl Graph {
     pub fn node_size(&self) -> (f32, f32) {
         (self.node_w, self.node_h)
     }
-    /// Set the node body's size outright, off the pitch's rule — what the
-    /// cell-model setters do, since there the cell IS the node.
+    /// Set the node body's size — what the cell-model setters do too, since
+    /// there the cell IS the node.
     pub fn set_node_size(&mut self, w: f32, h: f32) {
         self.node_w = w;
         self.node_h = h;
@@ -1289,9 +1276,8 @@ impl GraphController for Graph {
     fn set_grid_pitch(&mut self, px: f32, py: f32) {
         self.pitch_x = px;
         self.pitch_y = py;
-        let (w, h) = Self::node_size_for_pitch(px, py);
-        self.set_node_size(w, h);
     }
+    fn set_node_size(&mut self, w: f32, h: f32) { Graph::set_node_size(self, w, h) }
     /// Cell model: the cell is the node body, and the gap it had stays, so
     /// the two setters commute (a cell plus its gap is a pitch).
     fn set_grid_sizes(&mut self, gx: f32, gy: f32) {
@@ -1337,6 +1323,7 @@ mod tests {
         let mut g = Graph::new();
         WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
         g.set_grid_pitch(100.0, 60.0);
+        g.set_node_size(80.0, 40.0);
         g.set_grid_origin(140.0, 120.0);
         g.set_grid_snap_enabled(true);
         let node = |id: &str, name: &str, col: f32, row: f32| GraphNode {
@@ -1427,6 +1414,7 @@ mod tests {
         let mut g = Graph::new();
         WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
         g.set_grid_pitch(100.0, 60.0);
+        g.set_node_size(80.0, 40.0);
         g.set_grid_origin(140.0, 120.0);
         g.set_grid_snap_enabled(true);
         let node = |id: &str, name: &str, col: f32, row: f32, params: Vec<(String, String, String)>| GraphNode {
@@ -1476,14 +1464,16 @@ mod tests {
 
     /// The grid has one size per axis, the pitch, and a node is CENTRED on
     /// the intersection its position names — its body straddles the lines
-    /// rather than filling a cell between them. The body's size follows
-    /// from the pitch by one rule the hosts read too.
+    /// rather than filling a cell between them. The body's size is its own:
+    /// changing the pitch moves nodes apart without resizing them.
     #[test]
     fn nodes_are_centred_on_lattice_intersections() {
-        let g = two_nodes();
+        let mut g = two_nodes();
         assert_eq!(g.grid_pitch(), (100.0, 60.0));
-        assert_eq!(g.node_size(), Graph::node_size_for_pitch(100.0, 60.0));
         assert_eq!(g.node_size(), (80.0, 40.0));
+        g.set_grid_pitch(200.0, 90.0);
+        assert_eq!(g.node_size(), (80.0, 40.0), "the pitch does not size the node");
+        g.set_grid_pitch(100.0, 60.0);
         // Node a is on the (140, 120) intersection: its 80 x 40 body is
         // centred there.
         let (x, y, w, h) = g.node_rect(0).unwrap();

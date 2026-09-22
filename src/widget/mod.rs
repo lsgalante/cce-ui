@@ -624,9 +624,11 @@ pub trait GraphController {
     fn set_grid_snap(&mut self, gx: f32, gy: f32);
     /// The grid's ONE size per axis: the pitch, from the centre of one grid
     /// line to the centre of the next. Nodes are centred on the lattice
-    /// intersections, and the node body's size follows from the pitch
-    /// (`Graph::node_size_for_pitch`).
+    /// intersections. Leaves the node size alone.
     fn set_grid_pitch(&mut self, px: f32, py: f32);
+    /// The node body's size, independent of the pitch — hosts scale it with
+    /// their zoom as they scale the pitch.
+    fn set_node_size(&mut self, w: f32, h: f32);
     /// The older cell-and-gap description of the same lattice — a cell plus
     /// its gap is a pitch, and the node body is the cell. Kept for hosts
     /// that still speak it (cce-files, cce-graph); new code sets the pitch.

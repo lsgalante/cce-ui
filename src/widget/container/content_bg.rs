@@ -267,6 +267,8 @@ impl GraphController for ContentBg {
         self.grid_size_x = (px - self.skipped_col_w).max(0.0);
         self.grid_size_y = (py - self.skipped_row_h).max(0.0);
     }
+    /// No nodes here; the cell-and-gap gradient has no body to size.
+    fn set_node_size(&mut self, _w: f32, _h: f32) {}
     fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
     fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
     fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }

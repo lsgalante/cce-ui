@@ -325,6 +325,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.spacing_x" => "graph_spacing_x",
                 "style.surface.graph.spacing_y" => "graph_spacing_y",
                 "style.surface.graph.line_width" => "graph_line_width",
+                "style.surface.graph.node.width" => "graph_node_width",
+                "style.surface.graph.node.height" => "graph_node_height",
                 "style.surface.graph.grid_snap" => "graph_grid_snap",
                 "style.surface.graph.blur" => "graph_blur",
                 "style.surface.graph.font" => "graph_font",
@@ -3450,12 +3452,12 @@ pub fn set_tree_corner_radius(radius: f32) {
 
 /// The graph grid's pitch along x: the distance from the centre of one
 /// vertical grid line to the centre of the next. It is the grid's ONE size
-/// per axis — nodes are centred on the lattice intersections, and the node
-/// body's size follows from the pitch (`Graph::node_size_for_pitch`). It
-/// replaced a cell size plus a gap (`spacing_*` was the cell, `gap_col_w` /
-/// `gap_row_h` the gap, and a step was the two added up); the defaults are
-/// what those two used to add up to, so a config that set neither draws the
-/// same lattice it did.
+/// per axis — nodes are centred on the lattice intersections. The node body
+/// has a size of its own (`graph_node_width` / `graph_node_height`), so a
+/// denser grid does not shrink the nodes. The pitch replaced a cell size
+/// plus a gap (`spacing_*` was the cell, `gap_col_w` / `gap_row_h` the gap,
+/// and a step was the two added up); the defaults are what those two used
+/// to add up to, so a config that set neither draws the same lattice it did.
 pub fn graph_spacing_x() -> f32 {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float("graph_spacing_x").unwrap_or(187.5)
@@ -3494,6 +3496,35 @@ pub fn set_graph_line_width(width: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_float("graph_line_width", width);
+    }
+}
+
+/// The node body's width at 100% zoom (`style.surface.graph.node.width`),
+/// independent of the grid pitch: a node is a thing of its own size sitting
+/// on a crossing, and the grid is a reference under it. The default is the
+/// cell the old grid gave a node.
+pub fn graph_node_width() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_node_width").unwrap_or(150.0)
+}
+
+pub fn set_graph_node_width(width: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_node_width", width);
+    }
+}
+
+/// The node body's height at 100% zoom — see [`graph_node_width`].
+pub fn graph_node_height() -> f32 {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float("graph_node_height").unwrap_or(75.0)
+}
+
+pub fn set_graph_node_height(height: f32) {
+    lazy_init_style_registry();
+    if let Ok(mut registry) = get_style_registry().write() {
+        registry.set_float("graph_node_height", height);
     }
 }
 
@@ -6928,6 +6959,8 @@ mod tests {
         assert_eq!(graph_spacing_x(), stored("graph_spacing_x").unwrap_or(187.5));
         assert_eq!(graph_spacing_y(), stored("graph_spacing_y").unwrap_or(112.5));
         assert_eq!(graph_line_width(), stored("graph_line_width").unwrap_or(1.0));
+        assert_eq!(graph_node_width(), stored("graph_node_width").unwrap_or(150.0));
+        assert_eq!(graph_node_height(), stored("graph_node_height").unwrap_or(75.0));
         assert_eq!(graph_grid_snap(), stored("graph_grid_snap").unwrap_or(0.0) != 0.0);
         assert_eq!(graph_blur(), stored("graph_blur").unwrap_or(0.0));
         assert_eq!(graph_node_corner_radius(), stored("graph_node_corner_radius").unwrap_or(4.0));
