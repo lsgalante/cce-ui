@@ -464,54 +464,63 @@ pub struct TextBounds {
 /// popover's plate. A text item whose own bounds coincide with a popover rect IS that popover's
 /// text and is left alone; anything else that intersects gets clamped horizontally toward
 /// whichever side of the popover it starts on.
+/// Clamp a text item's bounds away from the registered popover rects it
+/// runs under, so page text does not bleed through a floating plate.
+///
+/// A text item BELONGS to a popover when it carries exactly that popover's
+/// rect as its bounds (the convention every popover's own labels follow),
+/// and it is then clamped only against the popovers registered AFTER its
+/// own — `overlay_rects` is in stacking order, the shared context menu
+/// last. Before 2026-09-22 a popover's text was exempt from its own rect
+/// alone and clamped against every other, so a context menu opened over a
+/// modal dialog had its labels clipped by the dialog it was drawn on top
+/// of, and showed as a plate with no legible entries.
 fn popover_occlusion_clamp(
     overlay_rects: &[(f32, f32, f32, f32)],
     ti: &TextItem,
     scale_f32: f32,
     item_bounds: &mut TextBounds,
 ) {
-    for &(ox, oy, ow, oh) in overlay_rects {
+    let owner = ti.bounds.and_then(|[l, t, r, b]| {
+        overlay_rects.iter().position(|&(ox, oy, ow, oh)| {
+            (l - ox).abs() < 1.0
+                && (t - oy).abs() < 1.0
+                && (r - (ox + ow)).abs() < 1.0
+                && (b - (oy + oh)).abs() < 1.0
+        })
+    });
+    let first_above = owner.map_or(0, |k| k + 1);
+    for &(ox, oy, ow, oh) in &overlay_rects[first_above..] {
         let ol = (ox * scale_f32).round() as i32;
         let ot = (oy * scale_f32).round() as i32;
         let or = ((ox + ow) * scale_f32).round() as i32;
         let ob = ((oy + oh) * scale_f32).round() as i32;
 
-        let is_overlay_text = if let Some([l, t, r, b]) = ti.bounds {
-            (l - ox).abs() < 1.0
-                && (t - oy).abs() < 1.0
-                && (r - (ox + ow)).abs() < 1.0
-                && (b - (oy + oh)).abs() < 1.0
-        } else {
-            false
-        };
+        let tx_pixel = ti.x * scale_f32;
+        let ty_pixel = ti.y * scale_f32;
 
-        if !is_overlay_text {
-            let tx_pixel = ti.x * scale_f32;
-            let ty_pixel = ti.y * scale_f32;
+        let mut text_w = 0.0f32;
+        let mut run_count = 0;
+        for run in ti.buffer.layout_runs() {
+            text_w = text_w.max(run.line_w);
+            run_count += 1;
+        }
+        let text_h = run_count as f32 * ti.buffer.metrics().line_height;
 
-            let mut text_w = 0.0f32;
-            let mut run_count = 0;
-            for run in ti.buffer.layout_runs() {
-                text_w = text_w.max(run.line_w);
-                run_count += 1;
-            }
-            let text_h = run_count as f32 * ti.buffer.metrics().line_height;
+        let actual_left = tx_pixel;
+        let actual_right = tx_pixel + text_w;
+        let actual_top = ty_pixel;
+        let actual_bottom = ty_pixel + text_h;
 
-            let actual_left = tx_pixel;
-            let actual_right = tx_pixel + text_w;
-            let actual_top = ty_pixel;
-            let actual_bottom = ty_pixel + text_h;
-
-            if actual_left < or as f32
-                && actual_right > ol as f32
-                && actual_top < ob as f32
-                && actual_bottom > ot as f32
-            {
-                if tx_pixel < ol as f32 {
-                    item_bounds.right = item_bounds.right.min(ol);
-                } else {
-                    item_bounds.left = item_bounds.left.max(or);
-                }
+        if actual_left < or as f32
+            && actual_right > ol as f32
+            && actual_top < ob as f32
+            && actual_bottom > ot as f32
+        {
+            if tx_pixel < ol as f32 {
+                item_bounds.right = item_bounds.right.min(ol);
+            } else {
+                item_bounds.left = item_bounds.left.max(or);
             }
         }
     }
