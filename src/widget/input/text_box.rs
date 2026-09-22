@@ -2253,7 +2253,7 @@ mod tests {
     }
 
     #[test]
-    fn test_search_textbox_cear_option() {
+    fn test_search_textbox_clear_option() {
         let mut dummy = crate::context::UiContext::new();
         let mut tb = TextBox::new("Some Search query".to_string()).with_placeholder("Search...");
         tb.set_rect(10.0, 10.0, 200.0, 30.0);
@@ -2263,11 +2263,11 @@ mod tests {
         assert!(clicked);
         assert!(dummy.is_context_menu_visible());
 
-        // Verify "Cear" option is in options
+        // Verify "Clear" option is in options
         let opts = crate::widget::context_menu::options();
-        assert!(opts.contains(&"Cear".to_string()));
+        assert!(opts.contains(&"Clear".to_string()));
 
-        // Simulate choosing the "Cear" option
+        // Simulate choosing the "Clear" option
         WidgetHost::context_action(&mut tb, crate::widget::ContextAction::ClearText);
         assert_eq!(tb.text, "");
         assert_eq!(tb.edit_buffer, "");

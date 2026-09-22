@@ -302,21 +302,10 @@ impl Application for RampPopup {
         // The shared context menu (right-click on the graph), drawn last, on
         // top of everything. Its labels carry the menu rect as bounds — the
         // runner exempts them from the menu's own text occlusion that way.
-        if self.ui_context.is_context_menu_visible() {
-            for (qx, qy, qw, qh, c) in self.ui_context.context_menu_quads() {
-                pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, c);
-            }
-            let (mx, my, mw, mh) = (
-                cce_ui::widget::context_menu::x(),
-                cce_ui::widget::context_menu::y(),
-                cce_ui::widget::context_menu::w(),
-                cce_ui::widget::context_menu::h(),
-            );
-            let bounds = Some([mx, my, mx + mw, my + mh]);
-            for l in self.ui_context.context_menu_labels() {
-                pc.text_with(l.text, l.x, l.y, l.font_size, l.color, None, bounds);
-            }
-        }
+        // The lit plate and the menu font, in one call — the flat quads and
+        // a family-less label loop drew this menu square, opaque and in the
+        // default sans, unlike every app's.
+        cce_ui::widget::context_menu::paint_with_labels(&mut pc);
 
         Some(pc.finish())
     }

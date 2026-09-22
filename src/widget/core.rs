@@ -506,7 +506,7 @@ pub mod context_menu {
                                         "Select All" => Some(CA::SelectAll),
                                         "Undo" => Some(CA::Undo),
                                         "Redo" => Some(CA::Redo),
-                                        "Cear" => Some(CA::ClearText),
+                                        "Clear" => Some(CA::ClearText),
                                         "Copy Key" => Some(CA::CopyKey),
                                         "Copy Value" => Some(CA::CopyValue),
                                         "Delete" => Some(CA::DeleteKey),
@@ -740,6 +740,19 @@ pub mod context_menu {
     pub fn hovered_item() -> Option<usize> { CONTEXT_MENU.with(|m| m.borrow().hovered_item) }
     pub fn options() -> Vec<String> { CONTEXT_MENU.with(|m| m.borrow().options.clone()) }
 
+    /// The row under a point, PAD-aware — the ONE row hit test. Every host
+    /// that dispatches the menu itself should ask this rather than divide
+    /// `(py - y()) / ROW_H`: the rows start `PAD` below the plate's top, so
+    /// that division names the row below over the bottom third of every
+    /// row, and runs off the end on the last one (2026-09-22 audit: six
+    /// call sites across five apps had it).
+    pub fn row_at(px: f32, py: f32) -> Option<usize> {
+        CONTEXT_MENU.with(|m| m.borrow().row_at(px, py))
+    }
+    /// A row's top, PAD-aware — for a host painting the rows itself.
+    pub fn row_y(idx: usize) -> f32 {
+        CONTEXT_MENU.with(|m| m.borrow().row_y(idx))
+    }
     pub fn hit_test(px: f32, py: f32) -> bool {
         CONTEXT_MENU.with(|m| m.borrow().hit_test(px, py))
     }
@@ -865,8 +878,25 @@ macro_rules! impl_widget_base {
 
 #[cfg(test)]
 mod context_menu_padding_tests {
-    use super::context_menu::{ContextMenuState, PAD, ROW_H};
+    use super::context_menu::{self, ContextMenuState, PAD, ROW_H};
     use crate::widget::WidgetId;
+
+    /// The shared menu is a popover for the window-drag question too: a
+    /// press on one of its rows must never start a window move, whatever
+    /// sits under the menu. It has no widget id to register, so the veto
+    /// asks the thread-local directly. And the free `row_at` is the
+    /// PAD-aware row hit test hosts dispatch by.
+    #[test]
+    fn an_open_menu_vetoes_window_drags_under_it() {
+        let ctx = crate::context::UiContext::new();
+        context_menu::show(100.0, 200.0, vec!["Copy".into(), "Paste".into()], 0, WidgetId(1));
+        assert!(!ctx.drag_allowed_at(110.0, 200.0 + PAD + ROW_H * 0.5), "a press on a row is not a drag");
+        assert_eq!(context_menu::row_at(110.0, 200.0 + PAD + ROW_H * 1.5), Some(1));
+        assert_eq!(context_menu::row_y(1), 200.0 + PAD + ROW_H);
+        assert!(ctx.drag_allowed_at(10.0, 10.0), "away from the menu the drag question is the widgets'");
+        context_menu::hide();
+        assert!(ctx.drag_allowed_at(110.0, 200.0 + PAD + ROW_H * 0.5), "hidden, it vetoes nothing");
+    }
 
     /// The plate pads its rows evenly: the height is the rows plus a pad
     /// above and below, the labels sit one pad in from the left with the

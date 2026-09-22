@@ -1043,7 +1043,7 @@ impl UiContext {
                 }
             };
             if is_search {
-                options.push("Cear".to_string());
+                options.push("Clear".to_string());
             }
         } else if name == "Breadcrumb" {
             options.push("Copy Path".to_string());
@@ -1097,6 +1097,14 @@ impl UiContext {
     /// there must never start a window move (the widgets beneath may not block dragging,
     /// e.g. Graph's edge-exclusive canvas hit test).
     fn point_in_active_popover(&self, px: f32, py: f32) -> bool {
+        // The shared context menu is a popover too — a thread-local one,
+        // with no widget id to register — and a press on one of its rows
+        // used to start a window move in any app whose background does
+        // not block dragging (cce-graph, cce-data-editor: the row never
+        // fired, the window slid).
+        if crate::widget::context_menu::is_visible() && crate::widget::context_menu::hit_test(px, py) {
+            return true;
+        }
         for &pop_id in &self.active_popovers {
             if let Some(ptr) = self.tree.get_ptr(pop_id) {
                 unsafe {
