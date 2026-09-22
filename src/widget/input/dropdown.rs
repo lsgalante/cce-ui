@@ -310,8 +310,67 @@ impl Dropdown {
         self.settle_anim();
     }
 
+    /// One option row's height — a fixed pitch, not the trigger's height.
+    /// `popover_geom` sizes the box by it, `draw_popover` lays the labels out
+    /// on it and `row_at` reads it back.
+    const ROW_H: f32 = 24.0;
+
     fn popover_width(&self, content: Rect) -> f32 {
         content.width.max(self.content_width())
+    }
+
+    /// The relief wall the open plate eats out of its own OUTER edges. The
+    /// menu's surface is carved exactly like the closed trigger's
+    /// (`carve_inside` at `depth`, then a trough straddling the carved edge by
+    /// ±depth/2), so the outermost `depth` of the box is valley rather than
+    /// face. A row laid flush against that edge therefore has its bottom
+    /// padding — and any descender sitting in it — painted over by the wall,
+    /// which is what cut the last option of every menu in half. The flat path
+    /// draws a 1px outline instead and costs a row only its outermost pixel.
+    fn plate_inset(&self, trigger_h: f32) -> f32 {
+        if self.raised() {
+            crate::layout::bevel_width().min(trigger_h * 0.2)
+        } else {
+            1.0
+        }
+    }
+
+    /// What [`Self::popover_geom`] reserves above and below the row strip:
+    /// [`Self::plate_inset`] on whichever menu edges are OUTER edges of the
+    /// open surface. A downward menu meets the trigger band along its top and
+    /// owns only its bottom edge; an upward one is the other way round; a menu
+    /// that replaces the trigger owns both.
+    fn popover_pads(&self, content: Rect) -> (f32, f32) {
+        let inset = self.plate_inset(content.height);
+        let anchor = self.popover_anchor.unwrap_or(content);
+        let base_y = anchor.y - self.label_top();
+        let open_upward = self.open_upward.unwrap_or(base_y > 400.0);
+        if self.menu_replaces_trigger {
+            (inset, inset)
+        } else if open_upward {
+            (inset, 0.0)
+        } else {
+            (0.0, inset)
+        }
+    }
+
+    /// Where the first option row sits: the menu box's top edge, past the
+    /// relief wall when that edge is an outer one. Rows run from here at
+    /// [`Self::ROW_H`] — the ONE origin the paint and the hit test share.
+    fn rows_top(&self, content: Rect) -> f32 {
+        let (_, ry, _, _) = self.popover_geom(content);
+        ry + self.popover_pads(content).0
+    }
+
+    /// Which option lies at `py`, or None for the reserved wall at the menu's
+    /// outer edge (and for anything past the last row).
+    fn row_at(&self, content: Rect, py: f32) -> Option<usize> {
+        let rel = py - self.rows_top(content);
+        if rel < 0.0 {
+            return None;
+        }
+        let idx = (rel / Self::ROW_H) as usize;
+        (idx < self.options.len()).then_some(idx)
     }
 
     /// The ONE continuous surface drawn while open: the trigger band unioned
@@ -357,10 +416,15 @@ impl Dropdown {
     /// Popover geometry against the laid-out content rect — the legacy `get_popover_geom`,
     /// with the base-rect reads rewritten in content-rect terms (`base.y + base.h` ⇒
     /// `content.y + content.height`, `base.y + label_offset` ⇒ `content.y`).
+    ///
+    /// The box is the row strip PLUS [`Self::popover_pads`] — it is a plate,
+    /// and its outer edges are relief wall, not face. Rows start at
+    /// [`Self::rows_top`], never at `ry`.
     pub fn popover_geom(&self, content: Rect) -> (f32, f32, f32, f32) {
+        let (pad_top, pad_bottom) = self.popover_pads(content);
         let content = self.popover_anchor.unwrap_or(content);
         let rw = self.popover_width(content);
-        let rh = self.options.len() as f32 * 24.0;
+        let rh = self.options.len() as f32 * Self::ROW_H + pad_top + pad_bottom;
 
         let base_y = content.y - self.label_top();
         let open_upward = self.open_upward.unwrap_or(base_y > 400.0);
@@ -919,7 +983,9 @@ impl Paint for Dropdown {
         // view as the traveling edge reveals them, clipped to the menu area by
         // hand (RenderTarget carries no clip stack); text clips through its
         // bounds.
-        let (rx, ry, rw, _rh) = self.popover_geom(rect);
+        let (rx, _ry, rw, _rh) = self.popover_geom(rect);
+        // The row strip inside the box — past the relief wall on an outer edge.
+        let rows_y = self.rows_top(rect);
         let (ax, ay, aw, ah) = self.popover_geom_drawn(rect);
         if aw <= 0.5 || ah <= 0.5 {
             // Nothing revealed yet — the plain trigger stands alone.
@@ -994,7 +1060,7 @@ impl Paint for Dropdown {
         }
 
         if let Some(h_idx) = self.hovered_item {
-            let iy = ry + h_idx as f32 * 24.0;
+            let iy = rows_y + h_idx as f32 * Self::ROW_H;
             // 4. Vibrantly colored translucent selection highlight
             if let Some((cx, cy, cw, ch)) = clip(rx + 2.0, iy + 2.0, rw - 4.0, 20.0) {
                 pc.rect(theme.primary_accent, cx, cy, cw, ch);
@@ -1002,10 +1068,11 @@ impl Paint for Dropdown {
         }
 
         for (idx, opt) in self.options.iter().enumerate() {
-            let iy = crate::layout::align_text_y(ry + idx as f32 * 24.0, 24.0, 12.0, 0.0);
+            let row_top = rows_y + idx as f32 * Self::ROW_H;
+            let iy = crate::layout::align_text_y(row_top, Self::ROW_H, 12.0, 0.0);
 
             if opt == "-" {
-                if let Some((cx, cy, cw, ch)) = clip(rx + 8.0, ry + idx as f32 * 24.0 + 11.5, rw - 16.0, 1.0) {
+                if let Some((cx, cy, cw, ch)) = clip(rx + 8.0, row_top + 11.5, rw - 16.0, 1.0) {
                     pc.rect(theme.surface_border, cx, cy, cw, ch);
                 }
                 continue;
@@ -1121,8 +1188,7 @@ impl Input for Dropdown {
                     );
                 }
                 if inside_popover {
-                    let idx = ((py - ry) / 24.0) as usize;
-                    if idx < self.options.len() {
+                    if let Some(idx) = self.row_at(content, *py) {
                         if self.options[idx] == "-" {
                             return true;
                         }
@@ -1165,9 +1231,10 @@ impl Input for Dropdown {
                 if self.open && !self.closing {
                     let (rx, ry, rw, rh) = self.popover_geom(ectx.rect);
                     if *px >= rx && *px <= rx + rw && *py >= ry && *py <= ry + rh {
-                        let idx = ((py - ry) / 24.0) as usize;
-                        if idx < self.options.len() && self.options[idx] != "-" {
-                            self.hovered_item = Some(idx);
+                        if let Some(idx) = self.row_at(ectx.rect, *py) {
+                            if self.options[idx] != "-" {
+                                self.hovered_item = Some(idx);
+                            }
                         }
                     }
                 }
@@ -1582,8 +1649,24 @@ mod tests {
         // popover_rect reports the ANIMATED box — land the expansion first.
         dd.land_anim_for_test();
         let (rx, ry, rw, rh) = WidgetHost::popover_rect(&dd).expect("open dropdown registers its popover");
+        // The box is the band, the rows, and the relief wall the plate needs
+        // along its one outer edge (the bottom, for a downward menu) — without
+        // that reserve the trough painted over the last row's descenders.
+        let wall = dd.plate_inset(24.0);
+        assert!(wall > 0.0, "the default relief styling carves the open plate");
         assert_eq!((rx, ry), (10.0, 10.0), "the unified surface starts at the trigger band");
-        assert!(rw >= 100.0 && rh == 72.0, "trigger band (24) + menu (2 * 24) as one box");
+        assert!(
+            rw >= 100.0 && rh == 24.0 + 2.0 * 24.0 + wall,
+            "trigger band (24) + menu (2 * 24) + the bottom wall as one box",
+        );
+        assert_eq!(
+            dd.rows_top(Rect { x: 10.0, y: 10.0, width: 100.0, height: 24.0 }),
+            34.0,
+            "a downward menu's rows still start flush under the band",
+        );
+        let trigger = Rect { x: 10.0, y: 10.0, width: 100.0, height: 24.0 };
+        assert_eq!(dd.row_at(trigger, 34.0 + 47.9), Some(1), "the last row is whole");
+        assert_eq!(dd.row_at(trigger, 34.0 + 48.1), None, "the wall below it picks nothing");
 
         // An outside press closes it (ungated presses — `gates_presses` is false).
         let closed = dd.mouse_input(MouseButton::Left, ElementState::Pressed, 500.0, 500.0, &mut dummy);
@@ -1610,8 +1693,18 @@ mod tests {
         assert!(dd.open);
         dd.land_anim_for_test();
         let (rx, ry, rw, rh) = WidgetHost::popover_rect(&dd).expect("open dropdown registers its popover");
-        assert_eq!(rh, 72.0, "three rows and nothing else — no trigger band");
+        // No band, so BOTH edges are outer ones and both carry the wall.
+        let wall = dd.plate_inset(24.0);
+        assert!(
+            (rh - (3.0 * 24.0 + 2.0 * wall)).abs() < 0.01,
+            "three rows and nothing else — no trigger band: {rh}",
+        );
         assert_eq!((rx, ry + rh), (10.0, 324.0), "the menu's bottom edge sits on the trigger's bottom edge");
+        assert_eq!(
+            dd.rows_top(Rect { x: 10.0, y: 300.0, width: 100.0, height: 24.0 }),
+            ry + wall,
+            "the rows start inside the wall",
+        );
         assert!(rw >= 100.0);
         assert_eq!(dd.get_popover_geom(), (rx, ry, rw, rh), "the drawn box is the full menu once landed");
 
@@ -1630,6 +1723,18 @@ mod tests {
         plain.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 310.0, &mut dummy);
         plain.land_anim_for_test();
         let (_, ry, _, rh) = WidgetHost::popover_rect(&plain).unwrap();
-        assert_eq!((ry, rh), (252.0, 72.0), "band (24) + two rows (48), stacked above the trigger");
+        // Upward: the menu's TOP is the outer edge, so the wall goes there and
+        // the rows still end flush on the band.
+        let wall = plain.plate_inset(24.0);
+        assert_eq!(
+            (ry, rh),
+            (252.0 - wall, 24.0 + 2.0 * 24.0 + wall),
+            "band (24) + two rows (48) + the top wall, stacked above the trigger",
+        );
+        assert_eq!(
+            plain.rows_top(Rect { x: 10.0, y: 300.0, width: 100.0, height: 24.0 }),
+            252.0,
+            "the rows end flush on the band",
+        );
     }
 }
