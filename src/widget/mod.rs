@@ -622,8 +622,18 @@ pub trait GraphController {
     fn set_grid_snap_enabled(&mut self, enabled: bool);
     fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)>;
     fn set_grid_snap(&mut self, gx: f32, gy: f32);
+    /// The grid's ONE size per axis: the pitch, from the centre of one grid
+    /// line to the centre of the next. Nodes are centred on the lattice
+    /// intersections, and the node body's size follows from the pitch
+    /// (`Graph::node_size_for_pitch`).
+    fn set_grid_pitch(&mut self, px: f32, py: f32);
+    /// The older cell-and-gap description of the same lattice — a cell plus
+    /// its gap is a pitch, and the node body is the cell. Kept for hosts
+    /// that still speak it (cce-files, cce-graph); new code sets the pitch.
     fn set_grid_sizes(&mut self, gx: f32, gy: f32);
+    /// The gap half of the cell-and-gap description; see [`set_grid_sizes`].
     fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32);
+    /// The lattice intersection node (0, 0) is centred on, window-absolute.
     fn set_grid_origin(&mut self, ox: f32, oy: f32);
     fn grid_origin(&self) -> (f32, f32);
     fn set_show_network_grid(&mut self, show: bool);
@@ -640,7 +650,8 @@ pub trait GraphController {
     fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool;
     /// The topmost node whose body contains (px, py), window-absolute coords.
     fn node_at(&self, px: f32, py: f32) -> Option<usize>;
-    /// The grid cells' superellipse corner radius at the current zoom (0 = square).
+    /// The corner radius of anything node-shaped on the grid at the current
+    /// zoom — the cursor, the drop-target highlight (0 = square).
     fn cell_corner_radius(&self) -> f32;
     /// The flat-geometry emission with grid cells tagged by their surviving
     /// rounded corners — for hosts that draw the graph's quads themselves
@@ -650,7 +661,7 @@ pub trait GraphController {
     /// hosts that draw the graph's quads themselves, called at the point in
     /// their walk where the grid goes (under the wires and nodes).
     fn paint_grid(&self, rect: crate::scene::layout::Rect, pc: &mut crate::scene::paint::PaintCtx);
-    /// The pixel rect of the cell an in-flight node drag will deposit on
+    /// The pixel rect the in-flight node drag will deposit its body on
     /// (`commit_drag`'s resolution), for hosts' drop-target highlight.
     /// None outside a node drag.
     fn drop_target_cell_rect(&self) -> Option<(f32, f32, f32, f32)>;

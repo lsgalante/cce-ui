@@ -9,6 +9,14 @@
 //! `all_quads` emptied by the adapter so no host draws it twice. Node-name text is clipped to
 //! the widget rect via [`Paint::text_bounds`]. All grid geometry is in absolute screen space
 //! (hosts pan by moving `grid_origin`); the widget rect only culls and clips.
+//!
+//! The grid is a LATTICE OF LINES with one size per axis — the pitch, from the centre of
+//! one line to the centre of the next — and a node is centred on the intersection its
+//! `position` names: node (c, r) sits on `grid_origin + (c * pitch_x, r * pitch_y)`. The
+//! node body's size follows from the pitch ([`Graph::node_size_for_pitch`]). It used to be
+//! a grid of CELLS — a cell size that was also the node size, plus a gap between cells,
+//! with a node filling its cell — and the cell-and-gap setters survive as a description of
+//! the same lattice for hosts that still speak it (a cell plus its gap is a pitch).
 
 use crate::colors;
 use crate::scene::layout::Rect;
@@ -56,15 +64,20 @@ const WIDGET_CORNERS: (bool, bool, bool, bool) = (false, false, true, true);
 
 pub struct Graph {
     show_network_grid: bool,
-    grid_size_x: f32,
-    grid_size_y: f32,
+    /// The pitch: centre of one grid line to the centre of the next, per
+    /// axis. The grid's one size.
+    pitch_x: f32,
+    pitch_y: f32,
+    /// The node body's size — derived from the pitch by `set_grid_pitch`,
+    /// or set outright by `set_node_size` and the cell-model setters.
+    node_w: f32,
+    node_h: f32,
+    /// The lattice intersection node (0, 0) is centred on, window-absolute.
     grid_origin_x: f32,
     grid_origin_y: f32,
     /// Smooth-scroll driver behind the pan origin: notches glide, a trackpad
     /// flick coasts across the unbounded canvas.
     pan_motion: crate::widget::ScrollMotion,
-    skipped_row_h: f32,
-    skipped_col_w: f32,
     nodes: Vec<GraphNode>,
     selected_idx: Option<usize>,
     selected_id: Option<String>,
@@ -119,8 +132,9 @@ impl Graph {
     pub fn new() -> Adapted<Graph> {
         crate::layout::lazy_init_style_registry();
 
-        let grid_size_x = crate::layout::graph_spacing_x();
-        let grid_size_y = crate::layout::graph_spacing_y();
+        let pitch_x = crate::layout::graph_spacing_x();
+        let pitch_y = crate::layout::graph_spacing_y();
+        let (node_w, node_h) = Self::node_size_for_pitch(pitch_x, pitch_y);
         let grid_snap_enabled = crate::layout::graph_grid_snap();
 
         let cell_col = crate::color::graph_cell_color();
@@ -128,13 +142,13 @@ impl Graph {
 
         Adapted::new(Graph {
             show_network_grid: false,
-            grid_size_x,
-            grid_size_y,
+            pitch_x,
+            pitch_y,
+            node_w,
+            node_h,
             grid_origin_x: 0.0,
             grid_origin_y: 0.0,
             pan_motion: crate::widget::ScrollMotion::new(),
-            skipped_row_h: grid_size_y / 2.0,
-            skipped_col_w: grid_size_x / 2.0,
             nodes: Vec::new(),
             selected_idx: None,
             selected_id: None,
@@ -171,11 +185,42 @@ impl Graph {
     pub fn set_node_opacity(&mut self, opacity: f32) {
         self.node_opacity = opacity;
     }
-    pub fn grid_sizes(&self) -> (f32, f32) {
-        (self.grid_size_x, self.grid_size_y)
+    /// The node body's width as a share of the x pitch, and its height as a
+    /// share of the y pitch. A fifth of the pitch is left between neighbours
+    /// in a row; a third between rows, because that is where the ports float
+    /// and the wires run. They are the proportions the cell grid had (a 150
+    /// cell in a 187.5 step, a 75 cell in a 112.5 step), so nothing moved.
+    pub const NODE_W_OF_PITCH: f32 = 0.8;
+    pub const NODE_H_OF_PITCH: f32 = 2.0 / 3.0;
+
+    /// The node body's size for a grid pitch — the ONE rule, so a host's
+    /// cursor and the widget's nodes cannot disagree about it.
+    pub fn node_size_for_pitch(pitch_x: f32, pitch_y: f32) -> (f32, f32) {
+        (pitch_x * Self::NODE_W_OF_PITCH, pitch_y * Self::NODE_H_OF_PITCH)
     }
+
+    /// The pitch: centre of one grid line to the centre of the next, per axis.
+    pub fn grid_pitch(&self) -> (f32, f32) {
+        (self.pitch_x, self.pitch_y)
+    }
+    /// The node body's size at the current zoom.
+    pub fn node_size(&self) -> (f32, f32) {
+        (self.node_w, self.node_h)
+    }
+    /// Set the node body's size outright, off the pitch's rule — what the
+    /// cell-model setters do, since there the cell IS the node.
+    pub fn set_node_size(&mut self, w: f32, h: f32) {
+        self.node_w = w;
+        self.node_h = h;
+    }
+    /// The cell-model view of the lattice: the node body (its "cell").
+    pub fn grid_sizes(&self) -> (f32, f32) {
+        (self.node_w, self.node_h)
+    }
+    /// The cell-model view of the lattice: what a pitch has beyond the node
+    /// body, as (row gap, column gap) — the order `set_skipped_sizes` takes.
     pub fn skipped_sizes(&self) -> (f32, f32) {
-        (self.skipped_row_h, self.skipped_col_w)
+        (self.pitch_y - self.node_h, self.pitch_x - self.node_w)
     }
     pub fn grid_origin(&self) -> (f32, f32) {
         (self.grid_origin_x, self.grid_origin_y)
@@ -190,44 +235,50 @@ impl Graph {
         self.gap_color = color;
     }
 
-    pub fn node_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
-        let node = self.nodes.get(idx)?;
-        let (nx, ny) = if self.dragging_idx == Some(idx) {
-            self.drag_node_pos.unwrap_or((
-                node.position.0 * (self.grid_size_x + self.skipped_col_w) + self.grid_origin_x,
-                node.position.1 * (self.grid_size_y + self.skipped_row_h) + self.grid_origin_y,
-            ))
-        } else {
-            (
-                node.position.0 * (self.grid_size_x + self.skipped_col_w) + self.grid_origin_x,
-                node.position.1 * (self.grid_size_y + self.skipped_row_h) + self.grid_origin_y,
-            )
-        };
-        Some((nx, ny, self.grid_size_x, self.grid_size_y))
+    /// The top-left corner of a node body centred on lattice cell (col, row).
+    fn cell_origin(&self, col: f32, row: f32) -> (f32, f32) {
+        (
+            self.grid_origin_x + col * self.pitch_x - self.node_w * 0.5,
+            self.grid_origin_y + row * self.pitch_y - self.node_h * 0.5,
+        )
     }
 
-    /// The grid cell an in-flight node drag will deposit on, as its pixel
-    /// rect — hosts highlight it as the drop target. Runs the SAME
-    /// resolution as `commit_drag` (round to the nearest cell, then
-    /// `find_empty_cell` walks off occupied ones), so the highlight never
-    /// lies about where the node actually lands. None outside a node drag.
+    /// The lattice cell whose intersection is nearest the CENTRE of a node
+    /// body whose top-left is (nx, ny) — the one snapping rule, shared by the
+    /// drag preview, the drop-target highlight and the drop itself. None on a
+    /// degenerate pitch.
+    fn nearest_cell(&self, nx: f32, ny: f32) -> Option<(f32, f32)> {
+        if self.pitch_x <= 0.0 || self.pitch_y <= 0.0 {
+            return None;
+        }
+        let c = ((nx + self.node_w * 0.5 - self.grid_origin_x) / self.pitch_x).round();
+        let r = ((ny + self.node_h * 0.5 - self.grid_origin_y) / self.pitch_y).round();
+        Some((c, r))
+    }
+
+    pub fn node_rect(&self, idx: usize) -> Option<(f32, f32, f32, f32)> {
+        let node = self.nodes.get(idx)?;
+        let at_cell = self.cell_origin(node.position.0, node.position.1);
+        let (nx, ny) = if self.dragging_idx == Some(idx) {
+            self.drag_node_pos.unwrap_or(at_cell)
+        } else {
+            at_cell
+        };
+        Some((nx, ny, self.node_w, self.node_h))
+    }
+
+    /// The rect the in-flight node drag will deposit its body on — hosts
+    /// highlight it as the drop target. Runs the SAME resolution as
+    /// `commit_drag` (nearest intersection, then `find_empty_cell` walks off
+    /// occupied ones), so the highlight never lies about where the node
+    /// actually lands. None outside a node drag.
     pub fn drop_target_cell_rect(&self) -> Option<(f32, f32, f32, f32)> {
         let idx = self.dragging_idx?;
         let (nx, ny) = self.drag_node_pos?;
-        let step_x = self.grid_size_x + self.skipped_col_w;
-        let step_y = self.grid_size_y + self.skipped_row_h;
-        if step_x <= 0.0 || step_y <= 0.0 {
-            return None;
-        }
-        let c = ((nx - self.grid_origin_x) / step_x).round();
-        let r = ((ny - self.grid_origin_y) / step_y).round();
+        let (c, r) = self.nearest_cell(nx, ny)?;
         let (c, r) = self.find_empty_cell(c, r, Some(idx));
-        Some((
-            self.grid_origin_x + c * step_x,
-            self.grid_origin_y + r * step_y,
-            self.grid_size_x,
-            self.grid_size_y,
-        ))
+        let (x, y) = self.cell_origin(c, r);
+        Some((x, y, self.node_w, self.node_h))
     }
 
     pub fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool {
@@ -312,31 +363,31 @@ impl Graph {
         (x, y)
     }
 
+    /// Scale the lattice and the node bodies together; the limits are on the
+    /// node width, as they always were.
+    fn scale_by(&mut self, factor: f32) {
+        self.pitch_x *= factor;
+        self.pitch_y *= factor;
+        self.node_w *= factor;
+        self.node_h *= factor;
+    }
+
     pub fn zoom_in(&mut self) {
-        if self.grid_size_x < 400.0 {
-            self.grid_size_x *= 1.1;
-            self.grid_size_y *= 1.1;
-            self.skipped_row_h *= 1.1;
-            self.skipped_col_w *= 1.1;
+        if self.node_w < 400.0 {
+            self.scale_by(1.1);
         }
     }
 
     pub fn zoom_out(&mut self) {
-        if self.grid_size_x > 40.0 {
-            self.grid_size_x /= 1.1;
-            self.grid_size_y /= 1.1;
-            self.skipped_row_h /= 1.1;
-            self.skipped_col_w /= 1.1;
+        if self.node_w > 40.0 {
+            self.scale_by(1.0 / 1.1);
         }
     }
 
     pub fn zoom_by_factor(&mut self, factor: f32) {
-        let new_grid_x = self.grid_size_x * factor;
-        if new_grid_x >= 40.0 && new_grid_x <= 400.0 {
-            self.grid_size_x = new_grid_x;
-            self.grid_size_y *= factor;
-            self.skipped_row_h *= factor;
-            self.skipped_col_w *= factor;
+        let new_w = self.node_w * factor;
+        if new_w >= 40.0 && new_w <= 400.0 {
+            self.scale_by(factor);
         }
     }
 
@@ -360,44 +411,37 @@ impl Graph {
         m.fill(PlateRole::Nested)
     }
 
-    /// The grid cells' rounded-corner radius at the current zoom: the desktop
-    /// grid's corner PROPORTION — the DE root plate radius per 512 virtual
-    /// units of cell, span-widened (cce-grid draws exactly this on its
-    /// 512vu cells) — applied to this grid's cell size, so the pane's cells
-    /// read as miniatures of the desktop's. Clamped to a quarter sweep;
-    /// 0 when the grid is off or degenerate.
+    /// The corner radius of anything node-shaped at the current zoom — the
+    /// hosts' empty-cell cursor and drop-target highlight read it. Clamped to
+    /// a quarter sweep of the node body; 0 when the body is degenerate.
     pub fn cell_corner_radius(&self) -> f32 {
-        // Pure cell GEOMETRY — no display gating: hosts read this for
-        // anything cell-shaped (the empty-cell cursor, drop-target
-        // highlights), which exist whether or not the cell tiles render.
-        // Gating on show_network_grid/uniform_background silently squared
-        // those consumers whenever the tiles were hidden.
-        if self.grid_size_x <= 0.0 || self.grid_size_y <= 0.0 {
+        // Pure GEOMETRY — no display gating: the cursor and the highlight
+        // exist whether or not the lattice is drawn. Gating on
+        // show_network_grid/uniform_background silently squared those
+        // consumers whenever the grid was hidden.
+        if self.node_w <= 0.0 || self.node_h <= 0.0 {
             return 0.0;
         }
-        let cell = self.grid_size_x.min(self.grid_size_y);
-        // The NODE radius, not a scaled-down plate radius: nodes, grid cells
-        // and the hosts' cell cursors (the designer's empty-cell cursor reads
-        // this) share one corner language. The old derivation
-        // (plate_corner_radius * cell/512 * span) gave cells a different,
-        // grid-size-dependent rounding that never matched the node bodies
-        // sitting on them.
-        crate::layout::graph_node_corner_radius().min(cell / 2.0)
+        let body = self.node_w.min(self.node_h);
+        // The NODE radius, so the cursor sitting on a node's cell traces the
+        // same silhouette the node does.
+        crate::layout::graph_node_corner_radius().min(body / 2.0)
     }
 
     /// The grid lines, flat, over whatever the graph is painted on — the
-    /// pane plate: the cells are the plate showing through (no fill of their
-    /// own), and everything outside them is grout in the gap colour at the
-    /// network opacity — ONE [`Prim::Grout`] draw, so the cells' rounded
-    /// corners (the node corner radius, the DE's shared corner language) are
-    /// exact, notch at every crossing included. Plus the origin axes as 2px
-    /// lines down the rail centrelines beside row and column 0. Gated on the
-    /// grid's visibility only: `uniform_background` describes the widget's
-    /// own background fill and the designer hard-codes it true, which is how
-    /// its grid went undrawn until 2026-09-20. (Flat per-cell strips came
-    /// between: seamless, but square-cornered — no quad can paint the notch.)
+    /// pane plate. A lattice of lines one pitch apart in the gap colour at
+    /// the network opacity, each centred on its coordinate (the pitch is
+    /// measured centre to centre, and `graph_line_width` only thickens
+    /// them), so the intersections are exactly where the node centres go.
+    /// Plus the origin axes: the two lines through the (0, 0) intersection,
+    /// 2px, in the axis colour. Gated on the grid's visibility only:
+    /// `uniform_background` describes the widget's own background fill and
+    /// the designer hard-codes it true, which is how its grid went undrawn
+    /// until 2026-09-20. (Rounded cells with grout between them came before
+    /// the lattice; a node then FILLED a cell rather than sitting on a
+    /// crossing.)
     pub fn paint_grid(&self, rect: Rect, pc: &mut PaintCtx) {
-        if self.grid_size_x <= 0.0 || self.grid_size_y <= 0.0 {
+        if self.pitch_x <= 0.0 || self.pitch_y <= 0.0 {
             return;
         }
         let (min_x, min_y) = (rect.x, rect.y);
@@ -412,32 +456,35 @@ impl Graph {
             }
         };
 
-        let step_x = self.grid_size_x + self.skipped_col_w;
-        let step_y = self.grid_size_y + self.skipped_row_h;
-        if self.show_network_grid && step_x >= 4.0 && step_y >= 4.0 {
-            let gap_rgba = [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity];
-            pc.grout(
-                rect,
-                (step_x, step_y),
-                (self.grid_origin_x + self.grid_size_x * 0.5, self.grid_origin_y + self.grid_size_y * 0.5),
-                (self.grid_size_x, self.grid_size_y),
-                self.cell_corner_radius(),
-                gap_rgba,
-            );
+        let line = crate::layout::graph_line_width().max(0.0);
+        if self.show_network_grid && line > 0.0 && self.pitch_x >= 4.0 && self.pitch_y >= 4.0 {
+            let color = [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity];
+            // The line indices that can cross the rect, one past each edge so
+            // a line's own width never pops at the boundary.
+            let c0 = ((min_x - self.grid_origin_x) / self.pitch_x).floor() as i32 - 1;
+            let c1 = ((max_x - self.grid_origin_x) / self.pitch_x).ceil() as i32 + 1;
+            for c in c0..=c1 {
+                let x = self.grid_origin_x + c as f32 * self.pitch_x;
+                clipped(x - line / 2.0, rect.y, line, rect.height, color, pc);
+            }
+            let r0 = ((min_y - self.grid_origin_y) / self.pitch_y).floor() as i32 - 1;
+            let r1 = ((max_y - self.grid_origin_y) / self.pitch_y).ceil() as i32 + 1;
+            for r in r0..=r1 {
+                let y = self.grid_origin_y + r as f32 * self.pitch_y;
+                clipped(rect.x, y - line / 2.0, rect.width, line, color, pc);
+            }
         }
 
-        // Origin axes, in the gaps beside row/column 0.
+        // Origin axes: the lattice lines through the (0, 0) intersection.
         let axis = [0.0, 0.0, 0.0, self.network_opacity];
         let thickness = 2.0;
-        let y_center = self.grid_origin_y + self.grid_size_y + self.skipped_row_h / 2.0;
-        clipped(rect.x, y_center - thickness / 2.0, rect.width, thickness, axis, pc);
-        let x_center = self.grid_origin_x - self.skipped_col_w / 2.0;
-        clipped(x_center - thickness / 2.0, rect.y, thickness, rect.height, axis, pc);
+        clipped(rect.x, self.grid_origin_y - thickness / 2.0, rect.width, thickness, axis, pc);
+        clipped(self.grid_origin_x - thickness / 2.0, rect.y, thickness, rect.height, axis, pc);
     }
 
-    /// The wires / connection preview / grid cells / axes / node bodies / toggles as plain
-    /// quads — the legacy `extra_quads` body, against `rect` instead of a stored rect —
-    /// with grid cells tagged by their surviving rounded corners (see [`TaggedQuad`]).
+    /// The wires / connection preview / node bodies / toggles as plain quads — the legacy
+    /// `extra_quads` body, against `rect` instead of a stored rect. The [`TaggedQuad`] cell
+    /// tag is always `None` now: the lattice is `paint_grid`'s, and it has no cells.
     pub fn geometry_quads_tagged(&self, rect: Rect) -> Vec<TaggedQuad> {
         let mut quads = Vec::new();
         let min_x = rect.x;
@@ -457,7 +504,7 @@ impl Graph {
         };
 
         // A three-segment orthogonal wire from (start_x, start_y) down/up to (end_x, end_y).
-        let scale_f = self.grid_size_x / 80.0;
+        let scale_f = self.node_w / 80.0;
         let wire_thickness = (3.0 * scale_f).clamp(1.0, 15.0);
         let push_wire = |start_x: f32, start_y: f32, end_x: f32, end_y: f32, color: [f32; 4], q: &mut Vec<TaggedQuad>| {
             let mid_y = start_y + (end_y - start_y) / 2.0;
@@ -923,21 +970,10 @@ impl Input for Graph {
             let nx = px - self.drag_ox;
             let ny = py - self.drag_oy;
 
-            let snap_x = if self.grid_snap_enabled { self.grid_size_x + self.skipped_col_w } else { 0.0 };
-            let snap_y = if self.grid_snap_enabled { self.grid_size_y + self.skipped_row_h } else { 0.0 };
-
-            let nx = if snap_x > 0.0 {
-                let relative = nx - self.grid_origin_x;
-                (relative / snap_x).round() * snap_x + self.grid_origin_x
-            } else {
-                nx
-            };
-
-            let ny = if snap_y > 0.0 {
-                let relative = ny - self.grid_origin_y;
-                (relative / snap_y).round() * snap_y + self.grid_origin_y
-            } else {
-                ny
+            // Snapping centres the body on the nearest intersection.
+            let (nx, ny) = match self.nearest_cell(nx, ny) {
+                Some((c, r)) if self.grid_snap_enabled => self.cell_origin(c, r),
+                _ => (nx, ny),
             };
 
             self.drag_node_pos = Some((nx, ny));
@@ -1113,7 +1149,7 @@ impl Graph {
     /// thickness — `push_wire`'s exact shape, unclipped.
     fn wire_segment_rects(&self, src_idx: usize, dest_idx: usize) -> Option<[(f32, f32, f32, f32); 3]> {
         let ((start_x, start_y), (end_x, end_y)) = self.wire_endpoints(src_idx, dest_idx)?;
-        let scale_f = self.grid_size_x / 80.0;
+        let scale_f = self.node_w / 80.0;
         let t = (3.0 * scale_f).clamp(1.0, 15.0);
         let mid_y = start_y + (end_y - start_y) / 2.0;
         let v1 = (start_x - t / 2.0, start_y.min(mid_y), t, (start_y - mid_y).abs());
@@ -1156,16 +1192,16 @@ impl Graph {
         None
     }
 
-    /// Drop the in-flight node drag onto the nearest free grid cell (legacy `drag_end`),
+    /// Drop the in-flight node drag onto the nearest free intersection (legacy `drag_end`),
     /// resolving a held splice target into `pending_splice` for the host.
     fn commit_drag(&mut self) {
         let target = self.splice_target.take();
         if let Some((nx, ny)) = self.drag_node_pos.take() {
-            let c = ((nx - self.grid_origin_x) / (self.grid_size_x + self.skipped_col_w)).round();
-            let r = ((ny - self.grid_origin_y) / (self.grid_size_y + self.skipped_row_h)).round();
             if let Some(idx) = self.dragging_idx.take() {
-                let (nx, ny) = self.find_empty_cell(c, r, Some(idx));
-                self.nodes[idx].position = (nx, ny);
+                if let Some((c, r)) = self.nearest_cell(nx, ny) {
+                    let (c, r) = self.find_empty_cell(c, r, Some(idx));
+                    self.nodes[idx].position = (c, r);
+                }
                 if let Some((src_id, dest_id)) = target {
                     let src_name = self.nodes.iter().find(|n| n.id == src_id).map(|n| n.name.clone());
                     let dest_ok = self.nodes.iter().any(|n| n.id == dest_id);
@@ -1249,9 +1285,25 @@ impl GraphController for Graph {
     fn clear_double_clicked_node(&mut self) { self.double_clicked_id = None; }
     fn set_grid_snap_enabled(&mut self, enabled: bool) { self.grid_snap_enabled = enabled; }
     fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { self.node_geom_toggled.take() }
-    fn set_grid_snap(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
-    fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
-    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
+    fn set_grid_snap(&mut self, gx: f32, gy: f32) { self.set_grid_sizes(gx, gy) }
+    fn set_grid_pitch(&mut self, px: f32, py: f32) {
+        self.pitch_x = px;
+        self.pitch_y = py;
+        let (w, h) = Self::node_size_for_pitch(px, py);
+        self.set_node_size(w, h);
+    }
+    /// Cell model: the cell is the node body, and the gap it had stays, so
+    /// the two setters commute (a cell plus its gap is a pitch).
+    fn set_grid_sizes(&mut self, gx: f32, gy: f32) {
+        let (gap_row, gap_col) = self.skipped_sizes();
+        self.set_node_size(gx, gy);
+        self.pitch_x = gx + gap_col;
+        self.pitch_y = gy + gap_row;
+    }
+    fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) {
+        self.pitch_x = self.node_w + col_w;
+        self.pitch_y = self.node_h + row_h;
+    }
     fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }
     fn grid_origin(&self) -> (f32, f32) { (self.grid_origin_x, self.grid_origin_y) }
     fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
@@ -1278,12 +1330,14 @@ mod tests {
     use crate::context::UiContext;
     use crate::widget::WidgetHost;
 
+    /// A 100 x 60 lattice whose (0, 0) intersection is at (140, 120), so node
+    /// a's 80 x 40 body is the rect (100, 100, 80, 40) and node b's, one cell
+    /// down-right, is (200, 160, 80, 40).
     fn two_nodes() -> Adapted<Graph> {
         let mut g = Graph::new();
         WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
-        g.set_grid_sizes(80.0, 40.0);
-        g.set_skipped_sizes(20.0, 20.0);
-        g.set_grid_origin(100.0, 100.0);
+        g.set_grid_pitch(100.0, 60.0);
+        g.set_grid_origin(140.0, 120.0);
         g.set_grid_snap_enabled(true);
         let node = |id: &str, name: &str, col: f32, row: f32| GraphNode {
             id: id.into(),
@@ -1350,7 +1404,7 @@ mod tests {
         assert_eq!(g.selected_node(), Some(0));
         assert!(g.is_dragging() && g.draggable());
 
-        // Drag one grid step right (step_x = 100): snap puts the node at column 1, but cell
+        // Drag one pitch right (pitch_x = 100): snap puts the node at column 1, and cell
         // (1, 0) is free so it lands there.
         g.drag_begin(110.0, 120.0);
         assert!(g.drag_update(210.0, 120.0));
@@ -1372,9 +1426,8 @@ mod tests {
         let mut ctx = UiContext::new();
         let mut g = Graph::new();
         WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
-        g.set_grid_sizes(80.0, 40.0);
-        g.set_skipped_sizes(20.0, 20.0);
-        g.set_grid_origin(100.0, 100.0);
+        g.set_grid_pitch(100.0, 60.0);
+        g.set_grid_origin(140.0, 120.0);
         g.set_grid_snap_enabled(true);
         let node = |id: &str, name: &str, col: f32, row: f32, params: Vec<(String, String, String)>| GraphNode {
             id: id.into(),
@@ -1419,6 +1472,46 @@ mod tests {
         assert!(g.drag_update(210.0, 230.0));
         assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 230.0, &mut ctx));
         assert_eq!(GraphController::take_pending_splice(&mut *g), None);
+    }
+
+    /// The grid has one size per axis, the pitch, and a node is CENTRED on
+    /// the intersection its position names — its body straddles the lines
+    /// rather than filling a cell between them. The body's size follows
+    /// from the pitch by one rule the hosts read too.
+    #[test]
+    fn nodes_are_centred_on_lattice_intersections() {
+        let g = two_nodes();
+        assert_eq!(g.grid_pitch(), (100.0, 60.0));
+        assert_eq!(g.node_size(), Graph::node_size_for_pitch(100.0, 60.0));
+        assert_eq!(g.node_size(), (80.0, 40.0));
+        // Node a is on the (140, 120) intersection: its 80 x 40 body is
+        // centred there.
+        let (x, y, w, h) = g.node_rect(0).unwrap();
+        assert_eq!((x + w / 2.0, y + h / 2.0), (140.0, 120.0));
+        assert_eq!((x, y, w, h), (100.0, 100.0, 80.0, 40.0));
+        // Node b, at (1, 1), is one pitch away along each axis.
+        let (x, y, w, h) = g.node_rect(1).unwrap();
+        assert_eq!((x + w / 2.0, y + h / 2.0), (240.0, 180.0));
+    }
+
+    /// The cell-and-gap setters describe the same lattice — a cell plus its
+    /// gap is a pitch, and the cell is the node body — in either order, so a
+    /// host still speaking them gets exactly the geometry it asked for.
+    #[test]
+    fn cell_and_gap_setters_describe_the_same_lattice() {
+        let mut g = Graph::new();
+        g.set_grid_sizes(140.0, 70.0);
+        g.set_skipped_sizes(35.0, 35.0);
+        assert_eq!(g.grid_pitch(), (175.0, 105.0));
+        assert_eq!(g.node_size(), (140.0, 70.0));
+        assert_eq!(g.grid_sizes(), (140.0, 70.0));
+        assert_eq!(g.skipped_sizes(), (35.0, 35.0));
+
+        let mut h = Graph::new();
+        h.set_skipped_sizes(35.0, 35.0);
+        h.set_grid_sizes(140.0, 70.0);
+        assert_eq!(h.grid_pitch(), (175.0, 105.0));
+        assert_eq!(h.node_size(), (140.0, 70.0));
     }
 
     #[test]

@@ -261,6 +261,12 @@ impl GraphController for ContentBg {
     fn set_grid_snap_enabled(&mut self, _enabled: bool) {}
     fn take_node_geom_toggle(&mut self) -> Option<(usize, bool)> { None }
     fn set_grid_snap(&mut self, _gx: f32, _gy: f32) {}
+    /// This background keeps its cell-and-gap gradient; a pitch lands as a
+    /// cell of pitch-minus-gap, so the bands still add up to the pitch.
+    fn set_grid_pitch(&mut self, px: f32, py: f32) {
+        self.grid_size_x = (px - self.skipped_col_w).max(0.0);
+        self.grid_size_y = (py - self.skipped_row_h).max(0.0);
+    }
     fn set_grid_sizes(&mut self, gx: f32, gy: f32) { self.grid_size_x = gx; self.grid_size_y = gy; }
     fn set_skipped_sizes(&mut self, row_h: f32, col_w: f32) { self.skipped_row_h = row_h; self.skipped_col_w = col_w; }
     fn set_grid_origin(&mut self, ox: f32, oy: f32) { self.grid_origin_x = ox; self.grid_origin_y = oy; }

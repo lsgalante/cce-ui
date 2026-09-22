@@ -324,8 +324,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.node.opacity" => "graph_node_opacity",
                 "style.surface.graph.spacing_x" => "graph_spacing_x",
                 "style.surface.graph.spacing_y" => "graph_spacing_y",
-                "style.surface.graph.gap_col_w" => "graph_gap_col_w",
-                "style.surface.graph.gap_row_h" => "graph_gap_row_h",
+                "style.surface.graph.line_width" => "graph_line_width",
                 "style.surface.graph.grid_snap" => "graph_grid_snap",
                 "style.surface.graph.blur" => "graph_blur",
                 "style.surface.graph.font" => "graph_font",
@@ -3449,9 +3448,17 @@ pub fn set_tree_corner_radius(radius: f32) {
     }
 }
 
+/// The graph grid's pitch along x: the distance from the centre of one
+/// vertical grid line to the centre of the next. It is the grid's ONE size
+/// per axis — nodes are centred on the lattice intersections, and the node
+/// body's size follows from the pitch (`Graph::node_size_for_pitch`). It
+/// replaced a cell size plus a gap (`spacing_*` was the cell, `gap_col_w` /
+/// `gap_row_h` the gap, and a step was the two added up); the defaults are
+/// what those two used to add up to, so a config that set neither draws the
+/// same lattice it did.
 pub fn graph_spacing_x() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("graph_spacing_x").unwrap_or(150.0)
+    get_style_registry().read().unwrap().get_float("graph_spacing_x").unwrap_or(187.5)
 }
 
 pub fn set_graph_spacing_x(spacing: f32) {
@@ -3461,9 +3468,10 @@ pub fn set_graph_spacing_x(spacing: f32) {
     }
 }
 
+/// The graph grid's pitch along y — see [`graph_spacing_x`].
 pub fn graph_spacing_y() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("graph_spacing_y").unwrap_or(75.0)
+    get_style_registry().read().unwrap().get_float("graph_spacing_y").unwrap_or(112.5)
 }
 
 pub fn set_graph_spacing_y(spacing: f32) {
@@ -3473,30 +3481,19 @@ pub fn set_graph_spacing_y(spacing: f32) {
     }
 }
 
-/// The gap between grid cells, the companion to `graph_spacing_*` (which is the cell
-/// itself). One node slot to the next is the two added up. Defaults match `ContentBg`'s
-/// own, i.e. a quarter of the cell.
-pub fn graph_gap_col_w() -> f32 {
+/// The drawn width of a graph grid line, in logical px. The pitch is
+/// measured centre to centre, so this changes how heavy the lattice looks
+/// and nothing about where anything sits. Not scaled by zoom — a lattice is
+/// a reference, not a thing in the scene.
+pub fn graph_line_width() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("graph_gap_col_w").unwrap_or(37.5)
+    get_style_registry().read().unwrap().get_float("graph_line_width").unwrap_or(1.0)
 }
 
-pub fn set_graph_gap_col_w(gap: f32) {
+pub fn set_graph_line_width(width: f32) {
     lazy_init_style_registry();
     if let Ok(mut registry) = get_style_registry().write() {
-        registry.set_float("graph_gap_col_w", gap);
-    }
-}
-
-pub fn graph_gap_row_h() -> f32 {
-    lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("graph_gap_row_h").unwrap_or(37.5)
-}
-
-pub fn set_graph_gap_row_h(gap: f32) {
-    lazy_init_style_registry();
-    if let Ok(mut registry) = get_style_registry().write() {
-        registry.set_float("graph_gap_row_h", gap);
+        registry.set_float("graph_line_width", width);
     }
 }
 
@@ -6928,8 +6925,9 @@ mod tests {
             reg.get_float(key)
         }
 
-        assert_eq!(graph_spacing_x(), stored("graph_spacing_x").unwrap_or(150.0));
-        assert_eq!(graph_spacing_y(), stored("graph_spacing_y").unwrap_or(75.0));
+        assert_eq!(graph_spacing_x(), stored("graph_spacing_x").unwrap_or(187.5));
+        assert_eq!(graph_spacing_y(), stored("graph_spacing_y").unwrap_or(112.5));
+        assert_eq!(graph_line_width(), stored("graph_line_width").unwrap_or(1.0));
         assert_eq!(graph_grid_snap(), stored("graph_grid_snap").unwrap_or(0.0) != 0.0);
         assert_eq!(graph_blur(), stored("graph_blur").unwrap_or(0.0));
         assert_eq!(graph_node_corner_radius(), stored("graph_node_corner_radius").unwrap_or(4.0));
