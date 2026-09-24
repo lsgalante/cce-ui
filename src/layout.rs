@@ -2232,6 +2232,22 @@ pub fn root_plate_gap() -> f32 {
     get_style_registry().read().unwrap().get_float("root_plate_gap").unwrap_or(12.0)
 }
 
+/// Where content starts on the standard root plate, measured from the
+/// WINDOW edge: the plate's rolled rim ([`bevel_width`]) plus one
+/// [`root_plate_padding`]. The padding is a run of flat plate face, the
+/// same run [`root_plate_gap`] leaves between two siblings; but the face
+/// only begins where the roll ends, so a bare padding at a window edge
+/// leaves most of it on the roll — measured at 4px of visible flat against
+/// 12 between panes (cce-mail, 2026-09-19). This is the one number an app
+/// on the standard plate insets by at its four edges; between siblings it
+/// uses the gap, and everything inside a pane plate uses
+/// [`plate_padding`]. An app whose base is NOT the rolled root plate (a
+/// transparent surface, a bare fill) has no roll to clear and insets by
+/// [`root_plate_padding`] alone.
+pub fn root_plate_inset() -> f32 {
+    bevel_width() + root_plate_padding()
+}
+
 /// Roll-off width for the wall where a bar (menubar / status bar / the demo's
 /// header band) steps down into the window plate. Wider than the plate's own
 /// perimeter roll on purpose: the carve depth saturates at `bevel_width` in the

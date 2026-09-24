@@ -260,8 +260,10 @@ impl Application for DemoApp {
             // ── Layout: a plain LayoutBox tree, solved in one call. Leaves carry their
             // intrinsic sizes; `grow` distributes leftover space; the solved rects are
             // assigned straight onto the widgets.
-            // DE-wide plate spacing: rim padding and object gap from config.
-            let plate_pad = cce_ui::layout::root_plate_padding();
+            // DE-wide plate spacing: the inset from the window edge (the
+            // root plate's roll plus one padding) and the gap between
+            // siblings on the plate, both from config.
+            let plate_pad = cce_ui::layout::root_plate_inset();
             let plate_gap = cce_ui::layout::root_plate_gap();
             let mut arena: Arena<LayoutBox> = Arena::new();
             let root = arena.insert(LayoutBox::container(
@@ -356,25 +358,12 @@ impl Application for DemoApp {
         let w = self.width as f32;
         let h = self.height as f32;
 
-        // The window plate — the dissolved root plate container as a lit object: page-low color
-        // at the configured opacity, config corner radius, perimeter rolled over
-        // `bevel_width` so the surface reads as a physical plate rather than a flat fill.
-        let mut plate = cce_ui::color::page_low_color();
-        if plate[3] > 0.001 {
-            plate[3] = cce_ui::color::root_plate_opacity();
-        }
-        // The root plate as a PlateSpec (RFC Phase 7b): all four corners are
-        // window corners, so the radii come from the SHARED silhouette curve
-        // — under squircle corner_shape this widens the perimeter roll to
-        // match the compositor's clip, which the old hand-rolled
-        // root_plate_corner_radius did not.
-        let frame = Rect { x: 0.0, y: 0.0, width: w, height: h };
-        pc.plate_spec(&cce_ui::scene::paint::PlateSpec {
-            rect: frame,
-            material: cce_ui::scene::Material::opaque(plate),
-            window_corners: (true, true, true, true),
-            depth: cce_ui::layout::bevel_width(),
-        });
+        // The standard root plate (`PlateSpec::window`): the DE's root
+        // material at its configured opacity, the shared silhouette arc on
+        // all four corners, the perimeter rolled over `bevel_width`. This
+        // demo is the reference app, so its base is the one every cce app
+        // should paint first.
+        pc.root_plate(w, h);
 
         // Header band: the title strip carved one step down into the plate. Flush to the
         // window's top and sides, so its only real wall is the bottom one facing the

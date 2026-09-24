@@ -59,6 +59,49 @@ pub struct PlateSpec {
 }
 
 impl PlateSpec {
+    /// THE standard root plate of a `width` x `height` window — the base
+    /// surface every cce app stands its panes and controls on: the whole
+    /// window, the root rung's material ([`Material::root`], which is the
+    /// DE's `style.surface.plate.root.color` at its configured opacity
+    /// unless a `material=` is bound), all four corners on the silhouette,
+    /// and the perimeter rolled over [`crate::layout::bevel_width`].
+    ///
+    /// This is the spec every app used to hand-copy as an eight-line block
+    /// (page-low colour, opacity override, four window corners, the DE roll)
+    /// — the copies are gone, and a window whose base is anything else is
+    /// off the standard on purpose, which its code should say. Emit it with
+    /// [`PaintCtx::root_plate`]; deviate with [`Self::with_material`] /
+    /// [`Self::with_depth`] (cce-system-interface's own tint, an overlay's
+    /// shallower roll).
+    pub fn window(width: f32, height: f32) -> Self {
+        Self::root_at(Rect { x: 0.0, y: 0.0, width, height })
+    }
+
+    /// [`Self::window`] for a root plate that is not the whole surface — a
+    /// layer-shell overlay drawing the window silhouette itself inside a
+    /// larger transparent surface (cce-cloud). Same material, corners and
+    /// roll; `rect` is where the "window" is.
+    pub fn root_at(rect: Rect) -> Self {
+        Self {
+            rect,
+            material: Material::root(),
+            window_corners: (true, true, true, true),
+            depth: crate::layout::bevel_width(),
+        }
+    }
+
+    /// This plate made of `material` instead of its rung's default.
+    pub fn with_material(mut self, material: Material) -> Self {
+        self.material = material;
+        self
+    }
+
+    /// This plate with a `depth` roll instead of the DE's `bevel_width`.
+    pub fn with_depth(mut self, depth: f32) -> Self {
+        self.depth = depth;
+        self
+    }
+
     /// All four corners on the silhouette: this plate IS the window's base
     /// surface.
     pub fn is_root(&self) -> bool {
@@ -1537,6 +1580,15 @@ impl PaintCtx {
         let f = crate::layout::corner_span_factor();
         let (tl, tr, br, bl) = spec.radii();
         self.plate(spec.rect, (tl / f, tr / f, br / f, bl / f), &spec.material.for_role(spec.role()), spec.depth);
+    }
+
+    /// The standard root plate of a `width` x `height` window —
+    /// [`PlateSpec::window`] emitted. The first prim of a standard cce app's
+    /// frame: everything else is laid on this surface (pane plates atop it,
+    /// bands and wells carved into it), starting
+    /// [`crate::layout::root_plate_inset`] in from each window edge.
+    pub fn root_plate(&mut self, width: f32, height: f32) {
+        self.plate_spec(&PlateSpec::window(width, height));
     }
 
     pub fn arc(&mut self, cx: f32, cy: f32, radius: f32, thickness: f32, start: f32, end: f32, color: [f32; 4]) {
