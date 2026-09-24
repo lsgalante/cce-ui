@@ -172,14 +172,14 @@ impl ComputeDevice {
             let pool_sizes = [
                 vk::DescriptorPoolSize::default()
                     .ty(vk::DescriptorType::STORAGE_BUFFER)
-                    .descriptor_count(MAX_BINDINGS as u32),
+                    .descriptor_count(2 * MAX_BINDINGS as u32),
                 vk::DescriptorPoolSize::default()
                     .ty(vk::DescriptorType::UNIFORM_BUFFER)
-                    .descriptor_count(MAX_BINDINGS as u32),
+                    .descriptor_count(2 * MAX_BINDINGS as u32),
             ];
             let descriptor_pool = device
                 .create_descriptor_pool(
-                    &vk::DescriptorPoolCreateInfo::default().max_sets(1).pool_sizes(&pool_sizes),
+                    &vk::DescriptorPoolCreateInfo::default().max_sets(2).pool_sizes(&pool_sizes),
                     None,
                 )
                 .map_err(|e| format!("descriptor pool: {e}"))?;
@@ -221,11 +221,83 @@ impl ComputeDevice {
     /// Upload every binding, dispatch `groups` workgroups of the kernel, wait
     /// for the GPU, and read every [`Binding::Storage`] back into its slice.
     pub fn run(&mut self, kernel: &Kernel, bindings: &mut [Binding<'_>], groups: [u32; 3]) -> Result<(), String> {
+        self.execute(kernel, bindings, groups, 1, None)
+    }
+
+    /// [`run_passes`](Self::run_passes) with the dispatch sized from the entry
+    /// point's `@workgroup_size` over `items`, like [`run_over`](Self::run_over).
+    pub fn run_passes_over(
+        &mut self,
+        kernel: &Kernel,
+        bindings: &mut [Binding<'_>],
+        items: u32,
+        passes: u32,
+        ping_pong: Option<(usize, usize)>,
+    ) -> Result<(), String> {
+        let kinds: Vec<BindKind> = bindings.iter().map(Binding::kind).collect();
+        let wg = self.workgroup_size(kernel, &kinds)?;
+        self.execute(kernel, bindings, [workgroups(items, wg[0]), 1, 1], passes, ping_pong)
+    }
+
+    /// `passes` dispatches of the kernel in ONE submission — uploaded once,
+    /// a memory barrier between passes, waited on once, read back once —
+    /// which is what an iterative solve needs: measured on an integrated
+    /// GPU, a pass submitted on its own costs about half a millisecond of
+    /// round trip whatever its size, and sixteen of those lose to the CPU
+    /// at every mesh size a designer works at.
+    ///
+    /// `ping_pong = Some((a, b))` makes passes alternate the roles of two
+    /// bindings: `a` must be a [`Binding::Input`] (the first pass reads it)
+    /// and `b` a [`Binding::Storage`] of the same length (the first pass
+    /// writes it); the second pass reads `b` and writes `a`'s buffer, and so
+    /// on. Whichever buffer the LAST pass wrote is read back into `b`'s
+    /// slice, so the caller always finds the result where it bound the
+    /// output. A Jacobi solve is exactly this shape.
+    pub fn run_passes(
+        &mut self,
+        kernel: &Kernel,
+        bindings: &mut [Binding<'_>],
+        groups: [u32; 3],
+        passes: u32,
+        ping_pong: Option<(usize, usize)>,
+    ) -> Result<(), String> {
+        self.execute(kernel, bindings, groups, passes, ping_pong)
+    }
+
+    fn execute(
+        &mut self,
+        kernel: &Kernel,
+        bindings: &mut [Binding<'_>],
+        groups: [u32; 3],
+        passes: u32,
+        ping_pong: Option<(usize, usize)>,
+    ) -> Result<(), String> {
         if bindings.len() > MAX_BINDINGS {
             return Err(format!("{} bindings; a job may carry at most {MAX_BINDINGS}", bindings.len()));
         }
         if groups.iter().any(|&g| g == 0) {
             return Err(format!("workgroup count {groups:?} has a zero"));
+        }
+        if passes == 0 {
+            return Err("a job needs at least one pass".to_string());
+        }
+        if let Some((a, b)) = ping_pong {
+            if a == b || a >= bindings.len() || b >= bindings.len() {
+                return Err(format!("ping-pong pair ({a}, {b}) does not name two distinct bindings of {}", bindings.len()));
+            }
+            if !matches!(bindings[a], Binding::Input(_)) {
+                return Err(format!("ping-pong binding {a} must be a read-only Input: it is where the first pass reads"));
+            }
+            if !matches!(bindings[b], Binding::Storage(_)) {
+                return Err(format!("ping-pong binding {b} must be a read-write Storage: it is where the result lands"));
+            }
+            if bindings[a].bytes().len() != bindings[b].bytes().len() {
+                return Err(format!(
+                    "ping-pong bindings {a} and {b} differ in length ({} vs {} bytes)",
+                    bindings[a].bytes().len(),
+                    bindings[b].bytes().len()
+                ));
+            }
         }
         let kinds: Vec<BindKind> = bindings.iter().map(Binding::kind).collect();
         let key = PipelineKey { kernel: kernel.clone(), kinds };
@@ -282,36 +354,50 @@ impl ComputeDevice {
             device
                 .reset_descriptor_pool(self.descriptor_pool, vk::DescriptorPoolResetFlags::empty())
                 .map_err(|e| format!("descriptor pool reset: {e}"))?;
-            let set_layouts = [set_layout];
-            let set = device
+            // One descriptor set, or two with the ping-pong pair swapped in
+            // the second, so alternate passes bind the buffers the other
+            // way round without a write between dispatches.
+            let set_count = if ping_pong.is_some() { 2 } else { 1 };
+            let set_layouts = vec![set_layout; set_count];
+            let sets = device
                 .allocate_descriptor_sets(
                     &vk::DescriptorSetAllocateInfo::default()
                         .descriptor_pool(self.descriptor_pool)
                         .set_layouts(&set_layouts),
                 )
-                .map_err(|e| format!("descriptor set: {e}"))?[0];
-            let infos: Vec<[vk::DescriptorBufferInfo; 1]> = (0..bindings.len())
-                .map(|i| {
-                    [vk::DescriptorBufferInfo::default()
-                        .buffer(self.slots[i].buffer)
+                .map_err(|e| format!("descriptor set: {e}"))?;
+            let slot_for = |binding: usize, swapped: bool| -> usize {
+                match ping_pong {
+                    Some((a, b)) if swapped && binding == a => b,
+                    Some((a, b)) if swapped && binding == b => a,
+                    _ => binding,
+                }
+            };
+            let mut infos: Vec<[vk::DescriptorBufferInfo; 1]> = Vec::with_capacity(set_count * bindings.len());
+            for (si, _) in sets.iter().enumerate() {
+                for i in 0..bindings.len() {
+                    let slot = slot_for(i, si == 1);
+                    infos.push([vk::DescriptorBufferInfo::default()
+                        .buffer(self.slots[slot].buffer)
                         .offset(0)
-                        .range(sizes[i] as vk::DeviceSize)]
-                })
-                .collect();
-            let writes: Vec<vk::WriteDescriptorSet> = bindings
-                .iter()
-                .enumerate()
-                .map(|(i, b)| {
-                    vk::WriteDescriptorSet::default()
-                        .dst_set(set)
-                        .dst_binding(i as u32)
-                        .descriptor_type(match b.kind() {
-                            BindKind::Storage => vk::DescriptorType::STORAGE_BUFFER,
-                            BindKind::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
-                        })
-                        .buffer_info(&infos[i])
-                })
-                .collect();
+                        .range(sizes[slot] as vk::DeviceSize)]);
+                }
+            }
+            let mut writes: Vec<vk::WriteDescriptorSet> = Vec::with_capacity(infos.len());
+            for (si, set) in sets.iter().enumerate() {
+                for (i, b) in bindings.iter().enumerate() {
+                    writes.push(
+                        vk::WriteDescriptorSet::default()
+                            .dst_set(*set)
+                            .dst_binding(i as u32)
+                            .descriptor_type(match b.kind() {
+                                BindKind::Storage => vk::DescriptorType::STORAGE_BUFFER,
+                                BindKind::Uniform => vk::DescriptorType::UNIFORM_BUFFER,
+                            })
+                            .buffer_info(&infos[si * bindings.len() + i]),
+                    );
+                }
+            }
             device.update_descriptor_sets(&writes, &[]);
 
             device
@@ -321,8 +407,25 @@ impl ComputeDevice {
                 )
                 .map_err(|e| format!("begin: {e}"))?;
             device.cmd_bind_pipeline(self.cmd, vk::PipelineBindPoint::COMPUTE, pipeline);
-            device.cmd_bind_descriptor_sets(self.cmd, vk::PipelineBindPoint::COMPUTE, layout, 0, &[set], &[]);
-            device.cmd_dispatch(self.cmd, groups[0], groups[1], groups[2]);
+            for pass in 0..passes {
+                let set = sets[if ping_pong.is_some() && pass % 2 == 1 { 1 } else { 0 }];
+                device.cmd_bind_descriptor_sets(self.cmd, vk::PipelineBindPoint::COMPUTE, layout, 0, &[set], &[]);
+                device.cmd_dispatch(self.cmd, groups[0], groups[1], groups[2]);
+                if pass + 1 < passes {
+                    // The next pass reads what this one wrote.
+                    device.cmd_pipeline_barrier(
+                        self.cmd,
+                        vk::PipelineStageFlags::COMPUTE_SHADER,
+                        vk::PipelineStageFlags::COMPUTE_SHADER,
+                        vk::DependencyFlags::empty(),
+                        &[vk::MemoryBarrier::default()
+                            .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+                            .dst_access_mask(vk::AccessFlags::SHADER_READ | vk::AccessFlags::SHADER_WRITE)],
+                        &[],
+                        &[],
+                    );
+                }
+            }
             // Shader writes become host-visible before the fence is signalled.
             device.cmd_pipeline_barrier(
                 self.cmd,
@@ -347,10 +450,17 @@ impl ComputeDevice {
             device.reset_fences(&[self.fence]).map_err(|e| format!("fence reset: {e}"))?;
         }
 
-        // Read back the read-write bindings.
+        // Read back the read-write bindings — the ping-pong output from
+        // whichever buffer the last pass wrote.
+        let last_written = |i: usize| -> usize {
+            match ping_pong {
+                Some((a, b)) if i == b && passes % 2 == 0 => a,
+                _ => i,
+            }
+        };
         for (i, b) in bindings.iter_mut().enumerate() {
             if let Binding::Storage(out) = b {
-                let mapped = self.slots[i]
+                let mapped = self.slots[last_written(i)]
                     .allocation
                     .as_ref()
                     .and_then(|a| a.mapped_slice())
@@ -592,6 +702,42 @@ fn axpy(@builtin(global_invocation_id) id: vec3<u32>) {
         // The device is still good after every failure.
         dev.run_over(&Kernel::new(DOUBLE, "main"), &mut [Binding::rw(&mut data)], 4).unwrap();
         assert_eq!(data, vec![2.0; 4]);
+    }
+
+    /// Passes chain inside one submission, and a ping-pong pair alternates
+    /// so the result lands in the output slice whether the count is odd or
+    /// even.
+    #[test]
+    fn passes_chain_and_ping_pong_lands_in_the_output() {
+        let Some(mut dev) = device() else { return };
+        // In place: three doublings are one octupling.
+        let mut data: Vec<f32> = (0..500).map(|i| i as f32).collect();
+        dev.run_passes_over(&Kernel::new(DOUBLE, "main"), &mut [Binding::rw(&mut data)], 500, 3, None).unwrap();
+        assert!(data.iter().enumerate().all(|(i, v)| *v == i as f32 * 8.0));
+
+        const COPY_DOUBLE: &str = r#"
+@group(0) @binding(0) var<storage, read> src: array<f32>;
+@group(0) @binding(1) var<storage, read_write> dst: array<f32>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+    let i = id.x;
+    if (i < arrayLength(&dst)) { dst[i] = src[i] * 2.0; }
+}"#;
+        let src: Vec<f32> = (0..500).map(|i| i as f32).collect();
+        let kernel = Kernel::new(COPY_DOUBLE, "main");
+        for passes in [1u32, 2, 3, 4] {
+            let mut dst = vec![0.0f32; 500];
+            dev.run_passes_over(&kernel, &mut [Binding::input(&src), Binding::rw(&mut dst)], 500, passes, Some((0, 1))).unwrap();
+            let factor = 2f32.powi(passes as i32);
+            assert!(dst.iter().enumerate().all(|(i, v)| *v == i as f32 * factor), "{passes} passes give x{factor}");
+        }
+        assert!(src.iter().enumerate().all(|(i, v)| *v == i as f32), "the input slice is never written");
+
+        let mut dst = vec![0.0f32; 500];
+        let err = dev.run_passes_over(&kernel, &mut [Binding::input(&src), Binding::rw(&mut dst)], 500, 2, Some((1, 0))).unwrap_err();
+        assert!(err.contains("must be a read-only Input"), "{err}");
+        let err = dev.run_passes_over(&kernel, &mut [Binding::input(&src), Binding::rw(&mut dst)], 500, 0, None).unwrap_err();
+        assert!(err.contains("at least one pass"), "{err}");
     }
 
     #[test]
