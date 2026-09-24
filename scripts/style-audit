@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# style-audit — does each cce app stand on the standard root plate and take
+# its spacing from the ladder? A conformance check, not a build step: it
+# greps the sibling app crates and prints one row per app.
+#
+#   cce-ui/scripts/style-audit            # every cce-* app beside cce-ui
+#   cce-ui/scripts/style-audit cce-mail   # one or more apps
+#   cce-ui/scripts/style-audit --strict   # exit 1 if any row is off-standard
+#
+# Columns:
+#   root      PLATE  paints PlateSpec::window / root_plate / root_at
+#             FILL   paints a full-window quad or rounded_rect instead (off)
+#             NONE   paints no window base at all (off unless opted out)
+#   ladder    how many spacing-ladder getters the app reads
+#             (root_plate_inset/padding/gap, plate_padding/gap, control_gap,
+#             the Style::root_/pane_/controls_ presets)
+#   literals  spacing consts of the app's own (const *PAD*/*GAP*/*MARGIN*),
+#             each one a number the ladder should be supplying
+#
+# Opt-outs: a crate that is not a plate by design (a transparent surface,
+# a full-bleed canvas) declares it with a line anywhere in its src:
+#   // style-audit: opt-out <reason>
+# and is listed as OPT-OUT rather than off-standard.
+set -u
+here=$(cd "$(dirname "$0")/.." && pwd)
+ws=$(dirname "$here")
+strict=0; apps=()
+for a in "$@"; do case "$a" in --strict) strict=1;; *) apps+=("$a");; esac; done
+if [ ${#apps[@]} -eq 0 ]; then
+  for d in "$ws"/cce-*/; do
+    d=${d%/}; n=$(basename "$d")
+    case "$n" in cce-ui|cce-compositor|cce-window-manager|cce-icons) continue;; esac
+    [ -f "$d/Cargo.toml" ] && grep -q '^cce-ui' "$d/Cargo.toml" 2>/dev/null && apps+=("$n")
+  done
+fi
+printf '%-24s %-8s %-7s %-9s %s\n' app root ladder literals note
+fail=0
+for n in "${apps[@]}"; do
+  src="$ws/$n/src"; [ -d "$src" ] || { printf '%-24s (no src)\n' "$n"; continue; }
+  if grep -rqE 'style-audit: *opt-out' "$src"; then
+    reason=$(grep -rhoE 'style-audit: *opt-out.*' "$src" | head -1 | sed 's/style-audit: *opt-out *//')
+    printf '%-24s %-8s %-7s %-9s %s\n' "$n" OPT-OUT - - "$reason"; continue
+  fi
+  if grep -rqE 'PlateSpec::(window|root_at)\(|\.root_plate\(' "$src"; then root=PLATE
+  elif grep -rqE '(quad|rounded_rect)\([^;]*(0\.0, *0\.0|x: *0\.0, *y: *0\.0)' "$src"; then root=FILL
+  else root=NONE; fi
+  ladder=$(grep -rhoE 'root_plate_(inset|padding|gap)\(\)|plate_(padding|gap)\(\)|control_gap\(\)|Style::(root|pane|controls)_(column|row)\(\)|ColumnLayout::(pane|controls)\(' "$src" | wc -l)
+  literals=$(grep -rhE '^\s*(pub )?const [A-Z_]*(PAD|GAP|MARGIN|INSET)[A-Z_]*: *f32' "$src" | wc -l)
+  note=""
+  [ "$root" != PLATE ] && { note="base is not the standard root plate"; fail=1; }
+  [ "$ladder" -eq 0 ] && { note="${note:+$note; }no ladder getter read"; fail=1; }
+  printf '%-24s %-8s %-7s %-9s %s\n' "$n" "$root" "$ladder" "$literals" "$note"
+done
+[ $strict -eq 1 ] && exit $fail
+exit 0

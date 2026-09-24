@@ -260,15 +260,12 @@ impl Application for DemoApp {
             // ── Layout: a plain LayoutBox tree, solved in one call. Leaves carry their
             // intrinsic sizes; `grow` distributes leftover space; the solved rects are
             // assigned straight onto the widgets.
-            // DE-wide plate spacing: the inset from the window edge (the
-            // root plate's roll plus one padding) and the gap between
-            // siblings on the plate, both from config.
-            let plate_pad = cce_ui::layout::root_plate_inset();
-            let plate_gap = cce_ui::layout::root_plate_gap();
+            // DE-wide spacing by rung, never by number: the root preset insets
+            // by the plate's roll plus one padding and spaces siblings by the
+            // root gap; the controls preset puts the control gap between a
+            // form's controls (`Style::root_column` / `Style::controls_row`).
             let mut arena: Arena<LayoutBox> = Arena::new();
-            let root = arena.insert(LayoutBox::container(
-                Style::column().padding(plate_pad).gap(plate_gap).cross_align(CrossAlign::Stretch),
-            ));
+            let root = arena.insert(LayoutBox::container(Style::root_column()));
             let title = arena.insert(LayoutBox::leaf(
                 Style::row(),
                 LSize::new(0.0, text_leaf_height(TITLE_FONT_SIZE)),
@@ -284,7 +281,7 @@ impl Application for DemoApp {
             // toggle, and dropdown plates land on the same top and bottom edge.
             const CONTROL_H: f32 = 28.0;
             let controls = arena.insert(LayoutBox::container(
-                Style::row().gap(plate_gap).height(Length::Fixed(CONTROL_H)),
+                Style::controls_row().height(Length::Fixed(CONTROL_H)),
             ));
             // `shrink` lets the fixed leaves give up width when the window is at its
             // minimum instead of overflowing the row.
@@ -295,7 +292,7 @@ impl Application for DemoApp {
             let name_box = arena.insert(LayoutBox::leaf(Style::row(), LSize::new(0.0, 30.0)));
             // ImageView row: same texture through two fit modes side by side.
             let images = arena.insert(LayoutBox::container(
-                Style::row().gap(plate_gap).height(Length::Fixed(72.0)),
+                Style::row().gap(cce_ui::layout::root_plate_gap()).height(Length::Fixed(72.0)),
             ));
             let image_contain = arena.insert(LayoutBox::leaf(Style::row().grow(1.0), LSize::new(0.0, 72.0)));
             let image_stretch = arena.insert(LayoutBox::leaf(Style::row().grow(1.0), LSize::new(0.0, 72.0)));
