@@ -689,15 +689,28 @@ impl Graph {
 
     /// Node-name labels beside each node, scaled with the grid, included only when they
     /// intersect the widget rect (legacy `text_labels`).
+    /// A node's name hangs off its body's RIGHT edge — an 8 px gap and a
+    /// 14 px font, both scaled with the body against its 80 px baseline —
+    /// unless it would not fit there and fits on the LEFT, where it hangs
+    /// off the left edge instead, right-aligned to it. A node parked against
+    /// the pane's right edge used to draw with no name at all: the label
+    /// began past the edge and the cull dropped it whole, whatever its
+    /// length. Frame All assumes the right-hand placement, which is safe —
+    /// after framing every label fits on the right and none flips.
     fn node_labels(&self, rect: Rect) -> Vec<TextLabel> {
         let mut labels = Vec::new();
         for (i, node) in self.nodes.iter().enumerate() {
             if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
                 let scale_f = nw / 80.0;
                 let font_size = (14.0 * scale_f).clamp(6.0, 48.0);
-                let lx = nx + nw + 8.0 * scale_f;
+                let gap = 8.0 * scale_f;
                 let ly = crate::layout::align_text_y(ny, nh, font_size, 0.0);
                 let text_w = TextLabel::estimate_width(&node.name, font_size);
+                let right = nx + nw + gap;
+                let left = nx - gap - text_w;
+                let fits_right = right + text_w <= rect.x + rect.width;
+                let fits_left = left >= rect.x;
+                let lx = if !fits_right && fits_left { left } else { right };
                 if lx + text_w >= rect.x && lx < rect.x + rect.width && ly + font_size >= rect.y && ly < rect.y + rect.height {
                     labels.push(TextLabel {
                         text: node.name.clone(),
@@ -1338,6 +1351,44 @@ mod tests {
         };
         g.set_nodes(&[node("a", "alpha", 0.0, 0.0), node("b", "beta", 1.0, 1.0)]);
         g
+    }
+
+    /// A node against the pane's right edge keeps its name: the label flips
+    /// to the body's left when it would not fit on the right, whatever the
+    /// name's length, and a node with room keeps the right-hand placement.
+    #[test]
+    fn a_node_at_the_right_edge_keeps_its_label_on_the_left() {
+        let mut g = two_nodes();
+        let node = |name: &str, col: f32| GraphNode {
+            id: name.into(),
+            name: name.into(),
+            position: (col, 0.0),
+            parameters: Vec::new(),
+            geom_visible: true,
+            node_type: String::new(),
+            inputs: 1,
+            outputs: 1,
+        };
+        // With the origin at 160, column 6's body spans 720..800 — flush
+        // against the right edge of an 800 px pane, so a right-hand label
+        // would BEGIN past the edge, which is exactly the screenshot that
+        // found this. Column 2's spans 320..400: plenty of room.
+        g.set_grid_origin(160.0, 120.0);
+        g.set_nodes(&[node("w", 6.0), node("wrangle_with_a_long_name", 6.0), node("mid", 2.0)]);
+        let rect = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let labels = g.node_labels(rect);
+        assert_eq!(labels.len(), 3, "every node keeps a label: {:?}", labels.iter().map(|l| &l.text).collect::<Vec<_>>());
+        let (nx, _, nw, _) = g.node_rect(0).unwrap();
+        assert_eq!((nx, nx + nw), (720.0, 800.0));
+        for name in ["w", "wrangle_with_a_long_name"] {
+            let l = labels.iter().find(|l| l.text == name).unwrap();
+            let w = TextLabel::estimate_width(name, l.font_size);
+            assert!((l.x + w - (nx - 8.0)).abs() < 0.5, "{name} hangs off the left edge, right-aligned to it: x {} w {w}", l.x);
+            assert!(l.x >= rect.x, "{name} stays inside the pane");
+        }
+        let mid = labels.iter().find(|l| l.text == "mid").unwrap();
+        let (mx, _, mw, _) = g.node_rect(2).unwrap();
+        assert_eq!(mid.x, mx + mw + 8.0, "a node with room keeps the right-hand placement");
     }
 
     /// A double-click's two presses always straddle a host node re-sync — the
