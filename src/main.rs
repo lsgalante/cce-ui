@@ -22,7 +22,7 @@
 use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::arena::Arena;
 use cce_ui::scene::layout::{
-    compute_layout, CrossAlign, FitMode, LayoutBox, Length, Rect, Size as LSize, Style,
+    compute_layout, FitMode, LayoutBox, Length, Rect, Size as LSize, Style,
 };
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
 use cce_ui::widget::{

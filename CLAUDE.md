@@ -425,6 +425,67 @@ What this buys, and where the code is heading:
   with the body still under 0.4. Useful range is ~0.3-0.6; the effect is in the
   roll and stays there.
 
+## The standard app — root plate, rungs, and the spacing ladder
+
+Every cce app is built the same way, and this section is the standard.
+`scripts/style-audit` checks the sibling app crates against it (one row per
+app; `--strict` fails on any off-standard row); `src/main.rs`, the demo, is
+the reference implementation.
+
+**Anatomy.** A window is a **root plate** with things standing on it. The root
+plate is the first prim of every frame — `pc.root_plate(w, h)`, which emits
+`PlateSpec::window(w, h)`: the root rung's material (`Material::root()`, the
+DE's `style.surface.plate.root.color` at its opacity unless a `material=` is
+bound), all four corners on the shared silhouette, the perimeter rolled over
+`bevel_width`. Nothing else paints a window base — not a quad, not a rounded
+rect at the silhouette radius, not a stroked border. On the root plate stand
+**pane plates** (`PlateSpec` with the corners that touch the window edge
+flagged, or `plate` / `rounded_rect` at `plate_corner_radius`) and **carves**
+(`inset_plate`, `recess_edges`: a menubar or status band stepping down into
+the surface, a well you type into). Which to use is the vocabulary above:
+things you press and content you read sit on plates; things you enter and
+bands that are part of the window's own surface are carved. On the pane
+plates sit **control plates**. A window that is deliberately not a plate — a
+transparent bar whose modules are the plates, a notification stack, a black
+lock or screensaver surface, the desktop grid overlay — says so with a
+`// style-audit: opt-out <reason>` comment and is listed as an opt-out.
+
+**Spacing is a ladder, and an app never names a number.** Three rungs, each a
+config key read through the style registry (so a nested KDL key works and
+live-reloads), each with a getter in `layout.rs`:
+
+| rung | inset from the rim | gap between siblings |
+|---|---|---|
+| root plate | `root_plate_inset()` = `bevel_width` + `style.surface.plate.root.padding` | `root_plate_gap()` (`…root.gap`) |
+| pane plate | `plate_padding()` (`style.surface.plate.padding`) | `plate_gap()` (`…plate.gap`, unset = the root gap) |
+| controls | — (inside a pane or root inset) | `control_gap()` (`style.control.gap`, unset = `CONTROL_GAP`) |
+
+The root inset carries the roll because the padding is a run of FLAT face —
+the same run the gap leaves between two panes — and the face only begins
+where the roll ends; a bare padding at a window edge measured 4px of visible
+flat against 12 between panes. The legacy keys (`page_margin`, `column_gap`,
+`control_panel_{padding,gap}`) are honoured when set and land on their rung
+when unset, the radius rule applied to spacing; do not add a new one.
+
+In the box model the ladder is presets — `Style::root_column()` /
+`root_row()`, `pane_column()` / `pane_row()`, `controls_column()` /
+`controls_row()` — and the legacy strategies' `Default`s and
+`ColumnLayout::pane` / `controls` read the same getters. An app picks the
+rung; a literal padding or gap in an app (`const PAD`, `+ 12.0`) is a number
+the ladder should be supplying, and the audit counts them.
+
+**Rules, restated as the audit checks them:**
+- The first prim of the frame is `root_plate(w, h)`, or the crate declares an
+  opt-out.
+- Every inset and gap comes from a rung getter or a preset; the app declares
+  no spacing constants of its own.
+- A deliberate deviation — the system settings' own tint, an overlay's
+  shallower roll — goes through `PlateSpec::window(..).with_material(..)` /
+  `.with_depth(..)` and a comment saying it is one, never a hand-built spec.
+- Migrating an app is pixel-neutral for the plate (`tests/plate_golden.rs`)
+  and a measured change for spacing: screenshot in a shadow session, count
+  the columns of flat face at the edges and across a split, and they match.
+
 ## The `scene/` core rebuild (read `docs/rfc-core-rebuild.md` before touching it)
 
 `src/scene/` is a **retained scene graph being grown additively** to replace three overlaid legacy
@@ -479,8 +540,8 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `history.rs` — `History<T>`: the undo/redo snapshot stack (cap, gestures, grouped runs).
   The toolkit defines the stack and the routing, never the step — see the trait section.
 - `widget/` — `container/` (vbox/hbox/scroll/menu/treelist/…), `input/` (button/slider/text_box/
-  dropdown/…), `display/` (label/graph/svg/…), plus `editor.rs`, `json_layout.rs` (KDL/JSON-driven
-  layouts), `core.rs`.
+  dropdown/…), `display/` (label/graph/svg/…), plus `editor.rs` and `core.rs`. (The
+  KDL/JSON-driven `json_layout.rs` is dissolved; `scene/layout.rs` is the box model.)
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`).
 - `process.rs` — detached/tracked child spawning, plus the `cce-cloud` popup pattern:
