@@ -21,6 +21,18 @@ impl ColumnLayout {
         }
     }
 
+    /// A column inside a pane plate: the pane rung's padding as the margin
+    /// and its gap between widgets (`plate_padding` / `plate_gap`).
+    pub fn pane(x: f32, y: f32, width: f32) -> Self {
+        Self::new(x, y, width, crate::layout::plate_gap(), crate::layout::plate_padding())
+    }
+
+    /// A column of controls with the control gap between them and no
+    /// margin of its own (`control_gap`).
+    pub fn controls(x: f32, y: f32, width: f32) -> Self {
+        Self::new(x, y, width, crate::layout::control_gap(), 0.0)
+    }
+
     /// `height` is the CONTENT height; the widget's block adds its label strip.
     pub fn add_widget(&mut self, widget: &mut dyn WidgetHost, height: f32) {
         let total_h = height + widget.label_strip();

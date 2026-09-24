@@ -140,7 +140,7 @@ impl Default for VerticalLayout {
         Self {
             padding_x: 0.0,
             padding_y: 0.0,
-            spacing: crate::layout::CONTROL_GAP,
+            spacing: crate::layout::control_gap(),
             left: 0.0,
             current_y: 0.0,
         }
@@ -444,9 +444,9 @@ pub struct ColumnsLayout {
 impl Default for ColumnsLayout {
     fn default() -> Self {
         Self {
-            padding_x: crate::layout::CONTROL_GAP,
-            padding_y: crate::layout::CONTROL_GAP,
-            spacing: crate::layout::CONTROL_GAP,
+            padding_x: crate::layout::control_gap(),
+            padding_y: crate::layout::control_gap(),
+            spacing: crate::layout::control_gap(),
         }
     }
 }
@@ -524,9 +524,9 @@ pub struct MosaicLayout {
 impl Default for MosaicLayout {
     fn default() -> Self {
         Self {
-            gap: crate::layout::CONTROL_GAP,
-            padding_x: crate::layout::CONTROL_GAP,
-            padding_y: crate::layout::CONTROL_GAP,
+            gap: crate::layout::control_gap(),
+            padding_x: crate::layout::control_gap(),
+            padding_y: crate::layout::control_gap(),
         }
     }
 }
@@ -679,9 +679,9 @@ pub struct ReverseMosaicLayout {
 impl Default for ReverseMosaicLayout {
     fn default() -> Self {
         Self {
-            gap: crate::layout::CONTROL_GAP,
-            padding_x: crate::layout::CONTROL_GAP,
-            padding_y: crate::layout::CONTROL_GAP,
+            gap: crate::layout::control_gap(),
+            padding_x: crate::layout::control_gap(),
+            padding_y: crate::layout::control_gap(),
         }
     }
 }

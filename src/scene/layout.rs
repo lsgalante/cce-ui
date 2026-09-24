@@ -221,6 +221,51 @@ impl Style {
     pub fn grid(columns: usize, col_gap: f32, row_gap: f32) -> Self {
         Style { mode: LayoutMode::Grid(GridSpec { columns: columns.max(1), col_gap, row_gap }), ..Default::default() }
     }
+    // ── The spacing ladder as presets ─────────────────────────────────
+    // An app on the standard root plate never names a padding or gap: it
+    // picks the rung. Root presets inset by `root_plate_inset` (the plate's
+    // roll plus one padding) and space siblings by `root_plate_gap`; pane
+    // presets by `plate_padding` / `plate_gap`; the controls presets space
+    // a form's controls by `control_gap` with no inset of their own, since
+    // they sit inside a pane or root preset that already has one.
+
+    /// A column of siblings standing on the root plate, stretched across it.
+    pub fn root_column() -> Self {
+        Self::column()
+            .padding(crate::layout::root_plate_inset())
+            .gap(crate::layout::root_plate_gap())
+            .cross_align(CrossAlign::Stretch)
+    }
+    /// A row of siblings standing on the root plate.
+    pub fn root_row() -> Self {
+        Self::row()
+            .padding(crate::layout::root_plate_inset())
+            .gap(crate::layout::root_plate_gap())
+            .cross_align(CrossAlign::Stretch)
+    }
+    /// A column inside a pane plate, inset from its rim.
+    pub fn pane_column() -> Self {
+        Self::column()
+            .padding(crate::layout::plate_padding())
+            .gap(crate::layout::plate_gap())
+            .cross_align(CrossAlign::Stretch)
+    }
+    /// A row inside a pane plate.
+    pub fn pane_row() -> Self {
+        Self::row()
+            .padding(crate::layout::plate_padding())
+            .gap(crate::layout::plate_gap())
+            .cross_align(CrossAlign::Stretch)
+    }
+    /// A column of controls: the control gap between them, no inset.
+    pub fn controls_column() -> Self {
+        Self::column().gap(crate::layout::control_gap())
+    }
+    /// A row of controls: the control gap between them, no inset.
+    pub fn controls_row() -> Self {
+        Self::row().gap(crate::layout::control_gap())
+    }
+
     pub fn gap(mut self, v: f32) -> Self {
         self.gap = v;
         self

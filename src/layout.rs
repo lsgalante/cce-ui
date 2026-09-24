@@ -296,6 +296,8 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.desktop.grid_cell_width" => "grid_cell_width",
                 "style.surface.desktop.grid_cell_height" => "grid_cell_height",
                 "style.surface.plate.padding" => "plate_padding",
+                "style.surface.plate.gap" => "plate_gap",
+                "style.control.gap" => "control_gap",
                 // The context menu's own radius (`menu_corner_radius`): a
                 // popover's corner is control-scale, not pane-scale.
                 "style.surface.menu.corner_radius" => "menu_corner_radius",
@@ -526,9 +528,9 @@ static RAMP_HEIGHT: RwLock<f32> = RwLock::new(32.0);
 static BUTTON_STRIP_SPACING: RwLock<f32> = RwLock::new(8.0);
 static SCROLLBAR_WIDTH: RwLock<f32> = RwLock::new(4.0);
 static SCROLLBAR_INSET: RwLock<f32> = RwLock::new(16.0);
-static COLUMN_GAP: RwLock<f32> = RwLock::new(16.0);
-static CONTROL_PANEL_PADDING: RwLock<f32> = RwLock::new(16.0);
-static CONTROL_PANEL_GAP: RwLock<f32> = RwLock::new(12.0);
+static COLUMN_GAP: RwLock<Option<f32>> = RwLock::new(None);
+static CONTROL_PANEL_PADDING: RwLock<Option<f32>> = RwLock::new(None);
+static CONTROL_PANEL_GAP: RwLock<Option<f32>> = RwLock::new(None);
 static TREE_OPACITY: RwLock<f32> = RwLock::new(1.0);
 static TREE_BLUR: RwLock<f32> = RwLock::new(0.0);
 
@@ -667,7 +669,7 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = PAGE_MARGIN.write() {
-                        *lock = val;
+                        *lock = Some(val);
                     }
                 }
             }
@@ -694,7 +696,7 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = COLUMN_GAP.write() {
-                        *lock = val;
+                        *lock = Some(val);
                     }
                 }
             }
@@ -703,7 +705,7 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
-                        *lock = val;
+                        *lock = Some(val);
                     }
                 }
             }
@@ -712,7 +714,7 @@ pub fn reload_config() {
                 let val_str = rest.trim_end_matches('"').trim();
                 if let Ok(val) = val_str.parse::<f32>() {
                     if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
-                        *lock = val;
+                        *lock = Some(val);
                     }
                 }
             }
@@ -1477,26 +1479,14 @@ pub fn set_nested_section_label_offset(offset: f32) {
 }
 
 
+/// The pane rung's padding: from a pane plate's rim to its content, in
+/// logical px (`style.surface.plate.padding`). The second rung of the
+/// spacing ladder — [`root_plate_inset`] / [`root_plate_gap`] on the root
+/// plate, this and [`plate_gap`] inside a pane plate, [`control_gap`]
+/// between controls. Registry-backed (live-reloadable); the legacy flat
+/// `plate_padding = N` line still loads as a fallback.
 pub fn plate_padding() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("plate_padding") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = PLATE_PADDING.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *PLATE_PADDING.read().unwrap()
+    registry_float("plate_padding").unwrap_or_else(|| *PLATE_PADDING.read().unwrap())
 }
 
 pub fn set_plate_padding(padding: f32) {
@@ -1505,33 +1495,20 @@ pub fn set_plate_padding(padding: f32) {
     }
 }
 
-static PAGE_MARGIN: RwLock<f32> = RwLock::new(20.0);
+static PAGE_MARGIN: RwLock<Option<f32>> = RwLock::new(None);
 
+/// Legacy: the page-level margin (`style.surface.page.margin`). Unset, it
+/// IS the pane rung's [`plate_padding`] — a page is a pane — so an app
+/// still reading it lands on the ladder. Set, it is honoured as before.
 pub fn page_margin() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("page_margin") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = PAGE_MARGIN.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *PAGE_MARGIN.read().unwrap()
+    registry_float("page_margin")
+        .or_else(|| *PAGE_MARGIN.read().unwrap())
+        .unwrap_or_else(plate_padding)
 }
 
 pub fn set_page_margin(margin: f32) {
     if let Ok(mut lock) = PAGE_MARGIN.write() {
-        *lock = margin;
+        *lock = Some(margin);
     }
 }
 
@@ -1595,87 +1572,45 @@ pub fn set_grid_gap(gap: f32) {
     }
 }
 
+/// Legacy: the inter-column gap (`style.layout.column.gap`). Unset, it is
+/// the root plate's [`root_plate_gap`] — columns are siblings on the plate.
 pub fn column_gap() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("column_gap") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = COLUMN_GAP.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *COLUMN_GAP.read().unwrap()
+    registry_float("column_gap")
+        .or_else(|| *COLUMN_GAP.read().unwrap())
+        .unwrap_or_else(root_plate_gap)
 }
 
 pub fn set_column_gap(gap: f32) {
     if let Ok(mut lock) = COLUMN_GAP.write() {
-        *lock = gap;
+        *lock = Some(gap);
     }
 }
 
+/// Legacy: a control panel's padding (`style.control.control_panel.padding`).
+/// Unset, it is the pane rung's [`plate_padding`] — a control panel is a pane.
 pub fn control_panel_padding() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("control_panel_padding") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *CONTROL_PANEL_PADDING.read().unwrap()
+    registry_float("control_panel_padding")
+        .or_else(|| *CONTROL_PANEL_PADDING.read().unwrap())
+        .unwrap_or_else(plate_padding)
 }
 
 pub fn set_control_panel_padding(padding: f32) {
     if let Ok(mut lock) = CONTROL_PANEL_PADDING.write() {
-        *lock = padding;
+        *lock = Some(padding);
     }
 }
 
+/// Legacy: a control panel's gap (`style.control.control_panel.gap`).
+/// Unset, it is the pane rung's [`plate_gap`].
 pub fn control_panel_gap() -> f32 {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        if let Some(content) = read_config() {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("control_panel_gap") {
-                    let rest = rest.trim_start_matches(|c: char| c == ' ' || c == '=' || c == '"');
-                    let val_str = rest.trim_end_matches('"').trim();
-                    if let Ok(val) = val_str.parse::<f32>() {
-                        if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
-                            *lock = val;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    *CONTROL_PANEL_GAP.read().unwrap()
+    registry_float("control_panel_gap")
+        .or_else(|| *CONTROL_PANEL_GAP.read().unwrap())
+        .unwrap_or_else(plate_gap)
 }
 
 pub fn set_control_panel_gap(gap: f32) {
     if let Ok(mut lock) = CONTROL_PANEL_GAP.write() {
-        *lock = gap;
+        *lock = Some(gap);
     }
 }
 
@@ -2246,6 +2181,30 @@ pub fn root_plate_gap() -> f32 {
 /// [`root_plate_padding`] alone.
 pub fn root_plate_inset() -> f32 {
     bevel_width() + root_plate_padding()
+}
+
+/// One style-registry float, initialising the registry on first use — the
+/// one read every rung getter goes through.
+fn registry_float(slot: &str) -> Option<f32> {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_float(slot)
+}
+
+/// Gap between siblings INSIDE a pane plate, in logical px
+/// (`style.surface.plate.gap`) — the pane rung's twin of
+/// [`root_plate_gap`]. Unset, it is the root gap: one number reads as one
+/// rhythm across both rungs unless a config says otherwise.
+pub fn plate_gap() -> f32 {
+    registry_float("plate_gap").unwrap_or_else(root_plate_gap)
+}
+
+/// Gap between controls, in logical px (`style.control.gap`) — the control
+/// rung of the ladder: what the layout strategies put between a form's
+/// controls (and between a detached label's block and the next), in both
+/// axes. Unset, it is [`CONTROL_GAP`], one control height, the value every
+/// strategy's `Default` carried as a literal.
+pub fn control_gap() -> f32 {
+    registry_float("control_gap").unwrap_or(CONTROL_GAP)
 }
 
 /// Roll-off width for the wall where a bar (menubar / status bar / the demo's
@@ -6821,9 +6780,30 @@ mod tests {
 
     #[test]
     fn test_column_gap() {
+        // A legacy key: set (by config or setter) it is honoured; unset it
+        // lands on the ladder — the root plate's gap.
         let gap = column_gap();
-        assert_eq!(gap, *super::COLUMN_GAP.read().unwrap());
+        match (registry_float("column_gap"), *super::COLUMN_GAP.read().unwrap()) {
+            (Some(v), _) | (None, Some(v)) => assert_eq!(gap, v),
+            (None, None) => assert_eq!(gap, root_plate_gap()),
+        }
         assert!(gap.is_finite() && gap >= 0.0, "column gap {gap}");
+    }
+
+    #[test]
+    fn spacing_ladder_falls_back_rung_by_rung() {
+        // Every rung getter is finite and non-negative, and the inset is the
+        // roll plus the padding, whatever the config says.
+        for v in [root_plate_padding(), root_plate_gap(), root_plate_inset(), plate_padding(), plate_gap(), control_gap()] {
+            assert!(v.is_finite() && v >= 0.0, "{v}");
+        }
+        assert_eq!(root_plate_inset(), bevel_width() + root_plate_padding());
+        if registry_float("plate_gap").is_none() {
+            assert_eq!(plate_gap(), root_plate_gap());
+        }
+        if registry_float("control_gap").is_none() {
+            assert_eq!(control_gap(), CONTROL_GAP);
+        }
     }
 
     #[test]
