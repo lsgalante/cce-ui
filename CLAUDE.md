@@ -19,6 +19,12 @@ set outright.
   layer surfaces), not toolkit-owned windows.
 - **Rendering**: raw Vulkan via **ash** (`src/vk/`, `VkRenderer`) for all geometry, and
   **cosmic-text** + swash for text (shaped into a self-managed glyph atlas by `src/vk/text.rs`).
+  `src/vk/compute.rs` is the one non-drawing seam: `ComputeDevice::run` uploads a list of
+  `Binding`s, dispatches a WGSL `Kernel` on a headless device, waits, and reads the read-write
+  ones back — buffers are host-visible and mapped, so upload and readback are memcpys, and every
+  failure (a user's bad WGSL included) is an `Err`, never a panic. Built for cce-designer's
+  solver operators (its `shapeshifter.md`, Phase 7 step 4); its tests run on whatever Vulkan the
+  machine has and skip with a note where there is none.
   The wgpu path is retired; cosmic-text used to be reached through **glyphon**, which is gone
   too — every `glyphon::` item used here was a cosmic-text re-export, and dropping it takes
   wgpu out of the build. There is no HTML/DOM — the UI is GPU primitives (quads, rounded rects with

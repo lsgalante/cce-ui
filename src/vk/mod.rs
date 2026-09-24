@@ -27,10 +27,18 @@
 //!   region as a drop-in alternative to the raster 3D pass. Plain compute:
 //!   no `VK_KHR_ray_*` needed.
 //!
+//! And beside the pipelines, one seam that is not a pipeline:
+//!
+//! - **Compute jobs** ([`ComputeDevice`] + [`Kernel`] + [`Binding`]): upload
+//!   buffers, dispatch a WGSL compute entry point on a headless device, read
+//!   back. The RT pass's machinery with a general face, for consumers with
+//!   arrays to transform (cce-designer's solver operators).
+//!
 //! The wgpu↔Vulkan Y-flip is a negative-height viewport (like wgpu-hal), NOT
 //! naga's ADJUST_COORDINATE_SPACE — a shader-side flip would reverse winding
 //! and break the 3D pipeline's back-face culling.
 
+mod compute;
 mod core;
 pub mod image;
 mod renderer;
@@ -38,6 +46,7 @@ mod rt;
 mod scene;
 mod text;
 
+pub use compute::{workgroups, BindKind, Binding, ComputeDevice, Kernel, MAX_BINDINGS};
 pub use core::VkCore;
 pub use image::{
     free_image, recycle_buffer, renderer_epoch, update_pixels, upload_pixels, upload_rgba, ImageQuad,
