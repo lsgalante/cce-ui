@@ -17,6 +17,17 @@
 //! viewport but the code editor's clip to the code box, in monospace, which the one-font
 //! one-bounds prim bridge can't express).
 //!
+//! The code row is an editor, not a text box (2026-09-24): a line-number gutter, shift+arrow /
+//! shift+click selection with ctrl+c / ctrl+x / ctrl+v through the toolkit clipboard, tab and
+//! shift+tab indenting by four, Enter carrying the line's indentation (a level deeper after an
+//! opening bracket), ctrl+z / ctrl+shift+z on a `History` of editor snapshots that lives as long
+//! as the editor does, and the emacs chords it always had. Edits go to the BUFFER and reach the
+//! row's VALUE on ctrl+enter, Escape, or leaving the row — never per keystroke, because a host
+//! that evaluates a script on every value change would fail it on every half-typed line. The
+//! border says which state the row is in (amber pending, blue applied, grey at rest), and
+//! [`ParametersBg::set_code_error_line`] lets the host flag the line its last evaluation
+//! failed on.
+//!
 //! Flagged approximation: the legacy scrollbar-press called `self.focus()` (base flag only —
 //! nothing reads it: the highlight keys on the ctx focus slot, and the designer tracks its
 //! focused pane by index); the `on_event` arm drops it.
@@ -60,6 +71,13 @@ pub struct ParametersBg {
     dragging_param: Option<usize>,
     pub focused_param: Option<usize>,
     pub code_editor: Option<TextEditorState>,
+    /// The code editor's undo history: one entry per edit, typing runs
+    /// coalesced by group. Lives exactly as long as the editor does.
+    code_history: crate::history::History<TextEditorState>,
+    /// A line (0-based) the host has flagged as the site of an error in the
+    /// code row's value — a script that failed to parse. Drawn as a band
+    /// under that line while the value it was reported for still stands.
+    code_error_line: Option<usize>,
     mouse_pos: Option<(f32, f32)>,
     pub sliders: Vec<Option<Adapted<Slider>>>,
     pub float3s: Vec<Option<Adapted<Float3>>>,
@@ -157,6 +175,53 @@ const CONTROL_INSET: f32 = CHANNEL;
 const ROW_X_INSET: f32 = SECTION_MARGIN + CONTROL_INSET;
 
 impl ParametersBg {
+    /// The code box's line pitch, its text inset below the box top, and the
+    /// gutter that carries line numbers: four columns of digits and a gap.
+    const CODE_LINE_H: f32 = 16.0;
+    const CODE_TOP: f32 = 22.0;
+    const CODE_BOX_TOP: f32 = 18.0;
+    const CODE_GUTTER_COLS: f32 = 4.0;
+    const CODE_INDENT: &'static str = "    ";
+
+    /// Where a code row's text starts: past the gutter.
+    fn code_text_x(&self, r: (f32, f32, f32, f32)) -> f32 {
+        r.0 + 12.0 + (Self::CODE_GUTTER_COLS + 1.0) * self.code_col_w()
+    }
+
+    /// Flag a line of the code row as an error site, or clear it. The host
+    /// calls this when the value it evaluated failed with a line number —
+    /// it is the one piece of feedback a script editor cannot do without.
+    pub fn set_code_error_line(&mut self, line: Option<usize>) {
+        self.code_error_line = line;
+    }
+
+    /// Whether a code row is being edited right now.
+    pub fn code_editing(&self) -> bool {
+        self.focused_param.is_some() && self.code_editor.is_some()
+    }
+
+    /// The clipboard, selection and history actions over the code editor:
+    /// what the runner's undo / redo chords and the context menu's rows
+    /// reach through [`Input::context_action`], and what the editor's own
+    /// chords call. Returns whether the editor was open to act on.
+    pub fn code_action(&mut self, action: crate::widget::ContextAction) -> bool {
+        match self.code_editor.as_mut() {
+            Some(editor) => {
+                apply_code_action(editor, &mut self.code_history, action);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether the focused code row holds edits not yet applied to its value.
+    pub fn code_is_dirty(&self) -> bool {
+        match (self.focused_param, &self.code_editor) {
+            (Some(i), Some(editor)) => self.display_params.get(i).is_some_and(|p| p.1 != editor.buffer),
+            _ => false,
+        }
+    }
+
     /// One code column's width — the shaped advance when recorded, else the
     /// legacy 7.2 estimate (only before the first `prepare_text`).
     fn code_col_w(&self) -> f32 {
@@ -175,6 +240,8 @@ impl ParametersBg {
             dragging_param: None,
             focused_param: None,
             code_editor: None,
+            code_history: crate::history::History::with_limit(200),
+            code_error_line: None,
             mouse_pos: None,
             sliders: Vec::new(),
             float3s: Vec::new(),
@@ -278,7 +345,7 @@ impl ParametersBg {
                 &p.1
             };
             let line_count = val_text.split('\n').count();
-            let content_h = 22.0 + (line_count as f32 * 16.0) + 12.0;
+            let content_h = Self::CODE_TOP + (line_count as f32 * Self::CODE_LINE_H) + 12.0;
             content_h.max(200.0)
         } else if p.2 == "section" {
             24.0
@@ -852,20 +919,39 @@ impl ParametersBg {
                 } else {
                     value.clone()
                 };
-                // One label PER LINE, at the same 16px pitch the cursor math uses
+                // One label PER LINE, at the same pitch the cursor math uses
                 // (`plain_quads`' cursor_y) — a single multi-line label would depend on
                 // the consumer's buffer line-height matching that pitch, and never
-                // exactly did.
+                // exactly did. A line number sits in the gutter before each.
+                let text_x = self.code_text_x(r);
                 for (line_i, line) in val_text.split('\n').enumerate() {
+                    let y = r.1 + Self::CODE_TOP + line_i as f32 * Self::CODE_LINE_H;
+                    let number = format!("{:>3}", line_i + 1);
+                    labels.push(TextLabel {
+                        text: number,
+                        x: r.0 + 12.0,
+                        y,
+                        font_size: 12.0,
+                        color: if self.code_error_line == Some(line_i) { [0xff, 0x80, 0x70] } else { [0x66, 0x66, 0x78] },
+                    });
                     if line.is_empty() {
                         continue;
                     }
                     labels.push(TextLabel {
                         text: line.to_string(),
-                        x: r.0 + 12.0,
-                        y: r.1 + 22.0 + line_i as f32 * 16.0,
+                        x: text_x,
+                        y,
                         font_size: 12.0,
                         color: [0xee, 0xee, 0xf0],
+                    });
+                }
+                if self.focused_param == Some(i) && self.code_is_dirty() {
+                    labels.push(TextLabel {
+                        text: "ctrl+enter applies".to_string(),
+                        x: r.0 + r.2 - 12.0 - 18.0 * self.code_col_w(),
+                        y: r.1 + r.3 - 15.0,
+                        font_size: 12.0,
+                        color: [0xd8, 0xa0, 0x50],
                     });
                 }
             } else if ptype.starts_with("spinbox") {
@@ -1002,6 +1088,7 @@ impl ParametersBg {
                         p.1 = editor.buffer.clone();
                     }
                     self.code_editor = None;
+                    self.code_history.clear();
                 }
             }
         }
@@ -1065,27 +1152,65 @@ impl ParametersBg {
                     param_quads.extend(f.extra_quads());
                 }
             } else if p.2 == "code" {
-                param_quads.push((r.0, r.1 + 18.0, r.2, r.3 - 18.0, [0.08, 0.08, 0.10, 1.0]));
-                let border_color = if self.focused_param == Some(i) {
+                let (bx, by, bw, bh) = (r.0, r.1 + Self::CODE_BOX_TOP, r.2, r.3 - Self::CODE_BOX_TOP);
+                param_quads.push((bx, by, bw, bh, [0.08, 0.08, 0.10, 1.0]));
+                let focused = self.focused_param == Some(i);
+                // Amber while edits are pending, blue while focused and
+                // applied, grey at rest: the border says whether what the
+                // node runs is what the box shows.
+                let border_color = if focused && self.code_is_dirty() {
+                    [0.85, 0.60, 0.25, 1.0]
+                } else if focused {
                     [0.25, 0.45, 0.85, 1.0]
                 } else {
                     [0.20, 0.20, 0.25, 1.0]
                 };
-                let (bx, by, bw, bh) = (r.0, r.1 + 18.0, r.2, r.3 - 18.0);
-                param_quads.push((bx, by, bw, 1.0, border_color));
-                param_quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));
-                param_quads.push((bx, by, 1.0, bh, border_color));
-                param_quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));
-                if self.focused_param == Some(i) {
+                let text_x = self.code_text_x(r);
+                let col_w = self.code_col_w();
+                let line_y = |l: usize| by + (Self::CODE_TOP - Self::CODE_BOX_TOP) + l as f32 * Self::CODE_LINE_H;
+                // The gutter's edge.
+                param_quads.push((text_x - col_w * 0.5, by + 1.0, 1.0, bh - 2.0, [0.16, 0.16, 0.20, 1.0]));
+                // The error band, under the flagged line.
+                if let Some(err_line) = self.code_error_line {
+                    let y = line_y(err_line);
+                    if y >= by && y + Self::CODE_LINE_H <= by + bh {
+                        param_quads.push((bx + 1.0, y, bw - 2.0, Self::CODE_LINE_H, [0.45, 0.12, 0.10, 1.0]));
+                    }
+                }
+                if focused {
                     if let Some(ref editor) = self.code_editor {
+                        // Selection: one band per line it covers.
+                        if let Some((start, end)) = editor.selected_range() {
+                            let (sl, sc) = get_cursor_line_col(&editor.buffer, start);
+                            let (el, ec) = get_cursor_line_col(&editor.buffer, end);
+                            let line_len = |l: usize| editor.buffer.split('\n').nth(l).map_or(0, |s| s.chars().count());
+                            for l in sl..=el {
+                                let c0 = if l == sl { sc } else { 0 };
+                                let c1 = if l == el { ec } else { line_len(l) + 1 };
+                                let y = line_y(l);
+                                if y >= by && y + Self::CODE_LINE_H <= by + bh && c1 > c0 {
+                                    param_quads.push((
+                                        text_x + c0 as f32 * col_w,
+                                        y,
+                                        (c1 - c0) as f32 * col_w,
+                                        Self::CODE_LINE_H,
+                                        [0.22, 0.32, 0.55, 1.0],
+                                    ));
+                                }
+                            }
+                        }
                         let (cursor_l, cursor_c) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                        let cursor_x = r.0 + 12.0 + (cursor_c as f32 * self.code_col_w());
-                        let cursor_y = r.1 + 22.0 + (cursor_l as f32 * 16.0) + (16.0 - 13.0) / 2.0;
-                        if cursor_y >= r.1 + 18.0 && cursor_y + 13.0 <= r.1 + r.3 {
+                        let cursor_x = text_x + (cursor_c as f32 * col_w);
+                        let cursor_y = line_y(cursor_l) + (Self::CODE_LINE_H - 13.0) / 2.0;
+                        if cursor_y >= by && cursor_y + 13.0 <= by + bh {
                             param_quads.push((cursor_x, cursor_y, 1.5, 13.0, [0.80, 0.80, 0.85, 1.0]));
                         }
                     }
                 }
+                param_quads.push((bx, by, bw, 1.0, border_color));
+                param_quads.push((bx, by + bh - 1.0, bw, 1.0, border_color));
+                param_quads.push((bx, by, 1.0, bh, border_color));
+                param_quads.push((bx + bw - 1.0, by, 1.0, bh, border_color));
             } else if is_text_row(&p.2) {
                 if let Some(tb) = &self.texts[i] {
                     param_quads.extend(tb.extra_quads());
@@ -1755,6 +1880,16 @@ impl Paint for ParametersBg {
 }
 
 impl Input for ParametersBg {
+    /// While a code row is being edited, the clipboard, selection and
+    /// history actions are the editor's — the runner routes the undo / redo
+    /// chords here before the app's own history gets them.
+    fn context_action(&mut self, action: crate::widget::ContextAction) -> bool {
+        if self.code_editing() {
+            return self.code_action(action);
+        }
+        false
+    }
+
     fn scrollable(&self) -> bool {
         true
     }
@@ -2408,14 +2543,32 @@ impl Input for ParametersBg {
                         }
                         if p.2 == "code" {
                             let r = rects[i];
-                            if px >= r.0 && px <= r.0 + r.2 && py >= r.1 + 18.0 && py <= r.1 + r.3 {
+                            if px >= r.0 && px <= r.0 + r.2 && py >= r.1 + Self::CODE_BOX_TOP && py <= r.1 + r.3 {
+                                // Clicking inside the box already being edited moves the
+                                // caret and keeps the buffer (and its history); a click
+                                // into a different row's box starts a fresh editor.
+                                let mut editor = match (self.focused_param == Some(i), self.code_editor.take()) {
+                                    (true, Some(e)) => e,
+                                    (_, other) => {
+                                        drop(other);
+                                        self.code_history.clear();
+                                        TextEditorState::new(p.1.clone())
+                                    }
+                                };
                                 self.focused_param = Some(i);
-                                let mut editor = TextEditorState::new(p.1.clone());
-                                let click_x = px - (r.0 + 12.0);
-                                let click_y = py - (r.1 + 22.0);
-                                let line = (click_y / 16.0).floor().max(0.0) as usize;
+                                let click_x = px - self.code_text_x(r);
+                                let click_y = py - (r.1 + Self::CODE_TOP);
+                                let line = (click_y / Self::CODE_LINE_H).floor().max(0.0) as usize;
                                 let col = (click_x / self.code_col_w() + 0.5).floor().max(0.0) as usize;
-                                editor.cursor_idx = map_2d_to_1d(&editor.buffer, line, col);
+                                let at = map_2d_to_1d(&editor.buffer, line, col);
+                                if ui.shift_pressed {
+                                    if editor.select_anchor.is_none() {
+                                        editor.select_anchor = Some(editor.cursor_idx);
+                                    }
+                                } else {
+                                    editor.clear_selection();
+                                }
+                                editor.cursor_idx = at;
                                 self.code_editor = Some(editor);
                                 clicked_any_focusable = true;
                                 break;
@@ -2467,46 +2620,92 @@ impl Input for ParametersBg {
                         let p = &mut self.display_params[idx];
                         if p.2 == "code" {
                             if let Some(mut editor) = self.code_editor.take() {
-                                let mut changed = false;
+                                // Edits go to the BUFFER, not the value: a script
+                                // re-evaluates the node on every value change, and
+                                // a half-typed line would fail on every keystroke.
+                                // ctrl+enter applies, and so does leaving the row
+                                // (Escape, a click elsewhere, `unfocus`).
+                                let before = editor.clone();
                                 let mut handled = true;
+                                let mut edited = false;
+                                let mut apply = false;
                                 let mut should_unfocus = false;
+                                let shift = event.shift;
+                                let mut move_vertical = |editor: &mut TextEditorState, delta: i32| {
+                                    if shift && editor.select_anchor.is_none() {
+                                        editor.select_anchor = Some(editor.cursor_idx);
+                                    } else if !shift {
+                                        editor.clear_selection();
+                                    }
+                                    let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
+                                    let total = editor.buffer.split('\n').count() as i32;
+                                    let target = (line as i32 + delta).clamp(0, total - 1) as usize;
+                                    editor.cursor_idx = map_2d_to_1d(&editor.buffer, target, col);
+                                };
                                 match &event.logical_key {
                                     Key::Named(NamedKey::Backspace) => {
-                                        changed = editor.delete_backwards();
+                                        edited = editor.delete_backwards();
                                     }
                                     Key::Named(NamedKey::Delete) => {
-                                        changed = editor.delete_forwards();
+                                        edited = editor.delete_forwards();
+                                    }
+                                    Key::Named(NamedKey::Enter) if event.ctrl => {
+                                        apply = true;
                                     }
                                     Key::Named(NamedKey::Enter) => {
-                                        editor.insert_text("\n");
-                                        changed = true;
+                                        // Auto-indent: the line's own leading whitespace,
+                                        // one level deeper after an opening brace.
+                                        let line_start = get_line_start(&editor.buffer, editor.cursor_idx);
+                                        let line: String = editor.buffer.chars().skip(line_start).take(editor.cursor_idx - line_start).collect();
+                                        let mut indent: String = line.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+                                        if line.trim_end().ends_with('{') || line.trim_end().ends_with('(') || line.trim_end().ends_with('[') {
+                                            indent.push_str(Self::CODE_INDENT);
+                                        }
+                                        editor.insert_text(&format!("\n{indent}"));
+                                        edited = true;
+                                    }
+                                    Key::Named(NamedKey::Tab) if event.shift => {
+                                        // Dedent the current line by one level, or what it has.
+                                        let line_start = get_line_start(&editor.buffer, editor.cursor_idx);
+                                        let leading = editor.buffer.chars().skip(line_start).take_while(|c| *c == ' ').count().min(Self::CODE_INDENT.len());
+                                        if leading > 0 {
+                                            let chars: Vec<char> = editor.buffer.chars().collect();
+                                            editor.buffer = chars[..line_start].iter().chain(&chars[line_start + leading..]).collect();
+                                            editor.cursor_idx = editor.cursor_idx.saturating_sub(leading).max(line_start);
+                                            editor.clear_selection();
+                                            edited = true;
+                                        }
+                                    }
+                                    Key::Named(NamedKey::Tab) => {
+                                        editor.insert_text(Self::CODE_INDENT);
+                                        edited = true;
                                     }
                                     Key::Named(NamedKey::Escape) => {
+                                        apply = true;
                                         should_unfocus = true;
                                     }
                                     Key::Named(NamedKey::ArrowLeft) => {
-                                        editor.move_cursor_left(false);
+                                        editor.move_cursor_left(shift);
                                     }
                                     Key::Named(NamedKey::ArrowRight) => {
-                                        editor.move_cursor_right(false);
+                                        editor.move_cursor_right(shift);
                                     }
-                                    Key::Named(NamedKey::ArrowUp) => {
-                                        let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                                        if line > 0 {
-                                            editor.cursor_idx = map_2d_to_1d(&editor.buffer, line - 1, col);
-                                        }
-                                    }
-                                    Key::Named(NamedKey::ArrowDown) => {
-                                        let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                                        let total_lines = editor.buffer.split('\n').count();
-                                        if line + 1 < total_lines {
-                                            editor.cursor_idx = map_2d_to_1d(&editor.buffer, line + 1, col);
-                                        }
-                                    }
+                                    Key::Named(NamedKey::ArrowUp) => move_vertical(&mut editor, -1),
+                                    Key::Named(NamedKey::ArrowDown) => move_vertical(&mut editor, 1),
                                     Key::Named(NamedKey::Home) => {
+                                        if shift && editor.select_anchor.is_none() {
+                                            editor.select_anchor = Some(editor.cursor_idx);
+                                        } else if !shift {
+                                            editor.clear_selection();
+                                        }
                                         editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
                                     }
                                     Key::Named(NamedKey::End) => {
+                                        if shift && editor.select_anchor.is_none() {
+                                            editor.select_anchor = Some(editor.cursor_idx);
+                                        } else if !shift {
+                                            editor.clear_selection();
+                                        }
                                         editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
                                     }
                                     Key::Character(s) => {
@@ -2518,53 +2717,48 @@ impl Input for ParametersBg {
                                                 "b" => {
                                                     editor.move_cursor_left(false);
                                                 }
-                                                "p" => {
-                                                    let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                                                    if line > 0 {
-                                                        editor.cursor_idx = map_2d_to_1d(&editor.buffer, line - 1, col);
-                                                    }
-                                                }
-                                                "n" => {
-                                                    let (line, col) = get_cursor_line_col(&editor.buffer, editor.cursor_idx);
-                                                    let total_lines = editor.buffer.split('\n').count();
-                                                    if line + 1 < total_lines {
-                                                        editor.cursor_idx = map_2d_to_1d(&editor.buffer, line + 1, col);
-                                                    }
+                                                "p" => move_vertical(&mut editor, -1),
+                                                "n" => move_vertical(&mut editor, 1),
+                                                "a" if event.shift => {
+                                                    editor.select_all();
                                                 }
                                                 "a" => {
+                                                    editor.clear_selection();
                                                     editor.cursor_idx = get_line_start(&editor.buffer, editor.cursor_idx);
                                                 }
                                                 "e" => {
+                                                    editor.clear_selection();
                                                     editor.cursor_idx = get_line_end(&editor.buffer, editor.cursor_idx);
                                                 }
                                                 "d" => {
-                                                    changed = editor.delete_forwards();
+                                                    edited = editor.delete_forwards();
                                                 }
                                                 "h" => {
-                                                    changed = editor.delete_backwards();
+                                                    edited = editor.delete_backwards();
                                                 }
                                                 "k" => {
                                                     let current_idx = editor.cursor_idx;
                                                     let end_idx = get_line_end(&editor.buffer, current_idx);
                                                     let chars: Vec<char> = editor.buffer.chars().collect();
-                                                    if chars.is_empty() {
-                                                        // do nothing
-                                                    } else if current_idx < chars.len() {
-                                                        let delete_end = if chars[current_idx] == '\n' {
-                                                            current_idx + 1
-                                                        } else {
-                                                            end_idx
-                                                        };
-                                                        let mut new_buf = String::new();
-                                                        for i in 0..current_idx {
-                                                            new_buf.push(chars[i]);
-                                                        }
-                                                        for i in delete_end..chars.len() {
-                                                            new_buf.push(chars[i]);
-                                                        }
-                                                        editor.buffer = new_buf;
-                                                        changed = true;
+                                                    if current_idx < chars.len() {
+                                                        let delete_end = if chars[current_idx] == '\n' { current_idx + 1 } else { end_idx };
+                                                        editor.buffer = chars[..current_idx].iter().chain(&chars[delete_end..]).collect();
+                                                        editor.clear_selection();
+                                                        edited = true;
                                                     }
+                                                }
+                                                // The clipboard and history chords are the
+                                                // context actions, so the chord, the runner's
+                                                // routing and the menu row do one thing.
+                                                "c" | "x" | "v" | "z" => {
+                                                    let action = match (s.to_lowercase().as_str(), event.shift) {
+                                                        ("c", _) => crate::widget::ContextAction::Copy,
+                                                        ("x", _) => crate::widget::ContextAction::Cut,
+                                                        ("v", _) => crate::widget::ContextAction::Paste,
+                                                        ("z", true) => crate::widget::ContextAction::Redo,
+                                                        _ => crate::widget::ContextAction::Undo,
+                                                    };
+                                                    apply_code_action(&mut editor, &mut self.code_history, action);
                                                 }
                                                 _ => {
                                                     handled = false;
@@ -2572,20 +2766,31 @@ impl Input for ParametersBg {
                                             }
                                         } else {
                                             editor.insert_text(s);
-                                            changed = true;
+                                            edited = true;
                                         }
                                     }
                                     _ => {
                                         handled = false;
                                     }
                                 }
-                                if changed {
+                                if edited {
+                                    // Typing runs coalesce into one undo step; anything
+                                    // structural (a newline, a paste, a deletion of a
+                                    // selection) starts a new one.
+                                    let plain_char = matches!(&event.logical_key, Key::Character(c) if !event.ctrl && c.chars().count() == 1);
+                                    if plain_char {
+                                        self.code_history.record_grouped(before, 1);
+                                    } else {
+                                        self.code_history.record(before);
+                                    }
+                                }
+                                if apply {
                                     p.1 = editor.buffer.clone();
                                 }
                                 if should_unfocus {
-                                    p.1 = editor.buffer;
                                     self.focused_param = None;
                                     self.code_editor = None;
+                                    self.code_history.clear();
                                 } else {
                                     self.code_editor = Some(editor);
                                 }
@@ -3140,6 +3345,53 @@ impl ParamController for ParametersBg {
     }
 }
 
+/// One clipboard, selection or history action over a code editor and its
+/// history — the body [`ParametersBg::code_action`] and the editor's own
+/// chords share, free of `self` so a caller holding a row borrow can use it.
+fn apply_code_action(
+    editor: &mut TextEditorState,
+    history: &mut crate::history::History<TextEditorState>,
+    action: crate::widget::ContextAction,
+) {
+    use crate::widget::ContextAction;
+    let before = editor.clone();
+    let mut edited = false;
+    match action {
+        ContextAction::Undo => {
+            if let Some(prev) = history.undo(editor.clone()) {
+                *editor = prev;
+            }
+        }
+        ContextAction::Redo => {
+            if let Some(next) = history.redo(editor.clone()) {
+                *editor = next;
+            }
+        }
+        ContextAction::SelectAll => editor.select_all(),
+        ContextAction::Copy => {
+            if let Some(text) = editor.selected_text() {
+                crate::widget::clipboard::copy_to_clipboard(&text);
+            }
+        }
+        ContextAction::Cut => {
+            if let Some(text) = editor.selected_text() {
+                crate::widget::clipboard::copy_to_clipboard(&text);
+                edited = editor.delete_backwards();
+            }
+        }
+        ContextAction::Paste => {
+            if let Some(text) = crate::widget::clipboard::read_from_clipboard() {
+                editor.insert_text(&text);
+                edited = true;
+            }
+        }
+        _ => {}
+    }
+    if edited {
+        history.record(before);
+    }
+}
+
 fn get_cursor_line_col(buffer: &str, cursor_idx: usize) -> (usize, usize) {
     let mut cur_line = 0;
     let mut cur_col = 0;
@@ -3327,6 +3579,148 @@ mod tests {
         assert_eq!(p.focused_param, None);
         assert!(p.code_editor.is_none());
         assert!(ParamController::node_params(&*p)[0].1.contains('y'), "editor buffer committed on unfocus");
+    }
+
+    fn key(k: Key, ctrl: bool, shift: bool) -> Event {
+        Event::KeyInput(crate::widget::KeyEvent { state: ElementState::Pressed, logical_key: k, text: None, repeat: false, ctrl, shift, alt: false })
+    }
+
+    fn chr(c: &str) -> Event {
+        key(Key::Character(c.into()), false, false)
+    }
+
+    fn ctrl(c: &str) -> Event {
+        key(Key::Character(c.into()), true, false)
+    }
+
+    fn named(k: NamedKey) -> Event {
+        key(Key::Named(k), false, false)
+    }
+
+    fn shift_named(k: NamedKey) -> Event {
+        key(Key::Named(k), false, true)
+    }
+
+    /// A code row focused by a click at its first character.
+    fn code_panel(src: &str) -> (Adapted<ParametersBg>, UiContext) {
+        let mut ctx = UiContext::new();
+        let mut p = panel_with(&[("Src", src, "code")]);
+        let r = p.get_param_rects()[0];
+        let x = p.code_text_x(r);
+        p.mouse_input(MouseButton::Left, ElementState::Pressed, x, r.1 + ParametersBg::CODE_TOP + 2.0, &mut ctx);
+        assert_eq!(p.focused_param, Some(0));
+        (p, ctx)
+    }
+
+    fn send(p: &mut Adapted<ParametersBg>, ctx: &mut UiContext, ev: Event) -> bool {
+        WidgetHost::handle_event(p, &ev, ctx)
+    }
+
+    /// Typing edits the buffer and leaves the VALUE alone until ctrl+enter
+    /// applies it — a script would otherwise re-run on every keystroke — and
+    /// the row says so: dirty while they differ, clean once applied.
+    #[test]
+    fn code_edits_apply_on_ctrl_enter_not_per_keystroke() {
+        let (mut p, mut ctx) = code_panel("let x = 1;");
+        assert!(!p.code_is_dirty());
+        send(&mut p, &mut ctx, chr("/"));
+        send(&mut p, &mut ctx, chr("/"));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "//let x = 1;");
+        assert_eq!(ParamController::node_params(&*p)[0].1, "let x = 1;", "the value waits");
+        assert!(p.code_is_dirty());
+        send(&mut p, &mut ctx, key(Key::Named(NamedKey::Enter), true, false));
+        assert_eq!(ParamController::node_params(&*p)[0].1, "//let x = 1;", "ctrl+enter applies");
+        assert!(!p.code_is_dirty());
+        assert_eq!(p.focused_param, Some(0), "and keeps editing");
+        // Escape applies too, and leaves the row.
+        send(&mut p, &mut ctx, chr("!"));
+        send(&mut p, &mut ctx, named(NamedKey::Escape));
+        assert_eq!(ParamController::node_params(&*p)[0].1, "//!let x = 1;");
+        assert_eq!(p.focused_param, None);
+    }
+
+    /// Tab indents, shift+tab dedents, and Enter carries the indentation —
+    /// one level deeper after an opening brace.
+    #[test]
+    fn code_editor_indents_like_an_editor() {
+        let (mut p, mut ctx) = code_panel("");
+        send(&mut p, &mut ctx, chr("i"));
+        send(&mut p, &mut ctx, chr("f"));
+        send(&mut p, &mut ctx, chr(" "));
+        send(&mut p, &mut ctx, chr("{"));
+        send(&mut p, &mut ctx, named(NamedKey::Enter));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "if {\n    ", "a brace opens a level");
+        send(&mut p, &mut ctx, chr("x"));
+        send(&mut p, &mut ctx, named(NamedKey::Enter));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "if {\n    x\n    ", "the level carries");
+        send(&mut p, &mut ctx, shift_named(NamedKey::Tab));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "if {\n    x\n", "shift+tab dedents the line");
+        send(&mut p, &mut ctx, chr("}"));
+        send(&mut p, &mut ctx, named(NamedKey::Tab));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "if {\n    x\n}    ", "tab inserts a level");
+        assert!(send(&mut p, &mut ctx, named(NamedKey::Tab)), "tab is the editor's: it does not fall through to the host");
+    }
+
+    /// shift+arrows select, typing replaces the selection, ctrl+z undoes a
+    /// typing run as one step and ctrl+shift+z redoes it.
+    #[test]
+    fn code_editor_selects_and_undoes() {
+        let (mut p, mut ctx) = code_panel("abc\ndef");
+        send(&mut p, &mut ctx, named(NamedKey::End));
+        send(&mut p, &mut ctx, shift_named(NamedKey::ArrowDown));
+        let e = p.code_editor.as_ref().unwrap();
+        assert_eq!(e.selected_text().as_deref(), Some("\ndef"), "shift+down from the end of line 1 selects to the same column of line 2");
+        send(&mut p, &mut ctx, chr("Z"));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "abcZ", "typing replaces the selection");
+        send(&mut p, &mut ctx, chr("Y"));
+        send(&mut p, &mut ctx, chr("X"));
+        send(&mut p, &mut ctx, ctrl("z"));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "abc\ndef", "one typing run, one undo");
+        send(&mut p, &mut ctx, key(Key::Character("z".into()), true, true));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "abcZYX", "and one redo");
+        send(&mut p, &mut ctx, key(Key::Character("a".into()), true, true));
+        assert_eq!(p.code_editor.as_ref().unwrap().selected_text().as_deref(), Some("abcZYX"), "ctrl+shift+a selects all");
+        assert_eq!(ParamController::node_params(&*p)[0].1, "abc\ndef", "none of it applied yet");
+    }
+
+    /// The host flags an error line and the gutter number turns red for it;
+    /// a click lands the caret past the gutter, on the column it named.
+    #[test]
+    fn code_row_flags_an_error_line_and_clicks_land_past_the_gutter() {
+        let (mut p, mut ctx) = code_panel("one\ntwo\nthree");
+        p.set_code_error_line(Some(1));
+        let labels = p.own_text_labels();
+        let two = labels.iter().find(|l| l.text == "  2").expect("a gutter number for line 2");
+        assert_eq!(two.color, [0xff, 0x80, 0x70]);
+        let one = labels.iter().find(|l| l.text == "  1").unwrap();
+        assert_eq!(one.color, [0x66, 0x66, 0x78]);
+        let r = p.get_param_rects()[0];
+        let x = p.code_text_x(r) + 2.0 * p.code_col_w();
+        p.mouse_input(MouseButton::Left, ElementState::Pressed, x, r.1 + ParametersBg::CODE_TOP + 2.0 * ParametersBg::CODE_LINE_H + 2.0, &mut ctx);
+        let e = p.code_editor.as_ref().unwrap();
+        assert_eq!(get_cursor_line_col(&e.buffer, e.cursor_idx), (2, 2), "line 3, column 2");
+        p.set_code_error_line(None);
+        assert!(p.own_text_labels().iter().all(|l| l.color != [0xff, 0x80, 0x70]));
+    }
+
+    /// The context actions reach the editor: undo through the runner's
+    /// routing is the editor's own history, and select-all selects the
+    /// buffer. Outside an edit the pane declines them.
+    #[test]
+    fn code_editor_answers_context_actions_while_editing() {
+        use crate::widget::ContextAction;
+        let (mut p, mut ctx) = code_panel("abc");
+        send(&mut p, &mut ctx, named(NamedKey::End));
+        send(&mut p, &mut ctx, chr("d"));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "abcd");
+        assert!(Input::context_action(&mut *p, ContextAction::Undo));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "abc", "undo through the context action");
+        assert!(Input::context_action(&mut *p, ContextAction::Redo));
+        assert_eq!(p.code_editor.as_ref().unwrap().buffer, "abcd");
+        assert!(Input::context_action(&mut *p, ContextAction::SelectAll));
+        assert_eq!(p.code_editor.as_ref().unwrap().selected_text().as_deref(), Some("abcd"));
+        WidgetHost::unfocus(&mut p);
+        assert!(!Input::context_action(&mut *p, ContextAction::Undo), "nothing to act on once the editor is closed");
     }
 
     #[test]
