@@ -359,6 +359,46 @@ pub mod context_menu {
         crate::layout::menubar_font_parsed()
     }
 
+    /// The band a slider row draws its control over, logical px.
+    pub const SLIDER_W: f32 = 120.0;
+    /// Gap between a slider row's label, its readout and its band.
+    pub const SLIDER_GAP: f32 = 10.0;
+
+    /// A row that is a SLIDER rather than an action: set on a shown menu with
+    /// [`set_row_slider`], it keeps the menu open while it is worked. The
+    /// wheel over the row steps it by `step` a notch (a trackpad's fractional
+    /// notches accumulate, so a fine swipe still arrives in whole steps); a
+    /// press on its band jumps to the pointer and drags until the release.
+    /// Each change is drained by the host through [`take_slider_change`] —
+    /// the menu has no idea what the value means, as it has none what an
+    /// action row does.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct MenuSlider {
+        pub value: f32,
+        pub min: f32,
+        pub max: f32,
+        /// One wheel notch's change, and the grid a dragged value snaps to
+        /// (0 = continuous).
+        pub step: f32,
+        /// Decimals in the readout.
+        pub decimals: usize,
+        /// Appended to the readout: `"%"`, `" mm"`.
+        pub suffix: &'static str,
+    }
+
+    impl MenuSlider {
+        fn clamp_snap(&self, v: f32) -> f32 {
+            let (lo, hi) = (self.min.min(self.max), self.min.max(self.max));
+            let v = if self.step > 0.0 { self.min + ((v - self.min) / self.step).round() * self.step } else { v };
+            v.clamp(lo, hi)
+        }
+
+        /// What the row shows to the left of its band.
+        pub fn readout(&self) -> String {
+            format!("{:.*}{}", self.decimals, self.value, self.suffix)
+        }
+    }
+
     /// A toolkit color as the `[u8; 3]` a [`TextLabel`] carries.
     fn rgb8(c: [f32; 4]) -> [u8; 3] {
         [
@@ -381,6 +421,16 @@ pub mod context_menu {
         /// caller's generational tree, so a stale target is a no-op, not a UAF.
         pub target: Option<WidgetId>,
         pub header_count: usize,
+        /// Slider rows by index, parallel to `options` — see [`MenuSlider`].
+        /// Emptied by every `show`, so a menu's sliders are the ones its
+        /// host set this time.
+        pub sliders: Vec<Option<MenuSlider>>,
+        /// The slider row a press took hold of, until the release.
+        pub slider_drag: Option<usize>,
+        /// A trackpad's leftover fraction of a wheel notch.
+        wheel_accum: f32,
+        /// The last value a slider was moved to, drained by the host.
+        slider_change: Option<(usize, f32)>,
     }
 
     impl ContextMenuState {
@@ -395,6 +445,10 @@ pub mod context_menu {
                 hovered_item: None,
                 target: None,
                 header_count: 0,
+                sliders: Vec::new(),
+                slider_drag: None,
+                wheel_accum: 0.0,
+                slider_change: None,
             }
         }
 
@@ -437,6 +491,110 @@ pub mod context_menu {
             self.hovered_item = None;
             self.target = Some(target);
             self.header_count = header_count;
+            self.sliders = vec![None; self.options.len()];
+            self.slider_drag = None;
+            self.wheel_accum = 0.0;
+            self.slider_change = None;
+        }
+
+        /// Make row `idx` a slider. Widens the plate to hold the label, the
+        /// readout at its widest (both ends of the range) and the band.
+        pub fn set_row_slider(&mut self, idx: usize, slider: MenuSlider) {
+            if idx >= self.options.len() {
+                return;
+            }
+            self.sliders[idx] = Some(slider);
+            let (family, size) = label_font();
+            let measure = |t: &str| crate::widget::display::measure_text_width(t, &family, size);
+            let readout_w = [slider.min, slider.max]
+                .iter()
+                .map(|&v| measure(&MenuSlider { value: v, ..slider }.readout()))
+                .fold(0.0f32, f32::max);
+            let need = PAD + measure(&self.options[idx]) + SLIDER_GAP + readout_w + SLIDER_GAP + SLIDER_W + PAD;
+            self.w = self.w.max(need);
+        }
+
+        /// The slider on row `idx`, if it is one.
+        pub fn slider(&self, idx: usize) -> Option<MenuSlider> {
+            self.sliders.get(idx).copied().flatten()
+        }
+
+        /// The band row `idx`'s slider draws over and a press grabs.
+        pub fn slider_band(&self, idx: usize) -> crate::scene::layout::Rect {
+            crate::scene::layout::Rect {
+                x: self.x + self.w - PAD - SLIDER_W,
+                y: self.row_y(idx) + 3.0,
+                width: SLIDER_W,
+                height: ROW_H - 6.0,
+            }
+        }
+
+        fn set_slider_value(&mut self, idx: usize, v: f32) -> bool {
+            let Some(Some(s)) = self.sliders.get_mut(idx) else { return false };
+            let v = s.clamp_snap(v);
+            if (v - s.value).abs() < f32::EPSILON {
+                return false;
+            }
+            s.value = v;
+            self.slider_change = Some((idx, v));
+            true
+        }
+
+        /// The wheel over a slider row steps it; anywhere else it does
+        /// nothing and says so. Up is more, as on every slider in the DE.
+        pub fn mouse_wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+            if !self.visible {
+                return false;
+            }
+            let Some(idx) = self.row_at(px, py) else { return false };
+            let Some(s) = self.slider(idx) else { return false };
+            self.wheel_accum += delta.notches_y();
+            let whole = self.wheel_accum.trunc();
+            if whole == 0.0 {
+                return false;
+            }
+            self.wheel_accum -= whole;
+            let step = if s.step > 0.0 { s.step } else { (s.max - s.min) * 0.02 };
+            self.set_slider_value(idx, s.value + whole * step)
+        }
+
+        /// A left press on a slider row: on the band it takes hold and jumps
+        /// the value to the pointer; anywhere on the row it is the slider's
+        /// and the menu stays open. `false` for any other row.
+        pub fn slider_press(&mut self, px: f32, py: f32) -> bool {
+            if !self.visible {
+                return false;
+            }
+            let Some(idx) = self.row_at(px, py) else { return false };
+            if self.slider(idx).is_none() {
+                return false;
+            }
+            let band = self.slider_band(idx);
+            if px >= band.x && px <= band.x + band.width {
+                self.slider_drag = Some(idx);
+                self.slider_drag_to(px);
+            }
+            true
+        }
+
+        /// Move the held slider to the pointer's place along its band —
+        /// wherever the pointer is, so a drag that leaves the plate keeps
+        /// working. `false` when nothing is held or nothing moved.
+        pub fn slider_drag_to(&mut self, px: f32) -> bool {
+            let Some(idx) = self.slider_drag else { return false };
+            let Some(s) = self.slider(idx) else { return false };
+            let band = self.slider_band(idx);
+            let t = ((px - band.x) / band.width.max(1.0)).clamp(0.0, 1.0);
+            self.set_slider_value(idx, s.min + t * (s.max - s.min))
+        }
+
+        /// End a slider drag; `true` if one was held.
+        pub fn slider_release(&mut self) -> bool {
+            self.slider_drag.take().is_some()
+        }
+
+        pub fn take_slider_change(&mut self) -> Option<(usize, f32)> {
+            self.slider_change.take()
         }
 
         pub fn hide(&mut self) {
@@ -471,6 +629,9 @@ pub mod context_menu {
 
         pub fn cursor_moved(&mut self, px: f32, py: f32) -> bool {
             if !self.visible { return false; }
+            if self.slider_drag.is_some() {
+                return self.slider_drag_to(px);
+            }
             let was_hovered = self.hovered_item;
             self.hovered_item = None;
             if let Some(idx) = self.row_at(px, py) {
@@ -485,6 +646,12 @@ pub mod context_menu {
 
         pub fn mouse_input(&mut self, button: MouseButton, state: ElementState, px: f32, py: f32, ctx: Option<&mut crate::context::UiContext>) -> bool {
             if !self.visible { return false; }
+            if button == MouseButton::Left && state == ElementState::Released && self.slider_release() {
+                return true;
+            }
+            if button == MouseButton::Left && state == ElementState::Pressed && self.slider_press(px, py) {
+                return true;
+            }
             if button != MouseButton::Left || state != ElementState::Pressed {
                 if state == ElementState::Pressed {
                     self.hide();
@@ -612,6 +779,22 @@ pub mod context_menu {
                     );
                 }
             }
+            self.paint_sliders(ctx);
+        }
+
+        /// The slider rows' bands — the toolkit's own `Slider`, one stamp set
+        /// to each row's range and value, so a slider in a menu is the slider
+        /// everywhere else. Its readout is off: the menu draws the readout as
+        /// a label, so it wears the menu font and clears the popover clamp.
+        fn paint_sliders(&self, ctx: &mut crate::scene::paint::PaintCtx) {
+            for idx in 0..self.options.len() {
+                let Some(s) = self.slider(idx) else { continue };
+                let mut stamp = Slider::new().with_readout(false);
+                stamp.set_scroll(false);
+                stamp.set_range(s.min, s.max);
+                stamp.set_scaled_value(s.value);
+                crate::widget::model::Paint::paint(&*stamp, self.slider_band(idx), ctx);
+            }
         }
 
         /// The flat-quad menu: a 1px border rect, a near-black fill and the hover
@@ -704,6 +887,19 @@ pub mod context_menu {
                     font_size: label_size,
                     color: text_color,
                 });
+                // A slider row's readout, right-aligned against its band.
+                if let Some(s) = self.slider(idx) {
+                    let (family, _) = label_font();
+                    let text = s.readout();
+                    let tw = crate::widget::display::measure_text_width(&text, &family, label_size);
+                    labels.push(TextLabel {
+                        text,
+                        x: self.slider_band(idx).x - SLIDER_GAP - tw,
+                        y: iy,
+                        font_size: label_size,
+                        color: text_color,
+                    });
+                }
             }
             labels
         }
@@ -762,6 +958,36 @@ pub mod context_menu {
 
     pub fn cursor_moved(px: f32, py: f32) -> bool {
         CONTEXT_MENU.with(|m| m.borrow_mut().cursor_moved(px, py))
+    }
+
+    /// Make row `idx` of the shown menu a slider — see [`MenuSlider`]. Call
+    /// after [`show`], which clears every row back to an action.
+    pub fn set_row_slider(idx: usize, slider: MenuSlider) {
+        CONTEXT_MENU.with(|m| m.borrow_mut().set_row_slider(idx, slider));
+    }
+    pub fn slider(idx: usize) -> Option<MenuSlider> {
+        CONTEXT_MENU.with(|m| m.borrow().slider(idx))
+    }
+    /// The wheel, for hosts that route it: steps the slider under the
+    /// pointer. `false` when no slider row is there — let it scroll the page.
+    pub fn mouse_wheel(delta: &MouseScrollDelta, px: f32, py: f32) -> bool {
+        CONTEXT_MENU.with(|m| m.borrow_mut().mouse_wheel(delta, px, py))
+    }
+    /// A left press, for hosts that dispatch the menu themselves: `true` when
+    /// it landed on a slider row, which the host must then NOT treat as an
+    /// action or a dismissal.
+    pub fn slider_press(px: f32, py: f32) -> bool {
+        CONTEXT_MENU.with(|m| m.borrow_mut().slider_press(px, py))
+    }
+    pub fn slider_dragging() -> bool {
+        CONTEXT_MENU.with(|m| m.borrow().slider_drag.is_some())
+    }
+    pub fn slider_release() -> bool {
+        CONTEXT_MENU.with(|m| m.borrow_mut().slider_release())
+    }
+    /// `(row, value)` of the last slider change since the last call.
+    pub fn take_slider_change() -> Option<(usize, f32)> {
+        CONTEXT_MENU.with(|m| m.borrow_mut().take_slider_change())
     }
 
     pub fn mouse_input(button: MouseButton, state: ElementState, px: f32, py: f32, ctx: Option<&mut crate::context::UiContext>) -> bool {
@@ -877,6 +1103,97 @@ macro_rules! impl_widget_base {
         fn as_any(&self) -> &dyn std::any::Any { self }
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
     };
+}
+
+#[cfg(test)]
+mod context_menu_slider_tests {
+    use super::context_menu::{ContextMenuState, MenuSlider, PAD, ROW_H, SLIDER_W};
+    use crate::widget::{ElementState, MouseButton, MouseScrollDelta, Position, WidgetId};
+
+    fn menu() -> ContextMenuState {
+        let mut m = ContextMenuState::new();
+        m.show(100.0, 50.0, vec!["Frame All".into(), "Opacity".into()], 0, WidgetId(7));
+        m.set_row_slider(1, MenuSlider { value: 50.0, min: 0.0, max: 100.0, step: 5.0, decimals: 0, suffix: "%" });
+        m
+    }
+    fn row_mid(m: &ContextMenuState, idx: usize) -> f32 {
+        m.row_y(idx) + ROW_H * 0.5
+    }
+
+    /// A notch over the slider row steps it by `step`, up is more, and the
+    /// change is reported once; over an action row the wheel is not the
+    /// menu's. A trackpad's fractions add up to whole steps.
+    #[test]
+    fn the_wheel_steps_a_slider_row() {
+        let mut m = menu();
+        let y = row_mid(&m, 1);
+        assert!(m.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 150.0, y));
+        assert_eq!(m.slider(1).unwrap().value, 55.0);
+        assert_eq!(m.take_slider_change(), Some((1, 55.0)));
+        assert_eq!(m.take_slider_change(), None, "reported once");
+        m.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -2.0), 150.0, y);
+        assert_eq!(m.slider(1).unwrap().value, 45.0);
+
+        assert!(!m.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 150.0, row_mid(&m, 0)), "an action row does not take the wheel");
+
+        // 30 px is half a notch: nothing yet, then the second half lands a step.
+        let half = MouseScrollDelta::PixelDelta(Position { x: 0.0, y: 30.0 });
+        assert!(!m.mouse_wheel(&half, 150.0, y));
+        assert!(m.mouse_wheel(&half, 150.0, y));
+        assert_eq!(m.slider(1).unwrap().value, 50.0);
+
+        // Clamped at the ends, and a clamp that moves nothing reports nothing.
+        for _ in 0..30 {
+            m.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 150.0, y);
+        }
+        assert_eq!(m.slider(1).unwrap().value, 100.0);
+        m.take_slider_change();
+        assert!(!m.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), 150.0, y));
+        assert_eq!(m.take_slider_change(), None);
+    }
+
+    /// A press on the band jumps to the pointer (snapped to the step) and
+    /// drags; the menu stays open through it, and the release ends the drag.
+    /// A press on an action row still fires and closes, as before.
+    #[test]
+    fn a_press_on_the_band_drags_and_keeps_the_menu_open() {
+        let mut m = menu();
+        let y = row_mid(&m, 1);
+        let band = m.slider_band(1);
+        assert!((band.x + SLIDER_W - (m.x + m.w - PAD)).abs() < 1e-3, "the band ends at the padding");
+        assert!(m.mouse_input(MouseButton::Left, ElementState::Pressed, band.x + band.width * 0.8, y, None));
+        assert!(m.visible, "a slider row does not close the menu");
+        assert_eq!(m.slider(1).unwrap().value, 80.0);
+        m.cursor_moved(band.x + band.width * 0.21, y + 200.0);
+        assert_eq!(m.slider(1).unwrap().value, 20.0, "the drag follows off the plate, snapped to 5");
+        assert!(m.mouse_input(MouseButton::Left, ElementState::Released, 0.0, 0.0, None));
+        assert!(m.slider_drag.is_none());
+        m.cursor_moved(band.x, y);
+        assert_eq!(m.slider(1).unwrap().value, 20.0, "released: motion is hover again");
+
+        // A press on the row's label end: the slider's, nothing moves.
+        assert!(m.mouse_input(MouseButton::Left, ElementState::Pressed, m.x + PAD + 2.0, y, None));
+        assert!(m.visible);
+        assert_eq!(m.slider(1).unwrap().value, 20.0);
+
+        m.mouse_input(MouseButton::Left, ElementState::Pressed, m.x + PAD + 2.0, row_mid(&m, 0), None);
+        assert!(!m.visible, "an action row still fires and closes");
+    }
+
+    /// The plate widens for the label, the readout and the band; a fresh
+    /// `show` clears every slider back to an action row.
+    #[test]
+    fn a_slider_row_widens_the_plate_and_show_clears_it() {
+        let mut m = ContextMenuState::new();
+        m.show(0.0, 0.0, vec!["Opacity".into()], 0, WidgetId(7));
+        let narrow = m.w;
+        m.set_row_slider(0, MenuSlider { value: 1.0, min: 0.0, max: 100.0, step: 1.0, decimals: 0, suffix: "%" });
+        assert!(m.w >= narrow.max(SLIDER_W + 2.0 * PAD));
+        let labels = m.text_labels();
+        assert!(labels.iter().any(|l| l.text == "1%"), "the readout is a label: {:?}", labels.iter().map(|l| &l.text).collect::<Vec<_>>());
+        m.show(0.0, 0.0, vec!["Opacity".into()], 0, WidgetId(7));
+        assert!(m.slider(0).is_none());
+    }
 }
 
 #[cfg(test)]
