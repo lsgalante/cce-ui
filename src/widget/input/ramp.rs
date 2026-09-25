@@ -1408,7 +1408,8 @@ impl Input for Ramp {
         if let (Some(idx), Some(last)) = (self.scroll_key_idx, self.last_key_scroll) {
             if last.elapsed().as_secs_f32() > 0.06 && idx < self.keys.len() {
                 let (vx, vy) = self.scroll_vel;
-                if vx.abs() > 0.02 || vy.abs() > 0.02 {
+                // Animations off: the key stops where the scroll left it.
+                if (vx.abs() > 0.02 || vy.abs() > 0.02) && crate::motion::enabled() {
                     self.keys[idx].pos = (self.keys[idx].pos + vx * dt).clamp(0.0, 1.0);
                     self.keys[idx].value = (self.keys[idx].value + vy * dt).clamp(0.0, 1.0);
                     let settled = self.resettle_key(idx);

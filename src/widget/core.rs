@@ -191,6 +191,9 @@ pub mod hover_animation {
         HOVER_STATE.with(|state| {
             let mut s = state.borrow_mut();
             let decay = 15.0;
+            // The per-tick approach fraction; 1 lands on the target at once,
+            // which is the whole of animations-off for the highlight.
+            let k = if crate::motion::enabled() { 1.0 - (-decay * dt).exp() } else { 1.0 };
             let mut changed = false;
 
             if s.current_alpha <= 0.001 && s.target_alpha > 0.0 {
@@ -203,7 +206,7 @@ pub mod hover_animation {
             }
 
             if (s.current_alpha - s.target_alpha).abs() > 0.001 {
-                s.current_alpha += (s.target_alpha - s.current_alpha) * (1.0 - (-decay * dt).exp());
+                s.current_alpha += (s.target_alpha - s.current_alpha) * k;
                 changed = true;
             } else if s.current_alpha != s.target_alpha {
                 s.current_alpha = s.target_alpha;
@@ -212,7 +215,7 @@ pub mod hover_animation {
 
             if let (Some(tx), Some(ty), Some(tw), Some(th)) = (s.target_x, s.target_y, s.target_w, s.target_h) {
                 if (s.current_x - tx).abs() > 0.1 {
-                    s.current_x += (tx - s.current_x) * (1.0 - (-decay * dt).exp());
+                    s.current_x += (tx - s.current_x) * k;
                     changed = true;
                 } else if s.current_x != tx {
                     s.current_x = tx;
@@ -220,7 +223,7 @@ pub mod hover_animation {
                 }
 
                 if (s.current_y - ty).abs() > 0.1 {
-                    s.current_y += (ty - s.current_y) * (1.0 - (-decay * dt).exp());
+                    s.current_y += (ty - s.current_y) * k;
                     changed = true;
                 } else if s.current_y != ty {
                     s.current_y = ty;
@@ -228,7 +231,7 @@ pub mod hover_animation {
                 }
 
                 if (s.current_w - tw).abs() > 0.1 {
-                    s.current_w += (tw - s.current_w) * (1.0 - (-decay * dt).exp());
+                    s.current_w += (tw - s.current_w) * k;
                     changed = true;
                 } else if s.current_w != tw {
                     s.current_w = tw;
@@ -236,7 +239,7 @@ pub mod hover_animation {
                 }
 
                 if (s.current_h - th).abs() > 0.1 {
-                    s.current_h += (th - s.current_h) * (1.0 - (-decay * dt).exp());
+                    s.current_h += (th - s.current_h) * k;
                     changed = true;
                 } else if s.current_h != th {
                     s.current_h = th;

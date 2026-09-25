@@ -498,7 +498,8 @@ impl Input for Slider {
         if last.elapsed().as_secs_f32() <= 0.06 {
             return false;
         }
-        if self.scroll_vel.abs() > 0.02 && !self.dragging && !self.editing {
+        // Animations off: the value stops where the wheel left it.
+        if self.scroll_vel.abs() > 0.02 && !self.dragging && !self.editing && crate::motion::enabled() {
             let new_val = (self.value + self.scroll_vel * dt).clamp(0.0, 1.0);
             let moved = self.set_value_marking(new_val);
             if crate::scroll_debug() {

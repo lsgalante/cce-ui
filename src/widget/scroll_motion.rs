@@ -113,7 +113,19 @@ impl Default for ScrollSettings {
 static SETTINGS: std::sync::OnceLock<ScrollSettings> = std::sync::OnceLock::new();
 
 /// This app's effective smooth-scroll settings (`<app>` → `cce-ui` → defaults).
+/// With animations off ([`crate::motion`]) a wheel notch jumps and a flick
+/// stops at the lift — the legacy behavior — whatever input.kdl says; that
+/// is checked per call, so it follows the switch while the app runs.
 pub fn scroll_settings() -> ScrollSettings {
+    let configured = configured_scroll_settings();
+    if crate::motion::enabled() {
+        configured
+    } else {
+        ScrollSettings { smooth: false, kinetic: false, ..configured }
+    }
+}
+
+fn configured_scroll_settings() -> ScrollSettings {
     *SETTINGS.get_or_init(|| {
         let input = crate::input::cached();
         let app = crate::config::get_app_name().unwrap_or_default();
@@ -333,6 +345,17 @@ impl ScrollAxis {
         let old = self.pos;
         match self.mode {
             Mode::Idle | Mode::Tracking => return false,
+            // Settings that forbid the motion already in flight (animations
+            // switched off mid-glide) land it rather than finish it.
+            Mode::Easing if !s.smooth => {
+                self.pos = self.target;
+                self.mode = Mode::Idle;
+            }
+            Mode::Coasting if !s.kinetic => {
+                self.vel = 0.0;
+                self.target = self.pos;
+                self.mode = Mode::Idle;
+            }
             Mode::Easing => {
                 let remaining = self.target - self.pos;
                 if remaining.abs() <= SNAP_PX {

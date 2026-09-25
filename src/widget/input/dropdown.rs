@@ -253,6 +253,10 @@ impl Dropdown {
         let Some(start) = self.anim_start else {
             return if self.open && !self.closing { 1.0 } else { 0.0 };
         };
+        // Animations off: a transition in flight has already landed.
+        if !crate::motion::enabled() {
+            return if self.closing { 0.0 } else { 1.0 };
+        }
         let el = start.elapsed().as_secs_f32() / Self::ANIM_S;
         if self.closing {
             (self.anim_from - el).clamp(0.0, 1.0)
@@ -266,7 +270,7 @@ impl Dropdown {
         self.anim_start = Some(std::time::Instant::now());
         self.open = true;
         self.closing = false;
-        self.anim_snap = self.anim_from;
+        self.anim_snap = self.anim_progress_now();
     }
 
     fn begin_close(&mut self) {
@@ -276,7 +280,7 @@ impl Dropdown {
         self.anim_from = self.anim_progress_now();
         self.anim_start = Some(std::time::Instant::now());
         self.closing = true;
-        self.anim_snap = self.anim_from;
+        self.anim_snap = self.anim_progress_now();
     }
 
     /// Fold finished animations back into settled state and refresh the

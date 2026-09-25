@@ -567,6 +567,10 @@ impl Input for Toggle {
         if d.abs() < 0.001 {
             return false;
         }
+        if !crate::motion::enabled() {
+            self.slide_t = target;
+            return true;
+        }
         self.slide_t += d * (1.0 - (-dt * 22.0).exp());
         if (target - self.slide_t).abs() < 0.005 {
             self.slide_t = target;

@@ -18,6 +18,7 @@ pub mod file_dialog;
 pub mod icon;
 pub mod ipc;
 pub mod mcp;
+pub mod motion;
 pub mod vk;
 
 pub mod colors {

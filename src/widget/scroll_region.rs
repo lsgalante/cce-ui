@@ -121,7 +121,7 @@ impl ScrollbarActivity {
         // reversed halfway takes proportionally less time rather than
         // restarting — a flick-scroll-flick does not stutter.
         let target = if self.raised { 1.0 } else { 0.0 };
-        let step = if SCROLL_FADE_SECS > 0.0 { dt / SCROLL_FADE_SECS } else { 1.0 };
+        let step = if SCROLL_FADE_SECS > 0.0 && crate::motion::enabled() { dt / SCROLL_FADE_SECS } else { 1.0 };
         let moved = if (self.fade - target).abs() <= step {
             let done = self.fade != target;
             self.fade = target;
