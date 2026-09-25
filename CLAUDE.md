@@ -244,8 +244,12 @@ What this buys, and where the code is heading:
   through `RenderTarget::inset_plate_tinted` and `CarveKind::Boss { tint }`.
   `CCE_FOCUS_DEBUG=1` prints the stops in walk order.
   The focus ring is the plate's own silhouette: `ControlPlate::with_tint`
-  lights the rim (a tinted `Trough`, `Boss` or `Bevel`), the same treatment a
+  tints the rim (a tinted `Trough`, `Boss` or `Bevel`), the same treatment a
   well's `recess_tinted` gives its rim while editing — never extra geometry.
+  The tint recolours the relief rather than replacing it: the rim's light
+  composites in the accent instead of white and its shadow in a dark accent
+  instead of black (`FOCUS_SHADOW`, both at `FOCUS_GAIN`, in
+  `shader2d.wgsl`), so a focused plate still reads which edges face the lamp.
   A Checkbox lights the ring its mark already draws; a Toggle lights the
   rim of the plate that slides in its well.
   Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector, ButtonStrip

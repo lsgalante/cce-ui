@@ -1999,10 +1999,10 @@ pub fn tessellate_display_list(
                 p.host[2] = fz;
                 p.host[3] = fw;
                 // w = 1 marks an accent-tinted plate (the focused-pane
-                // treatment): the shader then colors the WHOLE rolled edge
-                // with the tint, not just the specular glint — matching the
-                // free-carve path's tinted-well convention. Neutral white
-                // keeps w = 0 (spec-only, a no-op multiply).
+                // treatment): the shader keeps the roll's light and shadow
+                // and recolours them — light toward the tint, shadow toward
+                // a dark tint — matching the free-carve path's tinted-well
+                // convention. Neutral white keeps w = 0 (a no-op multiply).
                 let full = if *tint == [1.0, 1.0, 1.0] { 0.0 } else { 1.0 };
                 p.specular_tint = [tint[0], tint[1], tint[2], full];
                 plate = Some(p);
@@ -2261,8 +2261,9 @@ pub fn tessellate_display_list(
                 let sdf_rect = crate::scene::layout::Rect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
                 let mut p = plate_push_raised(&sdf_rect, *radii, *depth, scale, plate_light, plate_mat, false, None);
                 p.mode = mode;
-                // w = 1.0 flags the free-carve shader path to mix its white
-                // highlight screen toward the tint (plates leave w at 0.0).
+                // w = 1.0 flags the free-carve shader path to composite its
+                // light in the tint and its shadow in a dark tint instead of
+                // white and black (plates leave w at 0.0).
                 if let Some(t) = tint {
                     p.specular_tint = [t[0], t[1], t[2], 1.0];
                 }

@@ -240,8 +240,9 @@ pub struct ControlPlate {
     pub stance: PlateStance,
     pub face: Option<Material>,
     pub depth: f32,
-    /// The rim lit in this colour: the keyboard-focus ring, drawn on the
-    /// plate's own silhouette rather than as extra geometry. `None` unlit.
+    /// The rim's light and shadow tinted this colour: the keyboard-focus
+    /// ring, drawn on the plate's own relief rather than as extra geometry.
+    /// `None` untinted.
     pub tint: Option<[f32; 3]>,
 }
 
@@ -512,11 +513,12 @@ pub enum Prim {
     /// `push_widget_vertices`' non-bevel branch: rounded bg + `push_plate_solid_border_vertices`).
     Border { rect: Rect, radii: Radii, fill: [f32; 4], border: [f32; 4], thickness: f32 },
     /// A beveled plate: a rounded fill at full size plus a light/shadow overlay lip
-    /// (mirrors `push_widget_vertices`' bevel branch). `tint` multiplies the lit
-    /// roll's specular color — neutral white normally; a host sets it to a
+    /// (mirrors `push_widget_vertices`' bevel branch). `tint` colours the
+    /// roll's light and shadow — neutral white normally; a host sets it to a
     /// highlight color to mark the plate (the focused-pane treatment) without a
-    /// separate border ring. Shader-plates path only; the legacy banded
-    /// tessellation ignores it.
+    /// separate border ring: the light goes to the tint, the shadow to a dark
+    /// tint, so the relief still reads. Shader-plates path only; the legacy
+    /// banded tessellation ignores it.
     Bevel { rect: Rect, radii: Radii, material: Material, depth: f32, tint: [f32; 3] },
     /// A recess carved into whatever is already painted underneath — the inverse of
     /// `Bevel`. Emits ONLY the shaded edges, never a fill, so the surface below shows
@@ -531,8 +533,9 @@ pub enum Prim {
     /// `edges` is (top, right, bottom, left): which walls of the carve actually exist.
     /// A region flush with the plate's own edge is a step, not a trough — see
     /// `push_bevel_edge_vertices_banded`.
-    /// `tint` colors the wall's lit rim — the same focused-pane treatment as
-    /// [`Prim::Bevel`]'s tint, for carved wells instead of raised plates. A tinted
+    /// `tint` colours the wall's light and shadow — the same focused-pane
+    /// treatment as [`Prim::Bevel`]'s tint, for carved wells instead of raised
+    /// plates. A tinted
     /// recess never groups into a host plate's CSG features (a feature carries no
     /// color), so it always renders as the free-carve overlay. Shader-plates path
     /// only; the legacy banded tessellation ignores it.

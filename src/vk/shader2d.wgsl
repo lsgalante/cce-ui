@@ -171,6 +171,14 @@ const PLATE_CREST: f32 = 0.25;
 // The far-edge shade line's strength relative to the glint (roll_shade_line):
 // 1 is the exact mirror; 0.5 keeps dark faces from bottoming out at black.
 const PLATE_SHADE_LINE: f32 = 0.5;
+// The focus treatment (p_spec_tint.w = 1) keeps the relief and recolours it:
+// the light composites in the accent instead of white, the shadow in the
+// accent darkened to this fraction instead of black — so the lit and shaded
+// sides still differ exactly as an unfocused plate's do, in the accent's hue.
+const FOCUS_SHADOW: f32 = 0.25;
+// ...and at this gain over the neutral relief: the accent at white's alpha
+// reads dimmer than white, and a focused plate should read at least as lit.
+const FOCUS_GAIN: f32 = 1.5;
 // Recess depth as a fraction of the roll width (a recess is visually shallower
 // than a raised plate's full quarter-round).
 const RECESS_DEPTH: f32 = 0.6;
@@ -673,37 +681,50 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let diff = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n, l), 0.0);
         let shade = 1.0 + (diff / flat_shade - 1.0 + extra) * strength;
         // p_spec_tint.w = 1 marks an accent-tinted plate (the focused-pane
-        // treatment): the specular line WRAPS — the exact glint the
-        // light-facing edges always carry runs the whole silhouette in the
-        // accent color, same inset, width, and peak. Nothing else about the
-        // plate's shading changes (accent-wash variants were tried and read
-        // as painted frames). Neutral plates (w = 0) keep the directional
-        // glint, byte-identical.
+        // treatment). Neutral plates (w = 0) take the plain return below,
+        // byte-identical.
         let tw = rrect_clip.p_spec_tint.w;
         if (tw > 0.0) {
-            // The wrap runs on the plate's own roll ONLY (sv_rim), never on
-            // the carves: with the full slope every well carved into a
-            // focused plate — each parameter control on the designer's
-            // parameter pane — drew its own accent ring, reading as if every
-            // control were focused alongside the pane.
-            let spec = roll_spec_wrap(sv_rim);
             // A FILL-LESS tinted plate is a pure focus ring (the network
-            // cursor): the wrapped glint alone, on the plate's own roll — so
+            // cursor): there is no surface to light, so the specular line
+            // WRAPS — the glint the light-facing edges carry, run round the
+            // whole silhouette in the accent, on the plate's own roll — so
             // the line traces the same superellipse silhouette, radius
             // family, and inset as every node and pane, which a
             // boundary-straddling carve band cannot (outward offsets of an
             // Lp corner round off).
             if (abs(base.a) < 0.004) {
-                return vec4f(rrect_clip.p_spec_tint.rgb, spec * strength * aa);
+                return vec4f(rrect_clip.p_spec_tint.rgb, roll_spec_wrap(sv_rim) * strength * aa);
             }
-            // The carves keep the neutral directional glint an unfocused
-            // plate gives them (white, as p_spec_tint.rgb is for w = 0);
-            // sv_rim is zero on the face, so this is exactly their term.
-            let carve_spec = roll_spec(sv - sv_rim);
-            return vec4f(
-                base.rgb * shade + rrect_clip.p_spec_tint.rgb * (spec * strength) + vec3f(carve_spec * strength),
-                abs(base.a) * aa,
-            );
+            // A faced one keeps its relief and recolours it, exactly as a
+            // tinted carve does: the roll's light composites toward the
+            // accent instead of white, its shadow toward the dark accent
+            // instead of black, at FOCUS_GAIN — so the lit and shaded sides
+            // still differ as they do unfocused. The roll alone (sv_rim, and
+            // the crest, which lives on it): with the full slope every well
+            // carved into a focused plate — each parameter control on the
+            // designer's parameter pane — wore the accent too, reading as if
+            // every control were focused alongside the pane. The carves'
+            // neutral shading is added back on top unchanged.
+            let tint = rrect_clip.p_spec_tint.rgb;
+            let n_r = normalize(vec3f(sv_rim, 1.0));
+            let diff_r = PLATE_AMBIENT + (1.0 - PLATE_AMBIENT) * max(dot(n_r, l), 0.0);
+            let crest = PLATE_CREST * f * f * f * crest_weight(gd.xy);
+            let shade_r = 1.0 + (diff_r / flat_shade - 1.0 + crest) * strength;
+            let rim = base.rgb * shade_r + vec3f((roll_spec(sv_rim) - roll_shade_line(sv_rim)) * strength);
+            let full = base.rgb * shade + vec3f((roll_spec(sv) - roll_shade_line(sv)) * strength);
+            // The alpha a carve would composite white (or black) at for the
+            // same change in luminance, then that alpha in the accent.
+            let W = vec3f(0.2126, 0.7152, 0.0722);
+            let bl = dot(base.rgb, W);
+            let dl = dot(rim, W) - bl;
+            var lit = base.rgb;
+            if (dl >= 0.0) {
+                lit = mix(base.rgb, tint, min(dl / max(1.0 - bl, 0.05) * FOCUS_GAIN, 1.0));
+            } else {
+                lit = mix(base.rgb, tint * FOCUS_SHADOW, min(-dl / max(bl, 0.004) * FOCUS_GAIN, 1.0));
+            }
+            return vec4f(lit + (full - rim), abs(base.a) * aa);
         }
         let spec = roll_spec(sv);
         let dark = roll_shade_line(sv);
@@ -903,41 +924,21 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
     let hb = rrect_clip.p_host;
     let host_d = min(hb.z - abs(frag.x - hb.x), hb.w - abs(frag.y - hb.y));
     let att = clamp(host_d / t, 0.0, 1.0) * wedge;
-    var v = (diff / flat_shade - 1.0 + curv + spec) * strength * att;
-    // p_spec_tint.w = 1 marks a tinted carve — the FOCUS treatment. It
-    // renders as the wrapped specular line alone (roll_spec_wrap: the glint
-    // the light-facing edges normally carry, swept around the whole
-    // outline), matching the focused plates' accent glint exactly; the
-    // relief's diffuse/curvature terms drop so a standalone focus ring reads
-    // as the line, not a lit step. Plates leave w at 0.
+    let v = (diff / flat_shade - 1.0 + curv + spec) * strength * att;
+    // p_spec_tint.w = 1 marks a tinted carve — the FOCUS treatment. The
+    // relief is the unfocused carve's, term for term; only its colours
+    // change: the light composites in the accent instead of white and the
+    // shadow in a dark accent instead of black (FOCUS_SHADOW), both at
+    // FOCUS_GAIN. So the ring is the carve's own light and shadow, still
+    // reading which walls face the lamp. Plates leave w at 0.
     let tw = rrect_clip.p_spec_tint.w;
-    if (tw > 0.0) {
-        // The PLATE's monotonic roll profile, not the carve wall's: a wall's
-        // slope is a bell (rises then falls), so its tilt crosses the glint
-        // angle twice and drew two concentric lines. With roll_slope the ring
-        // is exactly a plate silhouette's glint — one line, same position.
-        let fr = clamp(1.0 - u, 0.0, 1.0);
-        // ...and ENDS at that silhouette (the rect outset by t/2), 1px
-        // anti-aliased like a plate's own. Past it `u` saturates at 0 and
-        // roll_slope(1) is the profile's steepest point, so every pixel of
-        // the cover quad outside the ring drew the full glint — a flat
-        // tinted block, square-cornered (the quad's own shape), around the
-        // rounded ring.
-        let sil = clamp(fd + 0.5 * t + 0.5, 0.0, 1.0);
-        v = roll_spec_wrap(fgd * roll_slope(fr)) * strength * att * sil;
-    }
+    let gain = mix(1.0, FOCUS_GAIN, tw);
     if (v >= 0.0) {
-        // Highlight: the white screen mixes toward the tint color, slightly
-        // boosted so the accent reads at the rim's low alphas.
         let hl = mix(vec3f(1.0), rrect_clip.p_spec_tint.rgb, tw);
-        return vec4f(hl, min(v * (1.0 + 0.5 * tw), 1.0));
+        return vec4f(hl, min(v * gain, 1.0));
     }
-    // Shadow: the complementary counter-tint (warm against a cool accent),
-    // kept dark (~22%) so it still reads as shadow with a hue cast, not a
-    // second glow — the painter's warm-light/cool-shadow trick. Untinted
-    // carves stay black.
-    let sh = (vec3f(1.0) - rrect_clip.p_spec_tint.rgb) * 0.22 * tw;
-    return vec4f(sh, min(-v * (1.0 + 0.5 * tw), 1.0));
+    let sh = rrect_clip.p_spec_tint.rgb * (FOCUS_SHADOW * tw);
+    return vec4f(sh, min(-v * gain, 1.0));
 }
 
 struct VertexOutput {
