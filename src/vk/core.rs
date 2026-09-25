@@ -48,7 +48,6 @@ pub struct VkCore {
     pub(crate) allocator: Option<Allocator>,
     pub(crate) command_pool: vk::CommandPool,
     pub(crate) queue: vk::Queue,
-    #[allow(dead_code)] // RT engine / future consumers select by family
     pub(crate) queue_family: u32,
     /// The VK_KHR_acceleration_structure device loader — present exactly when
     /// the ray-query stack (accel structs + ray_query + BDA) was enabled at
@@ -205,6 +204,41 @@ impl VkCore {
     ) -> (Self, vk::SurfaceKHR) {
         let (core, surface) = Self::new_inner(Some((display_ptr, surface_ptr)));
         (core, surface.expect("surface requested but not created"))
+    }
+
+    /// A new `VkSurfaceKHR` on another Wayland surface, from this core's
+    /// instance — for a renderer moving to a fresh `wl_surface` (a menu popup
+    /// re-opened) without a new device. The caller owns the handle.
+    ///
+    /// # Safety
+    /// `display_ptr` and `surface_ptr` must be live `wl_display` / `wl_surface`
+    /// pointers that outlive the returned surface.
+    pub unsafe fn create_wayland_surface(
+        &self,
+        display_ptr: *mut c_void,
+        surface_ptr: *mut c_void,
+    ) -> vk::SurfaceKHR {
+        let shared = shared_instance();
+        let wayland_loader = ash::khr::wayland_surface::Instance::new(&shared.entry, &self.instance);
+        let surface = wayland_loader
+            .create_wayland_surface(
+                &vk::WaylandSurfaceCreateInfoKHR::default()
+                    .display(display_ptr)
+                    .surface(surface_ptr),
+                None,
+            )
+            .expect("Failed to create Wayland surface");
+        // The device was chosen for the FIRST surface's present support; a
+        // later surface on the same display is presentable from the same
+        // family on every driver this runs on, but say so if not.
+        if !self
+            .surface_loader
+            .get_physical_device_surface_support(self.physical_device, self.queue_family, surface)
+            .unwrap_or(false)
+        {
+            log::warn!("[vk] queue family {} cannot present to the re-attached surface", self.queue_family);
+        }
+        surface
     }
 
     /// A windowless core: no surface extensions, any graphics-capable device.

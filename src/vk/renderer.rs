@@ -1446,6 +1446,58 @@ impl VkRenderer {
         self.present_mode == vk::PresentModeKHR::MAILBOX
     }
 
+    /// Let go of the window surface: wait idle, then destroy the swapchain
+    /// and the `VkSurfaceKHR`, keeping the device, pipelines and atlases. The
+    /// `wl_surface` under them may be destroyed after this returns, and must
+    /// not be before — a swapchain presenting to a dead surface is undefined.
+    /// Until [`attach_surface`](Self::attach_surface), `draw_frame_2d` draws
+    /// nothing and returns false.
+    pub fn detach_surface(&mut self) {
+        unsafe {
+            let _ = self.core.device.device_wait_idle();
+            self.destroy_swapchain_resources();
+            if self.swapchain != vk::SwapchainKHR::null() {
+                self.swapchain_loader.destroy_swapchain(self.swapchain, None);
+                self.swapchain = vk::SwapchainKHR::null();
+            }
+            if self.surface != vk::SurfaceKHR::null() {
+                self.core.surface_loader.destroy_surface(self.surface, None);
+                self.surface = vk::SurfaceKHR::null();
+            }
+        }
+        self.extent = vk::Extent2D { width: 0, height: 0 };
+        self.swapchain_dirty = true;
+    }
+
+    /// Present to a different `wl_surface` from now on, at `width` x
+    /// `height` physical px — detaching from the current one first if it is
+    /// still attached. What makes a popup surface cheap to re-open: a new
+    /// renderer costs a device and every pipeline, this costs one swapchain.
+    ///
+    /// # Safety
+    /// Same contract as [`VkRenderer::new`]: live `wl_display` / `wl_surface`
+    /// pointers that outlive the attachment.
+    pub unsafe fn attach_surface(
+        &mut self,
+        display_ptr: *mut c_void,
+        surface_ptr: *mut c_void,
+        width: u32,
+        height: u32,
+    ) {
+        if self.surface != vk::SurfaceKHR::null() {
+            self.detach_surface();
+        }
+        self.surface = self.core.create_wayland_surface(display_ptr, surface_ptr);
+        self.resize(width, height);
+        self.swapchain_dirty = true;
+    }
+
+    /// Whether a surface is attached — false between
+    /// [`detach_surface`](Self::detach_surface) and the next attach.
+    pub fn has_surface(&self) -> bool {
+        self.surface != vk::SurfaceKHR::null()
+    }
+
     /// The extent the next `draw_frame` will render at: the pending size when a
     /// swapchain rebuild is queued, otherwise the live one.
     pub fn pending_extent(&self) -> vk::Extent2D {
@@ -1515,6 +1567,9 @@ impl VkRenderer {
     /// top. Returns false if the frame was skipped (swapchain rebuild); the
     /// caller just draws again next tick.
     pub fn draw_frame_2d(&mut self, frame2d: Frame2D<'_>) -> bool {
+        if self.surface == vk::SurfaceKHR::null() {
+            return false;
+        }
         if self.swapchain_dirty {
             self.swapchain_dirty = false;
             self.recreate_swapchain();

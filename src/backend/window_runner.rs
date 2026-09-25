@@ -459,6 +459,124 @@ pub struct TextBounds {
     pub bottom: i32,
 }
 
+/// The display list's Text prims, shaped through the shared buffer cache and
+/// held for the glyph pass (the [`TextSpan`]s built by [`dl_text_spans`] borrow
+/// these). Clip = the paint walk's item clip ∩ the prim's own bounds, in
+/// logical space. Shared by the window's frame and the context-menu popup's.
+pub(crate) fn collect_dl_text(fs: &mut FontSystem, dl: &crate::scene::paint::DisplayList, out: &mut Vec<TextItem>) {
+    for item in &dl.items {
+        if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, alpha, font, bounds, attrs, layout } = &item.prim {
+            let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
+            let merged = match (clip, *bounds) {
+                (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
+                (Some(a), None) => Some(a),
+                (None, b) => b,
+            };
+            // Boxed text (wrap/align) shapes uncached and shifts down by the vertical
+            // offset; ordinary labels take the shared cached buffer.
+            let (buffer, y_off) = match layout {
+                Some(l) => get_text_buffer_laid_out(fs, text, *font_size, font.as_deref(), *attrs, *l),
+                None => (get_text_buffer_attrs(fs, text, *font_size, font.as_deref(), *attrs), 0.0),
+            };
+            out.push(TextItem {
+                buffer,
+                x: *x,
+                y: *y + y_off,
+                color: cosmic_text::Color::rgba(
+                    color[0],
+                    color[1],
+                    color[2],
+                    (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
+                ),
+                bounds: merged,
+                clip_circle: item.clip_circle,
+                clip_rrect: item.clip_rrect,
+            });
+        }
+    }
+}
+
+/// The glyph pass's spans for `items`: each clamped to the surface and its
+/// own bounds, then by the popover-occlusion clamp against `overlays`.
+pub(crate) fn dl_text_spans<'a>(
+    items: &'a [TextItem],
+    scale_f32: f32,
+    bounds: TextBounds,
+    overlays: &[(f32, f32, f32, f32)],
+) -> Vec<TextSpan<'a>> {
+    let mut spans: Vec<TextSpan<'a>> = Vec::new();
+    for ti in items {
+        let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
+            TextBounds {
+                left: ((l * scale_f32).round() as i32).clamp(0, bounds.right),
+                top: ((t * scale_f32).round() as i32).clamp(0, bounds.bottom),
+                right: ((r * scale_f32).round() as i32).clamp(0, bounds.right),
+                bottom: ((b * scale_f32).round() as i32).clamp(0, bounds.bottom),
+            }
+        } else {
+            bounds
+        };
+        popover_occlusion_clamp(overlays, ti, scale_f32, &mut item_bounds);
+        spans.push(TextSpan {
+            buffer: &ti.buffer,
+            left: (ti.x * scale_f32).round(),
+            top: (ti.y * scale_f32).round(),
+            // Buffers are shaped at physical size (get_text_buffer_attrs).
+            scale: 1.0,
+            bounds: Some([
+                item_bounds.left,
+                item_bounds.top,
+                item_bounds.right,
+                item_bounds.bottom,
+            ]),
+            default_color: [
+                ti.color.r() as f32 / 255.0,
+                ti.color.g() as f32 / 255.0,
+                ti.color.b() as f32 / 255.0,
+                ti.color.a() as f32 / 255.0,
+            ],
+            rotation: None,
+            // Circle wins when both are set (the circular pane's innermost clip);
+            // otherwise a rounded-rect clip rides as center+radius with extents.
+            clip_circle: match (ti.clip_circle, ti.clip_rrect) {
+                (Some(c), _) => [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32],
+                (None, Some(rr)) => [rr[0] * scale_f32, rr[1] * scale_f32, rr[4] * scale_f32],
+                (None, None) => [0.0; 3],
+            },
+            clip_extents: match (ti.clip_circle, ti.clip_rrect) {
+                (None, Some(rr)) => [rr[2] * scale_f32, rr[3] * scale_f32],
+                _ => [0.0; 2],
+            },
+        });
+    }
+    spans
+}
+
+/// The tessellated display list's batches, scissors and rounded clips scaled
+/// to physical px.
+pub(crate) fn dl_batches_2d(dl_batches: &[DlBatch], scale_f32: f32) -> Vec<Batch2D> {
+    dl_batches
+        .iter()
+        .map(|batch| Batch2D {
+            scissor: batch.scissor.map(|clip| {
+                (
+                    (clip.x * scale_f32).max(0.0) as u32,
+                    (clip.y * scale_f32).max(0.0) as u32,
+                    (clip.width * scale_f32) as u32,
+                    (clip.height * scale_f32) as u32,
+                )
+            }),
+            clip_rrect: batch
+                .clip_rrect
+                .map(|c| [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32, c[3] * scale_f32, c[4] * scale_f32]),
+            start: batch.start,
+            end: batch.end,
+            plate: batch.plate,
+            blur_behind: batch.blur_behind,
+        })
+        .collect()
+}
+
 /// The popover-occlusion clamp shared by the default [`Application::text_areas`] mapping and
 /// the display-list text path: clip a text item's bounds so it does not bleed through an open
 /// popover's plate. A text item whose own bounds coincide with a popover rect IS that popover's
@@ -3763,6 +3881,15 @@ pub struct EngineState<A: Application> {
     /// The popover-union rect last sent via zcce set_popover_region, logical
     /// surface px; None once a clear has been sent (or never anything).
     pub sent_popover_region: Option<(i32, i32, i32, i32)>,
+    /// The context menu's popup surface while one is open — see
+    /// `backend::menu_popup`.
+    pub menu_popup: Option<crate::backend::menu_popup::MenuPopup>,
+    /// The popup's renderer, kept across opens and moved from one popup
+    /// surface to the next: a renderer costs a device and every pipeline
+    /// (tens of ms), a re-attach costs one swapchain.
+    pub menu_renderer: Option<VkRenderer>,
+    /// The `wl_display` the renderers were made from, as an address.
+    pub display_ptr: usize,
 
     pub exit: bool,
     pub redraw: bool,
@@ -3856,6 +3983,7 @@ impl<A: Application> EngineState<A> {
 
         let display_ptr = conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
         let surface_ptr = surface.id().as_ptr() as *mut std::ffi::c_void;
+        self.display_ptr = display_ptr as usize;
 
         let load_system_fonts = self.inner.as_ref().map_or(false, |a| a.load_system_fonts());
         // Corner radius 0: runner apps tessellate their own rounded corners.
@@ -3881,7 +4009,7 @@ impl<A: Application> EngineState<A> {
     /// disagrees with it — a mispaired buffer/scale commit is how the resume
     /// output bounce halved even-sized windows (buffer at the old scale's
     /// size, new scale latched; the compositor reads it as a self-resize).
-    fn buffer_geometry(scale_factor: f64, w: f32, h: f32) -> (i32, u32, u32) {
+    pub(crate) fn buffer_geometry(scale_factor: f64, w: f32, h: f32) -> (i32, u32, u32) {
         let s = if crate::scale::forced_scale().is_some() {
             1
         } else {
@@ -4132,37 +4260,7 @@ impl<A: Application> EngineState<A> {
         // Clip = the paint walk's item clip ∩ the prim's own bounds, in logical space.
         self.dl_text_items.clear();
         if self.inner.as_ref().unwrap().display_list_text() {
-            let fs = self.font_system.as_mut().unwrap();
-            for item in &dl.items {
-                if let crate::scene::paint::Prim::Text { text, x, y, font_size, color, alpha, font, bounds, attrs, layout } = &item.prim {
-                    let clip = item.clip.map(|c| [c.x, c.y, c.x + c.width, c.y + c.height]);
-                    let merged = match (clip, *bounds) {
-                        (Some(a), Some(b)) => Some([a[0].max(b[0]), a[1].max(b[1]), a[2].min(b[2]), a[3].min(b[3])]),
-                        (Some(a), None) => Some(a),
-                        (None, b) => b,
-                    };
-                    // Boxed text (wrap/align) shapes uncached and shifts down by the vertical
-                    // offset; ordinary labels take the shared cached buffer.
-                    let (buffer, y_off) = match layout {
-                        Some(l) => get_text_buffer_laid_out(fs, text, *font_size, font.as_deref(), *attrs, *l),
-                        None => (get_text_buffer_attrs(fs, text, *font_size, font.as_deref(), *attrs), 0.0),
-                    };
-                    self.dl_text_items.push(TextItem {
-                        buffer,
-                        x: *x,
-                        y: *y + y_off,
-                        color: cosmic_text::Color::rgba(
-                            color[0],
-                            color[1],
-                            color[2],
-                            (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
-                        ),
-                        bounds: merged,
-                        clip_circle: item.clip_circle,
-                        clip_rrect: item.clip_rrect,
-                    });
-                }
-            }
+            collect_dl_text(self.font_system.as_mut().unwrap(), &dl, &mut self.dl_text_items);
         }
 
         let (mut verts, mut dl_batches, dl_images, plate_features) = tessellate_display_list(&dl, logical_w, logical_h, scale_factor as f32);
@@ -4222,7 +4320,9 @@ impl<A: Application> EngineState<A> {
         // popup is gone), so it gets the same occlusion: the menu rect clamps list text
         // beneath, and the menu's own labels are exempt because they carry bounds equal
         // to the rect.
-        if crate::widget::context_menu::is_visible() {
+        // Hosted in its popup surface, the menu covers the window from above
+        // and nothing of it is in the list.
+        if crate::widget::context_menu::is_visible() && !crate::widget::context_menu::is_hosted() {
             dl_overlay_rects.push((
                 crate::widget::context_menu::x(),
                 crate::widget::context_menu::y(),
@@ -4230,51 +4330,7 @@ impl<A: Application> EngineState<A> {
                 crate::widget::context_menu::h(),
             ));
         }
-        let mut spans: Vec<TextSpan> = Vec::new();
-        for ti in &self.dl_text_items {
-            let mut item_bounds = if let Some([l, t, r, b]) = ti.bounds {
-                TextBounds {
-                    left: ((l * scale_f32).round() as i32).clamp(0, bounds.right),
-                    top: ((t * scale_f32).round() as i32).clamp(0, bounds.bottom),
-                    right: ((r * scale_f32).round() as i32).clamp(0, bounds.right),
-                    bottom: ((b * scale_f32).round() as i32).clamp(0, bounds.bottom),
-                }
-            } else {
-                bounds
-            };
-            popover_occlusion_clamp(&dl_overlay_rects, ti, scale_f32, &mut item_bounds);
-            spans.push(TextSpan {
-                buffer: &ti.buffer,
-                left: (ti.x * scale_f32).round(),
-                top: (ti.y * scale_f32).round(),
-                // Buffers are shaped at physical size (get_text_buffer_attrs).
-                scale: 1.0,
-                bounds: Some([
-                    item_bounds.left,
-                    item_bounds.top,
-                    item_bounds.right,
-                    item_bounds.bottom,
-                ]),
-                default_color: [
-                    ti.color.r() as f32 / 255.0,
-                    ti.color.g() as f32 / 255.0,
-                    ti.color.b() as f32 / 255.0,
-                    ti.color.a() as f32 / 255.0,
-                ],
-                rotation: None,
-                // Circle wins when both are set (the circular pane's innermost clip);
-                // otherwise a rounded-rect clip rides as center+radius with extents.
-                clip_circle: match (ti.clip_circle, ti.clip_rrect) {
-                    (Some(c), _) => [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32],
-                    (None, Some(rr)) => [rr[0] * scale_f32, rr[1] * scale_f32, rr[4] * scale_f32],
-                    (None, None) => [0.0; 3],
-                },
-                clip_extents: match (ti.clip_circle, ti.clip_rrect) {
-                    (None, Some(rr)) => [rr[2] * scale_f32, rr[3] * scale_f32],
-                    _ => [0.0; 2],
-                },
-            });
-        }
+        let spans = dl_text_spans(&self.dl_text_items, scale_f32, bounds, &dl_overlay_rects);
 
         // 3. Frame: display-list batches under their physical scissors, then
         // text, then overlays. The renderer owns swapchain rebuild/recovery.
@@ -4308,26 +4364,7 @@ impl<A: Application> EngineState<A> {
             })
             .collect();
 
-        let batches: Vec<Batch2D> = dl_batches
-            .iter()
-            .map(|batch| Batch2D {
-                scissor: batch.scissor.map(|clip| {
-                    (
-                        (clip.x * scale_f32).max(0.0) as u32,
-                        (clip.y * scale_f32).max(0.0) as u32,
-                        (clip.width * scale_f32) as u32,
-                        (clip.height * scale_f32) as u32,
-                    )
-                }),
-                clip_rrect: batch
-                    .clip_rrect
-                    .map(|c| [c[0] * scale_f32, c[1] * scale_f32, c[2] * scale_f32, c[3] * scale_f32, c[4] * scale_f32]),
-                start: batch.start,
-                end: batch.end,
-                plate: batch.plate,
-                blur_behind: batch.blur_behind,
-            })
-            .collect();
+        let batches = dl_batches_2d(&dl_batches, scale_f32);
 
         let cc = self.inner.as_ref().unwrap().clear_color();
         let clear_color = [cc[0].powf(2.2), cc[1].powf(2.2), cc[2].powf(2.2), cc[3]];
@@ -4413,6 +4450,10 @@ impl<A: Application> EngineState<A> {
 
 impl<A: Application> Drop for EngineState<A> {
     fn drop(&mut self) {
+        // The popup's renderer lets go of its surface before the popup (and
+        // its wl_surface) drops with the rest of the fields.
+        self.close_menu_popup();
+        self.menu_renderer = None;
         self.renderer = None;
     }
 }
@@ -4718,6 +4759,15 @@ impl<A: Application> PointerHandler for EngineState<A> {
             // right/bottom-only, so frame coords == surface coords.
             let lx = x as f32 / forced;
             let ly = y as f32 / forced;
+            // An event on the context menu's popup surface is the app's too,
+            // at the popup's offset from the window: menu dispatch works in
+            // window coordinates, which now reach outside the window.
+            let popup_offset = self.menu_popup.as_ref().and_then(|p| p.offset_for(&event.surface));
+            let on_popup = popup_offset.is_some();
+            let (lx, ly) = match popup_offset {
+                Some((ox, oy)) => (lx + ox, ly + oy),
+                None => (lx, ly),
+            };
 
             self.cursor_pos = (lx, ly);
             match &event.kind {
@@ -4813,7 +4863,10 @@ impl<A: Application> PointerHandler for EngineState<A> {
 
                     // Client-Side Decorations (CSD) Drag & Resize Handling
                     let is_status_bar = self.inner.as_ref().unwrap().settings().app_id.starts_with("cce-status");
-                    if btn == MouseButton::Left && !is_status_bar && self.inner.as_ref().unwrap().standard_csd() {
+                    // Never on the menu popup: its presses are the menu's, and
+                    // its coordinates, translated into the window's, would
+                    // otherwise read as a resize border or a movable plate.
+                    if btn == MouseButton::Left && !on_popup && !is_status_bar && self.inner.as_ref().unwrap().standard_csd() {
                         let border = 8.0f32;
                         let mut edge = smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplevel::ResizeEdge::None;
                         if !self.inner.as_ref().unwrap().csd_resize_borders() {
@@ -5807,6 +5860,9 @@ fn run_session<'l, A: Application>(
         applied_margin: 0.0,
         overflow_was_active: false,
         sent_popover_region: None,
+        menu_popup: None,
+        menu_renderer: None,
+        display_ptr: 0,
         exit: false,
         redraw: false,
         frame_callback_pending: false,
@@ -6189,6 +6245,7 @@ fn run_session<'l, A: Application>(
             }
             engine_state.send_popover_region();
         }
+        engine_state.sync_menu_popup();
 
         if let Some(ref mut pk) = engine_state.pressed_key {
             let now = std::time::Instant::now();
@@ -6282,6 +6339,7 @@ fn run_session<'l, A: Application>(
             engine_state.redraw = false;
             if engine_state.first_configure_received {
                 engine_state.render();
+                engine_state.render_menu_popup();
                 rendered = true;
             }
         } else if !engine_state.redraw

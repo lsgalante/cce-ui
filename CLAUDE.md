@@ -169,6 +169,46 @@ list** (`window_runner.rs` ~1799). Two ways an app feeds it:
 So every app, migrated or not, renders through the same tessellate step. `custom_vertices` is
 appended as a final unclipped batch drawn on top.
 
+## The context menu draws in its own popup surface (since 2026-09-25)
+
+`widget::context_menu` is one global menu that every app shows, paints into its own
+display list and dispatches by window coordinates. Drawn in the window it was cut off
+at the window's edge, and a menu taller than the room left could not be seen at all.
+So on an xdg toplevel the runner mirrors the open menu into an `xdg_popup`
+(`backend/menu_popup.rs`, with the reasoning in its module docs): the compositor may
+put it anywhere on the output, and the positioner's flip-y / slide / resize-y keeps it
+there. A menu cut short scrolls: `ContextMenuState` keeps `content_h` (all the rows)
+apart from `h` (what is shown) and a `scroll`, and `row_at` / `row_y` / `hit_test`
+answer for the rows as DRAWN — every host that dispatches through them scrolls for free.
+
+A popup path existed before and was deleted in July (Phase 6x) for drawing in one
+place and hit-testing in another. Two rules make this one different, and both are
+load-bearing:
+
+- **The configure is written back.** Where the compositor put the popup is where the
+  menu IS (`context_menu::place`), so the rect apps hit-test is the rect on screen.
+- **The popup takes its own pointer input**, translated by its offset into window
+  coordinates (`pointer_frame`), so apps need no change — their menu coordinates may
+  now simply lie outside the window. The CSD move/resize checks are skipped for it.
+
+While the popup is up the menu is `hosted`: the apps' in-window `paint*`,
+`text_labels` and `extra_quads` draw nothing, and the runner paints a copy at the
+origin (`paint_hosted`). There the plate is the surface's ROOT, so its frost is the
+compositor's blur-behind, not the in-app pass — which has nothing to sample inside a
+popup and resolves to flat opaque grey. The compositor's blur cannot compress luminance
+the way the in-app frost does, so the root plate's alpha is raised to
+`1 - (1 - a)(1 - k)` to let the backdrop through by the same amount. The compositor
+blurs popups since the same date (`xdg_popup.rs`'s `update_blur`).
+
+The popup's renderer is kept across opens: `VkRenderer::detach_surface` /
+`attach_surface` move it from one popup's `wl_surface` to the next, so a re-open costs a
+swapchain rather than a device and every pipeline. **Detach before the popup drops** —
+the drop destroys the `wl_surface`, and a swapchain must not outlive it.
+
+Layer surfaces keep the in-window menu, placed by `context_menu::constrain_to` with the
+same flip / slide / shorten rules inside the window; so does any app run with
+`CCE_UI_MENU_POPUP=0`.
+
 ## Plates, wells and seams — the surface vocabulary
 
 Everything cce draws is a lit surface, and the words below name those surfaces
@@ -644,6 +684,8 @@ All opt-in, all read once, all quiet when unset — set one and run any client.
   its grouping window (correctly — the carve's shading is baked into the plate's earlier
   draw).
 - `CCE_PRESENT_DEBUG=1` — swapchain present/acquire tracing.
+- `CCE_UI_MENU_POPUP=0` — keep the context menu in the window instead of its popup
+  surface (see "The context menu draws in its own popup surface").
 - `CCE_VK_DEVICE=<substring>` — force a physical device; `CCE_VK_RT=0` disables ray tracing.
 - `CCE_FORCE_SCALE=<f>` — override HiDPI scale detection.
 - `CCE_FORCE_PPI=<f>` — pin the display metric (logical px per inch) regardless of what
