@@ -57,6 +57,13 @@ pub struct SceneDraw {
     /// contour-following wires) while the fill's slope is exactly the
     /// quantity needed.
     pub wire_base_width: f32,
+    /// FILL draws only: the vertex colours already carry their lighting, so
+    /// the fragment shader skips its derivative-normal flat shading and
+    /// draws them as they are. A host that wants SMOOTH shading bakes it —
+    /// the light is fixed in world space (see `scene3d.wgsl`), so lighting
+    /// per vertex from interpolated normals is exact for a static light,
+    /// and the vertex format needs no normal. False for an ordinary draw.
+    pub prelit: bool,
 }
 
 /// shader_3d.wgsl's uniform block.
@@ -73,7 +80,9 @@ struct SceneUniforms {
     /// normal flat shading, whose screen-space derivatives are degenerate on
     /// line fragments (along-axis only) and light the wires with noise.
     is_wire: f32,
-    _pad: [f32; 2],
+    /// 1.0 on `SceneDraw::prelit` draws: the flat shading is skipped too.
+    prelit: f32,
+    _pad: [f32; 1],
 }
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
@@ -736,7 +745,8 @@ impl SceneStage {
                 wire_tint: draw.wire_tint,
                 opacity: draw.opacity,
                 is_wire: if draw.wireframe { 1.0 } else { 0.0 },
-                _pad: [0.0; 2],
+                prelit: if draw.prelit { 1.0 } else { 0.0 },
+                _pad: [0.0; 1],
             };
             let offset = (self.uniform_stride as usize) * i;
             mapped[offset..offset + UNIFORM_SIZE as usize]

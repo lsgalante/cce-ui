@@ -15,6 +15,10 @@ struct Uniforms {
     // screen-space derivatives of a line fragment are along-axis only, so
     // the "normal" is noise and speckles the wires.
     is_wire: f32,
+    // 1 on a draw whose vertex colours are already lit (the host baked
+    // smooth shading from vertex normals against the same world light):
+    // skip the flat shading below so it is not applied twice.
+    prelit: f32,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -93,7 +97,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     // self-similar surface (a UV sphere's lattice, especially under a
     // wireframe overlay whose fill occludes the back wires) reads as glued to
     // the camera without it. Two-sided so unculled back faces stay sane.
-    if (in.lit > 0.5 && uniforms.is_wire < 0.5) {
+    if (in.lit > 0.5 && uniforms.is_wire < 0.5 && uniforms.prelit < 0.5) {
         let n = normalize(cross(dpdx(in.world), dpdy(in.world)));
         // A strongly AZIMUTHAL light, wrap-shaded. A near-vertical light (or a
         // two-sided |dot|) yields a latitude-dominated / 180-degree-symmetric
