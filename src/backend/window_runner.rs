@@ -5260,7 +5260,18 @@ impl<A: Application> EngineState<A> {
             xkeysym::Keysym::Alt_L | xkeysym::Keysym::Alt_R => Key::Named(NamedKey::Alt),
             xkeysym::Keysym::Control_L | xkeysym::Keysym::Control_R => Key::Named(NamedKey::Control),
             xkeysym::Keysym::Shift_L | xkeysym::Keysym::Shift_R => Key::Named(NamedKey::Shift),
+            xkeysym::Keysym::F1 => Key::Named(NamedKey::F1),
+            xkeysym::Keysym::F2 => Key::Named(NamedKey::F2),
+            xkeysym::Keysym::F3 => Key::Named(NamedKey::F3),
+            xkeysym::Keysym::F4 => Key::Named(NamedKey::F4),
             xkeysym::Keysym::F5 => Key::Named(NamedKey::F5),
+            xkeysym::Keysym::F6 => Key::Named(NamedKey::F6),
+            xkeysym::Keysym::F7 => Key::Named(NamedKey::F7),
+            xkeysym::Keysym::F8 => Key::Named(NamedKey::F8),
+            xkeysym::Keysym::F9 => Key::Named(NamedKey::F9),
+            xkeysym::Keysym::F10 => Key::Named(NamedKey::F10),
+            xkeysym::Keysym::F11 => Key::Named(NamedKey::F11),
+            xkeysym::Keysym::F12 => Key::Named(NamedKey::F12),
             _ => {
                 // With Ctrl held, xkb's utf8 goes through the legacy control-character
                 // transformation (ctrl+j = "\n", ctrl+a = 0x01, ...); the keysym is

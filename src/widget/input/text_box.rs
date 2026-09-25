@@ -221,6 +221,23 @@ impl TextBox {
         closest
     }
 
+    /// The font the value text is drawn in — AND measured in: `prepare_text`
+    /// (whose per-glyph positions place the caret, the selection and
+    /// click-to-column) shapes with exactly this, and `paint` emits it. It is
+    /// [`Paint::text_font`], because that is what actually draws the text:
+    /// `Adapted::paint_self` drops the Text prims `paint` emits and redraws
+    /// the value through its own-labels bridge in `text_font()` — the box's
+    /// family when customized (cce-text-editor's monospace editor), else the
+    /// configured control font string.
+    ///
+    /// Until 2026-09-25 the measurement shaped `font_family` instead (or
+    /// `monospace` for a password), a different face from the drawn one, so
+    /// the caret drifted off the text a little more with every character —
+    /// two dots short after twelve in the login greeter's password box.
+    pub fn value_font(&self) -> Option<String> {
+        <Self as Paint>::text_font(self)
+    }
+
     pub fn char_width(&self) -> f32 {
         if self.shaped_char_advance > 0.0 {
             self.shaped_char_advance
@@ -1385,11 +1402,9 @@ impl Paint for TextBox {
             text_src.as_str()
         };
 
-        let font_fam = if self.is_password {
-            "monospace"
-        } else {
-            self.font_family.as_str()
-        };
+        // Measured in the family the value text is DRAWN in — see `value_font`.
+        let font_fam = self.value_font();
+        let font_fam = font_fam.as_deref();
 
         let render_text = if self.is_password {
             "•".repeat(display_text.chars().count())
@@ -1397,7 +1412,7 @@ impl Paint for TextBox {
             display_text.to_string()
         };
 
-        let buffer = crate::widget::display::text_label::make_widget_text_buffer(fs, &render_text, self.font_size, font_fam);
+        let buffer = crate::backend::window_runner::get_text_buffer(fs, &render_text, self.font_size, font_fam);
 
         let char_count = render_text.chars().count();
         let mut x_offsets = vec![0.0; char_count + 1];
@@ -1406,7 +1421,7 @@ impl Paint for TextBox {
 
         // One column's advance, from the same shaping path as the labels (buffer-cached,
         // so this is a lookup after the first frame per family/size).
-        let probe = crate::widget::display::text_label::make_widget_text_buffer(fs, "MMMMMMMM", self.font_size, font_fam);
+        let probe = crate::backend::window_runner::get_text_buffer(fs, "MMMMMMMM", self.font_size, font_fam);
         self.shaped_char_advance = probe
             .layout_runs()
             .next()
@@ -1455,7 +1470,7 @@ impl Paint for TextBox {
             };
             let (lines, _) = self.wrap_text(max_chars);
             for line in &lines {
-                let line_buffer = crate::widget::display::text_label::make_widget_text_buffer(fs, line, self.font_size, font_fam);
+                let line_buffer = crate::backend::window_runner::get_text_buffer(fs, line, self.font_size, font_fam);
                 let n = line.chars().count();
                 let mut offs = vec![0.0f32; n + 1];
                 let mut line_total: f32 = 0.0;
@@ -1591,8 +1606,9 @@ impl Paint for TextBox {
             self.rect.x + self.rect.width,
             self.rect.y + self.rect.height,
         ]);
+        let font = self.value_font();
         for tl in self.value_labels() {
-            ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, None, well);
+            ctx.text_with(tl.text, tl.x, tl.y, tl.font_size, tl.color, font.clone(), well);
         }
     }
 }

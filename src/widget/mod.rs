@@ -71,7 +71,21 @@ pub enum NamedKey {
     Shift,
     Alt,
     Super,
+    // The function keys. F5 came first (the login greeter's restart); the
+    // rest arrived together on 2026-09-25 for the greeter's F1 power off and
+    // F2 reboot.
+    F1,
+    F2,
+    F3,
+    F4,
     F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
