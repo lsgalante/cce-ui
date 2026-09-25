@@ -924,7 +924,13 @@ pub mod context_menu {
     pub fn clear_if_matches(w: &dyn WidgetHost) {
         let id = w.base().id();
         CONTEXT_MENU.with(|m| {
-            let mut menu = m.borrow_mut();
+            // Already borrowed means the widget is being dropped from INSIDE
+            // the menu's own code — the slider rows' paint stamp, dropped at
+            // the end of `paint` under `paint_with_labels`' borrow. A widget
+            // the menu made for itself cannot be its target, so there is
+            // nothing to clear; `borrow_mut` here panicked on every paint of
+            // a menu with a slider row.
+            let Ok(mut menu) = m.try_borrow_mut() else { return };
             if menu.target == Some(id) {
                 menu.target = None;
                 menu.visible = false;
@@ -1118,6 +1124,22 @@ mod context_menu_slider_tests {
     }
     fn row_mid(m: &ContextMenuState, idx: usize) -> f32 {
         m.row_y(idx) + ROW_H * 0.5
+    }
+
+    /// Painted through the thread-local, as every host paints it: the slider
+    /// stamp is dropped while `CONTEXT_MENU` is borrowed, and its drop clears
+    /// widget references in that same cell. The tests above paint a bare
+    /// `ContextMenuState` and never held the borrow.
+    #[test]
+    fn a_slider_row_paints_through_the_shared_menu() {
+        use super::context_menu as cm;
+        cm::show(100.0, 50.0, vec!["Frame All".into(), "Opacity".into()], 0, WidgetId(7));
+        cm::set_row_slider(1, MenuSlider { value: 50.0, min: 0.0, max: 100.0, step: 5.0, decimals: 0, suffix: "%" });
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        cm::paint_with_labels(&mut pc);
+        cm::paint(&mut pc);
+        assert!(cm::is_visible(), "painting leaves the menu up");
+        cm::hide();
     }
 
     /// A notch over the slider row steps it by `step`, up is more, and the
