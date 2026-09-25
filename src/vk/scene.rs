@@ -64,6 +64,14 @@ pub struct SceneDraw {
     /// per vertex from interpolated normals is exact for a static light,
     /// and the vertex format needs no normal. False for an ordinary draw.
     pub prelit: bool,
+    /// FILL draws only: draw through the SEE-THROUGH twin of the fill
+    /// pipeline — no face culling and no depth writes (the depth TEST stays
+    /// on, so what is drawn before the fill still hides it) — so a
+    /// translucent mesh shows its own far side and everything behind it,
+    /// wires included, since nothing it draws can occlude them. Blending is
+    /// then order-dependent: the host should submit the triangles back to
+    /// front for the current eye. False for an ordinary fill.
+    pub see_through: bool,
 }
 
 /// shader_3d.wgsl's uniform block.
@@ -109,6 +117,9 @@ pub(crate) struct SceneStage {
     /// PolygonMode::LINE twin of `pipeline` — None when the device lacks
     /// fillModeNonSolid (wireframe draws then fall back to the fill pipeline).
     wireframe_pipeline: Option<vk::Pipeline>,
+    /// `pipeline` with culling off and depth writes off — the
+    /// `SceneDraw::see_through` fill.
+    see_through_pipeline: vk::Pipeline,
     /// Device cap for `SceneDraw::line_width` (1.0 without wideLines).
     max_line_width: f32,
     pipeline_layout: vk::PipelineLayout,
@@ -327,6 +338,43 @@ impl SceneStage {
                 )
                 .expect("Failed to create 3D pipeline")[0];
 
+            // The see-through twin: the fill pipeline with no culling (a
+            // translucent closed mesh shows its far wall) and no depth
+            // WRITES (its near layers must not hide its far ones, nor the
+            // wires riding it). The depth test stays: an opaque thing drawn
+            // earlier still occludes it.
+            let see_through_pipeline = {
+                let rasterization_st = vk::PipelineRasterizationStateCreateInfo::default()
+                    .polygon_mode(vk::PolygonMode::FILL)
+                    .cull_mode(vk::CullModeFlags::NONE)
+                    .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+                    .depth_bias_enable(true)
+                    .line_width(1.0);
+                let depth_stencil_st = vk::PipelineDepthStencilStateCreateInfo::default()
+                    .depth_test_enable(true)
+                    .depth_write_enable(false)
+                    .depth_compare_op(vk::CompareOp::LESS);
+                device
+                    .create_graphics_pipelines(
+                        vk::PipelineCache::null(),
+                        &[vk::GraphicsPipelineCreateInfo::default()
+                            .stages(&stages)
+                            .vertex_input_state(&vertex_input)
+                            .input_assembly_state(&input_assembly)
+                            .viewport_state(&viewport_state)
+                            .rasterization_state(&rasterization_st)
+                            .multisample_state(&multisample)
+                            .depth_stencil_state(&depth_stencil_st)
+                            .color_blend_state(&color_blend)
+                            .dynamic_state(&dynamic_state)
+                            .layout(pipeline_layout)
+                            .render_pass(render_pass)
+                            .subpass(0)],
+                        None,
+                    )
+                    .expect("Failed to create 3D see-through pipeline")[0]
+            };
+
             // The wireframe twin draws LINE_LIST edge meshes, NOT the fill
             // mesh through PolygonMode::LINE. Polygon-mode lines proved
             // driver-broken twice on Mesa ANV with the negative-height
@@ -441,6 +489,7 @@ impl SceneStage {
                 render_pass,
                 pipeline,
                 wireframe_pipeline,
+                see_through_pipeline,
                 max_line_width,
                 pipeline_layout,
                 descriptor_set_layout,
@@ -823,6 +872,8 @@ impl SceneStage {
                 }
                 let wanted = if draw.wireframe {
                     self.wireframe_pipeline.unwrap_or(self.pipeline)
+                } else if draw.see_through {
+                    self.see_through_pipeline
                 } else {
                     self.pipeline
                 };
@@ -879,6 +930,7 @@ impl SceneStage {
             if let Some(p) = self.wireframe_pipeline.take() {
                 device.destroy_pipeline(p, None);
             }
+            device.destroy_pipeline(self.see_through_pipeline, None);
             device.destroy_pipeline(self.pipeline, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
             device.destroy_shader_module(self.shader_module, None);
