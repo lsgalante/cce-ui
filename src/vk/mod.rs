@@ -47,7 +47,7 @@ mod scene;
 mod text;
 
 pub use compute::{workgroups, BindKind, Binding, ComputeDevice, Kernel, MAX_BINDINGS};
-pub use core::VkCore;
+pub use core::{SurfaceLost, VkCore};
 pub use image::{
     free_image, recycle_buffer, renderer_epoch, update_pixels, upload_pixels, upload_rgba, ImageQuad,
     PixelFormat,

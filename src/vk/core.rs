@@ -190,6 +190,33 @@ fn shared_instance() -> &'static SharedInstance {
     })
 }
 
+/// A Vulkan call on a window surface failed — in practice
+/// `ERROR_SURFACE_LOST_KHR`: the display connection under the surface is dead,
+/// because the compositor exited (a logout) or the transport broke. Mesa's
+/// Wayland WSI answers the surface queries with a roundtrip, so they are the
+/// first thing to find out.
+///
+/// That is the client's SESSION ending, not a renderer bug, so the window
+/// constructors and the swapchain path report it instead of panicking, and the
+/// caller ends the session the way it would for any other lost connection.
+/// Until 2026-09-25 each of these calls `expect`ed, and a daemon asked for a
+/// window over a dead connection took the whole process down at logout
+/// (cce-cloud, `No surface formats: ERROR_SURFACE_LOST_KHR`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurfaceLost {
+    /// The Vulkan entry point that failed.
+    pub call: &'static str,
+    pub result: vk::Result,
+}
+
+impl std::fmt::Display for SurfaceLost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "window surface lost ({}: {})", self.call, self.result)
+    }
+}
+
+impl std::error::Error for SurfaceLost {}
+
 impl VkCore {
     /// A core bound to a Wayland surface: the returned `vk::SurfaceKHR` is
     /// created from the raw pointers and the chosen device supports presenting
@@ -198,12 +225,16 @@ impl VkCore {
     /// # Safety
     /// `display_ptr` and `surface_ptr` must be live `wl_display` / `wl_surface`
     /// pointers that outlive the core and everything created from it.
+    ///
+    /// Fails with [`SurfaceLost`] when the surface cannot be created or no
+    /// device can be asked whether it presents to it — a dead display
+    /// connection, not a driver fault.
     pub unsafe fn new_for_wayland_surface(
         display_ptr: *mut c_void,
         surface_ptr: *mut c_void,
-    ) -> (Self, vk::SurfaceKHR) {
-        let (core, surface) = Self::new_inner(Some((display_ptr, surface_ptr)));
-        (core, surface.expect("surface requested but not created"))
+    ) -> Result<(Self, vk::SurfaceKHR), SurfaceLost> {
+        let (core, surface) = Self::new_inner(Some((display_ptr, surface_ptr)))?;
+        Ok((core, surface.expect("surface requested but not created")))
     }
 
     /// A new `VkSurfaceKHR` on another Wayland surface, from this core's
@@ -217,7 +248,7 @@ impl VkCore {
         &self,
         display_ptr: *mut c_void,
         surface_ptr: *mut c_void,
-    ) -> vk::SurfaceKHR {
+    ) -> Result<vk::SurfaceKHR, SurfaceLost> {
         let shared = shared_instance();
         let wayland_loader = ash::khr::wayland_surface::Instance::new(&shared.entry, &self.instance);
         let surface = wayland_loader
@@ -227,7 +258,7 @@ impl VkCore {
                     .surface(surface_ptr),
                 None,
             )
-            .expect("Failed to create Wayland surface");
+            .map_err(|result| SurfaceLost { call: "vkCreateWaylandSurfaceKHR", result })?;
         // The device was chosen for the FIRST surface's present support; a
         // later surface on the same display is presentable from the same
         // family on every driver this runs on, but say so if not.
@@ -238,18 +269,19 @@ impl VkCore {
         {
             log::warn!("[vk] queue family {} cannot present to the re-attached surface", self.queue_family);
         }
-        surface
+        Ok(surface)
     }
 
     /// A windowless core: no surface extensions, any graphics-capable device.
     /// For offscreen rendering (thumbnails, previews) and compute.
     pub fn new_headless() -> Self {
-        unsafe { Self::new_inner(None).0 }
+        // Only a surface can be lost, and there is none here.
+        unsafe { Self::new_inner(None).expect("headless core cannot lose a surface").0 }
     }
 
     unsafe fn new_inner(
         wayland: Option<(*mut c_void, *mut c_void)>,
-    ) -> (Self, Option<vk::SurfaceKHR>) {
+    ) -> Result<(Self, Option<vk::SurfaceKHR>), SurfaceLost> {
         // CCE_VK_DEVICE: "integrated" (the default), "discrete", or a device
         // name substring. An explicit request also lifts a session-wide ICD
         // pin (VK_DRIVER_FILES / VK_ICD_FILENAMES) for THIS process — the
@@ -275,23 +307,32 @@ impl VkCore {
         // Instance-level loader; only usable when VK_KHR_surface was enabled.
         let surface_loader = ash::khr::surface::Instance::new(entry, &instance);
 
-        let surface = wayland.map(|(display_ptr, surface_ptr)| {
-            let wayland_loader = ash::khr::wayland_surface::Instance::new(entry, &instance);
-            wayland_loader
-                .create_wayland_surface(
-                    &vk::WaylandSurfaceCreateInfoKHR::default()
-                        .display(display_ptr)
-                        .surface(surface_ptr),
-                    None,
+        let surface = match wayland {
+            Some((display_ptr, surface_ptr)) => {
+                let wayland_loader = ash::khr::wayland_surface::Instance::new(entry, &instance);
+                Some(
+                    wayland_loader
+                        .create_wayland_surface(
+                            &vk::WaylandSurfaceCreateInfoKHR::default()
+                                .display(display_ptr)
+                                .surface(surface_ptr),
+                            None,
+                        )
+                        .map_err(|result| SurfaceLost { call: "vkCreateWaylandSurfaceKHR", result })?,
                 )
-                .expect("Failed to create Wayland surface")
-        });
+            }
+            None => None,
+        };
 
         // Physical device + queue family: graphics, plus present support when
         // a surface exists. Prefer integrated (the toolkit's LowPower default)
         // unless CCE_VK_DEVICE says otherwise; an unsatisfiable preference
         // falls back to the default order rather than failing.
         let mut candidates: Vec<(vk::PhysicalDevice, u32, i32)> = Vec::new();
+        // A present-support query that FAILED, as opposed to answering no:
+        // on a dead display connection every device fails it, and "no
+        // suitable device" would then misreport a lost surface.
+        let mut support_error: Option<vk::Result> = None;
         for pd in instance
             .enumerate_physical_devices()
             .expect("No Vulkan physical devices")
@@ -302,7 +343,10 @@ impl VkCore {
                 let present = match surface {
                     Some(surface) => surface_loader
                         .get_physical_device_surface_support(pd, i as u32, surface)
-                        .unwrap_or(false),
+                        .unwrap_or_else(|e| {
+                            support_error = Some(e);
+                            false
+                        }),
                     None => true,
                 };
                 (graphics && present).then_some(i as u32)
@@ -342,6 +386,10 @@ impl VkCore {
             }
         }
         candidates.sort_by_key(|&(_, _, rank)| rank);
+        if let (true, Some(surface), Some(result)) = (candidates.is_empty(), surface, support_error) {
+            surface_loader.destroy_surface(surface, None);
+            return Err(SurfaceLost { call: "vkGetPhysicalDeviceSurfaceSupportKHR", result });
+        }
         let (physical_device, queue_family, _) = *candidates
             .first()
             .expect("No suitable Vulkan device found");
@@ -473,7 +521,7 @@ impl VkCore {
             )
             .expect("Failed to create command pool");
 
-        (
+        Ok((
             VkCore {
                 allocator: Some(allocator),
                 command_pool,
@@ -489,7 +537,7 @@ impl VkCore {
                 max_line_width,
             },
             surface,
-        )
+        ))
     }
 }
 

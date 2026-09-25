@@ -100,6 +100,22 @@ Key methods (see the trait def around `window_runner.rs:1450`):
 The frame loop is demand-driven (single `redraw` dirty bool, gated by a Wayland frame-callback
 vsync) — it idles correctly when nothing changes. Don't add per-frame I/O to the render hot path.
 
+### A lost surface ends the session; it does not panic (since 2026-09-25)
+
+`VkRenderer::try_new` returns `vk::SurfaceLost` when the display connection under the
+surface is already dead — Mesa's Wayland WSI answers the surface queries with a roundtrip,
+so `vkGetPhysicalDeviceSurfaceFormatsKHR` is the first call to find out, with
+`ERROR_SURFACE_LOST_KHR`. The runner ends that session as `ConnectionLost`: a reconnect if
+the compositor is still there, a clean exit if it is not. Mid-session, a swapchain
+rebuild, acquire or present that reports the surface lost latches `surface_lost()` and
+skips draws (one WARN) until the event loop sees the dead connection itself; the menu
+popup just closes. `VkRenderer::new` is the panicking wrapper, kept for tools that own
+their window outright (designer's `vk-smoke`) — **a client that can outlive its
+compositor calls `try_new`**. Found as cce-cloud's daemon panicking at logout on
+`No surface formats`: it had outlived a compositor and asked for a window over its
+connection. Reproduced by opening a `wl_surface`, killing the shadow compositor, then
+constructing: `new` panics, `try_new` returns the error.
+
 ### `renderer_init` — GPU handles do not survive a reconnect
 
 A connection is one **session**. A Wayland transport cannot be repaired once it breaks,

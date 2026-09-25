@@ -3974,7 +3974,16 @@ pub struct EngineState<A: Application> {
 }
 
 impl<A: Application> EngineState<A> {
-    pub fn init_gpu(&mut self, conn: &Connection, width_logical: f32, height_logical: f32) {
+    /// Build the window's renderer. A [`SurfaceLost`](crate::vk::SurfaceLost)
+    /// means the connection under the surface is already dead; the session
+    /// ends as a lost connection, which reconnects if the compositor is still
+    /// there and exits if it is not.
+    pub fn init_gpu(
+        &mut self,
+        conn: &Connection,
+        width_logical: f32,
+        height_logical: f32,
+    ) -> Result<(), crate::vk::SurfaceLost> {
         let s = self.scale_factor as f32;
         let pw = (width_logical * s) as u32;
         let ph = (height_logical * s) as u32;
@@ -3987,8 +3996,7 @@ impl<A: Application> EngineState<A> {
 
         let load_system_fonts = self.inner.as_ref().map_or(false, |a| a.load_system_fonts());
         // Corner radius 0: runner apps tessellate their own rounded corners.
-        let renderer =
-            unsafe { VkRenderer::new(display_ptr, surface_ptr, pw, ph, 0.0) };
+        let renderer = unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) }?;
         self.font_system = Some(if load_system_fonts {
             crate::create_font_system_with_system_fonts()
         } else {
@@ -3997,6 +4005,7 @@ impl<A: Application> EngineState<A> {
         self.renderer = Some(renderer);
         self.logical_width = width_logical;
         self.logical_height = height_logical;
+        Ok(())
     }
 
     /// Buffer scale and physical extent for a logical size under the current
@@ -6015,7 +6024,10 @@ fn run_session<'l, A: Application>(
     // larger than the window frame on every side; geometry/input-region are
     // published per-resize.
     let rim = 2.0 * engine_state.inner.as_ref().unwrap().overflow_margin() as f32;
-    engine_state.init_gpu(&conn, settings.width as f32 + rim, settings.height as f32 + rim);
+    if let Err(lost) = engine_state.init_gpu(&conn, settings.width as f32 + rim, settings.height as f32 + rim) {
+        log::error!("[window_runner] cannot create the renderer, ending session: {lost}");
+        return (engine_state.inner.take(), SessionEnd::ConnectionLost);
+    }
     engine_state
         .inner
         .as_mut()

@@ -17,6 +17,7 @@ use gpu_allocator::MemoryLocation;
 
 use crate::engine::Vertex;
 
+use super::core::SurfaceLost;
 use super::image::{ImageQuad, ImageStage};
 use super::rt::{RtCamera, RtMaterial, RtStage, RtTriangle};
 use super::scene::{MeshId, SceneDraw, SceneStage, Vertex3D};
@@ -279,6 +280,11 @@ pub struct VkRenderer {
     swapchain_dirty: bool,
     present_mode: vk::PresentModeKHR,
     present_debug_count: u64,
+    /// Set when a surface call reports the surface lost (see [`SurfaceLost`]):
+    /// the display connection is dead, so every later draw is skipped until
+    /// a new surface is attached, rather than re-failing (and re-logging)
+    /// each frame while the caller's event loop finds out for itself.
+    surface_lost: bool,
 
     // Declared last: everything above must be destroyed before the device/
     // instance the core tears down in its own Drop.
@@ -440,9 +446,12 @@ pub(crate) fn flipped_viewport(extent: vk::Extent2D) -> vk::Viewport {
 
 
 impl VkRenderer {
+    /// [`try_new`](Self::try_new) for a caller that owns its window outright
+    /// and has no session to end — a smoke test. Panics on a lost surface;
+    /// a client that can outlive its compositor wants `try_new`.
+    ///
     /// # Safety
-    /// `display_ptr` and `surface_ptr` must be live `wl_display` / `wl_surface`
-    /// pointers that outlive the renderer (same contract as `WgpuAdapter::new`).
+    /// Same contract as [`try_new`](Self::try_new).
     pub unsafe fn new(
         display_ptr: *mut c_void,
         surface_ptr: *mut c_void,
@@ -450,9 +459,28 @@ impl VkRenderer {
         height: u32,
         corner_radius_px: f32,
     ) -> Self {
+        Self::try_new(display_ptr, surface_ptr, width, height, corner_radius_px)
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// A renderer presenting to `surface_ptr`, or [`SurfaceLost`] when the
+    /// display connection under it is already dead — which is what a window
+    /// requested as the compositor goes away gets. The caller should treat
+    /// that as its connection ending (the runner does), not retry here.
+    ///
+    /// # Safety
+    /// `display_ptr` and `surface_ptr` must be live `wl_display` / `wl_surface`
+    /// pointers that outlive the renderer.
+    pub unsafe fn try_new(
+        display_ptr: *mut c_void,
+        surface_ptr: *mut c_void,
+        width: u32,
+        height: u32,
+        corner_radius_px: f32,
+    ) -> Result<Self, SurfaceLost> {
         let t_new = std::time::Instant::now();
         let (mut core, surface) =
-            super::core::VkCore::new_for_wayland_surface(display_ptr, surface_ptr);
+            super::core::VkCore::new_for_wayland_surface(display_ptr, surface_ptr)?;
         log::debug!("[timing] VkCore::new_for_wayland_surface: {:?}", t_new.elapsed());
         let t_rest = std::time::Instant::now();
         // Locals over the core for the setup below (methods use self.core.*).
@@ -462,13 +490,21 @@ impl VkRenderer {
         let physical_device = core.physical_device;
         let min_uniform_align = core.min_uniform_align;
         let surface_loader = core.surface_loader.clone();
-        let allocator = core.allocator.as_mut().unwrap();
 
         // Surface format: prefer sRGB (wgpu's get_default_config sorts sRGB first,
-        // so this matches the colors the app renders today).
-        let formats = surface_loader
+        // so this matches the colors the app renders today). The first query
+        // that talks to the compositor, so the one a dead connection fails.
+        let formats = match surface_loader
             .get_physical_device_surface_formats(physical_device, surface)
-            .expect("No surface formats");
+        {
+            Ok(formats) if !formats.is_empty() => formats,
+            Ok(_) => panic!("surface offers no formats"),
+            Err(result) => {
+                surface_loader.destroy_surface(surface, None);
+                return Err(SurfaceLost { call: "vkGetPhysicalDeviceSurfaceFormatsKHR", result });
+            }
+        };
+        let allocator = core.allocator.as_mut().unwrap();
         let surface_format = formats
             .iter()
             .copied()
@@ -890,17 +926,20 @@ impl VkRenderer {
             swapchain_dirty: false,
             present_mode: vk::PresentModeKHR::FIFO,
             present_debug_count: 0,
+            surface_lost: false,
             core,
         };
         log::debug!("[timing] VkRenderer pipelines/stages: {:?}", t_rest.elapsed());
         let t_swap = std::time::Instant::now();
-        renderer.create_swapchain();
+        // On failure `renderer` drops here, and its Drop tears down everything
+        // built so far, surface included.
+        renderer.create_swapchain()?;
         renderer.write_window_info();
         // The swapchain may have settled on a different extent than requested;
         // keep the backdrop targets in lockstep.
         renderer.sync_backdrop_targets();
         log::debug!("[timing] swapchain setup: {:?}", t_swap.elapsed());
-        renderer
+        Ok(renderer)
     }
 
     /// The window-clip corner radius as the shaders consume it: the nominal
@@ -969,12 +1008,19 @@ impl VkRenderer {
         }
     }
 
-    fn create_swapchain(&mut self) {
+    /// Build the swapchain for the current surface. Only the calls that ask
+    /// the surface can fail with [`SurfaceLost`]; everything after them is
+    /// device work and still panics as the bug it would be. A failure leaves
+    /// the previous swapchain (if any) in `self.swapchain` for Drop.
+    fn create_swapchain(&mut self) -> Result<(), SurfaceLost> {
         unsafe {
             let caps = self.core
                 .surface_loader
                 .get_physical_device_surface_capabilities(self.core.physical_device, self.surface)
-                .expect("Failed to query surface capabilities");
+                .map_err(|result| SurfaceLost {
+                    call: "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
+                    result,
+                })?;
 
             // Wayland reports "extent defined by the swapchain" (u32::MAX); use the
             // size the configure events gave us.
@@ -1055,7 +1101,7 @@ impl VkRenderer {
                         .old_swapchain(old_swapchain),
                     None,
                 )
-                .expect("Failed to create swapchain");
+                .map_err(|result| SurfaceLost { call: "vkCreateSwapchainKHR", result })?;
             if old_swapchain != vk::SwapchainKHR::null() {
                 self.swapchain_loader.destroy_swapchain(old_swapchain, None);
             }
@@ -1084,7 +1130,7 @@ impl VkRenderer {
             let images = self
                 .swapchain_loader
                 .get_swapchain_images(self.swapchain)
-                .expect("Failed to get swapchain images");
+                .map_err(|result| SurfaceLost { call: "vkGetSwapchainImagesKHR", result })?;
             self.swapchain_images = images.clone();
             let subresource_range = vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -1126,16 +1172,34 @@ impl VkRenderer {
                 );
             }
         }
+        Ok(())
     }
 
-    fn recreate_swapchain(&mut self) {
+    fn recreate_swapchain(&mut self) -> Result<(), SurfaceLost> {
         unsafe {
             let _ = self.core.device.device_wait_idle();
         }
         self.destroy_swapchain_resources();
-        self.create_swapchain();
+        self.create_swapchain()?;
         self.write_window_info();
         self.sync_backdrop_targets();
+        Ok(())
+    }
+
+    /// Latch a lost surface: say so once, then skip draws until a new
+    /// surface is attached.
+    fn mark_surface_lost(&mut self, lost: SurfaceLost) {
+        if !self.surface_lost {
+            log::warn!("[vk] {lost}; skipping draws until the connection is replaced");
+        }
+        self.surface_lost = true;
+    }
+
+    /// Whether the surface has been reported lost (see [`SurfaceLost`]). A
+    /// caller with its own event loop can end its session on this rather
+    /// than wait for the connection error.
+    pub fn surface_lost(&self) -> bool {
+        self.surface_lost
     }
 
     /// Suspend the UI pass, copy the swapchain's frame-so-far into the blur
@@ -1483,13 +1547,15 @@ impl VkRenderer {
         surface_ptr: *mut c_void,
         width: u32,
         height: u32,
-    ) {
+    ) -> Result<(), SurfaceLost> {
         if self.surface != vk::SurfaceKHR::null() {
             self.detach_surface();
         }
-        self.surface = self.core.create_wayland_surface(display_ptr, surface_ptr);
+        self.surface = self.core.create_wayland_surface(display_ptr, surface_ptr)?;
+        self.surface_lost = false;
         self.resize(width, height);
         self.swapchain_dirty = true;
+        Ok(())
     }
 
     /// Whether a surface is attached — false between
@@ -1567,12 +1633,15 @@ impl VkRenderer {
     /// top. Returns false if the frame was skipped (swapchain rebuild); the
     /// caller just draws again next tick.
     pub fn draw_frame_2d(&mut self, frame2d: Frame2D<'_>) -> bool {
-        if self.surface == vk::SurfaceKHR::null() {
+        if self.surface == vk::SurfaceKHR::null() || self.surface_lost {
             return false;
         }
         if self.swapchain_dirty {
             self.swapchain_dirty = false;
-            self.recreate_swapchain();
+            if let Err(lost) = self.recreate_swapchain() {
+                self.mark_surface_lost(lost);
+                return false;
+            }
             if self.swapchain_dirty {
                 // The rebuild couldn't honor the requested extent (surface
                 // caps disagree, e.g. mid suspend/resume) — presenting it
@@ -1608,6 +1677,10 @@ impl VkRenderer {
                 }
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                     self.swapchain_dirty = true;
+                    return false;
+                }
+                Err(result @ vk::Result::ERROR_SURFACE_LOST_KHR) => {
+                    self.mark_surface_lost(SurfaceLost { call: "vkAcquireNextImageKHR", result });
                     return false;
                 }
                 Err(e) => {
@@ -2100,6 +2173,9 @@ impl VkRenderer {
                 }
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                     self.swapchain_dirty = true;
+                }
+                Err(result @ vk::Result::ERROR_SURFACE_LOST_KHR) => {
+                    self.mark_surface_lost(SurfaceLost { call: "vkQueuePresentKHR", result });
                 }
                 Err(e) => log::error!("queue_present failed: {e:?}"),
             }

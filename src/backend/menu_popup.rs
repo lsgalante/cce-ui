@@ -242,14 +242,27 @@ impl<A: Application> PopupHandler for EngineState<A> {
         let (_, pw, ph) = Self::buffer_geometry(self.scale_factor, w, h);
         let surface_ptr = mp.popup.wl_surface().id().as_ptr() as *mut std::ffi::c_void;
         let display_ptr = self.display_ptr as *mut std::ffi::c_void;
-        match self.menu_renderer.as_mut() {
-            Some(r) if r.has_surface() => r.resize(pw, ph),
+        let attached = match self.menu_renderer.as_mut() {
+            Some(r) if r.has_surface() => {
+                r.resize(pw, ph);
+                Ok(())
+            }
             Some(r) => unsafe { r.attach_surface(display_ptr, surface_ptr, pw, ph) },
             None => {
                 let t = std::time::Instant::now();
-                self.menu_renderer = Some(unsafe { VkRenderer::new(display_ptr, surface_ptr, pw, ph, 0.0) });
+                let made = unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) };
                 log::debug!("[menu_popup] renderer created in {:?}", t.elapsed());
+                made.map(|r| self.menu_renderer = Some(r))
             }
+        };
+        // A lost surface is the connection dying under the menu; the window's
+        // own event loop ends the session on it. Just drop the menu.
+        if let Err(lost) = attached {
+            log::warn!("[menu_popup] {lost}; closing the menu");
+            context_menu::hide();
+            self.close_menu_popup();
+            self.redraw = true;
+            return;
         }
         self.redraw = true;
         self.render_menu_popup();
