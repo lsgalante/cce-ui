@@ -446,23 +446,6 @@ pub(crate) fn flipped_viewport(extent: vk::Extent2D) -> vk::Viewport {
 
 
 impl VkRenderer {
-    /// [`try_new`](Self::try_new) for a caller that owns its window outright
-    /// and has no session to end — a smoke test. Panics on a lost surface;
-    /// a client that can outlive its compositor wants `try_new`.
-    ///
-    /// # Safety
-    /// Same contract as [`try_new`](Self::try_new).
-    pub unsafe fn new(
-        display_ptr: *mut c_void,
-        surface_ptr: *mut c_void,
-        width: u32,
-        height: u32,
-        corner_radius_px: f32,
-    ) -> Self {
-        Self::try_new(display_ptr, surface_ptr, width, height, corner_radius_px)
-            .unwrap_or_else(|e| panic!("{e}"))
-    }
-
     /// A renderer presenting to `surface_ptr`, or [`SurfaceLost`] when the
     /// display connection under it is already dead — which is what a window
     /// requested as the compositor goes away gets. The caller should treat
@@ -1539,7 +1522,7 @@ impl VkRenderer {
     /// renderer costs a device and every pipeline, this costs one swapchain.
     ///
     /// # Safety
-    /// Same contract as [`VkRenderer::new`]: live `wl_display` / `wl_surface`
+    /// Same contract as [`VkRenderer::try_new`]: live `wl_display` / `wl_surface`
     /// pointers that outlive the attachment.
     pub unsafe fn attach_surface(
         &mut self,

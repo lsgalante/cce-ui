@@ -109,12 +109,13 @@ so `vkGetPhysicalDeviceSurfaceFormatsKHR` is the first call to find out, with
 the compositor is still there, a clean exit if it is not. Mid-session, a swapchain
 rebuild, acquire or present that reports the surface lost latches `surface_lost()` and
 skips draws (one WARN) until the event loop sees the dead connection itself; the menu
-popup just closes. `VkRenderer::new` is the panicking wrapper, kept for tools that own
-their window outright (designer's `vk-smoke`) — **a client that can outlive its
-compositor calls `try_new`**. Found as cce-cloud's daemon panicking at logout on
-`No surface formats`: it had outlived a compositor and asked for a window over its
-connection. Reproduced by opening a `wl_surface`, killing the shadow compositor, then
-constructing: `new` panics, `try_new` returns the error.
+popup just closes. `try_new` is the ONLY constructor: the panicking `new` was removed
+once its last callers (cce-cloud, cce-lock, designer's `vk-smoke`) had moved over, so a
+new client cannot pick the one that takes the process down at logout. Found as
+cce-cloud's daemon panicking at logout on `No surface formats`: it had outlived a
+compositor and asked for a window over its connection. Reproduced by opening a
+`wl_surface`, killing the shadow compositor, then constructing: `try_new` returns the
+error where the old `new` panicked.
 
 ### `renderer_init` — GPU handles do not survive a reconnect
 
