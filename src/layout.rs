@@ -2185,6 +2185,15 @@ pub fn root_plate_inset() -> f32 {
 
 /// One style-registry float, initialising the registry on first use — the
 /// one read every rung getter goes through.
+///
+/// The guard is released before this returns, which is why a getter whose
+/// unset slot falls back to ANOTHER getter must read through here:
+/// `get_style_registry().read().unwrap().get_float(k).unwrap_or_else(g)`
+/// holds its guard to the end of the statement, so `g`'s read nests inside
+/// it, and std's `RwLock` queues a reader behind a waiting writer — a
+/// `reload_config` arriving between the two reads parks both, and every
+/// reader in the process behind them. That hung cce-designer's suite
+/// (2026-09-25); `tests/style_registry_reentrancy.rs` is the check.
 fn registry_float(slot: &str) -> Option<f32> {
     lazy_init_style_registry();
     get_style_registry().read().unwrap().get_float(slot)
@@ -2239,7 +2248,7 @@ pub fn set_control_relief(relief: bool) {
 
 pub fn toggle_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("toggle_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("toggle_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_toggle_corner_radius(radius: f32) {
@@ -2279,7 +2288,7 @@ pub fn set_toggle_border_width(width: f32) {
 
 pub fn slider_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("slider_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("slider_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 /// The slider band's knobs (`style.control.slider.*`): the flat band's thickness,
@@ -3148,7 +3157,7 @@ pub fn set_button_font(font: &str) {
 pub fn color_selector_preview_corner_radius() -> f32 {
     lazy_init_style_registry();
     // Unset: the swatch rounds like the text field beside it (the TextBox radius).
-    get_style_registry().read().unwrap().get_float("color_selector_preview_corner_radius").unwrap_or_else(textbox_corner_radius)
+    registry_float("color_selector_preview_corner_radius").unwrap_or_else(textbox_corner_radius)
 }
 
 pub fn set_color_selector_preview_corner_radius(radius: f32) {
@@ -3161,7 +3170,7 @@ pub fn set_color_selector_preview_corner_radius(radius: f32) {
 pub fn color_selector_corner_radius() -> f32 {
     lazy_init_style_registry();
     // Unset: the selector's frame rounds like the text field it stands in for.
-    get_style_registry().read().unwrap().get_float("color_selector_corner_radius").unwrap_or_else(textbox_corner_radius)
+    registry_float("color_selector_corner_radius").unwrap_or_else(textbox_corner_radius)
 }
 
 pub fn set_color_selector_corner_radius(radius: f32) {
@@ -3192,7 +3201,7 @@ pub fn set_control_corner_radius(radius: f32) {
 
 pub fn button_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("button_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("button_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_button_corner_radius(radius: f32) {
@@ -3204,7 +3213,7 @@ pub fn set_button_corner_radius(radius: f32) {
 
 pub fn spinbox_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("spinbox_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("spinbox_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_spinbox_corner_radius(radius: f32) {
@@ -3354,7 +3363,7 @@ pub fn set_spinbox_button_padding(padding: f32) {
 
 pub fn textbox_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("textbox_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("textbox_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_textbox_corner_radius(radius: f32) {
@@ -3403,7 +3412,7 @@ pub fn set_textbox_multiline_border_width(width: f32) {
 
 pub fn list_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("list_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("list_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_list_corner_radius(radius: f32) {
@@ -3415,7 +3424,7 @@ pub fn set_list_corner_radius(radius: f32) {
 
 pub fn tree_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("tree_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("tree_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_tree_corner_radius(radius: f32) {
@@ -3601,7 +3610,7 @@ pub fn set_graph_connector_activation_radius(radius: f32) {
 
 pub fn font_selector_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("font_selector_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("font_selector_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_font_selector_corner_radius(radius: f32) {
@@ -3619,12 +3628,12 @@ pub fn set_font_selector_corner_radius(radius: f32) {
 /// its corner belongs to the control scale, like the dropdown's.
 pub fn menu_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("menu_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("menu_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn dropdown_corner_radius() -> f32 {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("dropdown_corner_radius").unwrap_or_else(control_corner_radius)
+    registry_float("dropdown_corner_radius").unwrap_or_else(control_corner_radius)
 }
 
 pub fn set_dropdown_corner_radius(radius: f32) {
