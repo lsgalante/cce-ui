@@ -563,43 +563,6 @@ impl crate::widget::Input for ButtonStrip {
                 }
                 old_hovered != self.hovered_idx
             }
-            Event::KeyInput(event) => {
-                if event.state != ElementState::Pressed {
-                    return false;
-                }
-                if self.buttons.is_empty() {
-                    return false;
-                }
-
-                let current = self.selected.unwrap_or(0);
-                let next;
-
-                match event.logical_key {
-                    Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowUp) => {
-                        if current > 0 {
-                            next = current - 1;
-                        } else {
-                            next = self.buttons.len() - 1;
-                        }
-                    }
-                    Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowDown) => {
-                        if current + 1 < self.buttons.len() {
-                            next = current + 1;
-                        } else {
-                            next = 0;
-                        }
-                    }
-                    _ => return false,
-                }
-
-                if Some(next) != self.selected {
-                    self.selected = Some(next);
-                    self.just_clicked = Some(next);
-                    self.generate_rotated_labels();
-                    return true;
-                }
-                false
-            }
             _ => false,
         }
     }

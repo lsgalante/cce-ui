@@ -2631,7 +2631,7 @@ impl Input for ParametersBg {
                                 let mut apply = false;
                                 let mut should_unfocus = false;
                                 let shift = event.shift;
-                                let mut move_vertical = |editor: &mut TextEditorState, delta: i32| {
+                                let move_vertical = |editor: &mut TextEditorState, delta: i32| {
                                     if shift && editor.select_anchor.is_none() {
                                         editor.select_anchor = Some(editor.cursor_idx);
                                     } else if !shift {
