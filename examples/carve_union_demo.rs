@@ -8,6 +8,7 @@
 use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
+use cce_ui::scene::Material;
 use cce_ui::widget::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use wayland_client::QueueHandle;
 
@@ -59,7 +60,7 @@ impl Application for DemoApp {
         pc.plate(
             Rect { x: 0.0, y: 0.0, width: w, height: h },
             (12.0, 12.0, 12.0, 12.0),
-            [0.42, 0.44, 0.50, 1.0],
+            &Material::opaque([0.42, 0.44, 0.50, 1.0]),
             cce_ui::layout::bevel_width(),
         );
         let wall = 10.0;

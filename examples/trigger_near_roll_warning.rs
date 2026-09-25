@@ -17,6 +17,7 @@
 use cce_ui::engine::{Application, EngineState, LogicalPosition, LogicalSize, WindowSettings};
 use cce_ui::scene::layout::Rect;
 use cce_ui::scene::paint::{DisplayList, PaintCtx};
+use cce_ui::scene::Material;
 use cce_ui::widget::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use wayland_client::QueueHandle;
 
@@ -67,7 +68,7 @@ impl Application for TriggerApp {
         pc.plate(
             Rect { x: 0.0, y: 0.0, width: w, height: h },
             (12.0, 12.0, 12.0, 12.0),
-            [0.13, 0.13, 0.16, 1.0],
+            &Material::opaque([0.13, 0.13, 0.16, 1.0]),
             roll,
         );
         // 2. A later plate overlapping where the carve goes: the occlusion
@@ -76,7 +77,7 @@ impl Application for TriggerApp {
         pc.bevel(
             Rect { x: 40.0, y: 100.0, width: 200.0, height: 80.0 },
             (6.0, 6.0, 6.0, 6.0),
-            [0.20, 0.20, 0.25, 1.0],
+            &Material::opaque([0.20, 0.20, 0.25, 1.0]),
             3.0,
         );
         // 3. Full-ring untinted recess hugging the left edge: its shaded
