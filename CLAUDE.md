@@ -117,6 +117,20 @@ compositor and asked for a window over its connection. Reproduced by opening a
 `wl_surface`, killing the shadow compositor, then constructing: `try_new` returns the
 error where the old `new` panicked.
 
+### A daemon can outlive its compositor (`Application::outlives_compositor`, 2026-09-25)
+
+When the compositor is gone (`SessionEnd::NoCompositor` — nothing at the socket) the
+runner EXITS by default: the compositor saves windows for restore and its successor
+respawns them, so a client that rejoined came up beside its own copy (2724002). That is
+wrong for a process the compositor does not restore — a systemd user service like the
+status bar or the notifier, which must outlive it and whose D-Bus names other programs
+depend on. Such an app returns true from `outlives_compositor`; the runner then waits for
+the successor's socket (`await_compositor_socket`, a 250 ms poll) and rejoins it with the
+same `Application`. Found when the status bar was rebuilt against 2724002: at every logout
+its modules exited, the launcher's backoff grew while nobody was logged in, and the tray's
+StatusNotifierWatcher came back seconds after the next login — Dropbox, starting into the
+gap, reported no tray.
+
 ### `renderer_init` — GPU handles do not survive a reconnect
 
 A connection is one **session**. A Wayland transport cannot be repaired once it breaks,
