@@ -120,6 +120,9 @@ pub(crate) struct SceneStage {
     /// `pipeline` with culling off and depth writes off — the
     /// `SceneDraw::see_through` fill.
     see_through_pipeline: vk::Pipeline,
+    /// `wireframe_pipeline` WITH depth writes — the wires of a see-through
+    /// fill (`SceneDraw::see_through` on a wireframe draw).
+    wireframe_see_through_pipeline: vk::Pipeline,
     /// Device cap for `SceneDraw::line_width` (1.0 without wideLines).
     max_line_width: f32,
     pipeline_layout: vk::PipelineLayout,
@@ -401,11 +404,13 @@ impl SceneStage {
             // were the only wires, and the overlay's whole lattice was the
             // back side showing through, which read as the mesh
             // counter-rotating during orbits).
-            let depth_stencil_lines = vk::PipelineDepthStencilStateCreateInfo::default()
-                .depth_test_enable(true)
-                .depth_write_enable(false)
-                .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
-            let wireframe_pipeline = Some({
+            // `depth_write` builds the see-through twin (`SceneDraw::
+            // see_through` on a WIRE draw): identical but for the writes.
+            let make_lines_pipeline = |depth_write: bool| {
+                let depth_stencil_lines = vk::PipelineDepthStencilStateCreateInfo::default()
+                    .depth_test_enable(true)
+                    .depth_write_enable(depth_write)
+                    .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
                 let input_assembly_lines = vk::PipelineInputAssemblyStateCreateInfo::default()
                     .topology(vk::PrimitiveTopology::LINE_LIST);
                 let rasterization_lines = vk::PipelineRasterizationStateCreateInfo::default()
@@ -444,7 +449,9 @@ impl SceneStage {
                         None,
                     )
                     .expect("Failed to create 3D wireframe pipeline")[0]
-            });
+            };
+            let wireframe_pipeline = Some(make_lines_pipeline(false));
+            let wireframe_see_through_pipeline = make_lines_pipeline(true);
 
             let uniform_stride = UNIFORM_SIZE.next_multiple_of(min_uniform_align.max(1));
 
@@ -490,6 +497,7 @@ impl SceneStage {
                 pipeline,
                 wireframe_pipeline,
                 see_through_pipeline,
+                wireframe_see_through_pipeline,
                 max_line_width,
                 pipeline_layout,
                 descriptor_set_layout,
@@ -870,7 +878,9 @@ impl SceneStage {
                 if mesh.count == 0 {
                     continue;
                 }
-                let wanted = if draw.wireframe {
+                let wanted = if draw.wireframe && draw.see_through {
+                    self.wireframe_see_through_pipeline
+                } else if draw.wireframe {
                     self.wireframe_pipeline.unwrap_or(self.pipeline)
                 } else if draw.see_through {
                     self.see_through_pipeline
@@ -881,7 +891,7 @@ impl SceneStage {
                     device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, wanted);
                     bound = wanted;
                 }
-                if draw.wireframe && self.wireframe_pipeline.is_some() {
+                if draw.wireframe && (draw.see_through || self.wireframe_pipeline.is_some()) {
                     device.cmd_set_line_width(cmd, draw.line_width.clamp(1.0, self.max_line_width));
                     device.cmd_set_depth_bias(cmd, 0.0, 0.0, 0.0);
                 } else if draw.wire_base_width > 0.0 {
@@ -931,6 +941,7 @@ impl SceneStage {
                 device.destroy_pipeline(p, None);
             }
             device.destroy_pipeline(self.see_through_pipeline, None);
+            device.destroy_pipeline(self.wireframe_see_through_pipeline, None);
             device.destroy_pipeline(self.pipeline, None);
             device.destroy_pipeline_layout(self.pipeline_layout, None);
             device.destroy_shader_module(self.shader_module, None);
