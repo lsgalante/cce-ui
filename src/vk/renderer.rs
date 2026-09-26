@@ -1162,8 +1162,16 @@ impl VkRenderer {
         unsafe {
             let _ = self.core.device.device_wait_idle();
         }
+        let before = self.extent;
         self.destroy_swapchain_resources();
         self.create_swapchain()?;
+        if present_debug() {
+            eprintln!(
+                "[vk] swapchain rebuilt {}x{} -> {}x{} (backdrop valid: {})",
+                before.width, before.height, self.extent.width, self.extent.height,
+                self.scene.backdrop_valid,
+            );
+        }
         self.write_window_info();
         self.sync_backdrop_targets();
         Ok(())
@@ -1292,18 +1300,29 @@ impl VkRenderer {
     /// Recreate backdrop + depth at the surface size (device must be idle),
     /// re-point the UI descriptor at the new view, and make the fresh image
     /// legal to sample.
+    ///
+    /// A rebuild at the SAME size (a swapchain reported suboptimal or out of
+    /// date, a corner-radius change) keeps the backdrop, and must not clear
+    /// it: `backdrop_valid` stays true across it, so a cleared image is
+    /// replayed under the UI as the scene, and an app that stages only when
+    /// its scene changes never repairs it. Seen as a designer viewport that
+    /// stayed black until the pointer moved, on a discrete GPU presenting to
+    /// a compositor on the integrated one — its swapchain is rebuilt at the
+    /// same size a few frames in (`CCE_PRESENT_DEBUG` logs every rebuild).
     fn sync_backdrop_targets(&mut self) {
-        self.scene.resize(
+        let recreated = self.scene.resize(
             &self.core.device,
             self.core.allocator.as_mut().unwrap(),
             self.extent,
         );
-        clear_image_to_shader_read(
-            &self.core.device,
-            self.core.queue,
-            self.core.command_pool,
-            self.scene.backdrop_image,
-        );
+        if recreated {
+            clear_image_to_shader_read(
+                &self.core.device,
+                self.core.queue,
+                self.core.command_pool,
+                self.scene.backdrop_image,
+            );
+        }
         // The blur snapshot target tracks the surface size alongside the
         // backdrop (same format so cmd_copy_image from the swapchain is legal).
         unsafe {

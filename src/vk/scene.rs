@@ -570,14 +570,19 @@ impl SceneStage {
     /// (Re)create the backdrop + depth targets at `extent`. Caller must have the
     /// device idle (the renderer's swapchain-rebuild path guarantees it) and must
     /// re-point the UI descriptor at the new `backdrop_view` and re-init its layout.
+    ///
+    /// Returns whether the targets were recreated. At an unchanged extent they
+    /// are kept, CONTENTS included: the backdrop still holds the last staged
+    /// scene and `backdrop_valid` still says so, and an app that stages only
+    /// when its scene changes will not stage again to repair it.
     pub(crate) fn resize(
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
         extent: vk::Extent2D,
-    ) {
+    ) -> bool {
         if extent == self.extent && self.framebuffer != vk::Framebuffer::null() {
-            return;
+            return false;
         }
         self.destroy_targets(device, allocator);
         self.extent = extent;
@@ -703,6 +708,7 @@ impl SceneStage {
                 )
                 .expect("Failed to create scene framebuffer");
         }
+        true
     }
 
     pub(crate) fn create_mesh(
