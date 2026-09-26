@@ -234,13 +234,37 @@ impl Button {
         (family, size.unwrap_or(12.0))
     }
 
+    /// The label's width AS `paint` DRAWS IT: shaped by cosmic-text with no
+    /// family (the DE's UI sans), which is what the `text_with(.., None, ..)`
+    /// below emits — the same shaped-buffer cache the draw reads.
+    ///
+    /// This used to be `measure_text_width` in the configured `button_font`
+    /// family: an SVG-inked extent in a face the label is never drawn in.
+    /// Under the default Berkeley Mono that measured every label wider than
+    /// its sans draw ("Attach..." 73px against 53px drawn), and since both
+    /// the centring and `intrinsic_size` read this, every label sat left of
+    /// centre with the surplus piled up on its right. The inked measure is
+    /// now only the fallback for a font system that shapes nothing.
+    ///
+    /// Blocking lock, as the context menu takes it: `try_lock` fell back to
+    /// the wrong measure whenever another thread was shaping. The one site
+    /// that holds this lock across a widget call (the flat host, around
+    /// `prepare_text`) never reaches a Button's measure — keep it that way.
     fn label_width(&self, label: &str) -> f32 {
         if label == "📋" {
-            12.0
-        } else {
-            let (family, size) = self.font();
-            crate::widget::display::measure_text_width(label, &family, size)
+            return 12.0;
         }
+        let (family, size) = self.font();
+        crate::geometry_font_system()
+            .lock()
+            .ok()
+            .and_then(|mut fs| {
+                crate::backend::window_runner::shaped_cluster_offsets(&mut fs, label, size, None)
+                    .last()
+                    .map(|&(_, total)| total)
+            })
+            .filter(|&w| w > 0.0)
+            .unwrap_or_else(|| crate::widget::display::measure_text_width(label, &family, size))
     }
 
     /// The control plate this Button's `paint` draws — flush, at the button
@@ -689,6 +713,26 @@ mod tests {
         assert!(x > 10.0 && x < 130.0, "a fitting label must stay centred, got {x}");
     }
 
+    /// Centred means centred on the glyphs as DRAWN: the gap either side of
+    /// the shaped label is equal. Measuring in the configured button family
+    /// while drawing in the UI sans left "Attach..." ~10px left of centre.
+    #[test]
+    fn a_label_is_centred_on_its_drawn_width() {
+        let (_, size) = Button::model(ButtonKind::Primary).font();
+        for label in ["Attach...", "Load Images", "Cancel"] {
+            let drawn = {
+                let mut fs = crate::geometry_font_system().lock().unwrap();
+                crate::backend::window_runner::shaped_cluster_offsets(&mut fs, label, size, None)
+                    .last()
+                    .map(|&(_, t)| t)
+                    .unwrap()
+            };
+            let (x, _) = painted_label(label, 160.0);
+            let (left, right) = (x - 10.0, 170.0 - (x + drawn));
+            assert!((left - right).abs() < 1.0, "{label:?}: {left:.1}px left vs {right:.1}px right");
+        }
+    }
+
     fn press(x: f32, y: f32) -> Event {
         Event::MouseButton { button: MouseButton::Left, state: ElementState::Pressed, x, y, local_x: x, local_y: y }
     }
@@ -795,3 +839,4 @@ mod focus_ring_tests {
         assert_eq!(troughs(&b), vec![None]);
     }
 }
+
