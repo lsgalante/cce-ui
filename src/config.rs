@@ -1005,7 +1005,7 @@ mod tests {
         assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.wall.profile", spec, "style"));
         assert!(update_kdl_in_memory_typed(&mut doc, "style.surface.relief.wall.height", "0.3", "style", Some("mm")));
         assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.edge.profile", spec, "style"));
-        assert!(update_kdl_in_memory_typed(&mut doc, "style.surface.relief.edge.knobs", "0.4,0.5,0.6", "style", Some("bevel")));
+        assert!(update_kdl_in_memory_typed(&mut doc, "style.surface.relief.edge.height", "4", "style", Some("px")));
         // Migrate: the flat spellings come off, and a spelling that is not
         // there reports nothing removed.
         assert!(remove_kdl_in_memory(&mut doc, "style.surface.relief.profile"));
@@ -1024,7 +1024,7 @@ mod tests {
         assert_eq!(relief.pointer("/wall/profile").and_then(|v| v.as_str()), Some(spec));
         assert_eq!(relief.pointer("/wall/height").and_then(|v| v.as_str()), Some("0.3mm"), "{relief}");
         assert_eq!(relief.pointer("/edge/profile").and_then(|v| v.as_str()), Some(spec));
-        assert_eq!(relief.pointer("/edge/knobs").and_then(|v| v.as_str()), Some("0.4,0.5,0.6"));
+        assert!(relief.pointer("/edge/height").is_some(), "{relief}");
         assert!(relief.get("profile").is_none() && relief.get("edge_knobs").is_none(), "{relief}");
         // A whole node comes off too.
         assert!(remove_kdl_in_memory(&mut doc, "style.surface.relief.edge"));

@@ -680,8 +680,8 @@ multiply on the plate's own fill plus a specular crest. Each is a node under
 
 ```kdl
 relief depth=0.15 width=9.3 {
-    wall height=(mm)0.3 profile="smooth;…" knobs=(bevel)"0.5,0.5,0.5"
-    edge height=4.0    profile="smooth;…" knobs=(bevel)"0.5,0.5,0.5"
+    wall height=(mm)0.3 profile="smooth;…"
+    edge height=4.0    profile="smooth;…"
 }
 ```
 
@@ -694,21 +694,35 @@ carve drops `relief_shade::RECESS_DEPTH` (0.6) of its wall (saturating at the
 DE roll width) and the roll is a quarter-round of radius width, the look every
 config had. `profile` is the curve as a ramp spec (absent or the identity
 sentinel = the analytic curve: smoothstep for a wall, the superellipse
-quadrant for an edge), and `knobs` is cce-relief's slider triple behind it,
-which only the editor reads. The registry keys never moved — `bevel_height`
-/ `roll_height`, `bevel_profile_spec` / `roll_profile_spec`,
-`bevel_profile_knobs` / `roll_profile_knobs` — so nothing downstream of the
-registry knows. Until 2026-09-28 the six were flat on the node with the wall
-UNNAMED (`height`, `profile`, `profile_knobs`) and the edge prefixed
-(`edge_height`, `edge_profile`, `edge_knobs`), which read as one shape with an
-"edge" variant rather than two shapes; those spellings survive as aliases in
+quadrant for an edge). The registry keys never moved — `bevel_height`
+/ `roll_height`, `bevel_profile_spec` / `roll_profile_spec` — so nothing
+downstream of the registry knows. Until 2026-09-28 the keys were flat on the
+node with the wall UNNAMED (`height`, `profile`) and the edge prefixed
+(`edge_height`, `edge_profile`), which read as one shape with an "edge"
+variant rather than two shapes; those spellings survive as aliases in
 `layout.rs`'s flatten table, and `prefer_relief_wall_edge` drops a flat one
 whenever its node spelling is present, so a file carrying both is decided by
 the node and not by line order (`the_node_spelling_of_a_relief_key_wins_over_the_flat_one`).
 `cce-relief`'s Save writes the node spellings and REMOVES the flat ones
 (`config::remove_config_value`), so a file migrates the first time it is
 saved; `wall` and `edge` are `PROP_NODES` members so their keys land as
-properties. `layout::carve_depth_px` states the drop rule
+properties.
+
+**The editor's knobs are not a style key.** cce-relief's Shoulder / Base /
+Bias triples — the slider positions behind each profile spec — rode in the
+style block as `(bevel)`-typed keys (`relief.wall.knobs` / `edge.knobs`,
+before that `profile_knobs` / `edge_knobs`) so the editor could reopen where
+it was left: editor state beside the values that draw, and the one relief
+key nothing but the editor read. They live in that app's own
+`~/.config/cce/cce-relief/state.kdl` now, one `knobs` node per Save target
+(`shared`, a retargeted file's path, or `<path>#<key>` for a `(relief)`
+value — two materials must not seed each other's sliders; `knob_state` in
+`cce-relief.rs`). The registry keys `bevel_profile_knobs` /
+`roll_profile_knobs` and their flatten arms are gone; a config that still
+carries a knob key seeds the editor once, off the raw file, and the next
+Save takes the key off under either spelling. The `(bevel)` type and
+`parse_bevel_knobs` stay, because a `(relief)` value still carries its own
+`k=` ride-along and the data editor's preview of such a value draws it. `layout::carve_depth_px` states the drop rule
 once for the tessellator's CSG features and, through `WindowInfo.relief_meta`,
 the shader's free carves; `carve_depth_ratio` / `roll_height_ratio` feed the
 shading twin (`Finish.carve_depth` / `roll_height`). A `(relief)` value

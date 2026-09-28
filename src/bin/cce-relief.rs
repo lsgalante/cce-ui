@@ -32,7 +32,16 @@
 //! sampled spec to stdout; Save persists to `~/.config/cce/config.kdl`
 //! (`style.surface.relief`) so every cce app starts with the material —
 //! or, with `--config <path>`, to that file instead (a per-app override
-//! like cce-designer's), which also seeds the knobs/depth/width on open.
+//! like cce-designer's), which also seeds the depth/width on open.
+//!
+//! The Shoulder / Base / Bias knob triples are NOT material: they are this
+//! editor's slider positions behind the profile specs, which nothing else
+//! reads. Since 2026-09-28 they live in this app's own state file
+//! (`~/.config/cce/cce-relief/state.kdl`, one `knobs` node per Save
+//! target — see `knob_state`), not in the style block beside the values
+//! that draw. A config that still carries them (`relief.wall.knobs` /
+//! `edge.knobs`, or the older `profile_knobs` / `edge_knobs`) seeds the
+//! sliders once, and the next Save takes the keys off the file.
 //!
 //! `--key <dotted.key>` edits a single `(relief)` VALUE in place instead
 //! (`cce_ui::relief_spec::ReliefSpec` — width/depth/wall knobs/wall
@@ -392,8 +401,8 @@ struct ProfileKnobs {
 impl ProfileKnobs {
     /// `installed` is whether the live material actually carries a custom
     /// LUT for this profile (`layout::*_profile_slopes().is_some()` — the
-    /// shader's own condition). It is NOT the same as "config carried saved
-    /// knobs": Save writes the knob triples as a ride-along even for an
+    /// shader's own condition). It is NOT the same as "the state file
+    /// carried saved knobs": Save remembers the knob triples even for an
     /// untouched section (so the editor reopens where it was left), while
     /// writing the identity SPEC — which installs nothing. Seeding `custom`
     /// from the knobs' presence made the prediction follow the knob curve
@@ -509,6 +518,9 @@ struct BevelPopup {
     /// seeds come from it. The edge section still previews but is not part
     /// of a `(relief)` value (a feature material has one wall curve).
     target_key: Option<String>,
+    /// The knob state's key for this Save target (`knob_state::target_id`):
+    /// which `knobs` node of `state.kdl` remembers this window's sliders.
+    state_target: String,
     /// Short label for a retargeted config ("cce-designer"), shown in the
     /// title and status so it's obvious which material is being edited.
     target_label: Option<String>,
@@ -1249,9 +1261,12 @@ impl BevelPopup {
     /// Persist the current material to the shared config
     /// (`style.surface.relief` — the same keys every app reads at startup).
     /// Untouched sections write the identity sentinel (= analytic); the knob
-    /// triples ride along so this editor reopens where you left it.
+    /// triples go to this app's own state file (`knob_state`) so the editor
+    /// reopens where you left it without the config carrying editor state.
     fn save_to_config(&mut self) {
         let p = self.config_path.to_string_lossy().into_owned();
+        // The sliders' positions, whichever target the material goes to.
+        let knobs_ok = knob_state::save(&self.state_target, self.wall.values(), self.edge.values());
         // `--key` mode: the whole material folds into ONE `(relief)` value
         // at that key — width, depth, the wall curve, and the knob triple
         // behind it (so reopening with --key seeds these sliders). The edge
@@ -1266,13 +1281,14 @@ impl BevelPopup {
                 knobs: Some(self.wall.values()),
                 profile: self.wall.custom.then(|| self.wall.last_spec.clone()),
             };
-            let ok = cce_ui::config::write_config_value_typed(
-                &p,
-                &key,
-                &spec.serialize(),
-                "style",
-                Some("relief"),
-            );
+            let ok = knobs_ok
+                & cce_ui::config::write_config_value_typed(
+                    &p,
+                    &key,
+                    &spec.serialize(),
+                    "style",
+                    Some("relief"),
+                );
             self.status = if ok {
                 println!("saved {key} -> {p}");
                 format!("Saved — {key} holds this material.")
@@ -1283,17 +1299,8 @@ impl BevelPopup {
         }
         let depth = format!("{:.3}", self.depth_slider.inner().get_scaled_value());
         let width = format!("{:.2}", self.width_slider.inner().get_scaled_value());
-        let knob_str = |k: &ProfileKnobs| {
-            let (s, b, c) = k.values();
-            format!("{s:.3},{b:.3},{c:.3}")
-        };
         let w = &mut |key: &str, value: &str| {
             cce_ui::config::write_config_value(&p, key, value, "style")
-        };
-        // The knob keys carry the (bevel) type explicitly, so a config that
-        // never had them gains the annotation (and its editors' previews).
-        let wb = |key: &str, value: &str| {
-            cce_ui::config::write_config_value_typed(&p, key, value, "style", Some("bevel"))
         };
         // The pinned drop is a LENGTH: written in millimetres when the
         // display metric is real (fabrication reads it straight), in logical
@@ -1316,19 +1323,23 @@ impl BevelPopup {
         // save MIGRATES: the flat spellings this editor wrote until
         // 2026-09-28 (`height`, `profile`, `profile_knobs` for the wall,
         // `edge_*` for the edge) come off the file, or the node spelling
-        // would shadow a stale line forever. `remove_config_value` is true
-        // for a key that is not there, so a clean file costs nothing.
+        // would shadow a stale line forever; and the knob triples come off
+        // under either spelling, since they live in the state file now.
+        // `remove_config_value` is true for a key that is not there, so a
+        // clean file costs nothing.
         let ok = height_ok
             & material_ok
+            & knobs_ok
             & w("style.surface.relief.depth", &depth)
             & w("style.surface.relief.width", &width)
             & w("style.surface.relief.wall.profile", &self.wall.last_spec)
-            & w("style.surface.relief.edge.profile", &self.edge.last_spec)
-            & wb("style.surface.relief.wall.knobs", &knob_str(&self.wall))
-            & wb("style.surface.relief.edge.knobs", &knob_str(&self.edge));
-        let migrated = ["height", "edge_height", "profile", "edge_profile", "profile_knobs", "edge_knobs"]
-            .iter()
-            .all(|k| cce_ui::config::remove_config_value(&p, &format!("style.surface.relief.{k}")));
+            & w("style.surface.relief.edge.profile", &self.edge.last_spec);
+        let migrated = [
+            "height", "edge_height", "profile", "edge_profile",
+            "profile_knobs", "edge_knobs", "wall.knobs", "edge.knobs",
+        ]
+        .iter()
+        .all(|k| cce_ui::config::remove_config_value(&p, &format!("style.surface.relief.{k}")));
         let ok = ok & migrated;
         self.status = if ok {
             println!("saved {p}");
@@ -1381,12 +1392,13 @@ impl Application for BevelPopup {
         });
 
         // Seeds prefer the target file's own relief keys, falling back to
-        // the DE-wide registry for anything it lacks.
-        let target_json = target_label
-            .is_some()
-            .then(|| std::fs::read_to_string(&config_path).ok())
-            .flatten()
+        // the DE-wide registry for anything it lacks. The shared config is
+        // read too (until 2026-09-28 only a retargeted one was), because a
+        // legacy knob key still in it has no registry slot to fall back to.
+        let target_json = std::fs::read_to_string(&config_path)
+            .ok()
             .map(|c| cce_ui::config::parse_kdl_to_json(&c));
+        let state_target = knob_state::target_id(&config_path, &shared_path, target_key.as_deref());
         let target_relief = target_json.as_ref().and_then(|v| v.pointer("/style/surface/relief").cloned());
         let rel_f32 = |k: &str| {
             target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_f64()).map(|f| f as f32)
@@ -1437,20 +1449,16 @@ impl Application for BevelPopup {
             }
             cce_ui::layout::install_wall_profile_spec(ks.profile.as_deref());
         }
-        let (wall_seed, edge_seed) = {
-            let reg = cce_ui::layout::get_style_registry().read().unwrap();
-            (
-                key_spec
-                    .as_ref()
-                    .and_then(|s| s.knobs)
-                    .or_else(|| rel_shape_str("wall", "knobs", "profile_knobs").as_deref().and_then(parse_knobs))
-                    .or_else(|| reg.get_string("bevel_profile_knobs").as_deref().and_then(parse_knobs)),
-                rel_shape_str("edge", "knobs", "edge_knobs")
-                    .as_deref()
-                    .and_then(parse_knobs)
-                    .or_else(|| reg.get_string("roll_profile_knobs").as_deref().and_then(parse_knobs)),
-            )
-        };
+        // The sliders reopen where the last Save of THIS target left them:
+        // the state file first, then a `(relief)` value's own `k=` ride-along,
+        // then a knob key a config still carries from before the move.
+        let (saved_wall, saved_edge) = knob_state::load(&state_target);
+        let (wall_seed, edge_seed) = (
+            saved_wall
+                .or_else(|| key_spec.as_ref().and_then(|s| s.knobs))
+                .or_else(|| rel_shape_str("wall", "knobs", "profile_knobs").as_deref().and_then(parse_knobs)),
+            saved_edge.or_else(|| rel_shape_str("edge", "knobs", "edge_knobs").as_deref().and_then(parse_knobs)),
+        );
 
         let depth = key_spec
             .as_ref()
@@ -1622,6 +1630,7 @@ impl Application for BevelPopup {
             },
             config_path,
             target_key,
+            state_target,
             target_label,
             ui_context: cce_ui::context::UiContext::new(),
             width: 520,
@@ -2023,4 +2032,134 @@ impl Application for BevelPopup {
 
 fn main() {
     cce_ui::engine::run::<BevelPopup>();
+}
+
+/// The editor's slider positions, kept in this app's own state file —
+/// `~/.config/cce/cce-relief/state.kdl` (`$XDG_CONFIG_HOME` honoured through
+/// `cce_config_dir`) — one `knobs` node per Save target:
+///
+/// ```kdl
+/// knobs target="shared" wall=(bevel)"0.500,0.500,0.500" edge=(bevel)"0.500,0.500,0.500"
+/// knobs target="/home/me/.config/cce/cce-designer/config.kdl" wall=… edge=…
+/// knobs target="/home/me/.config/cce/config.kdl#style.surface.desktop.line_relief" wall=…
+/// ```
+///
+/// Per target, because a per-app override and the shared material are two
+/// materials with two curves each, and reopening one must not seed it with
+/// the other's sliders. The triples used to ride in the style block as
+/// `relief.wall.knobs` / `edge.knobs` (before that `profile_knobs` /
+/// `edge_knobs`), `(bevel)`-typed so the data editor could preview them —
+/// editor state beside the values that draw, and the one relief key nothing
+/// but this editor read. The `(bevel)` type and `parse_bevel_knobs` stay:
+/// a `(relief)` value still carries its own `k=` ride-along, which is what
+/// the data editor's preview of such a value draws.
+mod knob_state {
+    use cce_ui::widget::parse_bevel_knobs as parse_knobs;
+
+    pub fn path() -> std::path::PathBuf {
+        cce_ui::config::cce_config_dir().join("cce-relief").join("state.kdl")
+    }
+
+    /// Which `knobs` node a Save target owns: `shared` for the DE-wide
+    /// config.kdl, a retargeted file by its path, a `--key` value by
+    /// `<path>#<key>`.
+    pub fn target_id(config_path: &std::path::Path, shared_path: &std::path::Path, key: Option<&str>) -> String {
+        match key {
+            Some(k) => format!("{}#{k}", config_path.display()),
+            None if config_path == shared_path => "shared".to_string(),
+            None => config_path.display().to_string(),
+        }
+    }
+
+    /// The saved (wall, edge) triples for `target`, each absent when the
+    /// state file has none — or a triple that does not parse, which reads
+    /// as unsaved rather than as midpoints, so the seed chain can go on to
+    /// a config's legacy key.
+    pub fn load(target: &str) -> (Option<(f32, f32, f32)>, Option<(f32, f32, f32)>) {
+        std::fs::read_to_string(path()).ok().map_or((None, None), |c| lookup(&c, target))
+    }
+
+    /// Remember `wall` and `edge` for `target`, keeping every other target's
+    /// node. `true` when the file was written.
+    pub fn save(target: &str, wall: (f32, f32, f32), edge: (f32, f32, f32)) -> bool {
+        let p = path();
+        let current = std::fs::read_to_string(&p).unwrap_or_default();
+        let Some(next) = upsert(&current, target, wall, edge) else {
+            return false;
+        };
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        // Temp-and-rename, so a crash mid-write leaves the old file whole.
+        let tmp = p.with_extension("kdl.tmp");
+        std::fs::write(&tmp, next).is_ok() && std::fs::rename(&tmp, &p).is_ok()
+    }
+
+    /// The (wall, edge) triples of `target`'s node in `content`.
+    pub fn lookup(content: &str, target: &str) -> (Option<(f32, f32, f32)>, Option<(f32, f32, f32)>) {
+        let Ok(doc) = content.parse::<kdl::KdlDocument>() else {
+            return (None, None);
+        };
+        let Some(node) = doc.nodes().iter().find(|n| is_target(n, target)) else {
+            return (None, None);
+        };
+        let triple = |k: &str| node.get(k).and_then(|e| e.value().as_string()).and_then(parse_knobs);
+        (triple("wall"), triple("edge"))
+    }
+
+    /// `content` with `target`'s node replaced (or added), every other node
+    /// kept as it was. `None` when `content` is not KDL — the file is this
+    /// app's own, so a corrupt one is reported by the Save rather than
+    /// silently replaced.
+    pub fn upsert(content: &str, target: &str, wall: (f32, f32, f32), edge: (f32, f32, f32)) -> Option<String> {
+        let mut doc = content.parse::<kdl::KdlDocument>().ok()?;
+        doc.nodes_mut().retain(|n| !is_target(n, target));
+        let fmt = |(s, b, c): (f32, f32, f32)| format!("{s:.3},{b:.3},{c:.3}");
+        let line = format!(
+            "knobs target={} wall=(bevel){} edge=(bevel){}\n",
+            kdl::KdlValue::String(target.to_string()),
+            kdl::KdlValue::String(fmt(wall)),
+            kdl::KdlValue::String(fmt(edge)),
+        );
+        doc.nodes_mut().push(line.parse::<kdl::KdlNode>().ok()?);
+        Some(doc.to_string())
+    }
+
+    fn is_target(node: &kdl::KdlNode, target: &str) -> bool {
+        node.name().value() == "knobs" && node.get("target").and_then(|e| e.value().as_string()) == Some(target)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// A Save adds or replaces exactly its own target's node and leaves
+        /// the others alone; a lookup reads back what was saved, and a
+        /// target with no node (or a corrupt triple) reads as unsaved.
+        #[test]
+        fn knob_state_keeps_one_node_per_target() {
+            let a = (0.2, 0.7, 0.9);
+            let b = (0.5, 0.5, 0.5);
+            let c = (0.1, 0.1, 0.1);
+            let s1 = upsert("", "shared", a, b).unwrap();
+            let s2 = upsert(&s1, "/x/config.kdl", c, c).unwrap();
+            let s3 = upsert(&s2, "shared", b, a).unwrap();
+            assert_eq!(s3.matches("knobs ").count(), 2, "{s3}");
+            assert_eq!(lookup(&s3, "shared"), (Some(b), Some(a)));
+            assert_eq!(lookup(&s3, "/x/config.kdl"), (Some(c), Some(c)));
+            assert_eq!(lookup(&s3, "/y/config.kdl#some.key"), (None, None));
+            assert!(s3.contains("(bevel)\"0.200,0.700,0.900\""), "the (bevel) value format: {s3}");
+            assert_eq!(lookup("knobs target=\"shared\" wall=\"junk\"", "shared"), (None, None));
+            assert!(upsert("not kdl {{{", "shared", a, b).is_none(), "a corrupt file is refused, not replaced");
+        }
+
+        #[test]
+        fn a_target_is_the_shared_file_a_path_or_a_key() {
+            let shared = std::path::Path::new("/home/me/.config/cce/config.kdl");
+            let app = std::path::Path::new("/home/me/.config/cce/cce-designer/config.kdl");
+            assert_eq!(target_id(shared, shared, None), "shared");
+            assert_eq!(target_id(app, shared, None), app.display().to_string());
+            assert_eq!(target_id(shared, shared, Some("style.surface.desktop.line_relief")), format!("{}#style.surface.desktop.line_relief", shared.display()));
+        }
+    }
 }

@@ -252,16 +252,19 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 // ridge or trough cut into a surface — and `edge` is the
                 // plate's perimeter roll. Each carries `height` (a length:
                 // the carve's drop, the roll's rise; unset = follow the
-                // width), `profile` (the ramp spec of its curve, written by
-                // cce-relief, installed by reload_config) and `knobs`
-                // (cce-relief's "shoulder,base,bias" slider positions behind
-                // that spec — only the editor reads them). The registry keys
-                // keep their old names. The flat spellings on the second
-                // line of each pair are the pre-rename aliases
-                // (`height` / `profile` / `profile_knobs` were the wall's,
-                // `edge_*` the edge's); `prefer_relief_wall_edge` drops a
-                // flat one whenever its node spelling is present, so a config
+                // width) and `profile` (the ramp spec of its curve, written
+                // by cce-relief, installed by reload_config). The registry
+                // keys keep their old names. The flat spellings on the
+                // second line of each pair are the pre-rename aliases
+                // (`height` / `profile` were the wall's, `edge_*` the
+                // edge's); `prefer_relief_wall_edge` drops a flat one
+                // whenever its node spelling is present, so a config
                 // carrying both is decided by the node, not by line order.
+                // cce-relief's slider knobs are NOT a style key any more
+                // (`relief.wall.knobs` / `edge.knobs`, before that
+                // `profile_knobs` / `edge_knobs`): editor state, kept in
+                // that app's own state.kdl, and read off a config only by
+                // the editor itself, as a one-time seed.
                 "style.surface.relief.wall.height"
                 | "style.surface.relief.height" => "bevel_height",
                 "style.surface.relief.edge.height"
@@ -270,10 +273,6 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 | "style.surface.relief.profile" => "bevel_profile_spec",
                 "style.surface.relief.edge.profile"
                 | "style.surface.relief.edge_profile" => "roll_profile_spec",
-                "style.surface.relief.wall.knobs"
-                | "style.surface.relief.profile_knobs" => "bevel_profile_knobs",
-                "style.surface.relief.edge.knobs"
-                | "style.surface.relief.edge_knobs" => "roll_profile_knobs",
                 "style.container.section.depth" => "section_depth",
                 "style.surface.param.backdrop_compression" => "param_compression",
                 "style.surface.param.label_layout" => "param_label_layout",
@@ -407,10 +406,8 @@ pub(crate) fn prefer_relief_wall_edge(val: &mut serde_json::Value) {
     const PAIRS: &[(&str, &str, &str)] = &[
         ("height", "wall", "height"),
         ("profile", "wall", "profile"),
-        ("profile_knobs", "wall", "knobs"),
         ("edge_height", "edge", "height"),
         ("edge_profile", "edge", "profile"),
-        ("edge_knobs", "edge", "knobs"),
     ];
     let Some(relief) = val.pointer_mut("/style/surface/relief").and_then(|v| v.as_object_mut()) else {
         return;
@@ -6966,8 +6963,8 @@ mod tests {
         let val: serde_json::Value = serde_json::json!({
             "style": { "surface": { "relief": {
                 "width": 9.3,
-                "wall": { "height": "0.3mm", "profile": "smooth;0:0,1:1", "knobs": "0.5,0.5,0.5" },
-                "edge": { "height": 4.0, "profile": "smooth;0:0,1:0.9", "knobs": "0.4,0.5,0.6" }
+                "wall": { "height": "0.3mm", "profile": "smooth;0:0,1:1" },
+                "edge": { "height": 4.0, "profile": "smooth;0:0,1:0.9" }
             } } }
         });
         let mut flat = String::new();
@@ -6982,20 +6979,20 @@ mod tests {
         assert_eq!(value("roll_height").as_deref(), Some("4"), "{flat}");
         assert_eq!(value("bevel_profile_spec").as_deref(), Some("smooth;0:0,1:1"), "{flat}");
         assert_eq!(value("roll_profile_spec").as_deref(), Some("smooth;0:0,1:0.9"), "{flat}");
-        assert_eq!(value("bevel_profile_knobs").as_deref(), Some("0.5,0.5,0.5"), "{flat}");
-        assert_eq!(value("roll_profile_knobs").as_deref(), Some("0.4,0.5,0.6"), "{flat}");
         // And the flat legacy spellings still land on the same keys.
         let old: serde_json::Value = serde_json::json!({
             "style": { "surface": { "relief": {
                 "height": 2.0, "edge_height": 3.0, "profile": "a", "edge_profile": "b",
-                "profile_knobs": "1,1,1", "edge_knobs": "2,2,2"
+                "wall": { "knobs": "1,1,1" }, "edge_knobs": "2,2,2"
             } } }
         });
         let mut flat = String::new();
         flatten_json_to_flat_props(&old, "", &mut flat);
-        for k in ["bevel_height", "roll_height", "bevel_profile_spec", "roll_profile_spec", "bevel_profile_knobs", "roll_profile_knobs"] {
+        for k in ["bevel_height", "roll_height", "bevel_profile_spec", "roll_profile_spec"] {
             assert!(flat.lines().any(|l| l.starts_with(&format!("{k} = "))), "{k} missing: {flat}");
         }
+        // The knobs are editor state, not style: no registry key of their own.
+        assert!(!flat.contains("profile_knobs"), "{flat}");
     }
 
     /// A config carrying both spellings of one relief key is decided by the
@@ -7009,7 +7006,7 @@ mod tests {
                 "depth": 0.15,
                 "height": 2.0, "wall": { "height": 5.0 },
                 "edge_profile": "old", "edge": { "profile": "new" },
-                "profile_knobs": "0.1,0.1,0.1"
+                "profile": "flat-only"
             } } }
         });
         prefer_relief_wall_edge(&mut val);
@@ -7018,7 +7015,7 @@ mod tests {
         assert!(relief.get("edge_profile").is_none(), "the flat edge profile yields: {relief}");
         assert_eq!(relief.pointer("/wall/height").and_then(|v| v.as_f64()), Some(5.0));
         assert_eq!(relief.pointer("/edge/profile").and_then(|v| v.as_str()), Some("new"));
-        assert_eq!(relief.get("profile_knobs").and_then(|v| v.as_str()), Some("0.1,0.1,0.1"), "no node spelling: kept");
+        assert_eq!(relief.get("profile").and_then(|v| v.as_str()), Some("flat-only"), "no node spelling: kept");
         assert_eq!(relief.get("depth").and_then(|v| v.as_f64()), Some(0.15));
         let mut flat = String::new();
         flatten_json_to_flat_props(&val, "", &mut flat);
