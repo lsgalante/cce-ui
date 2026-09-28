@@ -670,21 +670,52 @@ adds the bridge to real lengths, in two parts:
   beside `scale::set_scale_factor` (`units::set_metric`); apps read
   `units::metric()`, `units::mm(v)`, or `Len::to_px()`.
 
-**Relief has a real depth axis now.** `style.surface.relief.width` (the wall's
-run) and the new **`height`** (a carve's drop) and **`edge_height`** (the plate
-roll's rise) are all lengths — `height=(mm)0.3` is honest geometry, resolved
-through the metric. Unset, a carve drops `relief_shade::RECESS_DEPTH` (0.6) of
-its wall (saturating at the DE roll width) and the roll is a quarter-round of
-radius width — the look every config had. `style.surface.relief.depth` is NOT a
-length: it is the light strength (`bevel_depth` → `Finish.strength`), and
-**`light`** is its honest alias. `layout::carve_depth_px` states the drop rule
+**The relief is two shapes, and the config says which (2026-09-28).** A
+**wall** is a carve's side — a recess, boss, ridge or trough cut into a
+surface: buttons, wells, text boxes, the rows of a params pane — shaded as a
+translucent light-and-shadow overlay on whatever is under it. An **edge** is
+a plate's perimeter roll, the face curving down to its silhouette, shaded as a
+multiply on the plate's own fill plus a specular crest. Each is a node under
+`style.surface.relief` with the same three keys:
+
+```kdl
+relief depth=0.15 width=9.3 {
+    wall height=(mm)0.3 profile="smooth;…" knobs=(bevel)"0.5,0.5,0.5"
+    edge height=4.0    profile="smooth;…" knobs=(bevel)"0.5,0.5,0.5"
+}
+```
+
+`width` (the run of both, one number — see the roll-width note below) and
+`depth` (the light; `light` is its honest alias — NOT a length, it is
+`bevel_depth` → `Finish.strength`) stay on the node itself, since both
+shapes share them. `height` is a length — the wall's drop, the edge's rise —
+and `height=(mm)0.3` is honest geometry resolved through the metric; unset, a
+carve drops `relief_shade::RECESS_DEPTH` (0.6) of its wall (saturating at the
+DE roll width) and the roll is a quarter-round of radius width, the look every
+config had. `profile` is the curve as a ramp spec (absent or the identity
+sentinel = the analytic curve: smoothstep for a wall, the superellipse
+quadrant for an edge), and `knobs` is cce-relief's slider triple behind it,
+which only the editor reads. The registry keys never moved — `bevel_height`
+/ `roll_height`, `bevel_profile_spec` / `roll_profile_spec`,
+`bevel_profile_knobs` / `roll_profile_knobs` — so nothing downstream of the
+registry knows. Until 2026-09-28 the six were flat on the node with the wall
+UNNAMED (`height`, `profile`, `profile_knobs`) and the edge prefixed
+(`edge_height`, `edge_profile`, `edge_knobs`), which read as one shape with an
+"edge" variant rather than two shapes; those spellings survive as aliases in
+`layout.rs`'s flatten table, and `prefer_relief_wall_edge` drops a flat one
+whenever its node spelling is present, so a file carrying both is decided by
+the node and not by line order (`the_node_spelling_of_a_relief_key_wins_over_the_flat_one`).
+`cce-relief`'s Save writes the node spellings and REMOVES the flat ones
+(`config::remove_config_value`), so a file migrates the first time it is
+saved; `wall` and `edge` are `PROP_NODES` members so their keys land as
+properties. `layout::carve_depth_px` states the drop rule
 once for the tessellator's CSG features and, through `WindowInfo.relief_meta`,
 the shader's free carves; `carve_depth_ratio` / `roll_height_ratio` feed the
 shading twin (`Finish.carve_depth` / `roll_height`). A `(relief)` value
 carries the drop as `h=` (a length: `h=0.5mm`, or bare px) beside `w=` and
 `d=` (light; `l=` reads as an alias). `cce-relief`'s Height knob is the editor:
 its section's depth numbers read in mm when the metric is real, and Save
-writes `height` as a `(mm)` length then, px otherwise.
+writes `wall.height` as a `(mm)` length then, px otherwise.
 
 **There is one roll width.** `style.surface.relief.width` is the run of every
 roll and wall: the root plate's perimeter (`PlateSpec::window`), a `PlateSpec`

@@ -1853,7 +1853,7 @@ pub fn set_plate_border_thickness(t: f32) {
 ///
 /// **This is `style.surface.relief.width`** — the one roll width, the same
 /// number the root plate rolls over, every control wall runs, and
-/// `relief.edge_height` is a rise against. Until 2026-09-28 it was a second
+/// `relief.edge.height` is a rise against. Until 2026-09-28 it was a second
 /// width of its own (`style.surface.plate.bevel_width`, default 6 against the
 /// relief's 9.3), so a `PlateSpec` pane plate and an `append_widget_plate`
 /// pane plate rolled over different widths in one window, the designer's

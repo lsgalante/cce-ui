@@ -247,18 +247,33 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 // the honest spelling, `depth` the one every config has.
                 "style.surface.relief.depth" | "style.surface.relief.light" | "window_manager.bevel_depth" => "bevel_depth",
                 "style.surface.relief.width" | "window_manager.bevel_width" => "bevel_width",
-                // The geometric heights, both lengths (unit-aware): a carve's
-                // drop and the plate roll's rise. Unset = follow the width.
-                "style.surface.relief.height" => "bevel_height",
-                "style.surface.relief.edge_height" => "roll_height",
-                // Ramp-spec strings for the custom wall/roll profiles
-                // (written by cce-relief, installed by reload_config).
-                "style.surface.relief.profile" => "bevel_profile_spec",
-                "style.surface.relief.edge_profile" => "roll_profile_spec",
-                // cce-relief's slider positions behind those specs
-                // ("shoulder,base,bias" — only the editor reads these).
-                "style.surface.relief.profile_knobs" => "bevel_profile_knobs",
-                "style.surface.relief.edge_knobs" => "roll_profile_knobs",
+                // The two SHAPES of the relief, each a node under it
+                // (2026-09-28): `wall` is a carve's wall — a recess, boss,
+                // ridge or trough cut into a surface — and `edge` is the
+                // plate's perimeter roll. Each carries `height` (a length:
+                // the carve's drop, the roll's rise; unset = follow the
+                // width), `profile` (the ramp spec of its curve, written by
+                // cce-relief, installed by reload_config) and `knobs`
+                // (cce-relief's "shoulder,base,bias" slider positions behind
+                // that spec — only the editor reads them). The registry keys
+                // keep their old names. The flat spellings on the second
+                // line of each pair are the pre-rename aliases
+                // (`height` / `profile` / `profile_knobs` were the wall's,
+                // `edge_*` the edge's); `prefer_relief_wall_edge` drops a
+                // flat one whenever its node spelling is present, so a config
+                // carrying both is decided by the node, not by line order.
+                "style.surface.relief.wall.height"
+                | "style.surface.relief.height" => "bevel_height",
+                "style.surface.relief.edge.height"
+                | "style.surface.relief.edge_height" => "roll_height",
+                "style.surface.relief.wall.profile"
+                | "style.surface.relief.profile" => "bevel_profile_spec",
+                "style.surface.relief.edge.profile"
+                | "style.surface.relief.edge_profile" => "roll_profile_spec",
+                "style.surface.relief.wall.knobs"
+                | "style.surface.relief.profile_knobs" => "bevel_profile_knobs",
+                "style.surface.relief.edge.knobs"
+                | "style.surface.relief.edge_knobs" => "roll_profile_knobs",
                 "style.container.section.depth" => "section_depth",
                 "style.surface.param.backdrop_compression" => "param_compression",
                 "style.surface.param.label_layout" => "param_label_layout",
@@ -380,10 +395,38 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
     }
 }
 
+/// The `wall` / `edge` node spellings of the relief geometry win over the
+/// flat legacy ones. Both flatten to ONE registry key
+/// (`relief.wall.height` and `relief.height` are both `bevel_height`), and
+/// `reload_config` loads the flat lines in the order the JSON hands them
+/// out, so a config carrying both spellings — a file cce-relief has saved
+/// once under the new names while an older line survives, or a per-app
+/// override written in the other spelling — would otherwise be decided by
+/// which line came first. Run on the parsed config before it is flattened.
+pub(crate) fn prefer_relief_wall_edge(val: &mut serde_json::Value) {
+    const PAIRS: &[(&str, &str, &str)] = &[
+        ("height", "wall", "height"),
+        ("profile", "wall", "profile"),
+        ("profile_knobs", "wall", "knobs"),
+        ("edge_height", "edge", "height"),
+        ("edge_profile", "edge", "profile"),
+        ("edge_knobs", "edge", "knobs"),
+    ];
+    let Some(relief) = val.pointer_mut("/style/surface/relief").and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    for (flat, node, key) in PAIRS {
+        if relief.get(*node).and_then(|n| n.get(*key)).is_some() {
+            relief.remove(*flat);
+        }
+    }
+}
+
 fn read_config() -> Option<String> {
     let path = crate::config::get_config_path();
     if let Ok(content) = std::fs::read_to_string(&path) {
-        let val = crate::config::parse_kdl_to_json(&content);
+        let mut val = crate::config::parse_kdl_to_json(&content);
+        prefer_relief_wall_edge(&mut val);
         let mut flat_props = String::new();
         flatten_json_to_flat_props(&val, "", &mut flat_props);
         return Some(flat_props);
@@ -394,7 +437,8 @@ fn read_config() -> Option<String> {
 pub fn read_config_value(target_key: &str) -> Option<String> {
     let path = crate::config::get_config_path();
     if let Ok(content) = std::fs::read_to_string(&path) {
-        let val = crate::config::parse_kdl_to_json(&content);
+        let mut val = crate::config::parse_kdl_to_json(&content);
+        prefer_relief_wall_edge(&mut val);
         let mut flat_props = String::new();
         flatten_json_to_flat_props(&val, "", &mut flat_props);
         for line in flat_props.lines() {
@@ -1345,9 +1389,9 @@ pub fn reload_config() {
 pub const RELIEF_PROFILE_IDENTITY_SPEC: &str = "smooth;0.000:0.000,1.000:1.000";
 
 /// Parse-and-install the relief profiles config carries as ramp specs
-/// (`style.surface.relief.profile` / `edge_profile` → the style registry's
-/// `bevel_profile_spec` / `roll_profile_spec`). Absent, identity, or
-/// unparseable specs clear back to the analytic profiles.
+/// (`style.surface.relief.wall.profile` / `edge.profile` → the style
+/// registry's `bevel_profile_spec` / `roll_profile_spec`). Absent, identity,
+/// or unparseable specs clear back to the analytic profiles.
 fn apply_relief_profile_config() {
     let (wall, edge) = {
         let reg = get_style_registry().read().unwrap();
@@ -1837,7 +1881,7 @@ pub fn bevel_width() -> f32 {
 }
 
 /// A carve's geometric drop when the material pins one
-/// (`style.surface.relief.height`, a length — `(mm)0.3` resolves through
+/// (`style.surface.relief.wall.height`, a length — `(mm)0.3` resolves through
 /// the display metric), in logical px. `None` = follow the wall width at the
 /// analytic ratio ([`crate::scene::relief_shade::RECESS_DEPTH`]), the look
 /// every config had before heights existed. A configured 0 reads as unset,
@@ -1851,7 +1895,7 @@ pub fn bevel_height() -> Option<f32> {
         .filter(|h| h.is_finite() && *h > 0.0)
 }
 
-/// The plate roll's rise when pinned (`style.surface.relief.edge_height`, a
+/// The plate roll's rise when pinned (`style.surface.relief.edge.height`, a
 /// length), logical px. `None` = a quarter-round of radius `bevel_width`.
 pub fn roll_height() -> Option<f32> {
     lazy_init_style_registry();
@@ -6912,6 +6956,78 @@ mod tests {
         let padding = spinbox_button_padding();
         println!("Parsed spinbox button padding: {}", padding);
         assert!(padding >= 0.0);
+    }
+
+    /// The relief's two shapes are nodes — `relief { wall … ; edge … }` —
+    /// and each of their keys flattens to the registry key the flat legacy
+    /// spelling always did, so nothing downstream of the registry moved.
+    #[test]
+    fn relief_wall_and_edge_nodes_flatten_to_the_legacy_registry_keys() {
+        let val: serde_json::Value = serde_json::json!({
+            "style": { "surface": { "relief": {
+                "width": 9.3,
+                "wall": { "height": "0.3mm", "profile": "smooth;0:0,1:1", "knobs": "0.5,0.5,0.5" },
+                "edge": { "height": 4.0, "profile": "smooth;0:0,1:0.9", "knobs": "0.4,0.5,0.6" }
+            } } }
+        });
+        let mut flat = String::new();
+        flatten_json_to_flat_props(&val, "", &mut flat);
+        // A flat line is `key = value`, strings quoted — what reload_config parses.
+        let value = |k: &str| {
+            flat.lines()
+                .find(|l| l.starts_with(&format!("{k} = ")))
+                .map(|l| l[k.len() + 3..].trim_matches('"').to_string())
+        };
+        assert_eq!(value("bevel_height").as_deref(), Some("0.3mm"), "{flat}");
+        assert_eq!(value("roll_height").as_deref(), Some("4"), "{flat}");
+        assert_eq!(value("bevel_profile_spec").as_deref(), Some("smooth;0:0,1:1"), "{flat}");
+        assert_eq!(value("roll_profile_spec").as_deref(), Some("smooth;0:0,1:0.9"), "{flat}");
+        assert_eq!(value("bevel_profile_knobs").as_deref(), Some("0.5,0.5,0.5"), "{flat}");
+        assert_eq!(value("roll_profile_knobs").as_deref(), Some("0.4,0.5,0.6"), "{flat}");
+        // And the flat legacy spellings still land on the same keys.
+        let old: serde_json::Value = serde_json::json!({
+            "style": { "surface": { "relief": {
+                "height": 2.0, "edge_height": 3.0, "profile": "a", "edge_profile": "b",
+                "profile_knobs": "1,1,1", "edge_knobs": "2,2,2"
+            } } }
+        });
+        let mut flat = String::new();
+        flatten_json_to_flat_props(&old, "", &mut flat);
+        for k in ["bevel_height", "roll_height", "bevel_profile_spec", "roll_profile_spec", "bevel_profile_knobs", "roll_profile_knobs"] {
+            assert!(flat.lines().any(|l| l.starts_with(&format!("{k} = "))), "{k} missing: {flat}");
+        }
+    }
+
+    /// A config carrying both spellings of one relief key is decided by the
+    /// node spelling, whichever line the file wrote first — the flat pass
+    /// loads in JSON order, and `prefer_relief_wall_edge` is what makes the
+    /// order irrelevant. Keys with no node spelling are left alone.
+    #[test]
+    fn the_node_spelling_of_a_relief_key_wins_over_the_flat_one() {
+        let mut val: serde_json::Value = serde_json::json!({
+            "style": { "surface": { "relief": {
+                "depth": 0.15,
+                "height": 2.0, "wall": { "height": 5.0 },
+                "edge_profile": "old", "edge": { "profile": "new" },
+                "profile_knobs": "0.1,0.1,0.1"
+            } } }
+        });
+        prefer_relief_wall_edge(&mut val);
+        let relief = val.pointer("/style/surface/relief").unwrap();
+        assert!(relief.get("height").is_none(), "the flat wall height yields: {relief}");
+        assert!(relief.get("edge_profile").is_none(), "the flat edge profile yields: {relief}");
+        assert_eq!(relief.pointer("/wall/height").and_then(|v| v.as_f64()), Some(5.0));
+        assert_eq!(relief.pointer("/edge/profile").and_then(|v| v.as_str()), Some("new"));
+        assert_eq!(relief.get("profile_knobs").and_then(|v| v.as_str()), Some("0.1,0.1,0.1"), "no node spelling: kept");
+        assert_eq!(relief.get("depth").and_then(|v| v.as_f64()), Some(0.15));
+        let mut flat = String::new();
+        flatten_json_to_flat_props(&val, "", &mut flat);
+        assert_eq!(flat.lines().filter(|l| l.starts_with("bevel_height = ")).count(), 1, "{flat}");
+        assert!(flat.contains("bevel_height = 5"), "{flat}");
+        // A config with no relief block at all is untouched.
+        let mut none: serde_json::Value = serde_json::json!({ "style": {} });
+        prefer_relief_wall_edge(&mut none);
+        assert_eq!(none, serde_json::json!({ "style": {} }));
     }
 
     /// The control rung's key flattens to `control_corner_radius`, beside a

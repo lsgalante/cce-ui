@@ -18,7 +18,7 @@
 //! - `k` — the editor's Shoulder/Base/Bias knob triple, a ride-along seed
 //!   so `cce-relief` reopens where it was left (optional)
 //! - `p` — the wall's height curve as the same ramp spec
-//!   `style.surface.relief.profile` carries (optional; absent or the
+//!   `style.surface.relief.wall.profile` carries (optional; absent or the
 //!   identity sentinel = the analytic profile)
 //!
 //! No value contains whitespace (ramp specs are `;`/`:`/`,`-delimited), so

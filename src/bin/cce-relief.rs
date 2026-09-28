@@ -24,8 +24,8 @@
 //! **Height** (the wall's drop, logical px; 0 = follow the width at the
 //! analytic ratio). Height is the fabrication axis: the section's depth
 //! numbers read in millimetres whenever the display metric is real
-//! (`cce_ui::units`), and Save writes `style.surface.relief.height` as a
-//! `(mm)` length then, px otherwise.
+//! (`cce_ui::units`), and Save writes `style.surface.relief.wall.height` as
+//! a `(mm)` length then, px otherwise.
 //!
 //! Every edit applies live to this process (the
 //! popup's own plate, wells, and buttons ARE the preview) and logs the
@@ -1303,23 +1303,33 @@ impl BevelPopup {
             let len = self.height_len(h);
             cce_ui::config::write_config_value_typed(
                 &p,
-                "style.surface.relief.height",
+                "style.surface.relief.wall.height",
                 &cce_ui::units::fmt_num(len.value),
                 "style",
                 Some(len.unit.suffix()),
             )
         } else {
-            w("style.surface.relief.height", "0")
+            w("style.surface.relief.wall.height", "0")
         };
         let material_ok = self.save_material(&p);
+        // The two shapes are nodes — `relief { wall … ; edge … }` — and a
+        // save MIGRATES: the flat spellings this editor wrote until
+        // 2026-09-28 (`height`, `profile`, `profile_knobs` for the wall,
+        // `edge_*` for the edge) come off the file, or the node spelling
+        // would shadow a stale line forever. `remove_config_value` is true
+        // for a key that is not there, so a clean file costs nothing.
         let ok = height_ok
             & material_ok
             & w("style.surface.relief.depth", &depth)
             & w("style.surface.relief.width", &width)
-            & w("style.surface.relief.profile", &self.wall.last_spec)
-            & w("style.surface.relief.edge_profile", &self.edge.last_spec)
-            & wb("style.surface.relief.profile_knobs", &knob_str(&self.wall))
-            & wb("style.surface.relief.edge_knobs", &knob_str(&self.edge));
+            & w("style.surface.relief.wall.profile", &self.wall.last_spec)
+            & w("style.surface.relief.edge.profile", &self.edge.last_spec)
+            & wb("style.surface.relief.wall.knobs", &knob_str(&self.wall))
+            & wb("style.surface.relief.edge.knobs", &knob_str(&self.edge));
+        let migrated = ["height", "edge_height", "profile", "edge_profile", "profile_knobs", "edge_knobs"]
+            .iter()
+            .all(|k| cce_ui::config::remove_config_value(&p, &format!("style.surface.relief.{k}")));
+        let ok = ok & migrated;
         self.status = if ok {
             println!("saved {p}");
             "Saved — apps pick the material up on start.".to_string()
@@ -1378,16 +1388,25 @@ impl Application for BevelPopup {
             .flatten()
             .map(|c| cce_ui::config::parse_kdl_to_json(&c));
         let target_relief = target_json.as_ref().and_then(|v| v.pointer("/style/surface/relief").cloned());
-        let rel_str = |k: &str| {
-            target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_str().map(String::from))
-        };
         let rel_f32 = |k: &str| {
             target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| v.as_f64()).map(|f| f as f32)
         };
+        // A key of one of the relief's two SHAPES: `relief { wall k=… }` first,
+        // then the flat legacy spelling a file saved before 2026-09-28 still
+        // carries (`height` / `profile` / `profile_knobs` for the wall,
+        // `edge_*` for the edge) — the same precedence the registry load
+        // applies through `layout::prefer_relief_wall_edge`.
+        let rel_shape = |node: &str, k: &str, legacy: &str| {
+            let r = target_relief.as_ref()?;
+            r.get(node).and_then(|n| n.get(k)).or_else(|| r.get(legacy)).cloned()
+        };
+        let rel_shape_str = |node: &str, k: &str, legacy: &str| {
+            rel_shape(node, k, legacy).and_then(|v| v.as_str().map(String::from))
+        };
         // A length key: a bare number is logical px, a `(mm)`-annotated one
         // arrives as the string "0.3mm" and resolves through the metric.
-        let rel_len = |k: &str| {
-            target_relief.as_ref().and_then(|r| r.get(k)).and_then(|v| {
+        let rel_shape_len = |node: &str, k: &str, legacy: &str| {
+            rel_shape(node, k, legacy).and_then(|v| {
                 v.as_f64()
                     .map(|f| f as f32)
                     .or_else(|| v.as_str().and_then(cce_ui::units::Len::parse).map(|l| l.to_px()))
@@ -1424,9 +1443,9 @@ impl Application for BevelPopup {
                 key_spec
                     .as_ref()
                     .and_then(|s| s.knobs)
-                    .or_else(|| rel_str("profile_knobs").as_deref().and_then(parse_knobs))
+                    .or_else(|| rel_shape_str("wall", "knobs", "profile_knobs").as_deref().and_then(parse_knobs))
                     .or_else(|| reg.get_string("bevel_profile_knobs").as_deref().and_then(parse_knobs)),
-                rel_str("edge_knobs")
+                rel_shape_str("edge", "knobs", "edge_knobs")
                     .as_deref()
                     .and_then(parse_knobs)
                     .or_else(|| reg.get_string("roll_profile_knobs").as_deref().and_then(parse_knobs)),
@@ -1443,7 +1462,7 @@ impl Application for BevelPopup {
             .as_ref()
             .and_then(|s| s.height)
             .map(|l| l.to_px())
-            .or_else(|| rel_len("height"))
+            .or_else(|| rel_shape_len("wall", "height", "height"))
             .or_else(cce_ui::layout::bevel_height)
             .unwrap_or(0.0);
         let width = key_spec

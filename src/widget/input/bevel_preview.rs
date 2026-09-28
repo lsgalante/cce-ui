@@ -28,7 +28,7 @@ pub fn bevel_ease(shoulder: f32, base: f32, bias: f32, v: f32) -> f32 {
 }
 
 /// Parse a "shoulder,base,bias" knob triple (the `(bevel)` value format, and
-/// what cce-relief persists as `profile_knobs` / `edge_knobs`).
+/// what cce-relief persists as `relief.wall.knobs` / `relief.edge.knobs`).
 pub fn parse_bevel_knobs(s: &str) -> Option<(f32, f32, f32)> {
     let mut it = s.split(',').map(|p| p.trim().parse::<f32>());
     match (it.next(), it.next(), it.next()) {

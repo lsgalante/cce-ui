@@ -315,8 +315,59 @@ const PROP_NODES: &[&str] = &[
     "gestures", "key_bindings", "pointer_bind", "gesture_bind",
     "button", "button_strip", "dropdown", "toggle", "spinbox", "slider", "font_selector",
     "status", "overlay", "root", "desktop", "list", "section", "textbox", "multiline", "editor", "tree",
-    "menubar", "statusbar", "node", "relief", "frost", "finish"
+    "menubar", "statusbar", "node", "relief", "frost", "finish",
+    // The relief's two shapes (`relief { wall height=… profile=… knobs=… ; edge … }`).
+    "wall", "edge"
 ];
+
+fn get_node_mut<'a>(doc: &'a mut kdl::KdlDocument, path: &[&str]) -> Option<&'a mut kdl::KdlNode> {
+    if path.is_empty() {
+        return None;
+    }
+    let idx = doc.nodes().iter().position(|n| n.name().value() == path[0])?;
+    let node = &mut doc.nodes_mut()[idx];
+    if path.len() == 1 {
+        Some(node)
+    } else {
+        get_node_mut(node.children_mut().as_mut()?, &path[1..])
+    }
+}
+
+/// Remove `key` from the document — a property off its `PROP_NODES` node, or
+/// the whole node otherwise — creating nothing on the way. `true` when
+/// something was removed; a key that is not there is `false`, so a writer
+/// can tell "migrated" from "was already clean".
+pub fn remove_kdl_in_memory(doc: &mut kdl::KdlDocument, key: &str) -> bool {
+    let parts: Vec<&str> = key.split('.').collect();
+    let Some(leaf) = parts.last().copied() else {
+        return false;
+    };
+    // A PROP_NODES parent holds its keys as properties — but it may also
+    // hold child NODES (`relief { wall … }`), so a leaf that is not among
+    // the properties is looked for among the children before giving up.
+    let is_property = parts.len() >= 2 && PROP_NODES.contains(&parts[parts.len() - 2]);
+    if is_property {
+        let Some(node) = get_node_mut(doc, &parts[..parts.len() - 1]) else {
+            return false;
+        };
+        let before = node.entries().len();
+        node.entries_mut().retain(|e| e.name().map(|n| n.value()) != Some(leaf));
+        if node.entries().len() != before {
+            return true;
+        }
+    }
+    let parent: &mut kdl::KdlDocument = if parts.len() == 1 {
+        doc
+    } else {
+        match get_node_mut(doc, &parts[..parts.len() - 1]).and_then(|n| n.children_mut().as_mut()) {
+            Some(children) => children,
+            None => return false,
+        }
+    };
+    let before = parent.nodes().len();
+    parent.nodes_mut().retain(|n| n.name().value() != leaf);
+    parent.nodes().len() != before
+}
 
 fn get_or_create_node_mut<'a>(doc: &'a mut kdl::KdlDocument, path: &[&str]) -> Option<&'a mut kdl::KdlNode> {
     if path.is_empty() {
@@ -735,6 +786,22 @@ pub fn write_config_value(path: &str, key: &str, value: &str, default_section: &
     write_config_value_typed(path, key, value, default_section, None)
 }
 
+/// Remove `key` from the config file at `path` ([`remove_kdl_in_memory`]),
+/// writing only when something was removed. `true` when the key is gone —
+/// absent to begin with, or removed and written — so a writer migrating a
+/// legacy spelling can fold it into its own success.
+pub fn remove_config_value(path: &str, key: &str) -> bool {
+    let content = fs::read_to_string(path).unwrap_or_default();
+    let mut doc = match content.parse::<kdl::KdlDocument>() {
+        Ok(d) => d,
+        Err(_) => return true,
+    };
+    if remove_kdl_in_memory(&mut doc, key) {
+        return safe_write(path, &doc.to_string());
+    }
+    true
+}
+
 /// [`write_config_value`] with an explicit type annotation — see
 /// [`update_kdl_in_memory_typed`].
 pub fn write_config_value_typed(path: &str, key: &str, value: &str, default_section: &str, forced_ty: Option<&str>) -> bool {
@@ -922,6 +989,48 @@ mod tests {
         let node_val = sec_val.get(&node).unwrap();
         let prop_val = node_val.get(prop.as_ref().unwrap()).unwrap();
         assert_eq!(prop_val.as_f64().unwrap(), 0.75);
+    }
+
+    /// The relief's wall and edge keys write as PROPERTIES on `wall` / `edge`
+    /// child nodes of the existing `relief` node — the node keeps its own
+    /// `depth=` / `width=` properties and grows one child block — and the
+    /// reload path reads them back at the nested paths the registry maps.
+    /// The legacy flat spellings then come off with `remove_kdl_in_memory`,
+    /// which is how cce-relief's Save migrates a file in place.
+    #[test]
+    fn relief_wall_and_edge_keys_write_as_child_nodes_and_the_flat_ones_come_off() {
+        let content = "style {\n    surface {\n        relief depth=(f64)0.15 width=(f64)9.3 profile=\"old\" edge_knobs=(bevel)\"0.500,0.500,0.500\"\n    }\n}\n";
+        let mut doc = content.parse::<kdl::KdlDocument>().unwrap();
+        let spec = "smooth;0.000:0.500,0.400:1.000,1.000:0.000";
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.wall.profile", spec, "style"));
+        assert!(update_kdl_in_memory_typed(&mut doc, "style.surface.relief.wall.height", "0.3", "style", Some("mm")));
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.edge.profile", spec, "style"));
+        assert!(update_kdl_in_memory_typed(&mut doc, "style.surface.relief.edge.knobs", "0.4,0.5,0.6", "style", Some("bevel")));
+        // Migrate: the flat spellings come off, and a spelling that is not
+        // there reports nothing removed.
+        assert!(remove_kdl_in_memory(&mut doc, "style.surface.relief.profile"));
+        assert!(remove_kdl_in_memory(&mut doc, "style.surface.relief.edge_knobs"));
+        assert!(!remove_kdl_in_memory(&mut doc, "style.surface.relief.edge_height"), "absent: nothing to remove");
+        assert!(!remove_kdl_in_memory(&mut doc, "style.surface.nothing.here"), "missing node: nothing to remove");
+        let out = doc.to_string();
+        assert_eq!(out.matches("relief").count(), 1, "one relief node: {out}");
+        assert!(out.contains("depth=(f64)0.15"), "the node keeps its properties: {out}");
+        assert!(!out.contains("profile=\"old\""), "flat profile migrated: {out}");
+        assert!(!out.contains("edge_knobs"), "flat knobs migrated: {out}");
+
+        let val = parse_kdl_to_json(&out);
+        let relief = val.pointer("/style/surface/relief").unwrap();
+        assert_eq!(relief.get("depth").and_then(|v| v.as_f64()), Some(0.15));
+        assert_eq!(relief.pointer("/wall/profile").and_then(|v| v.as_str()), Some(spec));
+        assert_eq!(relief.pointer("/wall/height").and_then(|v| v.as_str()), Some("0.3mm"), "{relief}");
+        assert_eq!(relief.pointer("/edge/profile").and_then(|v| v.as_str()), Some(spec));
+        assert_eq!(relief.pointer("/edge/knobs").and_then(|v| v.as_str()), Some("0.4,0.5,0.6"));
+        assert!(relief.get("profile").is_none() && relief.get("edge_knobs").is_none(), "{relief}");
+        // A whole node comes off too.
+        assert!(remove_kdl_in_memory(&mut doc, "style.surface.relief.edge"));
+        let val = parse_kdl_to_json(&doc.to_string());
+        assert!(val.pointer("/style/surface/relief/edge").is_none());
+        assert!(val.pointer("/style/surface/relief/wall/profile").is_some());
     }
 
     #[test]
