@@ -910,3 +910,18 @@ re-layout on every rect assignment (`apply_label_layout` /
 `relabel_rows`), not a flag; `Adapted::clear_label` is the way a label
 comes OFF a widget, and `slider::detached_strip` reads an empty label as
 none for the widgets that store whatever they are handed.
+
+### The suite's animations switch is its own
+
+`motion::enabled()` reads `/run/cce/animations` in a shipped binary (see
+"Animations switch" in `../cce-compositor/WORKSPACE.md`). Under `cfg(test)`
+it does NOT: it answers on, or whatever `motion::force_for_test` set on the
+calling thread. Until 2026-09-28 the test binary read the machine's file,
+so the spreadsheet's wheel-glide tests and the scroll region's fade test
+passed on mains and failed on battery — the same lesson as cce-designer's
+pinned settings path and lattice, one layer down. A test wanting the
+snap-instead-of-ease path forces it for its thread; nothing sets
+`CCE_ANIMATIONS`, which is process-wide and would race the parallel suite.
+This pins only cce-ui's own suite: a dependent's test binary links cce-ui
+without `cfg(test)`, so a dependent test that eases still follows the
+machine — none does today.

@@ -43,9 +43,44 @@ pub fn read_state() -> Option<bool> {
 
 static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
 
+/// Under `cfg(test)` the switch is the SUITE's, not the machine's: on,
+/// unless a test forces it with [`force_for_test`]. Until 2026-09-28
+/// `enabled` read `/run/cce/animations` in the test binary too, so three
+/// glide and fade tests passed or failed with the laptop's power mode —
+/// off on battery, on when plugged in — and read as a broken glide rather
+/// than a borrowed switch. Thread-local rather than the shared cache,
+/// because libtest runs tests in parallel and a process-wide override set
+/// by one test would race every other test's read; a test that forces it
+/// does so for its own thread only, and the value resets with the thread.
+#[cfg(test)]
+thread_local! {
+    static FORCED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Set what [`enabled`] answers on this thread, for a test that exercises
+/// the snap-instead-of-ease path. Tests never set `CCE_ANIMATIONS`, since
+/// an environment variable is process-wide.
+#[cfg(test)]
+pub fn force_for_test(value: bool) {
+    FORCED.with(|f| f.set(value));
+}
+
 /// Whether to animate. Every easing in the toolkit asks this before it
 /// steps, and snaps to its target when the answer is no.
 pub fn enabled() -> bool {
+    #[cfg(test)]
+    {
+        return FORCED.with(|f| f.get());
+    }
+    #[cfg(not(test))]
+    enabled_on_this_machine()
+}
+
+/// [`enabled`] as the shipped binary answers it: the `CCE_ANIMATIONS`
+/// override for this process, else the state file, re-read at most every
+/// [`RECHECK`].
+#[cfg(not(test))]
+fn enabled_on_this_machine() -> bool {
     static ENV: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
     if let Some(forced) = *ENV.get_or_init(|| std::env::var("CCE_ANIMATIONS").ok().and_then(|v| parse(&v))) {
         return forced;
@@ -73,5 +108,19 @@ mod tests {
         assert_eq!(parse(" 0 "), Some(false));
         assert_eq!(parse(""), None);
         assert_eq!(parse("disabled"), None);
+    }
+
+    /// The suite's switch is on whatever the machine's file says, a test
+    /// can force it off for its own thread only, and another thread still
+    /// sees it on.
+    #[test]
+    fn the_suite_animates_whatever_the_machine_says() {
+        assert!(enabled(), "on by default, not read off {STATE_PATH}");
+        force_for_test(false);
+        assert!(!enabled(), "a test can force the snap path");
+        let elsewhere = std::thread::spawn(enabled).join().unwrap();
+        assert!(elsewhere, "the force is this thread's alone");
+        force_for_test(true);
+        assert!(enabled());
     }
 }
