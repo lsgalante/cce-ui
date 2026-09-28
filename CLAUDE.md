@@ -407,7 +407,7 @@ What this buys, and where the code is heading:
   (bool)false` off. The four keys it replaced (`blur` as the switch,
   `radius`, `backdrop_compression`, `refraction`) were aliases for the rest
   of that day and are RETIRED: the loader reports one it finds
-  (`color::retired_frost_keys`, a warning naming the path) and does not read
+  (`color::retired_surface_keys`, a warning naming the path) and does not read
   it — so a config with `blur=true` and no block is sharp, and the warning
   is what says why. A material's `frost` child spells its compression
   `compression` too; its `backdrop_compression` alias went with them.
@@ -570,8 +570,7 @@ Spellings that are NOT current, and what the loader does with each:
 | `relief.height` / `.profile`, `relief.edge_height` / `.edge_profile` | aliases of `wall.*` / `edge.*`; the node wins when both are present |
 | `window_manager.bevel_width` | alias of `relief.width` |
 | `param.color` (+ top-level `plate_opacity`) | alias of `plate.pane.color`, multiplied by the opacity line |
-| `plate.bevel_width` | a legacy OVERRIDE of the roll width that still wins, reported once at load; unit-blind |
-| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression` | RETIRED: reported by path, not read |
+| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression`, `plate.bevel_width` | RETIRED: reported by path (`color::retired_surface_keys`), not read |
 | `relief.wall.knobs` / `edge.knobs`, `profile_knobs` / `edge_knobs` | not style: cce-relief's own state (`~/.config/cce/cce-relief/state.kdl`); read once as a seed, removed on its next Save |
 
 Where each rule is argued, by its lead-in: **Frost is one block** and
@@ -580,8 +579,8 @@ editor's knobs are not a style key** and **There is one roll width** under
 "Units" (the geometry is unit-aware, which is why they sit there); the
 `menu` block under "The context menu draws in its own popup surface".
 `prefer_relief_spellings` in `layout.rs` is the one place the alias
-precedence is decided, `color::retired_frost_keys` the one place a retired
-key is named, and cce-relief's Save is the migration for all of it: it
+precedence is decided, `color::retired_surface_keys` the one place a retired
+key is named (`retired_surface_keys`), and cce-relief's Save is the migration for all of it: it
 writes the current spellings and removes every superseded one it finds.
 
 ## The standard app — root plate, rungs, and the spacing ladder
@@ -815,11 +814,13 @@ pane plate, a bordered widget plate under relief (`append_widget_plate`, via
 width of its own — `style.surface.plate.bevel_width`, default 6 against the
 relief's 9.3 — so two pane plates in one window rolled over different widths
 depending on which painter drew them, and no single key made a pane match the
-window lip. `plate_bevel_width()` now returns the relief width; the old key is
-an explicit override for a config that still carries it (reported once at
-load, and unit-blind where the relief width resolves lengths), and the test
-`the_pane_roll_is_the_relief_width_unless_a_legacy_key_overrides_it` pins the
-fallback.
+window lip. `plate_bevel_width()` now returns the relief width and nothing
+else: the old key was an explicit override for the rest of that day (so a
+config carrying it kept its look through the change) and is RETIRED — a
+config still carrying it is reported by path with the other retired surface
+keys and the key is not read, since an override that keeps working is a
+second width by another name. `the_pane_roll_is_the_relief_width` pins it,
+and cce-relief's Save removes the key.
 
 **And the relief can leave the screen.** `scene/heightfield.rs` integrates the
 height curves the shader only differentiates and samples a frame's plates into a

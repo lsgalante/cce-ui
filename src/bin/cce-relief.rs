@@ -1169,7 +1169,7 @@ impl BevelPopup {
                 // a retired key had it read as the seed (below) and loses it
                 // here, so a config migrates on its first save.
                 let frosted = self.material_frosted;
-                let migrated = ["blur", "radius", "backdrop_compression", "refraction"]
+                let migrated = ["blur", "radius", "backdrop_compression", "refraction", "bevel_width"]
                     .iter()
                     .all(|k| cce_ui::config::remove_config_value(p, &format!("style.surface.plate.{k}")));
                 w("style.surface.relief.spec", &spec)

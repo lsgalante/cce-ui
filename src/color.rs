@@ -659,18 +659,6 @@ fn parse_and_set_colors(content: &str) {
     if let Some(t) = val.pointer("/style/surface/plate/border_thickness").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = PLATE_BORDER_THICKNESS.write() { *lock = t as f32; }
     }
-    // The pane roll's OVERRIDE, not its width: absent (the shipped state), the
-    // roll is `style.surface.relief.width` like every other roll. Read as an
-    // Option so a key removed from config clears the override on reload.
-    {
-        let t = val.pointer("/style/surface/plate/bevel_width").and_then(|v| v.as_f64()).map(|t| t as f32);
-        if t.is_some() {
-            log::warn!(
-                "style.surface.plate.bevel_width is a legacy override: the pane roll follows style.surface.relief.width when it is unset"
-            );
-        }
-        if let Ok(mut lock) = PLATE_BEVEL_WIDTH.write() { *lock = t; }
-    }
     if let Some(c) = get_color("/style/surface/param/color") {
         if let Ok(mut lock) = PARAM_BG_COLOR.write() { *lock = c; }
         if let Ok(mut lock) = PANE_COLOR_WHOLE.write() { *lock = false; }
@@ -688,14 +676,14 @@ fn parse_and_set_colors(content: &str) {
     // keys it replaced on 2026-09-28 (`blur` as the switch, `radius`,
     // `backdrop_compression`, `refraction`) were read as aliases for the rest
     // of that day and are retired: a config still carrying one is reported
-    // (`retired_frost_keys`) and the key does nothing, because an alias that
+    // (`retired_surface_keys`) and the key does nothing, because an alias that
     // keeps working is a second spelling forever. The block is absent → not
     // frosted, which is what `blur=true` alone now amounts to; the report
     // is what tells the user why their plates went sharp.
-    let retired = retired_frost_keys(&val);
+    let retired = retired_surface_keys(&val);
     if !retired.is_empty() {
         log::warn!(
-            "retired frost keys in config: {} — spell the frost as `plate {{ frost radius= compression= refraction= }}` (or a material's `frost` child with `compression`)",
+            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), and every roll's width is `relief width=`",
             retired.join(", ")
         );
     }
@@ -779,14 +767,17 @@ fn parse_and_set_colors(content: &str) {
     }
 }
 
-/// The retired frost spellings a parsed config still carries, as the dotted
-/// paths a user would grep for: the four flat keys under `plate` (`blur`,
-/// `radius`, `backdrop_compression`, `refraction`) and `backdrop_compression`
-/// inside any `frost` child (the plate's, or a named material's), whose one
-/// name is `compression`. Empty for a clean config.
-pub fn retired_frost_keys(val: &serde_json::Value) -> Vec<String> {
+/// The retired `style.surface` spellings a parsed config still carries, as
+/// the dotted paths a user would grep for: the four flat frost keys under
+/// `plate` (`blur`, `radius`, `backdrop_compression`, `refraction`),
+/// `backdrop_compression` inside any `frost` child (the plate's, or a named
+/// material's), whose one name is `compression`, and `plate.bevel_width`,
+/// the pane roll's former width of its own (an override for the rest of
+/// 2026-09-28, retired that evening: every roll is `relief.width`). Empty
+/// for a clean config.
+pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
     let mut found = Vec::new();
-    for k in ["blur", "radius", "backdrop_compression", "refraction"] {
+    for k in ["blur", "radius", "backdrop_compression", "refraction", "bevel_width"] {
         if val.pointer(&format!("/style/surface/plate/{k}")).is_some() {
             found.push(format!("style.surface.plate.{k}"));
         }
@@ -1835,11 +1826,6 @@ pub fn set_root_plate_statusbar_blur(b: bool) {
 static PLATE_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.15, 0.15, 0.2, 0.95]));
 static PLATE_BORDER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.3, 0.3, 0.4, 1.0]));
 static PLATE_BORDER_THICKNESS: RwLock<f32> = RwLock::new(1.0);
-/// A legacy override of the pane plate's roll width
-/// (`style.surface.plate.bevel_width`); `None`, the shipped state, means the
-/// roll is [`crate::layout::bevel_width`]. See [`plate_bevel_width`].
-static PLATE_BEVEL_WIDTH: RwLock<Option<f32>> = RwLock::new(None);
-
 pub fn plate_color() -> Option<[f32; 4]> {
     load_colors_once();
     style_read(&PLATE_COLOR)
@@ -1878,17 +1864,13 @@ pub fn set_plate_border_thickness(t: f32) {
 /// pane plate rolled over different widths in one window, the designer's
 /// panes could not be made to match its own window lip by editing one key,
 /// and the edge height was expressed against a width the panes did not use.
-/// The old key survives as an explicit override for a config that still
-/// carries it, reported once at load; it is unit-blind (a bare number) where
-/// the relief width resolves lengths through the metric.
+/// The old key was an explicit override for the rest of that day and is
+/// RETIRED: a config still carrying it is reported by path
+/// (`retired_surface_keys`) and the key is not read. The getter survives
+/// as the name the plate painters call, so a caller need not know which
+/// registry key a roll is.
 pub fn plate_bevel_width() -> f32 {
-    load_colors_once();
-    style_read(&PLATE_BEVEL_WIDTH).unwrap_or_else(crate::layout::bevel_width)
-}
-
-/// Install (or with `None` clear) the legacy pane-roll override.
-pub fn set_plate_bevel_width(t: Option<f32>) {
-    style_write(&PLATE_BEVEL_WIDTH, t);
+    crate::layout::bevel_width()
 }
 
 /// How hard a frosted plate pulls its backdrop's LUMINANCE toward its own key
@@ -2238,42 +2220,47 @@ mod tests {
     }
 
     /// Rim refraction defaults OFF and clamps, like its neighbour.
-    /// The pane plates roll over the relief width — the one roll width — and
-    /// the legacy `plate.bevel_width` key is an override, not a second width.
+    /// The pane plates roll over the relief width — the one roll width —
+    /// and nothing, a loaded `plate.bevel_width` included, moves them off it.
     #[test]
-    fn the_pane_roll_is_the_relief_width_unless_a_legacy_key_overrides_it() {
-        set_plate_bevel_width(None);
-        assert_eq!(plate_bevel_width(), crate::layout::bevel_width(), "unset: the relief width");
-        set_plate_bevel_width(Some(12.0));
-        assert_eq!(plate_bevel_width(), 12.0, "the legacy key still wins while a config carries it");
-        set_plate_bevel_width(None);
-        assert_eq!(plate_bevel_width(), crate::layout::bevel_width(), "cleared: back to the relief width");
+    fn the_pane_roll_is_the_relief_width() {
+        let _lock = test_color_state_lock();
+        crate::layout::lazy_init_style_registry();
+        let _ = plate_blur();
+        reload_colors("style {\n surface {\n plate bevel_width=(f64)12.0\n }\n}\n");
+        assert_eq!(plate_bevel_width(), crate::layout::bevel_width(), "a retired key moves nothing");
+        assert_eq!(
+            retired_surface_keys(&crate::config::parse_kdl_to_json("style {\n surface {\n plate bevel_width=(f64)12.0\n }\n}\n")),
+            vec!["style.surface.plate.bevel_width"]
+        );
+        reload_colors("");
     }
 
-    /// The four flat frost keys and the `backdrop_compression` spelling
-    /// inside a `frost` child are reported by path; the block itself and a
-    /// material's `compression` are not.
+    /// The four flat frost keys, the `backdrop_compression` spelling inside
+    /// a `frost` child and `plate.bevel_width` are reported by path; the
+    /// block itself and a material's `compression` are not.
     #[test]
-    fn retired_frost_keys_are_named_by_path_and_the_block_is_not() {
+    fn retired_surface_keys_are_named_by_path_and_the_block_is_not() {
         let clean: serde_json::Value = serde_json::json!({ "style": { "surface": {
             "plate": { "frost": { "radius": 5.5, "compression": 0.0, "refraction": 0.0 }, "color": "#6c6c7bf2" },
             "material": { "glass": { "frost": { "compression": 0.6 } } }
         } } });
-        assert!(retired_frost_keys(&clean).is_empty());
+        assert!(retired_surface_keys(&clean).is_empty());
         let old: serde_json::Value = serde_json::json!({ "style": { "surface": {
             "plate": { "blur": true, "radius": 1.5, "backdrop_compression": 0.85, "refraction": 0.3,
-                       "frost": { "backdrop_compression": 0.2 } },
+                       "bevel_width": 12.0, "frost": { "backdrop_compression": 0.2 } },
             "material": { "glass": { "frost": { "backdrop_compression": 0.6 } } }
         } } });
-        assert_eq!(retired_frost_keys(&old), vec![
+        assert_eq!(retired_surface_keys(&old), vec![
             "style.surface.plate.blur",
             "style.surface.plate.radius",
             "style.surface.plate.backdrop_compression",
             "style.surface.plate.refraction",
+            "style.surface.plate.bevel_width",
             "style.surface.plate.frost.backdrop_compression",
             "style.surface.material.glass.frost.backdrop_compression",
         ]);
-        assert!(retired_frost_keys(&serde_json::json!({})).is_empty());
+        assert!(retired_surface_keys(&serde_json::json!({})).is_empty());
     }
 
     #[test]

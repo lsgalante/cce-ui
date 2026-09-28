@@ -628,7 +628,7 @@ mod tests {
         style {
             surface {
                 param color=(rgba)"#05050840"
-                plate bevel_width=(f64)12.0 {
+                plate {
                     frost compression=(f64)0.6 refraction=(f64)0.3
                     root corner_radius=(i64)24
                 }
@@ -646,7 +646,7 @@ mod tests {
                         frost compression=(f64)0.6 refraction=(f64)0.3
                     }
                 }
-                plate material="glass" bevel_width=(f64)12.0 {
+                plate material="glass" {
                     root corner_radius=(i64)24
                 }
                 relief depth=(f64)0.08
@@ -700,7 +700,7 @@ mod tests {
     /// (bool)false` is not. The four scattered keys it replaced (`blur`,
     /// `radius`, `backdrop_compression`, `refraction`) are RETIRED, not
     /// aliases: a config carrying one is reported by path
-    /// (`color::retired_frost_keys`) and the key does nothing — `blur=true`
+    /// (`color::retired_surface_keys`) and the key does nothing — `blur=true`
     /// alone is sharp, a flat `radius` moves nothing, and the old knob name
     /// inside the block is ignored too.
     #[test]
@@ -713,7 +713,7 @@ mod tests {
             crate::color::reload_colors(&doc(plate));
             (crate::color::plate_blur(), Frost::from_style())
         };
-        let retired = |plate: &str| crate::color::retired_frost_keys(&crate::config::parse_kdl_to_json(&doc(plate)));
+        let retired = |plate: &str| crate::color::retired_surface_keys(&crate::config::parse_kdl_to_json(&doc(plate)));
         let frosted = |c: f32, r: f32, rad: f32| Frost::Frosted { compression: c, refraction: r, radius: rad };
         assert_eq!(load("frost radius=(f64)3.0 compression=(f64)0.4 refraction=(f64)0.1"), (true, frosted(0.4, 0.1, 3.0)));
         assert!(retired("frost radius=(f64)3.0 compression=(f64)0.4 refraction=(f64)0.1").is_empty());
