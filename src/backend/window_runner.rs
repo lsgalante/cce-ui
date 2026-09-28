@@ -918,12 +918,30 @@ pub fn rounded_rect_vertices_corners(
 /// n = 2; higher `corner_shape` exponents give the DE's continuous-curvature
 /// corners, so widget silhouettes follow the same corner family as the
 /// SDF-lit plates. `e` is 2/n, hoisted by callers. Tangent points at the
-/// quadrant ends are unchanged, so fans still tile exactly against the body
-/// rects and edge strips.
+/// quadrant ends are pinned to the exact axis points (see below), so fans
+/// tile exactly against the body rects and edge strips.
 #[inline]
 fn superellipse_pt(theta: f32, e: f32) -> (f32, f32) {
     let (s, c) = theta.sin_cos();
-    (c.signum() * c.abs().powf(e), s.signum() * s.abs().powf(e))
+    // f32 sin/cos are not exactly 0 at a quadrant end (sin(PI) is -8.7e-8),
+    // and the fractional power magnifies that noise by orders of magnitude:
+    // at corner_shape 4.5 it is 7e-4, which on the desktop grid's 138 px
+    // cell corners put the fan's tangent vertex 0.1 px short of the body
+    // quad's edge. The fan's edge then tilts away from the quad's, and the
+    // row of pixel centres between them is covered by neither: a stray
+    // gap-coloured line 32 px long at every cell's left edge, and a lone
+    // gap pixel on the bottom row where the arc meets the body. Snap the
+    // ends to the exact axis points so fans tile against the rects.
+    let axis = |v: f32| -> f32 {
+        if v.abs() < 1e-6 {
+            0.0
+        } else if v.abs() > 1.0 - 1e-6 {
+            v.signum()
+        } else {
+            v.signum() * v.abs().powf(e)
+        }
+    };
+    (axis(c), axis(s))
 }
 
 /// Feathered glow ([`Prim::Glow`]): the rounded rect's interior fills at the
