@@ -522,6 +522,68 @@ What this buys, and where the code is heading:
   with the body still under 0.4. Useful range is ~0.3-0.6; the effect is in the
   roll and stays there.
 
+### The surface config shape (`style.surface`, as of 2026-09-28)
+
+The block every plate, wall and roll in the toolkit reads, in the spelling
+the loader treats as current — written down once because the rules below
+were settled one at a time across a day and each paragraph names only its
+own key. What a key is, in a line each:
+
+```kdl
+style {
+    surface {
+        plate material="glass" {                 // optional: bind the pane rung to a material node
+            pane color=(rgba)"#6c6c7bf2"         // the pane tint, alpha = strength (legacy: param.color × top-level plate_opacity)
+            frost radius=(f64)5.5 compression=(f64)0.0 refraction=(f64)0.0   // the ONE frost spelling; absent = unfrosted
+            border_color (rgba)"#9595a9ff"        // the flat border — control_relief OFF only
+            border_thickness (f64)1.0
+            padding (i64)20                       // the pane rung's inset
+            root {                                // the root rung
+                color (rgba)"#5e657acf"
+                blur (f64)0.1                     // the COMPOSITOR's blur-behind, not the client frost
+                corner_radius (i64)24             // the pane radius falls back to this
+            }
+        }
+        material {                                // named materials (RFC material, step 4)
+            glass {
+                color (rgba)"#05050840"
+                frost compression=(f64)0.6 refraction=(f64)0.3 radius=(f64)5.5
+                finish light=(f64)0.15 spec=(f64)0.4 shininess=(f64)24.0 curvature=(f64)0.2
+            }
+        }
+        relief light=(f64)0.15 width=(f64)9.3 spec=(f64)0.4 shininess=(f64)24.0 curvature=(f64)0.2 {
+            // light: the strength, NOT a length; width: the ONE run of every roll and wall;
+            // spec / shininess / curvature: the DE finish beyond its strength
+            wall height=(mm)0.3 profile="smooth;…"   // a carve's side (buttons, wells, rows): height = drop, profile = ramp spec
+            edge height=4.0    profile="smooth;…"   // a plate's perimeter roll: height = rise (unset = quarter-round of width)
+        }
+        menu color=(rgba)"#101018ff" opacity=(f64)0.06 compression=(f64)0.8 corner_radius=(i64)24   // every popover and the designer's dialog
+    }
+}
+```
+
+Spellings that are NOT current, and what the loader does with each:
+
+| Spelling | Status |
+|---|---|
+| `relief.depth`, `window_manager.bevel_depth`, a material's `finish depth=` | alias of `relief.light` / `finish light=`; `light` wins when both are present |
+| `relief.height` / `.profile`, `relief.edge_height` / `.edge_profile` | aliases of `wall.*` / `edge.*`; the node wins when both are present |
+| `window_manager.bevel_width` | alias of `relief.width` |
+| `param.color` (+ top-level `plate_opacity`) | alias of `plate.pane.color`, multiplied by the opacity line |
+| `plate.bevel_width` | a legacy OVERRIDE of the roll width that still wins, reported once at load; unit-blind |
+| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression` | RETIRED: reported by path, not read |
+| `relief.wall.knobs` / `edge.knobs`, `profile_knobs` / `edge_knobs` | not style: cce-relief's own state (`~/.config/cce/cce-relief/state.kdl`); read once as a seed, removed on its next Save |
+
+Where each rule is argued, by its lead-in: **Frost is one block** and
+**Named materials in config** above; **The relief is two shapes**, **The
+editor's knobs are not a style key** and **There is one roll width** under
+"Units" (the geometry is unit-aware, which is why they sit there); the
+`menu` block under "The context menu draws in its own popup surface".
+`prefer_relief_spellings` in `layout.rs` is the one place the alias
+precedence is decided, `color::retired_frost_keys` the one place a retired
+key is named, and cce-relief's Save is the migration for all of it: it
+writes the current spellings and removes every superseded one it finds.
+
 ## The standard app — root plate, rungs, and the spacing ladder
 
 Every cce app is built the same way, and this section is the standard.
@@ -749,7 +811,7 @@ never had: `(mm)` when the metric is real, px otherwise
 roll and wall: the root plate's perimeter (`PlateSpec::window`), a `PlateSpec`
 pane plate, a bordered widget plate under relief (`append_widget_plate`, via
 `colors::plate_bevel_width`), every control wall, and the length
-`edge_height` is a rise against. Until 2026-09-28 the widget-plate path had a
+`edge.height` is a rise against. Until 2026-09-28 the widget-plate path had a
 width of its own — `style.surface.plate.bevel_width`, default 6 against the
 relief's 9.3 — so two pane plates in one window rolled over different widths
 depending on which painter drew them, and no single key made a pane match the
