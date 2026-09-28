@@ -738,7 +738,12 @@ shading twin (`Finish.carve_depth` / `roll_height`). A `(relief)` value
 carries the drop as `h=` (a length: `h=0.5mm`, or bare px) beside `w=` and
 `d=` (light; `l=` reads as an alias). `cce-relief`'s Height knob is the editor:
 its section's depth numbers read in mm when the metric is real, and Save
-writes `wall.height` as a `(mm)` length then, px otherwise.
+writes `wall.height` in the unit the config already spells (an untouched
+slider verbatim, a moved one converted through the same metric that seeded
+it — so a headless session never turns `(mm)0.3` into `(px)1.1339`, which
+it did until 2026-09-28), choosing a unit only for a height the config
+never had: `(mm)` when the metric is real, px otherwise
+(`height_len_for` in `cce-relief.rs`).
 
 **There is one roll width.** `style.surface.relief.width` is the run of every
 roll and wall: the root plate's perimeter (`PlateSpec::window`), a `PlateSpec`

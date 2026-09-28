@@ -25,8 +25,11 @@
 //! **Height** (the wall's drop, logical px; 0 = follow the width at the
 //! analytic ratio). Height is the fabrication axis: the section's depth
 //! numbers read in millimetres whenever the display metric is real
-//! (`cce_ui::units`), and Save writes `style.surface.relief.wall.height` as
-//! a `(mm)` length then, px otherwise.
+//! (`cce_ui::units`), and Save writes `style.surface.relief.wall.height` in
+//! the UNIT the config already spells — a `(mm)0.3` stays millimetres on a
+//! headless session, and an untouched slider writes the seed back verbatim
+//! — choosing a unit only for a height the config never had: `(mm)` when
+//! the metric is real, px when it is only assumed (`height_len_for`).
 //!
 //! Every edit applies live to this process (the
 //! popup's own plate, wells, and buttons ARE the preview) and logs the
@@ -475,6 +478,12 @@ struct BevelPopup {
     depth_slider: Adapted<Slider>,
     width_slider: Adapted<Slider>,
     height_slider: Adapted<Slider>,
+    /// The wall height as the Save target spelled it when this window
+    /// opened — value AND unit — or `None` for a config with no height. The
+    /// unit Save writes back in (`height_len`); the value is what an
+    /// untouched slider writes verbatim, so a `(mm)0.3` does not come back
+    /// as `(px)1.1339` from a headless session whose metric is a guess.
+    height_seed: Option<cce_ui::units::Len>,
     /// The Finish column: what the surface does under light beyond its
     /// strength (`Light` above) — `scene::material::Finish`'s spec /
     /// shininess / curvature. Applied live to the DE finish, or to the pane
@@ -1009,15 +1018,9 @@ fn draw_section(pc: &mut PaintCtx, rect: Rect, profile: &ProfileKnobs, shape: Sh
 }
 
 impl BevelPopup {
-    /// The pinned drop as the length it should be written as: millimetres
-    /// when the display metric is real, logical px when it is only assumed.
+    /// The pinned drop as the length Save writes — see [`height_len_for`].
     fn height_len(&self, px: f32) -> cce_ui::units::Len {
-        let m = cce_ui::units::metric();
-        if m.is_real() {
-            cce_ui::units::Len::mm(((px * m.mm_per_px()) * 1000.0).round() / 1000.0)
-        } else {
-            cce_ui::units::Len::px(px)
-        }
+        height_len_for(self.height_seed, px, &cce_ui::units::metric())
     }
 
     /// The selected shape. The dropdown index is the ONLY source; read it
@@ -1423,13 +1426,13 @@ impl Application for BevelPopup {
         let rel_shape_str = |node: &str, k: &str, legacy: &str| {
             rel_shape(node, k, legacy).and_then(|v| v.as_str().map(String::from))
         };
-        // A length key: a bare number is logical px, a `(mm)`-annotated one
-        // arrives as the string "0.3mm" and resolves through the metric.
-        let rel_shape_len = |node: &str, k: &str, legacy: &str| {
+        // A length key, unit and all: a bare number is logical px, a
+        // `(mm)`-annotated one arrives as the string "0.3mm".
+        let rel_shape_units = |node: &str, k: &str, legacy: &str| {
             rel_shape(node, k, legacy).and_then(|v| {
                 v.as_f64()
-                    .map(|f| f as f32)
-                    .or_else(|| v.as_str().and_then(cce_ui::units::Len::parse).map(|l| l.to_px()))
+                    .map(|f| cce_ui::units::Len::px(f as f32))
+                    .or_else(|| v.as_str().and_then(cce_ui::units::Len::parse))
             })
         };
         // `--key` seeds: the single `(relief)` value at that key wins over
@@ -1474,11 +1477,16 @@ impl Application for BevelPopup {
             .or_else(|| rel_f32("light"))
             .or_else(|| rel_f32("depth"))
             .unwrap_or_else(cce_ui::layout::bevel_depth);
-        let height = key_spec
+        // The height as the target SPELLS it (value and unit), kept so Save
+        // writes the same unit back; the registry fallback carries no unit
+        // and seeds the slider only.
+        let height_seed: Option<cce_ui::units::Len> = key_spec
             .as_ref()
             .and_then(|s| s.height)
+            .or_else(|| rel_shape_units("wall", "height", "height"))
+            .filter(|l| l.value > 0.0);
+        let height = height_seed
             .map(|l| l.to_px())
-            .or_else(|| rel_shape_len("wall", "height", "height"))
             .or_else(cce_ui::layout::bevel_height)
             .unwrap_or(0.0);
         let width = key_spec
@@ -1657,6 +1665,7 @@ impl Application for BevelPopup {
             config_path,
             target_key,
             state_target,
+            height_seed,
             target_label,
             ui_context: cce_ui::context::UiContext::new(),
             width: 520,
@@ -2058,6 +2067,70 @@ impl Application for BevelPopup {
 
 fn main() {
     cce_ui::engine::run::<BevelPopup>();
+}
+
+/// The wall height Save writes for a slider at `px`, given the height the
+/// target spelled when the window opened (`seed`: value and unit, `None`
+/// for a config that had none) and the display metric.
+///
+/// **The configured unit is kept.** A `(mm)0.3` is written back in
+/// millimetres whatever the metric's source, converted through the same
+/// metric that resolved it on seed — so on a headless session, where the
+/// metric is the assumed 96 ppi, an untouched slider round-trips exactly
+/// and a moved one is a millimetre value derived through the same guess
+/// the slider itself was showing. Until 2026-09-28 the rule was "mm when
+/// the metric is real, px otherwise", which rewrote a `(mm)0.3` as
+/// `(px)1.1339` on every save from a session without EDID — a unit the
+/// user chose, lost to a metric the machine lacked. An untouched slider
+/// writes the seed VERBATIM, not a round trip of it, so a saved file that
+/// was not edited is byte-identical in that key. Only a height the config
+/// never had picks a unit from the metric: `(mm)` when it is real, px when
+/// it is only assumed, since a millimetre value nobody typed is honest only
+/// when the millimetres are.
+fn height_len_for(seed: Option<cce_ui::units::Len>, px: f32, metric: &cce_ui::units::Metric) -> cce_ui::units::Len {
+    use cce_ui::units::{Len, Unit};
+    match seed {
+        Some(seed) if (seed.resolve(metric) - px).abs() < 1e-4 => seed,
+        Some(seed) if seed.unit == Unit::Px => Len::px(px),
+        Some(seed) => Len::new((metric.from_px(px, seed.unit) * 1000.0).round() / 1000.0, seed.unit),
+        None if metric.is_real() => Len::mm(((px * metric.mm_per_px()) * 1000.0).round() / 1000.0),
+        None => Len::px(px),
+    }
+}
+
+#[cfg(test)]
+mod height_unit_tests {
+    use super::height_len_for;
+    use cce_ui::units::{Len, Metric, MetricSource};
+
+    fn real() -> Metric {
+        Metric::from_px_per_mm(1.0, 5.0, MetricSource::Measured).unwrap()
+    }
+
+    /// A `(mm)` height keeps its unit on an assumed metric: untouched it
+    /// writes back verbatim, moved it converts through the same guess.
+    #[test]
+    fn a_configured_unit_survives_a_headless_save() {
+        let assumed = Metric::assumed(1.0);
+        let seed = Len::mm(0.3);
+        let px = seed.resolve(&assumed);
+        assert_eq!(height_len_for(Some(seed), px, &assumed), seed, "untouched: verbatim");
+        assert_eq!(height_len_for(Some(seed), px + 0.00005, &assumed), seed, "a float wobble is untouched");
+        let moved = height_len_for(Some(seed), px * 2.0, &assumed);
+        assert_eq!(moved.unit, seed.unit);
+        assert!((moved.value - 0.6).abs() < 1e-3, "{moved:?}");
+        // A px height stays px even on a real display.
+        assert_eq!(height_len_for(Some(Len::px(4.0)), 6.0, &real()), Len::px(6.0));
+        // A `(cm)` height keeps centimetres.
+        assert_eq!(height_len_for(Some(Len::cm(0.1)), 10.0, &real()), Len::cm(0.2));
+    }
+
+    /// A height the config never had picks its unit from the metric.
+    #[test]
+    fn a_new_height_takes_its_unit_from_the_metric() {
+        assert_eq!(height_len_for(None, 1.5, &Metric::assumed(1.0)), Len::px(1.5));
+        assert_eq!(height_len_for(None, 1.5, &real()), Len::mm(0.3));
+    }
 }
 
 /// The editor's slider positions, kept in this app's own state file —
