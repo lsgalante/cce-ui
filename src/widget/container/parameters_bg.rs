@@ -79,6 +79,16 @@ pub struct ParametersBg {
     /// under that line while the value it was reported for still stands.
     code_error_line: Option<usize>,
     mouse_pos: Option<(f32, f32)>,
+    /// The parameter row under the pointer, tinted by `paint_ui` — the
+    /// pane's ONE hover rule, over every control kind. The controls keep
+    /// their own hovers (a spinbox's +/- buttons, a slider's band), but
+    /// under the DE relief style most of them draw none at all — the
+    /// spinbox's row border, the well frames and the dropdown border are
+    /// flat-style chrome the relief branches never paint — so which rows
+    /// answered the pointer depended on the control and the style
+    /// (2026-09-28: a slider lit, the spinbox beside it did not). Set with
+    /// the controls' hover in `hover_controls`, so a scroll moves it too.
+    hover_row: Option<usize>,
     pub sliders: Vec<Option<Adapted<Slider>>>,
     pub float3s: Vec<Option<Adapted<Float3>>>,
     pub spinboxes: Vec<Option<Adapted<Spinbox>>>,
@@ -243,6 +253,7 @@ impl ParametersBg {
             code_history: crate::history::History::with_limit(200),
             code_error_line: None,
             mouse_pos: None,
+            hover_row: None,
             sliders: Vec::new(),
             float3s: Vec::new(),
             spinboxes: Vec::new(),
@@ -826,7 +837,43 @@ impl ParametersBg {
                 }
             }
         }
+        let row = self.hoverable_row_at(px, py);
+        if row != self.hover_row {
+            self.hover_row = row;
+            changed = true;
+        }
         changed
+    }
+
+    /// The parameter row under `(px, py)`: a visible, non-header row whose
+    /// rect holds the point, and only while the point is inside the pane's
+    /// own viewport (a row scrolled out of it is not under anything).
+    fn hoverable_row_at(&self, px: f32, py: f32) -> Option<usize> {
+        if !self.visible
+            || px < self.rect.x
+            || px > self.rect.x + self.rect.width
+            || py < self.rect.y
+            || py > self.rect.y + self.rect.height
+        {
+            return None;
+        }
+        let hidden = self.hidden_rows();
+        self.get_param_rects().into_iter().enumerate().find_map(|(i, (x, y, w, h))| {
+            let hoverable = !hidden[i] && h > 0.0 && self.display_params[i].2 != "section";
+            (hoverable && px >= x && px <= x + w && py >= y && py <= y + h).then_some(i)
+        })
+    }
+
+    /// The hovered row's tint, over its floor and under its control: the
+    /// dialog's hover-row wash, at the control corner radius.
+    fn paint_hover_row(&self, ctx: &mut PaintCtx) {
+        let Some(i) = self.hover_row else { return };
+        let Some(&(x, y, w, h)) = self.get_param_rects().get(i) else { return };
+        if h <= 0.0 {
+            return;
+        }
+        let r = crate::layout::control_corner_radius();
+        ctx.rounded_rect(Rect { x, y, width: w, height: h }, r, (true, true, true, true), [1.0, 1.0, 1.0, 0.05]);
     }
 
     /// The rows moved under a still pointer: re-hover from where it was.
@@ -1837,6 +1884,7 @@ impl Paint for ParametersBg {
             return;
         }
         self.paint_row_floors(ctx);
+        self.paint_hover_row(ctx);
         for (qx, qy, qw, qh, qr, qc, corners) in self.rounded_quads(ui) {
             ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
         }
@@ -4022,6 +4070,7 @@ mod tests {
         let (px, py) = (250.0, r0.1 + r0.3 * 0.5);
         p.on_cursor_moved(px, py, &mut ctx);
         assert_eq!(hovered(&p), vec![0], "the slider under the pointer hovers");
+        assert_eq!(p.hover_row, Some(0), "and the pane tints its row");
 
         // A wheel over the label column scrolls the pane: a notch moves the
         // TARGET and the rows glide there over the following ticks, so the
@@ -4041,6 +4090,36 @@ mod tests {
             .expect("a row under the pointer after the scroll");
         assert_ne!(now, 0, "a different row is under the pointer");
         assert_eq!(hovered(&p), vec![now], "the hover followed the rows, without a motion");
+        assert_eq!(p.hover_row, Some(now), "the row tint followed too");
+
+        // Off the pane, nothing is hovered.
+        p.on_cursor_moved(-9999.0, -9999.0, &mut ctx);
+        assert!(hovered(&p).is_empty());
+        assert_eq!(p.hover_row, None);
+    }
+
+    /// The row tint is the pane's rule, not the control's: a spinbox row,
+    /// which draws no hover of its own under the relief style, is tinted
+    /// exactly as a slider row is, and a section header never is.
+    #[test]
+    fn every_control_kind_hovers_by_its_row() {
+        let mut ctx = UiContext::new();
+        let mut p = panel_with(&[
+            ("Shape", "", "section"),
+            ("Count", "3", "spinbox:0:10"),
+            ("Mode", "A", "choice:A,B"),
+            ("Size", "0.5", "slider:0:1"),
+        ]);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
+        let rects = p.get_param_rects();
+        for i in 1..4 {
+            let (x, y, w, h) = rects[i];
+            p.on_cursor_moved(x + w * 0.5, y + h * 0.5, &mut ctx);
+            assert_eq!(p.hover_row, Some(i), "row {i} under the pointer");
+        }
+        let (x, y, w, h) = rects[0];
+        p.on_cursor_moved(x + w * 0.5, y + h * 0.5, &mut ctx);
+        assert_eq!(p.hover_row, None, "a header is not a hoverable row");
     }
 
     /// A gesture the pane acquired stays the pane's: rows travelling under
