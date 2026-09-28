@@ -841,32 +841,7 @@ pub mod context_menu {
             };
             let r = crate::layout::menu_corner_radius();
             let depth = crate::layout::bevel_width().min(self.h * 0.2);
-            let face = crate::color::page_low_color();
-            if face[3] > 0.001 {
-                // The popover material: the page colour at menu_opacity,
-                // frosted (an opaque page colour would resolve the frost
-                // to a solid tint, invisible).
-                let material = crate::scene::material::Material::popover(face);
-                let material = if self.in_popup {
-                    // The compositor's blur frosts but cannot COMPRESS: the
-                    // in-app pass pulls the backdrop's luminance a fraction
-                    // `k` toward the plate's key, which is what keeps the
-                    // labels legible over a bright scene. Over glass that
-                    // only blurs, hold the same swing with opacity instead —
-                    // the backdrop reaches the eye at (1 - a)(1 - k) either
-                    // way — or a menu opened over something white washes out.
-                    let k = crate::color::menu_compression().clamp(0.0, 1.0);
-                    let mut m = material.for_role(crate::scene::material::PlateRole::Root);
-                    m.tint[3] = 1.0 - (1.0 - m.tint[3]) * (1.0 - k);
-                    m
-                } else {
-                    material
-                };
-                ctx.plate(rect, (r, r, r, r), &material, depth);
-            } else {
-                let (plateau, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
-                ctx.boss(plateau, radii, depth);
-            }
+            paint_menu_plate(ctx, rect, self.in_popup);
 
             // What the rows draw — hover, separators, slider bands — is cut at
             // the plate, so a row scrolled half out of a shortened menu stops
@@ -1060,6 +1035,45 @@ pub mod context_menu {
                 }
             }
             labels
+        }
+    }
+
+    /// The menu PLATE alone, over `rect`: [`Material::menu`] on a rounded
+    /// face at `style.surface.menu.corner_radius` with the rolled perimeter
+    /// at the relief width (capped at a fifth of the height) — or, for a
+    /// transparent configured face, the edges-only boss. What
+    /// [`ContextMenuState::paint`] draws under its rows, and what any other
+    /// surface that should look like a menu draws under its own (the
+    /// designer's command palette): one function, so the two cannot be
+    /// configured apart.
+    ///
+    /// `in_popup` says the plate is being painted into the runner's popup
+    /// surface, where the compositor's blur frosts but cannot COMPRESS: the
+    /// in-app pass pulls the backdrop's luminance a fraction `k` toward the
+    /// plate's key, which is what keeps the labels legible over a bright
+    /// scene. Over glass that only blurs, the same swing is held with
+    /// opacity instead — the backdrop reaches the eye at (1 - a)(1 - k)
+    /// either way — or a menu opened over something white washes out.
+    ///
+    /// [`Material::menu`]: crate::scene::material::Material::menu
+    pub fn paint_menu_plate(ctx: &mut crate::scene::paint::PaintCtx, rect: crate::scene::layout::Rect, in_popup: bool) {
+        let r = crate::layout::menu_corner_radius();
+        let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+        let face = crate::color::menu_color();
+        if face[3] > 0.001 {
+            let material = crate::scene::material::Material::menu();
+            let material = if in_popup {
+                let k = crate::color::menu_compression().clamp(0.0, 1.0);
+                let mut m = material.for_role(crate::scene::material::PlateRole::Root);
+                m.tint[3] = 1.0 - (1.0 - m.tint[3]) * (1.0 - k);
+                m
+            } else {
+                material
+            };
+            ctx.plate(rect, (r, r, r, r), &material, depth);
+        } else {
+            let (plateau, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
+            ctx.boss(plateau, radii, depth);
         }
     }
 

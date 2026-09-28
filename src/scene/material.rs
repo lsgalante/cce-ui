@@ -403,6 +403,15 @@ impl Material {
         Self::opaque([base[0], base[1], base[2], crate::color::menu_opacity()]).with_frost(frost)
     }
 
+    /// THE menu material: [`Material::popover`] of `color::menu_color` —
+    /// `style.surface.menu.color`, else the root plate colour. What a
+    /// context menu's plate is made of, and what any other surface that
+    /// should read as one (a command palette, a modal list) asks for, so
+    /// the `style.surface.menu` block is the one place both are configured.
+    pub fn menu() -> Self {
+        Self::popover(crate::color::menu_color())
+    }
+
     // ---- derived materials -------------------------------------------------
 
     /// The well floor cut into this plate: the same material with the tint

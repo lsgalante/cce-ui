@@ -119,6 +119,13 @@ static MENU_OPACITY: RwLock<f32> = RwLock::new(0.8);
 /// `plate.backdrop_compression` for popovers only; a menu is read while
 /// something else is going on beneath it, which a pane is not.
 static MENU_COMPRESSION: RwLock<f32> = RwLock::new(0.6);
+/// The colour a menu's face is tinted with (`style.surface.menu.color`),
+/// when the config names one; `None` follows the root plate colour
+/// (`page_low_color`), which is what every menu wore before the key
+/// existed. The alpha is ignored — `menu.opacity` is the tint strength —
+/// so a menu can be dark on a light window without the window's own
+/// plate going dark with it.
+static MENU_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(None);
 
 static ROOT_PLATE_STATUSBAR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.06, 0.06, 0.10, 1.0]);
 static ROOT_PLATE_STATUSBAR_TEXT_COLOR: RwLock<[f32; 4]> = RwLock::new([0.6666, 0.6666, 0.7333, 1.0]);
@@ -350,6 +357,9 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = val.pointer("/style/surface/menu/compression").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = MENU_COMPRESSION.write() { *lock = (c as f32).clamp(0.0, 1.0); }
+    }
+    if let Some(c) = get_color("/style/surface/menu/color") {
+        if let Ok(mut lock) = MENU_COLOR.write() { *lock = Some(c); }
     }
 
     let menubar_blur_ptr = val.pointer("/style/surface/plate/root/menubar/blur");
@@ -1231,6 +1241,20 @@ pub fn menu_compression() -> f32 {
 
 pub fn set_menu_compression(c: f32) {
     style_write(&MENU_COMPRESSION, c.clamp(0.0, 1.0));
+}
+
+/// The colour a menu's face is tinted with: `style.surface.menu.color` when
+/// configured, else the root plate colour (`page_low_color`) — the face
+/// every menu wore before the key existed, so an unconfigured menu looks as
+/// it always did. Its alpha is not the tint strength; `menu_opacity` is
+/// (`Material::popover` reads both).
+pub fn menu_color() -> [f32; 4] {
+    load_colors_once();
+    style_read(&MENU_COLOR).unwrap_or_else(page_low_color)
+}
+
+pub fn set_menu_color(c: Option<[f32; 4]>) {
+    style_write(&MENU_COLOR, c);
 }
 
 pub fn read_root_plate_opacity_if_configured() -> Option<f32> {
