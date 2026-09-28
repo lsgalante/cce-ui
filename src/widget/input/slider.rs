@@ -48,6 +48,12 @@ pub struct Slider {
     focused: bool,
     /// Readout / edit-buffer display precision (decimal places).
     decimals: usize,
+    /// The pointer is over the row (`MouseEnter` / `MouseLeave`, synthesized
+    /// by the adapter's hover bookkeeping): the band lifts, the way a well's
+    /// frame or a dropdown's border does. A slider had no hover at all until
+    /// 2026-09-28, so a params pane answered the pointer on every row but
+    /// its sliders.
+    hovered: bool,
 }
 
 impl Slider {
@@ -65,6 +71,7 @@ impl Slider {
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             label: None,
+            hovered: false,
             scroll_vel: 0.0,
             last_wheel: None,
             focused: false,
@@ -154,15 +161,24 @@ impl Slider {
     /// The slider: the band spanning the whole track, swelling at the value
     /// (`paint_band_shape`).
     fn paint_band(&self, g: &SliderGeom, ctx: &mut PaintCtx) {
-        // A band has no rim to light: focused, the band itself is the highlight.
+        // A band has no rim to light: focused, the band itself is the
+        // highlight; hovered, it lifts by the dropdown border's step.
         let color = if self.dragging {
             colors::slider_thumb_drag()
         } else if self.focused {
             crate::color::highlight_primary_color()
+        } else if self.hovered {
+            let c = colors::slider_thumb();
+            [(c[0] + 0.15).min(1.0), (c[1] + 0.15).min(1.0), (c[2] + 0.15).min(1.0), c[3]]
         } else {
             colors::slider_thumb()
         };
         paint_band_shape(ctx, g.track_x, g.track_w, g.y + g.h * 0.5, color, &|x| self.band_height_at(g, x));
+    }
+
+    /// The pointer is over the row.
+    pub fn hovered(&self) -> bool {
+        self.hovered
     }
 
     fn scaled_string(&self) -> String {
@@ -405,6 +421,14 @@ impl Input for Slider {
                     }
                 }
                 false
+            }
+            Event::MouseEnter => {
+                self.hovered = true;
+                true
+            }
+            Event::MouseLeave => {
+                self.hovered = false;
+                true
             }
             Event::FocusIn => {
                 self.focused = true;
@@ -1017,6 +1041,33 @@ fn probe_slider_bridge() {
         ));
         assert!(sl.inner().value() < before, "scroll up decreases value");
         assert!(sl.take_change());
+    }
+
+    /// A slider hovers like every other control: the adapter's hover
+    /// bookkeeping turns a move over the row into `MouseEnter`, a move away
+    /// into `MouseLeave`, and the band reads the flag. A float3's three rows
+    /// each hover on their own, since the group forwards the move to them.
+    #[test]
+    fn a_slider_hovers_under_the_pointer() {
+        let mut ctx = UiContext::new();
+        let mut sl = Slider::new();
+        let (id, ptr) = (sl.id(), sl.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        WidgetHost::set_rect(&mut sl, 0.0, 0.0, 100.0, 20.0);
+        assert!(!sl.inner().hovered());
+        assert!(sl.on_cursor_moved(50.0, 10.0, &mut ctx), "entering is a change");
+        assert!(sl.inner().hovered());
+        assert!(!sl.on_cursor_moved(60.0, 10.0, &mut ctx), "moving within is not");
+        assert!(sl.on_cursor_moved(500.0, 10.0, &mut ctx), "leaving is");
+        assert!(!sl.inner().hovered());
+
+        let mut f = crate::widget::display::Float3::new();
+        WidgetHost::set_rect(&mut f, 0.0, 0.0, 200.0, crate::widget::display::Float3::preferred_height(false));
+        let rows = f.inner().get_row_rects();
+        let (_, y1, _, h1) = rows[1];
+        assert!(f.on_cursor_moved(100.0, y1 + h1 * 0.5, &mut ctx));
+        let hovered: Vec<bool> = f.inner().sliders().iter().map(|s| s.inner().hovered()).collect();
+        assert_eq!(hovered, vec![false, true, false], "the row under the pointer, and only it");
     }
 }
 

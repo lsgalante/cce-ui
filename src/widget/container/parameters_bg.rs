@@ -749,6 +749,94 @@ impl ParametersBg {
         ]
     }
 
+    /// Hand a pointer position to every hosted control, so each re-reads
+    /// its own hover (and a ramp row its key drag). Called for every pointer
+    /// move, and again from the last known position (`mouse_pos`) whenever a
+    /// SCROLL moves the rows under a still pointer — the wheel arm and the
+    /// tick's coast — because a control's hover is recomputed only when it
+    /// is told where the pointer is, and until 2026-09-28 nothing told it on
+    /// a scroll: a control that scrolled under the pointer stayed dark and
+    /// one that scrolled away stayed lit until the next motion. Sliders are
+    /// in the roster since the same day, having had no hover before.
+    fn hover_controls(&mut self, px: f32, py: f32, ui: &mut UiContext) -> bool {
+        let mut changed = false;
+        for s_opt in &mut self.sliders {
+            if let Some(s) = s_opt {
+                if s.on_cursor_moved(px, py, ui) {
+                    changed = true;
+                }
+            }
+        }
+        for sb_opt in &mut self.spinboxes {
+            if let Some(sb) = sb_opt {
+                if sb.on_cursor_moved(px, py, ui) {
+                    changed = true;
+                }
+            }
+        }
+        for f_opt in &mut self.float3s {
+            if let Some(f) = f_opt {
+                if f.on_cursor_moved(px, py, ui) {
+                    changed = true;
+                }
+            }
+        }
+        for b_opt in &mut self.buttons {
+            if let Some(b) = b_opt {
+                if b.on_cursor_moved(px, py, ui) {
+                    changed = true;
+                }
+            }
+        }
+        for d_opt in &mut self.choices {
+            if let Some(d) = d_opt {
+                if d.on_cursor_moved(px, py, ui) {
+                    changed = true;
+                }
+            }
+        }
+        for tb_opt in &mut self.texts {
+            if let Some(tb) = tb_opt {
+                if tb.on_cursor_moved(px, py, ui) {
+                    changed = true;
+                }
+            }
+        }
+        for cb_opt in &mut self.toggles {
+            if let Some(cb) = cb_opt {
+                if cb.on_cursor_moved(px, py, ui) {
+                    changed = true;
+                }
+            }
+        }
+        for c_opt in &mut self.colors {
+            if let Some(c) = c_opt {
+                if c.on_cursor_moved(px, py, ui) {
+                    changed = true;
+                }
+            }
+        }
+        // Ramp rows: a move can drag a key — re-serialize the curve
+        // into the row value so hosts polling `node_params` see it.
+        for i in 0..self.ramps.len() {
+            if let Some(rp) = &mut self.ramps[i] {
+                if rp.on_cursor_moved(px, py, ui) {
+                    self.display_params[i].1 = rp.inner().spec_string();
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    /// The rows moved under a still pointer: re-hover from where it was.
+    fn rehover_after_scroll(&mut self, ui: &mut UiContext) -> bool {
+        match self.mouse_pos {
+            Some((px, py)) => self.hover_controls(px, py, ui),
+            None => false,
+        }
+    }
+
     fn update_slider_rects(&mut self) {
         // Inline rows hand their control the row less the label column; the
         // row rects themselves (`get_param_rects`) stay the full row, which is
@@ -2118,6 +2206,7 @@ impl Input for ParametersBg {
         if self.scroll_motion.tick(dt, crate::widget::Bounds::max(0.0), crate::widget::Bounds::max(pane_max)) {
             self.scroll_y = self.scroll_motion.y.pos();
             self.update_slider_rects();
+            self.rehover_after_scroll(&mut dummy);
             changed = true;
         }
         if self.scroll_motion.is_animating() {
@@ -2192,64 +2281,8 @@ impl Input for ParametersBg {
                     }
                 }
 
-                for sb_opt in &mut self.spinboxes {
-                    if let Some(sb) = sb_opt {
-                        if sb.on_cursor_moved(px, py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                for f_opt in &mut self.float3s {
-                    if let Some(f) = f_opt {
-                        if f.on_cursor_moved(px, py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                for b_opt in &mut self.buttons {
-                    if let Some(b) = b_opt {
-                        if b.on_cursor_moved(px, py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                for d_opt in &mut self.choices {
-                    if let Some(d) = d_opt {
-                        if d.on_cursor_moved(px, py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                for tb_opt in &mut self.texts {
-                    if let Some(tb) = tb_opt {
-                        if tb.on_cursor_moved(px, py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                for cb_opt in &mut self.toggles {
-                    if let Some(cb) = cb_opt {
-                        if cb.on_cursor_moved(px, py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                for c_opt in &mut self.colors {
-                    if let Some(c) = c_opt {
-                        if c.on_cursor_moved(px, py, ui) {
-                            changed = true;
-                        }
-                    }
-                }
-                // Ramp rows: a move can drag a key — re-serialize the curve
-                // into the row value so hosts polling `node_params` see it.
-                for i in 0..self.ramps.len() {
-                    if let Some(rp) = &mut self.ramps[i] {
-                        if rp.on_cursor_moved(px, py, ui) {
-                            self.display_params[i].1 = rp.inner().spec_string();
-                            changed = true;
-                        }
-                    }
+                if self.hover_controls(px, py, ui) {
+                    changed = true;
                 }
 
                 changed
@@ -3050,6 +3083,7 @@ impl Input for ParametersBg {
                                 self.update_slider_rects();
                                 self.activity.bump();
                                 self.recompute_scrollbar_raised();
+                                self.rehover_after_scroll(ui);
                             }
                         }
                         // An opaque pane swallows EVERY wheel over it, whether
@@ -3962,6 +3996,51 @@ mod tests {
         // The panel-scroll path must work when no slider is under the pointer:
         p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), 2.0, 2.0, &mut ctx);
         assert!(p.scroll_y >= before, "scroll never decreases on a downward wheel");
+    }
+
+    /// A scroll moves the rows under a still pointer, and the hover follows
+    /// the rows: the control that was under the pointer goes dark and the one
+    /// now there lights, without a pointer motion. The pointer's last
+    /// position is what the pane re-hovers from, so the wheel's own position
+    /// (over the label column, where the pane takes it) need not be it.
+    #[test]
+    fn a_scroll_re_hovers_the_control_under_a_still_pointer() {
+        let mut ctx = UiContext::new();
+        let rows: Vec<(String, String, String)> = (0..30)
+            .map(|i| (format!("P{i}"), "1.00".to_string(), "slider:0:2".to_string()))
+            .collect();
+        let mut p = ParametersBg::new();
+        ParamController::set_display_params(&mut *p, &rows);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 200.0);
+        let hovered = |p: &Adapted<ParametersBg>| -> Vec<usize> {
+            p.sliders.iter().enumerate().filter(|(_, s)| s.as_ref().map_or(false, |s| s.inner().hovered())).map(|(i, _)| i).collect()
+        };
+        assert!(hovered(&p).is_empty());
+
+        // Over the first row's control.
+        let r0 = p.get_param_rects()[0];
+        let (px, py) = (250.0, r0.1 + r0.3 * 0.5);
+        p.on_cursor_moved(px, py, &mut ctx);
+        assert_eq!(hovered(&p), vec![0], "the slider under the pointer hovers");
+
+        // A wheel over the label column scrolls the pane: a notch moves the
+        // TARGET and the rows glide there over the following ticks, so the
+        // re-hover that matters is the tick's. The pointer's stored position
+        // has not moved, but the rows under it have.
+        ctx.scroll_gesture_new = true;
+        let before = p.scroll_y;
+        p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), 2.0, py, &mut ctx);
+        for _ in 0..120 {
+            WidgetHost::tick(&mut p, 1.0 / 60.0, &mut ctx);
+        }
+        assert!(p.scroll_y > before, "the pane scrolled: {} -> {}", before, p.scroll_y);
+        let now = p
+            .get_param_rects()
+            .iter()
+            .position(|r| py >= r.1 && py <= r.1 + r.3)
+            .expect("a row under the pointer after the scroll");
+        assert_ne!(now, 0, "a different row is under the pointer");
+        assert_eq!(hovered(&p), vec![now], "the hover followed the rows, without a motion");
     }
 
     /// A gesture the pane acquired stays the pane's: rows travelling under
