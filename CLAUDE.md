@@ -567,10 +567,8 @@ Spellings that are NOT current, and what the loader does with each:
 | Spelling | Status |
 |---|---|
 | `window_manager.bevel_depth` / `.bevel_width` | compat aliases of `relief.light` / `.width` — the compositor's old block, a different family |
-| `relief.height` / `.profile`, `relief.edge_height` / `.edge_profile` | aliases of `wall.*` / `edge.*`; the node wins when both are present |
-| `window_manager.bevel_width` | alias of `relief.width` |
 | `param.color` (+ top-level `plate_opacity`) | alias of `plate.pane.color`, multiplied by the opacity line |
-| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression`, `plate.bevel_width`, `relief.depth`, a material's `finish depth=` | RETIRED: reported by path (`color::retired_surface_keys`), not read; cce-relief seeds from `depth` once and writes `light` |
+| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression`, `plate.bevel_width`, `relief.depth`, a material's `finish depth=`, `relief.height` / `.profile` / `.edge_height` / `.edge_profile` | RETIRED: reported by path (`color::retired_surface_keys`), not read; cce-relief seeds from each once and its Save writes the current spelling and removes the old |
 | `relief.wall.knobs` / `edge.knobs`, `profile_knobs` / `edge_knobs` | not style: cce-relief's own state (`~/.config/cce/cce-relief/state.kdl`); read once as a seed, removed on its next Save |
 
 Where each rule is argued, by its lead-in: **Frost is one block** and
@@ -578,10 +576,12 @@ Where each rule is argued, by its lead-in: **Frost is one block** and
 editor's knobs are not a style key** and **There is one roll width** under
 "Units" (the geometry is unit-aware, which is why they sit there); the
 `menu` block under "The context menu draws in its own popup surface".
-`prefer_relief_spellings` in `layout.rs` is the one place the alias
-precedence is decided, `color::retired_surface_keys` the one place a retired
-key is named (`retired_surface_keys`), and cce-relief's Save is the migration for all of it: it
-writes the current spellings and removes every superseded one it finds.
+There is no alias precedence to decide any more — every legacy spelling of
+the relief is retired, so a file is what it says — and
+`color::retired_surface_keys` is the one place a retired key is named;
+cce-relief's Save is the migration for all of it: it seeds from a retired
+key once, writes the current spelling and removes every superseded one it
+finds.
 
 ## The standard app — root plate, rungs, and the spacing ladder
 
@@ -770,11 +770,14 @@ quadrant for an edge). The registry keys never moved — `bevel_height`
 downstream of the registry knows. Until 2026-09-28 the keys were flat on the
 node with the wall UNNAMED (`height`, `profile`) and the edge prefixed
 (`edge_height`, `edge_profile`), which read as one shape with an "edge"
-variant rather than two shapes; those spellings survive as aliases in
-`layout.rs`'s flatten table, and `prefer_relief_spellings` drops a flat one
-whenever its node spelling is present, so a file carrying both is decided by
-the node and not by line order (`the_current_spelling_of_a_relief_key_wins_over_the_legacy_one`).
-`cce-relief`'s Save writes the node spellings and REMOVES the flat ones
+variant rather than two shapes; those spellings were aliases for the rest
+of that day and are RETIRED — not read, reported by path with the other
+retired surface keys, reaching no registry key (the flatten test asserts
+it). While they were aliases a `prefer_relief_spellings` pass dropped a flat
+one whenever its node spelling was present, because two spellings of one
+registry key were otherwise decided by line order; with nothing left to
+prefer, the pass is gone. `cce-relief` seeds from a flat key once, and its
+Save writes the node spellings and REMOVES the flat ones
 (`config::remove_config_value`), so a file migrates the first time it is
 saved; `wall` and `edge` are `PROP_NODES` members so their keys land as
 properties.

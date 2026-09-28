@@ -1417,8 +1417,9 @@ impl Application for BevelPopup {
         // A key of one of the relief's two SHAPES: `relief { wall k=… }` first,
         // then the flat legacy spelling a file saved before 2026-09-28 still
         // carries (`height` / `profile` / `profile_knobs` for the wall,
-        // `edge_*` for the edge) — the same precedence the registry load
-        // applies through `layout::prefer_relief_spellings`.
+        // `edge_*` for the edge). The loader does not read those any more
+        // (retired, reported); this is the one-time seed, and Save writes
+        // the node spelling and removes the flat one.
         let rel_shape = |node: &str, k: &str, legacy: &str| {
             let r = target_relief.as_ref()?;
             r.get(node).and_then(|n| n.get(k)).or_else(|| r.get(legacy)).cloned()
