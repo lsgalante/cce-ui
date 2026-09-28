@@ -79,15 +79,25 @@ pub struct ParametersBg {
     /// under that line while the value it was reported for still stands.
     code_error_line: Option<usize>,
     mouse_pos: Option<(f32, f32)>,
-    /// The parameter row under the pointer, tinted by `paint_ui` — the
-    /// pane's ONE hover rule, over every control kind. The controls keep
-    /// their own hovers (a spinbox's +/- buttons, a slider's band), but
-    /// under the DE relief style most of them draw none at all — the
-    /// spinbox's row border, the well frames and the dropdown border are
-    /// flat-style chrome the relief branches never paint — so which rows
-    /// answered the pointer depended on the control and the style
-    /// (2026-09-28: a slider lit, the spinbox beside it did not). Set with
-    /// the controls' hover in `hover_controls`, so a scroll moves it too.
+    /// The parameter row under the pointer: its LABEL lifts
+    /// (`own_text_labels`) — the pane's ONE hover rule, over every control
+    /// kind. The controls keep their own hovers (a spinbox's +/- buttons, a
+    /// slider's band), but under the DE relief style most of them draw none
+    /// at all — the spinbox's row border, the well frames and the dropdown
+    /// border are flat-style chrome the relief branches never paint — so
+    /// which rows answered the pointer depended on the control and the
+    /// style (2026-09-28: a slider lit, the spinbox beside it did not). Set
+    /// with the controls' hover in `hover_controls`, so a scroll moves it
+    /// too.
+    ///
+    /// A label, deliberately, and not a wash over the row. A row wash was
+    /// tried the same day and failed twice, both times through the relief:
+    /// painted before the wells it closed the pane plate's carve-grouping
+    /// window and every well in the pane flipped to the overlay shading on
+    /// any hover; painted after them, its 5% white composited in LINEAR
+    /// light, which lifts a well's dark shade line from 18 to ~67 while
+    /// the pane face moves 46 to 76 — the hovered well's outline paled and
+    /// read as the well lighting up. Text stands clear of the relief.
     hover_row: Option<usize>,
     pub sliders: Vec<Option<Adapted<Slider>>>,
     pub float3s: Vec<Option<Adapted<Float3>>>,
@@ -864,19 +874,6 @@ impl ParametersBg {
         })
     }
 
-    /// The hovered row's tint: the dialog's hover-row wash, at the control
-    /// corner radius, laid over the row's carves (see `paint_ui` for why it
-    /// must come after them).
-    fn paint_hover_row(&self, ctx: &mut PaintCtx) {
-        let Some(i) = self.hover_row else { return };
-        let Some(&(x, y, w, h)) = self.get_param_rects().get(i) else { return };
-        if h <= 0.0 {
-            return;
-        }
-        let r = crate::layout::control_corner_radius();
-        ctx.rounded_rect(Rect { x, y, width: w, height: h }, r, (true, true, true, true), [1.0, 1.0, 1.0, 0.05]);
-    }
-
     /// The rows moved under a still pointer: re-hover from where it was.
     fn rehover_after_scroll(&mut self, ui: &mut UiContext) -> bool {
         match self.mouse_pos {
@@ -884,6 +881,12 @@ impl ParametersBg {
             None => false,
         }
     }
+
+    /// The pane's own row label, and the same label under the pointer: the
+    /// dialog's row and selected-row label colours, so a hovered parameter
+    /// reads as the dialog's hovered command does.
+    const LABEL: [u8; 3] = [0xaa, 0xaa, 0xbb];
+    const LABEL_HOVER: [u8; 3] = [0xf4, 0xf4, 0xfa];
 
     fn update_slider_rects(&mut self) {
         // Inline rows hand their control the row less the label column; the
@@ -1012,7 +1015,7 @@ impl ParametersBg {
                     x: r.0,
                     y: r.1 + (r.3 - size) * 0.5,
                     font_size: size,
-                    color: [0xaa, 0xaa, 0xbb],
+                    color: if self.hover_row == Some(i) { Self::LABEL_HOVER } else { Self::LABEL },
                 });
             }
             if ptype.starts_with("slider") {
@@ -1907,16 +1910,6 @@ impl Paint for ParametersBg {
         for (fcx, fcy, fr, fd, fs) in self.section_fillets() {
             ctx.concave_fillet(fcx, fcy, fr, fd, fs, false);
         }
-        // AFTER every carve, never before: the wash is ordinary geometry,
-        // and ordinary geometry painted after the pane plate ends its
-        // carve-grouping window (`window_runner`'s tessellation) — every
-        // recess emitted after it loses the plate as its host and shades
-        // through the overlay fallback instead of the plate's own draw. For
-        // the day it sat above the carves (2026-09-28) hovering ANY row
-        // re-lit every well in the pane: the grouped and fallback shadings
-        // differ visibly (a crisp shade line against a soft lit crest), and
-        // the flip read as "all the wells brighten on hover".
-        self.paint_hover_row(ctx);
         for (scx, scy, sr, sc) in self.spheres() {
             ctx.sphere(scx, scy, sr, &crate::scene::material::Material::from_fill(sc));
         }
@@ -4080,7 +4073,7 @@ mod tests {
         let (px, py) = (250.0, r0.1 + r0.3 * 0.5);
         p.on_cursor_moved(px, py, &mut ctx);
         assert_eq!(hovered(&p), vec![0], "the slider under the pointer hovers");
-        assert_eq!(p.hover_row, Some(0), "and the pane tints its row");
+        assert_eq!(p.hover_row, Some(0), "and the pane lifts its label");
 
         // A wheel over the label column scrolls the pane: a notch moves the
         // TARGET and the rows glide there over the following ticks, so the
@@ -4100,7 +4093,7 @@ mod tests {
             .expect("a row under the pointer after the scroll");
         assert_ne!(now, 0, "a different row is under the pointer");
         assert_eq!(hovered(&p), vec![now], "the hover followed the rows, without a motion");
-        assert_eq!(p.hover_row, Some(now), "the row tint followed too");
+        assert_eq!(p.hover_row, Some(now), "the label lift followed too");
 
         // Off the pane, nothing is hovered.
         p.on_cursor_moved(-9999.0, -9999.0, &mut ctx);
@@ -4108,36 +4101,40 @@ mod tests {
         assert_eq!(p.hover_row, None);
     }
 
-    /// The hover wash is painted after every carve in the pane. Ordinary
-    /// geometry ends the pane plate's carve-grouping window, so a wash
-    /// emitted BEFORE the wells would drop every one of them to the overlay
-    /// shading — which is what happened for a day, and read as every well
-    /// re-lighting whenever any row was hovered.
+    /// The hover cue is the row's LABEL, and nothing else in the pane's
+    /// paint changes with it: a hover adds no geometry at all, so it can
+    /// neither close the pane plate's carve-grouping window (a wash before
+    /// the wells did, and every well flipped shading on any hover) nor
+    /// composite over a well's shade lines (a wash after them did, and the
+    /// hovered well's outline paled). Both shipped for part of 2026-09-28.
     #[test]
-    fn the_hover_wash_comes_after_every_carve() {
-        use crate::scene::paint::Prim;
+    fn a_hover_lifts_the_label_and_adds_no_geometry() {
         let mut ctx = UiContext::new();
         let mut p = panel_with(&[("Name", "x", "text"), ("Count", "3", "spinbox:0:10"), ("Size", "0.5", "slider:0:1")]);
         WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
+        let rect = Rect { x: 0.0, y: 0.0, width: 300.0, height: 400.0 };
+        let prims = |p: &Adapted<ParametersBg>, ctx: &UiContext| {
+            let mut pc = crate::scene::paint::PaintCtx::new();
+            Paint::paint_ui(&**p, ctx, rect, &mut pc);
+            pc.finish().items.into_iter().map(|i| i.prim).collect::<Vec<_>>()
+        };
+        let label_of = |p: &Adapted<ParametersBg>, name: &str| {
+            p.own_text_labels().into_iter().find(|l| l.text == name).map(|l| l.color).expect("a row label")
+        };
+        let at_rest = prims(&p, &ctx);
+        assert_eq!(label_of(&p, "Count"), ParametersBg::LABEL);
+
         let (x, y, w, h) = p.get_param_rects()[1];
         p.on_cursor_moved(x + w * 0.5, y + h * 0.5, &mut ctx);
         assert_eq!(p.hover_row, Some(1));
-
-        let mut pc = crate::scene::paint::PaintCtx::new();
-        Paint::paint_ui(&*p, &ctx, Rect { x: 0.0, y: 0.0, width: 300.0, height: 400.0 }, &mut pc);
-        let items = pc.finish().items;
-        let is_carve = |prim: &Prim| matches!(prim, Prim::Recess { .. } | Prim::Boss { .. } | Prim::Trough { .. } | Prim::Ridge { .. });
-        let last_carve = items.iter().rposition(|i| is_carve(&i.prim)).expect("the rows carve at least one well");
-        let wash = items
-            .iter()
-            .position(|i| matches!(&i.prim, Prim::RoundedRect { color, .. } if *color == [1.0, 1.0, 1.0, 0.05]))
-            .expect("the hovered row's wash is painted");
-        assert!(wash > last_carve, "wash at {wash} must follow the last carve at {last_carve}");
+        assert_eq!(label_of(&p, "Count"), ParametersBg::LABEL_HOVER, "the hovered row's label lifts");
+        assert_eq!(label_of(&p, "Name"), ParametersBg::LABEL, "and only that row's");
+        assert_eq!(prims(&p, &ctx), at_rest, "a hover paints no geometry");
     }
 
-    /// The row tint is the pane's rule, not the control's: a spinbox row,
-    /// which draws no hover of its own under the relief style, is tinted
-    /// exactly as a slider row is, and a section header never is.
+    /// The label lift is the pane's rule, not the control's: a spinbox row,
+    /// which draws no hover of its own under the relief style, lifts exactly
+    /// as a slider row does, and a section header never does.
     #[test]
     fn every_control_kind_hovers_by_its_row() {
         let mut ctx = UiContext::new();
