@@ -741,7 +741,9 @@ pub fn paint_band_shape_colored(ctx: &mut PaintCtx, track_x: f32, track_w: f32, 
 /// adapter's `Widget::label_offset` over a model's synced label, for models whose
 /// cached rect is the whole block.
 pub(crate) fn detached_strip(label: &Option<String>) -> f32 {
-    if label.is_some() { crate::layout::control_label_strip() } else { 0.0 }
+    // An EMPTY label is no label: `Adapted::clear_label` syncs one to take a
+    // label off a widget that stores whatever it is handed.
+    if label.as_deref().map_or(false, |l| !l.is_empty()) { crate::layout::control_label_strip() } else { 0.0 }
 }
 
 impl Layout for RangeSlider {

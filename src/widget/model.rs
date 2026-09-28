@@ -683,6 +683,17 @@ impl<W: Layout + Paint + Input + 'static> Adapted<W> {
         self.inner.sync_label(label);
     }
 
+    /// Take the control label off again: the base copy goes to `None`, so
+    /// the adapter reserves no label strip, and the widget's own copy is
+    /// synced empty — which the self-painting widgets' strip rule
+    /// (`slider::detached_strip`) reads as no label. What a host needs when
+    /// it moves a label from the control to a column of its own
+    /// (`ParametersBg` re-flowing a narrow pane).
+    pub fn clear_label(&mut self) {
+        self.base.label = None;
+        self.inner.sync_label("");
+    }
+
     // --- The value/polling drains (off `WidgetHost` in the 6bd value shrink): apps read
     // widget state through these concrete methods; each forwards to the narrow `Input`
     // hook. The last dyn readers went concrete-slot instead (TI roster, cloud JsonControl,

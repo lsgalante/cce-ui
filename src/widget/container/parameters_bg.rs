@@ -61,10 +61,15 @@ pub struct ParametersBg {
     /// the whole parameter list on each was the choppy params scroll,
     /// 2026-09-20). Drained by [`Self::take_tick_value_change`].
     tick_value_changed: bool,
-    /// The label layout the rows were BUILT under (`layout::param_labels_inline`
-    /// at the last rebuild): inline, the pane draws each label in a column
-    /// beside an unlabelled control; stacked, the control carries its own
-    /// label above itself. Read once per rebuild so geometry and widgets agree.
+    /// The configured preference (`layout::param_labels_inline`, the
+    /// `param_label_layout` style key), re-read at every rebuild.
+    inline_pref: bool,
+    /// The label layout the rows are laid out under NOW: inline, the pane
+    /// draws each label in a column beside an unlabelled control; stacked,
+    /// the control carries its own label above itself. The preference,
+    /// unless the pane is too narrow for a column: [`Self::decide_inline`]
+    /// re-decides on every rect assignment and [`Self::relabel_rows`]
+    /// moves the labels when it flips, so geometry and widgets agree.
     inline_labels: bool,
     rect: Rect,
     display_params: Vec<(String, String, String)>,
@@ -255,6 +260,7 @@ impl ParametersBg {
 
     pub fn new() -> Adapted<ParametersBg> {
         Adapted::new(ParametersBg {
+            inline_pref: crate::layout::param_labels_inline(),
             inline_labels: crate::layout::param_labels_inline(),
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             display_params: Vec::new(),
@@ -288,15 +294,17 @@ impl ParametersBg {
     }
 
     /// Row `i`'s laid-out height, ignoring collapse (the row-type table).
-    /// Whether row `i` is laid out with its label beside the control. Only
-    /// the rows whose control would otherwise carry a label strip: toggles
-    /// and buttons ARE their label, a ramp keeps its label band, sections
-    /// and code rows have layouts of their own.
-    fn inline_row(&self, i: usize) -> bool {
-        if !self.inline_labels {
-            return false;
-        }
-        let t = self.display_params[i].2.as_str();
+    /// The narrowest control an inline row may be left with. Below it the
+    /// pane stacks every label above its control instead: a slider whose
+    /// band is shorter than this has no room for its thumb and readout,
+    /// and the column was already truncating the label to make it fit.
+    pub const MIN_INLINE_CONTROL_W: f32 = 120.0;
+
+    /// Whether a row of type `t` takes the inline layout at all. Only the
+    /// rows whose control would otherwise carry a label strip: toggles and
+    /// buttons ARE their label, a ramp keeps its label band, sections and
+    /// code rows have layouts of their own.
+    fn inline_kind(t: &str) -> bool {
         t.starts_with("slider")
             || t.starts_with("float3")
             || t.starts_with("spinbox")
@@ -305,6 +313,69 @@ impl ParametersBg {
             || t.starts_with("color")
             || t == "rgb"
             || t == "rgba"
+    }
+
+    /// Whether row `i` is laid out with its label beside the control.
+    fn inline_row(&self, i: usize) -> bool {
+        self.inline_labels && Self::inline_kind(&self.display_params[i].2)
+    }
+
+    /// The layout the pane's width allows: the preference, unless a label
+    /// column would leave the controls narrower than
+    /// [`Self::MIN_INLINE_CONTROL_W`], in which case the labels stack. An
+    /// unlaid pane (no rect yet) follows the preference; the first rect
+    /// assignment decides.
+    fn decide_inline(&self) -> bool {
+        if !self.inline_pref {
+            return false;
+        }
+        if self.rect.width <= 0.0 {
+            return true;
+        }
+        let row_w = (self.rect.width - 2.0 * ROW_X_INSET).max(0.0);
+        row_w - self.label_col_w_if(true) >= Self::MIN_INLINE_CONTROL_W
+    }
+
+    /// Re-decide the layout for the current rect and, when it flips, move
+    /// every label between the column and the controls. The widgets were
+    /// built with or without a label, and the two layouts have different
+    /// row heights, so a flip is a relabel and a re-layout, not a flag.
+    fn apply_label_layout(&mut self) {
+        let want = self.decide_inline();
+        if want != self.inline_labels {
+            self.inline_labels = want;
+            self.relabel_rows();
+        }
+    }
+
+    /// Put each inline-kind row's label where the current layout wants it:
+    /// on the control when stacked, off it (the pane draws the column) when
+    /// inline. Toggles, buttons and ramps carry their label either way.
+    fn relabel_rows(&mut self) {
+        let inline = self.inline_labels;
+        for i in 0..self.display_params.len() {
+            let (name, ty) = (self.display_params[i].0.clone(), self.display_params[i].2.clone());
+            if !Self::inline_kind(&ty) {
+                continue;
+            }
+            macro_rules! relabel {
+                ($w:expr) => {
+                    if let Some(w) = $w {
+                        if inline { w.clear_label() } else { w.set_label(&name) }
+                    }
+                };
+            }
+            relabel!(&mut self.sliders[i]);
+            relabel!(&mut self.float3s[i]);
+            relabel!(&mut self.spinboxes[i]);
+            relabel!(&mut self.texts[i]);
+            relabel!(&mut self.colors[i]);
+            // Only a choice row's dropdown carries the row label; a text
+            // row's completion picker is a button inside the box.
+            if ty.starts_with("choice:") {
+                relabel!(&mut self.choices[i]);
+            }
+        }
     }
 
     /// The label strip an inline row no longer spends: the control was
@@ -329,7 +400,13 @@ impl ParametersBg {
     /// label truncates rather than squeezing the control out). Zero when
     /// nothing is inline.
     fn label_col_w(&self) -> f32 {
-        if !self.inline_labels {
+        self.label_col_w_if(self.inline_labels)
+    }
+
+    /// [`Self::label_col_w`] under a given layout — what the column WOULD
+    /// take, which is what [`Self::decide_inline`] asks before committing.
+    fn label_col_w_if(&self, inline: bool) -> f32 {
+        if !inline {
             return 0.0;
         }
         let (family, size) = Self::inline_label_font();
@@ -338,7 +415,7 @@ impl ParametersBg {
             .display_params
             .iter()
             .enumerate()
-            .filter(|(i, _)| !hidden[*i] && self.inline_row(*i))
+            .filter(|(i, p)| !hidden[*i] && Self::inline_kind(&p.2))
             .map(|(_, p)| crate::widget::display::measure_text_width(&p.0, &family, size))
             .fold(0.0f32, f32::max);
         if widest <= 0.0 {
@@ -1822,6 +1899,9 @@ impl Layout for ParametersBg {
     /// rect all row geometry derives from, then re-derive content height/scroll/row rects.
     fn rect_assigned(&mut self, rect: Rect) {
         self.rect = rect;
+        // The width decides the label layout (inline column or stacked),
+        // before the row geometry that depends on it is derived.
+        self.apply_label_layout();
         self.refresh_scroll_metrics();
     }
 
@@ -3293,8 +3373,11 @@ impl ParamController for ParametersBg {
             self.display_params = params.to_vec();
             self.focused_param = None;
             // Re-read at every rebuild, so a reloaded style takes effect the
-            // next time the rows are built, and geometry and widgets agree.
-            self.inline_labels = crate::layout::param_labels_inline();
+            // next time the rows are built, and geometry and widgets agree;
+            // then decided against the cached rect's width, as a resize
+            // decides it (`apply_label_layout`).
+            self.inline_pref = crate::layout::param_labels_inline();
+            self.inline_labels = self.decide_inline();
             let inline = self.inline_labels;
             self.sliders = self.display_params.iter().map(|p| {
                 if p.2.starts_with("slider") {
@@ -3674,6 +3757,69 @@ mod tests {
             (ROW_X_INSET + lw, 300.0 - 2.0 * ROW_X_INSET - lw),
             "control rect derives from the assigned rect and the label column"
         );
+    }
+
+    /// A pane too narrow for a label column stacks its labels above the
+    /// controls, and takes them back into the column when it widens: the
+    /// controls are relabelled, the column goes, the rows grow by the label
+    /// strip. The threshold is the control's width, not the pane's.
+    #[test]
+    fn a_narrow_pane_stacks_its_labels_and_a_wide_one_puts_them_back() {
+        let mut p = panel_with(&[("Size", "1.00", "slider:0:2"), ("Mode", "b", "choice:a,b,c"), ("On", "true", "checkbox")]);
+        if !p.inner().inline_pref {
+            return; // a stacked preference has nothing to re-flow
+        }
+        let strip = crate::layout::control_label_strip();
+        // The COLUMN label sits exactly at the row's left edge; a control's
+        // own detached label is inset from the control's edge, so the two
+        // are told apart by x.
+        let labels_in_column = |p: &Adapted<ParametersBg>| {
+            p.inner().own_text_labels().iter().any(|l| l.text == "Size" && l.x == ROW_X_INSET)
+        };
+
+        // 300 wide: inline. The slider carries no label; the pane draws it.
+        assert!(p.inner().inline_labels);
+        let col = p.inner().label_col_w();
+        assert!(col > 0.0);
+        assert!(labels_in_column(&p));
+        assert!(p.sliders[0].as_ref().unwrap().base().label.is_none());
+        let (_, _, sw_inline, _) = p.sliders[0].as_ref().unwrap().rect();
+        let h_inline = p.get_param_rects()[0].3;
+        assert!(sw_inline >= ParametersBg::MIN_INLINE_CONTROL_W, "the fixture starts with room: {sw_inline}");
+
+        // Narrow it until the control would fall under the minimum: stacked.
+        let narrow = 2.0 * ROW_X_INSET + col + ParametersBg::MIN_INLINE_CONTROL_W - 1.0;
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, narrow, 400.0);
+        assert!(!p.inner().inline_labels, "under the minimum the labels stack");
+        assert_eq!(p.inner().label_col_w(), 0.0, "no column");
+        assert!(!labels_in_column(&p), "the pane draws no column label");
+        assert_eq!(p.sliders[0].as_ref().unwrap().base().label.as_deref(), Some("Size"), "the slider carries its label");
+        assert_eq!(p.choices[1].as_ref().unwrap().base().label.as_deref(), Some("Mode"));
+        let (sx, _, sw, _) = p.sliders[0].as_ref().unwrap().rect();
+        assert_eq!((sx, sw), (ROW_X_INSET, narrow - 2.0 * ROW_X_INSET), "the control spans the row");
+        // The row grows for the label band — by the strip, less the floor
+        // the inline row's height table clamps at.
+        let h_stacked = p.get_param_rects()[0].3;
+        assert!(h_stacked > h_inline && h_stacked <= h_inline + strip, "inline {h_inline}, stacked {h_stacked}, strip {strip}");
+        // The toggle carried its label all along.
+        assert_eq!(p.toggles[2].as_ref().unwrap().base().label.as_deref(), Some("On"));
+
+        // One pixel wider than the minimum: inline again, labels off the controls.
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, narrow + 1.0, 400.0);
+        assert!(p.inner().inline_labels, "at the minimum the column comes back");
+        assert!(labels_in_column(&p));
+        assert!(p.sliders[0].as_ref().unwrap().base().label.is_none(), "the label left the slider");
+        assert!(p.choices[1].as_ref().unwrap().base().label.is_none());
+        assert_eq!(p.get_param_rects()[0].3, h_inline);
+        let (sx, _, sw, _) = p.sliders[0].as_ref().unwrap().rect();
+        assert_eq!((sx, sw), (ROW_X_INSET + col, narrow + 1.0 - 2.0 * ROW_X_INSET - col));
+
+        // A rebuild under a narrow rect builds stacked from the start.
+        let rows: Vec<(String, String, String)> = vec![("Size".into(), "1.00".into(), "slider:0:2".into()), ("Width".into(), "2.00".into(), "slider:0:2".into())];
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, narrow, 400.0);
+        ParamController::set_display_params(&mut *p, &rows);
+        assert!(!p.inner().inline_labels);
+        assert_eq!(p.sliders[1].as_ref().unwrap().base().label.as_deref(), Some("Width"));
     }
 
     #[test]
