@@ -5871,7 +5871,6 @@ pub fn run<A: Application>() {
     if let Some(mut app) = app {
         app.on_exit();
     }
-    crate::process::cleanup_spawned_processes();
 }
 
 /// One connection's lifetime: connect, build the surface and renderer, pump

@@ -23,7 +23,6 @@ cosmic-text = "=0.12.1"
 ash = "0.38"
 gpu-allocator = { version = "0.27", default-features = false, features = ["vulkan"] }
 naga = { version = "24", features = ["wgsl-in", "spv-out"] }
-tokio = { version = "1", features = ["full"] }
 smithay-client-toolkit = { version = "0.19.2", features = ["calloop"] }
 calloop = "0.13.0"
 calloop-wayland-source = "0.3.0"
