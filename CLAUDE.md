@@ -765,8 +765,19 @@ carve drops `relief_shade::RECESS_DEPTH` (0.6) of its wall (saturating at the
 DE roll width) and the roll is a quarter-round of radius width, the look every
 config had. `profile` is the curve as a ramp spec (absent or the identity
 sentinel = the analytic curve: smoothstep for a wall, the superellipse
-quadrant for an edge). The registry keys never moved — `bevel_height`
-/ `roll_height`, `bevel_profile_spec` / `roll_profile_spec` — so nothing
+quadrant for an edge). **`shader`** on the relief node is the A/B switch
+for how every one of those edges is LIT: `shader=(bool)false` renders the
+relief prims through the legacy banded vertex shading instead of
+shader2d's per-pixel SDF-lit branch (`layout::bevel_shader`; the registry
+key keeps the bevel name because it selects how the shared lit edge is
+computed, not which shapes exist). It was `window_manager.bevel_shader`
+until 2026-09-28 — the block the relief keys were born in — and only a
+number ever switched it, since a `(bool)` flattens to the string "false"
+that the float read never saw; `shader_on` reads both now, and the old
+spelling is retired with the block's other bevel keys (cce-relief's Save
+carries a value it finds across). The registry keys never moved —
+`bevel_depth`, `bevel_width`, `bevel_shader`, `bevel_height` /
+`roll_height`, `bevel_profile_spec` / `roll_profile_spec` — so nothing
 downstream of the registry knows. Until 2026-09-28 the keys were flat on the
 node with the wall UNNAMED (`height`, `profile`) and the edge prefixed
 (`edge_height`, `edge_profile`), which read as one shape with an "edge"
