@@ -3041,11 +3041,40 @@ impl Input for ParametersBg {
                         crate::widget::scroll_motion::current_scroll_phase(),
                         crate::widget::ScrollPhase::Finger | crate::widget::ScrollPhase::FingerEnd
                     );
-                let pane_takes = pane_owns || finger;
                 let rects = self.get_param_rects();
+                // The one exception to the finger rule: a spinbox row takes
+                // the gesture that BEGINS on it, trackpad included, and keeps
+                // it until the gesture ends — the slider's own latch. A
+                // spinbox holds a whole number, so a swipe over it is a
+                // count, not a scroll: the widget's wheel arm accumulates a
+                // finger's fractional notches into whole steps (2026-09-28;
+                // until then a two-finger scroll over a Rows or Columns row
+                // scrolled the pane, and the only way to step the value by
+                // pointer was the -/+ buttons). A gesture the pane or a
+                // slider acquired never lands on a spinbox sliding under the
+                // pointer — that is the leak the latch exists to stop.
+                let spin_target = (0..self.display_params.len()).find(|&i| {
+                    let Some(sb) = self.spinboxes[i].as_ref() else {
+                        return false;
+                    };
+                    let latched = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(sb.base().id());
+                    let r = rects[i];
+                    let under = r.3 > 0.0
+                        && py >= r.1
+                        && py <= r.1 + r.3
+                        && px >= self.rect.x
+                        && px <= self.rect.x + self.rect.width;
+                    latched || (!pane_owns && under)
+                });
+                let pane_takes = pane_owns || (finger && spin_target.is_none());
                 for (i, p) in self.display_params.iter_mut().enumerate() {
                     if pane_takes {
                         break;
+                    }
+                    // A gesture a spinbox owns is nobody else's: the pointer
+                    // may have drifted onto a slider's halo since it began.
+                    if spin_target.is_some() && spin_target != Some(i) {
+                        continue;
                     }
                     if p.2.starts_with("slider") {
                         // The capture zone is the slider's own shape halo
@@ -3107,22 +3136,19 @@ impl Input for ParametersBg {
                             }
                         }
                     } else if p.2.starts_with("spinbox") {
-                        let r = rects[i];
-                        let row_y = r.1;
-                        if py >= row_y && py <= row_y + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
+                        if spin_target == Some(i) {
                             if let Some(sb) = &mut self.spinboxes[i] {
+                                // The widget's own wheel arm: one step per
+                                // notch, fractions carried between events.
+                                // Ungated — `spin_target` already tested the
+                                // row, and a latched gesture may have
+                                // drifted off it.
                                 wheel_taken = true;
-                                let scroll_amount = match delta {
-                                    MouseScrollDelta::LineDelta(_x, y) => *y as i32,
-                                    MouseScrollDelta::PixelDelta(pos) => {
-                                        let dy = pos.y;
-                                        if dy > 0.0 { 1 } else if dy < 0.0 { -1 } else { 0 }
-                                    }
-                                };
-                                let new_val = (sb.value + scroll_amount * sb.step).clamp(sb.min, sb.max);
-                                if sb.value != new_val {
-                                    sb.value = new_val;
-                                    p.1 = new_val.to_string();
+                                ui.scroll_initiate_widget_id = Some(sb.base().id());
+                                sb.mouse_wheel_ungated(delta, px, py, ui);
+                                let new_val_str = sb.value.to_string();
+                                if p.1 != new_val_str {
+                                    p.1 = new_val_str;
                                     changed = true;
                                 }
                             }
@@ -4308,5 +4334,77 @@ mod tests {
         assert!(values(&p).iter().all(|v| v == "1.00"), "a finger gesture never adjusts: {:?}", values(&p));
         assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane took it");
         set_scroll_phase(ScrollPhase::Wheel);
+    }
+
+    /// The finger rule's one exception: a gesture that begins on a spinbox
+    /// row steps the spinbox — a finger's fractional notches accumulating
+    /// into whole steps — and stays the spinbox's, while a gesture the pane
+    /// acquired still scrolls past it. A wheel notch on the row steps it too,
+    /// however the scroll factor scales the notch.
+    #[test]
+    fn a_gesture_beginning_on_a_spinbox_row_steps_it_trackpad_included() {
+        use crate::widget::{scroll_motion::set_scroll_phase, Position, ScrollPhase};
+        let rows = |n: usize| -> Vec<(String, String, String)> {
+            (0..n)
+                .map(|i| if i == 1 { ("Count".to_string(), "10".to_string(), "spinbox:0:100:1".to_string()) } else { (format!("P{i}"), "1.00".to_string(), "slider:0:2".to_string()) })
+                .collect()
+        };
+        let panel = |n: usize, h: f32| {
+            let mut p = ParametersBg::new();
+            ParamController::set_display_params(&mut *p, &rows(n));
+            WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, h);
+            p
+        };
+        let row_point = |p: &Adapted<ParametersBg>| {
+            let r = p.get_param_rects()[1];
+            (r.0 + r.2 * 0.3, r.1 + r.3 * 0.5)
+        };
+        let count = |p: &Adapted<ParametersBg>| p.display_params[1].1.clone();
+
+        // A finger gesture beginning on the row: 60 px of travel is one step,
+        // the spinbox owns the gesture, and the pane does not scroll.
+        let mut ctx = UiContext::new();
+        let mut p = panel(30, 200.0);
+        let (x, y) = row_point(&p);
+        ctx.scroll_gesture_new = true;
+        set_scroll_phase(ScrollPhase::Finger);
+        assert!(p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 0.0, y: 30.0 }), x, y, &mut ctx));
+        assert_eq!(count(&p), "10", "half a notch: no step yet");
+        let sb_id = p.spinboxes[1].as_ref().unwrap().base().id();
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(sb_id), "the spinbox owns the gesture");
+        ctx.scroll_gesture_new = false;
+        assert!(p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 0.0, y: 30.0 }), x, y, &mut ctx));
+        assert_eq!(count(&p), "11", "the second half completes the notch");
+        assert_eq!(p.scroll_y, 0.0, "the pane did not scroll");
+        // Still its gesture when the pointer drifts onto the row below.
+        let below = p.get_param_rects()[2];
+        assert!(p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 0.0, y: -120.0 }), x, below.1 + below.3 * 0.5, &mut ctx));
+        assert_eq!(count(&p), "9", "two notches down, latched");
+        assert_eq!(p.display_params[2].1, "1.00", "the slider under the drifted pointer holds");
+
+        // A gesture the pane acquired scrolls past the row without stepping it.
+        let mut ctx = UiContext::new();
+        let mut p = panel(30, 200.0);
+        ctx.scroll_gesture_new = true;
+        set_scroll_phase(ScrollPhase::Finger);
+        p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 0.0, y: -30.0 }), 2.0, 2.0, &mut ctx);
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane took the gesture");
+        let (x, y) = row_point(&p);
+        ctx.scroll_gesture_new = false;
+        p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 0.0, y: -120.0 }), x, y, &mut ctx);
+        assert_eq!(count(&p), "10", "a pane-owned gesture never steps a spinbox");
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()));
+
+        // A scaled wheel notch (scroll_factor 0.5) still steps, over two notches.
+        let mut ctx = UiContext::new();
+        let mut p = panel(30, 200.0);
+        let (x, y) = row_point(&p);
+        ctx.scroll_gesture_new = true;
+        set_scroll_phase(ScrollPhase::Wheel);
+        assert!(p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), x, y, &mut ctx));
+        assert_eq!(count(&p), "10");
+        ctx.scroll_gesture_new = false;
+        assert!(p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 0.5), x, y, &mut ctx));
+        assert_eq!(count(&p), "11", "a half-notch factor is not truncated to nothing");
     }
 }
