@@ -659,8 +659,17 @@ fn parse_and_set_colors(content: &str) {
     if let Some(t) = val.pointer("/style/surface/plate/border_thickness").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = PLATE_BORDER_THICKNESS.write() { *lock = t as f32; }
     }
-    if let Some(t) = val.pointer("/style/surface/plate/bevel_width").and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = PLATE_BEVEL_WIDTH.write() { *lock = t as f32; }
+    // The pane roll's OVERRIDE, not its width: absent (the shipped state), the
+    // roll is `style.surface.relief.width` like every other roll. Read as an
+    // Option so a key removed from config clears the override on reload.
+    {
+        let t = val.pointer("/style/surface/plate/bevel_width").and_then(|v| v.as_f64()).map(|t| t as f32);
+        if t.is_some() {
+            log::warn!(
+                "style.surface.plate.bevel_width is a legacy override: the pane roll follows style.surface.relief.width when it is unset"
+            );
+        }
+        if let Ok(mut lock) = PLATE_BEVEL_WIDTH.write() { *lock = t; }
     }
     if let Some(c) = get_color("/style/surface/param/color") {
         if let Ok(mut lock) = PARAM_BG_COLOR.write() { *lock = c; }
@@ -1807,9 +1816,10 @@ pub fn set_root_plate_statusbar_blur(b: bool) {
 static PLATE_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.15, 0.15, 0.2, 0.95]));
 static PLATE_BORDER_COLOR: RwLock<Option<[f32; 4]>> = RwLock::new(Some([0.3, 0.3, 0.4, 1.0]));
 static PLATE_BORDER_THICKNESS: RwLock<f32> = RwLock::new(1.0);
-/// Roll width of the beveled plate border (the control_relief replacement for
-/// the flat border line) — `style.surface.plate.bevel_width`.
-static PLATE_BEVEL_WIDTH: RwLock<f32> = RwLock::new(6.0);
+/// A legacy override of the pane plate's roll width
+/// (`style.surface.plate.bevel_width`); `None`, the shipped state, means the
+/// roll is [`crate::layout::bevel_width`]. See [`plate_bevel_width`].
+static PLATE_BEVEL_WIDTH: RwLock<Option<f32>> = RwLock::new(None);
 
 pub fn plate_color() -> Option<[f32; 4]> {
     load_colors_once();
@@ -1838,12 +1848,27 @@ pub fn set_plate_border_thickness(t: f32) {
     style_write(&PLATE_BORDER_THICKNESS, t);
 }
 
+/// Roll width of a beveled pane plate (the control_relief replacement for the
+/// flat border line), in logical px.
+///
+/// **This is `style.surface.relief.width`** — the one roll width, the same
+/// number the root plate rolls over, every control wall runs, and
+/// `relief.edge_height` is a rise against. Until 2026-09-28 it was a second
+/// width of its own (`style.surface.plate.bevel_width`, default 6 against the
+/// relief's 9.3), so a `PlateSpec` pane plate and an `append_widget_plate`
+/// pane plate rolled over different widths in one window, the designer's
+/// panes could not be made to match its own window lip by editing one key,
+/// and the edge height was expressed against a width the panes did not use.
+/// The old key survives as an explicit override for a config that still
+/// carries it, reported once at load; it is unit-blind (a bare number) where
+/// the relief width resolves lengths through the metric.
 pub fn plate_bevel_width() -> f32 {
     load_colors_once();
-    style_read(&PLATE_BEVEL_WIDTH)
+    style_read(&PLATE_BEVEL_WIDTH).unwrap_or_else(crate::layout::bevel_width)
 }
 
-pub fn set_plate_bevel_width(t: f32) {
+/// Install (or with `None` clear) the legacy pane-roll override.
+pub fn set_plate_bevel_width(t: Option<f32>) {
     style_write(&PLATE_BEVEL_WIDTH, t);
 }
 
@@ -2194,6 +2219,18 @@ mod tests {
     }
 
     /// Rim refraction defaults OFF and clamps, like its neighbour.
+    /// The pane plates roll over the relief width — the one roll width — and
+    /// the legacy `plate.bevel_width` key is an override, not a second width.
+    #[test]
+    fn the_pane_roll_is_the_relief_width_unless_a_legacy_key_overrides_it() {
+        set_plate_bevel_width(None);
+        assert_eq!(plate_bevel_width(), crate::layout::bevel_width(), "unset: the relief width");
+        set_plate_bevel_width(Some(12.0));
+        assert_eq!(plate_bevel_width(), 12.0, "the legacy key still wins while a config carries it");
+        set_plate_bevel_width(None);
+        assert_eq!(plate_bevel_width(), crate::layout::bevel_width(), "cleared: back to the relief width");
+    }
+
     #[test]
     fn plate_refraction_defaults_off_and_clamps() {
         assert_eq!(plate_refraction(), 0.0, "off unless a config asks");

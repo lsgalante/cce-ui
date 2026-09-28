@@ -686,6 +686,20 @@ carries the drop as `h=` (a length: `h=0.5mm`, or bare px) beside `w=` and
 its section's depth numbers read in mm when the metric is real, and Save
 writes `height` as a `(mm)` length then, px otherwise.
 
+**There is one roll width.** `style.surface.relief.width` is the run of every
+roll and wall: the root plate's perimeter (`PlateSpec::window`), a `PlateSpec`
+pane plate, a bordered widget plate under relief (`append_widget_plate`, via
+`colors::plate_bevel_width`), every control wall, and the length
+`edge_height` is a rise against. Until 2026-09-28 the widget-plate path had a
+width of its own — `style.surface.plate.bevel_width`, default 6 against the
+relief's 9.3 — so two pane plates in one window rolled over different widths
+depending on which painter drew them, and no single key made a pane match the
+window lip. `plate_bevel_width()` now returns the relief width; the old key is
+an explicit override for a config that still carries it (reported once at
+load, and unit-blind where the relief width resolves lengths), and the test
+`the_pane_roll_is_the_relief_width_unless_a_legacy_key_overrides_it` pins the
+fallback.
+
 **And the relief can leave the screen.** `scene/heightfield.rs` integrates the
 height curves the shader only differentiates and samples a frame's plates into a
 height field — plates stack, carves etch, exactly the composite model the shader
