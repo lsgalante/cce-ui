@@ -683,7 +683,7 @@ fn parse_and_set_colors(content: &str) {
     let retired = retired_surface_keys(&val);
     if !retired.is_empty() {
         log::warn!(
-            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), every roll's width is `relief width=`, the light strength is `relief light=` (a material's `finish light=`), and the relief's geometry is `relief {{ wall height= profile= ; edge height= profile= }}` (the window_manager bevel_* spellings are the same relief keys)",
+            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), every roll's width is `relief width=`, the light strength is `relief light=` (a material's `finish light=`), and the relief's geometry is `relief {{ wall height= profile= ; edge height= profile= }}` (the window_manager bevel_* spellings are the same relief keys, and its bevel_shader is `relief shader=`)",
             retired.join(", ")
         );
     }
@@ -778,10 +778,10 @@ fn parse_and_set_colors(content: &str) {
 /// the relief's flat geometry keys `height` / `profile` (the wall's, now
 /// `wall.height` / `wall.profile`) and `edge_height` / `edge_profile` (the
 /// edge's, now `edge.height` / `edge.profile`); and `window_manager.bevel_depth`
-/// / `bevel_width`, the block the relief keys were born in before
-/// `style.surface.relief` existed (the compositor never read them). Each
-/// was an alias for part of 2026-09-28 and is not read now. Empty for a
-/// clean config.
+/// / `bevel_width` / `bevel_shader`, the block the relief keys were born in
+/// before `style.surface.relief` existed (the compositor never read them;
+/// the shader toggle is `relief.shader` now). Each was an alias for part
+/// of 2026-09-28 and is not read now. Empty for a clean config.
 pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
     let mut found = Vec::new();
     for k in ["blur", "radius", "backdrop_compression", "refraction", "bevel_width"] {
@@ -797,7 +797,7 @@ pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
             found.push(format!("style.surface.relief.{k}"));
         }
     }
-    for k in ["bevel_depth", "bevel_width"] {
+    for k in ["bevel_depth", "bevel_width", "bevel_shader"] {
         if val.pointer(&format!("/window_manager/{k}")).is_some() {
             found.push(format!("window_manager.{k}"));
         }
@@ -2274,7 +2274,7 @@ mod tests {
                        "bevel_width": 12.0, "frost": { "backdrop_compression": 0.2 } },
             "relief": { "depth": 0.15, "height": 1.0, "profile": "a", "edge_height": 2.0, "edge_profile": "b" },
             "material": { "glass": { "frost": { "backdrop_compression": 0.6 }, "finish": { "depth": 0.2 } } }
-        } }, "window_manager": { "bevel_depth": 0.15, "bevel_width": 9.3 } });
+        } }, "window_manager": { "bevel_depth": 0.15, "bevel_width": 9.3, "bevel_shader": 0 } });
         assert_eq!(retired_surface_keys(&old), vec![
             "style.surface.plate.blur",
             "style.surface.plate.radius",
@@ -2289,6 +2289,7 @@ mod tests {
             "style.surface.relief.edge_profile",
             "window_manager.bevel_depth",
             "window_manager.bevel_width",
+            "window_manager.bevel_shader",
             "style.surface.material.glass.frost.backdrop_compression",
             "style.surface.material.glass.finish.depth",
         ]);

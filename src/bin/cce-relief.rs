@@ -1354,7 +1354,22 @@ impl BevelPopup {
             & ["bevel_depth", "bevel_width"]
                 .iter()
                 .all(|k| cce_ui::config::remove_config_value(&p, &format!("window_manager.{k}")));
-        let ok = ok & migrated;
+        // The shader toggle is not one of this editor's knobs, but its old
+        // home is one of the retired keys a save cleans up: carry the value
+        // across to `relief.shader` rather than drop it.
+        let shader_moved = match std::fs::read_to_string(&p)
+            .ok()
+            .map(|c| cce_ui::config::parse_kdl_to_json(&c))
+            .and_then(|v| v.pointer("/window_manager/bevel_shader").cloned())
+        {
+            Some(v) => {
+                let on = v.as_f64().map_or(v.as_bool().unwrap_or(true), |f| f != 0.0);
+                w("style.surface.relief.shader", if on { "true" } else { "false" })
+                    & cce_ui::config::remove_config_value(&p, "window_manager.bevel_shader")
+            }
+            None => true,
+        };
+        let ok = ok & migrated & shader_moved;
         self.status = if ok {
             println!("saved {p}");
             "Saved — apps pick the material up on start.".to_string()

@@ -551,9 +551,10 @@ style {
                 finish light=(f64)0.15 spec=(f64)0.4 shininess=(f64)24.0 curvature=(f64)0.2
             }
         }
-        relief light=(f64)0.15 width=(f64)9.3 spec=(f64)0.4 shininess=(f64)24.0 curvature=(f64)0.2 {
+        relief light=(f64)0.15 width=(f64)9.3 spec=(f64)0.4 shininess=(f64)24.0 curvature=(f64)0.2 shader=(bool)true {
             // light: the strength, NOT a length; width: the ONE run of every roll and wall;
-            // spec / shininess / curvature: the DE finish beyond its strength
+            // spec / shininess / curvature: the DE finish beyond its strength;
+            // shader: false = the legacy banded edge shading, for A/B comparison
             wall height=(mm)0.3 profile="smooth;…"   // a carve's side (buttons, wells, rows): height = drop, profile = ramp spec
             edge height=4.0    profile="smooth;…"   // a plate's perimeter roll: height = rise (unset = quarter-round of width)
         }
@@ -567,7 +568,7 @@ Spellings that are NOT current, and what the loader does with each:
 | Spelling | Status |
 |---|---|
 | `param.color` (+ top-level `plate_opacity`) | alias of `plate.pane.color`, multiplied by the opacity line |
-| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression`, `plate.bevel_width`, `relief.depth`, a material's `finish depth=`, `relief.height` / `.profile` / `.edge_height` / `.edge_profile`, `window_manager.bevel_depth` / `.bevel_width` | RETIRED: reported by path (`color::retired_surface_keys`), not read; cce-relief seeds from each once and its Save writes the current spelling and removes the old |
+| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression`, `plate.bevel_width`, `relief.depth`, a material's `finish depth=`, `relief.height` / `.profile` / `.edge_height` / `.edge_profile`, `window_manager.bevel_depth` / `.bevel_width` / `.bevel_shader` | RETIRED: reported by path (`color::retired_surface_keys`), not read; cce-relief seeds from each once and its Save writes the current spelling and removes the old (the shader toggle it carries across as `relief.shader`) |
 | `relief.wall.knobs` / `edge.knobs`, `profile_knobs` / `edge_knobs` | not style: cce-relief's own state (`~/.config/cce/cce-relief/state.kdl`); read once as a seed, removed on its next Save |
 
 Where each rule is argued, by its lead-in: **Frost is one block** and

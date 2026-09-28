@@ -194,7 +194,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
             // `bevel_depth` registry key by accident, alias or not. The
             // `style.surface.*` retirements need no guard — stripped, they
             // become `surface.relief.depth` and the like, which nothing reads.
-            if matches!(prefix, "window_manager.bevel_depth" | "window_manager.bevel_width") {
+            if matches!(prefix, "window_manager.bevel_depth" | "window_manager.bevel_width" | "window_manager.bevel_shader") {
                 return;
             }
             let flat_key = match prefix {
@@ -286,7 +286,11 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.container.section.depth" => "section_depth",
                 "style.surface.param.backdrop_compression" => "param_compression",
                 "style.surface.param.label_layout" => "param_label_layout",
-                "window_manager.bevel_shader" => "bevel_shader",
+                // The relief's shader toggle lives with the relief
+                // (`relief shader=(bool)false` is the legacy banded look);
+                // `window_manager.bevel_shader`, its old home, is retired
+                // and reported like the block's other bevel keys.
+                "style.surface.relief.shader" => "bevel_shader",
                 "window_manager.control_relief" => "control_relief",
                 "window_manager.corner_shape" => "corner_shape",
                 "style.control.ramp.height" => "ramp_height",
@@ -1851,12 +1855,27 @@ pub fn corner_span_factor_for(n: f32) -> f32 {
 
 /// Whether the relief primitives (see `scene::paint::Prim`) render through
 /// shader2d's per-pixel SDF-lit branch (the default) or the legacy banded vertex
-/// shading. `bevel_shader 0` in config flips back to the old look for A/B
-/// comparison — the key keeps the bevel name because it selects how the shared
-/// lit EDGE is computed, not which shapes exist.
+/// shading. `style.surface.relief.shader=(bool)false` (or `0`) flips back to
+/// the old look for A/B comparison — the registry key keeps the bevel name
+/// because it selects how the shared lit EDGE is computed, not which shapes
+/// exist. Until 2026-09-28 the config spelling was `window_manager.bevel_shader`
+/// (retired, reported), and only a NUMBER worked: a `(bool)` flattens to the
+/// string "false", which the float read never saw.
 pub fn bevel_shader() -> bool {
     lazy_init_style_registry();
-    get_style_registry().read().unwrap().get_float("bevel_shader").map(|v| v != 0.0).unwrap_or(true)
+    let reg = get_style_registry().read().unwrap();
+    shader_on(reg.get_float("bevel_shader"), reg.get_string("bevel_shader").as_deref())
+}
+
+/// The shader toggle's reading of its registry slot: a number is on unless
+/// zero, a string is on unless it says `false` / `off` / `no`, and an unset
+/// slot is on.
+fn shader_on(float: Option<f32>, string: Option<&str>) -> bool {
+    match (float, string) {
+        (Some(v), _) => v != 0.0,
+        (None, Some(s)) => !matches!(s.trim().to_ascii_lowercase().as_str(), "false" | "off" | "no" | "0"),
+        (None, None) => true,
+    }
 }
 
 /// How wide a rolled edge is, in logical px — the distance over which a plate's perimeter
@@ -6980,11 +6999,11 @@ mod tests {
                 "height": 2.0, "edge_height": 3.0, "profile": "a", "edge_profile": "b",
                 "wall": { "knobs": "1,1,1" }, "edge_knobs": "2,2,2"
             } } },
-            "window_manager": { "bevel_depth": 0.3, "bevel_width": 5.0 }
+            "window_manager": { "bevel_depth": 0.3, "bevel_width": 5.0, "bevel_shader": 0 }
         });
         let mut flat = String::new();
         flatten_json_to_flat_props(&old, "", &mut flat);
-        for k in ["bevel_depth", "bevel_width", "bevel_height", "roll_height", "bevel_profile_spec", "roll_profile_spec", "profile_knobs"] {
+        for k in ["bevel_depth", "bevel_width", "bevel_shader", "bevel_height", "roll_height", "bevel_profile_spec", "roll_profile_spec", "profile_knobs"] {
             assert!(!flat.lines().any(|l| l.starts_with(&format!("{k} = "))), "{k} landed from a retired spelling: {flat}");
         }
         // And a file carrying BOTH spellings is what its current one says,
@@ -7001,6 +7020,22 @@ mod tests {
         assert_eq!(flat.lines().filter(|l| l.starts_with("bevel_height = ")).count(), 1, "{flat}");
         assert!(flat.contains("bevel_height = 5") && flat.contains("bevel_depth = 0.15"), "{flat}");
         assert!(flat.contains("roll_profile_spec = \"new\""), "{flat}");
+    }
+
+    /// The relief's shader toggle is `style.surface.relief.shader`, and a
+    /// `(bool)` works there: it flattens to the string "false", which the
+    /// getter reads (a number was the only thing the old float read saw).
+    #[test]
+    fn the_shader_toggle_lives_with_the_relief_and_takes_a_bool() {
+        let val: serde_json::Value = serde_json::json!({
+            "style": { "surface": { "relief": { "shader": false } } }
+        });
+        let mut flat = String::new();
+        flatten_json_to_flat_props(&val, "", &mut flat);
+        assert!(flat.lines().any(|l| l == "bevel_shader = false"), "{flat}");
+        assert!(shader_on(None, None), "unset: the SDF branch");
+        assert!(shader_on(Some(1.0), None) && !shader_on(Some(0.0), Some("true")), "a number decides when present");
+        assert!(!shader_on(None, Some("false")) && !shader_on(None, Some("off")) && shader_on(None, Some("true")));
     }
 
     /// The control rung's key flattens to `control_corner_radius`, beside a
