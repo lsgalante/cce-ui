@@ -80,8 +80,8 @@ pub struct ParametersBg {
     code_error_line: Option<usize>,
     mouse_pos: Option<(f32, f32)>,
     /// The parameter row under the pointer: its LABEL lifts
-    /// (`own_text_labels`) — the pane's ONE hover rule, over every control
-    /// kind. The controls keep their own hovers (a spinbox's +/- buttons, a
+    /// (`own_text_labels`) and its own carves light (`paint_ui`, the tint
+    /// channel) — the pane's ONE hover rule, over every control kind. The controls keep their own hovers (a spinbox's +/- buttons, a
     /// slider's band), but under the DE relief style most of them draw none
     /// at all — the spinbox's row border, the well frames and the dropdown
     /// border are flat-style chrome the relief branches never paint — so
@@ -97,7 +97,8 @@ pub struct ParametersBg {
     /// any hover; painted after them, its 5% white composited in LINEAR
     /// light, which lifts a well's dark shade line from 18 to ~67 while
     /// the pane face moves 46 to 76 — the hovered well's outline paled and
-    /// read as the well lighting up. Text stands clear of the relief.
+    /// read as the well lighting up. Text stands clear of the relief, and
+    /// the tinted carve is the relief's own way of lighting ONE rim.
     hover_row: Option<usize>,
     pub sliders: Vec<Option<Adapted<Slider>>>,
     pub float3s: Vec<Option<Adapted<Float3>>>,
@@ -887,6 +888,13 @@ impl ParametersBg {
     /// reads as the dialog's hovered command does.
     const LABEL: [u8; 3] = [0xaa, 0xaa, 0xbb];
     const LABEL_HOVER: [u8; 3] = [0xf4, 0xf4, 0xfa];
+    /// The hovered row's carve tint: the lifted label's own colour, so the
+    /// lit rim and the label read as one cue. Through the tint channel the
+    /// shader composites the rim's light in this colour at its focus gain
+    /// and the shadow in a quarter of it — the carve lights, it is not
+    /// washed over (a wash over a carve pales its dark shade line in linear
+    /// blending; see `hover_row`).
+    const HOVER_TINT: [f32; 3] = [0xf4 as f32 / 255.0, 0xf4 as f32 / 255.0, 0xfa as f32 / 255.0];
 
     fn update_slider_rects(&mut self) {
         // Inline rows hand their control the row less the label column; the
@@ -1894,15 +1902,34 @@ impl Paint for ParametersBg {
         for (acx, acy, ar, at, a0, a1, ac) in self.arcs() {
             ctx.arc(acx, acy, ar, at, a0, a1, ac);
         }
+        // The hovered row's carves are TINTED — the focus treatment's channel
+        // with a neutral light instead of the accent: the rim's own light and
+        // shadow, recoloured and gained, so the control under the pointer
+        // reads lit while every other carve keeps the plate's grouped shading.
+        // A tinted carve shades through the overlay path by design, and a
+        // section's well spans many rows, so it never qualifies.
+        let hover_rect = self.hover_row.and_then(|i| self.get_param_rects().get(i).copied()).filter(|r| r.3 > 0.0);
+        let hovered = |x: f32, y: f32, w: f32, h: f32| {
+            hover_rect.map_or(false, |(rx, ry, rw, rh)| {
+                x >= rx - 0.5 && y >= ry - 0.5 && x + w <= rx + rw + 0.5 && y + h <= ry + rh + 0.5
+            })
+        };
         for (rx, ry, rw, rh, radii, rd, raised, edges) in self.reliefs() {
-            if raised {
-                ctx.boss_edges(Rect { x: rx, y: ry, width: rw, height: rh }, radii, rd, edges);
-            } else {
-                ctx.recess_edges(Rect { x: rx, y: ry, width: rw, height: rh }, radii, rd, edges);
+            let rect = Rect { x: rx, y: ry, width: rw, height: rh };
+            match (raised, hovered(rx, ry, rw, rh)) {
+                (true, true) => ctx.boss_edges_tinted(rect, radii, rd, edges, Self::HOVER_TINT),
+                (true, false) => ctx.boss_edges(rect, radii, rd, edges),
+                (false, true) => ctx.recess_edges_tinted(rect, radii, rd, edges, Self::HOVER_TINT),
+                (false, false) => ctx.recess_edges(rect, radii, rd, edges),
             }
         }
         for (tx2, ty2, tw2, th2, radii, td, tedges) in self.troughs() {
-            ctx.trough_edges(Rect { x: tx2, y: ty2, width: tw2, height: th2 }, radii, td, tedges);
+            let rect = Rect { x: tx2, y: ty2, width: tw2, height: th2 };
+            if hovered(tx2, ty2, tw2, th2) {
+                ctx.trough_edges_tinted(rect, radii, td, tedges, Self::HOVER_TINT);
+            } else {
+                ctx.trough_edges(rect, radii, td, tedges);
+            }
         }
         for (ga, gb, gw, gd, ghost) in self.grooves() {
             ctx.groove(ga, gb, gw, gd, ghost);
@@ -4101,14 +4128,17 @@ mod tests {
         assert_eq!(p.hover_row, None);
     }
 
-    /// The hover cue is the row's LABEL, and nothing else in the pane's
-    /// paint changes with it: a hover adds no geometry at all, so it can
-    /// neither close the pane plate's carve-grouping window (a wash before
-    /// the wells did, and every well flipped shading on any hover) nor
-    /// composite over a well's shade lines (a wash after them did, and the
-    /// hovered well's outline paled). Both shipped for part of 2026-09-28.
+    /// The hover cue is the row's LABEL and the row's OWN carves lit through
+    /// the tint channel — and nothing else in the pane's paint changes with
+    /// it. A hover adds no geometry: it can neither close the pane plate's
+    /// carve-grouping window (a wash before the wells did, and every well
+    /// flipped shading on any hover) nor composite over a well's shade lines
+    /// (a wash after them did, and the hovered well's outline paled). Both
+    /// shipped for part of 2026-09-28. The other rows' carves keep their
+    /// untinted, grouped shading.
     #[test]
-    fn a_hover_lifts_the_label_and_adds_no_geometry() {
+    fn a_hover_lifts_the_label_and_lights_only_its_own_carves() {
+        use crate::scene::paint::Prim;
         let mut ctx = UiContext::new();
         let mut p = panel_with(&[("Name", "x", "text"), ("Count", "3", "spinbox:0:10"), ("Size", "0.5", "slider:0:1")]);
         WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
@@ -4121,7 +4151,13 @@ mod tests {
         let label_of = |p: &Adapted<ParametersBg>, name: &str| {
             p.own_text_labels().into_iter().find(|l| l.text == name).map(|l| l.color).expect("a row label")
         };
+        // A carve's rect and tint, whatever its kind.
+        let carve = |prim: &Prim| match prim {
+            Prim::Recess { rect, tint, .. } | Prim::Boss { rect, tint, .. } | Prim::Trough { rect, tint, .. } => Some((*rect, *tint)),
+            _ => None,
+        };
         let at_rest = prims(&p, &ctx);
+        assert!(at_rest.iter().all(|pr| carve(pr).map_or(true, |(_, t)| t.is_none())), "nothing is tinted at rest");
         assert_eq!(label_of(&p, "Count"), ParametersBg::LABEL);
 
         let (x, y, w, h) = p.get_param_rects()[1];
@@ -4129,7 +4165,21 @@ mod tests {
         assert_eq!(p.hover_row, Some(1));
         assert_eq!(label_of(&p, "Count"), ParametersBg::LABEL_HOVER, "the hovered row's label lifts");
         assert_eq!(label_of(&p, "Name"), ParametersBg::LABEL, "and only that row's");
-        assert_eq!(prims(&p, &ctx), at_rest, "a hover paints no geometry");
+
+        let hovered = prims(&p, &ctx);
+        assert_eq!(hovered.len(), at_rest.len(), "a hover adds no geometry");
+        let mut lit = 0;
+        for (a, b) in at_rest.iter().zip(&hovered) {
+            if a == b {
+                continue;
+            }
+            let ((ra, ta), (rb, tb)) = (carve(a).expect("only carves change"), carve(b).expect("only carves change"));
+            assert_eq!(ra, rb, "a carve keeps its place");
+            assert_eq!((ta, tb), (None, Some(ParametersBg::HOVER_TINT)), "the change is the hover tint");
+            assert!(rb.y >= y - 0.5 && rb.y + rb.height <= y + h + 0.5, "and only inside the hovered row: {rb:?}");
+            lit += 1;
+        }
+        assert!(lit > 0, "the hovered row's carves light");
     }
 
     /// The label lift is the pane's rule, not the control's: a spinbox row,

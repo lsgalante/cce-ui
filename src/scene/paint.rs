@@ -1513,6 +1513,20 @@ impl PaintCtx {
         self.push(Prim::Trough { rect, radii, depth, edges: (true, true, true, true), tint: Some(tint) });
     }
 
+    /// [`PaintCtx::trough_edges`] with a specular tint on the lit rim — see
+    /// `Prim::Trough::tint`.
+    pub fn trough_edges_tinted(
+        &mut self,
+        rect: Rect,
+        radii: Radii,
+        depth: f32,
+        edges: (bool, bool, bool, bool),
+        tint: [f32; 3],
+    ) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Trough { rect, radii, depth, edges, tint: Some(tint) });
+    }
+
     /// Raise a rim along `rect`'s boundary — see `Prim::Ridge`. `depth` is the
     /// full width of the bump (it straddles the outline by ±depth/2).
     pub fn ridge(&mut self, rect: Rect, radii: Radii, depth: f32) {
@@ -1538,6 +1552,19 @@ impl PaintCtx {
     ) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Recess { rect, radii, depth, edges, tint: None });
+    }
+
+    /// [`PaintCtx::recess_edges`] with a specular tint on the lit rim — see
+    /// `Prim::Recess::tint`. A tinted carve never groups into its host plate
+    /// (the tint could only land on the whole plate's specular), so it
+    /// shades through the overlay path with its own lit rim.
+    pub fn recess_edges_tinted(
+        &mut self, rect: Rect, radii: Radii, depth: f32,
+        edges: (bool, bool, bool, bool),
+        tint: [f32; 3],
+    ) {
+        let rect = self.apply_offset(rect);
+        self.push(Prim::Recess { rect, radii, depth, edges, tint: Some(tint) });
     }
 
     /// The window's glass slab: rounded fill at full size plus a rolled, lit perimeter.
