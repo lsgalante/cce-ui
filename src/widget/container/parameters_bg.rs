@@ -864,8 +864,9 @@ impl ParametersBg {
         })
     }
 
-    /// The hovered row's tint, over its floor and under its control: the
-    /// dialog's hover-row wash, at the control corner radius.
+    /// The hovered row's tint: the dialog's hover-row wash, at the control
+    /// corner radius, laid over the row's carves (see `paint_ui` for why it
+    /// must come after them).
     fn paint_hover_row(&self, ctx: &mut PaintCtx) {
         let Some(i) = self.hover_row else { return };
         let Some(&(x, y, w, h)) = self.get_param_rects().get(i) else { return };
@@ -1884,7 +1885,6 @@ impl Paint for ParametersBg {
             return;
         }
         self.paint_row_floors(ctx);
-        self.paint_hover_row(ctx);
         for (qx, qy, qw, qh, qr, qc, corners) in self.rounded_quads(ui) {
             ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, qr, corners, qc);
         }
@@ -1907,6 +1907,16 @@ impl Paint for ParametersBg {
         for (fcx, fcy, fr, fd, fs) in self.section_fillets() {
             ctx.concave_fillet(fcx, fcy, fr, fd, fs, false);
         }
+        // AFTER every carve, never before: the wash is ordinary geometry,
+        // and ordinary geometry painted after the pane plate ends its
+        // carve-grouping window (`window_runner`'s tessellation) — every
+        // recess emitted after it loses the plate as its host and shades
+        // through the overlay fallback instead of the plate's own draw. For
+        // the day it sat above the carves (2026-09-28) hovering ANY row
+        // re-lit every well in the pane: the grouped and fallback shadings
+        // differ visibly (a crisp shade line against a soft lit crest), and
+        // the flip read as "all the wells brighten on hover".
+        self.paint_hover_row(ctx);
         for (scx, scy, sr, sc) in self.spheres() {
             ctx.sphere(scx, scy, sr, &crate::scene::material::Material::from_fill(sc));
         }
@@ -4096,6 +4106,33 @@ mod tests {
         p.on_cursor_moved(-9999.0, -9999.0, &mut ctx);
         assert!(hovered(&p).is_empty());
         assert_eq!(p.hover_row, None);
+    }
+
+    /// The hover wash is painted after every carve in the pane. Ordinary
+    /// geometry ends the pane plate's carve-grouping window, so a wash
+    /// emitted BEFORE the wells would drop every one of them to the overlay
+    /// shading — which is what happened for a day, and read as every well
+    /// re-lighting whenever any row was hovered.
+    #[test]
+    fn the_hover_wash_comes_after_every_carve() {
+        use crate::scene::paint::Prim;
+        let mut ctx = UiContext::new();
+        let mut p = panel_with(&[("Name", "x", "text"), ("Count", "3", "spinbox:0:10"), ("Size", "0.5", "slider:0:1")]);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, 400.0);
+        let (x, y, w, h) = p.get_param_rects()[1];
+        p.on_cursor_moved(x + w * 0.5, y + h * 0.5, &mut ctx);
+        assert_eq!(p.hover_row, Some(1));
+
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        Paint::paint_ui(&*p, &ctx, Rect { x: 0.0, y: 0.0, width: 300.0, height: 400.0 }, &mut pc);
+        let items = pc.finish().items;
+        let is_carve = |prim: &Prim| matches!(prim, Prim::Recess { .. } | Prim::Boss { .. } | Prim::Trough { .. } | Prim::Ridge { .. });
+        let last_carve = items.iter().rposition(|i| is_carve(&i.prim)).expect("the rows carve at least one well");
+        let wash = items
+            .iter()
+            .position(|i| matches!(&i.prim, Prim::RoundedRect { color, .. } if *color == [1.0, 1.0, 1.0, 0.05]))
+            .expect("the hovered row's wash is painted");
+        assert!(wash > last_carve, "wash at {wash} must follow the last carve at {last_carve}");
     }
 
     /// The row tint is the pane's rule, not the control's: a spinbox row,
