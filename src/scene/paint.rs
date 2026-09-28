@@ -1840,7 +1840,7 @@ mod tests {
         assert!(!spec.is_root());
         assert_eq!(spec.role(), PlateRole::Nested);
         assert!(spec.fill()[3] < 0.0, "nested frost = negative-alpha sentinel");
-        spec.material.frost = Frost::Opaque;
+        spec.material.frost = Frost::Unfrosted;
         assert_eq!(spec.fill()[3], 0.8, "no frost, no encoding");
 
         // The detach role flip (RFC 7c): a frosted nested pane becomes a

@@ -664,6 +664,13 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(c) = get_color("/style/surface/param/color") {
         if let Ok(mut lock) = PARAM_BG_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = PANE_COLOR_WHOLE.write() { *lock = false; }
+    }
+    // The clear spelling of the same tint: the PANE plate's colour, whole —
+    // its alpha is the tint strength and nothing multiplies it.
+    if let Some(c) = get_color("/style/surface/plate/pane/color") {
+        if let Ok(mut lock) = PARAM_BG_COLOR.write() { *lock = c; }
+        if let Ok(mut lock) = PANE_COLOR_WHOLE.write() { *lock = true; }
     }
     if let Some(c) = val
         .pointer("/style/surface/plate/backdrop_compression")
@@ -681,6 +688,35 @@ fn parse_and_set_colors(content: &str) {
     }
     if let Some(r) = val.pointer("/style/surface/plate/radius").and_then(|v| v.as_f64()) {
         if let Ok(mut lock) = PLATE_FROST_RADIUS.write() { *lock = (r as f32).max(0.0); }
+    }
+    // The one-block spelling (2026-09-28), the same shape a named
+    // material's `frost` child has: `plate { frost radius=5.5
+    // compression=0 refraction=0 }` is frosted with those knobs, a bare
+    // `frost` is frosted at the defaults, `frost (bool)false` is not
+    // frosted. Read AFTER the four scattered keys (`blur`, `radius`,
+    // `backdrop_compression`, `refraction`), which stay as aliases, so a
+    // config that says both is governed by the block.
+    match val.pointer("/style/surface/plate/frost") {
+        Some(serde_json::Value::Object(fo)) => {
+            let num = |k: &str| fo.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
+            if let Ok(mut lock) = PLATE_BLUR.write() { *lock = true; }
+            if let Some(c) = num("compression").or_else(|| num("backdrop_compression")) {
+                if let Ok(mut lock) = PLATE_BACKDROP_COMPRESSION.write() { *lock = c.clamp(0.0, 1.0); }
+            }
+            if let Some(r) = num("refraction") {
+                if let Ok(mut lock) = PLATE_REFRACTION.write() { *lock = r.clamp(0.0, 1.0); }
+            }
+            if let Some(r) = num("radius") {
+                if let Ok(mut lock) = PLATE_FROST_RADIUS.write() { *lock = r.max(0.0); }
+            }
+        }
+        Some(serde_json::Value::Null) => {
+            if let Ok(mut lock) = PLATE_BLUR.write() { *lock = true; }
+        }
+        Some(serde_json::Value::Bool(on)) => {
+            if let Ok(mut lock) = PLATE_BLUR.write() { *lock = *on; }
+        }
+        _ => {}
     }
 
     // The DE finish beyond its strength (`relief.depth` / `light`, which
@@ -965,10 +1001,23 @@ pub const PARAM_BG: [f32; 4] = [0.10, 0.10, 0.14, 0.25];
 /// runtime (the designer's Style section "Plate Color"). Alpha doubles as the
 /// frost strength under plate blur.
 static PARAM_BG_COLOR: RwLock<[f32; 4]> = RwLock::new(PARAM_BG);
+/// Whether the pane tint came in as `style.surface.plate.pane.color` — the
+/// spelling whose alpha IS the tint strength — rather than the legacy
+/// `style.surface.param.color`, which the top-level `plate_opacity` line
+/// still multiplies (`Material::pane_legacy`). Two spellings, one tint.
+static PANE_COLOR_WHOLE: RwLock<bool> = RwLock::new(false);
 
 pub fn param_bg_color() -> [f32; 4] {
     load_colors_once();
     style_read(&PARAM_BG_COLOR)
+}
+
+/// Whether the pane tint was spelled `style.surface.plate.pane.color`, in
+/// which case its alpha is the whole tint strength and `plate_opacity` does
+/// not multiply it. See `PANE_COLOR_WHOLE`.
+pub fn pane_color_is_whole() -> bool {
+    load_colors_once();
+    style_read(&PANE_COLOR_WHOLE)
 }
 
 pub fn set_param_bg_color(color: [f32; 4]) {
@@ -1845,6 +1894,10 @@ pub fn set_plate_refraction(r: f32) {
     style_write(&PLATE_REFRACTION, r.clamp(0.0, 1.0));
 }
 
+/// Whether the default plate material is frosted at all — the switch on
+/// `Frost::from_style`. Spelled `style.surface.plate.frost` (a block, the
+/// knobs inside it; see the loader) or, as an alias, the older
+/// `style.surface.plate.blur` bool.
 static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
 
 /// The finish's three fixed terms — specular strength, shininess exponent,

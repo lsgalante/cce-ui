@@ -400,6 +400,21 @@ What this buys, and where the code is heading:
   **6-digit** hex sets alpha to **1.0**, so dropping the last byte off a
   translucent plate colour makes it fully opaque rather than leaving it
   alone.
+- **Frost is one block, and "unfrosted" is not "solid"** (2026-09-28). The
+  default plate material's recipe is spelled `style.surface.plate { frost
+  radius=5.5 compression=0 refraction=0 }` — the same `frost` child a named
+  material has — with a bare `frost` frosted at the defaults and `frost
+  (bool)false` off. The four keys it replaces (`blur` as the switch,
+  `radius`, `backdrop_compression`, `refraction`) are still read as aliases,
+  and the block governs when both are present; cce-relief writes whichever
+  spelling the config already uses. The enum variant is `Frost::Unfrosted`
+  (was `Opaque`): it means the plate never samples its backdrop, and a
+  translucent tint stays translucent with a SHARP view through it — which
+  is what the old name kept reading as "covers everything". The pane tint
+  has a clear spelling too, `style.surface.plate.pane.color`, whose alpha
+  is the whole tint strength; the legacy `style.surface.param.color` is
+  still multiplied by the top-level `plate_opacity` line, as it always was
+  (`color::pane_color_is_whole`).
 - **A frosted plate's legibility is `backdrop_compression`, not opacity.**
   Blur destroys a backdrop's spatial DETAIL and preserves its mean LUMINANCE,
   and text contrast is a mean-luminance property — so `resolve_blur`'s closing

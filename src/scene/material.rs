@@ -63,8 +63,12 @@ impl Finish {
 /// question.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Frost {
-    /// The tint alone, composited at its alpha. Not a sample of the backdrop.
-    Opaque,
+    /// No frost: the tint alone, composited at its ALPHA — a translucent
+    /// tint is still translucent, and what shows through is sharp. This
+    /// says nothing about coverage; it says the plate never samples its
+    /// backdrop. (Named `Opaque` until 2026-09-28, which read as "solid"
+    /// and was not.)
+    Unfrosted,
     /// Frosted glass: the backdrop blurred, luminance-compressed toward the
     /// tint's key, tinted at the tint's alpha; the rim refracts.
     Frosted {
@@ -104,11 +108,11 @@ impl Frost {
     /// The recipe as the plate branch reads it: `[p_host.z, p_host.w]` —
     /// compression and refraction packed in `z`, the blur radius in `w` as
     /// the kernel sigma in PHYSICAL px (the shader samples the backdrop in
-    /// physical px). `Opaque` packs to zeros: nothing reads them, and a
+    /// physical px). `Unfrosted` packs to zeros: nothing reads them, and a
     /// plate that was never frosted pushes the bytes it always did.
     pub fn pack(&self, scale: f32) -> [f32; 2] {
         match *self {
-            Frost::Opaque => [0.0, 0.0],
+            Frost::Unfrosted => [0.0, 0.0],
             Frost::Frosted { compression, refraction, radius } => {
                 let q = |v: f32| (v.clamp(0.0, 1.0) * Self::PACK_MAX).round();
                 [q(compression) * Self::PACK_BASE + q(refraction), radius.max(0.0) * scale]
@@ -138,10 +142,10 @@ impl Frost {
         }
     }
 
-    /// [`Frost::from_style`] when `on`, else [`Frost::Opaque`] — the shape of
+    /// [`Frost::from_style`] when `on`, else [`Frost::Unfrosted`] — the shape of
     /// every `blur: bool` the toolkit carries today.
     pub fn from_flag(on: bool) -> Self {
-        if on { Self::from_style() } else { Frost::Opaque }
+        if on { Self::from_style() } else { Frost::Unfrosted }
     }
 
     pub fn is_frosted(&self) -> bool {
@@ -205,7 +209,7 @@ impl MaterialDef {
                 refraction: f.refraction.unwrap_or(0.0).clamp(0.0, 1.0),
                 radius: f.radius.unwrap_or(Frost::DEFAULT_RADIUS).max(0.0),
             },
-            None => Frost::Opaque,
+            None => Frost::Unfrosted,
         };
         let mut finish = base.finish;
         if let Some(l) = self.light {
@@ -249,7 +253,7 @@ pub struct Material {
 impl Material {
     /// An opaque material of `tint` under the DE's finish.
     pub fn opaque(tint: [f32; 4]) -> Self {
-        Self { tint, frost: Frost::Opaque, finish: Finish::from_style() }
+        Self { tint, frost: Frost::Unfrosted, finish: Finish::from_style() }
     }
 
     pub fn with_tint(mut self, tint: [f32; 4]) -> Self {
@@ -272,7 +276,7 @@ impl Material {
     /// The root rung: `plate { root material="…" }` when bound, else the
     /// window's background, `style.surface.plate.root.color`
     /// (`color::page_low_color`, whose alpha IS `root_plate_opacity`).
-    /// `Frost::Opaque` on the client side by construction: a root plate's
+    /// `Frost::Unfrosted` on the client side by construction: a root plate's
     /// frost is the COMPOSITOR's (`plate.root.blur`, which the client never
     /// reads), and [`Material::fill`] under [`PlateRole::Root`] would ignore
     /// a `Frosted` here anyway.
@@ -315,7 +319,12 @@ impl Material {
 
     fn pane_legacy() -> Self {
         let mut tint = crate::color::param_bg_color();
-        tint[3] *= crate::layout::plate_opacity();
+        // `style.surface.plate.pane.color` is the whole tint, alpha
+        // included; the legacy `param.color` is still multiplied by the
+        // top-level `plate_opacity` line, as it always was.
+        if !crate::color::pane_color_is_whole() {
+            tint[3] *= crate::layout::plate_opacity();
+        }
         let frost = if crate::color::plate_blur() {
             Frost::Frosted {
                 compression: crate::color::plate_backdrop_compression(),
@@ -323,7 +332,7 @@ impl Material {
                 radius: crate::color::plate_frost_radius(),
             }
         } else {
-            Frost::Opaque
+            Frost::Unfrosted
         };
         Self { tint, frost, finish: Finish::from_style() }
     }
@@ -356,7 +365,7 @@ impl Material {
 
     /// The legacy bridge: a fill as the renderer consumed it before this
     /// type existed. A negative alpha is the frost sentinel — `Frosted` at
-    /// the DE recipe, tint alpha `|a|`; otherwise `Opaque` with the colour
+    /// the DE recipe, tint alpha `|a|`; otherwise `Unfrosted` with the colour
     /// as is. `from_fill(c).fill(Nested) == c` for every `c` a caller could
     /// hand the old API. For a call site that holds an encoded colour; a
     /// site that knows what it means says `Material::opaque` / `with_frost`.
@@ -380,7 +389,7 @@ impl Material {
     /// the tessellator encodes every prim as nested.
     pub fn for_role(&self, role: PlateRole) -> Self {
         match role {
-            PlateRole::Root => Material { frost: Frost::Opaque, ..*self },
+            PlateRole::Root => Material { frost: Frost::Unfrosted, ..*self },
             PlateRole::Nested => *self,
         }
     }
@@ -458,7 +467,7 @@ impl Material {
     ///   plate's frost is the compositor's blur-behind, never the in-app pass.
     /// - nested + [`Frost::Frosted`] → the in-app frost pass's negative-alpha
     ///   sentinel, `-|alpha|`.
-    /// - nested + [`Frost::Opaque`] → the tint as is.
+    /// - nested + [`Frost::Unfrosted`] → the tint as is.
     ///
     /// Static so a caller holding a tint and a flag (today's `PlateSpec`)
     /// encodes through the same rule without resolving a finish it does not
@@ -488,12 +497,12 @@ mod tests {
     fn fill_encodes_by_role() {
         let tint = [0.1, 0.2, 0.3, 0.8];
         assert_eq!(Material::fill_tint(tint, frosted(), PlateRole::Root)[3], 0.8, "root frost is the compositor's");
-        assert_eq!(Material::fill_tint(tint, Frost::Opaque, PlateRole::Root)[3], 0.8);
+        assert_eq!(Material::fill_tint(tint, Frost::Unfrosted, PlateRole::Root)[3], 0.8);
         assert_eq!(Material::fill_tint(tint, frosted(), PlateRole::Nested)[3], -0.8, "nested frost = sentinel");
-        assert_eq!(Material::fill_tint(tint, Frost::Opaque, PlateRole::Nested), tint, "no frost, no encoding");
+        assert_eq!(Material::fill_tint(tint, Frost::Unfrosted, PlateRole::Nested), tint, "no frost, no encoding");
         // A caller that hands a negative alpha in is normalised, not doubled.
         assert_eq!(Material::fill_tint([0.0, 0.0, 0.0, -0.5], frosted(), PlateRole::Nested)[3], -0.5);
-        assert_eq!(Material::fill_tint([0.0, 0.0, 0.0, -0.5], Frost::Opaque, PlateRole::Root)[3], 0.5);
+        assert_eq!(Material::fill_tint([0.0, 0.0, 0.0, -0.5], Frost::Unfrosted, PlateRole::Root)[3], 0.5);
         let m = Material::opaque(tint).with_frost(frosted());
         assert_eq!(m.fill(PlateRole::Nested), Material::fill_tint(tint, frosted(), PlateRole::Nested));
     }
@@ -542,7 +551,7 @@ mod tests {
         crate::color::set_plate_backdrop_compression(0.6);
         crate::color::set_plate_refraction(0.3);
         assert_eq!(Frost::from_style(), frosted());
-        assert_eq!(Frost::from_flag(false), Frost::Opaque);
+        assert_eq!(Frost::from_flag(false), Frost::Unfrosted);
         assert!(Frost::from_flag(true).is_frosted());
         crate::color::set_plate_backdrop_compression(0.0);
         crate::color::set_plate_refraction(0.0);
@@ -600,7 +609,7 @@ mod tests {
         // 0.6 / 0.3 (the designer's recipe) survive to better than a 1/255 step.
         let (c, r) = Frost::unpack(Frost::Frosted { compression: 0.6, refraction: 0.3, radius: 0.0 }.pack(1.0)[0]);
         assert!((c - 0.6).abs() < 1.0 / 510.0 && (r - 0.3).abs() < 1.0 / 510.0);
-        assert_eq!(Frost::Opaque.pack(2.0), [0.0, 0.0]);
+        assert_eq!(Frost::Unfrosted.pack(2.0), [0.0, 0.0]);
         assert_eq!(Frost::Frosted { compression: 0.0, refraction: 0.0, radius: 0.0 }.pack(2.0), [0.0, 0.0]);
 
         let wgsl = include_str!("../vk/shader2d.wgsl");
@@ -684,9 +693,57 @@ mod tests {
         assert_eq!(crate::color::material_binding(PlateRung::Pane), None);
     }
 
-    /// A binding wins over the legacy keys, a node without `frost` is opaque
-    /// whatever `plate blur` says, unset fields fall back to the rung, and a
-    /// binding to an undefined name degrades to the legacy material.
+    /// The default material's frost as ONE block — `plate { frost radius=…
+    /// compression=… refraction=… }`, the shape a named material's `frost`
+    /// child already had — with the four scattered keys (`blur`, `radius`,
+    /// `backdrop_compression`, `refraction`) still read as aliases: a bare
+    /// `frost` is frosted at the defaults, `frost (bool)false` is not, and
+    /// when both spellings are present the block governs.
+    #[test]
+    fn the_frost_block_is_one_spelling_of_the_default_recipe() {
+        let _lock = crate::color::test_color_state_lock();
+        crate::layout::lazy_init_style_registry();
+        let _ = crate::color::plate_blur();
+        let load = |plate: &str| {
+            crate::color::reload_colors(&format!("style {{\n surface {{\n plate {{\n {plate}\n }}\n }}\n}}\n"));
+            (crate::color::plate_blur(), Frost::from_style())
+        };
+        let frosted = |c: f32, r: f32, rad: f32| Frost::Frosted { compression: c, refraction: r, radius: rad };
+        assert_eq!(load("frost radius=(f64)3.0 compression=(f64)0.4 refraction=(f64)0.1"), (true, frosted(0.4, 0.1, 3.0)));
+        assert_eq!(load("frost backdrop_compression=(f64)0.2"), (true, frosted(0.2, 0.1, 3.0)), "the old knob name is accepted inside the block; unset knobs keep their last value");
+        assert_eq!(load("frost").0, true, "a bare `frost` is frosted");
+        assert_eq!(load("frost (bool)false").0, false);
+        assert_eq!(load("blur (bool)true\n radius (f64)2.0"), (true, frosted(0.2, 0.1, 2.0)), "the scattered spelling still works");
+        assert_eq!(load("blur (bool)false\n frost compression=(f64)0.7"), (true, frosted(0.7, 0.1, 2.0)), "the block governs");
+        crate::color::reload_colors("");
+    }
+
+    /// `style.surface.plate.pane.color` is the pane tint WHOLE — its alpha is
+    /// the tint strength — where the legacy `param.color` is still multiplied
+    /// by the top-level `plate_opacity` line.
+    #[test]
+    fn the_pane_colour_spelling_is_the_whole_tint() {
+        let _lock = crate::color::test_color_state_lock();
+        crate::layout::lazy_init_style_registry();
+        let _ = crate::color::plate_blur();
+        let was = crate::layout::plate_opacity();
+        crate::layout::set_plate_opacity(0.5);
+        crate::color::reload_colors("style {\n surface {\n param color=(rgba)\"#10101880\"\n }\n}\n");
+        assert!(!crate::color::pane_color_is_whole());
+        let a = Material::pane().tint[3];
+        assert!((a - 0.25).abs() < 1e-2, "legacy: alpha 0.5 x plate_opacity 0.5, got {a}");
+        crate::color::reload_colors("style {\n surface {\n plate {\n pane color=(rgba)\"#10101880\"\n }\n }\n}\n");
+        assert!(crate::color::pane_color_is_whole());
+        let a = Material::pane().tint[3];
+        assert!((a - 0.5).abs() < 1e-2, "spelled whole: alpha 0.5 as written, got {a}");
+        crate::layout::set_plate_opacity(was);
+        crate::color::reload_colors("");
+    }
+
+    /// A binding wins over the legacy keys, a node without `frost` is
+    /// unfrosted whatever `plate blur` says, unset fields fall back to the
+    /// rung, and a binding to an undefined name degrades to the legacy
+    /// material.
     #[test]
     fn binding_semantics() {
         let _lock = crate::color::test_color_state_lock();
@@ -711,7 +768,7 @@ mod tests {
             }
         "##);
         let pane = Material::pane();
-        assert_eq!(pane.frost, Frost::Opaque, "no frost child = opaque, blur flag or not");
+        assert_eq!(pane.frost, Frost::Unfrosted, "no frost child = unfrosted, blur flag or not");
         assert_eq!(pane.tint, Material::legacy(PlateRung::Pane).tint, "no color = the rung's tint");
         assert_eq!(pane.finish.spec, 0.25);
         assert_eq!(pane.finish.shininess, 12.0);
@@ -759,9 +816,9 @@ mod tests {
     fn control_face_is_opaque_or_none() {
         let face = Material::control_face([0.2, 0.3, 0.4, 0.5]).expect("a fill is a face");
         assert_eq!(face.tint, [0.2, 0.3, 0.4, 1.0]);
-        assert_eq!(face.frost, Frost::Opaque);
+        assert_eq!(face.frost, Frost::Unfrosted);
         assert!(Material::control_face([0.2, 0.3, 0.4, 0.0]).is_none());
-        assert_eq!(Material::control().frost, Frost::Opaque);
-        assert_eq!(Material::root().frost, Frost::Opaque);
+        assert_eq!(Material::control().frost, Frost::Unfrosted);
+        assert_eq!(Material::root().frost, Frost::Unfrosted);
     }
 }

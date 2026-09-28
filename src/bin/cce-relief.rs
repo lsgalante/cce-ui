@@ -1138,17 +1138,27 @@ impl BevelPopup {
                     & w(&format!("{m}.finish.shininess"), &shine)
                     & w(&format!("{m}.finish.curvature"), &curv)
                     & (!frosted
-                        || (w(&format!("{m}.frost.backdrop_compression"), &comp)
+                        || (w(&format!("{m}.frost.compression"), &comp)
                             & w(&format!("{m}.frost.refraction"), &refr)
                             & w(&format!("{m}.frost.radius"), &radius)))
             }
             None => {
+                // Into the `plate { frost … }` block when the config spells
+                // it that way (the block governs, so a write to the old
+                // scattered keys would be read and then overridden), else
+                // the scattered keys the config already uses.
+                let block = cce_ui::config::cached_config().pointer("/style/surface/plate/frost").is_some();
+                let (kc, kr, kd) = if block {
+                    ("style.surface.plate.frost.compression", "style.surface.plate.frost.refraction", "style.surface.plate.frost.radius")
+                } else {
+                    ("style.surface.plate.backdrop_compression", "style.surface.plate.refraction", "style.surface.plate.radius")
+                };
                 w("style.surface.relief.spec", &spec)
                     & w("style.surface.relief.shininess", &shine)
                     & w("style.surface.relief.curvature", &curv)
-                    & w("style.surface.plate.backdrop_compression", &comp)
-                    & w("style.surface.plate.refraction", &refr)
-                    & w("style.surface.plate.radius", &radius)
+                    & w(kc, &comp)
+                    & w(kr, &refr)
+                    & w(kd, &radius)
             }
         }
     }
@@ -1499,9 +1509,9 @@ impl Application for BevelPopup {
         };
         let (pcomp, prefr, pradius) = match pane.frost {
             cce_ui::scene::Frost::Frosted { compression, refraction, radius } => (compression, refraction, radius),
-            cce_ui::scene::Frost::Opaque => match cce_ui::scene::Frost::from_style() {
+            cce_ui::scene::Frost::Unfrosted => match cce_ui::scene::Frost::from_style() {
                 cce_ui::scene::Frost::Frosted { compression, refraction, radius } => (compression, refraction, radius),
-                cce_ui::scene::Frost::Opaque => (0.0, 0.0, cce_ui::scene::Frost::DEFAULT_RADIUS),
+                cce_ui::scene::Frost::Unfrosted => (0.0, 0.0, cce_ui::scene::Frost::DEFAULT_RADIUS),
             },
         };
         let frost_seed = |k: &str, plate_key: &str, process: f32| -> f32 {
