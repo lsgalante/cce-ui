@@ -683,7 +683,7 @@ fn parse_and_set_colors(content: &str) {
     let retired = retired_surface_keys(&val);
     if !retired.is_empty() {
         log::warn!(
-            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), and every roll's width is `relief width=`",
+            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), every roll's width is `relief width=`, and the light strength is `relief light=` (a material's `finish light=`)",
             retired.join(", ")
         );
     }
@@ -748,7 +748,7 @@ fn parse_and_set_colors(content: &str) {
                     MaterialDef {
                         tint: node.get("color").and_then(|v| v.as_str()).and_then(parse_hex),
                         frost,
-                        light: fk("light").or(fk("depth")),
+                        light: fk("light"),
                         spec: fk("spec"),
                         shininess: fk("shininess"),
                         curvature: fk("curvature"),
@@ -771,10 +771,12 @@ fn parse_and_set_colors(content: &str) {
 /// the dotted paths a user would grep for: the four flat frost keys under
 /// `plate` (`blur`, `radius`, `backdrop_compression`, `refraction`),
 /// `backdrop_compression` inside any `frost` child (the plate's, or a named
-/// material's), whose one name is `compression`, and `plate.bevel_width`,
-/// the pane roll's former width of its own (an override for the rest of
-/// 2026-09-28, retired that evening: every roll is `relief.width`). Empty
-/// for a clean config.
+/// material's), whose one name is `compression`; `plate.bevel_width`, the
+/// pane roll's former width of its own (every roll is `relief.width`); and
+/// `relief.depth` with `depth` inside any material's `finish` child, the
+/// light strength's former name (`light`, since it is not a length). Each
+/// was an alias for part of 2026-09-28 and is not read now. Empty for a
+/// clean config.
 pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
     let mut found = Vec::new();
     for k in ["blur", "radius", "backdrop_compression", "refraction", "bevel_width"] {
@@ -785,10 +787,16 @@ pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
     if val.pointer("/style/surface/plate/frost/backdrop_compression").is_some() {
         found.push("style.surface.plate.frost.backdrop_compression".to_string());
     }
+    if val.pointer("/style/surface/relief/depth").is_some() {
+        found.push("style.surface.relief.depth".to_string());
+    }
     if let Some(mats) = val.pointer("/style/surface/material").and_then(|v| v.as_object()) {
         for (name, node) in mats {
             if node.pointer("/frost/backdrop_compression").is_some() {
                 found.push(format!("style.surface.material.{name}.frost.backdrop_compression"));
+            }
+            if node.pointer("/finish/depth").is_some() {
+                found.push(format!("style.surface.material.{name}.finish.depth"));
             }
         }
     }
@@ -2237,19 +2245,22 @@ mod tests {
     }
 
     /// The four flat frost keys, the `backdrop_compression` spelling inside
-    /// a `frost` child and `plate.bevel_width` are reported by path; the
-    /// block itself and a material's `compression` are not.
+    /// a `frost` child, `plate.bevel_width` and `depth` (on the relief, or
+    /// in a material's `finish`) are reported by path; the block itself and
+    /// a material's `compression` / `light` are not.
     #[test]
     fn retired_surface_keys_are_named_by_path_and_the_block_is_not() {
         let clean: serde_json::Value = serde_json::json!({ "style": { "surface": {
             "plate": { "frost": { "radius": 5.5, "compression": 0.0, "refraction": 0.0 }, "color": "#6c6c7bf2" },
-            "material": { "glass": { "frost": { "compression": 0.6 } } }
+            "relief": { "light": 0.15 },
+            "material": { "glass": { "frost": { "compression": 0.6 }, "finish": { "light": 0.2 } } }
         } } });
         assert!(retired_surface_keys(&clean).is_empty());
         let old: serde_json::Value = serde_json::json!({ "style": { "surface": {
             "plate": { "blur": true, "radius": 1.5, "backdrop_compression": 0.85, "refraction": 0.3,
                        "bevel_width": 12.0, "frost": { "backdrop_compression": 0.2 } },
-            "material": { "glass": { "frost": { "backdrop_compression": 0.6 } } }
+            "relief": { "depth": 0.15 },
+            "material": { "glass": { "frost": { "backdrop_compression": 0.6 }, "finish": { "depth": 0.2 } } }
         } } });
         assert_eq!(retired_surface_keys(&old), vec![
             "style.surface.plate.blur",
@@ -2258,7 +2269,9 @@ mod tests {
             "style.surface.plate.refraction",
             "style.surface.plate.bevel_width",
             "style.surface.plate.frost.backdrop_compression",
+            "style.surface.relief.depth",
             "style.surface.material.glass.frost.backdrop_compression",
+            "style.surface.material.glass.finish.depth",
         ]);
         assert!(retired_surface_keys(&serde_json::json!({})).is_empty());
     }

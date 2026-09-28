@@ -566,11 +566,11 @@ Spellings that are NOT current, and what the loader does with each:
 
 | Spelling | Status |
 |---|---|
-| `relief.depth`, `window_manager.bevel_depth`, a material's `finish depth=` | alias of `relief.light` / `finish light=`; `light` wins when both are present |
+| `window_manager.bevel_depth` / `.bevel_width` | compat aliases of `relief.light` / `.width` — the compositor's old block, a different family |
 | `relief.height` / `.profile`, `relief.edge_height` / `.edge_profile` | aliases of `wall.*` / `edge.*`; the node wins when both are present |
 | `window_manager.bevel_width` | alias of `relief.width` |
 | `param.color` (+ top-level `plate_opacity`) | alias of `plate.pane.color`, multiplied by the opacity line |
-| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression`, `plate.bevel_width` | RETIRED: reported by path (`color::retired_surface_keys`), not read |
+| `plate.blur` / `.radius` / `.backdrop_compression` / `.refraction`, `frost.backdrop_compression`, `plate.bevel_width`, `relief.depth`, a material's `finish depth=` | RETIRED: reported by path (`color::retired_surface_keys`), not read; cce-relief seeds from `depth` once and writes `light` |
 | `relief.wall.knobs` / `edge.knobs`, `profile_knobs` / `edge_knobs` | not style: cce-relief's own state (`~/.config/cce/cce-relief/state.kdl`); read once as a seed, removed on its next Save |
 
 Where each rule is argued, by its lead-in: **Frost is one block** and
@@ -756,9 +756,10 @@ relief light=0.15 width=9.3 {
 `width` (the run of both, one number — see the roll-width note below) and
 `light` (how hard the light falls across either shape — NOT a length, it is
 `bevel_depth` → `Finish.strength`; `depth`, what every config said until
-2026-09-28, is its alias, losing to `light` when a file carries both, and
-cce-relief's Save writes `light` and takes `depth` off) stay on the node
-itself, since both shapes share them. `height` is a length — the wall's drop, the edge's rise —
+2026-09-28, was its alias for the rest of that day and is retired — reported
+by path, not read, seeded from once by cce-relief whose Save writes `light`
+and takes `depth` off) stay on the node itself, since both shapes share
+them. `height` is a length — the wall's drop, the edge's rise —
 and `height=(mm)0.3` is honest geometry resolved through the metric; unset, a
 carve drops `relief_shade::RECESS_DEPTH` (0.6) of its wall (saturating at the
 DE roll width) and the roll is a quarter-round of radius width, the look every

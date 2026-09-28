@@ -245,9 +245,12 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 // spelling survives only as a compat alias).
                 // `light` is the spelling (since 2026-09-28): it is the
                 // light strength, not a length. `depth` — what every config
-                // said until then — is the alias, and `prefer_relief_spellings`
-                // lets `light` win when a file carries both.
-                "style.surface.relief.light" | "style.surface.relief.depth" | "window_manager.bevel_depth" => "bevel_depth",
+                // said until then — was its alias for the rest of that day
+                // and is RETIRED: not read, reported by path
+                // (`color::retired_surface_keys`), removed by cce-relief's
+                // Save. The `window_manager.bevel_depth` compat spelling is
+                // a different family (the compositor's old block) and stays.
+                "style.surface.relief.light" | "window_manager.bevel_depth" => "bevel_depth",
                 "style.surface.relief.width" | "window_manager.bevel_width" => "bevel_width",
                 // The two SHAPES of the relief, each a node under it
                 // (2026-09-28): `wall` is a carve's wall — a recess, boss,
@@ -396,15 +399,15 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
 }
 
 /// The relief's current spellings win over its legacy ones: the `wall` /
-/// `edge` node spellings over the flat geometry keys, and `light` over
-/// `depth`. Each pair flattens to ONE registry key (`relief.wall.height`
-/// and `relief.height` are both `bevel_height`; `light` and `depth` are
-/// both `bevel_depth`), and `reload_config` loads the flat lines in the
-/// order the JSON hands them out, so a config carrying both spellings — a
-/// file cce-relief has saved once under the new names while an older line
+/// `edge` node spellings over the flat geometry keys. Each pair flattens to
+/// ONE registry key (`relief.wall.height` and `relief.height` are both
+/// `bevel_height`), and `reload_config` loads the flat lines in the order
+/// the JSON hands them out, so a config carrying both spellings — a file
+/// cce-relief has saved once under the new names while an older line
 /// survives, or a per-app override written in the other spelling — would
 /// otherwise be decided by which line came first. Run on the parsed config
-/// before it is flattened.
+/// before it is flattened. (`depth` versus `light` was a pair here for the
+/// rest of 2026-09-28; `depth` is retired now and never flattens at all.)
 pub(crate) fn prefer_relief_spellings(val: &mut serde_json::Value) {
     const NODE_PAIRS: &[(&str, &str, &str)] = &[
         ("height", "wall", "height"),
@@ -412,18 +415,12 @@ pub(crate) fn prefer_relief_spellings(val: &mut serde_json::Value) {
         ("edge_height", "edge", "height"),
         ("edge_profile", "edge", "profile"),
     ];
-    const FLAT_PAIRS: &[(&str, &str)] = &[("depth", "light")];
     let Some(relief) = val.pointer_mut("/style/surface/relief").and_then(|v| v.as_object_mut()) else {
         return;
     };
     for (flat, node, key) in NODE_PAIRS {
         if relief.get(*node).and_then(|n| n.get(*key)).is_some() {
             relief.remove(*flat);
-        }
-    }
-    for (legacy, current) in FLAT_PAIRS {
-        if relief.get(*current).is_some() {
-            relief.remove(*legacy);
         }
     }
 }
@@ -7005,20 +7002,22 @@ mod tests {
     }
 
     /// A config carrying both spellings of one relief key is decided by the
-    /// current spelling — the node one for the geometry, `light` over
-    /// `depth` — whichever line the file wrote first: the flat pass loads
-    /// in JSON order, and `prefer_relief_spellings` is what makes the order
-    /// irrelevant. A key with no current spelling beside it is left alone.
+    /// current spelling — the node one for the geometry — whichever line
+    /// the file wrote first: the flat pass loads in JSON order, and
+    /// `prefer_relief_spellings` is what makes the order irrelevant. A key
+    /// with no current spelling beside it is left alone. The retired
+    /// `depth` is not a pair any more: it never reaches a registry key.
     #[test]
     fn the_current_spelling_of_a_relief_key_wins_over_the_legacy_one() {
-        let mut both: serde_json::Value = serde_json::json!({
-            "style": { "surface": { "relief": { "depth": 0.3, "light": 0.1 } } }
+        let retired: serde_json::Value = serde_json::json!({
+            "style": { "surface": { "relief": { "depth": 0.3 } } }
         });
-        prefer_relief_spellings(&mut both);
-        assert_eq!(both.pointer("/style/surface/relief"), Some(&serde_json::json!({ "light": 0.1 })), "light wins over depth");
+        let mut flat = String::new();
+        flatten_json_to_flat_props(&retired, "", &mut flat);
+        assert!(!flat.contains("bevel_depth"), "a retired `depth` flattens to no registry key: {flat}");
         let mut val: serde_json::Value = serde_json::json!({
             "style": { "surface": { "relief": {
-                "depth": 0.15,
+                "light": 0.15,
                 "height": 2.0, "wall": { "height": 5.0 },
                 "edge_profile": "old", "edge": { "profile": "new" },
                 "profile": "flat-only"
@@ -7031,7 +7030,7 @@ mod tests {
         assert_eq!(relief.pointer("/wall/height").and_then(|v| v.as_f64()), Some(5.0));
         assert_eq!(relief.pointer("/edge/profile").and_then(|v| v.as_str()), Some("new"));
         assert_eq!(relief.get("profile").and_then(|v| v.as_str()), Some("flat-only"), "no node spelling: kept");
-        assert_eq!(relief.get("depth").and_then(|v| v.as_f64()), Some(0.15), "no `light` beside it: the alias is kept");
+        assert_eq!(relief.get("light").and_then(|v| v.as_f64()), Some(0.15));
         let mut flat = String::new();
         flatten_json_to_flat_props(&val, "", &mut flat);
         assert_eq!(flat.lines().filter(|l| l.starts_with("bevel_height = ")).count(), 1, "{flat}");

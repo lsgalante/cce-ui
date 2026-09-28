@@ -632,7 +632,7 @@ mod tests {
                     frost compression=(f64)0.6 refraction=(f64)0.3
                     root corner_radius=(i64)24
                 }
-                relief depth=(f64)0.08
+                relief light=(f64)0.08
             }
         }
     "##;
@@ -649,7 +649,7 @@ mod tests {
                 plate material="glass" {
                     root corner_radius=(i64)24
                 }
-                relief depth=(f64)0.08
+                relief light=(f64)0.08
             }
         }
     "##;
@@ -773,7 +773,7 @@ mod tests {
                         }
                     }
                     plate blur=(bool)true material="plastic"
-                    relief depth=(f64)0.15 spec=(f64)0.5 shininess=(f64)20.0 curvature=(f64)0.1
+                    relief light=(f64)0.15 spec=(f64)0.5 shininess=(f64)20.0 curvature=(f64)0.1
                 }
                 control material="ghost"
             }

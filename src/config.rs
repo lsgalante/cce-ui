@@ -999,7 +999,7 @@ mod tests {
     /// which is how cce-relief's Save migrates a file in place.
     #[test]
     fn relief_wall_and_edge_keys_write_as_child_nodes_and_the_flat_ones_come_off() {
-        let content = "style {\n    surface {\n        relief depth=(f64)0.15 width=(f64)9.3 profile=\"old\" edge_knobs=(bevel)\"0.500,0.500,0.500\"\n    }\n}\n";
+        let content = "style {\n    surface {\n        relief light=(f64)0.15 width=(f64)9.3 profile=\"old\" edge_knobs=(bevel)\"0.500,0.500,0.500\"\n    }\n}\n";
         let mut doc = content.parse::<kdl::KdlDocument>().unwrap();
         let spec = "smooth;0.000:0.500,0.400:1.000,1.000:0.000";
         assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.wall.profile", spec, "style"));
@@ -1014,13 +1014,13 @@ mod tests {
         assert!(!remove_kdl_in_memory(&mut doc, "style.surface.nothing.here"), "missing node: nothing to remove");
         let out = doc.to_string();
         assert_eq!(out.matches("relief").count(), 1, "one relief node: {out}");
-        assert!(out.contains("depth=(f64)0.15"), "the node keeps its properties: {out}");
+        assert!(out.contains("light=(f64)0.15"), "the node keeps its properties: {out}");
         assert!(!out.contains("profile=\"old\""), "flat profile migrated: {out}");
         assert!(!out.contains("edge_knobs"), "flat knobs migrated: {out}");
 
         let val = parse_kdl_to_json(&out);
         let relief = val.pointer("/style/surface/relief").unwrap();
-        assert_eq!(relief.get("depth").and_then(|v| v.as_f64()), Some(0.15));
+        assert_eq!(relief.get("light").and_then(|v| v.as_f64()), Some(0.15));
         assert_eq!(relief.pointer("/wall/profile").and_then(|v| v.as_str()), Some(spec));
         assert_eq!(relief.pointer("/wall/height").and_then(|v| v.as_str()), Some("0.3mm"), "{relief}");
         assert_eq!(relief.pointer("/edge/profile").and_then(|v| v.as_str()), Some(spec));
@@ -1037,12 +1037,12 @@ mod tests {
     fn relief_keys_write_as_properties_and_round_trip() {
         // `relief` is a PROP_NODES member: style.surface.relief.* must land as
         // properties on the existing relief node (the config.kdl shape), not
-        // as duplicate child nodes shadowing the depth=/width= properties.
-        let content = "style {\n    surface {\n        relief depth=(f64)0.15 width=(f64)9.3\n    }\n}\n";
+        // as duplicate child nodes shadowing the light=/width= properties.
+        let content = "style {\n    surface {\n        relief light=(f64)0.15 width=(f64)9.3\n    }\n}\n";
         let mut doc = content.parse::<kdl::KdlDocument>().unwrap();
         let spec = "smooth;0.000:0.500,0.400:1.000,1.000:0.000";
         assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.profile", spec, "style"));
-        assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.depth", "0.3", "style"));
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.relief.light", "0.3", "style"));
         let out = doc.to_string();
         // Still one relief node, no child block grown under it.
         assert_eq!(out.matches("relief").count(), 1, "out: {out}");
@@ -1053,7 +1053,7 @@ mod tests {
         let val = parse_kdl_to_json(&out);
         let relief = val.get("style").unwrap().get("surface").unwrap().get("relief").unwrap();
         assert_eq!(relief.get("profile").unwrap().as_str().unwrap(), spec);
-        assert_eq!(relief.get("depth").unwrap().as_f64().unwrap(), 0.3);
+        assert_eq!(relief.get("light").unwrap().as_f64().unwrap(), 0.3);
         assert_eq!(relief.get("width").unwrap().as_f64().unwrap(), 9.3);
     }
 

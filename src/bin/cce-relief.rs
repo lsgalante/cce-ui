@@ -1471,6 +1471,9 @@ impl Application for BevelPopup {
             saved_edge.or_else(|| rel_shape_str("edge", "knobs", "edge_knobs").as_deref().and_then(parse_knobs)),
         );
 
+        // `depth` is retired (the loader does not read it); read HERE as a
+        // seed only, so a file saved before the rename opens on its own
+        // light strength and Save writes it back as `light`.
         let depth = key_spec
             .as_ref()
             .and_then(|s| s.light)
