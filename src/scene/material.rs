@@ -628,7 +628,8 @@ mod tests {
         style {
             surface {
                 param color=(rgba)"#05050840"
-                plate backdrop_compression=(f64)0.6 refraction=(f64)0.3 bevel_width=(f64)12.0 blur=(bool)true {
+                plate bevel_width=(f64)12.0 {
+                    frost compression=(f64)0.6 refraction=(f64)0.3
                     root corner_radius=(i64)24
                 }
                 relief depth=(f64)0.08
@@ -642,7 +643,7 @@ mod tests {
                 material {
                     glass {
                         color (rgba)"#05050840"
-                        frost backdrop_compression=(f64)0.6 refraction=(f64)0.3
+                        frost compression=(f64)0.6 refraction=(f64)0.3
                     }
                 }
                 plate material="glass" bevel_width=(f64)12.0 {
@@ -693,28 +694,38 @@ mod tests {
         assert_eq!(crate::color::material_binding(PlateRung::Pane), None);
     }
 
-    /// The default material's frost as ONE block — `plate { frost radius=…
+    /// The default material's frost is ONE block — `plate { frost radius=…
     /// compression=… refraction=… }`, the shape a named material's `frost`
-    /// child already had — with the four scattered keys (`blur`, `radius`,
-    /// `backdrop_compression`, `refraction`) still read as aliases: a bare
-    /// `frost` is frosted at the defaults, `frost (bool)false` is not, and
-    /// when both spellings are present the block governs.
+    /// child already had: a bare `frost` is frosted at the defaults, `frost
+    /// (bool)false` is not. The four scattered keys it replaced (`blur`,
+    /// `radius`, `backdrop_compression`, `refraction`) are RETIRED, not
+    /// aliases: a config carrying one is reported by path
+    /// (`color::retired_frost_keys`) and the key does nothing — `blur=true`
+    /// alone is sharp, a flat `radius` moves nothing, and the old knob name
+    /// inside the block is ignored too.
     #[test]
-    fn the_frost_block_is_one_spelling_of_the_default_recipe() {
+    fn the_frost_block_is_the_only_spelling_of_the_default_recipe() {
         let _lock = crate::color::test_color_state_lock();
         crate::layout::lazy_init_style_registry();
         let _ = crate::color::plate_blur();
+        let doc = |plate: &str| format!("style {{\n surface {{\n plate {{\n {plate}\n }}\n }}\n}}\n");
         let load = |plate: &str| {
-            crate::color::reload_colors(&format!("style {{\n surface {{\n plate {{\n {plate}\n }}\n }}\n}}\n"));
+            crate::color::reload_colors(&doc(plate));
             (crate::color::plate_blur(), Frost::from_style())
         };
+        let retired = |plate: &str| crate::color::retired_frost_keys(&crate::config::parse_kdl_to_json(&doc(plate)));
         let frosted = |c: f32, r: f32, rad: f32| Frost::Frosted { compression: c, refraction: r, radius: rad };
         assert_eq!(load("frost radius=(f64)3.0 compression=(f64)0.4 refraction=(f64)0.1"), (true, frosted(0.4, 0.1, 3.0)));
-        assert_eq!(load("frost backdrop_compression=(f64)0.2"), (true, frosted(0.2, 0.1, 3.0)), "the old knob name is accepted inside the block; unset knobs keep their last value");
+        assert!(retired("frost radius=(f64)3.0 compression=(f64)0.4 refraction=(f64)0.1").is_empty());
+        assert_eq!(load("frost backdrop_compression=(f64)0.2"), (true, frosted(0.4, 0.1, 3.0)), "the old knob name inside the block is ignored; unset knobs keep their last value");
+        assert_eq!(retired("frost backdrop_compression=(f64)0.2"), vec!["style.surface.plate.frost.backdrop_compression"]);
         assert_eq!(load("frost").0, true, "a bare `frost` is frosted");
         assert_eq!(load("frost (bool)false").0, false);
-        assert_eq!(load("blur (bool)true\n radius (f64)2.0"), (true, frosted(0.2, 0.1, 2.0)), "the scattered spelling still works");
-        assert_eq!(load("blur (bool)false\n frost compression=(f64)0.7"), (true, frosted(0.7, 0.1, 2.0)), "the block governs");
+        // `from_style` is the RECIPE, `plate_blur` the switch: the retired
+        // keys flip neither — the switch stays off and the radius stays 3.
+        assert_eq!(load("blur (bool)true\n radius (f64)2.0"), (false, frosted(0.4, 0.1, 3.0)), "the retired spelling frosts nothing and moves nothing");
+        assert_eq!(retired("blur (bool)true\n radius (f64)2.0"), vec!["style.surface.plate.blur", "style.surface.plate.radius"]);
+        assert_eq!(load("blur (bool)false\n frost compression=(f64)0.7"), (true, frosted(0.7, 0.1, 3.0)), "the block is read, the retired key is not");
         crate::color::reload_colors("");
     }
 

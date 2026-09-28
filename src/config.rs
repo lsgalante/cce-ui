@@ -887,14 +887,14 @@ mod tests {
     fn material_keys_write_as_frost_and_finish_props() {
         use super::{parse_kdl_to_json, update_kdl_in_memory};
         let mut doc = kdl::KdlDocument::new();
-        assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.frost.backdrop_compression", "0.6", "style"));
+        assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.frost.compression", "0.6", "style"));
         assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.frost.refraction", "0.3", "style"));
         assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.finish.spec", "0.4", "style"));
         assert!(update_kdl_in_memory(&mut doc, "style.surface.material.glass.color", "#05050840", "style"));
         assert!(update_kdl_in_memory(&mut doc, "style.surface.plate.material", "glass", "style"));
         let text = doc.to_string();
         let val = parse_kdl_to_json(&text);
-        assert_eq!(val.pointer("/style/surface/material/glass/frost/backdrop_compression").and_then(|v| v.as_f64()), Some(0.6), "{text}");
+        assert_eq!(val.pointer("/style/surface/material/glass/frost/compression").and_then(|v| v.as_f64()), Some(0.6), "{text}");
         assert_eq!(val.pointer("/style/surface/material/glass/frost/refraction").and_then(|v| v.as_f64()), Some(0.3));
         assert_eq!(val.pointer("/style/surface/material/glass/finish/spec").and_then(|v| v.as_f64()), Some(0.4));
         assert_eq!(val.pointer("/style/surface/material/glass/color").and_then(|v| v.as_str()), Some("#05050840"));

@@ -404,10 +404,17 @@ What this buys, and where the code is heading:
   default plate material's recipe is spelled `style.surface.plate { frost
   radius=5.5 compression=0 refraction=0 }` — the same `frost` child a named
   material has — with a bare `frost` frosted at the defaults and `frost
-  (bool)false` off. The four keys it replaces (`blur` as the switch,
-  `radius`, `backdrop_compression`, `refraction`) are still read as aliases,
-  and the block governs when both are present; cce-relief writes whichever
-  spelling the config already uses. The enum variant is `Frost::Unfrosted`
+  (bool)false` off. The four keys it replaced (`blur` as the switch,
+  `radius`, `backdrop_compression`, `refraction`) were aliases for the rest
+  of that day and are RETIRED: the loader reports one it finds
+  (`color::retired_frost_keys`, a warning naming the path) and does not read
+  it — so a config with `blur=true` and no block is sharp, and the warning
+  is what says why. A material's `frost` child spells its compression
+  `compression` too; its `backdrop_compression` alias went with them.
+  cce-relief writes the block (only for a frosted plate, since the block is
+  what frosts one), seeds from a retired key it still finds, and removes
+  the retired keys on Save, so a file migrates the first time it is saved.
+  The enum variant is `Frost::Unfrosted`
   (was `Opaque`): it means the plate never samples its backdrop, and a
   translucent tint stays translucent with a SHARP view through it — which
   is what the old name kept reading as "covers everything". The pane tint
@@ -427,7 +434,7 @@ What this buys, and where the code is heading:
   "liquid glass" legibility problem, and why refraction and specular cannot
   help: they are shape cues, and legibility is a luminance budget.
 
-  `style.surface.plate.backdrop_compression` (0..1, `color::plate_backdrop_
+  `style.surface.plate { frost compression=… }` (0..1, `color::plate_backdrop_
   compression`, **default 0** — every existing config keeps today's look)
   remaps the blurred backdrop's luminance toward the plate's own key before
   the tint, holding its chromaticity. It is not opacity and not "darken": it
@@ -483,12 +490,12 @@ What this buys, and where the code is heading:
   the rung's legacy material (unset fields fall back; no `frost` child = opaque; a
   binding wins over the legacy keys; an undefined name warns and degrades to legacy).
   The DE finish's three fixed terms are `style.surface.relief.spec / shininess /
-  curvature`; the default frost's blur sigma is `style.surface.plate.radius`. cce-relief
+  curvature`; the default frost's blur sigma is `plate { frost radius=… }`. cce-relief
   edits them (Finish and Frost columns) and writes into the bound material's node or the
   DE keys — never restructuring an unbound config. KDL trap when writing fixtures: two
   nodes on one line need a `;`, and `a { b }` on one line is a parse error the loader
   swallows into an empty document.
-- **`style.surface.plate.refraction` (0..1, default 0) is the rim, and it buys
+- **`plate { frost refraction=… }` (0..1, default 0) is the rim, and it buys
   no legibility.** It is the answer to the other half of the question — not
   "can I read this" but "is this an object". The roll is a real surface with a
   real tilt, and `sv_rim` IS that tilt (the unnormalized normal's horizontal

@@ -1155,22 +1155,27 @@ impl BevelPopup {
                             & w(&format!("{m}.frost.radius"), &radius)))
             }
             None => {
-                // Into the `plate { frost … }` block when the config spells
-                // it that way (the block governs, so a write to the old
-                // scattered keys would be read and then overridden), else
-                // the scattered keys the config already uses.
-                let block = cce_ui::config::cached_config().pointer("/style/surface/plate/frost").is_some();
-                let (kc, kr, kd) = if block {
-                    ("style.surface.plate.frost.compression", "style.surface.plate.frost.refraction", "style.surface.plate.frost.radius")
-                } else {
-                    ("style.surface.plate.backdrop_compression", "style.surface.plate.refraction", "style.surface.plate.radius")
-                };
+                // Into the `plate { frost … }` block — the one spelling the
+                // loader reads since the flat `blur` / `radius` /
+                // `backdrop_compression` / `refraction` keys were retired —
+                // and only for a FROSTED plate: writing the block is what
+                // frosts a plate, so an unfrosted config keeps its sharp
+                // view and the three sliders read as "when frosted", as they
+                // do for an opaque material node. A file that still carries
+                // a retired key had it read as the seed (below) and loses it
+                // here, so a config migrates on its first save.
+                let frosted = self.material_frosted;
+                let migrated = ["blur", "radius", "backdrop_compression", "refraction"]
+                    .iter()
+                    .all(|k| cce_ui::config::remove_config_value(p, &format!("style.surface.plate.{k}")));
                 w("style.surface.relief.spec", &spec)
                     & w("style.surface.relief.shininess", &shine)
                     & w("style.surface.relief.curvature", &curv)
-                    & w(kc, &comp)
-                    & w(kr, &refr)
-                    & w(kd, &radius)
+                    & (!frosted
+                        || (w("style.surface.plate.frost.compression", &comp)
+                            & w("style.surface.plate.frost.refraction", &refr)
+                            & w("style.surface.plate.frost.radius", &radius)))
+                    & migrated
             }
         }
     }
@@ -1518,12 +1523,26 @@ impl Application for BevelPopup {
             None => Self::bound_material(),
         };
         let tdef = |k: &str| material_target.as_deref().map(|n| format!("/style/surface/material/{n}/{k}"));
+        // A `frost` block (anything but `frost (bool)false`) is frosted. The
+        // retired `plate.blur` is still honoured HERE, as a seed only: a
+        // file that has not been saved since the retirement opens frosted,
+        // and Save writes the block and drops the old key.
+        let block_frosted = |v: &serde_json::Value| {
+            match v.pointer("/style/surface/plate/frost") {
+                Some(serde_json::Value::Bool(on)) => *on,
+                Some(_) => true,
+                None => false,
+            }
+        };
+        let legacy_blur = |v: &serde_json::Value| {
+            tnum("/style/surface/plate/blur").map_or(
+                v.pointer("/style/surface/plate/blur").and_then(|b| b.as_bool()).unwrap_or(false),
+                |f| f > 0.001,
+            )
+        };
         let material_frosted = match tj {
             Some(v) => tdef("frost").is_some_and(|p| v.pointer(&p).is_some())
-                || (material_target.is_none() && tnum("/style/surface/plate/blur").map_or(
-                    v.pointer("/style/surface/plate/blur").and_then(|b| b.as_bool()).unwrap_or(false),
-                    |f| f > 0.001,
-                )),
+                || (material_target.is_none() && (block_frosted(v) || legacy_blur(v))),
             None => material_target
                 .as_deref()
                 .map_or(pane.frost.is_frosted(), |n| cce_ui::color::named_material(n).is_some_and(|d| d.frost.is_some())),
@@ -1541,13 +1560,17 @@ impl Application for BevelPopup {
                 cce_ui::scene::Frost::Unfrosted => (0.0, 0.0, cce_ui::scene::Frost::DEFAULT_RADIUS),
             },
         };
-        let frost_seed = |k: &str, plate_key: &str, process: f32| -> f32 {
+        // A frost knob seeds from the bound material's `frost` child, else
+        // the plate's `frost` block, else — seed only, so a not-yet-saved
+        // file opens where it was — the retired flat key under `plate`.
+        let frost_seed = |k: &str, legacy_key: &str, process: f32| -> f32 {
             tdef(&format!("frost/{k}"))
                 .and_then(|p| tnum(&p))
-                .or_else(|| tnum(&format!("/style/surface/plate/{plate_key}")))
+                .or_else(|| tnum(&format!("/style/surface/plate/frost/{k}")))
+                .or_else(|| tnum(&format!("/style/surface/plate/{legacy_key}")))
                 .unwrap_or(process)
         };
-        let comp0 = frost_seed("backdrop_compression", "backdrop_compression", pcomp);
+        let comp0 = frost_seed("compression", "backdrop_compression", pcomp);
         let refr0 = frost_seed("refraction", "refraction", prefr);
         let radius0 = frost_seed("radius", "radius", pradius);
         let spec0 = finish_seed("spec", pane.finish.spec);

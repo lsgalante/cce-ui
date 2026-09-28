@@ -681,35 +681,29 @@ fn parse_and_set_colors(content: &str) {
         if let Ok(mut lock) = PARAM_BG_COLOR.write() { *lock = c; }
         if let Ok(mut lock) = PANE_COLOR_WHOLE.write() { *lock = true; }
     }
-    if let Some(c) = val
-        .pointer("/style/surface/plate/backdrop_compression")
-        .and_then(|v| v.as_f64())
-    {
-        if let Ok(mut lock) = PLATE_BACKDROP_COMPRESSION.write() { *lock = (c as f32).clamp(0.0, 1.0); }
+    // The default plate's frost is ONE block, the same shape a named
+    // material's `frost` child has: `plate { frost radius=5.5 compression=0
+    // refraction=0 }` is frosted with those knobs, a bare `frost` is frosted
+    // at the defaults, `frost (bool)false` is not frosted. The four scattered
+    // keys it replaced on 2026-09-28 (`blur` as the switch, `radius`,
+    // `backdrop_compression`, `refraction`) were read as aliases for the rest
+    // of that day and are retired: a config still carrying one is reported
+    // (`retired_frost_keys`) and the key does nothing, because an alias that
+    // keeps working is a second spelling forever. The block is absent → not
+    // frosted, which is what `blur=true` alone now amounts to; the report
+    // is what tells the user why their plates went sharp.
+    let retired = retired_frost_keys(&val);
+    if !retired.is_empty() {
+        log::warn!(
+            "retired frost keys in config: {} — spell the frost as `plate {{ frost radius= compression= refraction= }}` (or a material's `frost` child with `compression`)",
+            retired.join(", ")
+        );
     }
-    if let Some(r) = val.pointer("/style/surface/plate/refraction").and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = PLATE_REFRACTION.write() { *lock = (r as f32).clamp(0.0, 1.0); }
-    }
-    if let Some(blur) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_bool()) {
-        if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur; }
-    } else if let Some(blur_val) = val.pointer("/style/surface/plate/blur").and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = PLATE_BLUR.write() { *lock = blur_val > 0.001; }
-    }
-    if let Some(r) = val.pointer("/style/surface/plate/radius").and_then(|v| v.as_f64()) {
-        if let Ok(mut lock) = PLATE_FROST_RADIUS.write() { *lock = (r as f32).max(0.0); }
-    }
-    // The one-block spelling (2026-09-28), the same shape a named
-    // material's `frost` child has: `plate { frost radius=5.5
-    // compression=0 refraction=0 }` is frosted with those knobs, a bare
-    // `frost` is frosted at the defaults, `frost (bool)false` is not
-    // frosted. Read AFTER the four scattered keys (`blur`, `radius`,
-    // `backdrop_compression`, `refraction`), which stay as aliases, so a
-    // config that says both is governed by the block.
     match val.pointer("/style/surface/plate/frost") {
         Some(serde_json::Value::Object(fo)) => {
             let num = |k: &str| fo.get(k).and_then(|v| v.as_f64()).map(|v| v as f32);
             if let Ok(mut lock) = PLATE_BLUR.write() { *lock = true; }
-            if let Some(c) = num("compression").or_else(|| num("backdrop_compression")) {
+            if let Some(c) = num("compression") {
                 if let Ok(mut lock) = PLATE_BACKDROP_COMPRESSION.write() { *lock = c.clamp(0.0, 1.0); }
             }
             if let Some(r) = num("refraction") {
@@ -752,7 +746,7 @@ fn parse_and_set_colors(content: &str) {
                 let Some(node) = node.as_object() else { continue };
                 let frost = node.get("frost").map(|fr| match fr.as_object() {
                     Some(fo) => FrostDef {
-                        compression: num(fo.get("backdrop_compression").or(fo.get("compression"))),
+                        compression: num(fo.get("compression")),
                         refraction: num(fo.get("refraction")),
                         radius: num(fo.get("radius")),
                     },
@@ -783,6 +777,31 @@ fn parse_and_set_colors(content: &str) {
         ];
         if let Ok(mut lock) = MATERIAL_BINDINGS.write() { *lock = bindings; }
     }
+}
+
+/// The retired frost spellings a parsed config still carries, as the dotted
+/// paths a user would grep for: the four flat keys under `plate` (`blur`,
+/// `radius`, `backdrop_compression`, `refraction`) and `backdrop_compression`
+/// inside any `frost` child (the plate's, or a named material's), whose one
+/// name is `compression`. Empty for a clean config.
+pub fn retired_frost_keys(val: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    for k in ["blur", "radius", "backdrop_compression", "refraction"] {
+        if val.pointer(&format!("/style/surface/plate/{k}")).is_some() {
+            found.push(format!("style.surface.plate.{k}"));
+        }
+    }
+    if val.pointer("/style/surface/plate/frost/backdrop_compression").is_some() {
+        found.push("style.surface.plate.frost.backdrop_compression".to_string());
+    }
+    if let Some(mats) = val.pointer("/style/surface/material").and_then(|v| v.as_object()) {
+        for (name, node) in mats {
+            if node.pointer("/frost/backdrop_compression").is_some() {
+                found.push(format!("style.surface.material.{name}.frost.backdrop_compression"));
+            }
+        }
+    }
+    found
 }
 
 fn load_colors_once() {
@@ -1921,8 +1940,8 @@ pub fn set_plate_refraction(r: f32) {
 
 /// Whether the default plate material is frosted at all — the switch on
 /// `Frost::from_style`. Spelled `style.surface.plate.frost` (a block, the
-/// knobs inside it; see the loader) or, as an alias, the older
-/// `style.surface.plate.blur` bool.
+/// knobs inside it; see the loader). The older `style.surface.plate.blur`
+/// bool is retired and reported, not read.
 static PLATE_BLUR: RwLock<bool> = RwLock::new(false);
 
 /// The finish's three fixed terms — specular strength, shininess exponent,
@@ -1935,8 +1954,8 @@ static FINISH_SPEC: RwLock<f32> = RwLock::new(0.4);
 static FINISH_SHININESS: RwLock<f32> = RwLock::new(24.0);
 static FINISH_CURVATURE: RwLock<f32> = RwLock::new(0.2);
 
-/// The default material's blur radius (`style.surface.plate.radius`, the
-/// kernel sigma in logical px) — [`crate::scene::Frost::DEFAULT_RADIUS`]
+/// The default material's blur radius (`style.surface.plate.frost.radius`,
+/// the kernel sigma in logical px) — [`crate::scene::Frost::DEFAULT_RADIUS`]
 /// unless config says otherwise.
 static PLATE_FROST_RADIUS: RwLock<f32> = RwLock::new(crate::scene::material::Frost::DEFAULT_RADIUS);
 
@@ -2231,6 +2250,32 @@ mod tests {
         assert_eq!(plate_bevel_width(), crate::layout::bevel_width(), "cleared: back to the relief width");
     }
 
+    /// The four flat frost keys and the `backdrop_compression` spelling
+    /// inside a `frost` child are reported by path; the block itself and a
+    /// material's `compression` are not.
+    #[test]
+    fn retired_frost_keys_are_named_by_path_and_the_block_is_not() {
+        let clean: serde_json::Value = serde_json::json!({ "style": { "surface": {
+            "plate": { "frost": { "radius": 5.5, "compression": 0.0, "refraction": 0.0 }, "color": "#6c6c7bf2" },
+            "material": { "glass": { "frost": { "compression": 0.6 } } }
+        } } });
+        assert!(retired_frost_keys(&clean).is_empty());
+        let old: serde_json::Value = serde_json::json!({ "style": { "surface": {
+            "plate": { "blur": true, "radius": 1.5, "backdrop_compression": 0.85, "refraction": 0.3,
+                       "frost": { "backdrop_compression": 0.2 } },
+            "material": { "glass": { "frost": { "backdrop_compression": 0.6 } } }
+        } } });
+        assert_eq!(retired_frost_keys(&old), vec![
+            "style.surface.plate.blur",
+            "style.surface.plate.radius",
+            "style.surface.plate.backdrop_compression",
+            "style.surface.plate.refraction",
+            "style.surface.plate.frost.backdrop_compression",
+            "style.surface.material.glass.frost.backdrop_compression",
+        ]);
+        assert!(retired_frost_keys(&serde_json::json!({})).is_empty());
+    }
+
     #[test]
     fn plate_refraction_defaults_off_and_clamps() {
         assert_eq!(plate_refraction(), 0.0, "off unless a config asks");
@@ -2247,7 +2292,7 @@ mod tests {
     /// Off is load-bearing: it is the behaviour every config already in the
     /// wild has, and a toolkit-wide default that changed how every frosted
     /// surface in the DE looks would arrive unannounced in eighteen apps.
-    /// Opting in is a per-app `style.surface.plate.backdrop_compression`.
+    /// Opting in is a per-app `style.surface.plate { frost compression=… }`.
     #[test]
     fn backdrop_compression_defaults_off_and_clamps() {
         assert_eq!(plate_backdrop_compression(), 0.0, "off unless a config asks");
