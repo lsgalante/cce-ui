@@ -1350,7 +1350,10 @@ impl BevelPopup {
             "profile_knobs", "edge_knobs", "wall.knobs", "edge.knobs",
         ]
         .iter()
-        .all(|k| cce_ui::config::remove_config_value(&p, &format!("style.surface.relief.{k}")));
+        .all(|k| cce_ui::config::remove_config_value(&p, &format!("style.surface.relief.{k}")))
+            & ["bevel_depth", "bevel_width"]
+                .iter()
+                .all(|k| cce_ui::config::remove_config_value(&p, &format!("window_manager.{k}")));
         let ok = ok & migrated;
         self.status = if ok {
             println!("saved {p}");
@@ -1472,14 +1475,19 @@ impl Application for BevelPopup {
             saved_edge.or_else(|| rel_shape_str("edge", "knobs", "edge_knobs").as_deref().and_then(parse_knobs)),
         );
 
-        // `depth` is retired (the loader does not read it); read HERE as a
-        // seed only, so a file saved before the rename opens on its own
-        // light strength and Save writes it back as `light`.
+        // `depth` and the `window_manager.bevel_*` spellings are retired
+        // (the loader does not read them); read HERE as seeds only, so a
+        // file saved before the renames opens on its own values and Save
+        // writes them back under `relief`.
+        let wm_f32 = |k: &str| {
+            target_json.as_ref().and_then(|v| v.pointer(&format!("/window_manager/{k}"))).and_then(|v| v.as_f64()).map(|f| f as f32)
+        };
         let depth = key_spec
             .as_ref()
             .and_then(|s| s.light)
             .or_else(|| rel_f32("light"))
             .or_else(|| rel_f32("depth"))
+            .or_else(|| wm_f32("bevel_depth"))
             .unwrap_or_else(cce_ui::layout::bevel_depth);
         // The height as the target SPELLS it (value and unit), kept so Save
         // writes the same unit back; the registry fallback carries no unit
@@ -1497,6 +1505,7 @@ impl Application for BevelPopup {
             .as_ref()
             .map(|s| s.width)
             .or_else(|| rel_f32("width"))
+            .or_else(|| wm_f32("bevel_width"))
             .unwrap_or_else(cce_ui::layout::bevel_width);
         // The seeds ARE the material this window previews: install them so
         // the section, the strip and the popup's own plate show the target

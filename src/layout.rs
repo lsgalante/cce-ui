@@ -188,6 +188,15 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
             }
         }
         _ => {
+            // A retired `window_manager` spelling of a relief key emits NO
+            // line: the fall-through below strips a path's first segment, so
+            // `window_manager.bevel_depth` would otherwise land on the live
+            // `bevel_depth` registry key by accident, alias or not. The
+            // `style.surface.*` retirements need no guard — stripped, they
+            // become `surface.relief.depth` and the like, which nothing reads.
+            if matches!(prefix, "window_manager.bevel_depth" | "window_manager.bevel_width") {
+                return;
+            }
             let flat_key = match prefix {
                 "style.list.font" | "style.data.list.font" => "list_font",
                 "style.list.font_color" | "style.data.list.font_color" => "list_font_color",
@@ -239,19 +248,19 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.control.toggle.border_color" => "toggle_border_color",
                 "style.control.toggle.corner_radius" => "toggle_corner_radius",
                 "window_manager.light_source_position" => "light_source_position",
-                // The DE's relief material: canonical home style.surface.relief
-                // (these shade every bevel/boss/recess in the toolkit — the
-                // compositor never read them, so the old window_manager
-                // spelling survives only as a compat alias).
-                // `light` is the spelling (since 2026-09-28): it is the
-                // light strength, not a length. `depth` — what every config
-                // said until then — was its alias for the rest of that day
-                // and is RETIRED: not read, reported by path
-                // (`color::retired_surface_keys`), removed by cce-relief's
-                // Save. The `window_manager.bevel_depth` compat spelling is
-                // a different family (the compositor's old block) and stays.
-                "style.surface.relief.light" | "window_manager.bevel_depth" => "bevel_depth",
-                "style.surface.relief.width" | "window_manager.bevel_width" => "bevel_width",
+                // The DE's relief material, home style.surface.relief: these
+                // shade every bevel/boss/recess in the toolkit. `light` is
+                // the spelling (since 2026-09-28): it is the light strength,
+                // not a length. Two older spellings are RETIRED — not read,
+                // reported by path (`color::retired_surface_keys`), removed
+                // by cce-relief's Save: `relief.depth`, what every config
+                // said until that day, and `window_manager.bevel_depth` /
+                // `bevel_width`, the block these keys were born in before
+                // they had a home of their own (the compositor never read
+                // them; the spelling survived as a compat alias until the
+                // evening of 2026-09-28).
+                "style.surface.relief.light" => "bevel_depth",
+                "style.surface.relief.width" => "bevel_width",
                 // The two SHAPES of the relief, each a node under it
                 // (2026-09-28): `wall` is a carve's wall — a recess, boss,
                 // ridge or trough cut into a surface — and `edge` is the
@@ -6970,11 +6979,12 @@ mod tests {
                 "depth": 0.3,
                 "height": 2.0, "edge_height": 3.0, "profile": "a", "edge_profile": "b",
                 "wall": { "knobs": "1,1,1" }, "edge_knobs": "2,2,2"
-            } } }
+            } } },
+            "window_manager": { "bevel_depth": 0.3, "bevel_width": 5.0 }
         });
         let mut flat = String::new();
         flatten_json_to_flat_props(&old, "", &mut flat);
-        for k in ["bevel_depth", "bevel_height", "roll_height", "bevel_profile_spec", "roll_profile_spec", "profile_knobs"] {
+        for k in ["bevel_depth", "bevel_width", "bevel_height", "roll_height", "bevel_profile_spec", "roll_profile_spec", "profile_knobs"] {
             assert!(!flat.lines().any(|l| l.starts_with(&format!("{k} = "))), "{k} landed from a retired spelling: {flat}");
         }
         // And a file carrying BOTH spellings is what its current one says,

@@ -683,7 +683,7 @@ fn parse_and_set_colors(content: &str) {
     let retired = retired_surface_keys(&val);
     if !retired.is_empty() {
         log::warn!(
-            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), every roll's width is `relief width=`, the light strength is `relief light=` (a material's `finish light=`), and the relief's geometry is `relief {{ wall height= profile= ; edge height= profile= }}`",
+            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), every roll's width is `relief width=`, the light strength is `relief light=` (a material's `finish light=`), and the relief's geometry is `relief {{ wall height= profile= ; edge height= profile= }}` (the window_manager bevel_* spellings are the same relief keys)",
             retired.join(", ")
         );
     }
@@ -777,8 +777,11 @@ fn parse_and_set_colors(content: &str) {
 /// light strength's former name (`light`, since it is not a length); and
 /// the relief's flat geometry keys `height` / `profile` (the wall's, now
 /// `wall.height` / `wall.profile`) and `edge_height` / `edge_profile` (the
-/// edge's, now `edge.height` / `edge.profile`). Each was an alias for part
-/// of 2026-09-28 and is not read now. Empty for a clean config.
+/// edge's, now `edge.height` / `edge.profile`); and `window_manager.bevel_depth`
+/// / `bevel_width`, the block the relief keys were born in before
+/// `style.surface.relief` existed (the compositor never read them). Each
+/// was an alias for part of 2026-09-28 and is not read now. Empty for a
+/// clean config.
 pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
     let mut found = Vec::new();
     for k in ["blur", "radius", "backdrop_compression", "refraction", "bevel_width"] {
@@ -792,6 +795,11 @@ pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
     for k in ["depth", "height", "profile", "edge_height", "edge_profile"] {
         if val.pointer(&format!("/style/surface/relief/{k}")).is_some() {
             found.push(format!("style.surface.relief.{k}"));
+        }
+    }
+    for k in ["bevel_depth", "bevel_width"] {
+        if val.pointer(&format!("/window_manager/{k}")).is_some() {
+            found.push(format!("window_manager.{k}"));
         }
     }
     if let Some(mats) = val.pointer("/style/surface/material").and_then(|v| v.as_object()) {
@@ -2250,23 +2258,23 @@ mod tests {
 
     /// The four flat frost keys, the `backdrop_compression` spelling inside
     /// a `frost` child, `plate.bevel_width`, `depth` (on the relief, or in a
-    /// material's `finish`) and the relief's flat geometry keys are
-    /// reported by path; the blocks themselves and a material's
-    /// `compression` / `light` are not.
+    /// material's `finish`), the relief's flat geometry keys and the
+    /// window_manager bevel spellings are reported by path; the blocks
+    /// themselves and a material's `compression` / `light` are not.
     #[test]
     fn retired_surface_keys_are_named_by_path_and_the_block_is_not() {
         let clean: serde_json::Value = serde_json::json!({ "style": { "surface": {
             "plate": { "frost": { "radius": 5.5, "compression": 0.0, "refraction": 0.0 }, "color": "#6c6c7bf2" },
             "relief": { "light": 0.15, "wall": { "height": 1.0, "profile": "a" }, "edge": { "height": 2.0, "profile": "b" } },
             "material": { "glass": { "frost": { "compression": 0.6 }, "finish": { "light": 0.2 } } }
-        } } });
+        } }, "window_manager": { "corner_shape": 4.5, "control_relief": true } });
         assert!(retired_surface_keys(&clean).is_empty());
         let old: serde_json::Value = serde_json::json!({ "style": { "surface": {
             "plate": { "blur": true, "radius": 1.5, "backdrop_compression": 0.85, "refraction": 0.3,
                        "bevel_width": 12.0, "frost": { "backdrop_compression": 0.2 } },
             "relief": { "depth": 0.15, "height": 1.0, "profile": "a", "edge_height": 2.0, "edge_profile": "b" },
             "material": { "glass": { "frost": { "backdrop_compression": 0.6 }, "finish": { "depth": 0.2 } } }
-        } } });
+        } }, "window_manager": { "bevel_depth": 0.15, "bevel_width": 9.3 } });
         assert_eq!(retired_surface_keys(&old), vec![
             "style.surface.plate.blur",
             "style.surface.plate.radius",
@@ -2279,6 +2287,8 @@ mod tests {
             "style.surface.relief.profile",
             "style.surface.relief.edge_height",
             "style.surface.relief.edge_profile",
+            "window_manager.bevel_depth",
+            "window_manager.bevel_width",
             "style.surface.material.glass.frost.backdrop_compression",
             "style.surface.material.glass.finish.depth",
         ]);
