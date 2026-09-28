@@ -619,10 +619,10 @@ cce-system-interface) to confirm behavior, not just the test suite.
   KDL/JSON-driven `json_layout.rs` is dissolved; `scene/layout.rs` is the box model.)
 - `protocol.rs` — inline-generated Wayland protocol bindings.
 - `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`).
-- `process.rs` — detached/tracked child spawning, plus the `cce-cloud` popup pattern:
-  `CloudPopup` (one blocking `run_json`/`run_dmenu` invocation) and `CloudPopupTracker`
-  (an app's single-active-popup toggle state; see cce-status-interface for the
-  canonical usage).
+- `process.rs` — detached/tracked child spawning. (The `cce-cloud` popup pattern
+  that lived beside it — `CloudPopup`, `CloudPopupTracker` — was removed on
+  2026-09-28: every app that spawned a popup has an in-process widget for it now,
+  and no crate in the workspace called it.)
 - `icon.rs` — XDG icon-theme lookup: a `.desktop` `Icon=` key (or an SNI tray icon
   name) → a file on disk, plus `upload_themed` to rasterize/decode and upload it.
   **Not** `lib.rs`'s `upload_icon`, which loads a *bundled* cce-icons glyph by its
