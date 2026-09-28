@@ -686,16 +686,18 @@ multiply on the plate's own fill plus a specular crest. Each is a node under
 `style.surface.relief` with the same three keys:
 
 ```kdl
-relief depth=0.15 width=9.3 {
+relief light=0.15 width=9.3 {
     wall height=(mm)0.3 profile="smooth;…"
     edge height=4.0    profile="smooth;…"
 }
 ```
 
 `width` (the run of both, one number — see the roll-width note below) and
-`depth` (the light; `light` is its honest alias — NOT a length, it is
-`bevel_depth` → `Finish.strength`) stay on the node itself, since both
-shapes share them. `height` is a length — the wall's drop, the edge's rise —
+`light` (how hard the light falls across either shape — NOT a length, it is
+`bevel_depth` → `Finish.strength`; `depth`, what every config said until
+2026-09-28, is its alias, losing to `light` when a file carries both, and
+cce-relief's Save writes `light` and takes `depth` off) stay on the node
+itself, since both shapes share them. `height` is a length — the wall's drop, the edge's rise —
 and `height=(mm)0.3` is honest geometry resolved through the metric; unset, a
 carve drops `relief_shade::RECESS_DEPTH` (0.6) of its wall (saturating at the
 DE roll width) and the roll is a quarter-round of radius width, the look every
@@ -707,9 +709,9 @@ downstream of the registry knows. Until 2026-09-28 the keys were flat on the
 node with the wall UNNAMED (`height`, `profile`) and the edge prefixed
 (`edge_height`, `edge_profile`), which read as one shape with an "edge"
 variant rather than two shapes; those spellings survive as aliases in
-`layout.rs`'s flatten table, and `prefer_relief_wall_edge` drops a flat one
+`layout.rs`'s flatten table, and `prefer_relief_spellings` drops a flat one
 whenever its node spelling is present, so a file carrying both is decided by
-the node and not by line order (`the_node_spelling_of_a_relief_key_wins_over_the_flat_one`).
+the node and not by line order (`the_current_spelling_of_a_relief_key_wins_over_the_legacy_one`).
 `cce-relief`'s Save writes the node spellings and REMOVES the flat ones
 (`config::remove_config_value`), so a file migrates the first time it is
 saved; `wall` and `edge` are `PROP_NODES` members so their keys land as

@@ -19,8 +19,9 @@
 //! hot.
 //!
 //! The knobs under the section: the wall curve's Shoulder / Base / Bias,
-//! then **Light** (the `bevel_depth` slot — how hard the light falls across
-//! the wall; not a length), **Width** (the wall's run, logical px) and
+//! then **Light** (`style.surface.relief.light`, the `bevel_depth` registry
+//! slot — how hard the light falls across the wall; not a length), **Width**
+//! (the wall's run, logical px) and
 //! **Height** (the wall's drop, logical px; 0 = follow the width at the
 //! analytic ratio). Height is the fabrication axis: the section's depth
 //! numbers read in millimetres whenever the display metric is real
@@ -1327,19 +1328,21 @@ impl BevelPopup {
         // The two shapes are nodes — `relief { wall … ; edge … }` — and a
         // save MIGRATES: the flat spellings this editor wrote until
         // 2026-09-28 (`height`, `profile`, `profile_knobs` for the wall,
-        // `edge_*` for the edge) come off the file, or the node spelling
-        // would shadow a stale line forever; and the knob triples come off
-        // under either spelling, since they live in the state file now.
+        // `edge_*` for the edge, and `depth` for the light) come off the
+        // file, or a current spelling would shadow a stale line forever; and
+        // the knob triples come off under either spelling, since they live
+        // in the state file now.
         // `remove_config_value` is true for a key that is not there, so a
         // clean file costs nothing.
         let ok = height_ok
             & material_ok
             & knobs_ok
-            & w("style.surface.relief.depth", &depth)
+            & w("style.surface.relief.light", &depth)
             & w("style.surface.relief.width", &width)
             & w("style.surface.relief.wall.profile", &self.wall.last_spec)
             & w("style.surface.relief.edge.profile", &self.edge.last_spec);
         let migrated = [
+            "depth",
             "height", "edge_height", "profile", "edge_profile",
             "profile_knobs", "edge_knobs", "wall.knobs", "edge.knobs",
         ]
@@ -1412,7 +1415,7 @@ impl Application for BevelPopup {
         // then the flat legacy spelling a file saved before 2026-09-28 still
         // carries (`height` / `profile` / `profile_knobs` for the wall,
         // `edge_*` for the edge) — the same precedence the registry load
-        // applies through `layout::prefer_relief_wall_edge`.
+        // applies through `layout::prefer_relief_spellings`.
         let rel_shape = |node: &str, k: &str, legacy: &str| {
             let r = target_relief.as_ref()?;
             r.get(node).and_then(|n| n.get(k)).or_else(|| r.get(legacy)).cloned()
