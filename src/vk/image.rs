@@ -958,6 +958,13 @@ impl ImageStage {
         self.images.get(&image_id).map(|gpu| gpu.descriptor_set)
     }
 
+    /// An uploaded image's view and size, for a pass that samples it under
+    /// bindings of its own (the path tracer). None while its upload has not
+    /// landed.
+    pub(crate) fn view_and_size(&self, image_id: u32) -> Option<(vk::ImageView, u32, u32)> {
+        self.images.get(&image_id).map(|gpu| (gpu.view, gpu.width, gpu.height))
+    }
+
     /// Record one image quad (index `i` of this frame's list). The caller
     /// restores its own pipeline/scissor state afterwards. Returns false if the
     /// image hasn't finished uploading (draw skipped).

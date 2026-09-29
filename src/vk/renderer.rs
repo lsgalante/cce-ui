@@ -19,7 +19,7 @@ use crate::engine::Vertex;
 
 use super::core::SurfaceLost;
 use super::image::{ImageQuad, ImageStage};
-use super::rt::{RtCamera, RtMaterial, RtStage, RtTriangle};
+use super::rt::{RtCamera, RtImage, RtImageSource, RtMaterial, RtStage, RtTriangle};
 use super::scene::{MeshId, SceneDraw, SceneImage, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
 
@@ -1495,6 +1495,19 @@ impl VkRenderer {
     /// (geometry rebuilds), matching `update_mesh`. The first call compiles
     /// the compute pipeline.
     pub fn set_rt_scene(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial]) {
+        self.set_rt_scene_with_image(triangles, materials, None);
+    }
+
+    /// [`set_rt_scene`](Self::set_rt_scene), with a user image standing in
+    /// the scene: the picture the raster pass draws as a `SceneImage`,
+    /// traced. The image's pixels changing is a change of scene like any
+    /// other — set it again, which restarts the accumulation.
+    pub fn set_rt_scene_with_image(
+        &mut self,
+        triangles: &[RtTriangle],
+        materials: &[RtMaterial],
+        image: Option<RtImage>,
+    ) {
         unsafe {
             let _ = self.core.device.device_wait_idle();
         }
@@ -1508,6 +1521,8 @@ impl VkRenderer {
                 core.accel_loader.as_ref(),
                 core.as_scratch_align,
                 core.min_uniform_align,
+                core.queue,
+                core.command_pool,
             )
         });
         rt.set_scene(
@@ -1517,6 +1532,7 @@ impl VkRenderer {
             core.command_pool,
             triangles,
             materials,
+            image.map(|i| (RtImageSource::Shared(i.image), i.corners, i.opacity)),
         );
     }
 
@@ -1813,7 +1829,10 @@ impl VkRenderer {
                 clip_radius,
             );
             if let Some(rt) = self.rt.as_mut() {
-                rt.write_frame_uniforms(frame_index);
+                let images = &self.image;
+                rt.write_frame_uniforms(&self.core.device, frame_index, &|id| {
+                    images.view_and_size(id)
+                });
             }
 
             // Record.

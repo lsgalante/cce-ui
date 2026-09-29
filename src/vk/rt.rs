@@ -39,6 +39,42 @@ pub struct RtMaterial {
     pub emission: [f32; 3],
 }
 
+/// An image standing in the traced scene: a quad whose surface is the
+/// image's colour, lit as any other surface is, and which lets a ray through
+/// where the image is clear. The tracer adds the quad to the scene itself.
+///
+/// The image is one the 2D pass already holds (an id from `upload_rgba`),
+/// so a picture shown in the raster viewport costs the tracer nothing more.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RtImage {
+    pub image: u32,
+    /// The quad's corners in the scene's space, in the image's own order:
+    /// top-left, top-right, bottom-right, bottom-left.
+    pub corners: [[f32; 3]; 4],
+    /// Alpha multiplier over the image's own.
+    pub opacity: f32,
+}
+
+/// [`RtImage`] for the headless tracer, which has no 2D pass to share an
+/// image with and is handed the pixels: tightly packed sRGB RGBA8.
+#[derive(Debug, Clone, Copy)]
+pub struct RtImagePixels<'a> {
+    pub pixels: &'a [u8],
+    pub width: u32,
+    pub height: u32,
+    pub corners: [[f32; 3]; 4],
+    pub opacity: f32,
+}
+
+/// Where the stage's image comes from.
+pub(crate) enum RtImageSource<'a> {
+    /// The 2D pass's image of this id, looked up each frame: its upload may
+    /// not have landed when the scene is set, and it may be replaced after.
+    Shared(u32),
+    /// Pixels for the stage to upload and own.
+    Pixels { pixels: &'a [u8], width: u32, height: u32 },
+}
+
 /// The full camera: the inverse of the raster path's `proj * view * model`.
 /// Rays are unprojected from NDC through it, so any matrix stack that renders
 /// the raster viewport drives the tracer unchanged.
@@ -84,6 +120,9 @@ struct RtParams {
     max_bounces: u32,
     spp: u32,
     _pad: [u32; 3],
+    img_origin: [f32; 4],
+    img_u: [f32; 4],
+    img_v: [f32; 4],
 }
 
 // --- BVH construction (binned SAH) ---
@@ -298,6 +337,185 @@ struct Accel {
 struct RtFrame {
     uniforms: AllocatedBuffer,
     descriptor_set: vk::DescriptorSet,
+}
+
+/// A texture the stage made and owns: the 1x1 stand-in bound while the
+/// scene has no image, and the headless tracer's image.
+struct OwnedTexture {
+    image: vk::Image,
+    view: vk::ImageView,
+    allocation: Option<Allocation>,
+    size: (u32, u32),
+}
+
+impl OwnedTexture {
+    /// Upload sRGB RGBA8 pixels as a one-level texture, with a blocking
+    /// one-time submit. One level: the headless tracer renders a still, and
+    /// its samples average what a mip chain would have.
+    fn new(
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        queue: vk::Queue,
+        command_pool: vk::CommandPool,
+        pixels: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Self {
+        assert_eq!(pixels.len(), (width * height * 4) as usize, "8888 size mismatch");
+        let range = vk::ImageSubresourceRange::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .level_count(1)
+            .layer_count(1);
+        unsafe {
+            let image = device
+                .create_image(
+                    &vk::ImageCreateInfo::default()
+                        .image_type(vk::ImageType::TYPE_2D)
+                        .format(vk::Format::R8G8B8A8_SRGB)
+                        .extent(vk::Extent3D { width, height, depth: 1 })
+                        .mip_levels(1)
+                        .array_layers(1)
+                        .samples(vk::SampleCountFlags::TYPE_1)
+                        .tiling(vk::ImageTiling::OPTIMAL)
+                        .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST)
+                        .initial_layout(vk::ImageLayout::UNDEFINED),
+                    None,
+                )
+                .expect("Failed to create RT texture");
+            let requirements = device.get_image_memory_requirements(image);
+            let allocation = allocator
+                .allocate(&AllocationCreateDesc {
+                    name: "rt-texture",
+                    requirements,
+                    location: MemoryLocation::GpuOnly,
+                    linear: false,
+                    allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+                })
+                .expect("Failed to allocate RT texture memory");
+            device
+                .bind_image_memory(image, allocation.memory(), allocation.offset())
+                .expect("Failed to bind RT texture memory");
+            let mut staging = create_cpu_buffer(
+                device,
+                allocator,
+                pixels.len() as vk::DeviceSize,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+                "rt-texture-staging",
+            );
+            staging.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..pixels.len()]
+                .copy_from_slice(pixels);
+
+            let cmd = device
+                .allocate_command_buffers(
+                    &vk::CommandBufferAllocateInfo::default()
+                        .command_pool(command_pool)
+                        .level(vk::CommandBufferLevel::PRIMARY)
+                        .command_buffer_count(1),
+                )
+                .expect("Failed to allocate RT texture command buffer")[0];
+            device
+                .begin_command_buffer(
+                    cmd,
+                    &vk::CommandBufferBeginInfo::default()
+                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                )
+                .unwrap();
+            let barrier = |from_access, to_access, from_layout, to_layout, from_stage, to_stage| {
+                device.cmd_pipeline_barrier(
+                    cmd,
+                    from_stage,
+                    to_stage,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[vk::ImageMemoryBarrier::default()
+                        .src_access_mask(from_access)
+                        .dst_access_mask(to_access)
+                        .old_layout(from_layout)
+                        .new_layout(to_layout)
+                        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                        .image(image)
+                        .subresource_range(range)],
+                );
+            };
+            barrier(
+                vk::AccessFlags::empty(),
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::PipelineStageFlags::TOP_OF_PIPE,
+                vk::PipelineStageFlags::TRANSFER,
+            );
+            device.cmd_copy_buffer_to_image(
+                cmd,
+                staging.buffer,
+                image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[vk::BufferImageCopy::default()
+                    .buffer_row_length(width)
+                    .buffer_image_height(height)
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1),
+                    )
+                    .image_extent(vk::Extent3D { width, height, depth: 1 })],
+            );
+            barrier(
+                vk::AccessFlags::TRANSFER_WRITE,
+                vk::AccessFlags::SHADER_READ,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::COMPUTE_SHADER,
+            );
+            device.end_command_buffer(cmd).unwrap();
+            let cmds = [cmd];
+            device
+                .queue_submit(
+                    queue,
+                    &[vk::SubmitInfo::default().command_buffers(&cmds)],
+                    vk::Fence::null(),
+                )
+                .expect("RT texture upload submit failed");
+            device.queue_wait_idle(queue).expect("RT texture upload wait failed");
+            device.free_command_buffers(command_pool, &cmds);
+            destroy_cpu_buffer(device, allocator, &mut staging);
+
+            let view = device
+                .create_image_view(
+                    &vk::ImageViewCreateInfo::default()
+                        .image(image)
+                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .format(vk::Format::R8G8B8A8_SRGB)
+                        .subresource_range(range),
+                    None,
+                )
+                .expect("Failed to create RT texture view");
+            OwnedTexture { image, view, allocation: Some(allocation), size: (width, height) }
+        }
+    }
+
+    /// Caller must have the device idle.
+    fn destroy(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        unsafe {
+            device.destroy_image_view(self.view, None);
+            device.destroy_image(self.image, None);
+        }
+        if let Some(a) = self.allocation.take() {
+            let _ = allocator.free(a);
+        }
+    }
+}
+
+/// The scene's image as the stage holds it.
+struct StagedImage {
+    /// The 2D pass's image of this id, or None for one the stage owns.
+    shared: Option<u32>,
+    owned: Option<OwnedTexture>,
+    corners: [[f32; 3]; 4],
+    opacity: f32,
 }
 
 #[repr(C)]
@@ -620,6 +838,12 @@ pub(crate) struct RtStage {
     materials: AllocatedBuffer,
     tri_count: u32,
 
+    /// Bound at the image bindings while the scene has no image, or has one
+    /// whose upload has not landed: a shader's bindings are never empty.
+    stand_in: OwnedTexture,
+    image_sampler: vk::Sampler,
+    image: Option<StagedImage>,
+
     accum: AllocatedBuffer,
     /// Primary-hit features (2 vec4 per pixel) written by the tracer, read
     /// by the denoiser.
@@ -653,6 +877,8 @@ impl RtStage {
         accel_loader: Option<&ash::khr::acceleration_structure::Device>,
         as_scratch_align: vk::DeviceSize,
         min_uniform_align: vk::DeviceSize,
+        queue: vk::Queue,
+        command_pool: vk::CommandPool,
     ) -> Self {
         let force_compute = std::env::var("CCE_VK_RT").is_ok_and(|v| v == "compute");
         let denoise_on = !std::env::var("CCE_VK_RT_DENOISE")
@@ -708,6 +934,16 @@ impl RtStage {
                 vk::DescriptorSetLayoutBinding::default()
                     .binding(6)
                     .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(7)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .descriptor_count(1)
+                    .stage_flags(vk::ShaderStageFlags::COMPUTE),
+                vk::DescriptorSetLayoutBinding::default()
+                    .binding(8)
+                    .descriptor_type(vk::DescriptorType::SAMPLER)
                     .descriptor_count(1)
                     .stage_flags(vk::ShaderStageFlags::COMPUTE),
             ];
@@ -766,6 +1002,12 @@ impl RtStage {
                 vk::DescriptorPoolSize::default()
                     .ty(vk::DescriptorType::STORAGE_IMAGE)
                     .descriptor_count(n),
+                vk::DescriptorPoolSize::default()
+                    .ty(vk::DescriptorType::SAMPLED_IMAGE)
+                    .descriptor_count(n),
+                vk::DescriptorPoolSize::default()
+                    .ty(vk::DescriptorType::SAMPLER)
+                    .descriptor_count(n),
             ];
             if tier == RtTier::RayQuery {
                 pool_sizes.push(
@@ -820,6 +1062,34 @@ impl RtStage {
             let denoiser = denoise_on
                 .then(|| Denoiser::new(device, allocator, frames_in_flight, min_uniform_align));
 
+            let stand_in =
+                OwnedTexture::new(device, allocator, queue, command_pool, &[255; 4], 1, 1);
+            // Linear within a level and between levels; the shader names
+            // the level, since a compute shader has no derivatives to
+            // choose one by.
+            let image_sampler = device
+                .create_sampler(
+                    &vk::SamplerCreateInfo::default()
+                        .mag_filter(vk::Filter::LINEAR)
+                        .min_filter(vk::Filter::LINEAR)
+                        .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                        .min_lod(0.0)
+                        .max_lod(vk::LOD_CLAMP_NONE)
+                        .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                        .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+                        .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE),
+                    None,
+                )
+                .expect("Failed to create RT image sampler");
+            for frame in &frames {
+                Self::write_image_descriptor(
+                    device,
+                    frame.descriptor_set,
+                    stand_in.view,
+                    image_sampler,
+                );
+            }
+
             RtStage {
                 tier,
                 accel_loader: accel_loader.cloned(),
@@ -835,6 +1105,9 @@ impl RtStage {
                 tris: AllocatedBuffer::null(),
                 materials: AllocatedBuffer::null(),
                 tri_count: 0,
+                stand_in,
+                image_sampler,
+                image: None,
                 accum: AllocatedBuffer::null(),
                 features: AllocatedBuffer::null(),
                 ping: AllocatedBuffer::null(),
@@ -855,9 +1128,43 @@ impl RtStage {
         }
     }
 
+    fn write_image_descriptor(
+        device: &ash::Device,
+        set: vk::DescriptorSet,
+        view: vk::ImageView,
+        sampler: vk::Sampler,
+    ) {
+        let image_infos = [vk::DescriptorImageInfo::default()
+            .image_view(view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let sampler_infos = [vk::DescriptorImageInfo::default().sampler(sampler)];
+        unsafe {
+            device.update_descriptor_sets(
+                &[
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(7)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(&image_infos),
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(8)
+                        .descriptor_type(vk::DescriptorType::SAMPLER)
+                        .image_info(&sampler_infos),
+                ],
+                &[],
+            );
+        }
+    }
+
     /// Replace the scene. Tier 1 builds the BVH on the CPU (reordering a copy
     /// of the triangles); tier 2 builds driver acceleration structures on the
     /// given queue instead. Caller must have the device idle.
+    ///
+    /// An image joins the scene as a quad of two triangles under a material
+    /// of its own, marked textured — so both tiers meet it as they meet any
+    /// triangle, and a scene that is an image alone is not an empty one.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn set_scene(
         &mut self,
         device: &ash::Device,
@@ -866,8 +1173,38 @@ impl RtStage {
         command_pool: vk::CommandPool,
         triangles: &[RtTriangle],
         materials: &[RtMaterial],
+        image: Option<(RtImageSource, [[f32; 3]; 4], f32)>,
     ) {
         let mut tris: Vec<RtTriangle> = triangles.to_vec();
+        // The index the image's material will have, past the scene's own
+        // (or past the one stood in for a scene that names none).
+        let image_material = materials.len().max(1) as u32;
+        if let Some((_, [tl, tr, br, bl], _)) = &image {
+            tris.push(RtTriangle { p0: *tl, p1: *bl, p2: *tr, material: image_material });
+            tris.push(RtTriangle { p0: *tr, p1: *bl, p2: *br, material: image_material });
+        }
+        if let Some(mut old) = self.image.take().and_then(|i| i.owned) {
+            old.destroy(device, allocator);
+        }
+        self.image = image.map(|(source, corners, opacity)| match source {
+            RtImageSource::Shared(id) => {
+                StagedImage { shared: Some(id), owned: None, corners, opacity }
+            }
+            RtImageSource::Pixels { pixels, width, height } => StagedImage {
+                shared: None,
+                owned: Some(OwnedTexture::new(
+                    device,
+                    allocator,
+                    queue,
+                    command_pool,
+                    pixels,
+                    width,
+                    height,
+                )),
+                corners,
+                opacity,
+            },
+        });
         let nodes = match self.tier {
             RtTier::Compute => build_bvh(&mut tris),
             RtTier::RayQuery => Vec::new(),
@@ -880,7 +1217,7 @@ impl RtStage {
                 p2: [t.p2[0], t.p2[1], t.p2[2], 0.0],
             })
             .collect();
-        let gpu_mats: Vec<GpuMaterial> = if materials.is_empty() {
+        let mut gpu_mats: Vec<GpuMaterial> = if materials.is_empty() {
             vec![GpuMaterial { albedo: [0.8, 0.8, 0.8, 0.0], emission: [0.0; 4] }]
         } else {
             materials
@@ -891,6 +1228,11 @@ impl RtStage {
                 })
                 .collect()
         };
+        if self.image.is_some() {
+            // albedo.w marks it textured: the shader takes the colour from
+            // the image.
+            gpu_mats.push(GpuMaterial { albedo: [1.0, 1.0, 1.0, 1.0], emission: [0.0; 4] });
+        }
 
         self.destroy_accel(device, allocator);
         for buf in [&mut self.nodes, &mut self.tris, &mut self.materials] {
@@ -1444,12 +1786,49 @@ impl RtStage {
         self.tri_count > 0 && self.sample_index < MAX_SAMPLES
     }
 
-    /// After the frame fence: write this frame's params.
-    pub(crate) fn write_frame_uniforms(&mut self, frame_index: usize) {
+    /// After the frame fence: write this frame's params, and point this
+    /// frame's image bindings at the scene's image as it is NOW.
+    ///
+    /// Each frame, because a shared image is the 2D pass's to replace: its
+    /// upload may land after the scene was set, and freeing it destroys the
+    /// view. This frame's set is past its fence, so it is safe to rewrite,
+    /// and it is rewritten before every use — a view that is gone is never
+    /// one a dispatch reads. `shared` looks an id up: its view and size.
+    pub(crate) fn write_frame_uniforms(
+        &mut self,
+        device: &ash::Device,
+        frame_index: usize,
+        shared: &dyn Fn(u32) -> Option<(vk::ImageView, u32, u32)>,
+    ) {
         if !self.staged || self.tri_count == 0 {
             return;
         }
         let Some(camera) = self.camera else { return };
+        let bound = self.image.as_ref().and_then(|image| {
+            let (view, w, h) = match (&image.owned, image.shared) {
+                (Some(owned), _) => (owned.view, owned.size.0, owned.size.1),
+                (None, Some(id)) => shared(id)?,
+                (None, None) => return None,
+            };
+            Some((view, w, h, image.corners, image.opacity))
+        });
+        let (view, img_origin, img_u, img_v) = match bound {
+            Some((view, w, h, [tl, tr, _, bl], opacity)) => (
+                view,
+                [tl[0], tl[1], tl[2], opacity.clamp(0.0, 1.0)],
+                [tr[0] - tl[0], tr[1] - tl[1], tr[2] - tl[2], w as f32],
+                [bl[0] - tl[0], bl[1] - tl[1], bl[2] - tl[2], h as f32],
+            ),
+            // No image, or one not there yet: opacity 0 lets every ray
+            // through the quad, and the stand-in is never sampled for it.
+            None => (self.stand_in.view, [0.0; 4], [1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]),
+        };
+        Self::write_image_descriptor(
+            device,
+            self.frames[frame_index].descriptor_set,
+            view,
+            self.image_sampler,
+        );
         let params = RtParams {
             inv_mvp: camera.inv_mvp,
             width: self.output_size.0,
@@ -1458,6 +1837,9 @@ impl RtStage {
             max_bounces: MAX_BOUNCES,
             spp: self.spp,
             _pad: [0; 3],
+            img_origin,
+            img_u,
+            img_v,
         };
         let frame = &mut self.frames[frame_index];
         frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()
@@ -1685,7 +2067,12 @@ impl RtStage {
         for buf in [&mut self.nodes, &mut self.tris, &mut self.materials] {
             destroy_cpu_buffer(device, allocator, buf);
         }
+        if let Some(mut owned) = self.image.take().and_then(|i| i.owned) {
+            owned.destroy(device, allocator);
+        }
+        self.stand_in.destroy(device, allocator);
         unsafe {
+            device.destroy_sampler(self.image_sampler, None);
             for frame in &mut self.frames {
                 let mut uniforms = std::mem::replace(&mut frame.uniforms, AllocatedBuffer::null());
                 destroy_cpu_buffer(device, allocator, &mut uniforms);
@@ -1732,6 +2119,7 @@ impl RtOffscreen {
         let accel_loader = core.accel_loader.clone();
         let as_scratch_align = core.as_scratch_align;
         let min_uniform_align = core.min_uniform_align;
+        let (queue, command_pool) = (core.queue, core.command_pool);
         let allocator = core.allocator.as_mut().unwrap();
         let stage = RtStage::new(
             &device,
@@ -1740,6 +2128,8 @@ impl RtOffscreen {
             accel_loader.as_ref(),
             as_scratch_align,
             min_uniform_align,
+            queue,
+            command_pool,
         );
         unsafe {
             let cmd = device
@@ -1768,6 +2158,16 @@ impl RtOffscreen {
 
     /// Replace the scene (same schema as `VkRenderer::set_rt_scene`).
     pub fn set_scene(&mut self, triangles: &[RtTriangle], materials: &[RtMaterial]) {
+        self.set_scene_with_image(triangles, materials, None);
+    }
+
+    /// [`set_scene`](Self::set_scene), with an image standing in the scene.
+    pub fn set_scene_with_image(
+        &mut self,
+        triangles: &[RtTriangle],
+        materials: &[RtMaterial],
+        image: Option<RtImagePixels>,
+    ) {
         unsafe {
             let _ = self.core.device.device_wait_idle();
         }
@@ -1781,6 +2181,13 @@ impl RtOffscreen {
             command_pool,
             triangles,
             materials,
+            image.map(|i| {
+                (
+                    RtImageSource::Pixels { pixels: i.pixels, width: i.width, height: i.height },
+                    i.corners,
+                    i.opacity,
+                )
+            }),
         );
     }
 
@@ -1815,7 +2222,7 @@ impl RtOffscreen {
             // stage() resets sample_index when the camera or size changed —
             // keep our resume point, not the reset, after the first chunk.
             self.stage.sample_index = done;
-            self.stage.write_frame_uniforms(0);
+            self.stage.write_frame_uniforms(&device, 0, &|_| None);
             unsafe {
                 device
                     .begin_command_buffer(self.cmd, &vk::CommandBufferBeginInfo::default())
@@ -2236,6 +2643,63 @@ mod tests {
         assert!(!tier2.is_empty());
         let denoise = compile_wgsl(include_str!("rt_denoise.wgsl"));
         assert!(!denoise.is_empty());
+    }
+
+    /// An image in the traced scene, end to end: a quad half red and half
+    /// clear, in front of a green wall. The red half shows red, the clear
+    /// half shows the wall behind it, and beside the quad is the wall too.
+    /// Run with: cargo test --lib vk::rt -- --ignored
+    #[test]
+    #[ignore = "requires a Vulkan device"]
+    fn test_offscreen_renders_an_image() {
+        let mut off = RtOffscreen::new();
+        // 2x1: a red texel, a clear one.
+        let pixels = [255u8, 0, 0, 255, 0, 0, 0, 0];
+        let wall = |p0, p1, p2| RtTriangle { p0, p1, p2, material: 0 };
+        off.set_scene_with_image(
+            &[
+                wall([-9.0, -9.0, -1.0], [9.0, -9.0, -1.0], [9.0, 9.0, -1.0]),
+                wall([-9.0, -9.0, -1.0], [9.0, 9.0, -1.0], [-9.0, 9.0, -1.0]),
+            ],
+            &[RtMaterial { albedo: [0.1, 0.9, 0.1], emission: [0.0; 3] }],
+            Some(RtImagePixels {
+                pixels: &pixels,
+                width: 2,
+                height: 1,
+                corners: [[-1.0, 0.5, 0.0], [1.0, 0.5, 0.0], [1.0, -0.5, 0.0], [-1.0, -0.5, 0.0]],
+                opacity: 1.0,
+            }),
+        );
+        let proj = glam::Mat4::perspective_rh(0.9, 1.0, 0.1, 100.0);
+        let view = glam::Mat4::look_at_rh(
+            glam::Vec3::new(0.0, 0.0, 3.0),
+            glam::Vec3::ZERO,
+            glam::Vec3::Y,
+        );
+        let camera = RtCamera { inv_mvp: (proj * view).inverse().to_cols_array_2d() };
+        let (w, h) = (64u32, 64u32);
+        let px = off.render(camera, w, h, 64);
+        let at = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            (px[i] as i32, px[i + 1] as i32, px[i + 2] as i32)
+        };
+        // The quad spans x in -1..1 of a view about 2.9 wide at z = 0: the
+        // pane's columns 10 to 54, and rows 21 to 43.
+        let (r, g, _) = at(16, 32);
+        assert!(r > g + 40, "the image's red half is not red: r={r} g={g}");
+        let (r, g, _) = at(48, 32);
+        assert!(g > r + 40, "the image's clear half hides the wall: r={r} g={g}");
+        let (r, g, _) = at(32, 6);
+        assert!(g > r + 40, "beside the image is not the wall: r={r} g={g}");
+
+        // Without its image the scene is the wall alone.
+        off.set_scene(
+            &[wall([-9.0, -9.0, -1.0], [9.0, -9.0, -1.0], [9.0, 9.0, -1.0])],
+            &[RtMaterial { albedo: [0.1, 0.9, 0.1], emission: [0.0; 3] }],
+        );
+        let px = off.render(camera, w, h, 16);
+        let i = ((32 * w + 40) * 4) as usize;
+        assert!(px[i + 1] > px[i], "the image outlived its scene");
     }
 
     /// End-to-end GPU test — needs a Vulkan device, so ignored by default.
