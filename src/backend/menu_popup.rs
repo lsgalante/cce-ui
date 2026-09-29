@@ -31,6 +31,17 @@
 //! keyboard stays with the window, whose Escape and press-outside handling
 //! close the menu as before.
 //!
+//! **A submenu is a second popup, the child of the first** (2026-09-29).
+//! `context_menu`'s open submenu is mirrored the same way into a popup whose
+//! PARENT is the menu's popup — nested as xdg means popups to nest — placed
+//! beside the row it flew out from by a positioner that flips it to the
+//! menu's other side where the output has no room. Its configure is relative
+//! to the menu's popup, so where it landed is that plus where the menu
+//! landed. It has a renderer of its own, kept across opens as the menu's is.
+//! The child goes first: a popup that is not the topmost may not be
+//! destroyed, so every close of the menu's popup closes the submenu's ahead
+//! of it.
+//!
 //! Only xdg toplevels get a popup. A layer surface, or any app with
 //! `CCE_UI_MENU_POPUP=0`, keeps the in-window menu, constrained to the window
 //! by `context_menu::constrain_to` with the same flip / slide / shorten rules.
@@ -60,6 +71,13 @@ pub struct MenuPopup {
     placed: Option<(f32, f32, f32, f32)>,
     /// The buffer scale last sent on the popup's surface.
     committed_scale: i32,
+}
+
+/// Which of the two menus a popup shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Which {
+    Menu,
+    Submenu,
 }
 
 impl MenuPopup {
@@ -93,30 +111,54 @@ impl<A: Application> EngineState<A> {
         )
     }
 
-    /// Bring the popup in line with the menu: open one for a newly shown
-    /// menu, close it for a hidden one. Runs once per loop, after input, so
-    /// a host that shows the menu and then sets its slider rows (which widen
-    /// it) has done both before the popup is sized.
+    /// Bring the popups in line with the menu: open one for a newly shown
+    /// menu, close it for a hidden one, and the same for its submenu. Runs
+    /// once per loop, after input, so a host that shows the menu and then
+    /// sets its slider rows (which widen it) has done both before the popup
+    /// is sized.
     pub(crate) fn sync_menu_popup(&mut self) {
         let visible = context_menu::is_visible();
         if !(visible && self.window.is_some() && popup_enabled()) {
-            if self.menu_popup.is_some() {
+            if self.menu_popup.is_some() || self.submenu_popup.is_some() {
                 self.close_menu_popup();
             }
             context_menu::set_hosted(false);
+            context_menu::submenu::set_hosted(false);
             if visible {
                 let (fw, fh) = self.frame_size();
                 context_menu::constrain_to(0.0, 0.0, fw, fh);
+                if context_menu::submenu::is_visible() {
+                    context_menu::submenu::constrain_beside(0.0, 0.0, fw, fh);
+                }
             }
             return;
         }
         let (anchor, w, content_h) = context_menu::natural_geometry();
         let key = (context_menu::generation(), w.ceil() as u32, content_h.ceil() as u32);
-        if self.menu_popup.as_ref().is_some_and(|p| p.key == key) {
+        if !self.menu_popup.as_ref().is_some_and(|p| p.key == key) {
+            self.close_menu_popup();
+            self.open_menu_popup(anchor, key);
+        }
+        self.sync_submenu_popup();
+    }
+
+    fn sync_submenu_popup(&mut self) {
+        if !context_menu::submenu::is_visible() {
+            self.close_submenu_popup();
             return;
         }
-        self.close_menu_popup();
-        self.open_menu_popup(anchor, key);
+        let (w, content_h, _) = context_menu::submenu::natural_geometry();
+        let key = (context_menu::submenu::generation(), w.ceil() as u32, content_h.ceil() as u32);
+        if self.submenu_popup.as_ref().is_some_and(|p| p.key == key) {
+            return;
+        }
+        self.close_submenu_popup();
+        // Its parent has to be on screen first; the next loop tries again.
+        let Some(placed) = self.menu_popup.as_ref().and_then(|p| p.placed) else {
+            context_menu::submenu::set_hosted(true);
+            return;
+        };
+        self.open_submenu_popup(placed, key);
     }
 
     fn open_menu_popup(&mut self, anchor: (f32, f32), key: (u64, u32, u32)) {
@@ -170,10 +212,66 @@ impl<A: Application> EngineState<A> {
         self.menu_popup = Some(MenuPopup { popup, key, placed: None, committed_scale: 0 });
     }
 
-    /// Close the popup. The renderer lets go of the surface FIRST: dropping
-    /// the popup destroys the `wl_surface`, and a swapchain must never
-    /// outlive the surface it presents to.
+    /// Open the submenu's popup beside the menu's, `menu` being where that
+    /// one landed. Everything here is in the MENU POPUP's coordinates, which
+    /// is what a child's positioner is relative to.
+    fn open_submenu_popup(&mut self, menu: (f32, f32, f32, f32), key: (u64, u32, u32)) {
+        let Some(parent) = self.menu_popup.as_ref() else { return };
+        let fallback = |why: String| {
+            log::warn!("[menu_popup] {why}; drawing the submenu in the window");
+            context_menu::submenu::set_hosted(false);
+        };
+        let positioner = match XdgPositioner::new(&self.xdg_shell_state) {
+            Ok(p) => p,
+            Err(e) => return fallback(format!("no positioner ({e})")),
+        };
+        let f = forced();
+        positioner.set_size(
+            ((key.1 as f32) * f).round().max(1.0) as i32,
+            ((key.2 as f32) * f).round().max(1.0) as i32,
+        );
+        // The anchor is a strip the menu's whole width at the height the
+        // submenu's top goes: its top-right corner is where the submenu
+        // opens from, and flipped, its top-left.
+        let (_, my, mw, mh) = menu;
+        let top = (context_menu::submenu::anchor_y() - my).clamp(0.0, (mh - 1.0).max(0.0));
+        let tall = context_menu::ROW_H.min(mh - top).max(1.0);
+        positioner.set_anchor_rect(
+            0,
+            (top * f).round() as i32,
+            ((mw * f).round() as i32).max(1),
+            ((tall * f).round() as i32).max(1),
+        );
+        positioner.set_anchor(Anchor::TopRight);
+        positioner.set_gravity(Gravity::BottomRight);
+        // Beside the menu on the right; on the left where the right has no
+        // room (flip); slid up where it would run off the bottom; cut down
+        // and scrolling where it is taller than the output.
+        positioner.set_constraint_adjustment(
+            ConstraintAdjustment::FlipX
+                | ConstraintAdjustment::SlideX
+                | ConstraintAdjustment::SlideY
+                | ConstraintAdjustment::ResizeY,
+        );
+        let popup = match Popup::new(
+            parent.popup.xdg_surface(),
+            &positioner,
+            &self.qh,
+            &self.compositor_state,
+            &self.xdg_shell_state,
+        ) {
+            Ok(p) => p,
+            Err(e) => return fallback(format!("cannot create popup ({e})")),
+        };
+        context_menu::submenu::set_hosted(true);
+        self.submenu_popup = Some(MenuPopup { popup, key, placed: None, committed_scale: 0 });
+    }
+
+    /// Close the popup, and the submenu's ahead of it. The renderer lets go
+    /// of the surface FIRST: dropping the popup destroys the `wl_surface`,
+    /// and a swapchain must never outlive the surface it presents to.
     pub(crate) fn close_menu_popup(&mut self) {
+        self.close_submenu_popup();
         if let Some(renderer) = self.menu_renderer.as_mut() {
             if renderer.has_surface() {
                 renderer.detach_surface();
@@ -183,12 +281,39 @@ impl<A: Application> EngineState<A> {
         context_menu::set_hosted(false);
     }
 
-    /// Draw the menu into its popup. Called after the window's own frame,
-    /// and after a configure; a no-op until the popup is placed.
+    pub(crate) fn close_submenu_popup(&mut self) {
+        if let Some(renderer) = self.submenu_renderer.as_mut() {
+            if renderer.has_surface() {
+                renderer.detach_surface();
+            }
+        }
+        self.submenu_popup = None;
+    }
+
+    /// The offset from the window of whichever menu popup `surface` is.
+    pub(crate) fn menu_popup_offset(&self, surface: &wl_surface::WlSurface) -> Option<(f32, f32)> {
+        self.menu_popup
+            .as_ref()
+            .and_then(|p| p.offset_for(surface))
+            .or_else(|| self.submenu_popup.as_ref().and_then(|p| p.offset_for(surface)))
+    }
+
+    /// Draw the menu into its popup, and the submenu into its own. Called
+    /// after the window's own frame, and after a configure; a no-op for a
+    /// popup not yet placed.
     pub(crate) fn render_menu_popup(&mut self) {
-        let Some(mp) = self.menu_popup.as_mut() else { return };
+        self.render_popup(Which::Menu);
+        self.render_popup(Which::Submenu);
+    }
+
+    fn render_popup(&mut self, which: Which) {
+        let (mp, renderer) = match which {
+            Which::Menu => (self.menu_popup.as_mut(), self.menu_renderer.as_mut()),
+            Which::Submenu => (self.submenu_popup.as_mut(), self.submenu_renderer.as_mut()),
+        };
+        let Some(mp) = mp else { return };
         let Some((_, _, w, h)) = mp.placed else { return };
-        let Some(renderer) = self.menu_renderer.as_mut() else { return };
+        let Some(renderer) = renderer else { return };
         if !renderer.has_surface() {
             return;
         }
@@ -196,7 +321,10 @@ impl<A: Application> EngineState<A> {
         let (s, pw, ph) = Self::buffer_geometry(self.scale_factor, w, h);
 
         let mut pc = crate::scene::paint::PaintCtx::new();
-        context_menu::paint_hosted(&mut pc);
+        match which {
+            Which::Menu => context_menu::paint_hosted(&mut pc),
+            Which::Submenu => context_menu::submenu::paint_hosted(&mut pc),
+        }
         let dl = pc.finish();
 
         let mut items = Vec::new();
@@ -224,25 +352,47 @@ impl<A: Application> EngineState<A> {
             clear_color: [0.0; 4],
         });
     }
+
+    fn which_popup(&self, surface: &wl_surface::WlSurface) -> Option<Which> {
+        if self.menu_popup.as_ref().is_some_and(|p| p.popup.wl_surface() == surface) {
+            Some(Which::Menu)
+        } else if self.submenu_popup.as_ref().is_some_and(|p| p.popup.wl_surface() == surface) {
+            Some(Which::Submenu)
+        } else {
+            None
+        }
+    }
 }
 
 impl<A: Application> PopupHandler for EngineState<A> {
     fn configure(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, popup: &Popup, config: PopupConfigure) {
-        let Some(mp) = self.menu_popup.as_mut() else { return };
-        if mp.popup.wl_surface() != popup.wl_surface() {
-            return;
-        }
+        let Some(which) = self.which_popup(popup.wl_surface()) else { return };
         let f = forced();
-        let (x, y) = (config.position.0 as f32 / f, config.position.1 as f32 / f);
+        let (mut x, mut y) = (config.position.0 as f32 / f, config.position.1 as f32 / f);
         let (w, h) = (config.width.max(1) as f32 / f, config.height.max(1) as f32 / f);
+        // The submenu's position is relative to its parent, the menu's popup.
+        if which == Which::Submenu {
+            let Some((mx, my, _, _)) = self.menu_popup.as_ref().and_then(|p| p.placed) else { return };
+            x += mx;
+            y += my;
+        }
+        let (scale_factor, display) = (self.scale_factor, self.display_ptr);
+        let (mp, slot) = match which {
+            Which::Menu => (self.menu_popup.as_mut(), &mut self.menu_renderer),
+            Which::Submenu => (self.submenu_popup.as_mut(), &mut self.submenu_renderer),
+        };
+        let Some(mp) = mp else { return };
         mp.placed = Some((x, y, w, h));
         // Where it landed IS where the menu is — see the module docs.
-        context_menu::place(x, y, h);
+        match which {
+            Which::Menu => context_menu::place(x, y, h),
+            Which::Submenu => context_menu::submenu::place(x, y, h),
+        }
 
-        let (_, pw, ph) = Self::buffer_geometry(self.scale_factor, w, h);
+        let (_, pw, ph) = Self::buffer_geometry(scale_factor, w, h);
         let surface_ptr = mp.popup.wl_surface().id().as_ptr() as *mut std::ffi::c_void;
-        let display_ptr = self.display_ptr as *mut std::ffi::c_void;
-        let attached = match self.menu_renderer.as_mut() {
+        let display_ptr = display as *mut std::ffi::c_void;
+        let attached = match slot.as_mut() {
             Some(r) if r.has_surface() => {
                 r.resize(pw, ph);
                 Ok(())
@@ -252,7 +402,7 @@ impl<A: Application> PopupHandler for EngineState<A> {
                 let t = std::time::Instant::now();
                 let made = unsafe { VkRenderer::try_new(display_ptr, surface_ptr, pw, ph, 0.0) };
                 log::debug!("[menu_popup] renderer created in {:?}", t.elapsed());
-                made.map(|r| self.menu_renderer = Some(r))
+                made.map(|r| *slot = Some(r))
             }
         };
         // A lost surface is the connection dying under the menu; the window's
@@ -265,13 +415,13 @@ impl<A: Application> PopupHandler for EngineState<A> {
             return;
         }
         self.redraw = true;
-        self.render_menu_popup();
+        self.render_popup(which);
     }
 
     fn done(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, popup: &Popup) {
         // The compositor dismissed it (its parent went away, say). The menu
         // closes with it; an app that watches `is_visible` sees that.
-        if self.menu_popup.as_ref().is_some_and(|mp| mp.popup.wl_surface() == popup.wl_surface()) {
+        if self.which_popup(popup.wl_surface()).is_some() {
             context_menu::hide();
             self.close_menu_popup();
             self.redraw = true;

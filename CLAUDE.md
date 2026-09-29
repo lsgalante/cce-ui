@@ -240,6 +240,49 @@ Layer surfaces keep the in-window menu, placed by `context_menu::constrain_to` w
 same flip / slide / shorten rules inside the window; so does any app run with
 `CCE_UI_MENU_POPUP=0`.
 
+### A row can open a submenu (since 2026-09-29)
+
+`context_menu::set_row_submenu(idx, SubmenuSpec { options, header_count, sliders })`,
+called after `show` like `set_row_slider`, gives a row a SUBMENU: a second menu that
+flies out beside the row while the pointer is on it. The row wears a `›` at its right
+end. **The menu opens and closes it; a host says what is in it and dispatches its
+rows.** One level deep: a submenu has no submenus.
+
+- **It is a second `ContextMenuState`**, the `SUBMENU` thread-local, so everything a
+  menu does — sliders, scrolling, the plate — a submenu does by the same code. Its
+  `parent_row` is the row it flew out from and what tells the two apart.
+- **The pointer calls answer for both; the row calls are each menu's own.** `hit_test`,
+  `cursor_moved`, `mouse_wheel`, `slider_press`, `slider_dragging` and `slider_release`
+  route to whichever menu the pointer is in, so a host with no submenus is unchanged and
+  one with them routes nothing by hand. A row index means nothing without its menu, so
+  `row_at` is the menu's alone (and `None` over the submenu) and `take_slider_change`
+  the menu's sliders'; the submenu's are `context_menu::submenu::row_at`,
+  `::take_slider_change`, `::parent_row`, `::slider`, `::options`.
+- **Hover intent is a triangle, not a timer.** Moving from a row into its submenu
+  crosses the rows between; while the pointer is inside the triangle from where it last
+  was on the open submenu's row to the submenu's near edge (a row taller at each end),
+  those rows neither hover nor swap the submenu. Straight down the menu is outside it,
+  and once the pointer has arrived in the submenu the apex is dropped, so coming back
+  out is an ordinary move. `open_submenu(idx)` is for a press on the row, under a
+  pointer that has not moved since the menu came up.
+- **Setting a submenu that is OPEN changes it where it stands** — labels and slider
+  values, keeping its hover, scroll, held slider and popup — which is how a host
+  re-marks a row after it was picked. A different number of rows shows it afresh.
+- **Its popup is the CHILD of the menu's popup** (`menu_popup.rs`), positioned against
+  the menu's whole width at the row's height: anchor top-right, gravity bottom-right,
+  flip-x / slide / resize-y, so it lands on the menu's left where the output has no
+  room on the right. Its configure is relative to its parent, so where it is, is that
+  plus where the menu landed. It has its own renderer (`submenu_renderer`), kept across
+  opens. **The child closes first**: a popup that is not the topmost may not be
+  destroyed, so `close_menu_popup` closes the submenu's ahead of the menu's. In a window
+  with no popup surface `submenu::constrain_beside` does the same flip and slide.
+- The cursor over either menu is the default arrow (`cursor_icon_at`): what lies under
+  a popup in window coordinates is the app's splitter or resize border, or nothing.
+
+The designer's viewport menu is the first consumer (Style, Markers).
+`context_menu_submenu_tests` covers the state; the popups were checked in a shadow
+session, at the output's right edge included.
+
 ## Plates, wells and seams — the surface vocabulary
 
 Everything cce draws is a lit surface, and the words below name those surfaces
