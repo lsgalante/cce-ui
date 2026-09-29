@@ -108,6 +108,34 @@ impl Slider {
         (self.min, self.max)
     }
 
+    /// The widest range a notch steps a flat 2% of. Wider than this, the
+    /// step follows the value's magnitude instead ([`Self::notch_step`]).
+    pub const FINE_SPAN: f32 = 20.0;
+
+    /// What one wheel notch, or one arrow press, moves the value by, as a
+    /// fraction of the range.
+    ///
+    /// 2% of the range — for a range up to [`Self::FINE_SPAN`] wide, which
+    /// is every slider the toolkit had until a host asked for one over
+    /// -1000..1000 (the designer's pull vector, 2026-09-28): there 2% is 40
+    /// units a notch, and a value of 0.06 cannot be reached by scrolling at
+    /// all. A wide range steps 2% of a SPAN that grows with the value —
+    /// `FINE_SPAN` times its magnitude, never less than `FINE_SPAN` itself
+    /// and never more than the range — so near zero it moves as a 20-wide
+    /// slider does (0.4 a notch, under a hundredth per pixel of trackpad
+    /// travel) and far from zero by the full 2%, and the whole range is
+    /// still a few dozen notches end to end. By magnitude rather than by a
+    /// finer flat step, because a flat step fine enough for 0.06 is one
+    /// that takes thousands of notches to reach 1000.
+    pub fn notch_step(&self) -> f32 {
+        let range = (self.max - self.min).abs();
+        if range <= Self::FINE_SPAN {
+            return 0.02;
+        }
+        let span = (Self::FINE_SPAN * self.get_scaled_value().abs().max(1.0)).min(range);
+        0.02 * span / range
+    }
+
     pub fn set_scaled_value(&mut self, val: f32) {
         let range = self.max - self.min;
         if range != 0.0 {
@@ -398,7 +426,7 @@ impl Input for Slider {
                     if latched || self.scroll_hit(r, *px, *py) {
                         ui.scroll_initiate_widget_id = Some(ectx.id);
                         let scroll_amount = delta.notches_y();
-                        let new_val = (self.value - scroll_amount * 0.02).clamp(0.0, 1.0);
+                        let new_val = (self.value - scroll_amount * self.notch_step()).clamp(0.0, 1.0);
                         let applied = new_val - self.value;
                         self.set_value_marking(new_val);
                         // Velocity estimate for the release glide (the Ramp
@@ -454,8 +482,8 @@ impl Input for Slider {
                     return false;
                 }
                 let target = match key_event.logical_key {
-                    Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowDown) => self.value - 0.02,
-                    Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowUp) => self.value + 0.02,
+                    Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::ArrowDown) => self.value - self.notch_step(),
+                    Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::ArrowUp) => self.value + self.notch_step(),
                     Key::Named(NamedKey::Home) => 0.0,
                     Key::Named(NamedKey::End) => 1.0,
                     Key::Named(NamedKey::Enter) if self.show_readout => {
@@ -1058,6 +1086,53 @@ fn probe_slider_bridge() {
         assert!(sl.take_change());
     }
 
+    /// A notch steps 2% of the range up to a 20-wide one, exactly as it
+    /// always did; a wider range steps by the value's magnitude — as a
+    /// 20-wide slider near zero, by the full 2% far from it — for the wheel
+    /// and the arrow keys alike.
+    #[test]
+    fn a_wide_range_steps_by_the_values_magnitude() {
+        let notch = |min: f32, max: f32, at: f32| -> f32 {
+            let mut ctx = UiContext::new();
+            let mut sl = Slider::new().with_range(min, max);
+            let (id, ptr) = (sl.id(), sl.as_ptr_mut());
+            ctx.register_widget(id, ptr);
+            WidgetHost::set_rect(&mut sl, 0.0, 0.0, 200.0, 20.0);
+            sl.inner_mut().set_scaled_value(at);
+            let before = sl.inner().get_scaled_value();
+            ctx.scroll_gesture_new = true;
+            // Over the band at the value, where the halo is.
+            let x = 200.0 * sl.inner().value();
+            assert!(sl.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), x.clamp(1.0, 199.0), 10.0, &mut ctx));
+            sl.inner().get_scaled_value() - before
+        };
+        let close = |got: f32, want: f32| (got - want).abs() <= want * 0.01 + 1e-3;
+        // Ordinary ranges: 2% of the range, untouched.
+        assert!(close(notch(0.0, 2.0, 1.0), 0.04), "{}", notch(0.0, 2.0, 1.0));
+        assert!(close(notch(-10.0, 10.0, 0.0), 0.4), "{}", notch(-10.0, 10.0, 0.0));
+        assert!(close(notch(-10.0, 10.0, 8.0), 0.4));
+        // -1000..1000: near zero a notch is what a 20-wide slider's is…
+        assert!(close(notch(-1000.0, 1000.0, 0.0), 0.4), "{}", notch(-1000.0, 1000.0, 0.0));
+        assert!(close(notch(-1000.0, 1000.0, 0.5), 0.4));
+        // …it grows with the magnitude, on either side of zero…
+        assert!(close(notch(-1000.0, 1000.0, 10.0), 4.0), "{}", notch(-1000.0, 1000.0, 10.0));
+        assert!(close(notch(-1000.0, 1000.0, -10.0), 4.0));
+        // …and is capped at the 2% of the range it used to be everywhere.
+        assert!(close(notch(-1000.0, 1000.0, 500.0), 40.0), "{}", notch(-1000.0, 1000.0, 500.0));
+
+        // End to end it is still a few dozen notches, not thousands.
+        let mut sl = Slider::new().with_range(-1000.0, 1000.0);
+        sl.inner_mut().set_scaled_value(0.0);
+        let mut notches = 0;
+        while sl.inner().get_scaled_value() < 999.0 && notches < 1000 {
+            let step = sl.inner().notch_step();
+            let v = (sl.inner().value() + step).clamp(0.0, 1.0);
+            sl.inner_mut().set_value(v);
+            notches += 1;
+        }
+        assert!(notches < 60, "0 to 1000 took {notches} notches");
+    }
+
     /// A slider hovers like every other control: the adapter's hover
     /// bookkeeping turns a move over the row into `MouseEnter`, a move away
     /// into `MouseLeave`, and the band reads the flag. A float3's three rows
@@ -1120,6 +1195,18 @@ mod focus_tests {
 
     /// A focused band steps by a wheel notch on the arrows, jumps on Home / End,
     /// and opens its readout on Enter; unfocused it ignores the keys.
+    /// The arrows step a wide range by the wheel's own notch.
+    #[test]
+    fn arrows_step_a_wide_range_by_the_values_magnitude() {
+        let mut ctx = UiContext::new();
+        let mut s = Slider::new().with_range(-1000.0, 1000.0).with_readout(true);
+        WidgetHost::set_rect(&mut s, 0.0, 0.0, 200.0, 16.0);
+        s.inner_mut().set_scaled_value(0.0);
+        s.handle_event(&Event::FocusIn, &mut ctx);
+        assert!(s.handle_event(&press(NamedKey::ArrowRight), &mut ctx));
+        assert!((s.inner().get_scaled_value() - 0.4).abs() < 1e-2, "{}", s.inner().get_scaled_value());
+    }
+
     #[test]
     fn arrows_step_the_band_and_enter_opens_the_readout() {
         let mut ctx = UiContext::new();

@@ -963,3 +963,15 @@ list, which stopped being a `ParametersBg` on 2026-09-24, and what the
 rule left behind was sliders a trackpad could not turn. The pane still
 scrolls from the label column, the gaps between bands, and every row that
 is not a value control.
+
+### A slider's notch follows the value on a wide range
+
+One wheel notch or arrow press moves a `Slider` by `notch_step`: 2% of the
+range for a range up to `FINE_SPAN` (20) wide, which leaves every slider
+the toolkit had exactly as it was. A WIDER range steps 2% of a span that
+grows with the value's magnitude — 20 times it, floored at 20 and capped
+at the range — so -1000..1000 moves 0.4 a notch near zero, 4 at ten, and
+the old 40 only from a hundred up. By magnitude rather than a finer flat
+step: one fine enough to set 0.06 takes thousands of notches to reach
+1000, and this takes under sixty. A drag still maps the pointer to the
+whole range; the readout is still where an exact value is typed.
