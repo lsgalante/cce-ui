@@ -996,6 +996,15 @@ vector of no length is given a length of one by the first drag. The ball
 counts as chrome in `ParametersBg::control_chrome`, so the label layout
 is decided by the track it leaves.
 
+**The ball carries rings** (`Float3::ring`, `RING_ANGLES`): five circles
+of latitude about the vector as their pole, thirty degrees apart, the
+near half of each drawn in short strokes. A lit ball is the same from
+every side, so without them a drag showed the vector move and the ball
+stand still; the rings are the vector's own, concentric circles when it
+points at the viewer and foreshortening into ellipses as it turns, which
+is how a rotation is read. They follow the full-precision direction a
+drag or a scroll is turning, so they move on every pixel.
+
 **A scroll rolls the ball** (`ball_scroll`), as content is scrolled: its
 surface moves the way a page under the pointer would, a two-finger
 gesture in both axes at once and a wheel notch in one, by `SCROLL_TURN`

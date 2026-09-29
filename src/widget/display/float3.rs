@@ -35,6 +35,14 @@ const DECIMALS: usize = 2;
 const BALL_DECIMALS: usize = 3;
 /// Gap between the trackball and the axis-letter column.
 const BALL_GAP: f32 = 10.0;
+/// The rings on the ball: circles of latitude about the vector, this many
+/// degrees from it. Five, a sixth of a half turn apart, so there is one on
+/// the equator and the far hemisphere carries its own pair — a vector
+/// pointing away still shows rings on the side that faces out.
+const RING_ANGLES: [f32; 5] = [30.0, 60.0, 90.0, 120.0, 150.0];
+/// Segments a ring is drawn in.
+const RING_SEGMENTS: usize = 48;
+
 /// How far one wheel notch rolls the ball. A drag is 1:1 with the ball's
 /// surface; a scroll is the fine handle, a quarter turn in six notches.
 const SCROLL_TURN: f32 = std::f32::consts::PI / 12.0;
@@ -166,6 +174,35 @@ impl Float3 {
         if len > 0.0 { out.map(|v| v / len) } else { dir }
     }
 
+    /// One ring on the unit ball: the circle of points `degrees` from
+    /// `dir`, as `segments + 1` points, the last closing on the first. A
+    /// circle of latitude about the vector as its pole — so the rings are
+    /// the vector's own, and turn exactly as it does. Seen from the front
+    /// they are concentric circles when the vector points at the viewer
+    /// and foreshorten into ellipses as it turns away, which is what makes
+    /// a rotation readable on a ball that is otherwise the same from every
+    /// side.
+    pub fn ring(dir: [f32; 3], degrees: f32, segments: usize) -> Vec<[f32; 3]> {
+        let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        let unit = |v: [f32; 3]| {
+            let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            if l > 0.0 { v.map(|c| c / l) } else { v }
+        };
+        let d = unit(dir);
+        // Any axis not along the vector gives a basis across it; which one
+        // only moves where on the circle the points start.
+        let aside = if d[1].abs() < 0.9 { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] };
+        let u = unit(cross(d, aside));
+        let w = cross(d, u);
+        let (st, ct) = degrees.to_radians().sin_cos();
+        (0..=segments)
+            .map(|i| {
+                let (sp, cp) = (i as f32 / segments as f32 * std::f32::consts::TAU).sin_cos();
+                [0, 1, 2].map(|k| ct * d[k] + st * (cp * u[k] + sp * w[k]))
+            })
+            .collect()
+    }
+
     fn ball_begin(&mut self, px: f32, py: f32) {
         let (dir, len) = self.fine();
         self.ball_drag = Some(BallDrag { last: (px, py), dir, len });
@@ -272,6 +309,37 @@ impl Float3 {
             None => self.vector(),
         };
         let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+
+        // The rings, under the vector: the near half of each, in short
+        // strokes. The far half is behind the ball. They follow the
+        // full-precision direction a drag or a scroll is turning, so they
+        // move on every pixel where the rounded rows would hold them still;
+        // a vector of no length shows them about the axis its first turn
+        // will start from, fainter.
+        let pole = match self.ball_drag {
+            Some(d) => d.dir,
+            None => self.fine().0,
+        };
+        let ring = [0.80, 0.84, 0.96, if len > 1e-6 { 0.42 } else { 0.18 }];
+        let inset = r - 0.75;
+        for degrees in RING_ANGLES {
+            let points = Self::ring(pole, degrees, RING_SEGMENTS);
+            for pair in points.windows(2) {
+                let (a, b) = (pair[0], pair[1]);
+                if a[2] < 0.0 || b[2] < 0.0 {
+                    continue;
+                }
+                ctx.vector(
+                    cx + a[0] * inset,
+                    cy - a[1] * inset,
+                    cx + b[0] * inset,
+                    cy - b[1] * inset,
+                    1.0,
+                    ring,
+                    crate::scene::paint::Cap::Round,
+                );
+            }
+        }
         // The accent's HUE at alphas of the ball's own: the configured
         // accent carries an alpha meant for washes, and at that alpha the
         // near side drew paler than the far one.
@@ -802,6 +870,50 @@ mod tests {
         let mut plain = Float3::new().with_range(-10.0, 10.0);
         WidgetHost::set_rect(&mut plain, 0.0, 0.0, 400.0, Float3::preferred_height(false));
         assert!(!plain.ball_hit(cx, cy));
+
+        // The rings are circles of latitude about the vector: every point
+        // on one is the same angle from it, whichever way it points.
+        for dir in [[0.0, 0.0, 1.0], [0.3, 0.5, 0.4], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]] {
+            let l = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2] as f32).sqrt();
+            let d = dir.map(|c: f32| c / l);
+            for degrees in RING_ANGLES {
+                let ring = Float3::ring(dir, degrees, 24);
+                assert_eq!(ring.len(), 25);
+                assert!(close(ring[0], ring[24]), "the ring closes");
+                for p in &ring {
+                    let dot = p[0] * d[0] + p[1] * d[1] + p[2] * d[2];
+                    assert!((dot - degrees.to_radians().cos()).abs() < 1e-5, "{degrees} degrees from {dir:?}: {p:?}");
+                    assert!(((p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt() - 1.0).abs() < 1e-5, "on the ball");
+                }
+            }
+        }
+        // Pointing at the viewer they are concentric circles about the
+        // centre; turned a quarter onto +X the equator's ring is seen edge
+        // on, a line down the middle.
+        let facing = Float3::ring([0.0, 0.0, 1.0], 30.0, 24);
+        assert!(facing.iter().all(|p| ((p[0] * p[0] + p[1] * p[1]).sqrt() - 0.5).abs() < 1e-5 && p[2] > 0.0));
+        let edge_on = Float3::ring([1.0, 0.0, 0.0], 90.0, 24);
+        assert!(edge_on.iter().all(|p| p[0].abs() < 1e-5));
+
+        // Painted: strokes for the near halves of the rings, and they move
+        // when the vector turns.
+        let strokes = |v: [f32; 3]| -> Vec<(f32, f32)> {
+            let mut pc = PaintCtx::new();
+            group(v).paint_ball(&mut pc);
+            pc.finish()
+                .items
+                .into_iter()
+                .filter_map(|i| match i.prim {
+                    crate::scene::paint::Prim::Vector { x1, y1, thickness, .. } if thickness == 1.0 => Some((x1, y1)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let facing = strokes([0.0, 0.0, 2.0]);
+        assert!(facing.len() > 60, "rings are drawn: {}", facing.len());
+        assert!(facing.iter().all(|(x, y)| (x - cx).powi(2) + (y - cy).powi(2) <= r * r + 0.5), "on the ball");
+        assert_ne!(facing, strokes([2.0, 0.0, 0.0]), "a turned vector turns its rings");
+        assert_ne!(strokes([0.0, 0.0, 2.0]).len(), 0);
 
         // The ball paints a sphere and the vector on it; without one, nothing.
         let mut pc = PaintCtx::new();
