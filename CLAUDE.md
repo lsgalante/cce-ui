@@ -996,6 +996,16 @@ vector of no length is given a length of one by the first drag. The ball
 counts as chrome in `ParametersBg::control_chrome`, so the label layout
 is decided by the track it leaves.
 
+**The ball can be seen from a host's camera** (`Float3::set_view`,
+`ParametersBg::set_trackball_view`): three rows, the camera's right, its
+up and the direction toward it, in the vector's space. The vector and its
+rings are then drawn as the host's 3D view shows them, and a drag or a
+scroll rolls about the CAMERA's axes — pushing the ball right swings the
+vector to the right of the screen, whatever that is in the scene. Only
+what the ball shows and how it turns: the rows and the value stay in the
+vector's own space. Without one the view is X right, Y up, Z toward the
+viewer. The pane keeps the view for rows built later.
+
 **The ball carries rings** (`Float3::ring`, `RING_ANGLES`): five circles
 of latitude about the vector as their pole, thirty degrees apart, the
 near half of each drawn in short strokes. A lit ball is the same from

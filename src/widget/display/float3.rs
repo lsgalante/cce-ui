@@ -79,7 +79,16 @@ pub struct Float3 {
     /// ([`Float3::fine`]); a trackpad sends a pixel at a time, and a pixel
     /// turns a short vector by less than the rows can hold.
     fine: Option<([f32; 3], f32)>,
+    /// The view the ball is seen from: the vector's space to the view's,
+    /// as three rows — the view's right, its up, and the axis toward the
+    /// viewer, each a direction in the vector's space. The identity (X
+    /// right, Y up, Z toward the viewer) until a host sets one
+    /// ([`Float3::set_view`]).
+    view: [[f32; 3]; 3],
 }
+
+/// The ball's view with nothing set: X right, Y up, Z toward the viewer.
+pub const IDENTITY_VIEW: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 impl Float3 {
     pub fn new() -> Adapted<Float3> {
@@ -94,7 +103,54 @@ impl Float3 {
             ball_drag: None,
             ball_id: crate::widget::WidgetId(crate::widget::NEXT_WIDGET_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)),
             fine: None,
+            view: IDENTITY_VIEW,
         })
+    }
+
+    /// See the ball from a host's camera: `view`'s rows are the camera's
+    /// right, its up, and the direction from the scene toward it, in the
+    /// vector's own space. The vector is then drawn on the ball as it lies
+    /// in the host's 3D view — pointing at the viewer on the ball when it
+    /// points at the camera in the scene — and a drag or a scroll rolls it
+    /// about the camera's axes, so pushing the ball right swings the vector
+    /// to the right of the SCREEN, whatever that is in the scene. The rows
+    /// and the value are untouched: only what the ball shows and how it
+    /// turns. Rows that are not unit length or not square to each other
+    /// are made so, and a degenerate view is refused.
+    pub fn set_view(&mut self, view: [[f32; 3]; 3]) -> bool {
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let unit = |v: [f32; 3]| {
+            let l = dot(v, v).sqrt();
+            (l > 1e-6).then(|| v.map(|c| c / l))
+        };
+        let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+        // Toward the viewer is kept; right is squared to it, and up follows.
+        let Some(toward) = unit(view[2]) else { return false };
+        let along = dot(view[0], toward);
+        let Some(right) = unit([0, 1, 2].map(|k| view[0][k] - along * toward[k])) else { return false };
+        let up = cross(toward, right);
+        self.view = [right, up, toward];
+        true
+    }
+
+    pub fn view(&self) -> [[f32; 3]; 3] {
+        self.view
+    }
+
+    /// A direction of the vector's space, as the view sees it.
+    fn to_view(&self, v: [f32; 3]) -> [f32; 3] {
+        self.view.map(|row| row[0] * v[0] + row[1] * v[1] + row[2] * v[2])
+    }
+
+    /// And back: a direction of the view's, in the vector's space.
+    fn from_view(&self, p: [f32; 3]) -> [f32; 3] {
+        [0, 1, 2].map(|k| self.view[0][k] * p[0] + self.view[1][k] * p[1] + self.view[2][k] * p[2])
+    }
+
+    /// Roll a direction of the vector's space as the VIEW sees the ball
+    /// roll: into the view, [`Self::rolled`], and back.
+    fn rolled_in_view(&self, dir: [f32; 3], dx: f32, dy: f32, radius: f32) -> [f32; 3] {
+        self.from_view(Self::rolled(self.to_view(dir), dx, dy, radius))
     }
 
     /// Give the group a trackball, or take it away.
@@ -108,9 +164,10 @@ impl Float3 {
     /// pointer, turning the vector with it and keeping its length. The rows
     /// stay: they are still how a component is typed or a length changed.
     ///
-    /// The view is fixed: X to the right, Y up, Z toward the viewer, the
-    /// axes the rows are lettered by. A vector of no length has no
-    /// direction to turn, so the first drag gives it a length of one.
+    /// The view is X to the right, Y up, Z toward the viewer — the axes
+    /// the rows are lettered by — until a host gives it a camera
+    /// ([`Float3::set_view`]). A vector of no length has no direction to
+    /// turn, so the first drag gives it a length of one, toward the viewer.
     pub fn set_trackball(&mut self, on: bool) {
         self.ball = on;
         self.ball_drag = None;
@@ -224,7 +281,8 @@ impl Float3 {
             }
         }
         let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-        if len > 1e-6 { (v.map(|c| c / len), len) } else { ([0.0, 0.0, 1.0], 1.0) }
+        // No length: toward the viewer, wherever the view puts that.
+        if len > 1e-6 { (v.map(|c| c / len), len) } else { (self.view[2], 1.0) }
     }
 
     pub fn ball_id(&self) -> crate::widget::WidgetId {
@@ -247,7 +305,7 @@ impl Float3 {
             return false;
         }
         let (dir, len) = self.fine();
-        let dir = Self::rolled(dir, nx * SCROLL_TURN * r, ny * SCROLL_TURN * r, r);
+        let dir = self.rolled_in_view(dir, nx * SCROLL_TURN * r, ny * SCROLL_TURN * r, r);
         self.fine = Some((dir, len));
         for (s, c) in self.sliders.iter_mut().zip(dir) {
             s.set_scaled_value(c * len);
@@ -280,7 +338,7 @@ impl Float3 {
         if dx == 0.0 && dy == 0.0 {
             return false;
         }
-        drag.dir = Self::rolled(drag.dir, dx, dy, r);
+        drag.dir = self.rolled_in_view(drag.dir, dx, dy, r);
         drag.last = (px, py);
         self.ball_drag = Some(drag);
         for (s, c) in self.sliders.iter_mut().zip(drag.dir) {
@@ -322,6 +380,8 @@ impl Float3 {
         };
         let ring = [0.80, 0.84, 0.96, if len > 1e-6 { 0.42 } else { 0.18 }];
         let inset = r - 0.75;
+        // Everything on the ball is drawn as the view sees it.
+        let pole = self.to_view(pole);
         for degrees in RING_ANGLES {
             let points = Self::ring(pole, degrees, RING_SEGMENTS);
             for pair in points.windows(2) {
@@ -350,8 +410,8 @@ impl Float3 {
             ctx.circle(cx, cy, 2.5, accent(0.35));
             return;
         }
-        let d = v.map(|c| c / len);
-        // The tip sits on the ball's surface as seen from +Z, a little in
+        let d = self.to_view(v.map(|c| c / len));
+        // The tip sits on the ball's surface as the view sees it, a little in
         // from the rim so a vector lying in the screen plane stays on it.
         let reach = r - 5.0;
         let (tx, ty) = (cx + d[0] * reach, cy - d[1] * reach);
@@ -870,6 +930,50 @@ mod tests {
         let mut plain = Float3::new().with_range(-10.0, 10.0);
         WidgetHost::set_rect(&mut plain, 0.0, 0.0, 400.0, Float3::preferred_height(false));
         assert!(!plain.ball_hit(cx, cy));
+
+        // Seen from a camera: one out along +X, looking back at the origin,
+        // with -Z to its right. A vector along +X points at it, so on the
+        // ball it faces the viewer, tip at the centre; rolled a quarter to
+        // the right it swings to the right of the SCREEN, which in the
+        // scene is -Z; and the rows hold the scene's numbers throughout.
+        let camera = [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
+        let mut f = group([2.0, 0.0, 0.0]);
+        assert!(f.set_view(camera));
+        let tip = |f: &Adapted<Float3>| {
+            let mut pc = PaintCtx::new();
+            f.paint_ball(&mut pc);
+            pc.finish().items.into_iter().find_map(|i| match i.prim {
+                crate::scene::paint::Prim::Vector { x2, y2, thickness, .. } if thickness == 2.0 => Some((x2, y2)),
+                _ => None,
+            }).expect("the vector's stroke")
+        };
+        let (tx, ty) = tip(&f);
+        assert!((tx - cx).abs() < 1e-3 && (ty - cy).abs() < 1e-3, "pointing at the camera: ({tx}, {ty})");
+        f.drag_begin(cx, cy);
+        assert!(f.drag_update(cx + quarter(r), cy));
+        assert!(close(f.vector(), [0.0, 0.0, -2.0]), "screen right is the scene's -Z: {:?}", f.vector());
+        f.drag_end();
+        let (tx, _) = tip(&f);
+        assert!(tx > cx + r * 0.5, "and it is drawn to the right");
+        // A scroll rolls about the camera's axes too, and a vector of no
+        // length starts toward the camera.
+        let mut f = group([2.0, 0.0, 0.0]);
+        f.set_view(camera);
+        ctx.scroll_gesture_new = true;
+        ctx.scroll_initiate_widget_id = None;
+        f.wheel(&MouseScrollDelta::LineDelta(0.0, -6.0), cx, cy, &mut ctx);
+        assert!(close(f.vector(), [0.0, 2.0, 0.0]), "six notches up: {:?}", f.vector());
+        let mut f = group([0.0, 0.0, 0.0]);
+        f.set_view(camera);
+        f.drag_begin(cx, cy);
+        f.drag_update(cx + 0.001, cy);
+        assert!(close(f.vector(), [1.0, 0.0, 0.0]), "toward the camera: {:?}", f.vector());
+        // A view that is not square is made so; one with no direction is refused.
+        let mut f = group([0.0, 0.0, 2.0]);
+        assert!(f.set_view([[2.0, 0.0, 1.0], [0.0, 9.0, 0.0], [0.0, 0.0, 3.0]]));
+        assert_eq!(f.view(), IDENTITY_VIEW);
+        assert!(!f.set_view([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]));
+        assert_eq!(f.view(), IDENTITY_VIEW);
 
         // The rings are circles of latitude about the vector: every point
         // on one is the same angle from it, whichever way it points.

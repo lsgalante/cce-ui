@@ -61,6 +61,10 @@ pub struct ParametersBg {
     /// the whole parameter list on each was the choppy params scroll,
     /// 2026-09-20). Drained by [`Self::take_tick_value_change`].
     tick_value_changed: bool,
+    /// The view every trackball in the pane is seen from
+    /// ([`Self::set_trackball_view`]); kept here so rows built later start
+    /// from it.
+    trackball_view: [[f32; 3]; 3],
     /// The configured preference (`layout::param_labels_inline`, the
     /// `param_label_layout` style key), re-read at every rebuild.
     inline_pref: bool,
@@ -260,6 +264,7 @@ impl ParametersBg {
 
     pub fn new() -> Adapted<ParametersBg> {
         Adapted::new(ParametersBg {
+            trackball_view: crate::widget::display::float3::IDENTITY_VIEW,
             inline_pref: crate::layout::param_labels_inline(),
             inline_labels: crate::layout::param_labels_inline(),
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
@@ -303,6 +308,26 @@ impl ParametersBg {
     /// 36, before the labels moved. A control with no track (spinbox, text
     /// box, dropdown, colour) is measured whole.
     pub const MIN_INLINE_TRACK_W: f32 = 120.0;
+
+    /// See every trackball in the pane from a host's camera
+    /// (`Float3::set_view`): the view's right, up and toward-the-viewer
+    /// axes, in the vectors' space. Returns whether anything changed, so a
+    /// host knows to draw again. Kept for the rows built after it.
+    pub fn set_trackball_view(&mut self, view: [[f32; 3]; 3]) -> bool {
+        let mut probe = Float3::new();
+        if !probe.set_view(view) {
+            return false;
+        }
+        let view = probe.view();
+        let moved = (0..3).any(|i| (0..3).any(|k| (view[i][k] - self.trackball_view[i][k]).abs() > 1e-5));
+        if moved {
+            self.trackball_view = view;
+            for f in self.float3s.iter_mut().flatten() {
+                f.set_view(view);
+            }
+        }
+        moved
+    }
 
     /// Whether a float3 row's type asks for the trackball: a fourth segment,
     /// `float3:lo:hi:trackball`.
@@ -3469,7 +3494,8 @@ impl ParamController for ParametersBg {
                 if p.2.starts_with("float3") {
                     let (min, max) = parse_slider_range(&p.2);
                     let vals = parse_float3_value(&p.1, min, max);
-                    let f = Float3::new().with_values(vals).with_range(min, max).with_trackball(Self::has_trackball(&p.2));
+                    let mut f = Float3::new().with_values(vals).with_range(min, max).with_trackball(Self::has_trackball(&p.2));
+                    f.set_view(self.trackball_view);
                     Some(if inline { f } else { f.with_label(&p.0) })
                 } else {
                     None
@@ -3953,6 +3979,16 @@ mod tests {
         let v: Vec<f32> = p.display_params[1].1.split(':').map(|c| c.parse().unwrap()).collect();
         assert!((v[0] - 2.0).abs() < 2e-3 && v[1].abs() < 2e-3 && v[2].abs() < 2e-3, "a quarter turn right: {v:?}");
         assert_eq!(p.display_params[2].1, "0:0:0", "the plain row is untouched");
+
+        // The pane's camera reaches every ball it has, and the ones built
+        // after it; the same view again changes nothing.
+        let camera = [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]];
+        assert!(p.inner_mut().set_trackball_view(camera));
+        assert_eq!(p.float3s[1].as_ref().unwrap().view(), camera);
+        assert!(!p.inner_mut().set_trackball_view(camera), "unchanged");
+        let rebuilt: Vec<(String, String, String)> = vec![("Other".into(), "0.000:0.000:1.000".into(), "float3:-10:10:trackball".into())];
+        ParamController::set_display_params(&mut *p, &rebuilt);
+        assert_eq!(p.float3s[0].as_ref().unwrap().view(), camera, "a rebuilt row starts from the pane's view");
 
         // A trackpad gesture beginning on the ball rolls it — the pane does
         // not scroll — and one beginning on the label column is the pane's.
