@@ -162,11 +162,14 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let tri = tris[hit.tri];
             let mat = materials[bitcast<u32>(tri.p0.w)];
             let at = ro + rd * hit.t;
-            var albedo = mat.albedo.rgb;
+            let albedo = mat.albedo.rgb;
             if mat.albedo.w > 0.5 {
-                // The image: its colour is the surface's, and where it is
-                // clear the ray goes on as if nothing were there — by
-                // chance, in proportion, which over the samples is the
+                // The image: a picture carries its own light. What a ray
+                // finds there is the image's colour as it is, neither lit
+                // by the sky nor shadowed by the scene — the colour the
+                // raster pass draws — and the path ends on it. Where the
+                // image is clear the ray goes on as if nothing were there:
+                // by chance, in proportion, which over the samples is the
                 // image's own alpha.
                 let rel = at - params.img_origin.xyz;
                 let u = params.img_u.xyz;
@@ -188,7 +191,17 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     ro = at + rd * (1e-4 * max(1.0, hit.t));
                     continue;
                 }
-                albedo = texel.rgb;
+                if primary {
+                    // Marked as the sky is, with no depth: the colour is
+                    // the image's own and has no noise to take out, so the
+                    // denoiser passes it through and mixes it into nothing
+                    // — smoothed, the image's fine print is the first
+                    // thing to go.
+                    features[2u * idx] = vec4<f32>(0.0, 0.0, 0.0, 1e30);
+                    features[2u * idx + 1u] = vec4<f32>(texel.rgb, 0.0);
+                }
+                radiance = radiance + throughput * texel.rgb;
+                break;
             }
             radiance = radiance + throughput * mat.emission.rgb;
             var n = normalize(cross(tri.p1.xyz - tri.p0.xyz, tri.p2.xyz - tri.p0.xyz));

@@ -39,9 +39,11 @@ pub struct RtMaterial {
     pub emission: [f32; 3],
 }
 
-/// An image standing in the traced scene: a quad whose surface is the
-/// image's colour, lit as any other surface is, and which lets a ray through
-/// where the image is clear. The tracer adds the quad to the scene itself.
+/// An image standing in the traced scene: a quad that shows the image's
+/// colour as it is — unlit, as the raster pass's `SceneImage` draws it — and
+/// lets a ray through where the image is clear. A path ends on it, so to
+/// the rest of the scene it is a light of its own colour. The tracer adds
+/// the quad to the scene itself.
 ///
 /// The image is one the 2D pass already holds (an id from `upload_rgba`),
 /// so a picture shown in the raster viewport costs the tracer nothing more.
@@ -2685,8 +2687,9 @@ mod tests {
         };
         // The quad spans x in -1..1 of a view about 2.9 wide at z = 0: the
         // pane's columns 10 to 54, and rows 21 to 43.
-        let (r, g, _) = at(16, 32);
-        assert!(r > g + 40, "the image's red half is not red: r={r} g={g}");
+        // Unlit: the texel's own colour, whatever the sky is doing.
+        let (r, g, b) = at(16, 32);
+        assert!(r >= 250 && g <= 5 && b <= 5, "the image's red half is not its red: {r} {g} {b}");
         let (r, g, _) = at(48, 32);
         assert!(g > r + 40, "the image's clear half hides the wall: r={r} g={g}");
         let (r, g, _) = at(32, 6);
