@@ -36,8 +36,6 @@ fn graph_paints_its_lattice_as_lines_and_axes() {
     g.set_grid_origin(50.0, 50.0);
     g.set_network_opacity(1.0);
     g.set_show_network_grid(true);
-    // The designer hard-codes a uniform background; that must not hide the grid.
-    g.set_uniform_background(true);
     let mut pc = PaintCtx::new();
     let rect = Rect { x: 40.0, y: 40.0, width: 600.0, height: 300.0 };
     g.paint_grid(rect, &mut pc);

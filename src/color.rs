@@ -780,9 +780,10 @@ fn parse_and_set_colors(content: &str) {
 /// / `bevel_width` / `bevel_shader`, the block the relief keys were born in
 /// before `style.surface.relief` existed (the compositor never read them;
 /// the shader toggle is `relief.shader` now). Each was an alias for part
-/// of 2026-09-28 and is not read now. And the graph's `cell_color` and
-/// `gap_color` (2026-09-29): a graph's cells have no colour, and its lines
-/// are `graph.grid_color`. Empty for a clean config.
+/// of 2026-09-28 and is not read now. And the graph's `cell_color`,
+/// `gap_color` and `uniform_background` (2026-09-29): a graph's cells have
+/// no colour, so there is no fill to switch, and its lines are
+/// `graph.grid_color`. Empty for a clean config.
 pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
     let mut found = Vec::new();
     for k in ["blur", "radius", "backdrop_compression", "refraction", "bevel_width"] {
@@ -813,7 +814,7 @@ pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
             }
         }
     }
-    for k in ["cell_color", "gap_color"] {
+    for k in ["cell_color", "gap_color", "uniform_background"] {
         if val.pointer(&format!("/style/surface/graph/{k}")).is_some() {
             found.push(format!("style.surface.graph.{k}"));
         }
@@ -2274,7 +2275,7 @@ mod tests {
             "material": { "glass": { "frost": { "backdrop_compression": 0.6 }, "finish": { "depth": 0.2 } } }
         } }, "window_manager": { "bevel_depth": 0.15, "bevel_width": 9.3, "bevel_shader": 0 } });
         let mut old = old;
-        old["style"]["surface"]["graph"] = serde_json::json!({ "cell_color": "#545467", "gap_color": "#48485b", "grid_color": "#48485b" });
+        old["style"]["surface"]["graph"] = serde_json::json!({ "cell_color": "#545467", "gap_color": "#48485b", "grid_color": "#48485b", "uniform_background": false });
         assert_eq!(retired_surface_keys(&old), vec![
             "style.surface.plate.blur",
             "style.surface.plate.radius",
@@ -2294,6 +2295,7 @@ mod tests {
             "style.surface.material.glass.finish.depth",
             "style.surface.graph.cell_color",
             "style.surface.graph.gap_color",
+            "style.surface.graph.uniform_background",
         ]);
         assert!(retired_surface_keys(&serde_json::json!({})).is_empty());
     }

@@ -101,7 +101,6 @@ pub struct Graph {
     // Hover tracking
     toggle_hovered_idx: Option<usize>,
 
-    uniform_background: bool,
     network_opacity: f32,
     /// Node-domain opacity (bodies, wires, connectors) — independent of
     /// `network_opacity`, which fades the pane surface (grid cells/gaps).
@@ -161,7 +160,6 @@ impl Graph {
             drag_oy: 0.0,
             drag_node_pos: None,
             toggle_hovered_idx: None,
-            uniform_background: false,
             network_opacity: crate::color::graph_opacity(),
             node_opacity: crate::color::graph_node_opacity(),
             grid_color: grid_col,
@@ -174,9 +172,6 @@ impl Graph {
         })
     }
 
-    pub fn set_uniform_background(&mut self, uniform: bool) {
-        self.uniform_background = uniform;
-    }
     pub fn set_network_opacity(&mut self, opacity: f32) {
         self.network_opacity = opacity;
     }
@@ -376,9 +371,9 @@ impl Graph {
     /// near-transparent black, so the cells between the grid lines are
     /// whatever the graph is painted on, and under `graph_blur` a frosted
     /// material whose tint alpha IS the blur value — the knob doubles as
-    /// the frost's opacity. Until 2026-09-29 a `uniform_background` graph
-    /// filled itself with a cell colour of its own (`graph.cell_color`);
-    /// the flag is kept for the hosts that set it and chooses nothing here.
+    /// the frost's opacity. Until 2026-09-29 a graph could fill itself
+    /// with a cell colour of its own (`graph.cell_color`, chosen by
+    /// `uniform_background`); both went together.
     fn bg_color(&self) -> [f32; 4] {
         use crate::scene::{Frost, Material, PlateRole};
         let c = [0.0, 0.0, 0.0, 0.01 * self.network_opacity];
@@ -397,7 +392,7 @@ impl Graph {
     pub fn cell_corner_radius(&self) -> f32 {
         // Pure GEOMETRY — no display gating: the cursor and the highlight
         // exist whether or not the lattice is drawn. Gating on
-        // show_network_grid/uniform_background silently squared those
+        // show_network_grid silently squared those
         // consumers whenever the grid was hidden.
         if self.node_w <= 0.0 || self.node_h <= 0.0 {
             return 0.0;
@@ -414,10 +409,8 @@ impl Graph {
     /// measured centre to centre, and `graph_line_width` only thickens
     /// them), so the intersections are exactly where the node centres go.
     /// Plus the origin axes: the two lines through the (0, 0) intersection,
-    /// 2px, in the axis colour. Gated on the grid's visibility only:
-    /// `uniform_background` describes the widget's own background fill and
-    /// the designer hard-codes it true, which is how its grid went undrawn
-    /// until 2026-09-20. (Rounded cells with grout between them came before
+    /// 2px, in the axis colour. Gated on the grid's visibility only.
+    /// (Rounded cells with grout between them came before
     /// the lattice; a node then FILLED a cell rather than sitting on a
     /// crossing.)
     pub fn paint_grid(&self, rect: Rect, pc: &mut PaintCtx) {
