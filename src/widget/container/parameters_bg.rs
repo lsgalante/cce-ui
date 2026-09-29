@@ -3151,38 +3151,79 @@ impl Input for ParametersBg {
                         crate::widget::ScrollPhase::Finger | crate::widget::ScrollPhase::FingerEnd
                     );
                 let rects = self.get_param_rects();
-                // The one exception to the finger rule: a spinbox row takes
-                // the gesture that BEGINS on it, trackpad included, and keeps
-                // it until the gesture ends — the slider's own latch. A
-                // spinbox holds a whole number, so a swipe over it is a
-                // count, not a scroll: the widget's wheel arm accumulates a
-                // finger's fractional notches into whole steps (2026-09-28;
-                // until then a two-finger scroll over a Rows or Columns row
-                // scrolled the pane, and the only way to step the value by
-                // pointer was the -/+ buttons). A gesture the pane or a
-                // slider acquired never lands on a spinbox sliding under the
-                // pointer — that is the leak the latch exists to stop.
-                let spin_target = (0..self.display_params.len()).find(|&i| {
-                    let Some(sb) = self.spinboxes[i].as_ref() else {
-                        return false;
+                // The exception to the finger rule: a VALUE control takes the
+                // gesture that BEGINS on it, trackpad included, and keeps it
+                // until the gesture ends — a spinbox by its row, a slider
+                // and each row of a float3 by the band's own halo
+                // (`Slider::scroll_hit`), the same zones a wheel notch
+                // acquires by. A two-finger scroll is aimed like a wheel:
+                // over a band it is the value being turned, anywhere else
+                // (the label column, the gaps, a toggle, a section header)
+                // the pane being scrolled. Spinboxes first (2026-09-28,
+                // earlier the same day), sliders and float3 rows after: the
+                // slider's wheel arm was written for trackpad streams all
+                // along, and the pane's rule kept every one of them from
+                // reaching it. A gesture the pane or another control
+                // acquired never lands on a control sliding under the
+                // pointer — that is the leak the latch exists to stop — so
+                // the LATCHED control is asked first, and only a gesture
+                // nobody owns is open to the control under the pointer.
+                let owner = {
+                    let latched_to = |id| !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(id);
+                    let in_row = |r: (f32, f32, f32, f32)| {
+                        py >= r.1 && py <= r.1 + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width
                     };
-                    let latched = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(sb.base().id());
-                    let r = rects[i];
-                    let under = r.3 > 0.0
-                        && py >= r.1
-                        && py <= r.1 + r.3
-                        && px >= self.rect.x
-                        && px <= self.rect.x + self.rect.width;
-                    latched || (!pane_owns && under)
-                });
-                let pane_takes = pane_owns || (finger && spin_target.is_none());
+                    let n = self.display_params.len();
+                    let latched = (0..n).find(|&i| {
+                        self.spinboxes[i].as_ref().is_some_and(|sb| latched_to(sb.base().id()))
+                            || self.sliders[i].as_ref().is_some_and(|sl| latched_to(sl.base().id()))
+                            || self.float3s[i]
+                                .as_ref()
+                                .is_some_and(|f| f.sliders().iter().any(|sl| latched_to(sl.base().id())))
+                    });
+                    // Under the pointer: the NEAREST control whose zone
+                    // holds it, by the distance to the band's (or the
+                    // spinbox row's) centre line. A band's halo reaches
+                    // past the band by more than the gap between rows, so
+                    // two neighbours' zones hold any point between them,
+                    // and the first in row order is the wrong answer for
+                    // the lower half of that gap.
+                    latched.or_else(|| {
+                        if pane_owns {
+                            return None;
+                        }
+                        (0..n)
+                            .filter_map(|i| {
+                                if rects[i].3 <= 0.0 {
+                                    return None;
+                                }
+                                if self.spinboxes[i].is_some() {
+                                    let r = rects[i];
+                                    return in_row(r).then(|| (i, (py - (r.1 + r.3 * 0.5)).abs()));
+                                }
+                                if let Some(sl) = self.sliders[i].as_ref() {
+                                    let (sx, sy, sw, sh) = sl.rect();
+                                    let ty = sl.label_strip();
+                                    let band = Rect { x: sx, y: sy + ty, width: sw, height: sh - ty };
+                                    return sl
+                                        .inner()
+                                        .scroll_hit(band, px, py)
+                                        .then(|| (i, (py - (band.y + band.height * 0.5)).abs()));
+                                }
+                                self.float3s[i].as_ref().and_then(|f| f.nearest_band(px, py)).map(|(_, d)| (i, d))
+                            })
+                            .min_by(|a, b| a.1.total_cmp(&b.1))
+                            .map(|(i, _)| i)
+                    })
+                };
+                let pane_takes = pane_owns || (finger && owner.is_none());
                 for (i, p) in self.display_params.iter_mut().enumerate() {
                     if pane_takes {
                         break;
                     }
-                    // A gesture a spinbox owns is nobody else's: the pointer
-                    // may have drifted onto a slider's halo since it began.
-                    if spin_target.is_some() && spin_target != Some(i) {
+                    // A gesture a control owns is nobody else's: the pointer
+                    // may have drifted onto another band's halo since it began.
+                    if owner.is_some() && owner != Some(i) {
                         continue;
                     }
                     if p.2.starts_with("slider") {
@@ -3190,22 +3231,12 @@ impl Input for ParametersBg {
                         // (`Slider::scroll_hit` — the band plus the traveling
                         // swell, inset), so scrolls off the shape fall through
                         // to the pane's viewport scroll below.
-                        let in_zone = self.sliders[i].as_ref().map_or(false, |s| {
-                            // The same gesture latch the slider's own wheel
-                            // test applies: mid-gesture the slider that
-                            // acquired the scroll keeps it (its halo travels
-                            // away from the pointer as the value moves).
-                            let latched = !ui.scroll_gesture_new
-                                && ui.scroll_initiate_widget_id == Some(s.base().id());
-                            let (sx, sy, sw, sh) = s.rect();
-                            let ty = s.label_strip();
-                            latched
-                                || s.inner().scroll_hit(
-                                    Rect { x: sx, y: sy + ty, width: sw, height: sh - ty },
-                                    px,
-                                    py,
-                                )
-                        });
+                        // `owner` made the zone test: this slider is latched
+                        // (mid-gesture the slider that acquired the scroll
+                        // keeps it — its halo travels away from the pointer
+                        // as the value moves), or its band is the nearest
+                        // whose halo holds the pointer.
+                        let in_zone = owner == Some(i);
                         if in_zone {
                             if let Some(s) = &mut self.sliders[i] {
                                 let was_scroll = s.scroll_enabled;
@@ -3228,8 +3259,7 @@ impl Input for ParametersBg {
                             }
                         }
                     } else if p.2.starts_with("float3") {
-                        let r = rects[i];
-                        if py >= r.1 - 2.0 && py <= r.1 + r.3 && px >= self.rect.x && px <= self.rect.x + self.rect.width {
+                        if owner == Some(i) {
                             // The group's rows apply the slider-row contract
                             // themselves (band halo / gesture latch, else the
                             // row strip; ungated forward).
@@ -3245,11 +3275,11 @@ impl Input for ParametersBg {
                             }
                         }
                     } else if p.2.starts_with("spinbox") {
-                        if spin_target == Some(i) {
+                        if owner == Some(i) {
                             if let Some(sb) = &mut self.spinboxes[i] {
                                 // The widget's own wheel arm: one step per
                                 // notch, fractions carried between events.
-                                // Ungated — `spin_target` already tested the
+                                // Ungated — `owner` already tested the
                                 // row, and a latched gesture may have
                                 // drifted off it.
                                 wheel_taken = true;
@@ -4484,11 +4514,15 @@ mod tests {
         assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane still owns it");
     }
 
-    /// A trackpad gesture is the pane's from anywhere — even beginning on a
-    /// slider band, and even in a pane whose content fits — while a wheel
-    /// notch on the band still adjusts the slider.
+    /// A trackpad gesture belongs to what it BEGINS on: over a slider's band
+    /// it turns the slider — in a pane that overflows and in one that fits
+    /// alike — and keeps turning it as the pointer drifts; beginning on the
+    /// label column it scrolls the pane, and stays the pane's as bands pass
+    /// under the pointer. A float3's rows are three such bands. (Until
+    /// 2026-09-28 every finger gesture was the pane's, from anywhere, and a
+    /// slider could be turned by a wheel notch but not by a trackpad.)
     #[test]
-    fn finger_gesture_goes_to_the_pane_even_from_a_control() {
+    fn a_finger_gesture_belongs_to_the_control_it_begins_on() {
         use crate::widget::{scroll_motion::set_scroll_phase, Position, ScrollPhase};
         let rows = |n: usize| -> Vec<(String, String, String)> {
             (0..n).map(|i| (format!("P{i}"), "1.00".to_string(), "slider:0:2".to_string())).collect()
@@ -4499,49 +4533,72 @@ mod tests {
             WidgetHost::set_rect(&mut p, 0.0, 0.0, 300.0, h);
             p
         };
+        // A point on row 1's band: the slider's own rect, below its label strip.
         let band_point = |p: &Adapted<ParametersBg>| {
-            let r = p.get_param_rects()[1];
-            (r.0 + r.2 * 0.5, r.1 + r.3 * 0.7)
+            let s = p.sliders[1].as_ref().unwrap();
+            let (sx, sy, sw, sh) = s.rect();
+            let ty = s.label_strip();
+            (sx + sw * 0.3, sy + ty + (sh - ty) * 0.5)
         };
         let values = |p: &Adapted<ParametersBg>| -> Vec<String> { p.display_params.iter().map(|d| d.1.clone()).collect() };
+        let finger = |dy: f64| MouseScrollDelta::PixelDelta(Position { x: 0.0, y: dy });
 
-        // Overflowing pane, finger gesture starting ON the band: the pane scrolls, the slider holds.
+        for (n, h) in [(30, 200.0), (3, 600.0)] {
+            // Beginning ON the band: the slider turns, and owns the gesture.
+            let mut ctx = UiContext::new();
+            let mut p = panel(n, h);
+            let (bx, by) = band_point(&p);
+            ctx.scroll_gesture_new = true;
+            set_scroll_phase(ScrollPhase::Finger);
+            assert!(p.mouse_wheel(&finger(-60.0), bx, by, &mut ctx));
+            let slider_id = p.sliders[1].as_ref().unwrap().base().id();
+            assert_ne!(values(&p)[1], "1.00", "a finger gesture on the band turns the slider ({n} rows)");
+            assert_eq!(ctx.scroll_initiate_widget_id, Some(slider_id), "the slider owns the gesture");
+            assert_eq!(p.scroll_y, 0.0, "the pane did not scroll");
+            // Still its gesture with the pointer drifted onto the next band.
+            let turned = values(&p)[1].clone();
+            let (_, sy2, _, sh2) = p.sliders[2].as_ref().unwrap().rect();
+            ctx.scroll_gesture_new = false;
+            assert!(p.mouse_wheel(&finger(-60.0), bx, sy2 + sh2 * 0.7, &mut ctx));
+            assert_ne!(values(&p)[1], turned, "latched: the first slider keeps turning");
+            assert_eq!(values(&p)[2], "1.00", "the band under the drifted pointer holds");
+        }
+
+        // Beginning on the label column: the pane scrolls and owns the
+        // gesture, and a band passing under the pointer adjusts nothing.
         let mut ctx = UiContext::new();
         let mut p = panel(30, 200.0);
-        assert!(p.content_h > 200.0);
-        let (bx, by) = band_point(&p);
+        let (_, by) = band_point(&p);
         ctx.scroll_gesture_new = true;
         set_scroll_phase(ScrollPhase::Finger);
-        p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 0.0, y: -30.0 }), bx, by, &mut ctx);
-        assert!(values(&p).iter().all(|v| v == "1.00"), "finger over a band did not adjust: {:?}", values(&p));
+        p.mouse_wheel(&finger(-30.0), ROW_X_INSET + 2.0, by, &mut ctx);
         assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane took the gesture");
         assert!(p.scroll_y > 0.0, "the pane scrolled (finger tracks 1:1): {}", p.scroll_y);
-
-        // Same pane, a wheel notch on the band: the slider adjusts.
-        let mut ctx = UiContext::new();
-        let mut p = panel(30, 200.0);
         let (bx, by) = band_point(&p);
-        ctx.scroll_gesture_new = true;
-        set_scroll_phase(ScrollPhase::Wheel);
-        p.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -3.0), bx, by, &mut ctx);
-        assert_ne!(values(&p)[1], "1.00", "a wheel notch on the band adjusts the slider");
+        ctx.scroll_gesture_new = false;
+        p.mouse_wheel(&finger(-60.0), bx, by, &mut ctx);
+        assert!(values(&p).iter().all(|v| v == "1.00"), "a pane-owned gesture turns nothing: {:?}", values(&p));
 
-        // A pane whose content fits: the finger gesture is still the pane's (nothing to
-        // scroll, nothing adjusted) — the same rule whatever the node's parameter count.
+        // A float3's rows are three bands: a finger gesture on the Y row
+        // turns Y alone.
         let mut ctx = UiContext::new();
-        let mut p = panel(3, 600.0);
-        assert!(p.content_h <= 600.0);
-        let (bx, by) = band_point(&p);
+        let mut p = panel_with(&[("Name", "x", "text"), ("Offset", "0.00:0.00:0.00", "float3:-1:1")]);
+        let f = p.float3s[1].as_ref().unwrap();
+        let (rx, ry, rw, rh) = f.get_row_rects()[1];
+        let chrome = crate::widget::input::slider::Slider::readout_chrome();
+        let (bx, by) = (rx + (rw - chrome) * 0.5, ry + rh * 0.5);
         ctx.scroll_gesture_new = true;
         set_scroll_phase(ScrollPhase::Finger);
-        p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 0.0, y: -30.0 }), bx, by, &mut ctx);
-        assert!(values(&p).iter().all(|v| v == "1.00"), "a finger gesture never adjusts: {:?}", values(&p));
-        assert_eq!(ctx.scroll_initiate_widget_id, Some(p.base().id()), "the pane took it");
+        assert!(p.mouse_wheel(&finger(-120.0), bx, by, &mut ctx));
+        let parts: Vec<f32> = p.display_params[1].1.split(':').map(|v| v.parse().unwrap()).collect();
+        assert_eq!((parts[0], parts[2]), (0.0, 0.0), "X and Z hold: {parts:?}");
+        assert_ne!(parts[1], 0.0, "Y turned: {parts:?}");
+        assert_eq!(p.scroll_y, 0.0);
         set_scroll_phase(ScrollPhase::Wheel);
     }
 
-    /// The finger rule's one exception: a gesture that begins on a spinbox
-    /// row steps the spinbox — a finger's fractional notches accumulating
+    /// The same rule on a spinbox, whose zone is its row: a gesture that
+    /// begins on a spinbox row steps the spinbox — a finger's fractional notches accumulating
     /// into whole steps — and stays the spinbox's, while a gesture the pane
     /// acquired still scrolls past it. A wheel notch on the row steps it too,
     /// however the scroll factor scales the notch.

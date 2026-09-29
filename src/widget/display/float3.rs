@@ -116,24 +116,44 @@ impl Float3 {
     /// otherwise the row's rect; a row in zone takes the wheel ungated (the halo already gated
     /// spatially, and the adapter's rect gate would clip its fringe). Returns whether a row took
     /// it, whether or not the value string ticked over.
+    ///
+    /// ONE row takes it: the latched one, else the NEAREST of the rows whose
+    /// halo holds the pointer. A halo reaches past its band by more than the
+    /// gap between rows, so two rows' halos hold any point between them —
+    /// and until 2026-09-28 the first in X/Y/Z order won, so a scroll over
+    /// the Y band turned X.
     pub fn wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ui: &mut UiContext) -> bool {
-        let rows = self.get_row_rects();
-        for (s, r) in self.sliders.iter_mut().zip(rows) {
-            let rect = Rect { x: r.0, y: r.1, width: r.2, height: r.3 };
-            let latched = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(s.base().id());
-            let in_zone = latched || s.inner().scroll_hit(rect, px, py);
-            if !in_zone {
-                continue;
-            }
-            let was_scroll = s.scroll_enabled;
-            s.set_scroll(true);
-            let taken = s.mouse_wheel_ungated(delta, px, py, ui);
-            s.set_scroll(was_scroll);
-            if taken {
-                return true;
-            }
-        }
-        false
+        let Some(i) = self.wheel_row(px, py, ui) else {
+            return false;
+        };
+        let s = &mut self.sliders[i];
+        let was_scroll = s.scroll_enabled;
+        s.set_scroll(true);
+        let taken = s.mouse_wheel_ungated(delta, px, py, ui);
+        s.set_scroll(was_scroll);
+        taken
+    }
+
+    /// The row a wheel at `(px, py)` belongs to, if any — see [`Self::wheel`] —
+    /// with its band centre's distance from the pointer for a host choosing
+    /// between this group and its neighbours.
+    pub fn wheel_row(&self, px: f32, py: f32, ui: &UiContext) -> Option<usize> {
+        let latched = self
+            .sliders
+            .iter()
+            .position(|s| !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(s.base().id()));
+        latched.or_else(|| self.nearest_band(px, py).map(|(i, _)| i))
+    }
+
+    /// The nearest row whose halo holds the pointer, with the distance from
+    /// the pointer to that band's centre line.
+    pub fn nearest_band(&self, px: f32, py: f32) -> Option<(usize, f32)> {
+        self.get_row_rects()
+            .into_iter()
+            .enumerate()
+            .filter(|(i, r)| self.sliders[*i].inner().scroll_hit(Rect { x: r.0, y: r.1, width: r.2, height: r.3 }, px, py))
+            .map(|(i, r)| (i, (py - (r.1 + r.3 * 0.5)).abs()))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
     }
 }
 

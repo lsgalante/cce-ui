@@ -43,15 +43,15 @@ pub fn read_state() -> Option<bool> {
 
 static CACHE: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
 
-/// Under `cfg(test)` the switch is the SUITE's, not the machine's: on,
-/// unless a test forces it with [`force_for_test`]. Until 2026-09-28
-/// `enabled` read `/run/cce/animations` in the test binary too, so three
-/// glide and fade tests passed or failed with the laptop's power mode —
-/// off on battery, on when plugged in — and read as a broken glide rather
-/// than a borrowed switch. Thread-local rather than the shared cache,
-/// because libtest runs tests in parallel and a process-wide override set
-/// by one test would race every other test's read; a test that forces it
-/// does so for its own thread only, and the value resets with the thread.
+// Under `cfg(test)` the switch is the SUITE's, not the machine's: on,
+// unless a test forces it with [`force_for_test`]. Until 2026-09-28
+// `enabled` read `/run/cce/animations` in the test binary too, so three
+// glide and fade tests passed or failed with the laptop's power mode —
+// off on battery, on when plugged in — and read as a broken glide rather
+// than a borrowed switch. Thread-local rather than the shared cache,
+// because libtest runs tests in parallel and a process-wide override set
+// by one test would race every other test's read; a test that forces it
+// does so for its own thread only, and the value resets with the thread.
 #[cfg(test)]
 thread_local! {
     static FORCED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };

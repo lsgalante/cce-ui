@@ -946,3 +946,20 @@ radius included, not just the ones it is about; and a test that RELOADS a
 knob reloads its default back before the empty reload, and asserts the
 globals are back. `test_color_state_lock` orders the reloaders against
 each other; it cannot undo what one of them left behind.
+
+### A scroll gesture in the params pane belongs to what it begins on
+
+`ParametersBg`'s wheel arm gives a gesture to the VALUE CONTROL it begins
+on and to the pane otherwise, for a wheel notch and a trackpad finger
+gesture alike: a slider and each row of a float3 by the band's halo
+(`Slider::scroll_hit`), a spinbox by its row. The control that acquired it
+keeps it until the gesture ends (`scroll_initiate_widget_id`, 250 ms of
+quiet), so the latched control is asked first and a gesture the pane or
+another control owns never lands on a band that slides under the pointer.
+From 2026-09-21 to 2026-09-28 every FINGER gesture was the pane's from
+anywhere, on the reasoning that a pane of mostly controls was scrollable
+only from a label; that reasoning was about the designer's Alt+D Settings
+list, which stopped being a `ParametersBg` on 2026-09-24, and what the
+rule left behind was sliders a trackpad could not turn. The pane still
+scrolls from the label column, the gaps between bands, and every row that
+is not a value control.
