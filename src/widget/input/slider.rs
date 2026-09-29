@@ -108,6 +108,12 @@ impl Slider {
         (self.min, self.max)
     }
 
+    /// Readout precision, for a host that changes it after construction
+    /// (a float3 group gaining a trackball reads to a third decimal).
+    pub fn set_decimals(&mut self, decimals: usize) {
+        self.decimals = decimals;
+    }
+
     /// The widest range a notch steps a flat 2% of. Wider than this, the
     /// step follows the value's magnitude instead ([`Self::notch_step`]).
     pub const FINE_SPAN: f32 = 20.0;

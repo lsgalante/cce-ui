@@ -304,6 +304,12 @@ impl ParametersBg {
     /// box, dropdown, colour) is measured whole.
     pub const MIN_INLINE_TRACK_W: f32 = 120.0;
 
+    /// Whether a float3 row's type asks for the trackball: a fourth segment,
+    /// `float3:lo:hi:trackball`.
+    fn has_trackball(t: &str) -> bool {
+        t.starts_with("float3") && t.split(':').nth(3) == Some("trackball")
+    }
+
     /// What a row of type `t` spends of its control rect on everything but
     /// its track: a slider's readout and gap, plus a float3's axis column.
     /// Zero for the controls that have no track.
@@ -311,7 +317,8 @@ impl ParametersBg {
         if t.starts_with("slider") {
             crate::widget::input::slider::Slider::readout_chrome()
         } else if t.starts_with("float3") {
-            crate::widget::display::float3::AXIS_W + crate::widget::input::slider::Slider::readout_chrome()
+            let ball = if Self::has_trackball(t) { Float3::trackball_chrome() } else { 0.0 };
+            ball + crate::widget::display::float3::AXIS_W + crate::widget::input::slider::Slider::readout_chrome()
         } else {
             0.0
         }
@@ -1915,11 +1922,17 @@ impl ParametersBg {
         let hidden = self.hidden_rows();
         let dummy = UiContext::new();
         for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] || p.2 != "ramp" {
+            if hidden[i] {
                 continue;
             }
-            if let Some(rp) = &self.ramps[i] {
-                rp.paint_self(&dummy, pc);
+            if p.2 == "ramp" {
+                if let Some(rp) = &self.ramps[i] {
+                    rp.paint_self(&dummy, pc);
+                }
+            } else if let Some(f) = self.float3s[i].as_ref().filter(|f| f.has_trackball()) {
+                // A float3's trackball: a sphere is not a prim the flat
+                // views carry, so it rides the scene path like the ramp.
+                f.paint_ball(pc);
             }
         }
     }
@@ -3457,7 +3470,7 @@ impl ParamController for ParametersBg {
                 if p.2.starts_with("float3") {
                     let (min, max) = parse_slider_range(&p.2);
                     let vals = parse_float3_value(&p.1, min, max);
-                    let f = Float3::new().with_values(vals).with_range(min, max);
+                    let f = Float3::new().with_values(vals).with_range(min, max).with_trackball(Self::has_trackball(&p.2));
                     Some(if inline { f } else { f.with_label(&p.0) })
                 } else {
                     None
@@ -3908,6 +3921,39 @@ mod tests {
         assert!(!p.inner().inline_labels, "the slider's track is the shortest");
         p.inner_mut().set_section_collapsed("Shape", true);
         assert!(p.inner().inline_labels, "with the slider hidden the spinbox decides");
+    }
+
+    /// A `float3:lo:hi:trackball` row builds its group with the ball, counts
+    /// the ball as chrome when the label layout is decided, paints it
+    /// through the scene path, and a press-and-drag on it through the
+    /// pane's own drag protocol turns the row's value.
+    #[test]
+    fn a_trackball_row_turns_its_value_through_the_pane() {
+        use crate::scene::paint::Prim;
+        let mut p = panel_with(&[("Name", "x", "text"), ("Pull", "0.000:0.000:2.000", "float3:-10:10:trackball"), ("Plain", "0:0:0", "float3:-10:10")]);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 500.0, 400.0);
+        assert!(p.float3s[1].as_ref().unwrap().has_trackball());
+        assert!(!p.float3s[2].as_ref().unwrap().has_trackball());
+        assert_eq!(
+            ParametersBg::control_chrome("float3:-10:10:trackball") - ParametersBg::control_chrome("float3:-10:10"),
+            Float3::trackball_chrome(),
+            "the ball is chrome: the tracks are what is left of it"
+        );
+
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        p.inner().paint_scene_rows(&mut pc);
+        let spheres = pc.finish().items.into_iter().filter(|i| matches!(i.prim, Prim::Sphere { .. })).count();
+        assert_eq!(spheres, 1, "one ball, for the one row that asks");
+
+        let (cx, cy, r) = p.float3s[1].as_ref().unwrap().ball_circle().unwrap();
+        let rect = Rect { x: 0.0, y: 0.0, width: 500.0, height: 400.0 };
+        Input::drag_begin(p.inner_mut(), cx, cy, rect);
+        assert!(Input::is_dragging(p.inner()), "the pane is dragging the row");
+        assert!(Input::drag_update(p.inner_mut(), cx + r * std::f32::consts::FRAC_PI_2, cy, rect));
+        Input::drag_end(p.inner_mut());
+        let v: Vec<f32> = p.display_params[1].1.split(':').map(|c| c.parse().unwrap()).collect();
+        assert!((v[0] - 2.0).abs() < 2e-3 && v[1].abs() < 2e-3 && v[2].abs() < 2e-3, "a quarter turn right: {v:?}");
+        assert_eq!(p.display_params[2].1, "0:0:0", "the plain row is untouched");
     }
 
     #[test]

@@ -975,3 +975,23 @@ the old 40 only from a hundred up. By magnitude rather than a finer flat
 step: one fine enough to set 0.06 takes thousands of notches to reach
 1000, and this takes under sixty. A drag still maps the pointer to the
 whole range; the readout is still where an exact value is typed.
+
+### A float3 group can carry a trackball
+
+`Float3::set_trackball` (a `ParametersBg` row typed
+`float3:lo:hi:trackball`) stands a ball left of the three rows, as tall as
+they are. The vector is drawn on it from the centre — X right, Y up, Z
+toward the viewer; bright on the near side, dim pointing away — and
+dragging the ball rolls it under the pointer, turning the vector and
+keeping its length. The rows stay: a direction is turned on the ball, a
+component typed or a length changed on a row. Three things to know. The
+drag turns its OWN full-precision copy (`BallDrag`), because the rows hold
+the vector rounded and a host writes the rounded string back between
+moves; turning that loses every step smaller than a readout tick. With
+the ball on the rows read to three decimals, since at two a vector of
+length 0.06 has seven directions. And the ball is painted by
+`paint_ball` through the host's scene path (`paint_scene_rows`), not
+`Paint::paint`: a sphere is not a prim the legacy flat views carry. A
+vector of no length is given a length of one by the first drag. The ball
+counts as chrome in `ParametersBg::control_chrome`, so the label layout
+is decided by the track it leaves.
