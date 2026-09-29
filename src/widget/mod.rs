@@ -685,6 +685,16 @@ pub trait GraphController {
 
 pub trait SpreadsheetController {
     fn set_spreadsheet_data(&mut self, headers: Vec<String>, rows: Vec<Vec<String>>);
+    /// The selected rows, as indices into the rows last set, ascending.
+    fn selected_rows(&self) -> Vec<usize> {
+        Vec::new()
+    }
+    /// Replace the selection; a row the table does not have is left out.
+    fn set_selected_rows(&mut self, _rows: &[usize]) {}
+    /// Whether the selection changed since this was last asked.
+    fn take_selection_change(&mut self) -> bool {
+        false
+    }
 }
 
 pub trait PathController {

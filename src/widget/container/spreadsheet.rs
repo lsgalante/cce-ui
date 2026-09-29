@@ -1,4 +1,6 @@
 //! Narrow-trait `Spreadsheet` (Phase 5l) — a read-only table with a header row, zebra rows,
+//! selectable rows (a press selects one, ctrl toggles one, shift extends from the last
+//! pressed — see [`Spreadsheet::press_row`]),
 //! column dividers, and an inertially-scrolled body: wheel input feeds a velocity that
 //! [`Input::tick`] integrates and decays each frame, the scrollbar thumb is host-drag-driven
 //! through the drag surface, and arrow/page/home/end keys jump the scroll. The scroll geometry
@@ -56,6 +58,16 @@ pub struct Spreadsheet {
     drag_offset_x: f32,
     hscrollbar_hovered: bool,
     hscrollbar_thumb_hovered: bool,
+    /// The selected rows, as indices into `rows` — the SOURCE order, so a
+    /// sort moves a selected row's place in the pane and not what it names.
+    selected: std::collections::BTreeSet<usize>,
+    /// The row a shift press extends from: the last one pressed without it.
+    anchor: Option<usize>,
+    /// Set by whatever changed `selected`, taken by the host.
+    selection_changed: bool,
+    /// The modifiers the host pushed in ahead of the press.
+    ctrl: bool,
+    shift: bool,
 }
 
 /// Scroll/scrollbar geometry for one (row count, rect) pair. Present only when the content
@@ -106,6 +118,11 @@ impl Spreadsheet {
             drag_offset_x: 0.0,
             hscrollbar_hovered: false,
             hscrollbar_thumb_hovered: false,
+            selected: std::collections::BTreeSet::new(),
+            anchor: None,
+            selection_changed: false,
+            ctrl: false,
+            shift: false,
         });
         // The spreadsheet pane starts hidden (the designer toggles it in later).
         crate::widget::WidgetHost::set_visible(&mut s, false);
@@ -226,6 +243,79 @@ impl Spreadsheet {
         }
     }
 
+    /// What a body press at `(px, py)` lands on: `Some(Some(place))` for the
+    /// row at that place in the DISPLAY order, `Some(None)` for the empty
+    /// body under the last row, `None` for a press that is not the body's —
+    /// outside it, or on a scrollbar, which the drag surface owns.
+    fn body_row_at(&self, px: f32, py: f32, rect: Rect) -> Option<Option<usize>> {
+        let body_top = rect.y + HEADER_H;
+        if px < rect.x || px > rect.x + rect.width || py < body_top || py > rect.y + rect.height {
+            return None;
+        }
+        if let Some(g) = self.geom(rect) {
+            if px >= g.scrollbar_x - 4.0 {
+                return None;
+            }
+        }
+        if let Some(g) = self.hgeom(rect) {
+            if py >= g.track_y - 4.0 {
+                return None;
+            }
+        }
+        let scroll = self.geom(rect).map_or(0.0, |g| g.scroll);
+        let place = ((py - body_top + scroll) / ROW_H) as usize;
+        Some((place < self.order.len()).then_some(place))
+    }
+
+    /// A press on the row at `place` of the display order, or on the empty
+    /// body (`None`). Plain, it selects that row alone — or nothing, where
+    /// the row was the whole selection already or the press met no row.
+    /// With ctrl it toggles the row and leaves the rest. With shift it
+    /// selects the run from the anchor to the row AS DISPLAYED, so under a
+    /// sort the run is what the eye sees between the two; with ctrl as well
+    /// the run is added to what is selected.
+    fn press_row(&mut self, place: Option<usize>, ctrl: bool, shift: bool) {
+        let before = self.selected.clone();
+        match place {
+            None => {
+                if !ctrl && !shift {
+                    self.selected.clear();
+                    self.anchor = None;
+                }
+            }
+            Some(place) => {
+                let src = self.order[place];
+                let anchor_place = self.anchor.and_then(|a| self.order.iter().position(|&r| r == a));
+                match (shift, anchor_place) {
+                    (true, Some(from)) => {
+                        if !ctrl {
+                            self.selected.clear();
+                        }
+                        let (lo, hi) = (from.min(place), from.max(place));
+                        self.selected.extend(self.order[lo..=hi].iter().copied());
+                    }
+                    _ if ctrl => {
+                        if !self.selected.remove(&src) {
+                            self.selected.insert(src);
+                        }
+                        self.anchor = Some(src);
+                    }
+                    _ => {
+                        let alone = self.selected.len() == 1 && self.selected.contains(&src);
+                        self.selected.clear();
+                        if !alone {
+                            self.selected.insert(src);
+                        }
+                        self.anchor = Some(src);
+                    }
+                }
+            }
+        }
+        if self.selected != before {
+            self.selection_changed = true;
+        }
+    }
+
     /// Scroll to where a thumb dragged to `thumb_y` puts the content.
     fn scroll_to_thumb(&mut self, g: &ScrollGeom, thumb_y: f32) {
         let ratio = if g.track_range > 0.0 {
@@ -281,6 +371,10 @@ impl Paint for Spreadsheet {
         // Zebra rows + separators, clipped to the body band
         let body_top = y + HEADER_H;
         let body_bottom = y + h;
+        let selected_fill = {
+            let [r, g, b, _] = colors::highlight_primary_color();
+            [r, g, b, 0.28]
+        };
         for i in 0..self.rows.len() {
             let ry = y + HEADER_H + i as f32 * ROW_H - scroll;
             if ry + ROW_H <= body_top || ry >= body_bottom {
@@ -295,6 +389,9 @@ impl Paint for Spreadsheet {
                     [0.08, 0.08, 0.11, 0.05]
                 };
                 ctx.quad(Rect { x, y: draw_y, width: w, height: draw_h }, row_color);
+                if self.order.get(i).is_some_and(|src| self.selected.contains(src)) {
+                    ctx.quad(Rect { x, y: draw_y, width: w, height: draw_h }, selected_fill);
+                }
 
                 let sep_y = ry + ROW_H;
                 if sep_y >= body_top && sep_y < body_bottom {
@@ -502,7 +599,16 @@ impl Input for Spreadsheet {
                 ..
             } => {
                 let Some(col) = self.header_col_at(*px, *py, ectx.rect) else {
-                    return false;
+                    // Not the header: a row of the body, or nothing of ours.
+                    let Some(place) = self.body_row_at(*px, *py, ectx.rect) else {
+                        return false;
+                    };
+                    let had = self.selection_changed;
+                    self.selection_changed = false;
+                    self.press_row(place, self.ctrl, self.shift);
+                    let changed = self.selection_changed;
+                    self.selection_changed |= had;
+                    return changed;
                 };
                 self.sort = match self.sort {
                     Some((c, true)) if c == col => Some((col, false)),
@@ -560,6 +666,11 @@ impl Input for Spreadsheet {
 
     fn scrollable(&self) -> bool {
         true
+    }
+
+    fn set_modifiers(&mut self, ctrl: bool, shift: bool, _alt: bool) {
+        self.ctrl = ctrl;
+        self.shift = shift;
     }
 
     // --- Scrollbar drag, host-driven (the designer checks `draggable()` on the pressed widget
@@ -671,6 +782,40 @@ impl SpreadsheetController for Spreadsheet {
         self.apply_sort();
         // The raw scroll may now exceed the new content; every consumer clamps through
         // `geom()`, and the next scroll write re-clamps it for real.
+        //
+        // The selection is of rows by index, and stands across a refresh:
+        // the designer re-sets the table on every frame of a playback, and
+        // the rows selected are still the elements they were. What a
+        // shorter table no longer has goes.
+        let n = self.rows.len();
+        let kept = self.selected.len();
+        self.selected.retain(|&r| r < n);
+        if self.selected.len() != kept {
+            self.selection_changed = true;
+        }
+        if self.anchor.is_some_and(|a| a >= n) {
+            self.anchor = None;
+        }
+    }
+
+    fn selected_rows(&self) -> Vec<usize> {
+        self.selected.iter().copied().collect()
+    }
+
+    fn set_selected_rows(&mut self, rows: &[usize]) {
+        let n = self.rows.len();
+        let next: std::collections::BTreeSet<usize> = rows.iter().copied().filter(|&r| r < n).collect();
+        if next != self.selected {
+            self.selected = next;
+            self.selection_changed = true;
+        }
+        if self.anchor.is_some_and(|a| !self.selected.contains(&a)) {
+            self.anchor = None;
+        }
+    }
+
+    fn take_selection_change(&mut self) -> bool {
+        std::mem::take(&mut self.selection_changed)
     }
 }
 
@@ -895,8 +1040,99 @@ mod tests {
             local_x: 50.0,
             local_y: 60.0,
         };
-        assert!(!s.handle_event(&body, &mut ctx), "body press is not a sort");
-        assert_eq!(s.inner().sort, Some((1, true)));
+        s.handle_event(&body, &mut ctx);
+        assert_eq!(s.inner().sort, Some((1, true)), "body press is not a sort");
+    }
+
+    fn body_click(y: f32) -> Event {
+        Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 50.0,
+            y,
+            local_x: 50.0,
+            local_y: y,
+        }
+    }
+
+    /// A press selects a row, ctrl toggles one, shift extends from the last
+    /// pressed; the rows are named by their place in the DATA, so a sort
+    /// moves the highlight and not what is selected; and a press on the
+    /// scrollbar is not a press on a row.
+    #[test]
+    fn rows_select_alone_toggled_and_in_runs() {
+        let mut ctx = UiContext::new();
+        let mut s = filled(50);
+        let (id, ptr) = (s.id(), s.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        // Rows are 24 tall under a 24 header: row k spans 24 + 24k.
+        let row_y = |k: usize| 24.0 + 24.0 * k as f32 + 12.0;
+
+        assert!(s.handle_event(&body_click(row_y(1)), &mut ctx));
+        assert_eq!(s.inner().selected_rows(), vec![1]);
+        assert!(s.inner_mut().take_selection_change());
+        assert!(!s.inner_mut().take_selection_change(), "taken once");
+
+        // Plain press elsewhere replaces it.
+        s.handle_event(&body_click(row_y(2)), &mut ctx);
+        assert_eq!(s.inner().selected_rows(), vec![2]);
+
+        // Ctrl adds and removes.
+        WidgetHost::set_modifiers(&mut s, true, false, false);
+        s.handle_event(&body_click(row_y(0)), &mut ctx);
+        assert_eq!(s.inner().selected_rows(), vec![0, 2]);
+        s.handle_event(&body_click(row_y(2)), &mut ctx);
+        assert_eq!(s.inner().selected_rows(), vec![0]);
+
+        // Shift runs from the last row pressed without it (row 2, the ctrl
+        // press) to this one.
+        WidgetHost::set_modifiers(&mut s, false, true, false);
+        s.handle_event(&body_click(row_y(0)), &mut ctx);
+        assert_eq!(s.inner().selected_rows(), vec![0, 1, 2]);
+
+        // A plain press on the one selected row clears it.
+        WidgetHost::set_modifiers(&mut s, false, false, false);
+        s.handle_event(&body_click(row_y(3)), &mut ctx);
+        s.handle_event(&body_click(row_y(3)), &mut ctx);
+        assert!(s.inner().selected_rows().is_empty());
+
+        // The scrollbar's column is the drag surface's.
+        s.handle_event(&Event::MouseButton {
+            button: MouseButton::Left,
+            state: ElementState::Pressed,
+            x: 196.0,
+            y: row_y(1),
+            local_x: 196.0,
+            local_y: row_y(1),
+        }, &mut ctx);
+        assert!(s.inner().selected_rows().is_empty(), "a scrollbar press selects nothing");
+
+        // Under a sort the row pressed is the row SHOWN there, and a shift
+        // run is the rows shown between.
+        let mut t = Spreadsheet::new();
+        t.set_visible(true);
+        WidgetHost::set_rect(&mut t, 0.0, 0.0, 200.0, 124.0);
+        let (id, ptr) = (t.id(), t.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        let rows = vec![
+            vec!["10".to_string(), "b".to_string()],
+            vec!["9".to_string(), "c".to_string()],
+            vec!["2".to_string(), "a".to_string()],
+        ];
+        SpreadsheetController::set_spreadsheet_data(&mut *t, vec!["n".into(), "s".into()], rows.clone());
+        t.handle_event(&header_click(50.0), &mut ctx); // ascending: 2, 9, 10 = rows 2, 1, 0
+        t.handle_event(&body_click(row_y(0)), &mut ctx);
+        assert_eq!(t.inner().selected_rows(), vec![2], "the first row shown is the data's third");
+        WidgetHost::set_modifiers(&mut t, false, true, false);
+        t.handle_event(&body_click(row_y(1)), &mut ctx);
+        assert_eq!(t.inner().selected_rows(), vec![1, 2]);
+
+        // A refresh keeps what is selected, less what the table lost.
+        SpreadsheetController::set_spreadsheet_data(&mut *t, vec!["n".into(), "s".into()], rows[..2].to_vec());
+        assert_eq!(t.inner().selected_rows(), vec![1]);
+        t.inner_mut().set_selected_rows(&[]);
+        assert!(t.inner().selected_rows().is_empty());
+        assert!(t.inner_mut().take_selection_change());
     }
 
     #[test]

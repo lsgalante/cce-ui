@@ -1069,3 +1069,27 @@ what the pane asks. A scroll keeps its own full-precision copy too
 (`fine`), reused while the rows still hold what it rounds to: a trackpad
 sends a pixel at a time, a quarter of a degree, which on a short vector
 is less than the rows can hold.
+
+### A spreadsheet's rows can be selected
+
+`Spreadsheet` keeps a selection of rows (since 2026-09-29): a press on a
+row selects it alone, or clears it where it was the whole selection; with
+ctrl the press toggles that row and leaves the rest; with shift it selects
+the run from the last row pressed without shift to this one. A press on
+the empty body under the last row clears. The host pushes the modifiers in
+ahead of the press (`set_modifiers`), as it does for every widget.
+
+**The selection is of rows of the DATA, not of places in the pane.** A
+sort moves where a selected row is drawn and not what is selected, and a
+shift run is the rows DISPLAYED between the two, which under a sort is
+what the eye sees. It stands across `set_spreadsheet_data`, less the rows
+a shorter table no longer has: a host that re-sets the table on every
+frame of a playback keeps its selection, and one whose table has become
+something else clears it itself.
+
+`SpreadsheetController` carries it: `selected_rows` (ascending),
+`set_selected_rows`, and `take_selection_change`, which is true once after
+anything changed the selection. A press on a scrollbar is the drag
+surface's and selects nothing (`body_row_at`). Selected rows wear
+`highlight_primary_color` at 28% over the zebra.
+`rows_select_alone_toggled_and_in_runs` is the test.
