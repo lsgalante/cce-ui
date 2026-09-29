@@ -74,6 +74,37 @@ pub struct SceneDraw {
     pub see_through: bool,
 }
 
+/// A user image standing in the 3D scene: a textured quad, unlit, depth
+/// tested against the meshes and seen from both sides.
+///
+/// Staged with `VkRenderer::stage_scene_images`, beside the scene's
+/// `SceneDraw`s rather than as one of them: a mesh draw names a mesh and an
+/// image draw names four corners and a texture, and the two share nothing but
+/// the pass.
+pub struct SceneImage {
+    /// Id from `upload_rgba`. A draw whose upload has not landed is skipped.
+    pub image: u32,
+    /// The quad's corners in the space `mvp` transforms, in the image's own
+    /// order: top-left, top-right, bottom-right, bottom-left.
+    pub corners: [[f32; 3]; 4],
+    pub mvp: [[f32; 4]; 4],
+    /// Whole-draw alpha multiplier over the image's own alpha.
+    pub opacity: f32,
+    /// Draw order: this image renders before the `SceneDraw` at this index
+    /// of the staged list, `u32::MAX` after them all. The pass blends in
+    /// submission order, so an image goes after the opaque things it may
+    /// show through to and before the translucent ones that may cover it.
+    pub before: u32,
+}
+
+/// One corner of a `SceneImage` quad.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ImageVertex3D {
+    position: [f32; 3],
+    uv: [f32; 2],
+}
+
 /// shader_3d.wgsl's uniform block.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -103,10 +134,13 @@ struct Mesh {
 struct StagedScene {
     scissor: (u32, u32, u32, u32),
     draws: Vec<SceneDraw>,
+    images: Vec<SceneImage>,
 }
 
 struct SceneFrame {
     uniforms: AllocatedBuffer,
+    /// Six vertices per staged `SceneImage`, in staged order.
+    image_verts: AllocatedBuffer,
     descriptor_set: vk::DescriptorSet,
     draw_count: u32,
 }
@@ -130,6 +164,12 @@ pub(crate) struct SceneStage {
     descriptor_pool: vk::DescriptorPool,
     shader_module: vk::ShaderModule,
     uniform_stride: vk::DeviceSize,
+    /// The `SceneImage` pipeline: set 0 is the scene's uniforms, set 1 a
+    /// user image's descriptor set (`image::image_set_bindings`).
+    image_pipeline: vk::Pipeline,
+    image_pipeline_layout: vk::PipelineLayout,
+    image_set_layout: vk::DescriptorSetLayout,
+    image_shader_module: vk::ShaderModule,
 
     format: vk::Format,
     extent: vk::Extent2D,
@@ -453,6 +493,89 @@ impl SceneStage {
             let wireframe_pipeline = Some(make_lines_pipeline(false));
             let wireframe_see_through_pipeline = make_lines_pipeline(true);
 
+            // The image pipeline: the fill's pass, blend and depth state,
+            // with no culling (a picture is seen from behind, mirrored) and
+            // a vertex that carries a uv where a mesh's carries a colour.
+            let image_bindings = super::image::image_set_bindings();
+            let image_set_layout = device
+                .create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo::default().bindings(&image_bindings),
+                    None,
+                )
+                .expect("Failed to create scene image set layout");
+            let image_set_layouts = [descriptor_set_layout, image_set_layout];
+            let image_pipeline_layout = device
+                .create_pipeline_layout(
+                    &vk::PipelineLayoutCreateInfo::default().set_layouts(&image_set_layouts),
+                    None,
+                )
+                .expect("Failed to create scene image pipeline layout");
+            let image_shader_module = device
+                .create_shader_module(
+                    &vk::ShaderModuleCreateInfo::default()
+                        .code(super::renderer::scene3d_image_spirv()),
+                    None,
+                )
+                .expect("Failed to create 3D image shader module");
+            let image_pipeline = {
+                let stages = [
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::VERTEX)
+                        .module(image_shader_module)
+                        .name(c"vs_main"),
+                    vk::PipelineShaderStageCreateInfo::default()
+                        .stage(vk::ShaderStageFlags::FRAGMENT)
+                        .module(image_shader_module)
+                        .name(c"fs_main"),
+                ];
+                let vertex_bindings = [vk::VertexInputBindingDescription::default()
+                    .binding(0)
+                    .stride(std::mem::size_of::<ImageVertex3D>() as u32)
+                    .input_rate(vk::VertexInputRate::VERTEX)];
+                let vertex_attributes = [
+                    vk::VertexInputAttributeDescription::default()
+                        .location(0)
+                        .binding(0)
+                        .format(vk::Format::R32G32B32_SFLOAT)
+                        .offset(0),
+                    vk::VertexInputAttributeDescription::default()
+                        .location(1)
+                        .binding(0)
+                        .format(vk::Format::R32G32_SFLOAT)
+                        .offset(12),
+                ];
+                let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
+                    .vertex_binding_descriptions(&vertex_bindings)
+                    .vertex_attribute_descriptions(&vertex_attributes);
+                let rasterization = vk::PipelineRasterizationStateCreateInfo::default()
+                    .polygon_mode(vk::PolygonMode::FILL)
+                    .cull_mode(vk::CullModeFlags::NONE)
+                    .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+                    .line_width(1.0);
+                let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+                let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
+                    .dynamic_states(&dynamic_states);
+                device
+                    .create_graphics_pipelines(
+                        vk::PipelineCache::null(),
+                        &[vk::GraphicsPipelineCreateInfo::default()
+                            .stages(&stages)
+                            .vertex_input_state(&vertex_input)
+                            .input_assembly_state(&input_assembly)
+                            .viewport_state(&viewport_state)
+                            .rasterization_state(&rasterization)
+                            .multisample_state(&multisample)
+                            .depth_stencil_state(&depth_stencil)
+                            .color_blend_state(&color_blend)
+                            .dynamic_state(&dynamic_state)
+                            .layout(image_pipeline_layout)
+                            .render_pass(render_pass)
+                            .subpass(0)],
+                        None,
+                    )
+                    .expect("Failed to create 3D image pipeline")[0]
+            };
+
             let uniform_stride = UNIFORM_SIZE.next_multiple_of(min_uniform_align.max(1));
 
             let pool_sizes = [vk::DescriptorPoolSize::default()
@@ -485,7 +608,14 @@ impl SceneStage {
                         vk::BufferUsageFlags::UNIFORM_BUFFER,
                         "scene-uniforms",
                     );
-                    SceneFrame { uniforms, descriptor_set, draw_count: 0 }
+                    let image_verts = create_cpu_buffer(
+                        device,
+                        allocator,
+                        1024,
+                        vk::BufferUsageFlags::VERTEX_BUFFER,
+                        "scene-image-quads",
+                    );
+                    SceneFrame { uniforms, image_verts, descriptor_set, draw_count: 0 }
                 })
                 .collect();
             for frame in &frames {
@@ -504,6 +634,10 @@ impl SceneStage {
                 descriptor_pool,
                 shader_module,
                 uniform_stride,
+                image_pipeline,
+                image_pipeline_layout,
+                image_set_layout,
+                image_shader_module,
                 format,
                 extent: vk::Extent2D { width: 0, height: 0 },
                 backdrop_image: vk::Image::null(),
@@ -766,7 +900,14 @@ impl SceneStage {
     }
 
     pub(crate) fn stage(&mut self, scissor: (u32, u32, u32, u32), draws: Vec<SceneDraw>) {
-        self.staged = Some(StagedScene { scissor, draws });
+        self.staged = Some(StagedScene { scissor, draws, images: Vec::new() });
+    }
+
+    /// The staged scene's images; nothing when no scene is staged.
+    pub(crate) fn stage_images(&mut self, images: Vec<SceneImage>) {
+        if let Some(staged) = &mut self.staged {
+            staged.images = images;
+        }
     }
 
     /// After the frame fence: write this frame's per-draw uniforms (mvp + the
@@ -783,7 +924,9 @@ impl SceneStage {
             return;
         };
         let frame = &mut self.frames[frame_index];
-        let needed = self.uniform_stride * staged.draws.len().max(1) as vk::DeviceSize;
+        // One slot per mesh draw, then one per image.
+        let slots = staged.draws.len() + staged.images.len();
+        let needed = self.uniform_stride * slots.max(1) as vk::DeviceSize;
         if needed > frame.uniforms.size {
             let mut old = std::mem::replace(&mut frame.uniforms, AllocatedBuffer::null());
             destroy_cpu_buffer(device, allocator, &mut old);
@@ -815,7 +958,54 @@ impl SceneStage {
             mapped[offset..offset + UNIFORM_SIZE as usize]
                 .copy_from_slice(bytemuck::bytes_of(&uniforms));
         }
+        for (j, image) in staged.images.iter().enumerate() {
+            let uniforms = SceneUniforms {
+                mvp: image.mvp,
+                window_size,
+                window_radius: corner_radius_px,
+                corner_shape,
+                wire_tint: [0.0; 4],
+                opacity: image.opacity,
+                is_wire: 0.0,
+                prelit: 1.0,
+                _pad: [0.0; 1],
+            };
+            let offset = (self.uniform_stride as usize) * (staged.draws.len() + j);
+            mapped[offset..offset + UNIFORM_SIZE as usize]
+                .copy_from_slice(bytemuck::bytes_of(&uniforms));
+        }
         frame.draw_count = staged.draws.len() as u32;
+
+        let mut verts: Vec<ImageVertex3D> = Vec::with_capacity(staged.images.len() * 6);
+        for image in &staged.images {
+            let [tl, tr, br, bl] = image.corners;
+            let v = |position: [f32; 3], uv: [f32; 2]| ImageVertex3D { position, uv };
+            verts.extend([
+                v(tl, [0.0, 0.0]),
+                v(bl, [0.0, 1.0]),
+                v(tr, [1.0, 0.0]),
+                v(tr, [1.0, 0.0]),
+                v(bl, [0.0, 1.0]),
+                v(br, [1.0, 1.0]),
+            ]);
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(&verts);
+        if bytes.len() as vk::DeviceSize > frame.image_verts.size {
+            let mut old = std::mem::replace(&mut frame.image_verts, AllocatedBuffer::null());
+            destroy_cpu_buffer(device, allocator, &mut old);
+            frame.image_verts = create_cpu_buffer(
+                device,
+                allocator,
+                (bytes.len() as vk::DeviceSize).next_power_of_two(),
+                vk::BufferUsageFlags::VERTEX_BUFFER,
+                "scene-image-quads",
+            );
+        }
+        if !bytes.is_empty() {
+            frame.image_verts.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()
+                [..bytes.len()]
+                .copy_from_slice(bytes);
+        }
     }
 
     /// Record the offscreen scene pass. Consumes the staged scene; afterwards the
@@ -826,6 +1016,7 @@ impl SceneStage {
         device: &ash::Device,
         cmd: vk::CommandBuffer,
         frame_index: usize,
+        images: &super::image::ImageStage,
     ) -> bool {
         let Some(staged) = self.staged.take() else {
             return false;
@@ -879,7 +1070,45 @@ impl SceneStage {
             );
             let mut bound = self.pipeline;
             device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, bound);
+            // The images due before mesh draw `at` (or, past the last draw,
+            // every one left), in staged order.
+            let draw_images = |at: usize, bound: &mut vk::Pipeline| {
+                for (j, image) in staged.images.iter().enumerate() {
+                    let due = (image.before as usize).min(staged.draws.len());
+                    if due != at {
+                        continue;
+                    }
+                    let Some(set) = images.descriptor_set(image.image) else { continue };
+                    if *bound != self.image_pipeline {
+                        device.cmd_bind_pipeline(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            self.image_pipeline,
+                        );
+                        *bound = self.image_pipeline;
+                    }
+                    device.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.image_pipeline_layout,
+                        0,
+                        &[frame.descriptor_set],
+                        &[(self.uniform_stride as u32) * (staged.draws.len() + j) as u32],
+                    );
+                    device.cmd_bind_descriptor_sets(
+                        cmd,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.image_pipeline_layout,
+                        1,
+                        &[set],
+                        &[],
+                    );
+                    device.cmd_bind_vertex_buffers(cmd, 0, &[frame.image_verts.buffer], &[0]);
+                    device.cmd_draw(cmd, 6, 1, (j * 6) as u32, 0);
+                }
+            };
             for (i, draw) in staged.draws.iter().enumerate() {
+                draw_images(i, &mut bound);
                 let mesh = &self.meshes[draw.mesh.0];
                 if mesh.count == 0 {
                     continue;
@@ -924,6 +1153,7 @@ impl SceneStage {
                 device.cmd_bind_vertex_buffers(cmd, 0, &[mesh.buffer.buffer], &[0]);
                 device.cmd_draw(cmd, mesh.count, 1, 0, 0);
             }
+            draw_images(staged.draws.len(), &mut bound);
             device.cmd_end_render_pass(cmd);
         }
         self.backdrop_valid = true;
@@ -936,6 +1166,8 @@ impl SceneStage {
             for frame in &mut self.frames {
                 let mut uniforms = std::mem::replace(&mut frame.uniforms, AllocatedBuffer::null());
                 destroy_cpu_buffer(device, allocator, &mut uniforms);
+                let mut quads = std::mem::replace(&mut frame.image_verts, AllocatedBuffer::null());
+                destroy_cpu_buffer(device, allocator, &mut quads);
             }
             for mesh in &mut self.meshes {
                 let mut buffer = std::mem::replace(&mut mesh.buffer, AllocatedBuffer::null());
@@ -946,6 +1178,10 @@ impl SceneStage {
             if let Some(p) = self.wireframe_pipeline.take() {
                 device.destroy_pipeline(p, None);
             }
+            device.destroy_pipeline(self.image_pipeline, None);
+            device.destroy_pipeline_layout(self.image_pipeline_layout, None);
+            device.destroy_descriptor_set_layout(self.image_set_layout, None);
+            device.destroy_shader_module(self.image_shader_module, None);
             device.destroy_pipeline(self.see_through_pipeline, None);
             device.destroy_pipeline(self.wireframe_see_through_pipeline, None);
             device.destroy_pipeline(self.pipeline, None);

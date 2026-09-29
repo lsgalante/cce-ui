@@ -224,6 +224,25 @@ const STAGING_IDLE_FRAMES: u32 = 120;
 /// small one costs more than it saves.
 const STAGING_KEEP_BYTES: vk::DeviceSize = 1 << 20;
 
+/// The bindings of a user image's descriptor set: the texture, then its
+/// sampler. One definition, because the 3D scene pass binds these same sets
+/// to a pipeline of its own (`SceneImage`), and a set is compatible with a
+/// pipeline layout only where the two layouts are defined identically.
+pub(crate) fn image_set_bindings() -> [vk::DescriptorSetLayoutBinding<'static>; 2] {
+    [
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(1)
+            .descriptor_type(vk::DescriptorType::SAMPLER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+    ]
+}
+
 pub(crate) struct ImageStage {
     pipeline: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
@@ -261,18 +280,7 @@ impl ImageStage {
         // renderer is gone.
         STAGES_BUILT.fetch_add(1, Ordering::Relaxed);
         unsafe {
-            let bindings = [
-                vk::DescriptorSetLayoutBinding::default()
-                    .binding(0)
-                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-                vk::DescriptorSetLayoutBinding::default()
-                    .binding(1)
-                    .descriptor_type(vk::DescriptorType::SAMPLER)
-                    .descriptor_count(1)
-                    .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-            ];
+            let bindings = image_set_bindings();
             let descriptor_set_layout = device
                 .create_descriptor_set_layout(
                     &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
@@ -905,6 +913,12 @@ impl ImageStage {
             buf.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()[..bytes.len()]
                 .copy_from_slice(bytes);
         }
+    }
+
+    /// The descriptor set an uploaded image is drawn with, or None while its
+    /// upload has not landed (or after it was freed).
+    pub(crate) fn descriptor_set(&self, image_id: u32) -> Option<vk::DescriptorSet> {
+        self.images.get(&image_id).map(|gpu| gpu.descriptor_set)
     }
 
     /// Record one image quad (index `i` of this frame's list). The caller

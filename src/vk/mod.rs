@@ -54,7 +54,7 @@ pub use image::{
 };
 pub use renderer::{Batch2D, Frame2D, PlatePush, VkRenderer, MAX_PLATE_FEATURES};
 pub use rt::{RtCamera, RtMaterial, RtOffscreen, RtTriangle};
-pub use scene::{MeshId, SceneDraw, Vertex3D};
+pub use scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 pub use text::TextSpan;
 
 /// Pay the process-wide, window-independent renderer costs up front: the

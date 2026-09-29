@@ -20,7 +20,7 @@ use crate::engine::Vertex;
 use super::core::SurfaceLost;
 use super::image::{ImageQuad, ImageStage};
 use super::rt::{RtCamera, RtMaterial, RtStage, RtTriangle};
-use super::scene::{MeshId, SceneDraw, SceneStage, Vertex3D};
+use super::scene::{MeshId, SceneDraw, SceneImage, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
 
 /// One scissored draw range of a 2D frame. `scissor` is (x, y, w, h) in
@@ -327,6 +327,11 @@ pub(crate) fn glyph_spirv() -> &'static [u32] {
 pub(crate) fn scene3d_spirv() -> &'static [u32] {
     static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
     SPIRV.get_or_init(|| compile_wgsl(include_str!("scene3d.wgsl")))
+}
+
+pub(crate) fn scene3d_image_spirv() -> &'static [u32] {
+    static SPIRV: std::sync::OnceLock<Vec<u32>> = std::sync::OnceLock::new();
+    SPIRV.get_or_init(|| compile_wgsl(include_str!("scene3d_image.wgsl")))
 }
 
 /// Like [`compile_wgsl`], but with naga's RAY_QUERY capability and SPIR-V 1.4
@@ -1451,6 +1456,16 @@ impl VkRenderer {
         self.scene.stage(scissor, draws);
     }
 
+    /// Add textured quads to the scene staged by the last [`stage_scene`] —
+    /// user images (ids from `upload_rgba`) standing in the 3D world, depth
+    /// tested against the meshes. Call it AFTER `stage_scene`, which starts
+    /// every staged scene with none; with no scene staged it does nothing.
+    ///
+    /// [`stage_scene`]: Self::stage_scene
+    pub fn stage_scene_images(&mut self, images: Vec<SceneImage>) {
+        self.scene.stage_images(images);
+    }
+
     /// Replace the path tracer's scene (triangles in the space the camera's
     /// `inv_mvp` unprojects into). Builds the BVH on the CPU and uploads it;
     /// waits for the GPU to go idle first — scene replacement is rare
@@ -1787,7 +1802,8 @@ impl VkRenderer {
 
             // Offscreen 3D pass (only when a scene was staged); leaves the
             // backdrop in TRANSFER_SRC.
-            let mut scene_recorded = self.scene.record(&self.core.device, cmd, frame_index);
+            let mut scene_recorded =
+                self.scene.record(&self.core.device, cmd, frame_index, &self.image);
 
             // Path-tracer pass (only when staged via `stage_rt`): one
             // accumulation dispatch, blitted into the backdrop's pane region —
@@ -2278,6 +2294,11 @@ mod tests {
     #[test]
     fn scene3d_compiles() {
         assert!(!super::scene3d_spirv().is_empty());
+    }
+
+    #[test]
+    fn scene3d_image_compiles() {
+        assert!(!super::scene3d_image_spirv().is_empty());
     }
 
     /// `WINDOW_INFO_BYTES` sizes the uniform buffer AND its descriptor range,
