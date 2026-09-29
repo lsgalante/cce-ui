@@ -3190,9 +3190,7 @@ impl Input for ParametersBg {
                     let latched = (0..n).find(|&i| {
                         self.spinboxes[i].as_ref().is_some_and(|sb| latched_to(sb.base().id()))
                             || self.sliders[i].as_ref().is_some_and(|sl| latched_to(sl.base().id()))
-                            || self.float3s[i]
-                                .as_ref()
-                                .is_some_and(|f| f.sliders().iter().any(|sl| latched_to(sl.base().id())))
+                            || self.float3s[i].as_ref().is_some_and(|f| f.wheel_latched(ui))
                     });
                     // Under the pointer: the NEAREST control whose zone
                     // holds it, by the distance to the band's (or the
@@ -3223,7 +3221,8 @@ impl Input for ParametersBg {
                                         .scroll_hit(band, px, py)
                                         .then(|| (i, (py - (band.y + band.height * 0.5)).abs()));
                                 }
-                                self.float3s[i].as_ref().and_then(|f| f.nearest_band(px, py)).map(|(_, d)| (i, d))
+                                // A float3's bands, and its trackball when it has one.
+                                self.float3s[i].as_ref().and_then(|f| f.wheel_zone(px, py)).map(|d| (i, d))
                             })
                             .min_by(|a, b| a.1.total_cmp(&b.1))
                             .map(|(i, _)| i)
@@ -3954,6 +3953,28 @@ mod tests {
         let v: Vec<f32> = p.display_params[1].1.split(':').map(|c| c.parse().unwrap()).collect();
         assert!((v[0] - 2.0).abs() < 2e-3 && v[1].abs() < 2e-3 && v[2].abs() < 2e-3, "a quarter turn right: {v:?}");
         assert_eq!(p.display_params[2].1, "0:0:0", "the plain row is untouched");
+
+        // A trackpad gesture beginning on the ball rolls it — the pane does
+        // not scroll — and one beginning on the label column is the pane's.
+        use crate::widget::{scroll_motion::set_scroll_phase, Position, ScrollPhase};
+        let rows: Vec<(String, String, String)> = (0..12)
+            .map(|i| (format!("P{i}"), "0.000:0.000:2.000".to_string(), "float3:-10:10:trackball".to_string()))
+            .collect();
+        let mut p = ParametersBg::new();
+        ParamController::set_display_params(&mut *p, &rows);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 500.0, 300.0);
+        assert!(p.content_h > 300.0, "the pane overflows, so it has somewhere to scroll");
+        let (cx, cy, _) = p.float3s[1].as_ref().unwrap().ball_circle().unwrap();
+        let mut ctx = UiContext::new();
+        ctx.scroll_gesture_new = true;
+        set_scroll_phase(ScrollPhase::Finger);
+        assert!(p.mouse_wheel(&MouseScrollDelta::PixelDelta(Position { x: 60.0, y: 0.0 }), cx, cy, &mut ctx));
+        let v: Vec<f32> = p.display_params[1].1.split(':').map(|c| c.parse().unwrap()).collect();
+        assert!(v[0] > 0.4 && v[1].abs() < 2e-3, "rolled right by a notch: {v:?}");
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(p.float3s[1].as_ref().unwrap().ball_id()));
+        assert_eq!(p.scroll_y, 0.0, "the pane did not scroll");
+        assert_eq!(p.display_params[0].1, "0.000:0.000:2.000", "the row above is untouched");
+        set_scroll_phase(ScrollPhase::Wheel);
     }
 
     #[test]

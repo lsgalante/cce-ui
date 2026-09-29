@@ -995,3 +995,15 @@ length 0.06 has seven directions. And the ball is painted by
 vector of no length is given a length of one by the first drag. The ball
 counts as chrome in `ParametersBg::control_chrome`, so the label layout
 is decided by the track it leaves.
+
+**A scroll rolls the ball** (`ball_scroll`), as content is scrolled: its
+surface moves the way a page under the pointer would, a two-finger
+gesture in both axes at once and a wheel notch in one, by `SCROLL_TURN`
+(15 degrees) a notch — the fine handle beside the drag's 1:1. The ball
+has an id of its own (`ball_id`) in the scroll-gesture bookkeeping, so a
+gesture that begins on it is the ball's until it ends and one a band
+holds stays the band's over the ball; `wheel_zone` / `wheel_latched` are
+what the pane asks. A scroll keeps its own full-precision copy too
+(`fine`), reused while the rows still hold what it rounds to: a trackpad
+sends a pixel at a time, a quarter of a degree, which on a short vector
+is less than the rows can hold.

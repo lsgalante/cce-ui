@@ -35,6 +35,9 @@ const DECIMALS: usize = 2;
 const BALL_DECIMALS: usize = 3;
 /// Gap between the trackball and the axis-letter column.
 const BALL_GAP: f32 = 10.0;
+/// How far one wheel notch rolls the ball. A drag is 1:1 with the ball's
+/// surface; a scroll is the fine handle, a quarter turn in six notches.
+const SCROLL_TURN: f32 = std::f32::consts::PI / 12.0;
 
 /// A trackball drag in progress: where the pointer last was, and the vector
 /// being turned at FULL precision. The rows hold it rounded to their
@@ -58,6 +61,16 @@ pub struct Float3 {
     /// vector is drawn on and turned by. See [`Float3::set_trackball`].
     ball: bool,
     ball_drag: Option<BallDrag>,
+    /// The ball's own id in the scroll-gesture bookkeeping
+    /// (`UiContext::scroll_initiate_widget_id`): a gesture that begins on
+    /// the ball is the ball's until it ends, as one on a band is the band's.
+    ball_id: crate::widget::WidgetId,
+    /// The vector a SCROLL is turning, at full precision, as a direction
+    /// and a length — what [`BallDrag`] is to a drag. Kept between events
+    /// for as long as the rows still hold what it rounds to
+    /// ([`Float3::fine`]); a trackpad sends a pixel at a time, and a pixel
+    /// turns a short vector by less than the rows can hold.
+    fine: Option<([f32; 3], f32)>,
 }
 
 impl Float3 {
@@ -71,6 +84,8 @@ impl Float3 {
             dragging_idx: None,
             ball: false,
             ball_drag: None,
+            ball_id: crate::widget::WidgetId(crate::widget::NEXT_WIDGET_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)),
+            fine: None,
         })
     }
 
@@ -152,10 +167,72 @@ impl Float3 {
     }
 
     fn ball_begin(&mut self, px: f32, py: f32) {
-        let v = self.vector();
-        let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
-        let (dir, len) = if len > 1e-6 { (v.map(|c| c / len), len) } else { ([0.0, 0.0, 1.0], 1.0) };
+        let (dir, len) = self.fine();
         self.ball_drag = Some(BallDrag { last: (px, py), dir, len });
+    }
+
+    /// The vector to turn, as a direction and a length: the full-precision
+    /// copy the last scroll left, while the rows still hold what it rounds
+    /// to — within half a readout tick and the rows' own float resolution
+    /// over their range — and the rows' vector otherwise (someone typed, or
+    /// dragged a band). A vector of no length points at the viewer with a
+    /// length of one.
+    fn fine(&self) -> ([f32; 3], f32) {
+        let v = self.vector();
+        if let Some((dir, len)) = self.fine {
+            let (min, max) = self.sliders[0].range();
+            let tol = 0.5 * 10f32.powi(-(self.decimals() as i32)) + (max - min).abs() * 5e-7;
+            if (0..3).all(|i| (dir[i] * len - v[i]).abs() <= tol) {
+                return (dir, len);
+            }
+        }
+        let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        if len > 1e-6 { (v.map(|c| c / len), len) } else { ([0.0, 0.0, 1.0], 1.0) }
+    }
+
+    pub fn ball_id(&self) -> crate::widget::WidgetId {
+        self.ball_id
+    }
+
+    /// Roll the ball by a scroll: the ball is scrolled as content is, its
+    /// surface moving the way a page under the pointer would — a two-finger
+    /// gesture in both axes at once, a wheel notch in one — by
+    /// [`SCROLL_TURN`] a notch. The length is kept.
+    pub fn ball_scroll(&mut self, delta: &MouseScrollDelta) -> bool {
+        let Some((_, _, r)) = self.ball_circle() else {
+            return false;
+        };
+        let (nx, ny) = match delta {
+            MouseScrollDelta::LineDelta(x, y) => (*x, *y),
+            MouseScrollDelta::PixelDelta(pos) => (pos.x as f32 / 60.0, pos.y as f32 / 60.0),
+        };
+        if nx == 0.0 && ny == 0.0 {
+            return false;
+        }
+        let (dir, len) = self.fine();
+        let dir = Self::rolled(dir, nx * SCROLL_TURN * r, ny * SCROLL_TURN * r, r);
+        self.fine = Some((dir, len));
+        for (s, c) in self.sliders.iter_mut().zip(dir) {
+            s.set_scaled_value(c * len);
+        }
+        true
+    }
+
+    /// Whether the scroll gesture in progress is this group's — the ball's
+    /// or one of its bands'.
+    pub fn wheel_latched(&self, ui: &UiContext) -> bool {
+        !ui.scroll_gesture_new
+            && ui.scroll_initiate_widget_id.is_some_and(|id| id == self.ball_id || self.sliders.iter().any(|s| s.base().id() == id))
+    }
+
+    /// How near a scroll at `(px, py)` is to something of this group's
+    /// that takes one: on the ball, nothing is nearer; else the distance to
+    /// the nearest band whose halo holds the pointer. `None` off both.
+    pub fn wheel_zone(&self, px: f32, py: f32) -> Option<f32> {
+        if self.ball_hit(px, py) {
+            return Some(0.0);
+        }
+        self.nearest_band(px, py).map(|(_, d)| d)
     }
 
     fn ball_roll(&mut self, px: f32, py: f32) -> bool {
@@ -290,7 +367,16 @@ impl Float3 {
     /// gap between rows, so two rows' halos hold any point between them —
     /// and until 2026-09-28 the first in X/Y/Z order won, so a scroll over
     /// the Y band turned X.
+    /// The BALL comes before the rows: a gesture it holds, or one nobody
+    /// holds that falls on it, rolls it ([`Self::ball_scroll`]).
     pub fn wheel(&mut self, delta: &MouseScrollDelta, px: f32, py: f32, ui: &mut UiContext) -> bool {
+        let ball_latched = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(self.ball_id);
+        let band_latched = self.wheel_latched(ui) && !ball_latched;
+        if self.ball && (ball_latched || (!band_latched && self.ball_hit(px, py))) {
+            ui.scroll_initiate_widget_id = Some(self.ball_id);
+            self.ball_scroll(delta);
+            return true;
+        }
         let Some(i) = self.wheel_row(px, py, ui) else {
             return false;
         };
@@ -661,6 +747,61 @@ mod tests {
         assert!(f.is_dragging());
         f.drag_update(row.0 + 60.0, row.1 + row.3 * 0.5);
         assert!(f.vector()[1] == 0.0 && f.vector()[2] == 2.0, "only X moved: {:?}", f.vector());
+
+        // A scroll rolls the ball as content is scrolled: a notch is
+        // fifteen degrees, the wheel in one axis and a two-finger gesture in
+        // both. Wheel DOWN moves content up, and the near point with it.
+        let turn = std::f32::consts::PI / 12.0;
+        let mut f = group([0.0, 0.0, 2.0]);
+        ctx.scroll_gesture_new = true;
+        ctx.scroll_initiate_widget_id = None;
+        assert!(f.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), cx, cy, &mut ctx));
+        assert!(close(f.vector(), [0.0, 2.0 * turn.sin(), 2.0 * turn.cos()]), "{:?}", f.vector());
+        assert_eq!(ctx.scroll_initiate_widget_id, Some(f.ball_id()), "the ball owns the gesture");
+        // Latched: the pointer has drifted onto a band, and the ball still turns.
+        ctx.scroll_gesture_new = false;
+        let row = f.get_row_rects()[0];
+        let before = f.vector();
+        assert!(f.wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), row.0 + 20.0, row.1 + row.3 * 0.5, &mut ctx));
+        assert!(close(f.vector(), [0.0, 0.0, 2.0]), "rolled back: {:?} from {before:?}", f.vector());
+
+        // A trackpad sends a pixel at a time. Sixty of them to the right are
+        // one notch, on a vector short enough that a single pixel turns it
+        // by less than the rows can hold.
+        let mut f = group([0.0, 0.0, 0.06]);
+        ctx.scroll_gesture_new = true;
+        ctx.scroll_initiate_widget_id = None;
+        for _ in 0..60 {
+            assert!(f.wheel(&MouseScrollDelta::PixelDelta(crate::widget::Position { x: 1.0, y: 0.0 }), cx, cy, &mut ctx));
+            ctx.scroll_gesture_new = false;
+        }
+        assert!(close(f.vector(), [0.06 * turn.sin(), 0.0, 0.06 * turn.cos()]), "{:?}", f.vector());
+        // A typed component ends the scroll's copy: the next scroll turns
+        // what the rows hold.
+        f.sliders[1].set_scaled_value(3.0);
+        ctx.scroll_gesture_new = true;
+        f.wheel(&MouseScrollDelta::LineDelta(1.0, 0.0), cx, cy, &mut ctx);
+        assert!((f.vector()[1] - 3.0).abs() < 2e-3, "Y is what was typed: {:?}", f.vector());
+
+        // Off the ball a scroll is the bands', and a gesture a band holds
+        // stays the band's over the ball.
+        let mut f = group([0.0, 0.0, 2.0]);
+        let row = f.get_row_rects()[0];
+        ctx.scroll_gesture_new = true;
+        ctx.scroll_initiate_widget_id = None;
+        let band_x = row.0 + (row.2 - 68.0) * 0.5;
+        assert!(f.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), band_x, row.1 + row.3 * 0.5, &mut ctx));
+        assert_ne!(f.vector()[0], 0.0, "the X band turned");
+        let (y, z) = (f.vector()[1], f.vector()[2]);
+        ctx.scroll_gesture_new = false;
+        assert!(f.wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), cx, cy, &mut ctx));
+        assert_eq!((f.vector()[1], f.vector()[2]), (y, z), "the ball did not take a band's gesture");
+        // Over the readouts, past the bands' halos, nothing takes a scroll;
+        // and a group without a ball has no ball to hit.
+        assert_eq!(f.wheel_zone(395.0, cy), None);
+        let mut plain = Float3::new().with_range(-10.0, 10.0);
+        WidgetHost::set_rect(&mut plain, 0.0, 0.0, 400.0, Float3::preferred_height(false));
+        assert!(!plain.ball_hit(cx, cy));
 
         // The ball paints a sphere and the vector on it; without one, nothing.
         let mut pc = PaintCtx::new();
