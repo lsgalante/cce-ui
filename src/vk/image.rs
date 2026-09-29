@@ -20,6 +20,16 @@
 //! the pixel buffer the renderer has finished with, so a streaming caller
 //! refills one buffer instead of allocating a frame-sized `Vec` per frame. Draw ordering comes from [`super::Frame2D::images`]: each
 //! [`ImageQuad`] carries the vertex index it sorts before.
+//!
+//! **An image drawn much smaller than it is wants mipmaps**
+//! ([`upload_rgba_mipmapped`]). The sampler filters between the four texels
+//! nearest each pixel, which is every texel while the image is drawn near
+//! its own size and one in twenty-five once it is drawn at a fifth of it: a
+//! hairline is then on screen or not by where the sample happened to land,
+//! and crawls as the image moves. It is asked for per image, because the
+//! chain is a third more memory and is rebuilt on every update, and most
+//! images — an icon, a thumbnail, a page read back at the size it is shown —
+//! are drawn at their own size.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -71,7 +81,7 @@ impl PixelFormat {
 }
 
 enum Pending {
-    Upload { id: u32, pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat },
+    Upload { id: u32, pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat, mips: bool },
     /// Replace the contents of an image that already exists, keeping its
     /// id, its `VkImage` and its descriptor set.
     Update { id: u32, pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat },
@@ -98,10 +108,31 @@ pub fn upload_rgba(pixels: Vec<u8>, width: u32, height: u32) -> u32 {
 /// Queue an image whose bytes are in `format`. [`upload_rgba`] is this with
 /// [`PixelFormat::Rgba`].
 pub fn upload_pixels(pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat) -> u32 {
+    queue_upload(pixels, width, height, format, false)
+}
+
+/// [`upload_rgba`] for an image that will be drawn much smaller than it is,
+/// or at a slant: the image gets a full mip chain, built on the GPU, and is
+/// sampled from the level that matches the size it is drawn at. An update
+/// ([`update_pixels`]) rebuilds the chain.
+///
+/// On a device that cannot build one by blitting the image is uploaded
+/// without, as [`upload_rgba`] would have.
+pub fn upload_rgba_mipmapped(pixels: Vec<u8>, width: u32, height: u32) -> u32 {
+    queue_upload(pixels, width, height, PixelFormat::Rgba, true)
+}
+
+fn queue_upload(pixels: Vec<u8>, width: u32, height: u32, format: PixelFormat, mips: bool) -> u32 {
     assert_eq!(pixels.len(), (width * height * 4) as usize, "8888 size mismatch");
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    PENDING.lock().unwrap().push(Pending::Upload { id, pixels, width, height, format });
+    PENDING.lock().unwrap().push(Pending::Upload { id, pixels, width, height, format, mips });
     id
+}
+
+/// How many levels a full mip chain of an image has: halved until the
+/// longer side is one texel.
+pub(crate) fn mip_level_count(width: u32, height: u32) -> u32 {
+    32 - width.max(height).max(1).leading_zeros()
 }
 
 /// Replace what `id` holds, keeping the image itself.
@@ -213,6 +244,9 @@ struct GpuImage {
     width: u32,
     height: u32,
     format: PixelFormat,
+    /// Levels in the image: 1 for one uploaded plain, the full chain for a
+    /// mipmapped one.
+    mip_levels: u32,
 }
 
 const MAX_IMAGES: u32 = 256;
@@ -250,6 +284,8 @@ pub(crate) struct ImageStage {
     descriptor_pool: vk::DescriptorPool,
     shader_module: vk::ShaderModule,
     sampler: vk::Sampler,
+    /// Whether this device can build a mip chain by blitting.
+    mips_supported: bool,
     images: HashMap<u32, GpuImage>,
     /// One host-visible staging buffer, grown to the largest upload and kept.
     /// Uploads are serialized against each other (each waits for its own copy
@@ -274,6 +310,8 @@ impl ImageStage {
         allocator: &mut Allocator,
         render_pass: vk::RenderPass,
         frames_in_flight: usize,
+        mips_supported: bool,
+        max_anisotropy: f32,
     ) -> Self {
         // One image table per renderer, so this is the renderer count — see
         // `renderer_epoch`, which is what tells a cache of ids that its
@@ -391,13 +429,24 @@ impl ImageStage {
                 )
                 .expect("Failed to create image pipeline")[0];
 
-            // Linear filtering: thumbnails scale smoothly.
+            // Linear filtering: thumbnails scale smoothly. Between mip
+            // levels too, and across every level an image has — which for
+            // an image uploaded plain is the one, so nothing changes for
+            // it. Anisotropy is for an image seen at a slant, whose long
+            // axis would otherwise be blurred to the level its short one
+            // asks for; an axis-aligned quad in the 2D pass has no slant and
+            // takes one sample as before.
+            let anisotropy = max_anisotropy.min(8.0);
             let sampler = device
                 .create_sampler(
                     &vk::SamplerCreateInfo::default()
                         .mag_filter(vk::Filter::LINEAR)
                         .min_filter(vk::Filter::LINEAR)
-                        .mipmap_mode(vk::SamplerMipmapMode::NEAREST)
+                        .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
+                        .min_lod(0.0)
+                        .max_lod(vk::LOD_CLAMP_NONE)
+                        .anisotropy_enable(anisotropy > 1.0)
+                        .max_anisotropy(anisotropy.max(1.0))
                         .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
                         .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
                         .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE),
@@ -442,6 +491,7 @@ impl ImageStage {
                 descriptor_pool,
                 shader_module,
                 sampler,
+                mips_supported,
                 images: HashMap::new(),
                 staging: None,
                 staging_idle: 0,
@@ -478,9 +528,10 @@ impl ImageStage {
         self.staging_idle = 0;
         for item in pending {
             match item {
-                Pending::Upload { id, pixels, width, height, format } => {
+                Pending::Upload { id, pixels, width, height, format, mips } => {
                     self.upload(
                         device, allocator, queue, command_pool, id, &pixels, width, height, format,
+                        mips,
                     );
                     retire_buffer(pixels);
                 }
@@ -495,10 +546,13 @@ impl ImageStage {
                     if reusable {
                         self.write_into(device, allocator, queue, command_pool, id, &pixels);
                     } else {
+                        // Mipmapped if what it replaces was: the id is the
+                        // same picture at another size.
+                        let mips = self.images.get(&id).is_some_and(|gpu| gpu.mip_levels > 1);
                         self.destroy_image(device, allocator, id);
                         self.upload(
                             device, allocator, queue, command_pool, id, &pixels, width, height,
-                            format,
+                            format, mips,
                         );
                     }
                     retire_buffer(pixels);
@@ -567,11 +621,23 @@ impl ImageStage {
         width: u32,
         height: u32,
         format: PixelFormat,
+        mips: bool,
     ) {
         if self.images.len() as u32 >= MAX_IMAGES {
             log::error!("image registry full ({MAX_IMAGES}); dropping upload {id}");
             return;
         }
+        let mip_levels =
+            if mips && self.mips_supported { mip_level_count(width, height) } else { 1 };
+        // Each level is blitted from the one above it, so a mipmapped image
+        // is a transfer's source as well as its destination.
+        let usage = if mip_levels > 1 {
+            vk::ImageUsageFlags::SAMPLED
+                | vk::ImageUsageFlags::TRANSFER_DST
+                | vk::ImageUsageFlags::TRANSFER_SRC
+        } else {
+            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST
+        };
         unsafe {
             let image = device
                 .create_image(
@@ -591,11 +657,11 @@ impl ImageStage {
                         // no cost, so a BGRA source never needs a CPU swizzle.
                         .format(format.vk())
                         .extent(vk::Extent3D { width, height, depth: 1 })
-                        .mip_levels(1)
+                        .mip_levels(mip_levels)
                         .array_layers(1)
                         .samples(vk::SampleCountFlags::TYPE_1)
                         .tiling(vk::ImageTiling::OPTIMAL)
-                        .usage(vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST)
+                        .usage(usage)
                         .initial_layout(vk::ImageLayout::UNDEFINED),
                     None,
                 )
@@ -623,7 +689,7 @@ impl ImageStage {
 
             let range = vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .level_count(1)
+                .level_count(mip_levels)
                 .layer_count(1);
             let cmd = device
                 .allocate_command_buffers(
@@ -672,23 +738,7 @@ impl ImageStage {
                     )
                     .image_extent(vk::Extent3D { width, height, depth: 1 })],
             );
-            device.cmd_pipeline_barrier(
-                cmd,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::default()
-                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                    .dst_access_mask(vk::AccessFlags::SHADER_READ)
-                    .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                    .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .image(image)
-                    .subresource_range(range)],
-            );
+            record_levels(device, cmd, image, width, height, mip_levels);
             device.end_command_buffer(cmd).unwrap();
             let cmds = [cmd];
             device
@@ -746,6 +796,7 @@ impl ImageStage {
                     width,
                     height,
                     format,
+                    mip_levels,
                 },
             );
         }
@@ -774,7 +825,9 @@ impl ImageStage {
         id: u32,
         pixels: &[u8],
     ) {
-        let Some(&GpuImage { image, width, height, .. }) = self.images.get(&id) else { return };
+        let Some(&GpuImage { image, width, height, mip_levels, .. }) = self.images.get(&id) else {
+            return;
+        };
         unsafe {
             let staging_buffer = {
                 let staging = self.staging_for(device, allocator, pixels.len());
@@ -784,7 +837,7 @@ impl ImageStage {
             };
             let range = vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
-                .level_count(1)
+                .level_count(mip_levels)
                 .layer_count(1);
             let cmd = device
                 .allocate_command_buffers(
@@ -837,23 +890,7 @@ impl ImageStage {
                     )
                     .image_extent(vk::Extent3D { width, height, depth: 1 })],
             );
-            device.cmd_pipeline_barrier(
-                cmd,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[vk::ImageMemoryBarrier::default()
-                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                    .dst_access_mask(vk::AccessFlags::SHADER_READ)
-                    .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-                    .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .image(image)
-                    .subresource_range(range)],
-            );
+            record_levels(device, cmd, image, width, height, mip_levels);
             device.end_command_buffer(cmd).unwrap();
             let cmds = [cmd];
             device
@@ -971,5 +1008,123 @@ impl ImageStage {
             device.destroy_pipeline_layout(self.pipeline_layout, None);
             device.destroy_shader_module(self.shader_module, None);
         }
+    }
+}
+
+/// Finish an image whose level 0 has just been copied into and whose every
+/// level is in TRANSFER_DST: build each further level from the one above
+/// it, and leave them all in the layout the shader reads.
+///
+/// A blit, filtered linearly, halves a level into the next: each texel of
+/// the smaller is the mean of the four it covers. The formats are sRGB, so
+/// the mean is taken of the light and not of its encoding — a level of a
+/// black and white check is the grey that looks half as bright, where a mean
+/// of the bytes is darker than that.
+///
+/// With one level there is nothing to build and this is the transition the
+/// plain upload always ended on.
+unsafe fn record_levels(
+    device: &ash::Device,
+    cmd: vk::CommandBuffer,
+    image: vk::Image,
+    width: u32,
+    height: u32,
+    mip_levels: u32,
+) {
+    let level = |i: u32| {
+        vk::ImageSubresourceRange::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .base_mip_level(i)
+            .level_count(1)
+            .layer_count(1)
+    };
+    let barrier = |range, from_access, to_access, from_layout, to_layout, from_stage, to_stage| {
+        device.cmd_pipeline_barrier(
+            cmd,
+            from_stage,
+            to_stage,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[vk::ImageMemoryBarrier::default()
+                .src_access_mask(from_access)
+                .dst_access_mask(to_access)
+                .old_layout(from_layout)
+                .new_layout(to_layout)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(image)
+                .subresource_range(range)],
+        );
+    };
+    let (mut w, mut h) = (width as i32, height as i32);
+    for i in 1..mip_levels {
+        let (next_w, next_h) = ((w / 2).max(1), (h / 2).max(1));
+        barrier(
+            level(i - 1),
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::AccessFlags::TRANSFER_READ,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::TRANSFER,
+        );
+        let layers = |i: u32| {
+            vk::ImageSubresourceLayers::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .mip_level(i)
+                .layer_count(1)
+        };
+        device.cmd_blit_image(
+            cmd,
+            image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[vk::ImageBlit::default()
+                .src_subresource(layers(i - 1))
+                .src_offsets([vk::Offset3D::default(), vk::Offset3D { x: w, y: h, z: 1 }])
+                .dst_subresource(layers(i))
+                .dst_offsets([
+                    vk::Offset3D::default(),
+                    vk::Offset3D { x: next_w, y: next_h, z: 1 },
+                ])],
+            vk::Filter::LINEAR,
+        );
+        barrier(
+            level(i - 1),
+            vk::AccessFlags::TRANSFER_READ,
+            vk::AccessFlags::SHADER_READ,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        );
+        (w, h) = (next_w, next_h);
+    }
+    barrier(
+        level(mip_levels - 1),
+        vk::AccessFlags::TRANSFER_WRITE,
+        vk::AccessFlags::SHADER_READ,
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        vk::PipelineStageFlags::TRANSFER,
+        vk::PipelineStageFlags::FRAGMENT_SHADER,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mip_level_count;
+
+    /// A full chain halves the longer side down to one texel.
+    #[test]
+    fn a_mip_chain_ends_at_one_texel() {
+        assert_eq!(mip_level_count(1, 1), 1);
+        assert_eq!(mip_level_count(2, 1), 2);
+        assert_eq!(mip_level_count(256, 256), 9);
+        assert_eq!(mip_level_count(257, 3), 9);
+        assert_eq!(mip_level_count(2550, 3300), 12);
+        assert_eq!(mip_level_count(0, 0), 1);
     }
 }

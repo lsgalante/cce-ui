@@ -63,6 +63,10 @@ pub struct VkCore {
     /// Widest rasterizable line (device lineWidthRange cap); 1.0 when the
     /// wideLines feature is absent or disabled.
     pub(crate) max_line_width: f32,
+    /// The most anisotropy a sampler may ask for (device
+    /// maxSamplerAnisotropy); 1.0 when the samplerAnisotropy feature is
+    /// absent, which is a sampler that asks for none.
+    pub(crate) max_anisotropy: f32,
 }
 
 /// The process-wide Vulkan entry + instance every [`VkCore`] hangs off.
@@ -466,8 +470,23 @@ impl VkCore {
         } else {
             1.0
         };
-        let enabled_features =
-            vk::PhysicalDeviceFeatures::default().wide_lines(wide_lines_supported);
+        // samplerAnisotropy for user images seen at a slant (a picture
+        // standing in the 3D scene): without it a mipmapped image viewed
+        // edge-on is blurred along BOTH axes to the level its short axis
+        // asks for.
+        let anisotropy_supported = supported_features.sampler_anisotropy == vk::TRUE;
+        let max_anisotropy = if anisotropy_supported {
+            instance
+                .get_physical_device_properties(physical_device)
+                .limits
+                .max_sampler_anisotropy
+                .max(1.0)
+        } else {
+            1.0
+        };
+        let enabled_features = vk::PhysicalDeviceFeatures::default()
+            .wide_lines(wide_lines_supported)
+            .sampler_anisotropy(anisotropy_supported);
         let mut device_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_infos)
             .enabled_features(&enabled_features);
@@ -535,6 +554,7 @@ impl VkCore {
                 min_uniform_align,
                 as_scratch_align,
                 max_line_width,
+                max_anisotropy,
             },
             surface,
         ))

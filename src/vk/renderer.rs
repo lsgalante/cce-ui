@@ -872,7 +872,30 @@ impl VkRenderer {
             .collect();
 
         let text = TextStage::new(&device, allocator, render_pass, FRAMES_IN_FLIGHT);
-        let image = ImageStage::new(&device, allocator, render_pass, FRAMES_IN_FLIGHT);
+        // Whether a mip chain can be built by blitting: both of the formats a
+        // user image may be in have to be a blit's source and destination
+        // and filter linearly. Asked here, where the instance is.
+        let mips_supported = [vk::Format::R8G8B8A8_SRGB, vk::Format::B8G8R8A8_SRGB]
+            .into_iter()
+            .all(|format| {
+                let needed = vk::FormatFeatureFlags::BLIT_SRC
+                    | vk::FormatFeatureFlags::BLIT_DST
+                    | vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR;
+                unsafe {
+                    core.instance
+                        .get_physical_device_format_properties(core.physical_device, format)
+                }
+                .optimal_tiling_features
+                .contains(needed)
+            });
+        let image = ImageStage::new(
+            &device,
+            allocator,
+            render_pass,
+            FRAMES_IN_FLIGHT,
+            mips_supported,
+            core.max_anisotropy,
+        );
 
         let swapchain_loader = ash::khr::swapchain::Device::new(&core.instance, &device);
         let mut renderer = Self {
