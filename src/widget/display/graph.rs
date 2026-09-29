@@ -106,8 +106,7 @@ pub struct Graph {
     /// Node-domain opacity (bodies, wires, connectors) — independent of
     /// `network_opacity`, which fades the pane surface (grid cells/gaps).
     node_opacity: f32,
-    cell_color: [f32; 3],
-    gap_color: [f32; 3],
+    grid_color: [f32; 3],
 
     // Connection state
     connecting_from: Option<(usize, PortType, usize)>,
@@ -138,8 +137,7 @@ impl Graph {
         let node_h = crate::layout::graph_node_height();
         let grid_snap_enabled = crate::layout::graph_grid_snap();
 
-        let cell_col = crate::color::graph_cell_color();
-        let gap_col = crate::color::graph_gap_color();
+        let grid_col = crate::color::graph_grid_color();
 
         Adapted::new(Graph {
             show_network_grid: false,
@@ -166,8 +164,7 @@ impl Graph {
             uniform_background: false,
             network_opacity: crate::color::graph_opacity(),
             node_opacity: crate::color::graph_node_opacity(),
-            cell_color: cell_col,
-            gap_color: gap_col,
+            grid_color: grid_col,
             connecting_from: None,
             current_mouse_pos: (0.0, 0.0),
             pending_connection: None,
@@ -215,11 +212,8 @@ impl Graph {
     pub fn grid_snap_enabled(&self) -> bool {
         self.grid_snap_enabled
     }
-    pub fn set_cell_color(&mut self, color: [f32; 3]) {
-        self.cell_color = color;
-    }
-    pub fn set_gap_color(&mut self, color: [f32; 3]) {
-        self.gap_color = color;
+    pub fn set_grid_color(&mut self, color: [f32; 3]) {
+        self.grid_color = color;
     }
 
     /// The top-left corner of a node body centred on lattice cell (col, row).
@@ -378,17 +372,16 @@ impl Graph {
         }
     }
 
-    /// The graph's plate, as the colour-typed host paints it: the cell
-    /// colour (or a near-transparent black) at the network opacity, and
-    /// under `graph_blur` a frosted material whose tint alpha IS the blur
-    /// value — the knob doubles as the frost's opacity.
+    /// The graph's plate, as the colour-typed host paints it: a
+    /// near-transparent black, so the cells between the grid lines are
+    /// whatever the graph is painted on, and under `graph_blur` a frosted
+    /// material whose tint alpha IS the blur value — the knob doubles as
+    /// the frost's opacity. Until 2026-09-29 a `uniform_background` graph
+    /// filled itself with a cell colour of its own (`graph.cell_color`);
+    /// the flag is kept for the hosts that set it and chooses nothing here.
     fn bg_color(&self) -> [f32; 4] {
         use crate::scene::{Frost, Material, PlateRole};
-        let c = if self.uniform_background {
-            [self.cell_color[0], self.cell_color[1], self.cell_color[2], self.network_opacity]
-        } else {
-            [0.0, 0.0, 0.0, 0.01 * self.network_opacity]
-        };
+        let c = [0.0, 0.0, 0.0, 0.01 * self.network_opacity];
         let blur_val = crate::layout::graph_blur();
         let m = if blur_val > 0.0 {
             Material::opaque([c[0], c[1], c[2], blur_val.abs() * self.network_opacity]).with_frost(Frost::from_style())
@@ -416,7 +409,7 @@ impl Graph {
     }
 
     /// The grid lines, flat, over whatever the graph is painted on — the
-    /// pane plate. A lattice of lines one pitch apart in the gap colour at
+    /// pane plate. A lattice of lines one pitch apart in the grid colour at
     /// the network opacity, each centred on its coordinate (the pitch is
     /// measured centre to centre, and `graph_line_width` only thickens
     /// them), so the intersections are exactly where the node centres go.
@@ -445,7 +438,7 @@ impl Graph {
 
         let line = crate::layout::graph_line_width().max(0.0);
         if self.show_network_grid && line > 0.0 && self.pitch_x >= 4.0 && self.pitch_y >= 4.0 {
-            let color = [self.gap_color[0], self.gap_color[1], self.gap_color[2], self.network_opacity];
+            let color = [self.grid_color[0], self.grid_color[1], self.grid_color[2], self.network_opacity];
             // The line indices that can cross the rect, one past each edge so
             // a line's own width never pops at the boundary.
             let c0 = ((min_x - self.grid_origin_x) / self.pitch_x).floor() as i32 - 1;

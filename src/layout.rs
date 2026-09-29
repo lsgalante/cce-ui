@@ -348,8 +348,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.statusbar.font" => "statusbar_font",
                 "style.surface.page.opacity" => "page_opacity",
                 "style.surface.page.margin" => "page_margin",
-                "style.surface.graph.cell_color" => "graph_cell_color",
-                "style.surface.graph.gap_color" => "graph_gap_color",
+                "style.surface.graph.grid_color" => "graph_grid_color",
                 "style.surface.graph.opacity" => "graph_opacity",
                 "style.surface.graph.node.opacity" => "graph_node_opacity",
                 "style.surface.graph.spacing_x" => "graph_spacing_x",
@@ -7108,10 +7107,7 @@ mod tests {
         // module's reach; what is checkable without writing them is that each
         // resolves to a real, in-gamut colour rather than an unparsed or
         // uninitialised one.
-        let rgb: [(&str, [f32; 3]); 2] = [
-            ("graph_cell", crate::color::graph_cell_color()),
-            ("graph_gap", crate::color::graph_gap_color()),
-        ];
+        let rgb: [(&str, [f32; 3]); 1] = [("graph_grid", crate::color::graph_grid_color())];
         for (name, c) in rgb {
             assert!(c.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)), "{name}: {c:?}");
         }

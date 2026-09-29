@@ -182,8 +182,7 @@ static TREE_SEPARATOR_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.19, 1
 static SCROLLBAR_TRACK_COLOR: RwLock<[f32; 4]> = RwLock::new([0.15, 0.15, 0.20, 0.3]);
 static SCROLLBAR_THUMB_COLOR: RwLock<[f32; 4]> = RwLock::new([0.60, 0.60, 0.65, 0.4]);
 
-static GRAPH_CELL_COLOR: RwLock<[f32; 3]> = RwLock::new([0.13, 0.13, 0.16]);
-static GRAPH_GAP_COLOR: RwLock<[f32; 3]> = RwLock::new([0.07, 0.07, 0.09]);
+static GRAPH_GRID_COLOR: RwLock<[f32; 3]> = RwLock::new([0.07, 0.07, 0.09]);
 static GRAPH_OPACITY: RwLock<f32> = RwLock::new(0.95);
 /// Opacity of the graph's NODE-domain content (node bodies, wires, connectors,
 /// node text) — `style.surface.graph.node.opacity`, deliberately independent of
@@ -550,11 +549,11 @@ fn parse_and_set_colors(content: &str) {
         }
     }
 
-    if let Some(c) = get_color("/style/surface/graph/cell_color") {
-        if let Ok(mut lock) = GRAPH_CELL_COLOR.write() { *lock = [c[0], c[1], c[2]]; }
-    }
-    if let Some(c) = get_color("/style/surface/graph/gap_color") {
-        if let Ok(mut lock) = GRAPH_GAP_COLOR.write() { *lock = [c[0], c[1], c[2]]; }
+    // The lattice's lines. The cells between them have no colour of their
+    // own: a graph shows whatever it is painted on. `cell_color` and
+    // `gap_color`, the cell model's pair, are retired (`retired_surface_keys`).
+    if let Some(c) = get_color("/style/surface/graph/grid_color") {
+        if let Ok(mut lock) = GRAPH_GRID_COLOR.write() { *lock = [c[0], c[1], c[2]]; }
     }
     if let Some(c) = get_color("/style/surface/graph/node/color") {
         if let Ok(mut lock) = GRAPH_NODE_COLOR.write() { *lock = c; }
@@ -683,7 +682,7 @@ fn parse_and_set_colors(content: &str) {
     let retired = retired_surface_keys(&val);
     if !retired.is_empty() {
         log::warn!(
-            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), every roll's width is `relief width=`, the light strength is `relief light=` (a material's `finish light=`), and the relief's geometry is `relief {{ wall height= profile= ; edge height= profile= }}` (the window_manager bevel_* spellings are the same relief keys, and its bevel_shader is `relief shader=`)",
+            "retired style.surface keys in config: {} — the frost is `plate {{ frost radius= compression= refraction= }}` (a material's `frost` child spells `compression`), every roll's width is `relief width=`, the light strength is `relief light=` (a material's `finish light=`), and the relief's geometry is `relief {{ wall height= profile= ; edge height= profile= }}` (the window_manager bevel_* spellings are the same relief keys, and its bevel_shader is `relief shader=`); a graph's lines are `graph {{ grid_color }}` and its cells take no colour",
             retired.join(", ")
         );
     }
@@ -781,7 +780,9 @@ fn parse_and_set_colors(content: &str) {
 /// / `bevel_width` / `bevel_shader`, the block the relief keys were born in
 /// before `style.surface.relief` existed (the compositor never read them;
 /// the shader toggle is `relief.shader` now). Each was an alias for part
-/// of 2026-09-28 and is not read now. Empty for a clean config.
+/// of 2026-09-28 and is not read now. And the graph's `cell_color` and
+/// `gap_color` (2026-09-29): a graph's cells have no colour, and its lines
+/// are `graph.grid_color`. Empty for a clean config.
 pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
     let mut found = Vec::new();
     for k in ["blur", "radius", "backdrop_compression", "refraction", "bevel_width"] {
@@ -810,6 +811,11 @@ pub fn retired_surface_keys(val: &serde_json::Value) -> Vec<String> {
             if node.pointer("/finish/depth").is_some() {
                 found.push(format!("style.surface.material.{name}.finish.depth"));
             }
+        }
+    }
+    for k in ["cell_color", "gap_color"] {
+        if val.pointer(&format!("/style/surface/graph/{k}")).is_some() {
+            found.push(format!("style.surface.graph.{k}"));
         }
     }
     found
@@ -941,22 +947,14 @@ pub fn set_graph_node_drag_color(color: [f32; 4]) {
     style_write(&GRAPH_NODE_DRAG_COLOR, color);
 }
 
-pub fn graph_cell_color() -> [f32; 3] {
+/// The colour of a graph's grid lines (`style.surface.graph.grid_color`).
+pub fn graph_grid_color() -> [f32; 3] {
     load_colors_once();
-    style_read(&GRAPH_CELL_COLOR)
+    style_read(&GRAPH_GRID_COLOR)
 }
 
-pub fn set_graph_cell_color(color: [f32; 3]) {
-    style_write(&GRAPH_CELL_COLOR, color);
-}
-
-pub fn graph_gap_color() -> [f32; 3] {
-    load_colors_once();
-    style_read(&GRAPH_GAP_COLOR)
-}
-
-pub fn set_graph_gap_color(color: [f32; 3]) {
-    style_write(&GRAPH_GAP_COLOR, color);
+pub fn set_graph_grid_color(color: [f32; 3]) {
+    style_write(&GRAPH_GRID_COLOR, color);
 }
 
 pub fn graph_opacity() -> f32 {
@@ -2275,6 +2273,8 @@ mod tests {
             "relief": { "depth": 0.15, "height": 1.0, "profile": "a", "edge_height": 2.0, "edge_profile": "b" },
             "material": { "glass": { "frost": { "backdrop_compression": 0.6 }, "finish": { "depth": 0.2 } } }
         } }, "window_manager": { "bevel_depth": 0.15, "bevel_width": 9.3, "bevel_shader": 0 } });
+        let mut old = old;
+        old["style"]["surface"]["graph"] = serde_json::json!({ "cell_color": "#545467", "gap_color": "#48485b", "grid_color": "#48485b" });
         assert_eq!(retired_surface_keys(&old), vec![
             "style.surface.plate.blur",
             "style.surface.plate.radius",
@@ -2292,6 +2292,8 @@ mod tests {
             "window_manager.bevel_shader",
             "style.surface.material.glass.frost.backdrop_compression",
             "style.surface.material.glass.finish.depth",
+            "style.surface.graph.cell_color",
+            "style.surface.graph.gap_color",
         ]);
         assert!(retired_surface_keys(&serde_json::json!({})).is_empty());
     }
