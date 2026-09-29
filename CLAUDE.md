@@ -900,14 +900,19 @@ All opt-in, all read once, all quiet when unset — set one and run any client.
 `ParametersBg` has two label layouts: **inline**, the pane's own column of
 labels beside unlabelled controls, and **stacked**, each control carrying
 its label above itself. `param_label_layout` in the style config is the
-PREFERENCE (`stacked`, or inline by default). Since 2026-09-28 the width
-decides on top of it: an inline pane whose label column would leave the
-controls narrower than `MIN_INLINE_CONTROL_W` (120 px — a slider band with
-no room for its thumb and readout) stacks, and takes the column back when
-it widens. The rows' widgets are built with or without their label and the
-two layouts have different row heights, so the flip is a relabel and a
-re-layout on every rect assignment (`apply_label_layout` /
-`relabel_rows`), not a flag; `Adapted::clear_label` is the way a label
+PREFERENCE (`stacked`, or inline by default). Since 2026-09-28 the rows
+decide on top of it: an inline pane whose label column would leave any
+visible row's TRACK shorter than `MIN_INLINE_TRACK_W` (120 px) stacks, and
+takes the column back when there is room. The track is what is measured —
+the control's rect less its chrome (`control_chrome`: a slider's 60 px
+readout and its gap, plus a float3's axis column) — because the first cut
+measured the rect and let a slider's track shrink to 52 px before the
+labels moved; a control with no track is measured whole. One decision for
+the pane, taken by its shortest track. The rows' widgets are built with or
+without their label and the two layouts have different row heights, so the
+flip is a relabel and a re-layout on every metrics refresh — a rect
+assignment, a rebuild, a section collapsing (`apply_label_layout` /
+`relabel_rows`) — not a flag; `Adapted::clear_label` is the way a label
 comes OFF a widget, and `slider::detached_strip` reads an empty label as
 none for the widgets that store whatever they are handed.
 

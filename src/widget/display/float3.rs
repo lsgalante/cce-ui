@@ -26,7 +26,7 @@ use crate::widget::{
 /// Vertical gap between the three slider rows.
 const ROW_GAP: f32 = 4.0;
 /// The axis-letter column left of each slider.
-const AXIS_W: f32 = 16.0;
+pub(crate) const AXIS_W: f32 = 16.0;
 /// Readout / edit-buffer precision of the rows, and of [`Float3::value_string`].
 const DECIMALS: usize = 2;
 

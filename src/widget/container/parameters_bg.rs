@@ -294,11 +294,28 @@ impl ParametersBg {
     }
 
     /// Row `i`'s laid-out height, ignoring collapse (the row-type table).
-    /// The narrowest control an inline row may be left with. Below it the
-    /// pane stacks every label above its control instead: a slider whose
-    /// band is shorter than this has no room for its thumb and readout,
-    /// and the column was already truncating the label to make it fit.
-    pub const MIN_INLINE_CONTROL_W: f32 = 120.0;
+    /// The shortest TRACK an inline row may leave its slider. Below it the
+    /// pane stacks every label above its control instead. Measured on the
+    /// track — what the slider is, to the eye and the hand — not on the
+    /// control's rect, which also holds the readout and its gap (and a
+    /// float3's axis column): until 2026-09-28 the rect was what was
+    /// measured, so a slider's track shrank to 52 px, and a float3's to
+    /// 36, before the labels moved. A control with no track (spinbox, text
+    /// box, dropdown, colour) is measured whole.
+    pub const MIN_INLINE_TRACK_W: f32 = 120.0;
+
+    /// What a row of type `t` spends of its control rect on everything but
+    /// its track: a slider's readout and gap, plus a float3's axis column.
+    /// Zero for the controls that have no track.
+    fn control_chrome(t: &str) -> f32 {
+        if t.starts_with("slider") {
+            crate::widget::input::slider::Slider::readout_chrome()
+        } else if t.starts_with("float3") {
+            crate::widget::display::float3::AXIS_W + crate::widget::input::slider::Slider::readout_chrome()
+        } else {
+            0.0
+        }
+    }
 
     /// Whether a row of type `t` takes the inline layout at all. Only the
     /// rows whose control would otherwise carry a label strip: toggles and
@@ -320,9 +337,12 @@ impl ParametersBg {
         self.inline_labels && Self::inline_kind(&self.display_params[i].2)
     }
 
-    /// The layout the pane's width allows: the preference, unless a label
-    /// column would leave the controls narrower than
-    /// [`Self::MIN_INLINE_CONTROL_W`], in which case the labels stack. An
+    /// The layout the rows allow: the preference, unless a label column
+    /// would leave any visible row's track shorter than
+    /// [`Self::MIN_INLINE_TRACK_W`], in which case the labels stack. One
+    /// decision for the pane — a mix of inline and stacked rows reads as
+    /// ragged — taken by its SHORTEST track, so a pane of spinboxes keeps
+    /// its column at a width where a pane with a float3 has let it go. An
     /// unlaid pane (no rect yet) follows the preference; the first rect
     /// assignment decides.
     fn decide_inline(&self) -> bool {
@@ -333,7 +353,13 @@ impl ParametersBg {
             return true;
         }
         let row_w = (self.rect.width - 2.0 * ROW_X_INSET).max(0.0);
-        row_w - self.label_col_w_if(true) >= Self::MIN_INLINE_CONTROL_W
+        let control_w = row_w - self.label_col_w_if(true);
+        let hidden = self.hidden_rows();
+        self.display_params
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| !hidden[*i] && Self::inline_kind(&p.2))
+            .all(|(_, p)| control_w - Self::control_chrome(&p.2) >= Self::MIN_INLINE_TRACK_W)
     }
 
     /// Re-decide the layout for the current rect and, when it flips, move
@@ -1072,6 +1098,12 @@ impl ParametersBg {
     /// The legacy `set_rect`/`set_display_params` tail: recompute the content height, clamp the
     /// scroll into it, re-lay the rows.
     fn refresh_scroll_metrics(&mut self) {
+        // The label layout (inline column or stacked) is decided first, by
+        // the tracks the rows would get: every geometry below depends on
+        // it. Here rather than on rect assignment alone, because a section
+        // collapsing or opening changes which rows are visible, and so
+        // which is the shortest track and how wide the column is.
+        self.apply_label_layout();
         self.content_h = self.get_total_content_height();
         let max_scroll = (self.content_h - self.rect.height).max(0.0);
         self.scroll_y = self.scroll_y.clamp(0.0, max_scroll);
@@ -1899,9 +1931,6 @@ impl Layout for ParametersBg {
     /// rect all row geometry derives from, then re-derive content height/scroll/row rects.
     fn rect_assigned(&mut self, rect: Rect) {
         self.rect = rect;
-        // The width decides the label layout (inline column or stacked),
-        // before the row geometry that depends on it is derived.
-        self.apply_label_layout();
         self.refresh_scroll_metrics();
     }
 
@@ -3785,10 +3814,13 @@ mod tests {
         assert!(p.sliders[0].as_ref().unwrap().base().label.is_none());
         let (_, _, sw_inline, _) = p.sliders[0].as_ref().unwrap().rect();
         let h_inline = p.get_param_rects()[0].3;
-        assert!(sw_inline >= ParametersBg::MIN_INLINE_CONTROL_W, "the fixture starts with room: {sw_inline}");
+        // The threshold is the slider's TRACK: its rect less the readout.
+        let chrome = crate::widget::input::slider::Slider::readout_chrome();
+        assert!(sw_inline - chrome >= ParametersBg::MIN_INLINE_TRACK_W, "the fixture starts with room: {sw_inline}");
 
-        // Narrow it until the control would fall under the minimum: stacked.
-        let narrow = 2.0 * ROW_X_INSET + col + ParametersBg::MIN_INLINE_CONTROL_W - 1.0;
+        // Narrow it until the TRACK would fall under the minimum: stacked,
+        // though the control's rect is still well over it.
+        let narrow = 2.0 * ROW_X_INSET + col + chrome + ParametersBg::MIN_INLINE_TRACK_W - 1.0;
         WidgetHost::set_rect(&mut p, 0.0, 0.0, narrow, 400.0);
         assert!(!p.inner().inline_labels, "under the minimum the labels stack");
         assert_eq!(p.inner().label_col_w(), 0.0, "no column");
@@ -3820,6 +3852,32 @@ mod tests {
         ParamController::set_display_params(&mut *p, &rows);
         assert!(!p.inner().inline_labels);
         assert_eq!(p.sliders[1].as_ref().unwrap().base().label.as_deref(), Some("Width"));
+
+        // The shortest track decides. At one width: a pane of controls with
+        // no track keeps its column, a slider's readout costs it the
+        // column, and a float3's axis letters cost it sooner still.
+        let at = |rows: &[(&str, &str, &str)], width: f32| {
+            let mut p = panel_with(rows);
+            WidgetHost::set_rect(&mut p, 0.0, 0.0, width, 400.0);
+            p.inner().inline_labels
+        };
+        let spin = [("Size", "3", "spinbox:0:10")];
+        let slider = [("Size", "1.00", "slider:0:2")];
+        let float3 = [("Size", "0:0:0", "float3:-1:1")];
+        let base = 2.0 * ROW_X_INSET + col + ParametersBg::MIN_INLINE_TRACK_W;
+        assert!(at(&spin, base), "a spinbox is measured whole");
+        assert!(!at(&slider, base), "a slider at that width has a track {chrome} short");
+        assert!(at(&slider, base + chrome));
+        assert!(!at(&float3, base + chrome), "a float3 spends an axis column too");
+        assert!(at(&float3, base + chrome + crate::widget::display::float3::AXIS_W));
+
+        // Collapsing the section that holds the only slider re-decides: the
+        // rows left visible have no track, and the column comes back.
+        let mut p = panel_with(&[("Count", "3", "spinbox:0:10"), ("Shape", "", "section"), ("Size", "1.00", "slider:0:2")]);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, base, 400.0);
+        assert!(!p.inner().inline_labels, "the slider's track is the shortest");
+        p.inner_mut().set_section_collapsed("Shape", true);
+        assert!(p.inner().inline_labels, "with the slider hidden the spinbox decides");
     }
 
     #[test]

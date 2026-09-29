@@ -124,12 +124,25 @@ impl Slider {
     }
 
 
+    /// Width of the value readout at the slider's right end.
+    pub const READOUT_W: f32 = 60.0;
+    /// Gap between the track and the readout.
+    pub const READOUT_GAP: f32 = 8.0;
+
+    /// What a slider's rect spends on everything but its TRACK: the readout
+    /// and its gap when it shows one. `rect width - chrome` is the track a
+    /// host gets for a rect — what `ParametersBg` measures to decide whether
+    /// a row's label can sit beside the control.
+    pub const fn readout_chrome() -> f32 {
+        Self::READOUT_W + Self::READOUT_GAP
+    }
+
     fn geom(&self, rect: Rect) -> SliderGeom {
         let x = rect.x;
         let w = rect.width;
         let (track_x, track_w) = if self.show_readout {
-            let readout_w = 60.0;
-            let gap = 8.0;
+            let readout_w = Self::READOUT_W;
+            let gap = Self::READOUT_GAP;
             ((x), (w - readout_w - gap).max(10.0))
         } else {
             (x, w)
