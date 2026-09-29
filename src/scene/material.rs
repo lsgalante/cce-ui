@@ -545,11 +545,19 @@ mod tests {
 
     /// The frost recipe reads the two plate-rung keys and carries the default
     /// kernel; the flag form is today's `blur: bool`.
+    ///
+    /// All THREE knobs are pinned on this thread, the radius included: the
+    /// setters write a per-thread overlay, but a `reload_colors` writes the
+    /// process-wide globals, and an absent frost knob keeps its last value
+    /// by design — so a neighbour's reload of `frost radius=3.0` outlived
+    /// its closing empty reload, and this test read 3.0 for the default
+    /// whenever that neighbour ran first (one run in eight, 2026-09-28).
     #[test]
     fn frost_from_style_and_flag() {
         let _lock = crate::color::test_color_state_lock();
         crate::color::set_plate_backdrop_compression(0.6);
         crate::color::set_plate_refraction(0.3);
+        crate::color::set_plate_frost_radius(Frost::DEFAULT_RADIUS);
         assert_eq!(Frost::from_style(), frosted());
         assert_eq!(Frost::from_flag(false), Frost::Unfrosted);
         assert!(Frost::from_flag(true).is_frosted());
@@ -726,7 +734,18 @@ mod tests {
         assert_eq!(load("blur (bool)true\n radius (f64)2.0"), (false, frosted(0.4, 0.1, 3.0)), "the retired spelling frosts nothing and moves nothing");
         assert_eq!(retired("blur (bool)true\n radius (f64)2.0"), vec!["style.surface.plate.blur", "style.surface.plate.radius"]);
         assert_eq!(load("blur (bool)false\n frost compression=(f64)0.7"), (true, frosted(0.7, 0.1, 3.0)), "the block is read, the retired key is not");
+        // Leave the globals as they were found. A reload writes them for
+        // the whole process, and an unset knob KEEPS its value (asserted
+        // above), so the empty reload alone left radius 3 / compression 0.7
+        // / refraction 0.1 behind for every test after this one.
+        crate::color::reload_colors(&doc(&format!(
+            "frost radius=(f64){} compression=(f64)0.0 refraction=(f64)0.0",
+            Frost::DEFAULT_RADIUS
+        )));
+        crate::color::reload_colors(&doc("frost (bool)false"));
         crate::color::reload_colors("");
+        assert_eq!(Frost::from_style(), frosted(0.0, 0.0, Frost::DEFAULT_RADIUS), "the globals are back at their defaults");
+        assert!(!crate::color::plate_blur());
     }
 
     /// `style.surface.plate.pane.color` is the pane tint WHOLE — its alpha is

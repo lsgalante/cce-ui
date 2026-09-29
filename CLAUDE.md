@@ -925,3 +925,19 @@ snap-instead-of-ease path forces it for its thread; nothing sets
 This pins only cce-ui's own suite: a dependent's test binary links cce-ui
 without `cfg(test)`, so a dependent test that eases still follows the
 machine — none does today.
+
+### A colour test that reloads a knob puts it back
+
+`color::style_write` (every `set_*`) is a per-thread overlay under
+`cfg(test)`, but `reload_colors` writes the process-wide globals — and an
+absent frost knob KEEPS its last value by design, so `reload_colors("")`
+resets the named materials and bindings (replaced wholesale) and nothing
+else. A test that reloads `frost radius=3.0` and closes with the empty
+reload leaves radius 3 behind for every test after it; that is what had
+`frost_from_style_and_flag` fail one run in eight (2026-09-28, the radius
+read 3.0 for the default whenever its neighbour ran first). Two rules: a
+test that ASSERTS a knob pins it on its own thread through the setter, the
+radius included, not just the ones it is about; and a test that RELOADS a
+knob reloads its default back before the empty reload, and asserts the
+globals are back. `test_color_state_lock` orders the reloaders against
+each other; it cannot undo what one of them left behind.
