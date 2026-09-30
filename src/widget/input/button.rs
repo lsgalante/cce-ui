@@ -234,17 +234,24 @@ impl Button {
         (family, size.unwrap_or(12.0))
     }
 
-    /// The label's width AS `paint` DRAWS IT: shaped by cosmic-text with no
-    /// family (the DE's UI sans), which is what the `text_with(.., None, ..)`
-    /// below emits — the same shaped-buffer cache the draw reads.
+    /// The label's width AS THE FRAME DRAWS IT: shaped by cosmic-text in
+    /// [`Paint::widget_font`] — the configured button family (`list_font`
+    /// for a ListRow), which is the font the adapter attaches to this
+    /// widget's text when it re-emits `paint`'s label prim
+    /// (`Adapted::paint_self` → `own_labels_with_prim_font(text_font())`).
+    /// Same font string, same shaped-buffer cache the draw reads.
     ///
-    /// This used to be `measure_text_width` in the configured `button_font`
-    /// family: an SVG-inked extent in a face the label is never drawn in.
-    /// Under the default Berkeley Mono that measured every label wider than
-    /// its sans draw ("Attach..." 73px against 53px drawn), and since both
-    /// the centring and `intrinsic_size` read this, every label sat left of
-    /// centre with the surplus piled up on its right. The inked measure is
-    /// now only the fallback for a font system that shapes nothing.
+    /// Two wrong measures preceded this one. First `measure_text_width` in
+    /// the button family: an SVG-inked extent, not the shaped run. Then
+    /// shaping with no family (the UI sans), on the belief that the label
+    /// was drawn in it — the `text_with(.., None, ..)` in `paint` below
+    /// says so, but that `None` never reaches the frame: the paint walk
+    /// swaps in `widget_font`. Under the default Berkeley Mono every label
+    /// then drew ~20% wider than measured, so `intrinsic_size` cut the plate
+    /// short and the glyphs ran over its right rim ("Load Images",
+    /// "View: HTML" in cce-mail). Legacy hosts (`render_widget`) draw in
+    /// `widget_font` too, so this measure holds on both paths. The inked
+    /// measure is now only the fallback for a font system that shapes nothing.
     ///
     /// Blocking lock, as the context menu takes it: `try_lock` fell back to
     /// the wrong measure whenever another thread was shaping. The one site
@@ -255,11 +262,12 @@ impl Button {
             return 12.0;
         }
         let (family, size) = self.font();
+        let font = Paint::widget_font(self);
         crate::geometry_font_system()
             .lock()
             .ok()
             .and_then(|mut fs| {
-                crate::backend::window_runner::shaped_cluster_offsets(&mut fs, label, size, None)
+                crate::backend::window_runner::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
                     .last()
                     .map(|&(_, total)| total)
             })
@@ -714,15 +722,18 @@ mod tests {
     }
 
     /// Centred means centred on the glyphs as DRAWN: the gap either side of
-    /// the shaped label is equal. Measuring in the configured button family
-    /// while drawing in the UI sans left "Attach..." ~10px left of centre.
+    /// the shaped label is equal. Measuring in a face the label is not drawn
+    /// in (first the inked button family, then the UI sans) left labels off
+    /// centre and, worse, under-measured for `intrinsic_size`.
     #[test]
     fn a_label_is_centred_on_its_drawn_width() {
-        let (_, size) = Button::model(ButtonKind::Primary).font();
+        let b = Button::model(ButtonKind::Primary);
+        let (_, size) = b.font();
+        let font = Paint::widget_font(&b);
         for label in ["Attach...", "Load Images", "Cancel"] {
             let drawn = {
                 let mut fs = crate::geometry_font_system().lock().unwrap();
-                crate::backend::window_runner::shaped_cluster_offsets(&mut fs, label, size, None)
+                crate::backend::window_runner::shaped_cluster_offsets(&mut fs, label, size, font.as_deref())
                     .last()
                     .map(|&(_, t)| t)
                     .unwrap()
@@ -731,6 +742,48 @@ mod tests {
             let (left, right) = (x - 10.0, 170.0 - (x + drawn));
             assert!((left - right).abs() < 1.0, "{label:?}: {left:.1}px left vs {right:.1}px right");
         }
+    }
+
+    /// The measure and the frame agree on the font: the paint walk emits the
+    /// label prim in `widget_font` (the adapter swaps it in for `paint`'s
+    /// `None`), so `label_width` must shape in exactly that font, and a
+    /// button sized by `intrinsic_size` then holds its whole label with the
+    /// 8px inset each side that `paint` clamps to.
+    #[test]
+    fn intrinsic_size_holds_the_label_as_the_walk_draws_it() {
+        use crate::scene::paint::Prim;
+        let mut ctx = UiContext::new();
+        let mut b = Button::new(0.0, 0.0, 0.0, 0.0).with_label("Load Images");
+        let (id, ptr) = (b.id(), b.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        let size = b.intrinsic_size().unwrap();
+        WidgetHost::set_rect(&mut b, 10.0, 20.0, size.width, size.height);
+
+        let list = crate::scene::painter::paint_tree(&ctx, &b);
+        let text = list
+            .items
+            .iter()
+            .find_map(|it| match &it.prim {
+                Prim::Text { text, x, font_size, font, .. } => Some((text.clone(), *x, *font_size, font.clone())),
+                _ => None,
+            })
+            .expect("the walk emits the label");
+        assert_eq!(text.0, "Load Images");
+        assert_eq!(text.3, Paint::widget_font(&*b), "the walk draws the label in widget_font");
+
+        // Shape it as the renderer will (that font string, that size) and
+        // check it ends 8px short of the plate's right edge, as it starts
+        // 8px in from the left.
+        let drawn = {
+            let mut fs = crate::geometry_font_system().lock().unwrap();
+            crate::backend::window_runner::shaped_cluster_offsets(&mut fs, &text.0, text.2, text.3.as_deref())
+                .last()
+                .map(|&(_, t)| t)
+                .unwrap()
+        };
+        let right_gap = (10.0 + size.width) - (text.1 + drawn);
+        assert!((text.1 - 18.0).abs() < 0.5, "label starts at the 8px inset, got x={}", text.1);
+        assert!((right_gap - 8.0).abs() < 1.0, "label ends {right_gap:.1}px short of the plate, want 8");
     }
 
     fn press(x: f32, y: f32) -> Event {
