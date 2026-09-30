@@ -825,17 +825,33 @@ impl UiContext {
     /// second delivery through the app's own dispatch is idempotent (a closing
     /// dropdown ignores further presses).
     pub fn close_popovers_missed_by_press(&mut self, x: f32, y: f32) {
-        let owners: Vec<WidgetId> = self
-            .tree
+        self.close_popovers_missed_by_press_with(x, y, |_| (0.0, 0.0));
+    }
+
+    /// The widgets with an open popover, in registry order.
+    pub fn popover_owners(&self) -> Vec<WidgetId> {
+        self.tree
             .iter_registered()
             .filter_map(|(id, ptr)| unsafe {
                 ptr.as_ref().and_then(|w| {
                     (w.visible() && w.popover_rect().is_some()).then_some(id)
                 })
             })
-            .collect();
-        for id in owners {
+            .collect()
+    }
+
+    /// [`close_popovers_missed_by_press`](Self::close_popovers_missed_by_press)
+    /// for a press in SURFACE coordinates: `offset` is where each owner is
+    /// drawn relative to where it was laid out
+    /// (`Application::popover_offset`), and the press is carried back into
+    /// the owner's own coordinates before it is tested and delivered. On a
+    /// scrolled page the unshifted test called a press on a menu row a miss,
+    /// and closed the menu under the click.
+    pub fn close_popovers_missed_by_press_with(&mut self, x: f32, y: f32, offset: impl Fn(WidgetId) -> (f32, f32)) {
+        for id in self.popover_owners() {
             let Some(ptr) = self.tree.get_ptr(id) else { continue };
+            let (dx, dy) = offset(id);
+            let (x, y) = (x - dx, y - dy);
             unsafe {
                 if !(*ptr).hit_test(x, y, self) {
                     let ev = Event::MouseButton {

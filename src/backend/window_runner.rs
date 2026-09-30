@@ -3624,6 +3624,20 @@ pub trait Application: Sized + 'static {
         None
     }
 
+    /// Where a widget's open popover is DRAWN, as an offset from the rect it
+    /// reports (`popover_rect`). A widget reports in the coordinates it was
+    /// laid out in; an app that lays its page out unscrolled and shifts what
+    /// it emits draws the popover `scroll` px away from there, and returns
+    /// `(0.0, -scroll_y)` here for the page's widgets. Everything the engine
+    /// derives from a popover rect reads it through this: the text-occlusion
+    /// clamp, the overflow input region, and the region sent to the
+    /// compositor. Without it a menu opened on a scrolled page had the page's
+    /// text drawn over it, and cut a menu-shaped hole in the text one scroll
+    /// offset away.
+    fn popover_offset(&self, _id: crate::widget::WidgetId) -> (f32, f32) {
+        (0.0, 0.0)
+    }
+
     /// Whether a left-press at (px, py) should start a compositor window drag. Every root
     /// root plate container is dissolved (Phase 6), so the default is "no" — apps that want
     /// drag-anywhere override this with `ctx.drag_allowed_at(px, py)`.
@@ -4129,13 +4143,15 @@ impl<A: Application> EngineState<A> {
             wl_region.add(0, 0, gw, gh);
             // Open popovers, clamped to the surface.
             if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
-                for (_id, ptr) in ctx.tree.iter_registered() {
+                for (id, ptr) in ctx.tree.iter_registered() {
                     unsafe {
                         let Some(w) = ptr.as_ref() else { continue };
                         if !w.visible() {
                             continue;
                         }
                         let Some((px, py, pw, ph)) = w.popover_rect() else { continue };
+                        let (dx, dy) = self.inner.as_ref().unwrap().popover_offset(id);
+                        let (px, py) = (px + dx, py + dy);
                         let x0 = px.max(0.0) as i32;
                         let y0 = py.max(0.0) as i32;
                         let x1 = ((px + pw).min(self.logical_width)) as i32;
@@ -4169,13 +4185,15 @@ impl<A: Application> EngineState<A> {
         }
         let mut union: Option<(f32, f32, f32, f32)> = None;
         if let Some(ctx) = self.inner.as_ref().unwrap().ui_context() {
-            for (_id, ptr) in ctx.tree.iter_registered() {
+            for (id, ptr) in ctx.tree.iter_registered() {
                 unsafe {
                     let Some(w) = ptr.as_ref() else { continue };
                     if !w.visible() {
                         continue;
                     }
                     let Some((px, py, pw, ph)) = w.popover_rect() else { continue };
+                    let (dx, dy) = self.inner.as_ref().unwrap().popover_offset(id);
+                    let (px, py) = (px + dx, py + dy);
                     let (x0, y0) = (px.max(0.0), py.max(0.0));
                     let x1 = (px + pw).min(self.logical_width);
                     let y1 = (py + ph).min(self.logical_height);
@@ -4399,7 +4417,8 @@ impl<A: Application> EngineState<A> {
                 if let Some(ptr) = ctx.tree.get_ptr(pop_id) {
                     unsafe {
                         if let Some((x, y, w, h)) = (*ptr).popover_rect() {
-                            dl_overlay_rects.push((x, y, w, h));
+                            let (dx, dy) = self.inner.as_ref().unwrap().popover_offset(pop_id);
+                            dl_overlay_rects.push((x + dx, y + dy, w, h));
                         }
                     }
                 }
@@ -5034,8 +5053,18 @@ impl<A: Application> PointerHandler for EngineState<A> {
                     // dispatch: apps commonly region-gate their routing, so an
                     // open menu's owner may never hear about a press elsewhere.
                     if btn == MouseButton::Left {
-                        if let Some(ctx) = self.inner.as_mut().unwrap().ui_context_mut() {
-                            ctx.close_popovers_missed_by_press(lx, ly);
+                        let app = self.inner.as_mut().unwrap();
+                        let offsets: Vec<_> = app
+                            .ui_context()
+                            .map(|ctx| ctx.popover_owners())
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|id| (id, app.popover_offset(id)))
+                            .collect();
+                        if let Some(ctx) = app.ui_context_mut() {
+                            ctx.close_popovers_missed_by_press_with(lx, ly, |id| {
+                                offsets.iter().find(|(o, _)| *o == id).map_or((0.0, 0.0), |&(_, d)| d)
+                            });
                         }
                     }
 
