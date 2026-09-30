@@ -368,6 +368,7 @@ fn flatten_json_to_flat_props(val: &serde_json::Value, prefix: &str, flat_props:
                 "style.surface.graph.node.wire_color" => "graph_wire_color",
                 "style.surface.graph.node.wire_highlight_color" => "graph_wire_highlight_color",
                 "style.surface.graph.node.wire_size" => "graph_wire_size",
+                "style.surface.graph.node.wire_style" => "graph_wire_style",
                 "style.surface.graph.node.wire_activation_radius" => "graph_wire_activation_radius",
                 "style.surface.graph.node.connector_color" => "graph_connector_color",
                 "style.surface.graph.node.connector_highlight_color" => "graph_connector_highlight_color",
@@ -3608,6 +3609,14 @@ pub fn set_graph_node_delete(key: String) {
     if let Ok(mut registry) = get_style_registry().write() {
         registry.set_string("graph_node_delete", key);
     }
+}
+
+/// `style.surface.graph.node.wire_style`: how a wire runs, by
+/// `WireStyle::name` — `orthogonal`, `rounded`, `bezier` or `straight`.
+/// `None` when the config does not say.
+pub fn graph_wire_style() -> Option<String> {
+    lazy_init_style_registry();
+    get_style_registry().read().unwrap().get_string("graph_wire_style")
 }
 
 pub fn graph_wire_size() -> f32 {

@@ -753,6 +753,37 @@ cce-system-interface) to confirm behavior, not just the test suite.
   `detect_metric` — the display's logical px per mm from its `wl_output` geometry).
 - `units.rs` — lengths with units and the display metric; see the Units section below.
 
+## A graph's wires are strokes in a style (since 2026-09-30)
+
+`Graph` draws its wires in one of four `WireStyle`s: **orthogonal** (down,
+across at half the height, down — what every wire was), **rounded** (the
+same with the two bends rounded, the radius at most half a node's height),
+**bezier** (a cubic that leaves the output and reaches the input heading
+down, so a wire back up the graph loops) and **straight**. The style is
+`style.surface.graph.node.wire_style` unless the host sets one
+(`Graph::set_wire_style`, `None` to follow the config again). Colour and
+width are `wire_color` and `wire_size` (px at 100%, scaled with the node
+body) in the same block — both parsed since long before and READ BY
+NOTHING until this change, when the wires were a hard-coded cyan 3 px.
+
+- **The wires are not in `geometry_quads_tagged` any more.** They are
+  `Graph::paint_wires` (also on `GraphController`), `Prim::Vector`s and
+  `Prim::Arc`s, since only one style is axis-aligned. `Paint::paint` calls
+  it after the grid; a host drawing the quads itself (the designer) calls
+  it between `paint_grid` and the bodies. The legacy `extra_quads` view has
+  no wires.
+- **One path, drawn and hit**: `wire_path` derives each style's pieces, and
+  the splice hit test (`splice_wire_at`) walks the same pieces against the
+  dragged ghost, so a drop lands on the wire as drawn in any style.
+- **The orthogonal joins do not overlap** — the across run is widened by
+  half a thickness to fill the corners and the down runs stop at its edge —
+  so a translucent wire is one alpha throughout. A bezier is flat-capped
+  pieces about 6 px of control net apiece, fine enough that no notch shows
+  at the joins.
+
+`every_wire_style_runs_from_port_to_port` and the splice test, run in all
+four styles, are the tests.
+
 ## Units — logical px inside, real lengths at the edges
 
 The toolkit's working unit is and stays the **logical pixel**: every layout
