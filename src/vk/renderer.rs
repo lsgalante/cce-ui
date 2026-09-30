@@ -125,6 +125,59 @@ pub struct Frame2D<'a> {
     /// Plate batches reference them by offset+count in `PlatePush::host`.
     pub plate_features: &'a [[f32; 12]],
     pub clear_color: [f32; 4],
+    /// The only part of the surface that differs from the previous frame,
+    /// (x, y, w, h) in physical pixels; None = all of it. With a rect the
+    /// renderer keeps the pixels outside it (see [`ImageAge`]) and tells the
+    /// compositor that only the rect changed. The caller vouches for it: a
+    /// pixel that changed outside the rect stays as it was.
+    pub damage: Option<(u32, u32, u32, u32)>,
+}
+
+/// How far a swapchain image's pixels are behind the latest frame. A frame
+/// with [`Frame2D::damage`] repaints only what the image it acquired is
+/// missing — the frame's own damage plus whatever frames that went to the
+/// OTHER images changed in the meantime — instead of every pixel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ImageAge {
+    /// Never rendered, or a full-surface frame went by: repaint everything.
+    Unknown,
+    /// Holds the latest frame.
+    Current,
+    /// Holds the latest frame except inside this rect.
+    Behind(vk::Rect2D),
+}
+
+fn rect_union(a: vk::Rect2D, b: vk::Rect2D) -> vk::Rect2D {
+    if a.extent.width == 0 || a.extent.height == 0 {
+        return b;
+    }
+    if b.extent.width == 0 || b.extent.height == 0 {
+        return a;
+    }
+    let x0 = a.offset.x.min(b.offset.x);
+    let y0 = a.offset.y.min(b.offset.y);
+    let x1 = (a.offset.x + a.extent.width as i32).max(b.offset.x + b.extent.width as i32);
+    let y1 = (a.offset.y + a.extent.height as i32).max(b.offset.y + b.extent.height as i32);
+    vk::Rect2D {
+        offset: vk::Offset2D { x: x0, y: y0 },
+        extent: vk::Extent2D { width: (x1 - x0) as u32, height: (y1 - y0) as u32 },
+    }
+}
+
+/// `a` cut down to `b`; zero-sized (a legal scissor that draws nothing) when
+/// they do not meet.
+fn rect_intersect(a: vk::Rect2D, b: vk::Rect2D) -> vk::Rect2D {
+    let x0 = a.offset.x.max(b.offset.x);
+    let y0 = a.offset.y.max(b.offset.y);
+    let x1 = (a.offset.x + a.extent.width as i32).min(b.offset.x + b.extent.width as i32);
+    let y1 = (a.offset.y + a.extent.height as i32).min(b.offset.y + b.extent.height as i32);
+    vk::Rect2D {
+        offset: vk::Offset2D { x: x0, y: y0 },
+        extent: vk::Extent2D {
+            width: (x1 - x0).max(0) as u32,
+            height: (y1 - y0).max(0) as u32,
+        },
+    }
 }
 
 const FRAMES_IN_FLIGHT: usize = 2;
@@ -237,6 +290,11 @@ pub struct VkRenderer {
     /// UI pass over a backdrop copy: loadOp LOAD, initial layout TRANSFER_DST.
     /// Framebuffers are shared with `render_pass` (compatible attachments).
     render_pass_load: vk::RenderPass,
+    /// LOAD from PRESENT_SRC: a partial frame repaints inside a swapchain
+    /// image that still holds an earlier frame.
+    render_pass_partial: vk::RenderPass,
+    /// Per swapchain image, what it is missing; reset with the swapchain.
+    image_ages: Vec<ImageAge>,
     descriptor_set_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
     pipeline: vk::Pipeline,
@@ -564,6 +622,28 @@ impl VkRenderer {
                 None,
             )
             .expect("Failed to create load render pass");
+
+        // Variant for a partial frame: keep what the image already shows and
+        // repaint inside the damage only. A presented image comes back from
+        // acquire in PRESENT_SRC with its contents intact.
+        let attachments_partial = [vk::AttachmentDescription::default()
+            .format(surface_format.format)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .load_op(vk::AttachmentLoadOp::LOAD)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)];
+        let render_pass_partial = device
+            .create_render_pass(
+                &vk::RenderPassCreateInfo::default()
+                    .attachments(&attachments_partial)
+                    .subpasses(&subpasses)
+                    .dependencies(&dependencies),
+                None,
+            )
+            .expect("Failed to create partial render pass");
 
         // Descriptor set layout mirroring shader.wgsl @group(0): naga maps WGSL
         // texture/sampler/uniform bindings 1:1 onto set 0 descriptor bindings.
@@ -910,6 +990,8 @@ impl VkRenderer {
             render_finished: Vec::new(),
             render_pass,
             render_pass_load,
+            render_pass_partial,
+            image_ages: Vec::new(),
             descriptor_set_layout,
             pipeline_layout,
             pipeline,
@@ -1143,6 +1225,7 @@ impl VkRenderer {
                 .get_swapchain_images(self.swapchain)
                 .map_err(|result| SurfaceLost { call: "vkGetSwapchainImagesKHR", result })?;
             self.swapchain_images = images.clone();
+            self.image_ages = vec![ImageAge::Unknown; images.len()];
             let subresource_range = vk::ImageSubresourceRange::default()
                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                 .base_mip_level(0)
@@ -1681,6 +1764,7 @@ impl VkRenderer {
             images: &[],
             plate_features: &[],
             clear_color: [0.0; 4],
+            damage: None,
         })
     }
 
@@ -1950,8 +2034,37 @@ impl VkRenderer {
             let clear_values = [vk::ClearValue {
                 color: vk::ClearColorValue { float32: frame2d.clear_color },
             }];
+            let full_scissor = vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: self.extent,
+            };
+            // This frame's damage, and whether the acquired image can be
+            // brought up to date by repainting part of it. Blur-behind and
+            // backdrop frames copy whole images around and stay full.
+            let damage = frame2d.damage.map(|(x, y, w, h)| {
+                rect_intersect(
+                    vk::Rect2D {
+                        offset: vk::Offset2D { x: x as i32, y: y as i32 },
+                        extent: vk::Extent2D { width: w, height: h },
+                    },
+                    full_scissor,
+                )
+            });
+            let partial: Option<vk::Rect2D> = match (damage, self.image_ages[image_index as usize]) {
+                _ if use_backdrop || frame2d.batches.iter().any(|b| b.blur_behind) => None,
+                (Some(d), ImageAge::Current) => Some(d),
+                (Some(d), ImageAge::Behind(missing)) => Some(rect_union(d, missing)),
+                _ => None,
+            };
+            // Every scissor of the frame passes through this.
+            let clip = |r: vk::Rect2D| match partial {
+                Some(region) => rect_intersect(r, region),
+                None => r,
+            };
             let (ui_pass, ui_clear_values): (vk::RenderPass, &[vk::ClearValue]) = if use_backdrop {
                 (self.render_pass_load, &[])
+            } else if partial.is_some() {
+                (self.render_pass_partial, &[])
             } else {
                 (self.render_pass, &clear_values)
             };
@@ -1969,18 +2082,21 @@ impl VkRenderer {
             );
             self.core.device
                 .cmd_set_viewport(cmd, 0, &[flipped_viewport(self.extent)]);
-            self.core.device.cmd_set_scissor(
-                cmd,
-                0,
-                &[vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: self.extent,
-                }],
-            );
-            let full_scissor = vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: self.extent,
-            };
+            self.core.device.cmd_set_scissor(cmd, 0, &[clip(full_scissor)]);
+            if let Some(region) = partial {
+                // The partial pass loads instead of clearing; clear what it
+                // is about to repaint.
+                if region.extent.width > 0 && region.extent.height > 0 {
+                    self.core.device.cmd_clear_attachments(
+                        cmd,
+                        &[vk::ClearAttachment::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .color_attachment(0)
+                            .clear_value(clear_values[0])],
+                        &[vk::ClearRect::default().rect(region).layer_count(1)],
+                    );
+                }
+            }
             // Display-list geometry interleaved with user images: each image
             // quad draws before the vertex its `z_before` names, so it sits
             // above earlier geometry and below later geometry.
@@ -2040,7 +2156,7 @@ impl VkRenderer {
                             },
                             None => full_scissor,
                         };
-                        self.core.device.cmd_set_scissor(cmd, 0, &[img_scissor]);
+                        self.core.device.cmd_set_scissor(cmd, 0, &[clip(img_scissor)]);
                         self.image.record_quad(&self.core.device, cmd, frame_index, k, q.image);
                         snapshot_fresh = false;
                     }
@@ -2093,7 +2209,7 @@ impl VkRenderer {
                                 },
                                 None => full_scissor,
                             };
-                            self.core.device.cmd_set_scissor(cmd, 0, &[img_scissor]);
+                            self.core.device.cmd_set_scissor(cmd, 0, &[clip(img_scissor)]);
                             self.image.record_quad(&self.core.device, cmd, frame_index, k, q.image);
                             continue;
                         }
@@ -2111,7 +2227,7 @@ impl VkRenderer {
                             );
                             self.core.device
                                 .cmd_bind_vertex_buffers(cmd, 0, &[frame.vertex.buffer], &[0]);
-                            self.core.device.cmd_set_scissor(cmd, 0, &[scissor]);
+                            self.core.device.cmd_set_scissor(cmd, 0, &[clip(scissor)]);
                             // Per-batch rounded-rect clip (fragments outside
                             // discard) + the SDF-lit plate block when this
                             // batch is a plate cover quad.
@@ -2163,11 +2279,11 @@ impl VkRenderer {
                         },
                         None => full_scissor,
                     };
-                    self.core.device.cmd_set_scissor(cmd, 0, &[img_scissor]);
+                    self.core.device.cmd_set_scissor(cmd, 0, &[clip(img_scissor)]);
                     self.image.record_quad(&self.core.device, cmd, frame_index, k, q.image);
                 }
                 // Restore for the text/overlay draws.
-                self.core.device.cmd_set_scissor(cmd, 0, &[full_scissor]);
+                self.core.device.cmd_set_scissor(cmd, 0, &[clip(full_scissor)]);
             }
             self.text.record_draw(&self.core.device, cmd, frame_index);
             if frame.overlay_count > 0 {
@@ -2216,12 +2332,39 @@ impl VkRenderer {
                 .queue_submit(self.core.queue, &[submit], in_flight)
                 .expect("Queue submit failed");
 
+            // The image now holds this frame; every other image fell behind
+            // by this frame's damage.
+            for (k, age) in self.image_ages.iter_mut().enumerate() {
+                *age = if k == image_index as usize {
+                    ImageAge::Current
+                } else {
+                    match (damage, *age) {
+                        (Some(d), ImageAge::Current) => ImageAge::Behind(d),
+                        (Some(d), ImageAge::Behind(m)) => ImageAge::Behind(rect_union(d, m)),
+                        _ => ImageAge::Unknown,
+                    }
+                };
+            }
+
             let swapchains = [self.swapchain];
             let image_indices = [image_index];
-            let present = vk::PresentInfoKHR::default()
+            // What changed since the previous present — the frame's damage,
+            // however much of the image had to be repainted to get there.
+            // Only for a frame that was itself partial: the first frames of
+            // a swapchain replace a buffer of another size or none at all.
+            let present_rects = [vk::RectLayerKHR::default()
+                .offset(damage.unwrap_or(full_scissor).offset)
+                .extent(damage.unwrap_or(full_scissor).extent)
+                .layer(0)];
+            let present_region = [vk::PresentRegionKHR::default().rectangles(&present_rects)];
+            let mut present_regions = vk::PresentRegionsKHR::default().regions(&present_region);
+            let mut present = vk::PresentInfoKHR::default()
                 .wait_semaphores(&signal_semaphores)
                 .swapchains(&swapchains)
                 .image_indices(&image_indices);
+            if self.core.incremental_present && partial.is_some() {
+                present = present.push_next(&mut present_regions);
+            }
             if present_debug() {
                 eprintln!("[vk] frame {} present img {}...", self.present_debug_count, image_index);
             }
@@ -2317,6 +2460,7 @@ impl Drop for VkRenderer {
             self.core.device.destroy_shader_module(self.shader_module, None);
             self.core.device.destroy_render_pass(self.render_pass, None);
             self.core.device.destroy_render_pass(self.render_pass_load, None);
+            self.core.device.destroy_render_pass(self.render_pass_partial, None);
             self.core.surface_loader.destroy_surface(self.surface, None);
             // The rest (allocator, command pool, device, instance) is the
             // core's Drop, which runs after this body.

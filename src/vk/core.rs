@@ -67,6 +67,10 @@ pub struct VkCore {
     /// maxSamplerAnisotropy); 1.0 when the samplerAnisotropy feature is
     /// absent, which is a sampler that asks for none.
     pub(crate) max_anisotropy: f32,
+    /// VK_KHR_incremental_present is enabled: a present may name the
+    /// rectangles that changed, which the Wayland WSI forwards as the
+    /// surface's buffer damage in place of "everything".
+    pub(crate) incremental_present: bool,
 }
 
 /// The process-wide Vulkan entry + instance every [`VkCore`] hangs off.
@@ -490,6 +494,11 @@ impl VkCore {
         let mut device_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_infos)
             .enabled_features(&enabled_features);
+        let incremental_present =
+            wayland.is_some() && has_ext(ash::khr::incremental_present::NAME);
+        if incremental_present {
+            device_extensions.push(ash::khr::incremental_present::NAME.as_ptr());
+        }
         if ray_query {
             device_extensions.push(ash::khr::acceleration_structure::NAME.as_ptr());
             device_extensions.push(ash::khr::ray_query::NAME.as_ptr());
@@ -555,6 +564,7 @@ impl VkCore {
                 as_scratch_align,
                 max_line_width,
                 max_anisotropy,
+                incremental_present,
             },
             surface,
         ))

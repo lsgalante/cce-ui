@@ -350,6 +350,7 @@ impl<A: Application> EngineState<A> {
             images: &[],
             plate_features: &plate_features,
             clear_color: [0.0; 4],
+            damage: None,
         });
     }
 

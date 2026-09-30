@@ -3568,6 +3568,19 @@ pub trait Application: Sized + 'static {
     /// On-top overlay quads drawn after the display list and its text (e.g. the status bar's
     /// tray-hover highlights). Deliberately separate from the single paint path.
     fn overlay_quads(&mut self, _quads: &mut Vec<(f32, f32, f32, f32, [f32; 4])>, _size: LogicalSize, _scale: f64) {}
+    /// The part of the surface that changed since the last frame this app
+    /// painted, as (x, y, w, h) in logical px, taken (and reset) once per
+    /// rendered frame right after `display_list`. `None` — the default —
+    /// means all of it. Returning a rect makes the frame a partial one: only
+    /// that rect is repainted and only it is reported to the compositor as
+    /// damage, which is what keeps a small change on a very large surface
+    /// (an image dragged across the desktop grid) from costing a full
+    /// repaint on both sides. The app vouches for the rect: anything that
+    /// changed outside it keeps its old pixels. A frame that was skipped is
+    /// the runner's to make up — the next one is painted in full.
+    fn take_damage(&mut self, _size: LogicalSize, _scale: f64) -> Option<(f32, f32, f32, f32)> {
+        None
+    }
     fn input_regions(&self) -> Option<Vec<(i32, i32, i32, i32)>> {
         None
     }
@@ -3928,6 +3941,9 @@ pub struct EngineState<A: Application> {
 
     pub exit: bool,
     pub redraw: bool,
+    /// A frame took the app's damage (`Application::take_damage`) and was
+    /// not presented: the next presented frame is a full one.
+    pub damage_owed: bool,
     pub frame_callback_pending: bool,
     /// When the pending frame callback was armed — the starvation fallback's
     /// clock (see the render gate in `run`).
@@ -4305,6 +4321,28 @@ impl<A: Application> EngineState<A> {
         let dl = self.inner.as_mut().unwrap()
             .display_list(LogicalSize::new(logical_w, logical_h), scale_factor)
             .unwrap_or_else(|| crate::scene::paint::PaintCtx::new().finish());
+        // Taken with the display list it describes. A frame that took the
+        // app's damage and then was not presented owes those pixels, so the
+        // next one that is presented repaints everything.
+        let app_damage = self
+            .inner
+            .as_mut()
+            .unwrap()
+            .take_damage(LogicalSize::new(logical_w, logical_h), scale_factor);
+        let damage = match (app_damage, self.damage_owed) {
+            (Some((x, y, w, h)), false) => {
+                // Outward to whole physical pixels, plus one for an
+                // antialiased edge.
+                let s = scale_factor as f32;
+                let x0 = ((x * s).floor() - 1.0).max(0.0);
+                let y0 = ((y * s).floor() - 1.0).max(0.0);
+                let x1 = ((x + w) * s).ceil() + 1.0;
+                let y1 = ((y + h) * s).ceil() + 1.0;
+                Some((x0 as u32, y0 as u32, (x1 - x0).max(0.0) as u32, (y1 - y0).max(0.0) as u32))
+            }
+            _ => None,
+        };
+        self.damage_owed = true;
 
         // 1a. Phase 6 display-list text: shape the list's Text prims through the shared buffer
         // cache and hold them for the glyph pass (the TextSpans built below borrow these).
@@ -4492,6 +4530,7 @@ impl<A: Application> EngineState<A> {
             images: &image_quads,
             plate_features: &plate_features,
             clear_color,
+            damage,
         }) {
             // No present happened (swapchain out-of-date, or the created
             // swapchain didn't match the requested extent). The frame
@@ -4499,6 +4538,8 @@ impl<A: Application> EngineState<A> {
             // clear it or the demand-driven loop stalls waiting forever.
             self.frame_callback_pending = false;
             self.redraw = true;
+        } else {
+            self.damage_owed = false;
         }
     }
 }
@@ -5982,6 +6023,7 @@ fn run_session<'l, A: Application>(
         display_ptr: 0,
         exit: false,
         redraw: false,
+        damage_owed: true,
         frame_callback_pending: false,
         frame_callback_armed_at: None,
         warm_until: None,
