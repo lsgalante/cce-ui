@@ -1,9 +1,11 @@
 //! The DE-wide animations switch.
 //!
 //! One flag, followed by every cce-ui widget that eases and by the
-//! compositor: when it is off, anything that would glide, fade, slide or
-//! coast lands on its target in the same frame instead. Disabled means
+//! compositor: when it is off, anything that would glide, fade or slide
+//! lands on its target in the same frame instead. Disabled means
 //! "snap", never "freeze" — a dropdown still opens, a scroll still moves.
+//! A trackpad flick's coast is NOT under it (`widget::scroll_motion`): that
+//! is the hand's gesture carried on, not an animation the toolkit adds.
 //!
 //! The switch is a file, [`STATE_PATH`], holding `on` or `off`. The System
 //! Interface's Power page sets it per power mode and `cce-power-apply`

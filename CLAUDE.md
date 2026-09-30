@@ -959,6 +959,20 @@ assignment, a rebuild, a section collapsing (`apply_label_layout` /
 comes OFF a widget, and `slider::detached_strip` reads an empty label as
 none for the widgets that store whatever they are handed.
 
+### A flick coasts with animations off
+
+The animations switch (`motion::enabled`) stops a wheel notch's GLIDE and
+not a trackpad flick's COAST (`scroll_motion::with_animations`, since
+2026-09-29). Until then it turned both off, so on a power mode with
+animations off a two-finger scroll stopped dead at the lift in every
+pane that scrolls through `ScrollMotion` — lists, the params pane, the
+spreadsheet, a graph's pan. The glide is an animation the toolkit adds;
+the coast is the rest of a gesture the hand made, and its own setting is
+input.kdl's `kinetic_scroll`. Two value controls still follow the switch,
+deliberately left alone: a slider's and a ramp key's drift after a scroll
+over them, which changes a VALUE after the hand has stopped.
+`the_animations_switch_stops_the_glide_and_not_the_coast` is the test.
+
 ### The suite's animations switch is its own
 
 `motion::enabled()` reads `/run/cce/animations` in a shipped binary (see

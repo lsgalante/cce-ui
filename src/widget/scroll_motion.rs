@@ -113,16 +113,24 @@ impl Default for ScrollSettings {
 static SETTINGS: std::sync::OnceLock<ScrollSettings> = std::sync::OnceLock::new();
 
 /// This app's effective smooth-scroll settings (`<app>` → `cce-ui` → defaults).
-/// With animations off ([`crate::motion`]) a wheel notch jumps and a flick
-/// stops at the lift — the legacy behavior — whatever input.kdl says; that
-/// is checked per call, so it follows the switch while the app runs.
+/// With animations off ([`crate::motion`]) a wheel notch jumps, whatever
+/// input.kdl says; that is checked per call, so it follows the switch while
+/// the app runs.
+///
+/// **A flick coasts either way.** Until 2026-09-29 the switch turned the
+/// coast off with the glide, so on a power mode that has animations off a
+/// trackpad scroll stopped dead at the lift in every pane. The glide of a
+/// notch is an animation the toolkit adds, and the switch is for those;
+/// the coast is the rest of a gesture the hand made, and `kinetic_scroll`
+/// in input.kdl is the setting for it.
 pub fn scroll_settings() -> ScrollSettings {
-    let configured = configured_scroll_settings();
-    if crate::motion::enabled() {
-        configured
-    } else {
-        ScrollSettings { smooth: false, kinetic: false, ..configured }
-    }
+    with_animations(configured_scroll_settings(), crate::motion::enabled())
+}
+
+/// `configured` as the animations switch leaves it: the glide follows the
+/// switch, the coast does not.
+fn with_animations(configured: ScrollSettings, animations: bool) -> ScrollSettings {
+    ScrollSettings { smooth: configured.smooth && animations, ..configured }
 }
 
 fn configured_scroll_settings() -> ScrollSettings {
@@ -593,6 +601,18 @@ mod tests {
         }
         assert!(!a.finger_end(0.5, &s), "a finger held still before lifting stops dead");
         assert_eq!(a.pos(), 150.0);
+    }
+
+    #[test]
+    fn the_animations_switch_stops_the_glide_and_not_the_coast() {
+        let off = with_animations(smooth(), false);
+        assert!(!off.smooth, "a notch jumps");
+        assert!(off.kinetic, "a flick still coasts");
+        assert_eq!((off.ease_rate, off.friction), (smooth().ease_rate, smooth().friction));
+        assert_eq!(with_animations(smooth(), true), smooth());
+        // What input.kdl turned off stays off.
+        let plain = ScrollSettings { smooth: false, kinetic: false, ..smooth() };
+        assert_eq!(with_animations(plain, true), plain);
     }
 
     #[test]
