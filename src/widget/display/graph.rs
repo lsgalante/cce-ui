@@ -112,6 +112,22 @@ enum WireSeg {
     Arc { c: (f32, f32), r: f32, a0: f32, a1: f32 },
 }
 
+/// One DEVICE pixel in logical px.
+fn device_px() -> f32 {
+    1.0 / crate::scale::scale_factor().max(1.0)
+}
+
+/// A wire of `size` logical px as it is drawn: (stroke width, alpha). The
+/// thinnest stroke is one device pixel (`px`), because the 2D pass has no
+/// antialiasing — an axis-aligned quad narrower than a pixel covers a row of
+/// pixel centres or none, and the wire would come and go as it moved. A
+/// thinner wire is drawn as that pixel at the share of it the wire would
+/// cover, so it reads thinner by reading fainter.
+fn wire_stroke(size: f32, px: f32) -> (f32, f32) {
+    let px = px.max(f32::EPSILON);
+    (size.max(px), (size / px).clamp(0.0, 1.0))
+}
+
 /// The path of a wire from `start` to `end` drawn `t` px thick. `bend` is
 /// the largest radius a Rounded bend takes and the least a Bezier lead
 /// runs straight down before curving — both scale with the node, so the
@@ -681,12 +697,22 @@ impl Graph {
         self.wire_style = style;
     }
 
-    /// A wire's stroke: `graph_wire_size` px at 100%, scaled with the node
-    /// body as the zoom scales it.
-    fn wire_thickness(&self) -> f32 {
+    /// A wire's width as asked for: `graph_wire_size` px at 100%, scaled
+    /// with the node body as the zoom scales it, and at most half a body.
+    fn wire_size_at_zoom(&self) -> f32 {
         let base = crate::layout::graph_node_width();
         let zoom = if base > 0.0 { self.node_w / base } else { 1.0 };
-        (crate::layout::graph_wire_size() * zoom).clamp(1.0, (self.node_h * 0.5).max(1.0))
+        (crate::layout::graph_wire_size() * zoom).clamp(0.0, (self.node_h * 0.5).max(1.0))
+    }
+
+    /// A wire's stroke as drawn (see [`wire_stroke`]).
+    fn wire_thickness(&self) -> f32 {
+        wire_stroke(self.wire_size_at_zoom(), device_px()).0
+    }
+
+    /// The alpha a wire's colour is drawn at (see [`wire_stroke`]).
+    fn wire_fade(&self) -> f32 {
+        wire_stroke(self.wire_size_at_zoom(), device_px()).1
     }
 
     /// What a Rounded bend's radius and a Bezier's straight lead are made of.
@@ -718,10 +744,11 @@ impl Graph {
                 }
             }
         };
+        let fade = self.node_opacity * self.wire_fade();
         let wc = crate::color::graph_wire_color();
-        let wire_color = [wc[0], wc[1], wc[2], wc[3] * self.node_opacity];
+        let wire_color = [wc[0], wc[1], wc[2], wc[3] * fade];
         let hl = crate::color::graph_wire_highlight_color();
-        let splice_color = [hl[0], hl[1], hl[2], hl[3] * self.node_opacity];
+        let splice_color = [hl[0], hl[1], hl[2], hl[3] * fade];
         pc.clip(rect, |pc| {
             for (src_idx, i, port) in self.wire_pairs() {
                 let Some(segs) = self.wire_segments(src_idx, i, port) else { continue };
@@ -1772,6 +1799,17 @@ mod tests {
     /// piece begins where the last ended. The orthogonal one is three runs
     /// meeting square, which touch without overlapping so a translucent wire
     /// is one alpha throughout — the across run filling the corners.
+    #[test]
+    fn a_wire_thinner_than_a_device_pixel_is_that_pixel_fainter() {
+        // At 2x a device pixel is half a logical one.
+        assert_eq!(wire_stroke(3.0, 0.5), (3.0, 1.0));
+        assert_eq!(wire_stroke(0.5, 0.5), (0.5, 1.0));
+        assert_eq!(wire_stroke(0.25, 0.5), (0.5, 0.5));
+        // At 1x the pixel is a whole one, and nothing draws narrower.
+        assert_eq!(wire_stroke(0.5, 1.0), (1.0, 0.5));
+        assert_eq!(wire_stroke(0.0, 1.0), (1.0, 0.0));
+    }
+
     #[test]
     fn every_wire_style_runs_from_port_to_port() {
         let t = 6.0;

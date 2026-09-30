@@ -780,6 +780,14 @@ NOTHING until this change, when the wires were a hard-coded cyan 3 px.
   so a translucent wire is one alpha throughout. A bezier is flat-capped
   pieces about 6 px of control net apiece, fine enough that no notch shows
   at the joins.
+- **A wire may be thinner than a pixel** (the same day). `wire_size` has no
+  floor; what is drawn does (`wire_stroke`): one DEVICE pixel, half a
+  logical one at 2x, since the 2D pass has no antialiasing and a narrower
+  axis-aligned quad covers a row of pixel centres or none. A wire under
+  that is the pixel at the share of it the wire covers, so it reads
+  thinner by reading fainter. Until then the stroke was clamped to one
+  LOGICAL pixel, two device pixels at 2x, and `wire_size` below 1 did
+  nothing.
 
 `every_wire_style_runs_from_port_to_port` and the splice test, run in all
 four styles, are the tests.
