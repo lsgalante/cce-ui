@@ -58,10 +58,16 @@ fn monospace_cell_width(font_family: &str, font_size: f32) -> f32 {
 /// raw ink measure. Sizing a dropdown from the ink measure therefore left the trigger a few px too
 /// narrow and tripped its own right-edge fade — badly under a monospace UI font like the default
 /// Berkeley Mono. Keep this in step with `paint_text`.
+///
+/// Shaped first ([`shaped_clusters`]), which is exactly where the glyphs land; the measured
+/// fallbacks below are for a process with no font system to shape through.
 fn text_advance(text: &str, font_family: &str, font_size: f32) -> f32 {
     let n = text.chars().count();
     if n == 0 {
         return 0.0;
+    }
+    if let Some(&(_, total)) = shaped_clusters(text, font_size).as_ref().and_then(|c| c.last()) {
+        return total;
     }
     if is_monospace_font(font_family, font_size) {
         n as f32 * monospace_cell_width(font_family, font_size)
@@ -70,6 +76,61 @@ fn text_advance(text: &str, font_family: &str, font_size: f32) -> f32 {
         let measure_str = format!("{}M", text);
         (crate::widget::display::measure_text_width(&measure_str, font_family, font_size) - w_dummy).max(0.0)
     }
+}
+
+/// `text` shaped in the trigger's own font, as the renderer draws it: each cluster's start
+/// `(byte, x)` in logical px, ending on `(text.len(), total advance)` — `None` when there is no
+/// font system to shape through or the shape came back empty.
+///
+/// The trigger draws its text a cluster at a time (so it can fade them one by one), and these
+/// are the offsets it places them at. Until 2026-09-30 they were measured instead — a prefix
+/// through `measure_text_width`, with every character then pushed at least a pixel past the
+/// previous one's MEASURED ink — and a lone narrow glyph measures wider than it advances, so
+/// "Create" drew as "Cr eat e".
+fn shaped_clusters(text: &str, font_size: f32) -> Option<Vec<(usize, f32)>> {
+    let font = crate::layout::control_label_font_detached();
+    let mut fs = crate::geometry_font_system().lock().ok()?;
+    let clusters =
+        crate::backend::window_runner::shaped_cluster_offsets(&mut fs, text, font_size, Some(&font));
+    (clusters.len() > 1 && clusters.last().is_some_and(|&(_, total)| total > 0.0)).then_some(clusters)
+}
+
+/// [`shaped_clusters`]' fallback, a character a piece: on the monospace cell, or at a
+/// measured prefix with each character kept a pixel clear of the last one's measured ink.
+fn measured_pieces(text: &str, font_family: &str, font_size: f32, total_advance: f32) -> Vec<(String, f32, f32)> {
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    if is_monospace_font(font_family, font_size) {
+        let cell = monospace_cell_width(font_family, font_size);
+        return chars.iter().enumerate().map(|(i, c)| (c.to_string(), i as f32 * cell, cell)).collect();
+    }
+    let w_dummy = crate::widget::display::measure_text_width("M", font_family, font_size);
+    let mut offsets = Vec::with_capacity(n);
+    let mut prefix = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if i > 0 {
+            prefix.push(chars[i - 1]);
+        }
+        let measured = if i == 0 {
+            0.0
+        } else {
+            let w = crate::widget::display::measure_text_width(&format!("{prefix}M"), font_family, font_size);
+            (w - w_dummy).max(0.0)
+        };
+        offsets.push((c, measured));
+    }
+    let mut out = Vec::with_capacity(n);
+    let mut prev_end = 0.0f32;
+    for i in 0..n {
+        let (c, mut offset) = offsets[i];
+        if i > 0 {
+            offset = offset.max(prev_end + 1.0);
+        }
+        let next = if i + 1 < n { offsets[i + 1].1 } else { total_advance };
+        out.push((c.to_string(), offset, next - offset));
+        prev_end = offset + crate::widget::display::measure_text_width(&c.to_string(), font_family, font_size);
+    }
+    out
 }
 
 #[derive(Debug, Clone)]
@@ -672,50 +733,19 @@ impl Dropdown {
             ((parent_color[2] * (1.0 - alpha) + bg_color[2] * alpha) * 255.0).round().clamp(0.0, 255.0) as u8,
         ];
 
-        let w_dummy = crate::widget::display::measure_text_width("M", &font_family, font_size);
-        let chars: Vec<char> = selected_text.chars().collect();
-        let n = chars.len();
-
-        let is_monospace = is_monospace_font(&font_family, font_size);
-
-        let cell_width = if is_monospace {
-            monospace_cell_width(&font_family, font_size)
-        } else {
-            0.0
+        // The pieces the text is drawn in — `(text, offset, advance)` — each faded on its own.
+        // Shaped when there is a font system (a cluster each, at the offset the shaper gives
+        // it, which is where the whole string's glyphs would land); measured otherwise.
+        let total_advance = text_advance(&selected_text, &font_family, font_size);
+        let pieces: Vec<(String, f32, f32)> = match shaped_clusters(&selected_text, font_size) {
+            Some(clusters) => clusters
+                .windows(2)
+                .map(|w| (selected_text[w[0].0..w[1].0].to_string(), w[0].1, w[1].1 - w[0].1))
+                .collect(),
+            None => measured_pieces(&selected_text, &font_family, font_size, total_advance),
         };
 
-        let mut char_offsets = Vec::with_capacity(n);
-        if is_monospace {
-            for i in 0..n {
-                char_offsets.push(i as f32 * cell_width);
-            }
-        } else {
-            if n > 0 {
-                char_offsets.push(0.0f32);
-            }
-            let mut prefix = String::new();
-            for i in 1..n {
-                prefix.push(chars[i - 1]);
-                let measure_str = format!("{}M", prefix);
-                let w_prefix_dummy = crate::widget::display::measure_text_width(&measure_str, &font_family, font_size);
-                let offset = (w_prefix_dummy - w_dummy).max(0.0);
-                char_offsets.push(offset);
-            }
-        }
-
-        let total_advance = text_advance(&selected_text, &font_family, font_size);
-
-        // Draw and fade every character individually
-        let mut prev_char_end = 0.0;
-        for i in 0..n {
-            let mut offset = char_offsets[i];
-            if !is_monospace {
-                if i > 0 {
-                    offset = offset.max(prev_char_end + 1.0);
-                }
-            }
-            let next_offset = if i < n - 1 { char_offsets[i + 1] } else { total_advance };
-            let c_w = if is_monospace { cell_width } else { next_offset - offset };
+        for (piece, offset, c_w) in pieces {
             let cur_x = start_x + offset;
 
             if cur_x >= right_limit {
@@ -741,14 +771,8 @@ impl Dropdown {
                 default_color
             };
 
-            if !skip_char {
-                ctx.text(chars[i].to_string(), cur_x, text_y, font_size, color);
-                let c_w_ink = if is_monospace {
-                    cell_width
-                } else {
-                    crate::widget::display::measure_text_width(&chars[i].to_string(), &font_family, font_size)
-                };
-                prev_char_end = offset + c_w_ink;
+            if !skip_char && !piece.trim().is_empty() {
+                ctx.text(piece, cur_x, text_y, font_size, color);
             }
         }
 
@@ -1344,6 +1368,32 @@ unsafe impl Sync for Dropdown {}
 mod tests {
     use super::*;
     use crate::widget::LayoutConstraints;
+
+    /// The trigger draws its text a cluster at a time, and each lands where the
+    /// word shaped whole puts it — "Create" drew as "Cr eat e" while the offsets
+    /// were measured a letter at a time.
+    #[test]
+    fn the_trigger_text_is_spaced_as_the_word_shapes() {
+        let dd = Dropdown::new(vec!["Create".to_string()], 0);
+        let mut pc = PaintCtx::new();
+        dd.paint_text(Rect { x: 0.0, y: 0.0, width: 300.0, height: 24.0 }, &mut pc);
+        let drawn: Vec<(String, f32)> = pc
+            .finish()
+            .items
+            .into_iter()
+            .filter_map(|item| match item.prim {
+                crate::scene::paint::Prim::Text { text, x, .. } if text != "▼" => Some((text, x)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(drawn.iter().map(|(t, _)| t.as_str()).collect::<String>(), "Create");
+        let (_, size) = crate::layout::control_label_font_detached_parsed();
+        let whole = shaped_clusters("Create", size).expect("the test process can shape");
+        let x0 = drawn[0].1;
+        for ((text, x), &(_, want)) in drawn.iter().zip(whole.iter()) {
+            assert!((x - x0 - want).abs() < 0.01, "{text:?} drawn at {} where the word puts it at {want}", x - x0);
+        }
+    }
 
     #[test]
     fn test_dropdown_widget_interaction() {
