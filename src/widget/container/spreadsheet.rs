@@ -459,7 +459,7 @@ impl Paint for Spreadsheet {
             );
         }
 
-        // Header + cell text. Cells render only when the row lies fully inside the body.
+        // Header + cell text, each cell clamped to its column and the body band.
         if self.headers.is_empty() {
             return;
         }
@@ -525,9 +525,15 @@ impl Paint for Spreadsheet {
             };
             ctx.text_with(fit(label), cx, y + 6.0, 12.0, color, None, col_bounds(i, y, HEADER_H));
         }
+        // A row half scrolled under the header or off the bottom draws its
+        // text CUT at the body band, as its zebra fill is. Until 2026-09-30
+        // it drew no text until it was wholly inside, so a scrolling row's
+        // band arrived empty and its values popped in a row's height late.
         for (i, &src) in self.order.iter().enumerate() {
             let ry = y + HEADER_H + i as f32 * ROW_H - scroll;
-            if ry < body_top || ry + ROW_H > body_bottom {
+            let top = ry.max(body_top);
+            let bottom = (ry + ROW_H).min(body_bottom);
+            if bottom <= top {
                 continue;
             }
             for (col_idx, val) in self.rows[src].iter().enumerate().take(n_cols) {
@@ -535,7 +541,7 @@ impl Paint for Spreadsheet {
                     continue;
                 }
                 let cx = xoff + col_w * col_idx as f32 + 8.0;
-                ctx.text_with(fit(val.clone()), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, ry, ROW_H));
+                ctx.text_with(fit(val.clone()), cx, ry + 6.0, 12.0, [0xbb, 0xbb, 0xcc], None, col_bounds(col_idx, top, bottom - top));
             }
         }
     }
@@ -843,6 +849,33 @@ mod tests {
         let rows = vec![(0..cols).map(|i| format!("v{i}")).collect::<Vec<String>>(); 2];
         SpreadsheetController::set_spreadsheet_data(&mut *s, headers, rows);
         s
+    }
+
+    /// A row half scrolled out at either edge of the body draws its text cut
+    /// at the band — it used to draw none until it was wholly inside.
+    #[test]
+    fn a_half_scrolled_row_draws_its_text_cut_at_the_body() {
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 124.0 };
+        let mut s = filled(20);
+        (*s).scroll_y = ROW_H * 0.5;
+        let mut pc = crate::scene::paint::PaintCtx::new();
+        Paint::paint(&*s, rect, &mut pc);
+        let items = pc.finish().items;
+        let cell = |want: &str| {
+            items.iter().find_map(|item| match &item.prim {
+                crate::scene::paint::Prim::Text { text, bounds, .. } if text == want => *bounds,
+                _ => None,
+            })
+        };
+        let body_top = HEADER_H;
+        let body_bottom = rect.height;
+        // r0 spans -12..12 of the body; r4 runs 12 px past its bottom.
+        let top = cell("r0").expect("the row under the header draws its text");
+        assert_eq!((top[1], top[3]), (body_top, body_top + ROW_H * 0.5), "cut at the header");
+        let bottom = cell("r4").expect("the row off the bottom draws its text");
+        assert_eq!(bottom[3], body_bottom, "cut at the pane's bottom");
+        assert!(bottom[1] < bottom[3]);
+        assert!(cell("r5").is_none(), "a row wholly out of the body draws nothing");
     }
 
     /// Columns floor at MIN_COL_W instead of squeezing: past the floor the run
