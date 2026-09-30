@@ -853,7 +853,7 @@ pub mod context_menu {
                 self.scroll_by(-delta.notches_y() * ROW_H);
                 return true;
             };
-            self.wheel_accum += delta.notches_y();
+            self.wheel_accum += delta.value_notches_y();
             let whole = self.wheel_accum.trunc();
             if whole == 0.0 {
                 return false;

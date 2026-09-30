@@ -370,6 +370,52 @@ pub fn app_chord(name: &str, default: &str) -> String {
     cached().resolve_chord(&app, name, default)
 }
 
+/// Whether the trackpad scrolls NATURALLY — the content following the
+/// fingers — per input.kdl's `trackpad { natural_scroll }`, as the
+/// compositor applies it. Read once per process; a thread's override
+/// (`force_natural_scroll`, for a test) wins over it, and under `cfg(test)`
+/// with no override the answer is `false`, so the toolkit's own suite does
+/// not read the machine.
+///
+/// What it is for: a VALUE control — a slider, a spinbox, a menu's slider
+/// row — takes the wheel as "up is more", and a finger under natural
+/// scrolling as the same thing, which is the opposite sign of the pixel
+/// delta the runner hands it (the delta is what a LIST scrolls by, and a
+/// list under natural scrolling moves its content the way the fingers
+/// went). See `MouseScrollDelta::value_notches_y`.
+pub fn natural_scroll() -> bool {
+    if let Some(forced) = NATURAL_OVERRIDE.with(|f| f.get()) {
+        return forced;
+    }
+    #[cfg(test)]
+    {
+        false
+    }
+    #[cfg(not(test))]
+    {
+        *NATURAL_SCROLL.get_or_init(|| {
+            let input = cached();
+            let app = crate::config::get_app_name().unwrap_or_default();
+            input.resolve_setting(&app, "trackpad", "natural_scroll").and_then(SettingValue::as_bool).unwrap_or(false)
+        })
+    }
+}
+
+#[cfg(not(test))]
+static NATURAL_SCROLL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+thread_local! {
+    static NATURAL_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Force what [`natural_scroll`] answers on this thread, for a test that
+/// drives a value control with a finger; `None` lifts it. Thread-local,
+/// because a suite runs its tests in parallel and a process-wide override
+/// set by one would race every other test's read.
+pub fn force_natural_scroll(natural: Option<bool>) {
+    NATURAL_OVERRIDE.with(|f| f.set(natural));
+}
+
 /// This app's effective wheel-delta multipliers, resolved once per process.
 /// Pixel (smooth) deltas scale by `trackpad`, discrete clicks by `mouse`.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -507,7 +507,7 @@ impl Input for Spinbox {
                 // Wheel up steps up, wheel down steps down, one step per notch;
                 // fractional (trackpad) notches accumulate. Always consumed, so
                 // a host's page never scrolls under a spinbox mid-gesture.
-                self.wheel_accum += delta.notches_y();
+                self.wheel_accum += delta.value_notches_y();
                 while self.wheel_accum >= 1.0 {
                     self.wheel_accum -= 1.0;
                     self.step_by(1);

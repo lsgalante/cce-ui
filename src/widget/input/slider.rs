@@ -438,8 +438,9 @@ impl Input for Slider {
                     let latched = !ui.scroll_gesture_new && ui.scroll_initiate_widget_id == Some(ectx.id);
                     if latched || self.scroll_hit(r, *px, *py) {
                         ui.scroll_initiate_widget_id = Some(ectx.id);
-                        let scroll_amount = delta.notches_y();
-                        let new_val = (self.value - scroll_amount * self.notch_step()).clamp(0.0, 1.0);
+                        // Up is more, for a wheel and for a finger alike.
+                        let scroll_amount = delta.value_notches_y();
+                        let new_val = (self.value + scroll_amount * self.notch_step()).clamp(0.0, 1.0);
                         let applied = new_val - self.value;
                         self.set_value_marking(new_val);
                         // Velocity estimate for the release glide (the Ramp
@@ -911,7 +912,7 @@ impl Input for RangeSlider {
                     let center_high = x + self.value_high * range + thumb_size / 2.0;
                     let dist_low = (px - center_low).abs();
                     let dist_high = (px - center_high).abs();
-                    let scroll_amount = delta.notches_y();
+                    let scroll_amount = delta.value_notches_y();
                     let step = 0.02;
                     let adjust_low = if dist_low < dist_high {
                         true
@@ -921,12 +922,12 @@ impl Input for RangeSlider {
                         scroll_amount > 0.0
                     };
                     if adjust_low {
-                        let new_val = (self.value_low - scroll_amount * step).clamp(0.0, self.value_high);
+                        let new_val = (self.value_low + scroll_amount * step).clamp(0.0, self.value_high);
                         if (new_val - self.value_low).abs() > 0.0001 {
                             self.value_low = new_val;
                         }
                     } else {
-                        let new_val = (self.value_high - scroll_amount * step).clamp(self.value_low, 1.0);
+                        let new_val = (self.value_high + scroll_amount * step).clamp(self.value_low, 1.0);
                         if (new_val - self.value_high).abs() > 0.0001 {
                             self.value_high = new_val;
                         }
@@ -1095,7 +1096,7 @@ fn probe_slider_bridge() {
             10.0,
             &mut ctx,
         ));
-        assert!(sl.inner().value() < before, "scroll up decreases value");
+        assert!(sl.inner().value() > before, "a wheel notch up is more");
         assert!(sl.take_change());
     }
 
@@ -1116,7 +1117,7 @@ fn probe_slider_bridge() {
             ctx.scroll_gesture_new = true;
             // Over the band at the value, where the halo is.
             let x = 200.0 * sl.inner().value();
-            assert!(sl.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, -1.0), x.clamp(1.0, 199.0), 10.0, &mut ctx));
+            assert!(sl.mouse_wheel(&MouseScrollDelta::LineDelta(0.0, 1.0), x.clamp(1.0, 199.0), 10.0, &mut ctx));
             sl.inner().get_scaled_value() - before
         };
         let close = |got: f32, want: f32| (got - want).abs() <= want * 0.01 + 1e-3;

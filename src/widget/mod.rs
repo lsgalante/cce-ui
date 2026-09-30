@@ -43,6 +43,30 @@ impl MouseScrollDelta {
             MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 60.0,
         }
     }
+
+    /// The notches a VALUE control takes, "up is more": a wheel notch up
+    /// is positive, and a finger's travel is positive when the fingers
+    /// went UP — which under natural scrolling is the negative of the
+    /// pixel delta, since that delta is what a list scrolls by and a
+    /// natural list moves its content the way the fingers went. Until
+    /// 2026-09-30 every value control read `notches_y` and each had picked
+    /// a sign: the slider was right for a natural trackpad and backwards
+    /// for a wheel, the spinbox and the menu and palette sliders the other
+    /// way round.
+    pub fn value_notches_y(&self) -> f32 {
+        self.value_notches_of(crate::input::natural_scroll())
+    }
+
+    /// [`Self::value_notches_y`] for a given natural-scroll setting.
+    pub fn value_notches_of(&self, natural: bool) -> f32 {
+        match self {
+            MouseScrollDelta::LineDelta(_x, y) => *y,
+            MouseScrollDelta::PixelDelta(pos) => {
+                let n = (pos.y as f32) / 60.0;
+                if natural { -n } else { n }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -776,3 +800,29 @@ pub fn match_key_shortcut(event: &KeyEvent, shortcut_str: &str) -> bool {
     false
 }
 
+
+#[cfg(test)]
+mod value_notch_tests {
+    use super::{MouseScrollDelta, Position};
+
+    /// A value control reads "up is more": a wheel notch up is positive
+    /// either way; a finger's pixel delta is taken as it comes with natural
+    /// scrolling off, and negated with it on, since that delta is what a
+    /// list scrolls by and a natural list follows the fingers.
+    #[test]
+    fn a_value_control_reads_up_as_more_on_a_wheel_and_a_natural_finger() {
+        let wheel_up = MouseScrollDelta::LineDelta(0.0, 1.0);
+        let finger = MouseScrollDelta::PixelDelta(Position { x: 0.0, y: -60.0 });
+        assert_eq!(wheel_up.value_notches_of(false), 1.0);
+        assert_eq!(wheel_up.value_notches_of(true), 1.0);
+        assert_eq!(finger.value_notches_of(false), -1.0, "natural off: the delta as it comes");
+        assert_eq!(finger.value_notches_of(true), 1.0, "natural on: the fingers went up, so more");
+        // Under `cfg(test)` the toolkit's own suite reads natural as off,
+        // unless a thread forces it.
+        assert_eq!(finger.value_notches_y(), -1.0);
+        crate::input::force_natural_scroll(Some(true));
+        assert_eq!(finger.value_notches_y(), 1.0);
+        crate::input::force_natural_scroll(None);
+        assert_eq!(finger.value_notches_y(), -1.0);
+    }
+}

@@ -959,6 +959,25 @@ assignment, a rebuild, a section collapsing (`apply_label_layout` /
 comes OFF a widget, and `slider::detached_strip` reads an empty label as
 none for the widgets that store whatever they are handed.
 
+### A value control reads the wheel as "up is more", a natural finger too
+
+`MouseScrollDelta::value_notches_y` (2026-09-30) is what a VALUE control —
+`Slider`, `Slider2D`, `Spinbox`, a context menu's slider row — turns by:
+a wheel notch up is positive, and a finger's pixel delta is taken as it
+comes with natural scrolling off and NEGATED with it on
+(`input::natural_scroll`, input.kdl's `trackpad { natural_scroll }`, read
+once). The delta the runner hands out is what a LIST scrolls by, and a
+natural list moves its content the way the fingers went; a value has no
+content to move, so under natural scrolling the fingers going up is
+more. Until then each control read `notches_y` with a sign of its own:
+the slider was right for a natural trackpad and backwards for a wheel,
+the spinbox and the menu slider the other way round. Under `cfg(test)`
+the toolkit's suite reads natural as off; `force_natural_scroll` sets it
+per THREAD for a test that drives a control with a finger — a dependent's
+test binary links cce-ui without `cfg(test)` and would otherwise read the
+machine's. `a_value_control_reads_up_as_more_on_a_wheel_and_a_natural_finger`
+is the test.
+
 ### A flick coasts with animations off
 
 The animations switch (`motion::enabled`) stops a wheel notch's GLIDE and
