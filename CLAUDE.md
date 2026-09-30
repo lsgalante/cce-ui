@@ -784,6 +784,25 @@ NOTHING until this change, when the wires were a hard-coded cyan 3 px.
 `every_wire_style_runs_from_port_to_port` and the splice test, run in all
 four styles, are the tests.
 
+## A node has as many wires as the host says (since 2026-09-30)
+
+`Graph::wire_pairs` draws a wire for EVERY parameter a host types `node`,
+the k-th into input port k (`node_wires`, public so a host can read the
+rule back) — a Switch's four inputs, a Boolean's With, a Transfer's From.
+Until then it drew one, the parameter NAMED `input`, so every second
+operand was a real connection with no line. A host that types no parameter
+`node` keeps exactly that (cce-files and cce-graph pass `("input", name,
+"string")`), so nothing changed for them. An empty value is a port with
+nothing wired; a wire past the node's ports lands on port 0.
+
+A connection the pointer makes reports its port too:
+`GraphController::take_pending_connection_to_port` gives (input node id,
+output node name, port), and the old `take_pending_connection` — which
+takes the same connection — is the default for hosts that do not care.
+Splicing a dragged node onto a wire takes only a wire into port 0, since
+the splice rewires Inputs. `every_node_parameter_is_a_wire_into_its_own_port`
+is the test.
+
 ## Units — logical px inside, real lengths at the edges
 
 The toolkit's working unit is and stays the **logical pixel**: every layout

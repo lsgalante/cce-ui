@@ -620,7 +620,7 @@ pub use self::container::{
 pub use self::display::{
     TextLabel, Label, StyledLabel, LabelPrim, TextItem, UsageBar,
     InfoBox, StatusDot, InteractiveListItem,
-    GraphNode, Graph, TaggedQuad, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
+    GraphNode, Graph, TaggedQuad, node_wires, Float3, ProgressBar, StatusBar, Splitter, Node, Separator,
     DotStatus, Panel, ImageView, serialize_widgets,
     truncate_head, truncate_tail,
 };
@@ -678,6 +678,13 @@ pub trait GraphController {
     fn grid_origin(&self) -> (f32, f32);
     fn set_show_network_grid(&mut self, show: bool);
     fn take_pending_connection(&mut self) -> Option<(String, String)>;
+    /// [`Self::take_pending_connection`] with the INPUT PORT the connection
+    /// was dropped on: (input node id, output node name, port). A host whose
+    /// nodes read several wires (the k-th `node` parameter into port k)
+    /// writes the one the port is. Taking either takes the connection.
+    fn take_pending_connection_to_port(&mut self) -> Option<(String, String, usize)> {
+        self.take_pending_connection().map(|(id, name)| (id, name, 0))
+    }
     /// A node dropped onto a wire, to be spliced in between its ends:
     /// (dragged node id, the wire's upstream node NAME — what Input params
     /// store, the wire's downstream node id). The host rewires both Input

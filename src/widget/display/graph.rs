@@ -226,6 +226,26 @@ fn segment_meets_rect(a: (f32, f32), b: (f32, f32), x1: f32, y1: f32, x2: f32, y
     true
 }
 
+/// The nodes `node` reads, one per input port in order: the values of its
+/// parameters of type `node`, else its parameter named `input` alone (see
+/// `Graph::wire_pairs`). Empty is a port with nothing wired to it.
+pub fn node_wires(node: &GraphNode) -> Vec<String> {
+    let typed: Vec<String> = node
+        .parameters
+        .iter()
+        .filter(|(_, _, ty)| ty == "node")
+        .map(|(_, value, _)| value.trim().to_string())
+        .collect();
+    if !typed.is_empty() {
+        return typed;
+    }
+    node.parameters
+        .iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case("input"))
+        .map(|(_, value, _)| vec![value.clone()])
+        .unwrap_or_default()
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct GraphNode {
     #[serde(default)]
@@ -295,7 +315,9 @@ pub struct Graph {
     // Connection state
     connecting_from: Option<(usize, PortType, usize)>,
     current_mouse_pos: (f32, f32),
-    pending_connection: Option<(String, String)>,
+    /// A connection finished by the pointer: (input node id, output node
+    /// name, the input PORT it was dropped on).
+    pending_connection: Option<(String, String, usize)>,
     hovered_port: Option<(usize, PortType, usize)>,
 
     /// The wire the in-flight node drag would splice into, as (src node id,
@@ -673,8 +695,8 @@ impl Graph {
     }
 
     /// The wire from `src_idx`'s output to `dest_idx`'s input, as drawn.
-    fn wire_segments(&self, src_idx: usize, dest_idx: usize) -> Option<Vec<WireSeg>> {
-        let (start, end) = self.wire_endpoints(src_idx, dest_idx)?;
+    fn wire_segments(&self, src_idx: usize, dest_idx: usize, port: usize) -> Option<Vec<WireSeg>> {
+        let (start, end) = self.wire_endpoints(src_idx, dest_idx, port)?;
         Some(wire_path(self.wire_style(), start, end, self.wire_thickness(), self.wire_bend()))
     }
 
@@ -701,8 +723,8 @@ impl Graph {
         let hl = crate::color::graph_wire_highlight_color();
         let splice_color = [hl[0], hl[1], hl[2], hl[3] * self.node_opacity];
         pc.clip(rect, |pc| {
-            for (src_idx, i) in self.wire_pairs() {
-                let Some(segs) = self.wire_segments(src_idx, i) else { continue };
+            for (src_idx, i, port) in self.wire_pairs() {
+                let Some(segs) = self.wire_segments(src_idx, i, port) else { continue };
                 let is_splice_target = self
                     .splice_target
                     .as_ref()
@@ -1213,20 +1235,20 @@ impl Graph {
                         let dx = px - port_x;
                         let dy = py - port_y;
                         if dx * dx + dy * dy <= port_click_radius_sq {
-                            if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+                            if let Some((src_idx, src_port_type, src_port_idx)) = self.connecting_from {
                                 // A click on the opposite port kind of ANOTHER
                                 // node completes the connection; anything else
                                 // cancels it.
                                 if src_idx != i && src_port_type != port_type {
-                                    let (out_idx, in_idx) = if port_type == PortType::Input {
-                                        (src_idx, i)
+                                    let (out_idx, in_idx, in_port) = if port_type == PortType::Input {
+                                        (src_idx, i, k)
                                     } else {
-                                        (i, src_idx)
+                                        (i, src_idx, src_port_idx)
                                     };
                                     let output_node = &self.nodes[out_idx];
                                     let input_node = &self.nodes[in_idx];
                                     self.pending_connection =
-                                        Some((input_node.id.clone(), output_node.name.clone()));
+                                        Some((input_node.id.clone(), output_node.name.clone(), in_port));
                                 }
                                 self.connecting_from = None;
                             } else {
@@ -1241,7 +1263,7 @@ impl Graph {
         }
 
         // Actively connecting + clicked a target node body: connect to its closest compatible port
-        if let Some((src_idx, src_port_type, _src_port_idx)) = self.connecting_from {
+        if let Some((src_idx, src_port_type, src_port_idx)) = self.connecting_from {
             for i in (0..self.nodes.len()).rev() {
                 if src_idx != i {
                     if let Some((nx, ny, nw, nh)) = self.node_rect(i) {
@@ -1250,13 +1272,14 @@ impl Graph {
                             if src_port_type == PortType::Output && node.inputs > 0 {
                                 let output_node = &self.nodes[src_idx];
                                 let input_node = &self.nodes[i];
-                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                // A body, not a port: its first input.
+                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone(), 0));
                                 self.connecting_from = None;
                                 return true;
                             } else if src_port_type == PortType::Input && node.outputs > 0 {
                                 let output_node = &self.nodes[i];
                                 let input_node = &self.nodes[src_idx];
-                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone()));
+                                self.pending_connection = Some((input_node.id.clone(), output_node.name.clone(), src_port_idx));
                                 self.connecting_from = None;
                                 return true;
                             }
@@ -1305,19 +1328,25 @@ impl Graph {
         false
     }
 
-    /// The wire pairs the draw pass renders: (src idx, dest idx), one per
-    /// node whose "Input" parameter names another node — the ONE derivation,
-    /// shared with the splice hit test so the two cannot disagree about
-    /// where a wire is.
-    fn wire_pairs(&self) -> Vec<(usize, usize)> {
+    /// The wires the draw pass renders: (src idx, dest idx, input port) —
+    /// the ONE derivation, shared with the splice hit test so the two cannot
+    /// disagree about where a wire is.
+    ///
+    /// A node's wires are its parameters of type `node`, in order, the k-th
+    /// into input port k: every one a host marks so, not just the first
+    /// (the designer's Switch reads four, a Boolean two). A node with none
+    /// so marked has its parameter NAMED `input` as its one wire, into port
+    /// 0 — what every host passed before the type said it (cce-files,
+    /// cce-graph).
+    fn wire_pairs(&self) -> Vec<(usize, usize, usize)> {
         let mut out = Vec::new();
         for i in 0..self.nodes.len() {
-            let node = &self.nodes[i];
-            if let Some((_, input_name, _)) =
-                node.parameters.iter().find(|(name, _, _)| name.eq_ignore_ascii_case("input"))
-            {
-                if let Some(src_idx) = self.nodes.iter().position(|n| n.name == *input_name) {
-                    out.push((src_idx, i));
+            for (port, source) in node_wires(&self.nodes[i]).into_iter().enumerate() {
+                if source.is_empty() {
+                    continue;
+                }
+                if let Some(src_idx) = self.nodes.iter().position(|n| n.name == source) {
+                    out.push((src_idx, i, port));
                 }
             }
         }
@@ -1328,14 +1357,17 @@ impl Graph {
     /// back to the node edge midpoints for portless nodes. The three-segment
     /// shape (down, across, down) derives from these in both the draw pass
     /// and [`Self::wire_segment_rects`].
-    fn wire_endpoints(&self, src_idx: usize, dest_idx: usize) -> Option<((f32, f32), (f32, f32))> {
+    fn wire_endpoints(&self, src_idx: usize, dest_idx: usize, port: usize) -> Option<((f32, f32), (f32, f32))> {
         let (sx, sy, sw, sh) = self.node_rect(src_idx)?;
         let (ex, ey, ew, _eh) = self.node_rect(dest_idx)?;
         let start = self
             .port_center(src_idx, PortType::Output, 0)
             .unwrap_or((sx + sw / 2.0, sy + sh));
+        // Into its own port; a wire past the node's ports (a host that
+        // declared fewer) lands on the first, and a portless node's edge.
         let end = self
-            .port_center(dest_idx, PortType::Input, 0)
+            .port_center(dest_idx, PortType::Input, port)
+            .or_else(|| self.port_center(dest_idx, PortType::Input, 0))
             .unwrap_or((ex + ew / 2.0, ey));
         Some((start, end))
     }
@@ -1345,7 +1377,9 @@ impl Graph {
     /// inflated by the wire activation radius so a near miss still takes.
     /// The dragged node's own wires never count (dropping a node on a wire
     /// it is already an end of is a move, not a rewire), and a node with no
-    /// "Input" parameter or no output port cannot sit mid-chain.
+    /// "Input" parameter or no output port cannot sit mid-chain. Only a
+    /// wire into port 0 — the Input — is spliced into, since the splice
+    /// rewires the Inputs.
     fn splice_wire_at(&self, idx: usize, nx: f32, ny: f32) -> Option<(usize, usize)> {
         let node = self.nodes.get(idx)?;
         let has_input = node
@@ -1361,11 +1395,11 @@ impl Graph {
         let pad = crate::layout::graph_wire_activation_radius().max(0.0) + self.wire_thickness() / 2.0;
         let (gx1, gy1) = (nx - pad, ny - pad);
         let (gx2, gy2) = (nx + nw + pad, ny + nh + pad);
-        for (src, dest) in self.wire_pairs() {
-            if src == idx || dest == idx {
+        for (src, dest, port) in self.wire_pairs() {
+            if src == idx || dest == idx || port != 0 {
                 continue;
             }
-            let Some(segs) = self.wire_segments(src, dest) else { continue };
+            let Some(segs) = self.wire_segments(src, dest, port) else { continue };
             let hit = segs.iter().any(|seg| match *seg {
                 WireSeg::Line(a, b) => segment_meets_rect(a, b, gx1, gy1, gx2, gy2),
                 // An arc, as the chords of its eighths.
@@ -1502,6 +1536,9 @@ impl GraphController for Graph {
     fn grid_origin(&self) -> (f32, f32) { (self.grid_origin_x, self.grid_origin_y) }
     fn set_show_network_grid(&mut self, show: bool) { self.show_network_grid = show; }
     fn take_pending_connection(&mut self) -> Option<(String, String)> {
+        self.pending_connection.take().map(|(id, name, _)| (id, name))
+    }
+    fn take_pending_connection_to_port(&mut self) -> Option<(String, String, usize)> {
         self.pending_connection.take()
     }
     fn take_pending_splice(&mut self) -> Option<(String, String, String)> {
@@ -1836,6 +1873,44 @@ mod tests {
 
         let pending = GraphController::take_pending_connection(&mut *g);
         assert_eq!(pending, Some(("b".to_string(), "alpha".to_string())));
+    }
+
+    /// Every parameter a host types `node` is a wire, the k-th into input
+    /// port k, and a connection dropped on a port says which; a host that
+    /// types none keeps its one `input` wire.
+    #[test]
+    fn every_node_parameter_is_a_wire_into_its_own_port() {
+        let mut ctx = UiContext::new();
+        let mut g = two_nodes();
+        let (id, ptr) = (g.id(), g.as_ptr_mut());
+        ctx.register_widget(id, ptr);
+        let wire = |n: &str, v: &str| (n.to_string(), v.to_string(), "node".to_string());
+        let node = |id: &str, col: f32, row: f32, parameters: Vec<(String, String, String)>, inputs: usize| GraphNode {
+            id: id.into(),
+            name: id.into(),
+            position: (col, row),
+            parameters,
+            geom_visible: true,
+            node_type: String::new(),
+            inputs,
+            outputs: 1,
+        };
+        g.set_nodes(&[
+            node("a", 0.0, 0.0, vec![], 0),
+            node("b", 2.0, 0.0, vec![], 0),
+            node("sw", 1.0, 2.0, vec![wire("Input", "a"), wire("Input 2", "b"), wire("Input 3", ""), ("Index".into(), "1".into(), "spinbox".into())], 3),
+            node("old", 3.0, 2.0, vec![("input".into(), "b".into(), "string".into())], 1),
+        ]);
+        assert_eq!(g.wire_pairs(), vec![(0, 2, 0), (1, 2, 1), (1, 3, 0)], "two wires into the switch, each its port; the untyped host's one");
+        let (_, end) = g.wire_endpoints(1, 2, 1).unwrap();
+        assert_eq!(Some(end), g.port_center(2, PortType::Input, 1), "into its own port");
+
+        // Dropped on the switch's third port: port 2.
+        let (ax, ay) = g.port_center(0, PortType::Output, 0).unwrap();
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, ax, ay, &mut ctx));
+        let (px, py) = g.port_center(2, PortType::Input, 2).unwrap();
+        assert!(g.mouse_input(MouseButton::Left, ElementState::Pressed, px, py, &mut ctx));
+        assert_eq!(GraphController::take_pending_connection_to_port(&mut *g), Some(("sw".to_string(), "a".to_string(), 2)));
     }
 
     #[test]
