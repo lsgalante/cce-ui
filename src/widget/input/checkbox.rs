@@ -296,6 +296,13 @@ impl Toggle {
         self.slide_t = if v { 1.0 } else { 0.0 };
     }
 
+    /// Set the hover directly, for a host that paints one toggle as a
+    /// STAMP over several rows and does its own hit-testing — the
+    /// designer's dialog — as `Checkbox::set_hovered` is there for.
+    pub fn set_hovered(&mut self, hovered: bool) {
+        self.hovered = hovered;
+    }
+
     pub fn toggled(&self) -> bool {
         self.toggled
     }
