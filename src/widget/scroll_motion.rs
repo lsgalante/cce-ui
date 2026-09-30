@@ -123,8 +123,27 @@ static SETTINGS: std::sync::OnceLock<ScrollSettings> = std::sync::OnceLock::new(
 /// notch is an animation the toolkit adds, and the switch is for those;
 /// the coast is the rest of a gesture the hand made, and `kinetic_scroll`
 /// in input.kdl is the setting for it.
+///
+/// A thread's override ([`force_scroll_settings`], for a test) wins over
+/// all of it, animations switch included.
 pub fn scroll_settings() -> ScrollSettings {
+    if let Some(forced) = SETTINGS_OVERRIDE.with(|f| f.get()) {
+        return forced;
+    }
     with_animations(configured_scroll_settings(), crate::motion::enabled())
+}
+
+thread_local! {
+    static SETTINGS_OVERRIDE: std::cell::Cell<Option<ScrollSettings>> = const { std::cell::Cell::new(None) };
+}
+
+/// Force what [`scroll_settings`] answers on this thread, for a test whose
+/// result hangs on a coast or a glide — which input.kdl and the power
+/// mode's animations switch would otherwise decide on the machine that runs
+/// it. `None` lifts it. Thread-local, as `input::force_natural_scroll` is,
+/// because a suite runs its tests in parallel.
+pub fn force_scroll_settings(settings: Option<ScrollSettings>) {
+    SETTINGS_OVERRIDE.with(|f| f.set(settings));
 }
 
 /// `configured` as the animations switch leaves it: the glide follows the
@@ -454,8 +473,17 @@ impl ScrollMotion {
     /// wheel-notch delta; a pixel delta takes the finger path only while the
     /// runner reports a finger gesture, else it is applied instantly.
     pub fn apply_px(&mut self, dx: f32, dy: f32, discrete: bool, bx: Bounds, by: Bounds) -> bool {
-        let s = scroll_settings();
         let phase = if discrete { ScrollPhase::Wheel } else { current_scroll_phase() };
+        self.apply_phase(phase, dx, dy, discrete, bx, by)
+    }
+
+    /// [`Self::apply_px`] in a phase the caller names instead of the
+    /// runner-published one — which is a process global, so a test that set
+    /// it would change what every other test's wheel means while the suite
+    /// runs in parallel. A host that reads the phase itself hands it on
+    /// through this.
+    pub fn apply_phase(&mut self, phase: ScrollPhase, dx: f32, dy: f32, discrete: bool, bx: Bounds, by: Bounds) -> bool {
+        let s = scroll_settings();
         match phase {
             ScrollPhase::Wheel => {
                 let mut moved = false;

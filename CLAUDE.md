@@ -1042,6 +1042,23 @@ deliberately left alone: a slider's and a ramp key's drift after a scroll
 over them, which changes a VALUE after the hand has stopped.
 `the_animations_switch_stops_the_glide_and_not_the_coast` is the test.
 
+### A host may name the phase; a test may pin the settings (2026-09-30)
+
+The phase a wheel event belongs to (`Finger`, `FingerEnd`, `Wheel`) is a
+process GLOBAL the runner publishes before each dispatch, and
+`ScrollMotion::apply_px` reads it. So does anything a test would set it
+through — which, in a suite running tests in parallel, changes what every
+other test's pixel delta means. `ScrollMotion::apply_phase` takes the phase
+as an argument (`apply_px` is it with the published one), for a host that
+reads the phase itself and hands it on; cce-designer's viewport does, and
+its test drives a flick without touching the global.
+
+`scroll_motion::force_scroll_settings` pins what `scroll_settings()`
+answers on the calling THREAD, over input.kdl and the animations switch
+alike, as `force_natural_scroll` pins natural scrolling: a dependent's test
+binary links cce-ui without `cfg(test)`, so a test whose result hangs on a
+coast would otherwise pass or fail by the machine's `kinetic_scroll`.
+
 ### The suite's animations switch is its own
 
 `motion::enabled()` reads `/run/cce/animations` in a shipped binary (see
