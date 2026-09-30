@@ -280,6 +280,8 @@ impl GraphController for ContentBg {
             pc.quad(Rect { x: qx, y: qy, width: qw, height: qh }, qc);
         }
     }
+    /// No nodes, so no wires.
+    fn paint_wires(&self, _rect: Rect, _pc: &mut PaintCtx) {}
     fn take_pending_connection(&mut self) -> Option<(String, String)> { None }
     fn cancel_connecting(&mut self) {}
     fn is_node_rect(&self, _qx: f32, _qy: f32, _qw: f32, _qh: f32) -> bool { false }

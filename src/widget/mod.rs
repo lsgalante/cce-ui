@@ -701,6 +701,11 @@ pub trait GraphController {
     /// hosts that draw the graph's quads themselves, called at the point in
     /// their walk where the grid goes (under the wires and nodes).
     fn paint_grid(&self, rect: crate::scene::layout::Rect, pc: &mut crate::scene::paint::PaintCtx);
+    /// The wires and the connection being dragged out, stroked in the wire
+    /// style in effect — for hosts that draw the graph's quads themselves,
+    /// called after [`paint_grid`](Self::paint_grid) and under the nodes.
+    /// The quads carry no wires.
+    fn paint_wires(&self, rect: crate::scene::layout::Rect, pc: &mut crate::scene::paint::PaintCtx);
     /// The pixel rect the in-flight node drag will deposit its body on
     /// (`commit_drag`'s resolution), for hosts' drop-target highlight.
     /// None outside a node drag.

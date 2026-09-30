@@ -10,6 +10,12 @@
 //! the widget rect via [`Paint::text_bounds`]. All grid geometry is in absolute screen space
 //! (hosts pan by moving `grid_origin`); the widget rect only culls and clips.
 //!
+//! The WIRES are not quads: they are strokes in a [`WireStyle`] — orthogonal, rounded,
+//! bezier or straight — painted by [`Graph::paint_wires`], which `paint` calls after the
+//! grid and a host drawing the quads itself calls in the same place. Their colour, width
+//! and style are `wire_color`, `wire_size` and `wire_style` under
+//! `style.surface.graph.node`; until 2026-09-30 the first two were parsed and never read.
+//!
 //! The grid is a LATTICE OF LINES with one size per axis — the pitch, from the centre of
 //! one line to the centre of the next — and a node is centred on the intersection its
 //! `position` names: node (c, r) sits on `grid_origin + (c * pitch_x, r * pitch_y)`. The
@@ -40,6 +46,185 @@ fn default_outputs() -> usize { 1 }
 /// cell — per-corner `(tl, tr, br, bl)` rounding that survived the pane clip —
 /// and `None` for everything else (wires, gaps, axes, nodes, toggles).
 pub type TaggedQuad = (f32, f32, f32, f32, [f32; 4], Option<(bool, bool, bool, bool)>);
+
+/// How a wire runs from an output port (the bottom of its node) to an input
+/// port (the top of the next): `style.surface.graph.node.wire_style` in
+/// config.kdl, by [`WireStyle::name`], unless a host sets one of its own
+/// ([`Graph::set_wire_style`]). Every style is drawn and hit-tested from the
+/// one path [`wire_path`] derives, so a splice drop lands on the wire you see.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WireStyle {
+    /// Down, across at half the height, down: three straight runs meeting
+    /// square. What every wire was before there was a choice.
+    #[default]
+    Orthogonal,
+    /// The same three runs with their two bends rounded off.
+    Rounded,
+    /// One cubic curve that leaves the output heading down and arrives at
+    /// the input heading down, so a wire running back up the graph loops.
+    Bezier,
+    /// One straight line, port to port.
+    Straight,
+}
+
+impl WireStyle {
+    pub const ALL: [WireStyle; 4] = [WireStyle::Orthogonal, WireStyle::Rounded, WireStyle::Bezier, WireStyle::Straight];
+
+    /// The config spelling.
+    pub fn name(self) -> &'static str {
+        match self {
+            WireStyle::Orthogonal => "orthogonal",
+            WireStyle::Rounded => "rounded",
+            WireStyle::Bezier => "bezier",
+            WireStyle::Straight => "straight",
+        }
+    }
+
+    /// The spelling a menu shows.
+    pub fn label(self) -> &'static str {
+        match self {
+            WireStyle::Orthogonal => "Orthogonal",
+            WireStyle::Rounded => "Rounded",
+            WireStyle::Bezier => "Bezier",
+            WireStyle::Straight => "Straight",
+        }
+    }
+
+    /// Either spelling, any case.
+    pub fn parse(s: &str) -> Option<WireStyle> {
+        let s = s.trim();
+        WireStyle::ALL.into_iter().find(|w| w.name().eq_ignore_ascii_case(s))
+    }
+
+    /// The configured style; orthogonal when the key is absent or names
+    /// no style.
+    pub fn configured() -> WireStyle {
+        crate::layout::graph_wire_style().as_deref().and_then(WireStyle::parse).unwrap_or_default()
+    }
+}
+
+/// One piece of a wire's path, in window px: a straight run, or an arc about
+/// a centre at a CENTRELINE radius from one angle to another (radians,
+/// screen space, so y runs down).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum WireSeg {
+    Line((f32, f32), (f32, f32)),
+    Arc { c: (f32, f32), r: f32, a0: f32, a1: f32 },
+}
+
+/// The path of a wire from `start` to `end` drawn `t` px thick. `bend` is
+/// the largest radius a Rounded bend takes and the least a Bezier lead
+/// runs straight down before curving — both scale with the node, so the
+/// shape keeps its proportions under zoom.
+fn wire_path(style: WireStyle, start: (f32, f32), end: (f32, f32), t: f32, bend: f32) -> Vec<WireSeg> {
+    let ((sx, sy), (ex, ey)) = (start, end);
+    let my = sy + (ey - sy) / 2.0;
+    let orthogonal = || {
+        // Square joins with no overlap, so a translucent wire is one alpha
+        // throughout: the across run is widened by half a thickness at each
+        // end to fill the corners, and the down runs stop at its edge.
+        let s = if ey >= sy { 1.0 } else { -1.0 };
+        let mut out = Vec::with_capacity(3);
+        let v1_end = my - s * t / 2.0;
+        if s * (v1_end - sy) > 0.0 {
+            out.push(WireSeg::Line((sx, sy), (sx, v1_end)));
+        }
+        out.push(WireSeg::Line((sx.min(ex) - t / 2.0, my), (sx.max(ex) + t / 2.0, my)));
+        let v2_start = my + s * t / 2.0;
+        if s * (ey - v2_start) > 0.0 {
+            out.push(WireSeg::Line((ex, v2_start), (ex, ey)));
+        }
+        out
+    };
+    match style {
+        WireStyle::Straight => vec![WireSeg::Line(start, end)],
+        WireStyle::Orthogonal => orthogonal(),
+        WireStyle::Rounded => {
+            let (dx, dy) = (ex - sx, ey - sy);
+            if dx.abs() < 0.5 {
+                return vec![WireSeg::Line(start, end)];
+            }
+            let r = bend.min(dx.abs() / 2.0).min(dy.abs() / 2.0);
+            // A bend tighter than half the stroke has no inside edge.
+            if r < t / 2.0 {
+                return orthogonal();
+            }
+            // Bend at (bx, by) turning from heading u1 to heading u2.
+            let bend_at = |bx: f32, by: f32, u1: (f32, f32), u2: (f32, f32)| {
+                let t1 = (bx - u1.0 * r, by - u1.1 * r);
+                let t2 = (bx + u2.0 * r, by + u2.1 * r);
+                let c = (t1.0 + u2.0 * r, t1.1 + u2.1 * r);
+                let a0 = (t1.1 - c.1).atan2(t1.0 - c.0);
+                let a1 = (t2.1 - c.1).atan2(t2.0 - c.0);
+                let mut sweep = a1 - a0;
+                if sweep > std::f32::consts::PI {
+                    sweep -= std::f32::consts::TAU;
+                } else if sweep < -std::f32::consts::PI {
+                    sweep += std::f32::consts::TAU;
+                }
+                (t1, t2, WireSeg::Arc { c, r, a0, a1: a0 + sweep })
+            };
+            let down = (0.0, dy.signum());
+            let across = (dx.signum(), 0.0);
+            let (p1a, p1b, arc1) = bend_at(sx, my, down, across);
+            let (p2a, p2b, arc2) = bend_at(ex, my, across, down);
+            vec![
+                WireSeg::Line(start, p1a),
+                arc1,
+                WireSeg::Line(p1b, p2a),
+                arc2,
+                WireSeg::Line(p2b, end),
+            ]
+        }
+        WireStyle::Bezier => {
+            let lead = ((ey - sy).abs() * 0.5).max(bend);
+            let (c1, c2) = ((sx, sy + lead), (ex, ey - lead));
+            // Fine enough that the flat-capped pieces meet without a visible
+            // notch: about one piece per 6 px of the control net.
+            let net = lead * 2.0 + ((c2.0 - c1.0).powi(2) + (c2.1 - c1.1).powi(2)).sqrt();
+            let n = ((net / 6.0).ceil() as usize).clamp(8, 96);
+            let at = |u: f32| {
+                let v = 1.0 - u;
+                let (a, b, c, d) = (v * v * v, 3.0 * v * v * u, 3.0 * v * u * u, u * u * u);
+                (a * sx + b * c1.0 + c * c2.0 + d * ex, a * sy + b * c1.1 + c * c2.1 + d * ey)
+            };
+            let mut prev = start;
+            (1..=n)
+                .map(|i| {
+                    let p = at(i as f32 / n as f32);
+                    let seg = WireSeg::Line(prev, p);
+                    prev = p;
+                    seg
+                })
+                .collect()
+        }
+    }
+}
+
+/// Whether the segment a→b passes through the rect (x1, y1)-(x2, y2):
+/// Liang–Barsky clipping of the segment to the rect.
+fn segment_meets_rect(a: (f32, f32), b: (f32, f32), x1: f32, y1: f32, x2: f32, y2: f32) -> bool {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    for (p, q) in [(-dx, a.0 - x1), (dx, x2 - a.0), (-dy, a.1 - y1), (dy, y2 - a.1)] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return false;
+            }
+        } else {
+            let r = q / p;
+            if p < 0.0 {
+                lo = lo.max(r);
+            } else {
+                hi = hi.min(r);
+            }
+            if lo > hi {
+                return false;
+            }
+        }
+    }
+    true
+}
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct GraphNode {
@@ -124,6 +309,8 @@ pub struct Graph {
     /// node id). The host rewires: dragged.Input = upstream name,
     /// downstream.Input = dragged's name.
     pending_splice: Option<(String, String, String)>,
+    /// The host's choice of wire style; `None` follows the config.
+    wire_style: Option<WireStyle>,
 }
 
 impl Graph {
@@ -169,6 +356,7 @@ impl Graph {
             hovered_port: None,
             splice_target: None,
             pending_splice: None,
+            wire_style: None,
         })
     }
 
@@ -455,7 +643,83 @@ impl Graph {
         clipped(self.grid_origin_x - thickness / 2.0, rect.y, thickness, rect.height, axis, pc);
     }
 
-    /// The wires / connection preview / node bodies / toggles as plain quads — the legacy
+    /// The wire style in effect: the host's, else the config's.
+    pub fn wire_style(&self) -> WireStyle {
+        self.wire_style.unwrap_or_else(WireStyle::configured)
+    }
+
+    /// The host's own choice of wire style, if it made one.
+    pub fn chosen_wire_style(&self) -> Option<WireStyle> {
+        self.wire_style
+    }
+
+    /// Choose the wire style for this graph; `None` goes back to the
+    /// config's `wire_style`.
+    pub fn set_wire_style(&mut self, style: Option<WireStyle>) {
+        self.wire_style = style;
+    }
+
+    /// A wire's stroke: `graph_wire_size` px at 100%, scaled with the node
+    /// body as the zoom scales it.
+    fn wire_thickness(&self) -> f32 {
+        let base = crate::layout::graph_node_width();
+        let zoom = if base > 0.0 { self.node_w / base } else { 1.0 };
+        (crate::layout::graph_wire_size() * zoom).clamp(1.0, (self.node_h * 0.5).max(1.0))
+    }
+
+    /// What a Rounded bend's radius and a Bezier's straight lead are made of.
+    fn wire_bend(&self) -> f32 {
+        self.node_h * 0.5
+    }
+
+    /// The wire from `src_idx`'s output to `dest_idx`'s input, as drawn.
+    fn wire_segments(&self, src_idx: usize, dest_idx: usize) -> Option<Vec<WireSeg>> {
+        let (start, end) = self.wire_endpoints(src_idx, dest_idx)?;
+        Some(wire_path(self.wire_style(), start, end, self.wire_thickness(), self.wire_bend()))
+    }
+
+    /// The wires, and the one being dragged out of a port, in the style in
+    /// effect ([`Self::wire_style`]), `wire_color` at the node opacity and
+    /// `wire_size` thick; the wire an in-flight node drag would splice into
+    /// is in `wire_highlight_color` — the drop affordance. Clipped to `rect`.
+    /// Hosts that draw the graph's quads themselves call it between
+    /// [`Self::paint_grid`] and the node bodies.
+    pub fn paint_wires(&self, rect: Rect, pc: &mut PaintCtx) {
+        let t = self.wire_thickness();
+        let stroke = |segs: &[WireSeg], color: [f32; 4], pc: &mut PaintCtx| {
+            for seg in segs {
+                match *seg {
+                    WireSeg::Line(a, b) => pc.vector(a.0, a.1, b.0, b.1, t, color, crate::scene::paint::Cap::Flat),
+                    // The arc's radius is its OUTER edge; the path's is the
+                    // centreline.
+                    WireSeg::Arc { c, r, a0, a1 } => pc.arc(c.0, c.1, r + t / 2.0, t, a0, a1, color),
+                }
+            }
+        };
+        let wc = crate::color::graph_wire_color();
+        let wire_color = [wc[0], wc[1], wc[2], wc[3] * self.node_opacity];
+        let hl = crate::color::graph_wire_highlight_color();
+        let splice_color = [hl[0], hl[1], hl[2], hl[3] * self.node_opacity];
+        pc.clip(rect, |pc| {
+            for (src_idx, i) in self.wire_pairs() {
+                let Some(segs) = self.wire_segments(src_idx, i) else { continue };
+                let is_splice_target = self
+                    .splice_target
+                    .as_ref()
+                    .is_some_and(|(s, d)| self.nodes[src_idx].id == *s && self.nodes[i].id == *d);
+                stroke(&segs, if is_splice_target { splice_color } else { wire_color }, pc);
+            }
+            // The connection being dragged out of a port.
+            if let Some((node_idx, port_type, port_idx)) = self.connecting_from {
+                if let Some(start) = self.port_center(node_idx, port_type, port_idx) {
+                    let segs = wire_path(self.wire_style(), start, self.current_mouse_pos, t, self.wire_bend());
+                    stroke(&segs, [1.0, 0.6, 0.0, 0.8], pc); // Golden orange preview
+                }
+            }
+        });
+    }
+
+    /// The node bodies / toggles as plain quads — the legacy
     /// `extra_quads` body, against `rect` instead of a stored rect. The [`TaggedQuad`] cell
     /// tag is always `None` now: the lattice is `paint_grid`'s, and it has no cells.
     pub fn geometry_quads_tagged(&self, rect: Rect) -> Vec<TaggedQuad> {
@@ -464,64 +728,8 @@ impl Graph {
         let min_y = rect.y;
         let max_x = rect.x + rect.width;
         let max_y = rect.y + rect.height;
-        let push_clipped = |qx: f32, qy: f32, qw: f32, qh: f32, qc: [f32; 4], q: &mut Vec<TaggedQuad>| {
-            let rx1 = qx.max(min_x);
-            let ry1 = qy.max(min_y);
-            let rx2 = (qx + qw).min(max_x);
-            let ry2 = (qy + qh).min(max_y);
-            let rw = rx2 - rx1;
-            let rh = ry2 - ry1;
-            if rw > 0.0 && rh > 0.0 {
-                q.push((rx1, ry1, rw, rh, qc, None));
-            }
-        };
-
-        // A three-segment orthogonal wire from (start_x, start_y) down/up to (end_x, end_y).
-        let scale_f = self.node_w / 80.0;
-        let wire_thickness = (3.0 * scale_f).clamp(1.0, 15.0);
-        let push_wire = |start_x: f32, start_y: f32, end_x: f32, end_y: f32, color: [f32; 4], q: &mut Vec<TaggedQuad>| {
-            let mid_y = start_y + (end_y - start_y) / 2.0;
-
-            let v1_min_y = start_y.min(mid_y);
-            let v1_max_y = start_y.max(mid_y);
-            push_clipped(start_x - wire_thickness / 2.0, v1_min_y, wire_thickness, v1_max_y - v1_min_y, color, q);
-
-            let h_min_x = start_x.min(end_x);
-            let h_max_x = start_x.max(end_x);
-            push_clipped(h_min_x, mid_y - wire_thickness / 2.0, h_max_x - h_min_x, wire_thickness, color, q);
-
-            let v2_min_y = mid_y.min(end_y);
-            let v2_max_y = mid_y.max(end_y);
-            push_clipped(end_x - wire_thickness / 2.0, v2_min_y, wire_thickness, v2_max_y - v2_min_y, color, q);
-        };
-
-        // Connection wires: each node with an "input" parameter draws a wire
-        // from that source node's first output port to its own first input
-        // port (pairs and endpoints from the shared helpers the splice hit
-        // test also reads). The wire an in-flight node drag would splice
-        // into draws in the highlight color — the drop affordance.
-        let wire_color = [0.0, 0.75, 1.0, 0.7 * self.node_opacity]; // Vibrant cyan glow
-        let hl = crate::color::graph_wire_highlight_color();
-        let splice_color = [hl[0], hl[1], hl[2], hl[3] * self.node_opacity];
-        for (src_idx, i) in self.wire_pairs() {
-            if let Some(((start_x, start_y), (end_x, end_y))) = self.wire_endpoints(src_idx, i) {
-                let is_splice_target = self
-                    .splice_target
-                    .as_ref()
-                    .map(|(s, d)| self.nodes[src_idx].id == *s && self.nodes[i].id == *d)
-                    .unwrap_or(false);
-                let color = if is_splice_target { splice_color } else { wire_color };
-                push_wire(start_x, start_y, end_x, end_y, color, &mut quads);
-            }
-        }
-
-        // Connection preview while dragging one out
-        if let Some((node_idx, port_type, port_idx)) = self.connecting_from {
-            if let Some((start_x, start_y)) = self.port_center(node_idx, port_type, port_idx) {
-                let preview_color = [1.0, 0.6, 0.0, 0.8]; // Golden orange preview
-                push_wire(start_x, start_y, self.current_mouse_pos.0, self.current_mouse_pos.1, preview_color, &mut quads);
-            }
-        }
+        // The wires and the connection preview are `paint_wires`' — strokes,
+        // not quads, since only one of the styles is axis-aligned.
 
         // The grid lines and the origin axes are `paint_grid`'s — hosts that
         // draw these quads themselves call it at the same point in their walk.
@@ -745,12 +953,13 @@ impl Paint for Graph {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        // The background is the first entry; the grid lines go over it
-        // before the wires and nodes.
+        // The background is the first entry; the grid lines and then the
+        // wires go over it before the nodes.
         for (i, (qx, qy, qw, qh, r, c, corners)) in self.rounded_geometry(rect).into_iter().enumerate() {
             ctx.rounded_rect(Rect { x: qx, y: qy, width: qw, height: qh }, r, corners, c);
             if i == 0 {
                 self.paint_grid(rect, ctx);
+                self.paint_wires(rect, ctx);
             }
         }
         for (cx, cy, r, c) in self.port_circles(rect) {
@@ -1131,21 +1340,8 @@ impl Graph {
         Some((start, end))
     }
 
-    /// The wire's three segments as axis-aligned rects at the drawn
-    /// thickness — `push_wire`'s exact shape, unclipped.
-    fn wire_segment_rects(&self, src_idx: usize, dest_idx: usize) -> Option<[(f32, f32, f32, f32); 3]> {
-        let ((start_x, start_y), (end_x, end_y)) = self.wire_endpoints(src_idx, dest_idx)?;
-        let scale_f = self.node_w / 80.0;
-        let t = (3.0 * scale_f).clamp(1.0, 15.0);
-        let mid_y = start_y + (end_y - start_y) / 2.0;
-        let v1 = (start_x - t / 2.0, start_y.min(mid_y), t, (start_y - mid_y).abs());
-        let h = (start_x.min(end_x), mid_y - t / 2.0, (end_x - start_x).abs(), t);
-        let v2 = (end_x - t / 2.0, mid_y.min(end_y), t, (end_y - mid_y).abs());
-        Some([v1, h, v2])
-    }
-
     /// The wire the dragged node's ghost at (nx, ny) would splice into —
-    /// the first pair (draw order) whose segment run touches the ghost rect,
+    /// the first pair (draw order) whose path, as drawn, touches the ghost rect,
     /// inflated by the wire activation radius so a near miss still takes.
     /// The dragged node's own wires never count (dropping a node on a wire
     /// it is already an end of is a move, not a rewire), and a node with no
@@ -1160,16 +1356,26 @@ impl Graph {
             return None;
         }
         let (_, _, nw, nh) = self.node_rect(idx)?;
-        let pad = crate::layout::graph_wire_activation_radius().max(0.0);
+        // Half the stroke on top of the activation radius, so the wire's
+        // edge counts and not only its centreline.
+        let pad = crate::layout::graph_wire_activation_radius().max(0.0) + self.wire_thickness() / 2.0;
         let (gx1, gy1) = (nx - pad, ny - pad);
         let (gx2, gy2) = (nx + nw + pad, ny + nh + pad);
         for (src, dest) in self.wire_pairs() {
             if src == idx || dest == idx {
                 continue;
             }
-            let Some(segs) = self.wire_segment_rects(src, dest) else { continue };
-            let hit = segs.iter().any(|&(x, y, w, h)| {
-                x < gx2 && x + w > gx1 && y < gy2 && y + h > gy1
+            let Some(segs) = self.wire_segments(src, dest) else { continue };
+            let hit = segs.iter().any(|seg| match *seg {
+                WireSeg::Line(a, b) => segment_meets_rect(a, b, gx1, gy1, gx2, gy2),
+                // An arc, as the chords of its eighths.
+                WireSeg::Arc { c, r, a0, a1 } => (0..8).any(|k| {
+                    let at = |u: f32| {
+                        let a = a0 + (a1 - a0) * u;
+                        (c.0 + r * a.cos(), c.1 + r * a.sin())
+                    };
+                    segment_meets_rect(at(k as f32 / 8.0), at((k + 1) as f32 / 8.0), gx1, gy1, gx2, gy2)
+                }),
             });
             if hit {
                 return Some((src, dest));
@@ -1206,6 +1412,9 @@ impl Graph {
 impl GraphController for Graph {
     fn paint_grid(&self, rect: Rect, pc: &mut PaintCtx) {
         Graph::paint_grid(self, rect, pc)
+    }
+    fn paint_wires(&self, rect: Rect, pc: &mut PaintCtx) {
+        Graph::paint_wires(self, rect, pc)
     }
     fn set_nodes(&mut self, nodes: &[GraphNode]) {
         // Hover carries a node INDEX, so remap it by id across the rebuild
@@ -1447,8 +1656,15 @@ mod tests {
     /// reports nothing, and the handshake is take-once.
     #[test]
     fn node_dropped_on_a_wire_reports_a_splice() {
+        for style in WireStyle::ALL {
+            node_dropped_on_a_wire_reports_a_splice_in(style);
+        }
+    }
+
+    fn node_dropped_on_a_wire_reports_a_splice_in(style: WireStyle) {
         let mut ctx = UiContext::new();
         let mut g = Graph::new();
+        g.set_wire_style(Some(style));
         WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
         g.set_grid_pitch(100.0, 60.0);
         g.set_node_size(80.0, 40.0);
@@ -1485,7 +1701,7 @@ mod tests {
         assert_eq!(
             splice,
             Some(("c".to_string(), "alpha".to_string(), "b".to_string())),
-            "drop on the wire must report (dragged, upstream name, downstream id)"
+            "{style:?}: drop on the wire must report (dragged, upstream name, downstream id)"
         );
         assert_eq!(GraphController::take_pending_splice(&mut *g), None, "take-once");
 
@@ -1497,6 +1713,66 @@ mod tests {
         assert!(g.drag_update(210.0, 230.0));
         assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 230.0, &mut ctx));
         assert_eq!(GraphController::take_pending_splice(&mut *g), None);
+    }
+
+    /// Where a piece of a wire begins and ends.
+    fn seg_ends(seg: &WireSeg) -> ((f32, f32), (f32, f32)) {
+        match *seg {
+            WireSeg::Line(a, b) => (a, b),
+            WireSeg::Arc { c, r, a0, a1 } => (
+                (c.0 + r * a0.cos(), c.1 + r * a0.sin()),
+                (c.0 + r * a1.cos(), c.1 + r * a1.sin()),
+            ),
+        }
+    }
+
+    fn near(a: (f32, f32), b: (f32, f32)) -> bool {
+        (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01
+    }
+
+    /// Every style but the orthogonal one is one unbroken run from the
+    /// output port to the input port, down the graph and back up it: each
+    /// piece begins where the last ended. The orthogonal one is three runs
+    /// meeting square, which touch without overlapping so a translucent wire
+    /// is one alpha throughout — the across run filling the corners.
+    #[test]
+    fn every_wire_style_runs_from_port_to_port() {
+        let t = 6.0;
+        let cases = [((100.0, 100.0), (300.0, 260.0)), ((300.0, 260.0), (100.0, 100.0)), ((100.0, 100.0), (100.0, 300.0))];
+        for (start, end) in cases {
+            for style in [WireStyle::Rounded, WireStyle::Bezier, WireStyle::Straight] {
+                let segs = wire_path(style, start, end, t, 20.0);
+                assert!(near(seg_ends(&segs[0]).0, start), "{style:?} {start:?}->{end:?} starts at the output");
+                assert!(near(seg_ends(segs.last().unwrap()).1, end), "{style:?} {start:?}->{end:?} ends at the input");
+                for w in segs.windows(2) {
+                    assert!(near(seg_ends(&w[0]).1, seg_ends(&w[1]).0), "{style:?} {start:?}->{end:?} is unbroken");
+                }
+            }
+            let segs = wire_path(WireStyle::Rounded, start, end, t, 20.0);
+            if start.0 != end.0 {
+                assert_eq!(segs.iter().filter(|s| matches!(s, WireSeg::Arc { .. })).count(), 2, "two rounded bends");
+            }
+        }
+
+        let segs = wire_path(WireStyle::Orthogonal, (100.0, 100.0), (300.0, 260.0), t, 20.0);
+        assert_eq!(
+            segs,
+            vec![
+                WireSeg::Line((100.0, 100.0), (100.0, 177.0)),
+                WireSeg::Line((97.0, 180.0), (303.0, 180.0)),
+                WireSeg::Line((300.0, 183.0), (300.0, 260.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_wire_style_is_named_either_way_in_any_case() {
+        for style in WireStyle::ALL {
+            assert_eq!(WireStyle::parse(style.name()), Some(style));
+            assert_eq!(WireStyle::parse(style.label()), Some(style));
+            assert_eq!(WireStyle::parse(&style.name().to_uppercase()), Some(style));
+        }
+        assert_eq!(WireStyle::parse("wiggly"), None);
     }
 
     /// The grid has one size per axis, the pitch, and a node is CENTRED on
