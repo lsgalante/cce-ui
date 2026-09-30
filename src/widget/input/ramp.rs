@@ -159,16 +159,12 @@ impl Ramp {
         // render inside param rows too ("Bevel (Raised)" used to clip).
         // Labeled: the dropdowns draw their own detached labels, sitting on
         // the expanded top wall of their inset (the labeled-relief style).
+        // The presets, and nothing else: a curve edited by hand is no
+        // preset, and the trigger says so by going blank (`sync_preset`)
+        // rather than by a "Custom" entry that, picked, did nothing.
         let preset_dropdown = Dropdown::new(
-            vec![
-                "Custom".to_string(),
-                "Linear".to_string(),
-                "Raised".to_string(),
-                "Sunken".to_string(),
-                "Peak".to_string(),
-                "Valley".to_string(),
-            ],
-            2,
+            RAMP_PRESETS.iter().map(|(name, _)| name.to_string()).collect(),
+            1,
         ).with_open_upward(true).with_label("Preset");
         let line_type_dropdown = Dropdown::new(
             vec![
@@ -195,50 +191,37 @@ impl Ramp {
         })
     }
     
+    /// Replace the curve with preset `idx` of [`RAMP_PRESETS`] (an index
+    /// past the end changes nothing) and show it on the trigger.
     pub fn apply_preset(&mut self, idx: usize) {
-        match idx {
-            1 => { // Linear
-                self.keys = vec![
-                    RampKey { pos: 0.0, value: 0.0 },
-                    RampKey { pos: 1.0, value: 1.0 },
-                ];
-            }
-            2 => { // Bevel (Raised)
-                self.keys = vec![
-                    RampKey { pos: 0.0, value: 0.5 },
-                    RampKey { pos: 0.2, value: 1.0 },
-                    RampKey { pos: 0.8, value: 1.0 },
-                    RampKey { pos: 1.0, value: 0.5 },
-                ];
-            }
-            3 => { // Bevel (Sunken)
-                self.keys = vec![
-                    RampKey { pos: 0.0, value: 0.5 },
-                    RampKey { pos: 0.2, value: 0.0 },
-                    RampKey { pos: 0.8, value: 0.0 },
-                    RampKey { pos: 1.0, value: 0.5 },
-                ];
-            }
-            4 => { // Peak
-                self.keys = vec![
-                    RampKey { pos: 0.0, value: 0.0 },
-                    RampKey { pos: 0.5, value: 1.0 },
-                    RampKey { pos: 1.0, value: 0.0 },
-                ];
-            }
-            5 => { // Valley
-                self.keys = vec![
-                    RampKey { pos: 0.0, value: 1.0 },
-                    RampKey { pos: 0.5, value: 0.0 },
-                    RampKey { pos: 1.0, value: 1.0 },
-                ];
-            }
-            _ => {}
+        if let Some((_, keys)) = RAMP_PRESETS.get(idx) {
+            self.keys = keys.iter().map(|&(pos, value)| RampKey { pos, value }).collect();
         }
         self.selected_key_idx = None;
+        self.sync_preset();
         self.just_changed = true;
     }
-    
+
+    /// Show on the preset trigger the preset the curve IS, or nothing when
+    /// it is none of them — after a hand edit, or a spec that is no preset.
+    /// Blank rather than a stale name, and the dropdown keeps a pick of the
+    /// preset it last showed live, so choosing it again puts it back.
+    pub fn sync_preset(&mut self) {
+        let matches = |keys: &[(f32, f32)]| {
+            self.keys.len() == keys.len()
+                && self.keys.iter().zip(keys).all(|(k, &(pos, value))| {
+                    (k.pos - pos).abs() <= 0.0005 && (k.value - value).abs() <= 0.0005
+                })
+        };
+        match RAMP_PRESETS.iter().position(|(_, keys)| matches(keys)) {
+            Some(idx) => {
+                self.preset_dropdown.selected = idx;
+                self.preset_dropdown.custom_display_text = None;
+            }
+            None => self.preset_dropdown.custom_display_text = Some(String::new()),
+        }
+    }
+
     /// The curve's value at `t` — [`crate::layout::sample_ramp_keys`], the
     /// DE's one ramp interpolation, so what this widget draws is exactly
     /// what every consumer of its spec string evaluates.
@@ -279,12 +262,22 @@ impl Ramp {
             self.keys = new_keys;
             self.line_type_dropdown.selected = new_line;
             self.selected_key_idx = None;
-            self.preset_dropdown.selected = 0; // Custom
+            self.sync_preset();
             self.arrange_fields();
         }
         changed
     }
 }
+
+/// The ramp editor's presets, in the order its Preset dropdown lists them:
+/// a name and the keys, `(pos, value)`, the curve is set to.
+pub const RAMP_PRESETS: &[(&str, &[(f32, f32)])] = &[
+    ("Linear", &[(0.0, 0.0), (1.0, 1.0)]),
+    ("Raised", &[(0.0, 0.5), (0.2, 1.0), (0.8, 1.0), (1.0, 0.5)]),
+    ("Sunken", &[(0.0, 0.5), (0.2, 0.0), (0.8, 0.0), (1.0, 0.5)]),
+    ("Peak", &[(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)]),
+    ("Valley", &[(0.0, 1.0), (0.5, 0.0), (1.0, 1.0)]),
+];
 
 /// Serialize ramp keys + line type as the DE's ramp spec string:
 /// `"smooth;0.000:0.500,0.200:1.000,…"` (`"linear;…"` for straight segments) —
@@ -892,7 +885,7 @@ impl Ramp {
         self.keys[idx].value = self.key_pad.inner().value_y();
         let settled = self.resettle_key(idx);
         self.selected_key_idx = Some(settled);
-        self.preset_dropdown.selected = 0; // Custom
+        self.sync_preset();
         self.just_changed = true;
     }
 
@@ -1417,7 +1410,7 @@ impl Input for Ramp {
                     self.selected_key_idx = Some(settled);
                     self.key_pad
                         .set_values(self.keys[settled].pos, self.keys[settled].value);
-                    self.preset_dropdown.selected = 0; // Custom
+                    self.sync_preset();
                     let f = (-5.0 * dt).exp();
                     self.scroll_vel = (vx * f, vy * f);
                     changed = true;
@@ -1444,7 +1437,7 @@ impl Input for Ramp {
                 changed = true;
             }
             if self.del_button.tick(dt, ui) {
-                self.preset_dropdown.selected = 0; // Custom
+                self.sync_preset();
                 changed = true;
             }
         }
@@ -1526,7 +1519,7 @@ impl Input for Ramp {
                 let new_key = RampKey { pos: t, value: val };
                 self.keys.push(new_key);
                 let new_idx = self.resettle_key(self.keys.len() - 1);
-                self.preset_dropdown.selected = 0; // Custom
+                self.sync_preset();
                 self.just_changed = true;
                 self.selected_key_idx = Some(new_idx);
                 self.key_pad.set_values(t, val);
@@ -1548,7 +1541,7 @@ impl Input for Ramp {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
                                 self.selected_key_idx = None;
-                                self.preset_dropdown.selected = 0; // Custom
+                                self.sync_preset();
                                 self.just_changed = true;
                                 self.arrange_fields();
                             }
@@ -1567,7 +1560,7 @@ impl Input for Ramp {
                             if self.keys.len() > 2 {
                                 self.keys.remove(idx);
                                 self.selected_key_idx = None;
-                                self.preset_dropdown.selected = 0; // Custom
+                                self.sync_preset();
                                 self.just_changed = true;
                                 self.arrange_fields();
                             }
@@ -1603,7 +1596,7 @@ impl Input for Ramp {
                 self.key_pad.set_values(t, val);
                 let settled = self.resettle_key(idx);
                 self.selected_key_idx = Some(settled);
-                self.preset_dropdown.selected = 0; // Custom
+                self.sync_preset();
                 changed = true;
             }
         }
@@ -1698,7 +1691,7 @@ impl Input for Ramp {
                         self.selected_key_idx = Some(settled);
                         self.key_pad
                             .set_values(self.keys[settled].pos, self.keys[settled].value);
-                        self.preset_dropdown.selected = 0; // Custom
+                        self.sync_preset();
                         self.just_changed = true;
                         self.arrange_fields();
                         return true;
@@ -1807,5 +1800,52 @@ impl Input for Ramp {
     fn drag_end(&mut self) {
         self.key_pad.drag_end();
         self.is_dragging_key = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Preset dropdown lists the presets and nothing else. A curve
+    /// edited by hand leaves the trigger blank rather than naming a preset
+    /// it no longer is, and picking a preset, the one last shown included,
+    /// puts it back.
+    #[test]
+    fn the_preset_dropdown_lists_only_presets() {
+        let mut ramp = Ramp::new();
+        let r = ramp.inner_mut();
+        let names: Vec<&str> = RAMP_PRESETS.iter().map(|(n, _)| *n).collect();
+        assert_eq!(r.preset_dropdown.options, names);
+        assert!(!r.preset_dropdown.options.iter().any(|o| o == "Custom"));
+        // A new ramp is the Raised curve, and says so.
+        assert_eq!(r.preset_dropdown.options[r.preset_dropdown.selected], "Raised");
+        assert_eq!(r.preset_dropdown.custom_display_text, None);
+
+        // A hand edit: the curve is no preset, and the trigger is blank.
+        r.keys[1].value = 0.3;
+        r.sync_preset();
+        assert_eq!(r.preset_dropdown.custom_display_text.as_deref(), Some(""));
+        // Picking Raised again restores it.
+        r.apply_preset(1);
+        assert_eq!(r.keys.len(), 4);
+        assert_eq!(r.preset_dropdown.custom_display_text, None);
+        assert_eq!(r.preset_dropdown.options[r.preset_dropdown.selected], "Raised");
+
+        // Every preset applies to its own curve and names itself.
+        for (i, (name, keys)) in RAMP_PRESETS.iter().enumerate() {
+            r.apply_preset(i);
+            let got: Vec<(f32, f32)> = r.keys.iter().map(|k| (k.pos, k.value)).collect();
+            assert_eq!(&got[..], *keys, "{name}");
+            assert_eq!(r.preset_dropdown.options[r.preset_dropdown.selected], *name);
+        }
+
+        // A spec that is a preset shows it; one that is none goes blank.
+        r.apply_preset(0);
+        assert!(r.set_spec("linear;0.000:1.000,0.500:0.000,1.000:1.000"));
+        assert_eq!(r.preset_dropdown.options[r.preset_dropdown.selected], "Valley");
+        assert_eq!(r.preset_dropdown.custom_display_text, None);
+        assert!(r.set_spec("linear;0.000:0.100,1.000:0.900"));
+        assert_eq!(r.preset_dropdown.custom_display_text.as_deref(), Some(""));
     }
 }
