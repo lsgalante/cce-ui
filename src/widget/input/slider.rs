@@ -228,6 +228,13 @@ impl Slider {
         self.hovered
     }
 
+    /// Set the hover directly, for a host that paints one slider as a STAMP
+    /// over several rows and does its own hit-testing — the designer's
+    /// dialog — rather than routing `MouseEnter` / `MouseLeave` to it.
+    pub fn set_hovered(&mut self, hovered: bool) {
+        self.hovered = hovered;
+    }
+
     fn scaled_string(&self) -> String {
         format!("{:.*}", self.decimals, self.min + self.value * (self.max - self.min))
     }
