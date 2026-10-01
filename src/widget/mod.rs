@@ -590,8 +590,11 @@ pub mod container;
 pub mod display;
 pub mod editor;
 pub mod layout_helper;
+pub mod shaping;
 #[cfg(feature = "markdown")]
 pub mod markdown;
+#[cfg(feature = "doc_editor")]
+pub mod doc_editor;
 pub mod model;
 pub mod scroll_region;
 pub mod scroll_motion;

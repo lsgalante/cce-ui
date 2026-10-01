@@ -802,6 +802,45 @@ cce-system-interface) to confirm behavior, not just the test suite.
   `detect_metric` — the display's logical px per mm from its `wl_output` geometry).
 - `units.rs` — lengths with units and the display metric; see the Units section below.
 
+## Markdown: `MarkdownView` and `DocEditor` (features, 2026-10-01)
+
+Two opt-in features for the clients that show notes (Obsidian-on-cce):
+
+- **`markdown`** — `widget::markdown`, the reading view: `cce_vault`'s
+  blocks laid out at a width into draw items and click targets
+  (`layout`, `Layout::paint` / `paint_scaled`). cce-notes' reading mode
+  and cce-grid's note cards draw through it. Brings in `cce-vault`.
+- **`doc_editor`** — `widget::doc_editor::DocEditor`, the editor with
+  Markdown **live preview**: markup is hidden except on the caret's lines
+  (the selection's, or the whole fenced block the caret is in), where it
+  shows dimmed; `preview = false` is source mode. No extra dependencies.
+  - `buffer` — lines, caret/selection as (line, byte), edits with merged
+    typing/deleting undo runs, and a log of `Change`s for the layout.
+  - `preview` — styles ONE line: block kind (heading, list, task, quote,
+    rule, code, fence, frontmatter, table) plus inline segments that map
+    1:1 onto source bytes. Markup is never replaced, only hidden, so
+    caret maths never translates between screen and source.
+  - `layout` — one styled line wrapped into runs, with the x of every
+    byte (`ShapingMeasure::offsets`), so drawing, caret and clicks agree.
+  - **Incremental:** a line is shaped only when it is drawn and has
+    changed; undrawn lines keep an estimated height. A 5000-line note
+    shapes one screen (`a_long_document_shapes_only_what_shows`).
+  - **Host-driven, not a registered widget:** the app forwards keys,
+    presses, motion and the wheel and paints it (`prepare` then
+    `paint_prepared_with`, which takes a link resolver so unresolved
+    links fade without a relayout). Answers come back as `Response`
+    (`Follow(Target)` for a rendered-link click or a Ctrl+click). Undo
+    and redo are the host's `Application::undo` / `redo` hooks calling
+    `DocEditor::undo` / `redo` — the runner routes the chord there
+    because the editor is not a focused widget.
+  - Measure with the app's own font set: `DocEditor::new(.., system_fonts)`
+    must match `Application::load_system_fonts`, or widths are not drawn
+    widths. `widget::shaping` holds `Measure` / `ShapingMeasure`, shared
+    with the reading view; a width includes trailing spaces (max of glyph
+    x + w), which is what a run placed after it needs.
+  - The caret does not blink (a blink is a frame every half second for
+    as long as the window is open).
+
 ## A graph's wires are strokes in a style (since 2026-09-30)
 
 `Graph` draws its wires in one of four `WireStyle`s: **orthogonal** (down,

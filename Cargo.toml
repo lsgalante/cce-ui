@@ -12,6 +12,9 @@ path = "src/lib.rs"
 # and note cards. Brings in cce-vault and its Markdown parser, so only the
 # clients that show notes turn it on.
 markdown = ["dep:cce-vault"]
+# `widget::doc_editor` (DocEditor): the line-buffer document editor with
+# Markdown live preview (cce-notes' editing mode). No extra dependencies.
+doc_editor = []
 
 [dependencies]
 cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "11a26a5f8e1ff1ac55a951d88afc751ab68a5aba", optional = true }
