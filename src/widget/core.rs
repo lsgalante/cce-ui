@@ -796,6 +796,59 @@ pub mod context_menu {
             (self.content_h - self.h).max(0.0)
         }
 
+        /// Whether a press on row `idx` could run it: not a header, not a
+        /// separator.
+        fn actionable(&self, idx: usize) -> bool {
+            idx >= self.header_count && self.options.get(idx).is_some_and(|o| o != "-")
+        }
+
+        /// Highlight row `idx` as the pointer would, scrolled into view —
+        /// the keyboard's hover. `None`, or a row that cannot run, clears it.
+        pub fn set_hovered_item(&mut self, idx: Option<usize>) {
+            self.hovered_item = idx.filter(|&i| self.actionable(i));
+            if let Some(i) = self.hovered_item {
+                self.scroll_into_view(i);
+            }
+        }
+
+        /// Move the highlight to the next row that can run, `dir` > 0 down
+        /// and < 0 up, skipping headers and separators; from no highlight,
+        /// the first (or last) such row. Stops at either end rather than
+        /// wrapping. Returns the highlighted row.
+        pub fn step_hovered(&mut self, dir: i32) -> Option<usize> {
+            let n = self.options.len() as i32;
+            let step = if dir < 0 { -1 } else { 1 };
+            let mut i = match self.hovered_item {
+                Some(h) => h as i32,
+                None if step > 0 => -1,
+                None => n,
+            };
+            loop {
+                i += step;
+                if i < 0 || i >= n {
+                    return self.hovered_item;
+                }
+                if self.actionable(i as usize) {
+                    self.set_hovered_item(Some(i as usize));
+                    return self.hovered_item;
+                }
+            }
+        }
+
+        /// Scroll so row `idx` is wholly inside the plate. Unlike
+        /// [`Self::scroll_by`] this does not re-hover the row under the
+        /// pointer: the keyboard put the highlight where it is.
+        fn scroll_into_view(&mut self, idx: usize) {
+            let top = idx as f32 * ROW_H;
+            let bottom = top + ROW_H + 2.0 * PAD;
+            if top < self.scroll {
+                self.scroll = top;
+            } else if bottom > self.scroll + self.h {
+                self.scroll = bottom - self.h;
+            }
+            self.scroll = self.scroll.clamp(0.0, self.max_scroll());
+        }
+
         /// Scroll the rows by `dy` px (positive shows rows further down),
         /// clamped; re-hovers whatever row the pointer now sits on. `true`
         /// when anything moved.
@@ -1502,6 +1555,17 @@ pub mod context_menu {
     pub fn h() -> f32 { CONTEXT_MENU.with(|m| m.borrow().h) }
     pub fn hovered_item() -> Option<usize> { CONTEXT_MENU.with(|m| m.borrow().hovered_item) }
     pub fn options() -> Vec<String> { CONTEXT_MENU.with(|m| m.borrow().options.clone()) }
+    /// Highlight a row from the keyboard — see
+    /// [`ContextMenuState::set_hovered_item`]. A host that walks a menu
+    /// with the arrow keys (a dropdown) sets the open row with this and
+    /// moves with [`step_hovered`], and runs [`hovered_item`] on Enter.
+    pub fn set_hovered_item(idx: Option<usize>) {
+        CONTEXT_MENU.with(|m| m.borrow_mut().set_hovered_item(idx));
+    }
+    /// See [`ContextMenuState::step_hovered`].
+    pub fn step_hovered(dir: i32) -> Option<usize> {
+        CONTEXT_MENU.with(|m| m.borrow_mut().step_hovered(dir))
+    }
 
     /// The row under a point, PAD-aware — the ONE row hit test. Every host
     /// that dispatches the menu itself should ask this rather than divide
@@ -1727,6 +1791,33 @@ mod context_menu_slider_tests {
         let rows: Vec<String> = (0..20).map(|i| format!("Row {i}")).collect();
         m.show(100.0, 50.0, rows, 0, WidgetId(7));
         m
+    }
+
+    /// The keyboard walks a menu: a step skips the header and the
+    /// separators, stops at both ends rather than wrapping, and scrolls a
+    /// shortened menu to the row it lands on.
+    #[test]
+    fn the_keyboard_steps_the_highlight_over_what_cannot_run() {
+        let mut m = ContextMenuState::new();
+        let rows = ["Header", "A", "-", "B", "C"].map(String::from).to_vec();
+        m.show(100.0, 50.0, rows, 1, WidgetId(7));
+        assert_eq!(m.step_hovered(1), Some(1), "the header is skipped");
+        assert_eq!(m.step_hovered(1), Some(3), "and the separator");
+        assert_eq!(m.step_hovered(1), Some(4));
+        assert_eq!(m.step_hovered(1), Some(4), "the last row stays");
+        assert_eq!(m.step_hovered(-1), Some(3));
+        assert_eq!(m.step_hovered(-1), Some(1));
+        assert_eq!(m.step_hovered(-1), Some(1), "the header is not reached");
+        m.set_hovered_item(Some(2));
+        assert_eq!(m.hovered_item, None, "a separator cannot be highlighted");
+        assert_eq!(m.step_hovered(-1), Some(4), "from nothing, up starts at the bottom");
+
+        let mut long = long_menu();
+        long.place(100.0, 50.0, 200.0);
+        long.set_hovered_item(Some(15));
+        assert!(long.row_y(15) >= long.y && long.row_y(15) + ROW_H <= long.y + long.h, "scrolled into view");
+        long.set_hovered_item(Some(0));
+        assert_eq!(long.scroll, 0.0);
     }
 
     /// Placed shorter than its rows, the menu scrolls: the wheel moves the

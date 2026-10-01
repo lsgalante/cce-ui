@@ -240,6 +240,17 @@ Layer surfaces keep the in-window menu, placed by `context_menu::constrain_to` w
 same flip / slide / shorten rules inside the window; so does any app run with
 `CCE_UI_MENU_POPUP=0`.
 
+### The keyboard can walk a menu (since 2026-10-01)
+
+`context_menu::set_hovered_item(Some(idx))` highlights a row as the pointer would, and
+`context_menu::step_hovered(dir)` moves the highlight to the next row that can run
+(down for `dir > 0`), skipping header rows and `-` separators, stopping at either end
+rather than wrapping. Both scroll a shortened menu to the row, WITHOUT re-hovering the
+row under the pointer the way `scroll_by` does: the keyboard put the highlight there.
+The menu itself still reads no keys — a host that wants a walkable menu (the designer's
+dialog dropdowns) routes Up/Down to `step_hovered` and runs `hovered_item()` on Enter.
+`the_keyboard_steps_the_highlight_over_what_cannot_run` is the test.
+
 ### A row can open a submenu (since 2026-09-29)
 
 `context_menu::set_row_submenu(idx, SubmenuSpec { options, header_count, sliders })`,
