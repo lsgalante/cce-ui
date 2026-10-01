@@ -332,7 +332,7 @@ impl ParametersBg {
     /// Whether a float3 row's type asks for the trackball: a fourth segment,
     /// `float3:lo:hi:trackball`.
     fn has_trackball(t: &str) -> bool {
-        t.starts_with("float3") && t.split(':').nth(3) == Some("trackball")
+        t.starts_with("float3:") && t.split(':').nth(3) == Some("trackball")
     }
 
     /// What a row of type `t` spends of its control rect on everything but
@@ -341,7 +341,7 @@ impl ParametersBg {
     fn control_chrome(t: &str) -> f32 {
         if t.starts_with("slider") {
             crate::widget::input::slider::Slider::readout_chrome()
-        } else if t.starts_with("float3") {
+        } else if is_vec_row(t) {
             let ball = if Self::has_trackball(t) { Float3::trackball_chrome() } else { 0.0 };
             ball + crate::widget::display::float3::AXIS_W + crate::widget::input::slider::Slider::readout_chrome()
         } else {
@@ -355,7 +355,7 @@ impl ParametersBg {
     /// code rows have layouts of their own.
     fn inline_kind(t: &str) -> bool {
         t.starts_with("slider")
-            || t.starts_with("float3")
+            || is_vec_row(t)
             || t.starts_with("spinbox")
             || t.starts_with("choice")
             || is_text_row(t)
@@ -511,8 +511,8 @@ impl ParametersBg {
             // strip and label band are fixed, so this whole increase grows the
             // curve plot (Ramp::graph_h = height − strip).
             260.0
-        } else if p.2.starts_with("float3") {
-            Float3::preferred_height(!self.inline_row(i))
+        } else if is_vec_row(&p.2) {
+            Float3::preferred_height_for(!self.inline_row(i), vec_row_n(&p.2))
         } else if p.2.starts_with("slider") {
             (38.0 - self.inline_strip(i)).max(22.0)
         } else if is_text_row(&p.2) || p.2.starts_with("spinbox") || p.2.starts_with("choice") {
@@ -1171,7 +1171,7 @@ impl ParametersBg {
                 if let Some(s) = &self.sliders[i] {
                     labels.extend(s.own_text_labels());
                 }
-            } else if ptype.starts_with("float3") {
+            } else if is_vec_row(ptype) {
                 if let Some(f) = &self.float3s[i] {
                     labels.extend(f.own_text_labels());
                 }
@@ -1344,7 +1344,7 @@ impl ParametersBg {
                         let new_val = min + s.value * (max - min);
                         p.1 = format!("{:.*}", slider_decimals(&p.2), new_val);
                     }
-                } else if p.2.starts_with("float3") {
+                } else if is_vec_row(&p.2) {
                     if let Some(f) = &mut self.float3s[idx] {
                         f.unfocus();
                         p.1 = f.value_string();
@@ -1435,7 +1435,7 @@ impl ParametersBg {
                 }
             } else if p.2 == "section" {
                 // Section header line is handled by the border box top border now
-            } else if p.2.starts_with("float3") {
+            } else if is_vec_row(&p.2) {
                 if let Some(f) = &self.float3s[i] {
                     param_quads.extend(f.extra_quads());
                 }
@@ -1577,7 +1577,7 @@ impl ParametersBg {
                 if let Some(s) = &self.sliders[i] {
                     out.extend(s.all_rounded_quads(ctx));
                 }
-            } else if p.2.starts_with("float3") {
+            } else if is_vec_row(&p.2) {
                 // Three slider rows: the same set per row (readout boxes,
                 // square-style tracks and fills), through the group's own paint.
                 if let Some(f) = &self.float3s[i] {
@@ -2233,7 +2233,7 @@ impl Input for ParametersBg {
     fn draggable(&self, _rect: Rect) -> bool {
         self.scrollbar_dragging
             || self.dragging_param.is_some()
-            || self.display_params.iter().any(|p| p.2.starts_with("slider") || p.2.starts_with("float3"))
+            || self.display_params.iter().any(|p| p.2.starts_with("slider") || is_vec_row(&p.2))
     }
 
     fn is_dragging(&self) -> bool {
@@ -2256,7 +2256,7 @@ impl Input for ParametersBg {
                         break;
                     }
                 }
-            } else if p.2.starts_with("float3") {
+            } else if is_vec_row(&p.2) {
                 let r = rects[i];
                 if py >= r.1 && py <= r.1 + r.3 {
                     if let Some(f) = &mut self.float3s[i] {
@@ -2844,7 +2844,7 @@ impl Input for ParametersBg {
                                     }
                                 }
                             }
-                        } else if p.2.starts_with("float3") {
+                        } else if is_vec_row(&p.2) {
                             let r = rects[i];
                             if py >= r.1 && py <= r.1 + r.3 {
                                 if let Some(f) = &mut self.float3s[i] {
@@ -3130,7 +3130,7 @@ impl Input for ParametersBg {
                                     return true;
                                 }
                             }
-                        } else if p.2.starts_with("float3") {
+                        } else if is_vec_row(&p.2) {
                             if let Some(f) = &mut self.float3s[idx] {
                                 if f.keyboard_input(event, ui) {
                                     p.1 = f.value_string();
@@ -3295,7 +3295,7 @@ impl Input for ParametersBg {
                                 s.set_scroll(was_scroll);
                             }
                         }
-                    } else if p.2.starts_with("float3") {
+                    } else if is_vec_row(&p.2) {
                         if owner == Some(i) {
                             // The group's rows apply the slider-row contract
                             // themselves (band halo / gesture latch, else the
@@ -3391,8 +3391,20 @@ fn slider_decimals(ptype: &str) -> usize {
     ptype.split(':').nth(3).and_then(|s| s.parse().ok()).unwrap_or(2)
 }
 
+/// Whether a row of type `t` is a vector of sliders: `float2`, `float3` or
+/// `float4`, each `floatN:lo:hi` — the one [`Float3`] group with that many
+/// rows ([`Float3::set_components`]).
+fn is_vec_row(t: &str) -> bool {
+    t.starts_with("float2") || t.starts_with("float3") || t.starts_with("float4")
+}
+
+/// How many rows a vector row has: the digit after `float`.
+fn vec_row_n(t: &str) -> usize {
+    t.get(5..6).and_then(|d| d.parse().ok()).unwrap_or(3)
+}
+
 fn parse_slider_range(ptype: &str) -> (f32, f32) {
-    if ptype.starts_with("slider:") || ptype.starts_with("float3:") {
+    if ptype.starts_with("slider:") || (is_vec_row(ptype) && ptype.contains(':')) {
         let parts: Vec<&str> = ptype.split(':').collect();
         if parts.len() >= 3 {
             if let (Ok(min), Ok(max)) = (parts[1].parse::<f32>(), parts[2].parse::<f32>()) {
@@ -3427,13 +3439,15 @@ fn parse_spinbox_range(ptype: &str) -> (i32, i32, i32) {
     (0, 10000, 1)
 }
 
-fn parse_float3_value(val_str: &str, min: f32, max: f32) -> [f32; 3] {
-    let mut out = [0.5, 0.5, 0.5];
+/// A vector row's text as `n` normalized values: each component over the
+/// row's range, mid-range where the text has none.
+fn parse_vec_value(val_str: &str, min: f32, max: f32, n: usize) -> Vec<f32> {
+    let mut out = vec![0.5; n];
     let parts: Vec<&str> = val_str
         .split(|c| c == ':' || c == ',' || c == ' ')
         .filter(|s| !s.is_empty())
         .collect();
-    for i in 0..3 {
+    for i in 0..n {
         if i < parts.len() {
             if let Ok(v) = parts[i].parse::<f32>() {
                 let range = max - min;
@@ -3491,10 +3505,11 @@ impl ParamController for ParametersBg {
                 }
             }).collect();
             self.float3s = self.display_params.iter().map(|p| {
-                if p.2.starts_with("float3") {
+                if is_vec_row(&p.2) {
                     let (min, max) = parse_slider_range(&p.2);
-                    let vals = parse_float3_value(&p.1, min, max);
-                    let mut f = Float3::new().with_values(vals).with_range(min, max).with_trackball(Self::has_trackball(&p.2));
+                    let n = vec_row_n(&p.2);
+                    let mut f = Float3::new().with_components(n).with_range(min, max).with_trackball(Self::has_trackball(&p.2));
+                    f.set_values_n(&parse_vec_value(&p.1, min, max, n));
                     f.set_view(self.trackball_view);
                     Some(if inline { f } else { f.with_label(&p.0) })
                 } else {
@@ -3619,8 +3634,11 @@ impl ParamController for ParametersBg {
                         // Same round-trip guard as the slider row.
                         let cur_str = f.value_string();
                         if cur_str != p_new.1 {
-                            let vals = parse_float3_value(&p_new.1, min, max);
-                            f.set_values(vals);
+                            let n = vec_row_n(&p_new.2);
+                            if f.components() != n {
+                                f.set_components(n);
+                            }
+                            f.set_values_n(&parse_vec_value(&p_new.1, min, max, n));
                         }
                     } else if let Some(ref mut sb) = self.spinboxes[i] {
                         if !sb.editing {
@@ -3946,6 +3964,46 @@ mod tests {
         assert!(!p.inner().inline_labels, "the slider's track is the shortest");
         p.inner_mut().set_section_collapsed("Shape", true);
         assert!(p.inner().inline_labels, "with the slider hidden the spinbox decides");
+    }
+
+    /// `float2` and `float4` rows are the float3 group with two or four
+    /// rows (X Y, X Y Z W): that many sliders over the row's range, laid out
+    /// and sized for that many, read from and written back as that many
+    /// components — and no trackball, which a direction of three numbers
+    /// is the only thing to have.
+    #[test]
+    fn float2_and_float4_rows_are_the_group_with_two_or_four_sliders() {
+        let mut p = panel_with(&[
+            ("Two", "1.00:-2.00", "float2:-10:10"),
+            ("Four", "1:2:3:4", "float4:-10:10:trackball"),
+            ("Three", "0:0:0", "float3:-10:10"),
+        ]);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 500.0, 600.0);
+        let two = p.float3s[0].as_ref().expect("a float2 row is a group");
+        let four = p.float3s[1].as_ref().expect("a float4 row is a group");
+        assert_eq!((two.components(), four.components()), (2, 4));
+        assert_eq!(two.get_row_rects().len(), 2);
+        assert_eq!(four.get_row_rects().len(), 4);
+        assert!(!four.has_trackball(), "four numbers have no ball");
+        assert_eq!(two.value_string(), "1.00:-2.00");
+        assert_eq!(four.value_string(), "1.00:2.00:3.00:4.00");
+        assert!(
+            Float3::preferred_height_for(false, 4) > Float3::preferred_height_for(false, 3)
+                && Float3::preferred_height_for(false, 3) > Float3::preferred_height_for(false, 2)
+        );
+        assert_eq!(Float3::preferred_height_for(false, 3), Float3::preferred_height(false));
+
+        // A new value for the row reaches the group, and a group whose
+        // row changed width takes the new width.
+        let rows: Vec<(String, String, String)> = vec![
+            ("Two".into(), "3:4".into(), "float2:-10:10".into()),
+            ("Four".into(), "5:6:7".into(), "float3:-10:10".into()),
+            ("Three".into(), "0:0:0".into(), "float3:-10:10".into()),
+        ];
+        ParamController::set_display_params(&mut *p, &rows);
+        assert_eq!(p.float3s[0].as_ref().unwrap().value_string(), "3.00:4.00");
+        let f = p.float3s[1].as_ref().unwrap();
+        assert_eq!((f.components(), f.value_string()), (3, "5.00:6.00:7.00".to_string()));
     }
 
     /// A `float3:lo:hi:trackball` row builds its group with the ball, counts

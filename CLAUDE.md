@@ -240,6 +240,19 @@ Layer surfaces keep the in-window menu, placed by `context_menu::constrain_to` w
 same flip / slide / shorten rules inside the window; so does any app run with
 `CCE_UI_MENU_POPUP=0`.
 
+### A float row can be two, three or four wide (since 2026-10-01)
+
+`float2:lo:hi` and `float4:lo:hi` parameter rows are the `float3` row's group with two
+or four sliders (X Y, X Y Z W): `Float3::set_components(n)` / `with_components(n)`,
+four sliders stored with the first `n` laid out, drawn, hit and written
+(`value_string` joins `n` components, `scaled_values` / `set_values_n` read and write
+them). `ParametersBg` treats every `floatN` row alike (`is_vec_row`, `vec_row_n`) and
+sizes it with `Float3::preferred_height_for(labeled, n)`; a row whose width changes on
+a re-read takes the new width in place. Only a three-wide group has a trackball — a
+direction is three numbers — so `float4:…:trackball` has none. The designer's
+Attribute node presents its Value through these.
+`float2_and_float4_rows_are_the_group_with_two_or_four_sliders` is the test.
+
 ### The keyboard can walk a menu (since 2026-10-01)
 
 `context_menu::set_hovered_item(Some(idx))` highlights a row as the pointer would, and

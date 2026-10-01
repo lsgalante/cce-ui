@@ -61,8 +61,13 @@ struct BallDrag {
 pub struct Float3 {
     /// The assigned (label-inclusive) rect.
     rect: Rect,
-    sliders: [Adapted<Slider>; 3],
-    axes: [&'static str; 3],
+    /// Four rows, of which the first [`Float3::components`] are the group's
+    /// (three unless a host asks for two or four — `float2` / `float4`
+    /// parameter rows). The rest are never laid out, drawn or hit.
+    sliders: [Adapted<Slider>; 4],
+    axes: [&'static str; 4],
+    /// How many rows the group has, 1..=4; three by default.
+    n: usize,
     label: Option<String>,
     dragging_idx: Option<usize>,
     /// Whether the group carries a TRACKBALL left of its rows: a ball the
@@ -95,8 +100,9 @@ impl Float3 {
         let row = || Slider::new().with_readout(true).with_decimals(DECIMALS);
         Adapted::new(Float3 {
             rect: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
-            sliders: [row(), row(), row()],
-            axes: ["X", "Y", "Z"],
+            sliders: [row(), row(), row(), row()],
+            axes: ["X", "Y", "Z", "W"],
+            n: 3,
             label: None,
             dragging_idx: None,
             ball: false,
@@ -169,7 +175,8 @@ impl Float3 {
     /// ([`Float3::set_view`]). A vector of no length has no direction to
     /// turn, so the first drag gives it a length of one, toward the viewer.
     pub fn set_trackball(&mut self, on: bool) {
-        self.ball = on;
+        // A direction is three numbers: two or four have no ball.
+        self.ball = on && self.n == 3;
         self.ball_drag = None;
         let decimals = self.decimals();
         for s in self.sliders.iter_mut() {
@@ -180,6 +187,23 @@ impl Float3 {
 
     pub fn has_trackball(&self) -> bool {
         self.ball
+    }
+
+    /// Give the group `n` rows (1..=4: X, Y, Z, W) — a `float2` or
+    /// `float4` value is the same control with fewer or more of them. A
+    /// group of other than three has no trackball.
+    pub fn set_components(&mut self, n: usize) {
+        self.n = n.clamp(1, 4);
+        if self.n != 3 {
+            self.ball = false;
+            self.ball_drag = None;
+        }
+        self.layout_rows();
+    }
+
+    /// How many rows the group has.
+    pub fn components(&self) -> usize {
+        self.n
     }
 
     fn decimals(&self) -> usize {
@@ -424,13 +448,32 @@ impl Float3 {
 
     /// The height a labeled (`labeled`) group lays out to: the detached label band plus three slider rows and their gaps — the row-height table entry.
     pub fn preferred_height(labeled: bool) -> f32 {
+        Self::preferred_height_for(labeled, 3)
+    }
+
+    /// [`Self::preferred_height`] for a group of `n` rows.
+    pub fn preferred_height_for(labeled: bool, n: usize) -> f32 {
+        let n = n.clamp(1, 4) as f32;
         let top = if labeled { crate::layout::control_label_strip() } else { 0.0 };
-        top + 3.0 * crate::layout::slider_height() + 2.0 * ROW_GAP
+        top + n * crate::layout::slider_height() + (n - 1.0) * ROW_GAP
     }
 
     /// Normalized (0..1) values, X/Y/Z.
     pub fn values(&self) -> [f32; 3] {
         [self.sliders[0].value, self.sliders[1].value, self.sliders[2].value]
+    }
+
+    /// The scaled values of the group's rows, as many as it has.
+    pub fn scaled_values(&self) -> Vec<f32> {
+        self.sliders[..self.n].iter().map(|s| s.get_scaled_value()).collect()
+    }
+
+    /// Normalized values in for the group's rows, as many as it has; each
+    /// row clamps to 0..1, and a row with no value given keeps its own.
+    pub fn set_values_n(&mut self, values: &[f32]) {
+        for (s, v) in self.sliders[..self.n].iter_mut().zip(values) {
+            s.set_value(*v);
+        }
     }
 
     /// Normalized values in; each row clamps to 0..1.
@@ -448,16 +491,15 @@ impl Float3 {
     /// The scaled values as the `x:y:z` row string (`DECIMALS` places) the parameter pane
     /// stores — the one formatter for every host sync.
     pub fn value_string(&self) -> String {
-        let v = |i: usize| self.sliders[i].get_scaled_value();
         let d = self.decimals();
-        format!("{:.*}:{:.*}:{:.*}", d, v(0), d, v(1), d, v(2))
+        self.sliders[..self.n].iter().map(|s| format!("{:.*}", d, s.get_scaled_value())).collect::<Vec<_>>().join(":")
     }
 
     /// The three rows, X/Y/Z — for hosts that draw this group through the legacy flat views
     /// and need each row's relief prims (`track_relief`, `thumb_sphere`) over its
     /// [`Self::get_row_rects`] rect.
-    pub fn sliders(&self) -> &[Adapted<Slider>; 3] {
-        &self.sliders
+    pub fn sliders(&self) -> &[Adapted<Slider>] {
+        &self.sliders[..self.n]
     }
 
     /// Detached-label band above the rows (zero unlabeled) — the adapter's
@@ -474,12 +516,15 @@ impl Float3 {
         let x = self.rect.x + ball + AXIS_W;
         let w = (self.rect.width - ball - AXIS_W).max(10.0);
         let h = crate::layout::slider_height();
-        (0..3).map(|i| (x, top + i as f32 * (h + ROW_GAP), w, h)).collect()
+        (0..self.n).map(|i| (x, top + i as f32 * (h + ROW_GAP), w, h)).collect()
     }
 
     fn layout_rows(&mut self) {
         let rows = self.get_row_rects();
-        for (s, r) in self.sliders.iter_mut().zip(rows) {
+        for (i, s) in self.sliders.iter_mut().enumerate() {
+            // A row past the group's count is laid out nowhere, so it is
+            // hit by nothing.
+            let r = rows.get(i).copied().unwrap_or((0.0, 0.0, 0.0, 0.0));
             s.set_rect(r.0, r.1, r.2, r.3);
         }
     }
@@ -546,6 +591,12 @@ impl Adapted<Float3> {
         self
     }
 
+    /// See [`Float3::set_components`].
+    pub fn with_components(mut self, n: usize) -> Self {
+        self.set_components(n);
+        self
+    }
+
     pub fn with_values(mut self, values: [f32; 3]) -> Self {
         self.set_values(values);
         self
@@ -566,7 +617,7 @@ impl Layout for Float3 {
     /// The three rows alone: the adapter adds the detached-label strip itself
     /// (`Adapted::preferred_height`), as it does for every non-inflating widget.
     fn intrinsic_size(&self) -> Option<Size> {
-        Some(Size::new(0.0, Float3::preferred_height(false)))
+        Some(Size::new(0.0, Float3::preferred_height_for(false, self.n)))
     }
 
     fn rect_assigned(&mut self, rect: Rect) {
