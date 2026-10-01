@@ -253,6 +253,17 @@ direction is three numbers — so `float4:…:trackball` has none. The designer'
 Attribute node presents its Value through these.
 `float2_and_float4_rows_are_the_group_with_two_or_four_sliders` is the test.
 
+### A parameter pane can draw separators (since 2026-10-01)
+
+A row of type `separator` (`parameters_bg::SEPARATOR`) is a hairline between two runs
+of rows: one pixel tall with the ordinary row gap either side, drawn in
+`plain_quads` in the theme's `surface_border`, and never hovered, focused, edited or
+given a backing. Its key and value mean nothing — a host writing rows back finds no
+parameter by them and skips it. Unlike a `section` it has no title and collapses
+nothing; it is what a host puts between groups of parameters that are about different
+things (the designer derives them from its templates' `group` metadata).
+`a_separator_row_is_a_rule_between_rows` is the test.
+
 ### A slider's range can be soft (since 2026-10-01)
 
 `Slider::set_soft` / `with_soft`, `Float3::set_soft`, and in `ParametersBg` a `soft`

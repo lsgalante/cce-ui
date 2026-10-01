@@ -506,6 +506,9 @@ impl ParametersBg {
             content_h.max(200.0)
         } else if p.2 == "section" {
             24.0
+        } else if p.2 == SEPARATOR {
+            // A rule, its own pixel: the row gaps either side are the air.
+            1.0
         } else if p.2 == "ramp" {
             // Label band + the ramp's graph and control strip. The control
             // strip and label band are fixed, so this whole increase grows the
@@ -646,7 +649,7 @@ impl ParametersBg {
         let r = crate::layout::control_corner_radius();
         let hidden = self.hidden_rows();
         for (i, (x, y, w, h)) in self.get_param_rects().into_iter().enumerate() {
-            if hidden[i] || h <= 0.0 || self.display_params[i].2 == "section" {
+            if hidden[i] || h <= 0.0 || self.display_params[i].2 == "section" || self.display_params[i].2 == SEPARATOR {
                 continue;
             }
             ctx.fill_material(Rect { x, y, width: w, height: h }, (r, r, r, r), &mat);
@@ -1005,7 +1008,7 @@ impl ParametersBg {
         }
         let hidden = self.hidden_rows();
         self.get_param_rects().into_iter().enumerate().find_map(|(i, (x, y, w, h))| {
-            let hoverable = !hidden[i] && h > 0.0 && self.display_params[i].2 != "section";
+            let hoverable = !hidden[i] && h > 0.0 && self.display_params[i].2 != "section" && self.display_params[i].2 != SEPARATOR;
             (hoverable && px >= x && px <= x + w && py >= y && py <= y + h).then_some(i)
         })
     }
@@ -1434,6 +1437,10 @@ impl ParametersBg {
                 }
             } else if p.2 == "section" {
                 // Section header line is handled by the border box top border now
+            } else if p.2 == SEPARATOR {
+                // A hairline across the row, inset from the pane's edges.
+                let c = crate::colors::active_theme().surface_border;
+                param_quads.push((r.0 + 6.0, r.1, (r.2 - 12.0).max(0.0), 1.0, [c[0], c[1], c[2], c[3] * 0.8]));
             } else if is_vec_row(&p.2) {
                 if let Some(f) = &self.float3s[i] {
                     param_quads.extend(f.extra_quads());
@@ -3393,6 +3400,12 @@ fn is_vec_row(t: &str) -> bool {
     t.starts_with("float2") || t.starts_with("float3") || t.starts_with("float4")
 }
 
+/// A SEPARATOR row: a hairline between two runs of rows, a pixel tall with
+/// the row gap either side, that nothing focuses, hovers or edits — what a
+/// host puts between groups of parameters that are about different things.
+/// Its key and value mean nothing; a host writing rows back skips it.
+pub const SEPARATOR: &str = "separator";
+
 /// Whether a slider or vector row's range is SOFT: a `soft` segment
 /// anywhere after the range (`slider:lo:hi:dec:soft`,
 /// `float3:lo:hi:trackball:soft`). A value typed past an end widens the
@@ -3969,6 +3982,22 @@ mod tests {
         assert!(!p.inner().inline_labels, "the slider's track is the shortest");
         p.inner_mut().set_section_collapsed("Shape", true);
         assert!(p.inner().inline_labels, "with the slider hidden the spinbox decides");
+    }
+
+    /// A `separator` row is a hairline a pixel tall between its neighbours,
+    /// the row gap either side, drawn as a rule and never hovered.
+    #[test]
+    fn a_separator_row_is_a_rule_between_rows() {
+        let p = panel_with(&[("Input", "a", "text"), ("", "", SEPARATOR), ("Size", "1.00", "slider:0:2")]);
+        let mut p = p;
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 400.0, 400.0);
+        let rects = p.get_param_rects();
+        assert_eq!(rects[1].3, 1.0, "a pixel tall");
+        assert!((rects[1].1 - (rects[0].1 + rects[0].3 + ROW_GAP)).abs() < 1e-3, "the row gap above");
+        assert!((rects[2].1 - (rects[1].1 + 1.0 + ROW_GAP)).abs() < 1e-3, "and below");
+        let rule = p.plain_quads().into_iter().find(|q| q.3 == 1.0 && (q.1 - rects[1].1).abs() < 1e-3);
+        assert!(rule.is_some_and(|q| q.2 > 300.0), "a rule across the row");
+        assert_eq!(p.hoverable_row_at(rects[1].0 + 50.0, rects[1].1 + 0.5), None, "nothing to hover");
     }
 
     /// A `soft` slider or float row builds its sliders with a soft range,
