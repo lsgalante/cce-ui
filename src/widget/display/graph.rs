@@ -1417,13 +1417,32 @@ impl Graph {
             return None;
         }
         let (_, _, nw, nh) = self.node_rect(idx)?;
+        self.input_wire_meeting(nx, ny, nw, nh, Some(idx))
+    }
+
+    /// The wire into an Input (port 0) that runs through the body a node
+    /// would have at lattice cell (`col`, `row`), as (upstream id,
+    /// downstream id) — by the hit test a dragged node's splice drop uses,
+    /// so a host placing a NEW node there (the designer's Add Node at its
+    /// grid cursor) wires it in exactly where a drop would have. Whether
+    /// the cell is free is the host's to ask; a node's own wires touch it.
+    pub fn input_wire_through_cell(&self, col: f32, row: f32) -> Option<(String, String)> {
+        let (x, y) = self.cell_origin(col, row);
+        let (src, dest) = self.input_wire_meeting(x, y, self.node_w, self.node_h, None)?;
+        Some((self.nodes[src].id.clone(), self.nodes[dest].id.clone()))
+    }
+
+    /// The first wire into a port 0 (draw order) whose path, as drawn,
+    /// touches the body rect at (x, y), inflated by the wire activation
+    /// radius so a near miss still takes. `skip`'s own wires never count.
+    fn input_wire_meeting(&self, x: f32, y: f32, w: f32, h: f32, skip: Option<usize>) -> Option<(usize, usize)> {
         // Half the stroke on top of the activation radius, so the wire's
         // edge counts and not only its centreline.
         let pad = crate::layout::graph_wire_activation_radius().max(0.0) + self.wire_thickness() / 2.0;
-        let (gx1, gy1) = (nx - pad, ny - pad);
-        let (gx2, gy2) = (nx + nw + pad, ny + nh + pad);
+        let (gx1, gy1) = (x - pad, y - pad);
+        let (gx2, gy2) = (x + w + pad, y + h + pad);
         for (src, dest, port) in self.wire_pairs() {
-            if src == idx || dest == idx || port != 0 {
+            if Some(src) == skip || Some(dest) == skip || port != 0 {
                 continue;
             }
             let Some(segs) = self.wire_segments(src, dest, port) else { continue };
@@ -1570,6 +1589,9 @@ impl GraphController for Graph {
     }
     fn take_pending_splice(&mut self) -> Option<(String, String, String)> {
         self.pending_splice.take()
+    }
+    fn input_wire_through_cell(&self, col: f32, row: f32) -> Option<(String, String)> {
+        Graph::input_wire_through_cell(self, col, row)
     }
     fn cancel_connecting(&mut self) {
         self.connecting_from = None;
@@ -1777,6 +1799,38 @@ mod tests {
         assert!(g.drag_update(210.0, 230.0));
         assert!(g.mouse_input(MouseButton::Left, ElementState::Released, 210.0, 230.0, &mut ctx));
         assert_eq!(GraphController::take_pending_splice(&mut *g), None);
+    }
+
+    /// A cell a wire runs through names that wire, in every style; a cell
+    /// clear of every wire names none.
+    #[test]
+    fn a_cell_on_a_wire_names_the_wire() {
+        for style in WireStyle::ALL {
+            let mut g = Graph::new();
+            g.set_wire_style(Some(style));
+            WidgetHost::set_rect(&mut g, 0.0, 0.0, 800.0, 600.0);
+            g.set_grid_pitch(100.0, 60.0);
+            g.set_node_size(80.0, 40.0);
+            g.set_grid_origin(140.0, 120.0);
+            let node = |id: &str, name: &str, col: f32, row: f32, input: &str| GraphNode {
+                id: id.into(),
+                name: name.into(),
+                position: (col, row),
+                parameters: vec![("Input".to_string(), input.to_string(), "node".to_string())],
+                geom_visible: true,
+                node_type: String::new(),
+                inputs: 1,
+                outputs: 1,
+            };
+            // alpha above beta, a cell between them.
+            g.set_nodes(&[node("a", "alpha", 0.0, 0.0, ""), node("b", "beta", 0.0, 2.0, "alpha")]);
+            assert_eq!(
+                g.input_wire_through_cell(0.0, 1.0),
+                Some(("a".to_string(), "b".to_string())),
+                "{style:?}"
+            );
+            assert_eq!(g.input_wire_through_cell(2.0, 1.0), None, "{style:?}: off to the side");
+        }
     }
 
     /// Where a piece of a wire begins and ends.

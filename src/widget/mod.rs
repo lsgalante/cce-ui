@@ -693,6 +693,13 @@ pub trait GraphController {
     fn take_pending_splice(&mut self) -> Option<(String, String, String)> {
         None
     }
+    /// The wire into an Input that runs through the body a node would have
+    /// at lattice cell (col, row), as (upstream id, downstream id): where a
+    /// node ADDED there splices in, by the hit test a drop uses. Default
+    /// None for hosts whose graphs have no wires to splice.
+    fn input_wire_through_cell(&self, _col: f32, _row: f32) -> Option<(String, String)> {
+        None
+    }
     fn cancel_connecting(&mut self);
     fn is_node_rect(&self, qx: f32, qy: f32, qw: f32, qh: f32) -> bool;
     /// The topmost node whose body contains (px, py), window-absolute coords.
