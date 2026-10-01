@@ -590,6 +590,8 @@ pub mod container;
 pub mod display;
 pub mod editor;
 pub mod layout_helper;
+#[cfg(feature = "markdown")]
+pub mod markdown;
 pub mod model;
 pub mod scroll_region;
 pub mod scroll_motion;
