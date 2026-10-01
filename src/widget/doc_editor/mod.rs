@@ -36,7 +36,7 @@ use crate::scene::paint::{Cap, PaintCtx};
 use crate::widget::shaping::ShapingMeasure;
 use crate::widget::{Bounds, Key, KeyEvent, MouseScrollDelta, NamedKey, ScrollMotion};
 use layout::{Deco, LineLayout};
-use preview::{Context, Kind, Marker};
+use preview::{Context, Kind, Marker, Prop};
 
 /// What a key or click did, for the host.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +64,8 @@ pub struct DocEditor {
     pub pad: f32,
     measure: ShapingMeasure,
     ctx: Vec<Context>,
+    /// The frontmatter lines' Properties roles (`None` elsewhere).
+    props: Vec<Option<Prop>>,
     layouts: Vec<Option<LineLayout>>,
     heights: Vec<f32>,
     tops: Vec<f32>,
@@ -96,6 +98,7 @@ impl DocEditor {
             pad: 24.0,
             measure: ShapingMeasure::new(system_fonts),
             ctx: Vec::new(),
+            props: Vec::new(),
             layouts: Vec::new(),
             heights: Vec::new(),
             tops: Vec::new(),
@@ -112,6 +115,7 @@ impl DocEditor {
             follow_caret: false,
         };
         e.sync();
+        e.caret_to_body();
         e
     }
 
@@ -121,6 +125,16 @@ impl DocEditor {
         self.motion = ScrollMotion::new();
         self.want_x = None;
         self.sync();
+        self.caret_to_body();
+    }
+
+    /// Start the caret on the body, past a frontmatter block, so the
+    /// Properties table shows rather than its raw YAML.
+    fn caret_to_body(&mut self) {
+        if let Some(close) = self.props.iter().position(|p| *p == Some(Prop::Close)) {
+            self.buf.caret = Pos::new((close + 1).min(self.buf.line_count() - 1), 0);
+            self.sync();
+        }
     }
 
     pub fn text(&self) -> String {
@@ -145,12 +159,21 @@ impl DocEditor {
     // ---- incremental bookkeeping ----------------------------------------
 
     /// The lines shown raw: the caret's (or the selection's), widened to
-    /// a fenced code block the caret is in, so its fences show.
+    /// a fenced code block or the frontmatter the caret is in, so its
+    /// fences (or its raw YAML) show.
     fn active_range(&self) -> (usize, usize) {
         let (mut a, mut b) = match self.buf.selection() {
             Some((a, b)) => (a.line, b.line),
             None => (self.buf.caret.line, self.buf.caret.line),
         };
+        // The frontmatter shows raw while the caret is anywhere in it, as
+        // a fenced block does; elsewhere it is the Properties table.
+        if let Some((x, _)) = preview::frontmatter_block(&self.ctx, a) {
+            a = x;
+        }
+        if let Some((_, y)) = preview::frontmatter_block(&self.ctx, b) {
+            b = y;
+        }
         if let Some((x, _)) = preview::fenced_block(&self.ctx, a) {
             a = x;
         }
@@ -201,6 +224,13 @@ impl DocEditor {
             }
         }
         self.ctx = ctx;
+        let props = preview::properties(self.buf.lines(), &self.ctx);
+        for (i, p) in props.iter().enumerate() {
+            if self.props.get(i) != Some(p) {
+                self.layouts[i] = None;
+            }
+        }
+        self.props = props;
         let act = self.active_range();
         if act != self.shown_active {
             let (a, b) = self.shown_active;
@@ -256,7 +286,16 @@ impl DocEditor {
         let act = self.shown_active;
         let active = self.is_active(i, act);
         let text = self.buf.line(i);
-        let line = preview::style_line(text, self.ctx[i], active);
+        let line = match self.props.get(i) {
+            Some(Some(p)) if !active => {
+                let key = match p {
+                    Prop::Item { key_line: Some(k), .. } => preview::prop_key(self.buf.line(*k)),
+                    _ => None,
+                };
+                preview::style_property(text, p, key)
+            }
+            _ => preview::style_line(text, self.ctx[i], active),
+        };
         let l = layout::layout_line(text, &line, active, self.width, &self.theme, &mut self.measure);
         if (l.height - self.heights[i]).abs() > 0.01 {
             self.heights[i] = l.height;
@@ -642,6 +681,16 @@ impl DocEditor {
                     return self.after_edit(rev, before);
                 }
             }
+            if let Some((r, bytes, on)) = l.toggle.clone() {
+                if x >= r.x && x <= r.x + r.width && ly >= r.y && ly <= r.y + r.height {
+                    // A boolean property's box: flip it in place.
+                    let keep = (self.buf.caret, self.buf.anchor);
+                    let next = if on { "false" } else { "true" };
+                    self.buf.replace(Pos::new(i, bytes.start), Pos::new(i, bytes.end), next, EditKind::Other);
+                    (self.buf.caret, self.buf.anchor) = keep;
+                    return self.after_edit(rev, before);
+                }
+            }
             if !active || ctrl {
                 if let Some(k) = l.link_at(x, ly) {
                     return Response::Follow(l.links[k].clone());
@@ -837,7 +886,8 @@ impl DocEditor {
                 for r in &l.runs {
                     let row_y = top + r.row as f32 * l.row_h;
                     if let Some(bg) = r.bg {
-                        pc.rounded_rect(Rect { x: ox + r.x - 2.0, y: row_y + 2.0, width: r.w + 4.0, height: l.row_h - 4.0 }, 3.0, (true, true, true, true), bg);
+                        let (pad, radius) = if r.look.pill { (layout::PILL_PAD, (l.row_h - 4.0) / 2.0) } else { (2.0, 3.0) };
+                        pc.rounded_rect(Rect { x: ox + r.x - pad, y: row_y + 2.0, width: r.w + 2.0 * pad, height: l.row_h - 4.0 }, radius, (true, true, true, true), bg);
                     }
                     let ty = row_y + (l.row_h - r.size) / 2.0;
                     let color = match r.link {
@@ -969,6 +1019,37 @@ mod tests {
         let run = l.runs.iter().find(|r| r.link.is_some()).unwrap();
         let (sx, sy) = (e.origin.0 + run.x + 2.0, e.origin.1 + 4.0);
         assert_eq!(e.press(sx, sy, false, false), Response::Follow(Target::Note { target: "Target".into(), subpath: None }));
+    }
+
+    #[test]
+    fn the_frontmatter_is_a_table_until_the_caret_enters_it() {
+        let mut e = editor("---\ndone: false\ntags: [x]\n---\nbody");
+        e.buf.caret = Pos::new(4, 0);
+        let mut pc = PaintCtx::new();
+        e.paint(&mut pc, Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 }, true);
+        let header = e.layouts[0].as_ref().unwrap();
+        assert!(matches!(&header.decos[0], Deco::Text { text, .. } if text == "Properties"));
+        let row = e.layouts[1].as_ref().unwrap();
+        let (r, _, on) = row.toggle.clone().expect("a checkbox");
+        assert!(!on);
+        // Ticking the box writes `true`, and the caret stays put.
+        let (sx, sy) = (e.origin.0 + r.x + r.width / 2.0, e.origin.1 + e.tops[1] + r.y + r.height / 2.0);
+        assert_eq!(e.press(sx, sy, false, false), Response::Changed);
+        assert_eq!(e.text(), "---\ndone: true\ntags: [x]\n---\nbody");
+        assert_eq!(e.buf.caret, Pos::new(4, 0));
+        e.release();
+        // The pill is padded inside the value column.
+        e.paint(&mut pc, Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 }, true);
+        let tags = e.layouts[2].as_ref().unwrap();
+        assert_eq!(tags.runs.len(), 1);
+        assert!(tags.runs[0].look.pill && tags.runs[0].x >= tags.content_x + layout::PILL_PAD - 0.01);
+        // The caret in the block shows all of it raw.
+        e.buf.set_caret(Pos::new(2, 0), false);
+        e.paint(&mut pc, Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 }, true);
+        for i in 0..4 {
+            let l = e.layouts[i].as_ref().unwrap();
+            assert_eq!(l.runs.iter().map(|r| r.text.as_str()).collect::<String>(), e.buf.line(i), "line {i} raw");
+        }
     }
 
     #[test]

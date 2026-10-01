@@ -849,6 +849,17 @@ Two opt-in features for the clients that show notes (Obsidian-on-cce):
     widths. `widget::shaping` holds `Measure` / `ShapingMeasure`, shared
     with the reading view; a width includes trailing spaces (max of glyph
     x + w), which is what a run placed after it needs.
+  - **Frontmatter is the Properties table** while the caret is outside
+    it (`preview::properties` gives each line a role, `style_property`
+    its row): a "Properties" header, keys in a column as wide as the
+    reading view's, values inline-styled (links follow), list values as
+    pills — a one-per-line YAML list is one pill per line, its key drawn
+    by the first item and the key line itself zero height — and
+    `true`/`false` as a checkbox that flips the bytes in place
+    (`LineLayout::toggle`, undoable). The caret anywhere in the block
+    shows all of it raw, like a fenced block; an unclosed block, nested
+    maps and block scalars stay raw. `set_text` starts the caret past the
+    block so a note opens on the table.
   - The caret does not blink (a blink is a frame every half second for
     as long as the window is open).
 
