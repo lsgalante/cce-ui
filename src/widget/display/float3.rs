@@ -206,6 +206,14 @@ impl Float3 {
         self.n
     }
 
+    /// Give every row a soft range (`Slider::set_soft`): a value typed
+    /// past an end widens that row's range.
+    pub fn set_soft(&mut self, soft: bool) {
+        for s in self.sliders.iter_mut() {
+            s.set_soft(soft);
+        }
+    }
+
     fn decimals(&self) -> usize {
         if self.ball { BALL_DECIMALS } else { DECIMALS }
     }

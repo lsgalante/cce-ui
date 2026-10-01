@@ -1340,8 +1340,7 @@ impl ParametersBg {
                 } else if p.2.starts_with("slider") {
                     if let Some(s) = &mut self.sliders[idx] {
                         s.unfocus();
-                        let (min, max) = parse_slider_range(&p.2);
-                        let new_val = min + s.value * (max - min);
+                        let new_val = s.get_scaled_value();
                         p.1 = format!("{:.*}", slider_decimals(&p.2), new_val);
                     }
                 } else if is_vec_row(&p.2) {
@@ -2302,8 +2301,7 @@ impl Input for ParametersBg {
         if let Some(i) = self.dragging_param {
             if let Some(s) = &mut self.sliders[i] {
                 if s.drag_update(px, py) {
-                    let (min, max) = parse_slider_range(&self.display_params[i].2);
-                    let new_val = min + s.value * (max - min);
+                    let new_val = s.get_scaled_value();
                     let old_val = &self.display_params[i].1;
                     let new_val_str = format!("{:.*}", slider_decimals(&self.display_params[i].2), new_val);
                     if *old_val != new_val_str {
@@ -2375,8 +2373,7 @@ impl Input for ParametersBg {
         for i in 0..self.sliders.len() {
             if let Some(s) = &mut self.sliders[i] {
                 if s.tick(dt, &mut dummy) {
-                    let (min, max) = parse_slider_range(&self.display_params[i].2);
-                    let new_val = min + s.value * (max - min);
+                    let new_val = s.get_scaled_value();
                     let new_val_str = format!("{:.*}", slider_decimals(&self.display_params[i].2), new_val);
                     if self.display_params[i].1 != new_val_str {
                         self.display_params[i].1 = new_val_str;
@@ -3109,8 +3106,7 @@ impl Input for ParametersBg {
                         } else if p.2.starts_with("slider") {
                             if let Some(s) = &mut self.sliders[idx] {
                                 if s.keyboard_input(event, ui) {
-                                    let (min, max) = parse_slider_range(&p.2);
-                                    let new_val = min + s.value * (max - min);
+                                    let new_val = s.get_scaled_value();
                                     p.1 = format!("{:.*}", slider_decimals(&p.2), new_val);
                                     if !s.editing {
                                         self.focused_param = None;
@@ -3283,8 +3279,7 @@ impl Input for ParametersBg {
                                 // clip the halo's fringe outside the row rect.
                                 if s.mouse_wheel_ungated(delta, px, py, ui) {
                                     wheel_taken = true;
-                                    let (min, max) = parse_slider_range(&p.2);
-                                    let new_val = min + s.value * (max - min);
+                                    let new_val = s.get_scaled_value();
                                     let old_val = &p.1;
                                     let new_val_str = format!("{:.*}", slider_decimals(&p.2), new_val);
                                     if *old_val != new_val_str {
@@ -3398,6 +3393,15 @@ fn is_vec_row(t: &str) -> bool {
     t.starts_with("float2") || t.starts_with("float3") || t.starts_with("float4")
 }
 
+/// Whether a slider or vector row's range is SOFT: a `soft` segment
+/// anywhere after the range (`slider:lo:hi:dec:soft`,
+/// `float3:lo:hi:trackball:soft`). A value typed past an end widens the
+/// row's range rather than being clamped to it (`Slider::set_soft`); the
+/// host is expected to choose the range around the value.
+fn is_soft_row(t: &str) -> bool {
+    t.split(':').skip(3).any(|s| s == "soft")
+}
+
 /// How many rows a vector row has: the digit after `float`.
 fn vec_row_n(t: &str) -> usize {
     t.get(5..6).and_then(|d| d.parse().ok()).unwrap_or(3)
@@ -3498,7 +3502,7 @@ impl ParamController for ParametersBg {
                     } else {
                         0.0
                     };
-                    let s = Slider::new().with_value(t).with_range(min, max).with_readout(true).with_decimals(slider_decimals(&p.2));
+                    let s = Slider::new().with_value(t).with_range(min, max).with_readout(true).with_decimals(slider_decimals(&p.2)).with_soft(is_soft_row(&p.2));
                     Some(if inline { s } else { s.with_label(&p.0) })
                 } else {
                     None
@@ -3509,6 +3513,7 @@ impl ParamController for ParametersBg {
                     let (min, max) = parse_slider_range(&p.2);
                     let n = vec_row_n(&p.2);
                     let mut f = Float3::new().with_components(n).with_range(min, max).with_trackball(Self::has_trackball(&p.2));
+                    f.set_soft(is_soft_row(&p.2));
                     f.set_values_n(&parse_vec_value(&p.1, min, max, n));
                     f.set_view(self.trackball_view);
                     Some(if inline { f } else { f.with_label(&p.0) })
@@ -3964,6 +3969,28 @@ mod tests {
         assert!(!p.inner().inline_labels, "the slider's track is the shortest");
         p.inner_mut().set_section_collapsed("Shape", true);
         assert!(p.inner().inline_labels, "with the slider hidden the spinbox decides");
+    }
+
+    /// A `soft` slider or float row builds its sliders with a soft range,
+    /// and the pane writes back the value the slider holds — past the
+    /// row's declared range once a typed value has widened it — rather
+    /// than re-reading the slider's fraction over the declared range.
+    #[test]
+    fn a_soft_row_writes_back_what_its_slider_holds() {
+        let mut p = panel_with(&[("V", "1.00", "slider:-10:10:2:soft"), ("W", "1:2", "float2:-10:10:soft"), ("H", "1.00", "slider:-10:10")]);
+        WidgetHost::set_rect(&mut p, 0.0, 0.0, 500.0, 400.0);
+        assert!(is_soft_row("slider:-10:10:2:soft") && is_soft_row("float3:-1:1:trackball:soft"));
+        assert!(!is_soft_row("slider:-10:10") && !is_soft_row("float3:-1:1:trackball"));
+        assert_eq!(slider_decimals("slider:-10:10:2:soft"), 2);
+        {
+            let s = p.sliders[0].as_mut().unwrap();
+            s.set_range(-10.0, 500.0);
+            s.set_scaled_value(500.0);
+        }
+        p.inner_mut().focused_param = Some(0);
+        p.inner_mut().commit_and_unfocus();
+        assert_eq!(p.display_params[0].1, "500.00");
+        assert_eq!(p.display_params[2].1, "1.00", "the hard row is untouched");
     }
 
     /// `float2` and `float4` rows are the float3 group with two or four

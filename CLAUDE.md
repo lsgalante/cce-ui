@@ -253,6 +253,20 @@ direction is three numbers — so `float4:…:trackball` has none. The designer'
 Attribute node presents its Value through these.
 `float2_and_float4_rows_are_the_group_with_two_or_four_sliders` is the test.
 
+### A slider's range can be soft (since 2026-10-01)
+
+`Slider::set_soft` / `with_soft`, `Float3::set_soft`, and in `ParametersBg` a `soft`
+segment after the range (`slider:lo:hi:dec:soft`, `float3:lo:hi:trackball:soft`,
+`is_soft_row`): a value TYPED into the readout past either end widens the range to hold
+it, where a hard range clamps it to the end. A drag and the wheel still stop at the
+ends. It is for a value with no natural bounds whose range is only a scale to drag
+over — the host is expected to choose the range around the value and re-choose it (the
+designer's Attribute Value row). The pane now writes a slider row back from the
+slider's OWN value (`get_scaled_value`) rather than its fraction over the row's
+declared range, which was the same thing until a range could widen.
+`a_soft_range_widens_to_a_typed_value` and `a_soft_row_writes_back_what_its_slider_holds`
+are the tests.
+
 ### The keyboard can walk a menu (since 2026-10-01)
 
 `context_menu::set_hovered_item(Some(idx))` highlights a row as the pointer would, and

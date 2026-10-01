@@ -34,6 +34,12 @@ pub struct Slider {
     edit_buffer: String,
     min: f32,
     max: f32,
+    /// A SOFT range: a value typed into the readout past either end widens
+    /// the range to hold it, where a hard range clamps it to the end. For
+    /// a value with no natural bounds, whose range is only a scale to drag
+    /// over — the host re-chooses it around the value. Off by default; a
+    /// drag and the wheel stop at the ends either way.
+    soft: bool,
     pub editor_state: TextEditorState,
     pub just_changed: bool,
     label: Option<String>,
@@ -68,6 +74,7 @@ impl Slider {
             edit_buffer: String::new(),
             min: 0.0,
             max: 1.0,
+            soft: false,
             editor_state: TextEditorState::new(String::new()),
             just_changed: false,
             label: None,
@@ -82,6 +89,11 @@ impl Slider {
     pub fn set_range(&mut self, min: f32, max: f32) {
         self.min = min;
         self.max = max;
+    }
+
+    /// See the `soft` field.
+    pub fn set_soft(&mut self, soft: bool) {
+        self.soft = soft;
     }
 
     pub fn set_scroll(&mut self, enabled: bool) {
@@ -257,6 +269,13 @@ impl Slider {
             self.editing = false;
             let old_val = self.value;
             if let Ok(new_val) = self.edit_buffer.parse::<f32>() {
+                // A soft range widens to hold what was typed; the value is
+                // the number, not the end it would clamp to.
+                if self.soft && new_val.is_finite() && (new_val < self.min || new_val > self.max) {
+                    self.min = self.min.min(new_val);
+                    self.max = self.max.max(new_val);
+                    self.just_changed = true;
+                }
                 let range = self.max - self.min;
                 if range != 0.0 {
                     self.value = ((new_val - self.min) / range).clamp(0.0, 1.0);
@@ -296,6 +315,12 @@ impl Adapted<Slider> {
     /// Readout display precision in decimal places (default 2).
     pub fn with_decimals(mut self, decimals: usize) -> Self {
         self.decimals = decimals;
+        self
+    }
+
+    /// See the `soft` field.
+    pub fn with_soft(mut self, soft: bool) -> Self {
+        self.set_soft(soft);
         self
     }
 
@@ -1010,6 +1035,27 @@ impl Input for RangeSlider {
 mod tests {
     use super::*;
     use crate::widget::{MouseScrollDelta, WidgetHost, UiContext};
+
+    /// A soft range takes a typed value past its end and widens to hold
+    /// it; a hard one clamps the same number to the end.
+    #[test]
+    fn a_soft_range_widens_to_a_typed_value() {
+        let typed = |soft: bool, text: &str| {
+            let mut sl = Slider::new().with_range(-10.0, 10.0).with_readout(true).with_soft(soft);
+            sl.editing = true;
+            sl.edit_buffer = text.to_string();
+            sl.commit_edit();
+            (sl.get_scaled_value(), sl.range(), sl.just_changed)
+        };
+        let (v, range, changed) = typed(true, "500");
+        assert!((v - 500.0).abs() < 1e-3 && range == (-10.0, 500.0) && changed, "{v} {range:?}");
+        let (v, range, _) = typed(true, "-42");
+        assert!((v + 42.0).abs() < 1e-3 && range == (-42.0, 10.0));
+        let (v, range, _) = typed(true, "3");
+        assert!((v - 3.0).abs() < 1e-3 && range == (-10.0, 10.0), "inside, nothing widens");
+        let (v, range, _) = typed(false, "500");
+        assert!((v - 10.0).abs() < 1e-3 && range == (-10.0, 10.0), "a hard range clamps");
+    }
 
     /// The legacy rangeslider interaction test, driven through the WidgetHost drag forwards
     /// (hosts call these directly): thumb selection by proximity, constrained updates.
