@@ -247,9 +247,20 @@ same flip / slide / shorten rules inside the window; so does any app run with
 (down for `dir > 0`), skipping header rows and `-` separators, stopping at either end
 rather than wrapping. Both scroll a shortened menu to the row, WITHOUT re-hovering the
 row under the pointer the way `scroll_by` does: the keyboard put the highlight there.
-The menu itself still reads no keys — a host that wants a walkable menu (the designer's
-dialog dropdowns) routes Up/Down to `step_hovered` and runs `hovered_item()` on Enter.
+The menu itself still reads no keys — a host that wants a walkable menu routes Up/Down
+to `step_hovered` and runs `hovered_item()` on Enter.
 `the_keyboard_steps_the_highlight_over_what_cannot_run` is the test.
+
+### A dropdown says whether it is taking input (since 2026-10-01)
+
+`Dropdown::is_expanded()` is `open && !closing`: `open` alone stays true through the
+closing animation, while the plate is still drawn but presses and keys are no longer
+the dropdown's. A host that routes input to a dropdown ahead of what is under it (the
+designer's dialog hosts one) asks this. Such a host should also know that the runner
+hands every left press to each registered popover whose hit test MISSES it, before the
+app sees the press (`close_popovers_missed_by_press`) — and a popover covered by an
+outer popover's claim always misses — so the dropdown may already have taken the press
+by the time the app is asked.
 
 ### A row can open a submenu (since 2026-09-29)
 

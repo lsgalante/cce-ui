@@ -245,6 +245,15 @@ impl Dropdown {
         })
     }
 
+    /// Whether the menu is open and taking input: open and not shrinking
+    /// closed. `open` alone stays true through the closing animation, while
+    /// the plate is still drawn but presses and keys are no longer its — a
+    /// host that routes input to the dropdown ahead of what is under it asks
+    /// this.
+    pub fn is_expanded(&self) -> bool {
+        self.open && !self.closing
+    }
+
     /// Set (or clear) the app-owned concentric frame — see the `corner_frame` field docs.
     pub fn set_corner_frame(&mut self, frame: Option<((f32, f32, f32, f32), f32, (bool, bool, bool, bool))>) {
         self.corner_frame = frame;
@@ -1418,10 +1427,12 @@ mod tests {
         assert!(move_changed);
         assert_eq!(dd.hovered_item, Some(1));
 
+        assert!(dd.is_expanded(), "open and taking input");
         // 4. Click option B selects it and starts the animated close
         let select_changed = dd.mouse_input(MouseButton::Left, ElementState::Pressed, 50.0, 70.0, &mut dummy);
         assert!(select_changed);
         assert!(dd.closing, "selection starts the animated contraction");
+        assert!(dd.open && !dd.is_expanded(), "drawn while it shrinks, but no longer taking input");
         dd.land_anim_for_test();
         assert!(!dd.open);
         assert_eq!(dd.selected, 1);
