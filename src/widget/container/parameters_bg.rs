@@ -1272,6 +1272,8 @@ impl ParametersBg {
                 if let Some(c) = &self.colors[i] {
                     labels.extend(c.own_text_labels());
                 }
+            } else if ptype == SEPARATOR {
+                // A rule says nothing.
             } else if ptype == "ramp" {
                 // The name label only — the ramp's own control labels ride its
                 // scene-path paint (paint_scene_rows).
@@ -3998,6 +4000,8 @@ mod tests {
         let rule = p.plain_quads().into_iter().find(|q| q.3 == 1.0 && (q.1 - rects[1].1).abs() < 1e-3);
         assert!(rule.is_some_and(|q| q.2 > 300.0), "a rule across the row");
         assert_eq!(p.hoverable_row_at(rects[1].0 + 50.0, rects[1].1 + 0.5), None, "nothing to hover");
+        let near = |l: &TextLabel| (l.y - rects[1].1).abs() < 6.0;
+        assert!(!p.own_text_labels().iter().any(near), "and no label: a fallback `name: value` once drew ':'");
     }
 
     /// A `soft` slider or float row builds its sliders with a soft range,
