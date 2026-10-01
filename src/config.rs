@@ -879,6 +879,36 @@ pub fn get_kdl_type_annotations(kdl_content: &str, key_paths: &[String]) -> Vec<
 
 #[cfg(test)]
 mod tests {
+    /// A string the writer emits comes back as it went in, quotes,
+    /// backslashes and control characters included — as a section value,
+    /// a top-level value, a keybind (written with a type annotation), a
+    /// list item and a key that is not an identifier. Until 2026-10-01
+    /// none of it was escaped, a quote inside a value made a line the
+    /// parser refused, and an app whose settings file fails to parse loads
+    /// its defaults.
+    #[test]
+    fn strings_round_trip_through_the_kdl_writer() {
+        let odd = "a \"quoted\" \\path\\ with\nnewline,\ttab and \u{1} control";
+        let val = serde_json::json!({
+            "section": {
+                "plain": odd,
+                "shortcut": "ctrl+\"",
+                "items": [odd, "x"],
+                "not an ident": odd,
+            },
+            "top": odd,
+        });
+        let text = super::json_to_kdl_string(&val);
+        let doc: kdl::KdlDocument = text.parse().unwrap_or_else(|e| panic!("{e}\n{text}"));
+        let back = super::kdl_to_json(&doc);
+        assert_eq!(back["section"]["plain"], odd, "{text}");
+        assert_eq!(back["section"]["shortcut"], "ctrl+\"", "{text}");
+        assert_eq!(back["section"]["items"][0], odd, "{text}");
+        assert_eq!(back["section"]["not an ident"], odd, "{text}");
+        assert_eq!(back["top"], odd, "{text}");
+        assert_eq!(super::kdl_quote("plain"), "\"plain\"", "an ordinary string is unchanged");
+    }
+
     /// A material node's frost and finish are written as PROPERTIES of a
     /// `frost` / `finish` child (RFC material § 5), created on demand under
     /// `style.surface.material.<name>`, and read back through the same
@@ -1282,6 +1312,32 @@ mod tests {
     }
 }
 
+/// `s` as a quoted KDL string, escaped as KDL v1 (the `kdl` 4 parser this
+/// reads back with) escapes: a quote, a backslash and the control
+/// characters. Every string the writer emits goes through here — until
+/// 2026-10-01 values were written as `"{s}"` with nothing escaped, so one
+/// quote inside a value made a line no parser reads, and an app whose
+/// settings file fails to parse loads its DEFAULTS.
+pub fn kdl_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0C}' => out.push_str("\\f"),
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 fn format_kdl_type(ty: &str) -> String {
     let is_ident = !ty.is_empty()
         && !ty.chars().next().unwrap().is_ascii_digit()
@@ -1289,7 +1345,7 @@ fn format_kdl_type(ty: &str) -> String {
     if is_ident {
         ty.to_string()
     } else {
-        format!("\"{}\"", ty.replace('\\', "\\\\").replace('"', "\\\""))
+        kdl_quote(ty)
     }
 }
 
@@ -1300,7 +1356,7 @@ fn format_kdl_identifier(name: &str) -> String {
     if is_ident {
         name.to_string()
     } else {
-        format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
+        kdl_quote(name)
     }
 }
 
@@ -1340,7 +1396,7 @@ pub fn value_to_kdl_with_annotations(
                     let is_vec2i = annotations.get(&prop_path).map_or(false, |a| a == "vec2i");
                     if is_vec2i {
                         if let serde_json::Value::String(ref s) = prop_val {
-                            child_parts.push(format!("{}{} (vec2i){}\n", "    ".repeat(indent + 1), prop_name, s));
+                            child_parts.push(format!("{}{} (vec2i){}\n", "    ".repeat(indent + 1), format_kdl_identifier(prop_name), s));
                         }
                     } else {
                         let (val_str, val_ty) = match prop_val {
@@ -1361,24 +1417,24 @@ pub fn value_to_kdl_with_annotations(
                                     if anno == "vec2i" {
                                         (s.clone(), Some(anno.clone()))
                                     } else {
-                                        (format!("\"{}\"", s), Some(anno.clone()))
+                                        (kdl_quote(s), Some(anno.clone()))
                                     }
                                 } else if s.starts_with('#') {
                                     let s_clean = s.trim_start_matches('#');
                                     let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
-                                    (format!("\"{}\"", s), Some(ty.to_string()))
+                                    (kdl_quote(s), Some(ty.to_string()))
                                 } else if prop_name == "key" || prop_name == "keybind" || prop_name == "shortcut" || prop_name == "open_search" || prop_name == "close_search" || prop_name == "delete" || prop_name.ends_with("_key") || prop_name.ends_with(".key") || prop_name.ends_with(".keybind") || prop_name.ends_with(".open_search") || prop_name.ends_with(".close_search") || prop_name == "brightness_up" || prop_name == "brightness_down" || prop_name.ends_with(".brightness_up") || prop_name.ends_with(".brightness_down") {
-                                    (format!("\"{}\"", s), Some("keybind".to_string()))
+                                    (kdl_quote(s), Some("keybind".to_string()))
                                 } else {
-                                    (format!("\"{}\"", s), None)
+                                    (kdl_quote(s), None)
                                 }
                             }
                             _ => (prop_val.to_string(), None),
                         };
                         if let Some(ty) = val_ty {
-                            prop_parts.push(format!("{}=({}){}", prop_name, format_kdl_type(&ty), val_str));
+                            prop_parts.push(format!("{}=({}){}", format_kdl_identifier(prop_name), format_kdl_type(&ty), val_str));
                         } else {
-                            prop_parts.push(format!("{}={}", prop_name, val_str));
+                            prop_parts.push(format!("{}={}", format_kdl_identifier(prop_name), val_str));
                         }
                     }
                 }
@@ -1393,7 +1449,7 @@ pub fn value_to_kdl_with_annotations(
                     out.push_str(&format!("{}}}\n", indent_str));
                     out
                 } else {
-                    format!("{}{} {}\n", indent_str, key, prop_parts.join(" "))
+                    format!("{}{} {}\n", indent_str, format_kdl_identifier(key), prop_parts.join(" "))
                 }
             }
         }
@@ -1404,9 +1460,9 @@ pub fn value_to_kdl_with_annotations(
             if !arr.is_empty() && arr.iter().all(|v| v.is_string()) {
                 let args: Vec<String> = arr
                     .iter()
-                    .filter_map(|v| v.as_str().map(|s| format!("\"{}\"", s)))
+                    .filter_map(|v| v.as_str().map(|s| kdl_quote(s)))
                     .collect();
-                return format!("{}{} {}\n", indent_str, key, args.join(" "));
+                return format!("{}{} {}\n", indent_str, format_kdl_identifier(key), args.join(" "));
             }
             let mut out = String::new();
             for item in arr {
@@ -1433,24 +1489,24 @@ pub fn value_to_kdl_with_annotations(
                         if anno == "vec2i" {
                             (s.clone(), Some(anno.clone()))
                         } else {
-                            (format!("\"{}\"", s), Some(anno.clone()))
+                            (kdl_quote(s), Some(anno.clone()))
                         }
                     } else if s.starts_with('#') {
                         let s_clean = s.trim_start_matches('#');
                         let ty = if s_clean.len() == 8 { "rgba" } else { "rgb" };
-                        (format!("\"{}\"", s), Some(ty.to_string()))
+                        (kdl_quote(s), Some(ty.to_string()))
                     } else if key == "key" || key == "keybind" || key == "shortcut" || key == "open_search" || key == "close_search" || key == "delete" || key.ends_with("_key") || key.ends_with(".key") || key.ends_with(".keybind") || key.ends_with(".open_search") || key.ends_with(".close_search") || key == "brightness_up" || key == "brightness_down" || key.ends_with(".brightness_up") || key.ends_with(".brightness_down") {
-                        (format!("\"{}\"", s), Some("keybind".to_string()))
+                        (kdl_quote(s), Some("keybind".to_string()))
                     } else {
-                        (format!("\"{}\"", s), None)
+                        (kdl_quote(s), None)
                     }
                 }
                 _ => (val.to_string(), None),
             };
             if let Some(ty) = val_ty {
-                format!("{}{} ({}){}\n", indent_str, key, format_kdl_type(&ty), val_str)
+                format!("{}{} ({}){}\n", indent_str, format_kdl_identifier(key), format_kdl_type(&ty), val_str)
             } else {
-                format!("{}{} {}\n", indent_str, key, val_str)
+                format!("{}{} {}\n", indent_str, format_kdl_identifier(key), val_str)
             }
         }
     }
@@ -1519,7 +1575,7 @@ pub fn save_recent_files(files: &[String]) {
     }
     let mut kdl_str = "recent {\n".to_string();
     for file in files {
-        kdl_str.push_str(&format!("    file \"{}\"\n", file));
+        kdl_str.push_str(&format!("    file {}\n", kdl_quote(file)));
     }
     kdl_str.push_str("}\n");
     let _ = std::fs::write(path, kdl_str);
