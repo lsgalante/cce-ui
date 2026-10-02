@@ -1722,19 +1722,13 @@ impl ParametersBg {
             }
             // (control, its configured corner radius, raised vs recessed)
             let ctl: Option<(&dyn WidgetHost, f32, bool)> = if is_text_row(&p.2) {
-                // The textpick picker button is NOT in this list: it is a
-                // flush inset control (face level with the well floor, a
-                // valley seam around it — the dropdown trigger's trough
-                // language, not a boss), and troughs travel through
-                // [`Self::picker_troughs`]. A boss here read as a raised
-                // island, which no other inset control in the DE does.
+                // The textpick picker is NOT in this list: with it the row is
+                // a field ([`Self::fields`]) — a well ending in a flush run.
                 self.texts[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::textbox_corner_radius(), false))
             } else if p.2.starts_with("choice") {
-                // The dropdown trigger is a FLUSH inset control: the widget's
-                // own raised paint is one `inset_plate` (face level with the
-                // plate, a valley seam around it), so its ring travels through
-                // [`Self::troughs`]. A boss here read as a raised island the
-                // widget itself never draws.
+                // The dropdown trigger is a FLUSH control, a field that is all
+                // run ([`Self::fields`]). A boss here read as a raised island
+                // the widget itself never draws.
                 None
             } else if p.2 == "button" {
                 self.buttons[i].as_ref().map(|w| (w as &dyn WidgetHost, crate::layout::button_corner_radius(), true))
@@ -1743,8 +1737,7 @@ impl ParametersBg {
                 // widget's own (`Toggle::flat_carves`, exactly what its paint
                 // emits, in the order it emits them) — ARE the control: the
                 // track's well (a recess) and the plate gliding on its floor
-                // (a boss). Neither is flush, so nothing here rides
-                // [`Self::troughs`].
+                // (a boss). Neither is flush.
                 if let Some(t) = &self.toggles[i] {
                     let (x, y, w, h) = t.rect();
                     if w > 0.0 && h > 0.0 {
@@ -1762,12 +1755,10 @@ impl ParametersBg {
                 }
                 None
             } else if p.2.starts_with("spinbox") {
-                // The well recess only — the -/+ run's trough and its seam
-                // travel through [`Self::troughs`] / [`Self::grooves`] (this
-                // tuple speaks boss/recess). The widget's own `relief_parts`
-                // decides where the well ends: at the run, square there, the
-                // run being the control's right end. Same side-label inset,
-                // same content band, same depth cap as its paint.
+                // A plain well only when there is no -/+ run; with one the
+                // control is a field ([`Self::fields`]) and its -/+ seam a
+                // groove ([`Self::grooves`]). Same side-label inset, same
+                // content band, same depth cap as its paint.
                 if let Some(sb) = &self.spinboxes[i] {
                     let (x, y, w, h) = sb.rect();
                     let ty = sb.label_strip();
@@ -1813,8 +1804,6 @@ impl ParametersBg {
                 // The top-label band stays outside the relief like every other host.
                 let ty = w.label_strip();
                 let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                // A text box joined to its picker is square at the seam,
-                // as the box's own carve is (`TextBox::well`).
                 // A text box joined to its picker is half of a field
                 // ([`Self::fields`]), drawn there.
                 if is_text_row(&p.2) && self.texts[i].as_ref().is_some_and(|t| t.inner().joined_right) {
@@ -1826,65 +1815,14 @@ impl ParametersBg {
         out
     }
 
-    /// The textpick picker buttons' trough rings — `(x, y, w, h, radii, depth)`
-    /// for [`crate::scene::paint::PaintCtx::trough_edges`], drawn by the host
-    /// AFTER [`Self::reliefs`]. These are the rows' FLUSH inset controls — the
-    /// textpick picker button, the spinbox's -/+ run, the dropdown trigger
-    /// (the widget's own `inset_plate`): faces
-    /// level with the surface they sit in, so the control reads as part of
-    /// the plate, marked off by its seam alone. On the sides a control adjoins its well, the WELL'S
-    /// OWN WALL is the seam's far side (the face reaches the wall's base and
-    /// that trough edge is suppressed — a lip of its own there doubles the
-    /// valley); only edges facing open floor carve their own wall. They
-    /// cannot ride in [`Self::reliefs`], whose tuple only speaks boss/recess.
-    /// Radii are the well radius's parallel curve at each control's inset;
-    /// depths match the well's carve, so seam and wall read as one family.
-    #[allow(clippy::type_complexity)]
-    pub fn troughs(
-        &self,
-    ) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32, (bool, bool, bool, bool))> {
-        if !self.visible || !crate::layout::control_relief() {
-            return Vec::new();
-        }
-        let mut out = Vec::new();
-        let hidden = self.hidden_rows();
-        for (i, p) in self.display_params.iter().enumerate() {
-            if hidden[i] {
-                continue;
-            }
-            // A textpick row's picker and a spinbox's -/+ run are the flush
-            // ends of fields ([`Self::fields`]), not troughs of their own.
-            if p.2.starts_with("textpick") || p.2.starts_with("spinbox") {
-                continue;
-            }
-            if p.2.starts_with("choice") {
-                // The dropdown trigger: the widget's own raised paint is one
-                // `inset_plate` on its content band — the same ring here, on
-                // the same band (top-label band excluded),
-                // same radius, same depth cap. The face stays the plate: the
-                // pane carries no dropdown fill (a `Border` face never reaches
-                // the rounded-quad view), so the trigger is flush and bare.
-                if let Some(d) = &self.choices[i] {
-                    let (x, y, w, h) = d.rect();
-                    if w > 0.0 && h > 0.0 {
-                        let ty = d.label_strip();
-                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                        let r = crate::layout::dropdown_corner_radius();
-                        out.push((x, y + ty, w, h - ty, (r, r, r, r), depth, (true, true, true, true)));
-                    }
-                }
-            }
-            // A toggle contributes nothing here: its well and its glider plate
-            // are a recess and a boss, and both ride [`Self::reliefs`].
-        }
-        out
-    }
-
     /// The rows that are ONE field ([`crate::scene::paint::Prim::Field`]):
     /// a sunken well ending in a flush run, one outline round both —
-    /// `(x, y, w, h, radii, depth, split)`, drawn AFTER [`Self::troughs`].
+    /// `(x, y, w, h, radii, depth, split)`, drawn AFTER [`Self::reliefs`].
     /// A textpick row is its text box's well and its picker; a spinbox, its
-    /// value's well and its -/+ run. On the pane's own rule for wells and
+    /// value's well and its -/+ run; a dropdown row, a field that is all run
+    /// (its seam [`crate::scene::paint::FIELD_RUN_ONLY`] to the left), so
+    /// every flush control in the pane has the same edge. They replaced
+    /// `troughs()` on 2026-10-01. On the pane's own rule for wells and
     /// troughs: the content band as the outline, the wall straddling it.
     #[allow(clippy::type_complexity)]
     pub fn fields(&self) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32, f32)> {
@@ -1911,6 +1849,21 @@ impl ParametersBg {
                         out.push((x, y + ty, dx + dw - x, h - ty, (r, r, r, r), depth, dx));
                     }
                 }
+            } else if p.2.starts_with("choice") {
+                // The dropdown trigger: a field that is all run — the
+                // widget's own raised paint (`ControlPlate::with_run_edge`)
+                // on the same band, radius and depth cap. Until 2026-10-01
+                // a trough, whose edge differed from the run's at the end of
+                // a text row's field.
+                if let Some(d) = &self.choices[i] {
+                    let (x, y, w, h) = d.rect();
+                    let ty = d.label_strip();
+                    if w > 0.0 && h - ty > 0.0 {
+                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
+                        let r = crate::layout::dropdown_corner_radius();
+                        out.push((x, y + ty, w, h - ty, (r, r, r, r), depth, x - crate::scene::paint::FIELD_RUN_ONLY));
+                    }
+                }
             } else if p.2.starts_with("spinbox") {
                 if let Some(sb) = &self.spinboxes[i] {
                     let (x, y, w, h) = sb.rect();
@@ -1929,7 +1882,7 @@ impl ParametersBg {
     }
 
     /// The engraved seams companion — `(a, b, width, depth, host)` for
-    /// [`crate::scene::paint::PaintCtx::groove`], drawn AFTER [`Self::troughs`]
+    /// [`crate::scene::paint::PaintCtx::groove`], drawn AFTER [`Self::fields`]
     /// (a groove engraves the surface the trough's control face provides).
     /// Today: the seam dividing a spinbox's -/+ run into its two buttons —
     /// the breadcrumb's segment-seam language at miniature scale.
@@ -2133,14 +2086,6 @@ impl Paint for ParametersBg {
                 (true, false) => ctx.boss_edges(rect, radii, rd, edges),
                 (false, true) => ctx.recess_edges_tinted(rect, radii, rd, edges, Self::HOVER_TINT),
                 (false, false) => ctx.recess_edges(rect, radii, rd, edges),
-            }
-        }
-        for (tx2, ty2, tw2, th2, radii, td, tedges) in self.troughs() {
-            let rect = Rect { x: tx2, y: ty2, width: tw2, height: th2 };
-            if hovered(tx2, ty2, tw2, th2) {
-                ctx.trough_edges_tinted(rect, radii, td, tedges, Self::HOVER_TINT);
-            } else {
-                ctx.trough_edges(rect, radii, td, tedges);
             }
         }
         for (fx, fy, fw, fh, radii, fd, split) in self.fields() {
@@ -3923,7 +3868,6 @@ mod tests {
         assert_eq!((fx, fy, fx + fw, fy + fh), (tx, dy, dx + dw, dy + dh), "the field spans box and picker");
         assert_eq!(fradii, (rr, rr, rr, rr), "its own radius at all four corners");
         assert_eq!(split, dx, "the seam is where the picker begins");
-        assert!(p.inner().troughs().iter().all(|t| t.0 != dx), "the picker draws no ring of its own");
         assert!(p.inner().reliefs().iter().all(|r| !(r.0 == tx && r.2 == tw)), "nor the box a well of its own");
 
         // Both text variants lay out at the same row height.
@@ -3941,6 +3885,32 @@ mod tests {
         assert_eq!(px_, tx, "menu left-aligns with the box");
         assert!(pw >= tw, "menu at least as wide as the box");
         assert!(py_ >= ty + th - 1.0, "menu hangs below the box");
+    }
+
+    /// A dropdown trigger's edge is a field's run: its own paint and the
+    /// pane's re-emission both draw a field that is all run, so its edge
+    /// matches the picker at the end of a text row and the -/+ run of a
+    /// spinbox. Never a trough, whose outer half differed.
+    #[test]
+    fn a_dropdown_trigger_wears_the_runs_edge() {
+        use crate::scene::paint::{PaintCtx, Prim, FIELD_RUN_ONLY};
+        if !crate::layout::control_relief() {
+            return;
+        }
+        let p = panel_with(&[("Mode", "b", "choice:a,b,c")]);
+        let d = p.choices[0].as_ref().expect("a dropdown");
+        let (x, y, w, h) = d.rect();
+        let ty = d.label_strip();
+        let fields = p.inner().fields();
+        assert_eq!(fields.len(), 1, "{fields:?}");
+        let (fx, fy, fw, fh, _, _, split) = fields[0];
+        assert_eq!((fx, fy, fw, fh), (x, y + ty, w, h - ty), "on the trigger's band");
+        assert_eq!(split, x - FIELD_RUN_ONLY, "all run, no well");
+        let mut pc = PaintCtx::new();
+        Paint::paint(d.inner(), Rect { x, y: y + ty, width: w, height: h - ty }, &mut pc);
+        let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
+        assert!(prims.iter().any(|p| matches!(p, Prim::Field { rect, split, .. } if *split < rect.x - 100.0)), "{prims:?}");
+        assert!(!prims.iter().any(|p| matches!(p, Prim::Trough { .. })), "no trough");
     }
 
     #[test]

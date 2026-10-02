@@ -4119,6 +4119,15 @@ pub trait RenderTarget {
     fn inset_plate_tinted(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, _tint: [f32; 3]) {
         self.inset_plate(color, x, y, w, h, radius, depth);
     }
+    /// A flush plate with a field run's edge
+    /// ([`crate::scene::paint::PaintCtx::flush_run`]) — the dropdown's grown
+    /// trigger. Hosts without the field prim draw the inset plate.
+    fn flush_run(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: Option<[f32; 3]>) {
+        match tint {
+            Some(t) => self.inset_plate_tinted(color, x, y, w, h, radius, depth, t),
+            None => self.inset_plate(color, x, y, w, h, radius, depth),
+        }
+    }
     /// One step carve from a widget's `paint` ([`ReliefCarve`]) — offered here
     /// for the same reason as `inset_plate`: the legacy `all_quads` stream
     /// carries no relief prims, so a flat-path host never sees them.
@@ -4346,18 +4355,22 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
             // `Prim::Field` replaced — the well to the seam, the run's flush
             // plate past it.
             Prim::Field { rect, radii, depth, split, tint } => {
-                pc.relief_carve(&ReliefCarve {
-                    kind: CarveKind::Recess { tint },
-                    x: rect.x,
-                    y: rect.y,
-                    w: (split - rect.x).max(0.0),
-                    h: rect.height,
-                    radii: (radii.0, 0.0, 0.0, radii.3),
-                    depth,
-                    edges: (true, true, true, true),
-                });
+                // All run and no well (`PaintCtx::flush_run`): the plate alone.
+                if split > rect.x {
+                    pc.relief_carve(&ReliefCarve {
+                        kind: CarveKind::Recess { tint },
+                        x: rect.x,
+                        y: rect.y,
+                        w: split - rect.x,
+                        h: rect.height,
+                        radii: (radii.0, 0.0, 0.0, radii.3),
+                        depth,
+                        edges: (true, true, true, true),
+                    });
+                }
                 let r = radii.1.max(radii.2);
-                let (rx, rw) = (split, (rect.x + rect.width - split).max(0.0));
+                let rx = split.max(rect.x);
+                let rw = (rect.x + rect.width - rx).max(0.0);
                 match tint {
                     Some(t) => pc.inset_plate_tinted([0.0; 4], rx, rect.y, rw, rect.height, r, depth, t),
                     None => pc.inset_plate([0.0; 4], rx, rect.y, rw, rect.height, r, depth),

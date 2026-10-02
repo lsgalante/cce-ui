@@ -342,6 +342,16 @@ nothing at the outline, where both sides stand at half the step. Never grouped i
 plate (its profile is not a monotonic step); the overlay's host-box slot carries `split`.
 The legacy banded path and flat hosts (`layout.rs`'s bridge) draw the two-box form.
 
+**A dropdown trigger wears the run's edge too** (the same day): a field that is all run,
+its seam `FIELD_RUN_ONLY` px to its left (`PaintCtx::flush_run`), in place of
+`Prim::Trough` — `ControlPlate::with_run_edge`, which the Dropdown's raised trigger sets,
+the expanded menu's plate (`RenderTarget::flush_run`, which a host without the prim
+answers with its inset plate), and the pane's dropdown rows, now in `fields` (the pane's
+`troughs()` list went: nothing in the pane draws a trough any more). So every flush
+control in a parameter pane has one edge. Other flush controls — buttons, breadcrumbs,
+the font selector — still wear the trough. `a_dropdown_trigger_wears_the_runs_edge` is
+the test.
+
 The pieces that feed it: `ParametersBg::fields` (the pane's list, drawn after its troughs,
 hover-tinted like them; textpick rows and spinboxes with a run are in neither `reliefs`
 nor `troughs`), `TextBox::joined_right` (the box stops at the seam), `Dropdown::set_radii`

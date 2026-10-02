@@ -650,6 +650,9 @@ impl Dropdown {
             )
             .with_radii((r4[0], r4[1], r4[2], r4[3]))
             .with_depth(depth)
+            // The edge a field's run wears, not a trough's: the same edge
+            // as the picker at the end of a text row beside it.
+            .with_run_edge(true)
             .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint));
             ctx.control_plate(&plate);
             return;
@@ -1082,7 +1085,7 @@ impl Paint for Dropdown {
                 (radius, radius, radius, radius),
                 depth,
             );
-            pc.inset_plate(face, t.x, t.y, t.width, t.height, tr.0, depth);
+            pc.flush_run(face, t.x, t.y, t.width, t.height, tr.0, depth, None);
         } else {
             pc.rect_with_radius(self.border_color(), ux, uy, uw, uh, radius);
             pc.rect_with_radius(face, ux + 1.0, uy + 1.0, uw - 2.0, uh - 2.0, (radius - 1.0).max(0.0));

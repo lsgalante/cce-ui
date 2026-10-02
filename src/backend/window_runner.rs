@@ -2549,22 +2549,27 @@ pub fn tessellate_display_list(
                 // has no blended outline, and the legacy path exists only for
                 // A/B comparison.
                 let all = (true, true, true, true);
-                let lw = (*split - rect.x).max(0.0);
-                push_bevel_edge_vertices_banded(
-                    rect.x, rect.y, lw, rect.height, (radii.0, 0.0, 0.0, radii.3), *depth,
-                    sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(*depth), all,
-                    EdgeKind::Step, &mut verts,
-                );
-                let (rx, rw) = (*split, (rect.x + rect.width - *split).max(0.0));
+                if *split > rect.x {
+                    push_bevel_edge_vertices_banded(
+                        rect.x, rect.y, *split - rect.x, rect.height, (radii.0, 0.0, 0.0, radii.3), *depth,
+                        sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(*depth), all,
+                        EdgeKind::Step, &mut verts,
+                    );
+                }
+                let rx = split.max(rect.x);
+                let rw = (rect.x + rect.width - rx).max(0.0);
+                // All run (`PaintCtx::flush_run`): its own left corners.
+                let (l0, l3) = if *split > rect.x { (0.0, 0.0) } else { (radii.0, radii.3) };
                 let half = *depth * 0.5;
                 push_bevel_edge_vertices_banded(
-                    rx, rect.y, rw, rect.height, (0.0, radii.1, radii.2, 0.0), half,
+                    rx, rect.y, rw, rect.height, (l0, radii.1, radii.2, l3), half,
                     sw, sh, [0.0; 4], no, -1.0, default_bevel_bands(half), all,
                     EdgeKind::Step, &mut verts,
                 );
                 let ir = (radii.1 - half).max(0.0);
+                let il = if *split > rect.x { 0.0 } else { (radii.0 - half).max(0.0) };
                 push_bevel_edge_vertices_banded(
-                    rx + half, rect.y + half, rw - *depth, rect.height - *depth, (0.0, ir, ir, 0.0), half,
+                    rx + half, rect.y + half, rw - *depth, rect.height - *depth, (il, ir, ir, il), half,
                     sw, sh, [0.0; 4], no, 1.0, default_bevel_bands(half), all,
                     EdgeKind::Step, &mut verts,
                 );
