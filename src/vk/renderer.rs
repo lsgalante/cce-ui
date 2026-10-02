@@ -397,6 +397,8 @@ pub struct VkRenderer {
     /// Built lazily on the first `set_rt_scene`, so ordinary UI apps never
     /// compile the path-tracer pipeline.
     rt: Option<RtStage>,
+    /// See [`VkRenderer::set_rt_background`].
+    rt_background: Option<[f32; 3]>,
 
     desired_extent: vk::Extent2D,
     corner_radius_px: f32,
@@ -1092,6 +1094,7 @@ impl VkRenderer {
             scene,
             image,
             rt: None,
+            rt_background: None,
             desired_extent: vk::Extent2D { width: width.max(1), height: height.max(1) },
             corner_radius_px,
             swapchain_dirty: false,
@@ -1677,12 +1680,25 @@ impl VkRenderer {
         );
     }
 
+    /// What a camera ray that meets nothing shows in the traced pane: a
+    /// colour in LINEAR RGB (what the raster pass's vertex colours are), or
+    /// None for the sky, which is what every miss showed until 2026-10-02.
+    /// Only the camera ray: a bounce that leaves the scene still meets the
+    /// sky, the tracer's one light, so a backdrop changes what is seen
+    /// behind the scene and not how it is lit. Kept here and handed over at
+    /// each `stage_rt`, so it may be set before the first scene; a change
+    /// restarts the accumulation.
+    pub fn set_rt_background(&mut self, color: Option<[f32; 3]>) {
+        self.rt_background = color;
+    }
+
     /// Stage one progressive path-tracing pass into the viewport pane
     /// (physical pixels) for the next `draw_frame`. Call it every frame while
     /// RT mode is on: each frame adds a sample; a camera/pane/scene change
     /// restarts the accumulation. No-op until `set_rt_scene` has run.
     pub fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera) {
         if let Some(rt) = self.rt.as_mut() {
+            rt.set_background(self.rt_background);
             rt.stage(
                 &self.core.device,
                 self.core.allocator.as_mut().unwrap(),

@@ -125,6 +125,7 @@ struct RtParams {
     img_origin: [f32; 4],
     img_u: [f32; 4],
     img_v: [f32; 4],
+    background: [f32; 4],
 }
 
 // --- BVH construction (binned SAH) ---
@@ -867,6 +868,9 @@ pub(crate) struct RtStage {
     /// Samples per dispatch: 1 interactive, higher for offscreen rendering.
     spp: u32,
     staged: bool,
+    /// What a camera ray that meets nothing shows, linear RGB; None is the
+    /// sky. See [`RtStage::set_background`].
+    background: Option<[f32; 3]>,
 }
 
 impl RtStage {
@@ -1126,7 +1130,20 @@ impl RtStage {
                 sample_index: 0,
                 spp: 1,
                 staged: false,
+                background: None,
             }
+        }
+    }
+
+    /// What a camera ray that meets nothing shows: a colour (linear RGB),
+    /// or None for the sky. The sky stays the light either way — a bounce
+    /// that leaves the scene still meets it — so this is the backdrop and
+    /// not the lighting, as an app's raster background colour is. A change
+    /// restarts the accumulation.
+    pub(crate) fn set_background(&mut self, background: Option<[f32; 3]>) {
+        if self.background != background {
+            self.background = background;
+            self.sample_index = 0;
         }
     }
 
@@ -1842,6 +1859,10 @@ impl RtStage {
             img_origin,
             img_u,
             img_v,
+            background: match self.background {
+                Some([r, g, b]) => [r, g, b, 1.0],
+                None => [0.0; 4],
+            },
         };
         let frame = &mut self.frames[frame_index];
         frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()
@@ -2156,6 +2177,12 @@ impl RtOffscreen {
                 core,
             }
         }
+    }
+
+    /// What a camera ray that meets nothing shows — see
+    /// `VkRenderer::set_rt_background`.
+    pub fn set_background(&mut self, background: Option<[f32; 3]>) {
+        self.stage.set_background(background);
     }
 
     /// Replace the scene (same schema as `VkRenderer::set_rt_scene`).
@@ -2742,5 +2769,41 @@ mod tests {
         assert!(cr > cb, "center not red-dominant: r={cr} b={cb}");
         let (sr, _sg, sb, _sa) = at(1, 1);
         assert!(sb >= sr, "corner sky not blue-ish: r={sr} b={sb}");
+    }
+
+    /// A background colour is what a camera ray that meets nothing shows —
+    /// every sample's, not only the one that writes the denoiser's features
+    /// (a render takes several per dispatch) — while the sky still lights
+    /// what is hit; and None is the sky again.
+    #[test]
+    #[ignore = "requires a Vulkan device"]
+    fn test_offscreen_background_is_what_a_miss_shows() {
+        let mut off = RtOffscreen::new();
+        off.set_scene(
+            &[RtTriangle { p0: [-1.0, -1.0, 0.0], p1: [1.0, -1.0, 0.0], p2: [0.0, 1.5, 0.0], material: 0 }],
+            &[RtMaterial { albedo: [0.8, 0.8, 0.8], emission: [0.0; 3] }],
+        );
+        let proj = glam::Mat4::perspective_rh(0.9, 1.0, 0.1, 100.0);
+        let view = glam::Mat4::look_at_rh(glam::Vec3::new(0.0, 0.0, 3.0), glam::Vec3::ZERO, glam::Vec3::Y);
+        let camera = RtCamera { inv_mvp: (proj * view).inverse().to_cols_array_2d() };
+        let (w, h) = (32u32, 32u32);
+        let render = |off: &mut RtOffscreen| {
+            let px = off.render(camera, w, h, 16);
+            let at = |x: u32, y: u32| {
+                let i = ((y * w + x) * 4) as usize;
+                [px[i], px[i + 1], px[i + 2]]
+            };
+            (at(1, 1), at(w / 2, h / 2))
+        };
+        let (sky, lit) = render(&mut off);
+
+        off.set_background(Some([0.0, 0.0, 0.0]));
+        let (corner, centre) = render(&mut off);
+        assert_eq!(corner, [0, 0, 0], "the corner is the backdrop, in every sample");
+        assert!(centre.iter().all(|&c| c > 60), "the sky still lights the triangle: {centre:?}");
+        assert!(centre.iter().zip(lit).all(|(&a, b)| a.abs_diff(b) < 24), "and lights it as before: {centre:?} against {lit:?}");
+
+        off.set_background(None);
+        assert_eq!(render(&mut off).0, sky, "None is the sky");
     }
 }

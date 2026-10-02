@@ -38,6 +38,12 @@ struct Params {
     img_u: vec4<f32>,
     // xyz = the left edge, top to bottom; w = the texture's height.
     img_v: vec4<f32>,
+    // What a camera ray that meets nothing shows: rgb linear, w = 1 when
+    // set. w = 0 shows the sky, as every miss did before. Only the camera
+    // ray — a bounce that leaves the scene still meets the sky, which is
+    // the light, so the backdrop changes what is seen behind the scene and
+    // not how the scene is lit.
+    background: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -156,7 +162,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     features[2u * idx] = vec4<f32>(0.0, 0.0, 0.0, 1e30);
                     features[2u * idx + 1u] = vec4<f32>(1.0, 1.0, 1.0, 0.0);
                 }
-                radiance = radiance + throughput * sky(rd);
+                // `straight`, not `primary`: every sample's camera ray,
+                // where `primary` is the one sample that writes features.
+                if straight && params.background.w > 0.5 {
+                    radiance = radiance + throughput * params.background.rgb;
+                } else {
+                    radiance = radiance + throughput * sky(rd);
+                }
                 break;
             }
             let tri = tris[hit.tri];
