@@ -348,7 +348,10 @@ down to the floor, meeting the face's lip where both stand at half the step; it 
 out at the outline, which runs straight across. **The run is laid out a wall wider than
 its face**, so the BUTTON is what reaches the well and what it carries stands in its
 middle: a textpick picker is `PICK_W` plus a wall, its arrow centred
-(`Dropdown::center_arrow`), and a spinbox's run begins a wall before its flat layout's
+(`Dropdown::center_arrow`) — which is a trigger's ARROW SLOT (`dropdown::arrow_slot`),
+the right end every dropdown centres its ▼ in, so the picker's arrow and every other
+trigger's stand in one column (since the same day; they stood 18 px in from the right
+end, two pixels off the picker's; `a_pickers_arrow_lines_up_with_a_dropdowns`) — and a spinbox's run begins a wall before its flat layout's
 buttons (`SpinGeom::run_x`), its face halved at its middle by the -/+ seam with each
 glyph in the middle of its half — hit zones, washes, glyphs and relief all read
 `SpinGeom`. For a few hours on 2026-10-02 the seam was the right side mirrored instead

@@ -50,6 +50,18 @@ fn monospace_cell_width(font_family: &str, font_size: f32) -> f32 {
     ((w_m20 - w_m10) / 10.0).max(1.0)
 }
 
+/// Width of the ARROW SLOT, a trigger's right end in which its ▼ is
+/// centred: `ARROW_SLOT` and a relief wall at this band height. A textpick
+/// picker (`ParametersBg`) is exactly this wide with its arrow in its middle,
+/// so its arrow lines up with every other trigger's in a column of rows.
+/// The wall is the lip a flush run's face rises out of at a field's seam.
+pub fn arrow_slot(band_h: f32) -> f32 {
+    ARROW_SLOT + crate::layout::bevel_width().min(band_h * 0.2)
+}
+
+/// The arrow slot less its wall — a picker's face.
+pub const ARROW_SLOT: f32 = 24.0;
+
 /// The advance width `paint_text` will actually lay `text` out to.
 ///
 /// This is the single source of truth shared by the sizing pass (`content_width` /
@@ -149,9 +161,9 @@ pub struct Dropdown {
     /// parameter pane's textpick picker button nested in its TextBox), where
     /// the menu should span the whole field, not the button sliver.
     pub popover_anchor: Option<Rect>,
-    /// The ▼ stands in the MIDDLE of the trigger instead of at its right
-    /// end — for a trigger that carries nothing else (the textpick
-    /// picker), whose padding about the arrow should be even.
+    /// The ▼ stands in the MIDDLE of the trigger instead of in the arrow
+    /// slot at its right end — for a trigger that carries nothing else
+    /// (the textpick picker), whose padding about the arrow should be even.
     pub center_arrow: bool,
     pub font_family: String,
     pub custom_display_text: Option<String>,
@@ -727,6 +739,17 @@ impl Dropdown {
         }
     }
 
+    /// Where the ▼ is drawn on a trigger band: centred in the arrow slot
+    /// at its right end ([`arrow_slot`]), or in the whole band under
+    /// `center_arrow`. Measured at the size the glyph is drawn at — the
+    /// configured font's, which the runner reads off the font string.
+    /// Until 2026-10-02 it stood 18 px in from the right end, and the
+    /// picker's centred arrow stood two pixels left of every other.
+    fn arrow_x(&self, band: Rect, font_family: &str, font_size: f32) -> f32 {
+        let slot = if self.center_arrow { band.width } else { arrow_slot(band.height).min(band.width) };
+        band.x + band.width - 0.5 * (slot + text_advance("▼", font_family, font_size))
+    }
+
     /// Emit the selected-text (per-character fade against the right edge) and the ▼ arrow —
     /// the legacy `text_labels` body minus the control label (the adapter's base-label
     /// machinery draws that, with the +4px `detached_label_inset`).
@@ -817,11 +840,7 @@ impl Dropdown {
         // fight rather than help.
         // The glyph is drawn at the configured font's size (the runner
         // reads it off the font string), so that is the size it is measured at.
-        let arrow_x = if self.center_arrow {
-            x + 0.5 * (w - text_advance("▼", &font_family, font_size))
-        } else {
-            x + w - 18.0
-        };
+        let arrow_x = self.arrow_x(content, &font_family, font_size);
         ctx.text_with(
             "▼",
             arrow_x,
@@ -1118,9 +1137,10 @@ impl Paint for Dropdown {
                 &font,
                 band_bounds,
             );
+            let (family, size) = crate::layout::control_label_font_detached_parsed();
             pc.text_with_font_and_bounds(
                 "▼",
-                tx + tw - 18.0,
+                self.arrow_x(rect, &family, size),
                 crate::layout::center_text_y(ty, th, 10.0),
                 10.0,
                 [0x83 as f32 / 255.0, 0x83 as f32 / 255.0, 0x8a as f32 / 255.0, 1.0],
@@ -1668,7 +1688,8 @@ mod tests {
         let adv = super::text_advance("▼", &family, size);
         let x = arrow_x(true);
         assert!((x + 0.5 * adv - 25.0).abs() < 1e-3, "centred on the trigger's middle: {x} + {adv}/2");
-        assert_eq!(arrow_x(false), 10.0 + 30.0 - 18.0, "an ordinary trigger keeps it at its right end");
+        let slot = super::arrow_slot(24.0);
+        assert!((arrow_x(false) + 0.5 * adv - (40.0 - 0.5 * slot)).abs() < 1e-3, "an ordinary trigger centres it in the slot at its right end");
     }
 
     #[test]

@@ -53,7 +53,7 @@ fn is_text_row(t: &str) -> bool {
 /// Width of a textpick row's picker button: the right end of the field,
 /// a flush control plate reaching the field's outer edge as a dropdown
 /// trigger's does, the text box's well ending at the seam beside it.
-const PICK_W: f32 = 24.0;
+const PICK_W: f32 = crate::widget::input::dropdown::ARROW_SLOT;
 
 pub struct ParametersBg {
     /// A row VALUE changed inside `tick` (a picker stream folded into its
@@ -1088,12 +1088,12 @@ impl ParametersBg {
                     let label_top = if inline[i] { 0.0 } else { crate::layout::control_label_strip() };
                     let band_h = r.3 - label_top;
                     let rr = crate::layout::textbox_corner_radius();
-                    // The picker begins a wall before PICK_W: that is the
-                    // seam, where the well's floor ends and its wall meets
-                    // the button's lip, so the button is PICK_W wide where
-                    // it is a face and the arrow sits in its middle.
-                    let depth = crate::layout::bevel_width().min(band_h * 0.2);
-                    d.set_rect(r.0 + r.2 - PICK_W - depth, r.1 + label_top, PICK_W + depth, band_h);
+                    // The picker is a trigger's arrow slot: PICK_W and a
+                    // wall, the wall being the lip its face rises out of at
+                    // the seam. Its arrow in its middle is then where every
+                    // other trigger's arrow is, in its slot.
+                    let pick_w = crate::widget::input::dropdown::arrow_slot(band_h);
+                    d.set_rect(r.0 + r.2 - pick_w, r.1 + label_top, pick_w, band_h);
                     d.inner_mut().set_radii(Some((0.0, rr, rr, 0.0)));
                     d.inner_mut().center_arrow = true;
                     // The menu hangs off the WHOLE field, not the button
@@ -3859,6 +3859,22 @@ mod tests {
     /// The textpick text-row variant: a TextBox AND a menu-button Dropdown
     /// share the row — the picker takes a right-edge sliver, its options come
     /// from the type string, and a plain text row builds no picker.
+    /// A textpick row's picker centres its arrow, and every other dropdown
+    /// row's arrow stands in the same column: the picker is a trigger's
+    /// arrow slot (`dropdown::arrow_slot`).
+    #[test]
+    fn a_pickers_arrow_lines_up_with_a_dropdowns() {
+        let p = panel_with(&[
+            ("Name", "mass", "textpick:Norm,UV,Pos,Col"),
+            ("Type", "Float", "choice:Float,Float3,Int"),
+        ]);
+        let arrow = |i: usize| {
+            let d = p.choices[i].as_ref().unwrap();
+            d.own_text_labels().into_iter().find(|l| l.text == "▼").expect("an arrow").x
+        };
+        assert!((arrow(0) - arrow(1)).abs() < 1e-3, "picker {} vs dropdown {}", arrow(0), arrow(1));
+    }
+
     #[test]
     fn textpick_rows_carry_a_picker() {
         let p = panel_with(&[
