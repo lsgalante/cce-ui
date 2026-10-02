@@ -75,6 +75,47 @@ pub fn request_close_fade() -> std::time::Duration {
     std::time::Duration::from_millis(ms.min(2000))
 }
 
+/// Ask the compositor to bring a window to the user: un-minimize it, focus
+/// it, raise it, and pan the camera to it — `ccectl focus-window <query>`.
+///
+/// `query` is what the compositor resolves: a numeric window id, else an
+/// app_id (an exact match beats a substring one). An app bringing *itself*
+/// forward passes its own app_id — which is what a single-instance app does
+/// when a later launch forwards to it, or the work lands in a window parked
+/// off-camera and the launch looks like it did nothing. (xdg-activation is
+/// not the route to this: the compositor deliberately answers it with an
+/// attention notification, not focus.)
+///
+/// Blocks for one round trip, bounded at a second for the same reason as
+/// [`request_close_fade`] — `send_command` reads with no deadline, and a
+/// compositor wedged mid-frame must not hang the caller. `Err` when there is
+/// no compositor to ask, it does not answer in time, it answers `error: …`
+/// (no such window, no seat), or `query` is empty or spans lines.
+pub fn focus_window(query: &str) -> std::io::Result<()> {
+    focus_window_at(&socket_path("cce"), query)
+}
+
+fn focus_window_at(path: &str, query: &str) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    const REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+    let query = query.trim();
+    // A newline would end this command and start another on the control
+    // socket; refuse rather than pass an injection along.
+    if query.is_empty() || query.contains(['\n', '\r']) {
+        return Err(Error::new(ErrorKind::InvalidInput, format!("not a window query: {query:?}")));
+    }
+    let mut stream = UnixStream::connect(path)?;
+    stream.set_write_timeout(Some(REPLY_TIMEOUT))?;
+    stream.set_read_timeout(Some(REPLY_TIMEOUT))?;
+    stream.write_all(format!("focus-window {query}\n").as_bytes())?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply)?;
+    match reply.trim() {
+        "ok" => Ok(()),
+        other => Err(Error::new(ErrorKind::Other, format!("focus-window {query}: {other}"))),
+    }
+}
+
 /// One request line from a socket client, bounded in size and in TOTAL time.
 ///
 /// For a listener thread that serves one client after another: a plain
@@ -155,5 +196,53 @@ mod tests {
         let (mut client, server) = UnixStream::pair().unwrap();
         client.write_all(&[b'z'; 2000]).unwrap();
         assert_eq!(read_request_line(&server, 1024, Duration::from_millis(200)), None);
+    }
+
+    /// Against a stand-in compositor on a private path (never the session's
+    /// control socket): the command it sends, `ok` as success, `error: …`
+    /// as an error, a silent compositor bounded, a bad query never sent.
+    #[test]
+    fn focus_window_sends_one_command_and_reads_the_verdict() {
+        use super::focus_window_at;
+        use std::io::Read;
+        use std::os::unix::net::UnixListener;
+
+        let path = format!("/tmp/cce-ui-focus-test-{}.sock", std::process::id());
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        let replies: [&[u8]; 3] = [b"ok\n", b"error: window not found\n", b""];
+        let server = std::thread::spawn(move || {
+            let mut got = Vec::new();
+            for reply in replies {
+                let (mut conn, _) = listener.accept().unwrap();
+                let line = read_request_line(&conn, 1024, Duration::from_secs(1)).unwrap();
+                got.push(line);
+                if reply.is_empty() {
+                    // Say nothing and keep the connection open: a wedged compositor.
+                    let mut rest = Vec::new();
+                    let _ = conn.read_to_end(&mut rest);
+                } else {
+                    conn.write_all(reply).unwrap();
+                }
+            }
+            got
+        });
+
+        assert!(focus_window_at(&path, "cce-browser").is_ok());
+        let err = focus_window_at(&path, "  nothing-here ").unwrap_err();
+        assert!(err.to_string().contains("window not found"), "{err}");
+        let t = Instant::now();
+        assert!(focus_window_at(&path, "12").is_err(), "a silent compositor is an error");
+        assert!(t.elapsed() < Duration::from_secs(3), "and a bounded one: {:?}", t.elapsed());
+        for bad in ["", "   ", "a\nquit", "a\rb"] {
+            assert_eq!(
+                focus_window_at(&path, bad).unwrap_err().kind(),
+                std::io::ErrorKind::InvalidInput,
+                "{bad:?}"
+            );
+        }
+        let got = server.join().unwrap();
+        assert_eq!(got, ["focus-window cce-browser\n", "focus-window nothing-here\n", "focus-window 12\n"]);
+        let _ = std::fs::remove_file(&path);
     }
 }
