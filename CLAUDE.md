@@ -300,6 +300,23 @@ app sees the press (`close_popovers_missed_by_press`) — and a popover covered 
 outer popover's claim always misses — so the dropdown may already have taken the press
 by the time the app is asked.
 
+### A dropdown's text names its font (since 2026-10-01)
+
+The trigger's text and ▼ are emitted with `control_label_font_detached()` named on the
+prim, where they used to leave the font to the host. Through the widget walk the
+adapter attached `widget_font` and nothing changed; but a dropdown painted as a STAMP
+by another widget (the designer's palette paints its choice rows so) took that
+widget's font, and the menu `draw_popover` grows out of it — which has always named
+the font — opened in a different one. The whole configured string is passed, family
+and size together (`Berkeley Mono 14`): the runner parses both and the size wins over
+the prim's, which is how the menu's hard-coded 12 px rows and 10 px ▼ come out at the
+trigger's size. Passing the family alone breaks exactly that.
+
+A host that draws an open dropdown should hand `render_popover` a real `PaintCtx`, as
+cce-files does: a `PopoverCollector` keeps fills as plain rects, so the grown plate
+loses its relief and its corners (`inset_plate` degrades to a flat fill there). The
+designer's params pane went through one until the same day.
+
 ### A row can open a submenu (since 2026-09-29)
 
 `context_menu::set_row_submenu(idx, SubmenuSpec { options, header_count, sliders })`,

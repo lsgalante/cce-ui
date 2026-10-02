@@ -781,7 +781,13 @@ impl Dropdown {
             };
 
             if !skip_char && !piece.trim().is_empty() {
-                ctx.text(piece, cur_x, text_y, font_size, color);
+                // The font named here and not left to the host: a dropdown
+                // painted as a stamp by another widget (the designer's
+                // palette paints its choice rows so) took that widget's
+                // font, and its menu then opened in this one. The whole
+                // configured string, as `widget_font` and `draw_popover`
+                // pass it — the runner reads its size too.
+                ctx.text_with(piece, cur_x, text_y, font_size, color, Some(crate::layout::control_label_font_detached()), None);
             }
         }
 
@@ -795,7 +801,7 @@ impl Dropdown {
             crate::layout::center_text_y(content.y, content.height, 10.0),
             10.0,
             [0x83, 0x83, 0x8a],
-            None,
+            Some(crate::layout::control_label_font_detached()),
             Some([content.x, content.y, content.x + content.width, content.y + content.height]),
         );
     }
