@@ -72,6 +72,12 @@ pub struct MenuPopup {
     placed: Option<(f32, f32, f32, f32)>,
     /// The buffer scale last sent on the popup's surface.
     committed_scale: i32,
+    /// The menu is still drawn in the window until this popup is placed —
+    /// see `open_menu_popup`.
+    handoff: bool,
+    /// Placed after a hand-off and not drawn yet: the next frame draws it
+    /// AHEAD of the window's (`take_menu_popup_lead`).
+    lead: bool,
 }
 
 impl MenuPopup {
@@ -212,11 +218,22 @@ impl<A: Application> EngineState<A> {
                 return;
             }
         };
-        // Hosted from now: until the first configure places it, the menu is
-        // drawn nowhere — a few milliseconds, against a copy in the window
-        // that would blink out when the popup appears somewhere else.
-        context_menu::set_hosted(true);
-        self.menu_popup = Some(MenuPopup { popup, key, placed: None, committed_scale: 0 });
+        // A menu opened at the pointer is hosted from now: until the first
+        // configure places it, it is drawn nowhere — a few milliseconds,
+        // against a copy in the window that would blink out when the popup
+        // appears somewhere else.
+        //
+        // A TURNED page is not: it takes the place of a plate that was just
+        // on screen (the designer's dialog, which closed in the same
+        // dispatch), and drawn nowhere it was a frame of nothing between the
+        // two. Its place is known — the corner — so the window keeps drawing
+        // it until the popup is placed, and the frame after the configure
+        // commits the popup FIRST and then the window without it: for the
+        // time the window's frame takes to draw, the two stand one over the
+        // other at one place, where the other order left neither.
+        let handoff = context_menu::is_turned();
+        context_menu::set_hosted(!handoff);
+        self.menu_popup = Some(MenuPopup { popup, key, placed: None, committed_scale: 0, handoff, lead: false });
     }
 
     /// Close the popup. The renderer lets go
@@ -230,6 +247,12 @@ impl<A: Application> EngineState<A> {
         }
         self.menu_popup = None;
         context_menu::set_hosted(false);
+    }
+
+    /// Whether the next frame draws the popup ahead of the window's own: once,
+    /// for the first frame after a hand-off (see `open_menu_popup`).
+    pub(crate) fn take_menu_popup_lead(&mut self) -> bool {
+        self.menu_popup.as_mut().is_some_and(|p| std::mem::take(&mut p.lead))
     }
 
     /// The offset from the window of the menu popup, if `surface` is it.
@@ -298,8 +321,13 @@ impl<A: Application> PopupHandler for EngineState<A> {
         let (mp, slot) = (self.menu_popup.as_mut(), &mut self.menu_renderer);
         let Some(mp) = mp else { return };
         mp.placed = Some((x, y, w, h));
+        let handoff = std::mem::take(&mut mp.handoff);
         // Where it landed IS where the menu is — see the module docs.
         context_menu::place(x, y, h);
+        if handoff {
+            context_menu::set_hosted(true);
+            mp.lead = true;
+        }
 
         let (_, pw, ph) = Self::buffer_geometry(scale_factor, w, h);
         let surface_ptr = mp.popup.wl_surface().id().as_ptr() as *mut std::ffi::c_void;
@@ -327,7 +355,12 @@ impl<A: Application> PopupHandler for EngineState<A> {
             return;
         }
         self.redraw = true;
-        self.render_menu_popup();
+        // A handed-off menu is drawn on the next frame, after the window's
+        // own without it (see `open_menu_popup`); drawn here it would stand
+        // over the window's copy until that frame.
+        if !handoff {
+            self.render_menu_popup();
+        }
     }
 
     fn done(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, popup: &Popup) {

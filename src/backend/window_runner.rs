@@ -6613,8 +6613,16 @@ fn run_session<'l, A: Application>(
         if engine_state.redraw && !engine_state.frame_callback_pending {
             engine_state.redraw = false;
             if engine_state.first_configure_received {
+                // A menu handed over from the window commits first, so
+                // there is no moment with neither (`take_menu_popup_lead`).
+                let lead = engine_state.take_menu_popup_lead();
+                if lead {
+                    engine_state.render_menu_popup();
+                }
                 engine_state.render();
-                engine_state.render_menu_popup();
+                if !lead {
+                    engine_state.render_menu_popup();
+                }
                 rendered = true;
             }
         } else if !engine_state.redraw

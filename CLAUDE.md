@@ -588,7 +588,13 @@ there:
   runs `natural_geometry` is the larger of the two sizes, so the popup is repositioned
   to hold both and again to the page's own when it lands, and the runner asks for
   frames (`is_turning`). Only labels fade (`text_faded`); the leaving rows' geometry
-  is not drawn. `CCE_UI_TURN_MS` slows it down, to capture a turn frame by frame in a
+  is not drawn. **A turned page that needs a NEW popup is handed over from the
+  window** (`MenuPopup::handoff`): it stays drawn in the window until the popup's
+  first configure, and the frame after commits the popup ahead of the window
+  (`take_menu_popup_lead`). Hosted at once, as a menu opened at the pointer is, a
+  swipe back from the designer's dialog left a frame with neither plate — the dialog
+  gone, the popup not placed — and, drawn after the window, the popup arrived up to a
+  window frame's draw late. `CCE_UI_TURN_MS` slows it down, to capture a turn frame by frame in a
   shadow session. `a_page_turn_grows_the_plate_from_the_one_it_replaced` is the test.
 
 **Until this a row could open a SUBMENU** (2026-09-29 to 2026-10-02): a second
