@@ -1034,10 +1034,15 @@ cce-system-interface) to confirm behavior, not just the test suite.
 - `history.rs` — `History<T>`: the undo/redo snapshot stack (cap, gestures, grouped runs).
   The toolkit defines the stack and the routing, never the step — see the trait section.
 - `widget/` — `container/` (vbox/hbox/scroll/menu/treelist/…), `input/` (button/slider/text_box/
-  dropdown/…), `display/` (label/graph/svg/…), plus `editor.rs` and `core.rs`. (The
-  KDL/JSON-driven `json_layout.rs` is dissolved; `scene/layout.rs` is the box model.)
+  dropdown/…), `display/` (label/graph/svg/…), plus `editor.rs` (`TextEditorState`, the
+  model behind `TextBox`), `line_edit.rs` (`LineEdit`: the text, caret, selection and keymap
+  of a one-line field an app draws itself — cce-browser's URL bar and dialog fields) and
+  `core.rs`. (The KDL/JSON-driven `json_layout.rs` is dissolved; `scene/layout.rs` is the
+  box model.)
 - `protocol.rs` — inline-generated Wayland protocol bindings.
-- `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`).
+- `ipc.rs` — the `/tmp/<prefix>-<WAYLAND_DISPLAY>.sock` helpers (`socket_path`, `send_command`,
+  the bounded `read_request_line`, `focus_window`), and `ipc::instance`: single-instance
+  claim-or-forward for apps that run once per session.
 - `icon.rs` — XDG icon-theme lookup: a `.desktop` `Icon=` key (or an SNI tray icon
   name) → a file on disk, plus `upload_themed` to rasterize/decode and upload it.
   **Not** `lib.rs`'s `upload_icon`, which loads a *bundled* cce-icons glyph by its

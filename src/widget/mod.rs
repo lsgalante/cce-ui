@@ -623,12 +623,14 @@ impl EmbedImage {
 }
 #[cfg(feature = "doc_editor")]
 pub mod doc_editor;
+pub mod line_edit;
 pub mod model;
 pub mod scroll_region;
 pub mod scroll_motion;
  
 // Re-exports
 pub use self::editor::TextEditorState;
+pub use self::line_edit::{EditOutcome, LineEdit};
 pub use self::layout_helper::{ColumnLayout, RowLayout};
 pub use self::scroll_region::{ScrollRegion, ScrollbarActivity};
 pub use self::scroll_motion::{Bounds, ScrollAxis, ScrollMotion, ScrollPhase, ScrollSettings, LINE_PX};
