@@ -1719,24 +1719,50 @@ pub fn push_plate_solid_border_vertices(
     // curve is indistinguishable from the true parallel curve, and at
     // corner_shape 2 this is exactly the circular arc annulus. NOT
     // push_arc_background_vertices — that stays circular for genuine arcs.
+    //
+    // Both edges of the annulus are FEATHERED, like the fill fan's corners
+    // (push_rounded_rect_vertices_corners) and push_feathered_line_vertices:
+    // each fades over `f` either side of its true curve, so the 50%-coverage
+    // lines stay on the exact silhouette and the stroke reads at the same
+    // weight, but the arc anti-aliases instead of rasterizing a staircase
+    // beside the SDF-smooth face it outlines. The straight edges stay crisp
+    // quads (a pixel-snapped hairline would only blur). A corner too tight to
+    // fit the inner fade keeps the hard annulus.
+    let f = 0.5f32.min(t * 0.25);
+    let fade = [color[0], color[1], color[2], 0.0];
     let corner = |cx: f32, cy: f32, r: f32, start: f32, end: f32, out: &mut Vec<Vertex>| {
         let r_in = (r - t).max(0.0);
+        // (inner radius, outer radius, inner alpha colour, outer alpha colour)
+        let bands: &[(f32, f32, [f32; 4], [f32; 4])] = if r_in - f > 0.0 {
+            &[
+                (r_in - f, r_in + f, fade, color),
+                (r_in + f, r - f, color, color),
+                (r - f, r + f, color, fade),
+            ]
+        } else {
+            &[(r_in, r, color, color)]
+        };
         let ndc = |px: f32, py: f32| [(px / sw) * 2.0 - 1.0, 1.0 - (py / sh) * 2.0];
         for i in 0..segments {
             let t1 = start + (i as f32) * (end - start) / segments as f32;
             let t2 = start + ((i + 1) as f32) * (end - start) / segments as f32;
             let (c1, s1) = superellipse_pt(t1, corner_e);
             let (c2, s2) = superellipse_pt(t2, corner_e);
-            let o1 = ndc(cx + r * c1, cy + r * s1);
-            let o2 = ndc(cx + r * c2, cy + r * s2);
-            let i1 = ndc(cx + r_in * c1, cy + r_in * s1);
-            let i2 = ndc(cx + r_in * c2, cy + r_in * s2);
-            out.push(Vertex { position: o1, color, clip_circle });
-            out.push(Vertex { position: o2, color, clip_circle });
-            out.push(Vertex { position: i1, color, clip_circle });
-            out.push(Vertex { position: o2, color, clip_circle });
-            out.push(Vertex { position: i2, color, clip_circle });
-            out.push(Vertex { position: i1, color, clip_circle });
+            for &(ra, rb, ca, cb) in bands {
+                if rb - ra <= 0.0 {
+                    continue;
+                }
+                let o1 = ndc(cx + rb * c1, cy + rb * s1);
+                let o2 = ndc(cx + rb * c2, cy + rb * s2);
+                let i1 = ndc(cx + ra * c1, cy + ra * s1);
+                let i2 = ndc(cx + ra * c2, cy + ra * s2);
+                out.push(Vertex { position: o1, color: cb, clip_circle });
+                out.push(Vertex { position: o2, color: cb, clip_circle });
+                out.push(Vertex { position: i1, color: ca, clip_circle });
+                out.push(Vertex { position: o2, color: cb, clip_circle });
+                out.push(Vertex { position: i2, color: ca, clip_circle });
+                out.push(Vertex { position: i1, color: ca, clip_circle });
+            }
         }
     };
 
