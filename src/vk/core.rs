@@ -225,6 +225,38 @@ impl std::fmt::Display for SurfaceLost {
 
 impl std::error::Error for SurfaceLost {}
 
+fn device_type_name(t: vk::PhysicalDeviceType) -> &'static str {
+    match t {
+        vk::PhysicalDeviceType::INTEGRATED_GPU => "integrated",
+        vk::PhysicalDeviceType::DISCRETE_GPU => "discrete",
+        vk::PhysicalDeviceType::VIRTUAL_GPU => "virtual",
+        vk::PhysicalDeviceType::CPU => "cpu",
+        _ => "other",
+    }
+}
+
+/// The warning for a `CCE_VK_DEVICE` preference the chosen device does not
+/// meet, or `None` when there was no explicit preference or it was met (a
+/// rank of 0 is a match, whatever the preference). `chosen` and `seen` are
+/// device descriptions, `seen` every one the loader offered.
+///
+/// A vendor whose driver failed to LOAD is in no list at all, which is the
+/// case worth naming: in a cce-shadow session the NVIDIA ICD will not load
+/// without an X display (`DISPLAY` and `XAUTHORITY`), and the loader says why
+/// only when asked (`VK_LOADER_DEBUG=error`).
+fn unmet_device_preference(pref: Option<&str>, chosen_rank: i32, chosen: &str, seen: &[String]) -> Option<String> {
+    let pref = pref?;
+    if chosen_rank == 0 {
+        return None;
+    }
+    Some(format!(
+        "cce-ui: CCE_VK_DEVICE={pref} is not met; using {chosen}. Devices the Vulkan loader offered: {}. \
+         A driver that failed to load is not among them (VK_LOADER_DEBUG=error says why; in a \
+         cce-shadow session the NVIDIA driver needs DISPLAY and XAUTHORITY).",
+        seen.join(", ")
+    ))
+}
+
 impl VkCore {
     /// A core bound to a Wayland surface: the returned `vk::SurfaceKHR` is
     /// created from the raw pointers and the chosen device supports presenting
@@ -341,6 +373,9 @@ impl VkCore {
         // on a dead display connection every device fails it, and "no
         // suitable device" would then misreport a lost surface.
         let mut support_error: Option<vk::Result> = None;
+        // Every device the loader offered, for the warning below when the
+        // preference cannot be met — including those that cannot draw here.
+        let mut seen: Vec<String> = Vec::new();
         for pd in instance
             .enumerate_physical_devices()
             .expect("No Vulkan physical devices")
@@ -359,6 +394,12 @@ impl VkCore {
                 };
                 (graphics && present).then_some(i as u32)
             });
+            {
+                let props = instance.get_physical_device_properties(pd);
+                let name = CStr::from_ptr(props.device_name.as_ptr()).to_string_lossy();
+                let usable = if family.is_some() { "" } else { ", cannot draw to this window" };
+                seen.push(format!("{name} ({}{usable})", device_type_name(props.device_type)));
+            }
             if let Some(family) = family {
                 let props = instance.get_physical_device_properties(pd);
                 let name = CStr::from_ptr(props.device_name.as_ptr())
@@ -398,13 +439,25 @@ impl VkCore {
             surface_loader.destroy_surface(surface, None);
             return Err(SurfaceLost { call: "vkGetPhysicalDeviceSurfaceSupportKHR", result });
         }
-        let (physical_device, queue_family, _) = *candidates
+        let (physical_device, queue_family, chosen_rank) = *candidates
             .first()
             .expect("No suitable Vulkan device found");
         {
             let props = instance.get_physical_device_properties(physical_device);
             let name = CStr::from_ptr(props.device_name.as_ptr()).to_string_lossy();
             log::info!("Vulkan device: {name}");
+            // An explicit preference that was not met falls back SILENTLY
+            // otherwise — and a fallback renders as the device asked for
+            // would, so nothing on screen says it happened (2026-10-02: hours
+            // of "discrete" shadow captures that were all on the Intel GPU).
+            // stderr, not `log`: most clients init no logger.
+            let chosen = format!("{name} ({})", device_type_name(props.device_type));
+            if let Some(msg) = unmet_device_preference(device_pref.as_deref(), chosen_rank, &chosen, &seen) {
+                static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("{msg}");
+                }
+            }
         }
         let min_uniform_align = instance
             .get_physical_device_properties(physical_device)
@@ -581,5 +634,23 @@ impl Drop for VkCore {
             self.device.destroy_command_pool(self.command_pool, None);
             self.device.destroy_device(None);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An explicit preference that was not met says so; one that was met, or
+    /// no preference at all, says nothing.
+    #[test]
+    fn an_unmet_device_preference_is_reported() {
+        let seen = vec!["Intel(R) Iris(R) Xe Graphics (integrated)".to_string()];
+        let msg = unmet_device_preference(Some("discrete"), 1, &seen[0], &seen).expect("unmet");
+        assert!(msg.contains("CCE_VK_DEVICE=discrete is not met"), "{msg}");
+        assert!(msg.contains("using Intel(R) Iris(R) Xe Graphics (integrated)"), "{msg}");
+        assert!(msg.contains("DISPLAY and XAUTHORITY"), "{msg}");
+        assert_eq!(unmet_device_preference(Some("discrete"), 0, &seen[0], &seen), None);
+        assert_eq!(unmet_device_preference(None, 1, &seen[0], &seen), None);
     }
 }

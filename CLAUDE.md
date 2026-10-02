@@ -442,8 +442,8 @@ between a plate and its carves, so two captures of "the same" pane can differ in
 grouped. And inside a `cce-shadow` session the NVIDIA ICD does not load at all unless
 the process can reach an X display (`DISPLAY=:0` and `XAUTHORITY=$HOME/.Xauthority`):
 `vk_icdGetInstanceProcAddr` fails, the loader skips the ICD, and `CCE_VK_DEVICE=discrete`
-falls back to the Intel device SILENTLY. Check `grep -c nvidia /proc/<pid>/maps` before
-believing a "discrete" shadow capture.
+fell back to the Intel device SILENTLY. It says so on stderr now (below, "Debug
+environment variables"); `grep -c nvidia /proc/<pid>/maps` is the check from outside.
 
 ### A row can open a submenu (since 2026-09-29)
 
@@ -1236,6 +1236,18 @@ All opt-in, all read once, all quiet when unset — set one and run any client.
 - `CCE_UI_MENU_POPUP=0` — keep the context menu in the window instead of its popup
   surface (see "The context menu draws in its own popup surface").
 - `CCE_VK_DEVICE=<substring>` — force a physical device; `CCE_VK_RT=0` disables ray tracing.
+  `integrated`, `discrete` or a name substring; any of them also lifts a session-wide ICD
+  pin (`VK_DRIVER_FILES`) for the process. **A preference the chosen device does not meet
+  is printed to stderr** (since 2026-10-02, once per process, `unmet_device_preference` in
+  `vk/core.rs`): what was asked, what was taken, and every device the loader offered — a
+  driver that failed to LOAD is in no list, which is the case the line points at
+  (`VK_LOADER_DEBUG=error` says why). Until then the fallback was silent, and a fallback
+  renders exactly as the asked-for device would, so nothing on screen gave it away.
+- The cce-ui suite reads `~/.config/cce` through the style registry, and LAZILY: a value
+  read before the first load and one read after come from two configurations. A test
+  asserting on shading numbers pins its inputs instead (`relief_shade`'s tests:
+  `pinned_light`, `pinned_finish`); `deeper_carve_shades_harder` failed run alone and
+  passed in the full suite until it did.
 - `CCE_FORCE_SCALE=<f>` — override HiDPI scale detection.
 - `CCE_FORCE_PPI=<f>` — pin the display metric (logical px per inch) regardless of what
   the outputs report; a headless shadow has no EDID and would run `assumed`. The live
