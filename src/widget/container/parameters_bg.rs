@@ -1764,12 +1764,27 @@ impl ParametersBg {
             } else if p.2.starts_with("spinbox") {
                 // The well recess only — the -/+ run's trough and its seam
                 // travel through [`Self::troughs`] / [`Self::grooves`] (this
-                // tuple speaks boss/recess). The generic push below matches
-                // the widget's own `relief_parts` well exactly: same side-
-                // label inset, same content band, same depth cap.
-                self.spinboxes[i]
-                    .as_ref()
-                    .map(|w| (w as &dyn WidgetHost, crate::layout::spinbox_corner_radius(), false))
+                // tuple speaks boss/recess). The widget's own `relief_parts`
+                // decides where the well ends: at the run, square there, the
+                // run being the control's right end. Same side-label inset,
+                // same content band, same depth cap as its paint.
+                if let Some(sb) = &self.spinboxes[i] {
+                    let (x, y, w, h) = sb.rect();
+                    let ty = sb.label_strip();
+                    let band = Rect { x, y: y + ty, width: w, height: h - ty };
+                    if w > 0.0 && h > 0.0 {
+                        let r = crate::layout::spinbox_corner_radius();
+                        let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
+                        match sb.inner().relief_parts(band) {
+                            Some((_, Some(((run, _, _, _), _)))) => {
+                                out.push((x, y + ty, run.x - x, h - ty, (r, 0.0, 0.0, r), depth, false, all));
+                            }
+                            Some((_, None)) => out.push((x, y + ty, w, h - ty, r4(r), depth, false, all)),
+                            None => {}
+                        }
+                    }
+                }
+                None
             } else if p.2.starts_with("color") || p.2 == "rgb" || p.2 == "rgba" {
                 // The control's one well (`ColorSelector::field_relief`, the
                 // same geometry its paint carves); the swatch is a fill on its

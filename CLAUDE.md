@@ -329,6 +329,13 @@ and the pane's `reliefs` both read). Until then the picker was a button nested i
 box's well, its face stopping at the base of the well's wall, so it never reached the edge
 a dropdown's ▼ does. `textpick_rows_carry_a_picker` holds the layout.
 
+**A spinbox's -/+ run is its right end the same way** (the same day):
+`Spinbox::relief_parts` makes the run a flush plate over the whole band, out to the
+outer edge, its ring all round, square at the seam and the spinbox radius outside, and
+the value's well ends there square (`relief_parts` returns its radii, which the widget's
+paint and the pane's `reliefs` both use). The seam between - and + crosses the run's face
+between its ring's walls. It was nested inside a full-width well, as the picker was.
+
 ### A row can open a submenu (since 2026-09-29)
 
 `context_menu::set_row_submenu(idx, SubmenuSpec { options, header_count, sliders })`,
