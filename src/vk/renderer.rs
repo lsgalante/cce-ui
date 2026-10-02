@@ -71,6 +71,36 @@ const _: () = assert!(
      before raising PUSH_CONSTANT_FLOATS"
 );
 
+/// The fragment push-constant block for one batch: its rounded-rect clip,
+/// and its plate block when it is a plate cover quad. `feature_base` is the
+/// frame slot's first entry in the feature UBO, added to a plate's (or a
+/// union carve's) feature offset. Shared with the offscreen test harness
+/// (`vk::plate_probe`), so the two cannot push different blocks.
+pub(crate) fn batch_push_constants(batch: &Batch2D, clip_shape: f32, feature_base: usize) -> [f32; PUSH_CONSTANT_FLOATS] {
+    let rr = batch.clip_rrect.unwrap_or([0.0; 5]);
+    let enabled = if batch.clip_rrect.is_some() { 1.0f32 } else { 0.0 };
+    let mut pc = [0.0f32; PUSH_CONSTANT_FLOATS];
+    pc[..5].copy_from_slice(&rr);
+    pc[5] = enabled;
+    pc[7] = clip_shape;
+    if let Some(p) = &batch.plate {
+        pc[6] = p.mode;
+        pc[7] = p.shape;
+        pc[8..12].copy_from_slice(&p.rect);
+        pc[12..16].copy_from_slice(&p.radii);
+        pc[16..20].copy_from_slice(&p.light);
+        pc[20..24].copy_from_slice(&p.material);
+        pc[24..28].copy_from_slice(&p.host);
+        pc[28..32].copy_from_slice(&p.specular_tint);
+        if p.mode == 1.0 || p.mode == 14.0 {
+            // Rebase the feature offset onto this frame's UBO slot (a plate's
+            // CSG carves, or a union carve's boxes).
+            pc[24] += feature_base as f32;
+        }
+    }
+    pc
+}
+
 /// Push-constant block for one SDF-lit plate batch (physical px throughout).
 /// Mirrors the `p_*` fields of shader2d's `RRectClip`.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -180,18 +210,53 @@ fn rect_intersect(a: vk::Rect2D, b: vk::Rect2D) -> vk::Rect2D {
     }
 }
 
-const FRAMES_IN_FLIGHT: usize = 2;
+pub(crate) const FRAMES_IN_FLIGHT: usize = 2;
 /// Max plate-carve features per frame; the shader's UBO holds one slot of this
 /// size per frame in flight.
 pub const MAX_PLATE_FEATURES: usize = 64;
-const PLATE_FEATURE_BYTES: usize = 48;
+pub(crate) const PLATE_FEATURE_BYTES: usize = 48;
 /// shader2d's WindowInfo UBO: [size/clip vec4][bevel-profile meta vec4]
 /// [8 vec4 of profile slope samples].
 // [size/clip vec4][carve profile meta + 8 vec4][roll profile meta + 8 vec4].
 // [size/clip vec4][carve profile meta][8 carve slopes][roll profile meta]
 // [8 roll slopes][relief heights][backdrop meta] = 21 vec4. Grows only at the
 // END — every offset above is addressed by index from both sides.
-const WINDOW_INFO_BYTES: vk::DeviceSize = 320;
+pub(crate) const WINDOW_INFO_BYTES: vk::DeviceSize = 320;
+
+/// The pinned relief heights (carve, roll) in physical px at `scale`, 0 =
+/// follow the width.
+pub(crate) fn relief_px_at(scale: f32) -> (f32, f32) {
+    let s = scale.max(0.001);
+    (
+        crate::layout::bevel_height().map_or(0.0, |h| h * s),
+        crate::layout::roll_height().map_or(0.0, |h| h * s),
+    )
+}
+
+/// shader2d's `WindowInfo` block for a target of `extent` whose corners clip
+/// at `clip_corner_radius` (physical px), with the pinned relief heights
+/// `relief` (carve, roll; physical px, 0 = unpinned) — the profiles and the
+/// corner shape from the live style. Shared with the offscreen test harness.
+pub(crate) fn window_info_data(extent: vk::Extent2D, clip_corner_radius: f32, relief: (f32, f32)) -> [f32; WINDOW_INFO_BYTES as usize / 4] {
+    let mut data = [0.0f32; WINDOW_INFO_BYTES as usize / 4];
+    data[0] = extent.width as f32;
+    data[1] = extent.height as f32;
+    data[2] = clip_corner_radius;
+    data[3] = crate::layout::corner_shape();
+    if let Some(slopes) = crate::layout::bevel_profile_slopes() {
+        data[4] = 1.0;
+        data[5] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
+        data[8..8 + slopes.len()].copy_from_slice(&slopes);
+    }
+    if let Some(slopes) = crate::layout::roll_profile_slopes() {
+        data[40] = 1.0;
+        data[41] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
+        data[44..44 + slopes.len()].copy_from_slice(&slopes);
+    }
+    data[76] = relief.0;
+    data[77] = relief.1;
+    data
+}
 
 pub(crate) struct AllocatedBuffer {
     pub(crate) buffer: vk::Buffer,
@@ -353,6 +418,155 @@ pub struct VkRenderer {
 /// (Y-down) is handled with a negative-height viewport (like wgpu-hal), NOT in
 /// the shader — flipping in the shader would reverse screen-space winding and
 /// break the 3D pipeline's back-face culling.
+/// The 2D UI pipeline over `render_pass`: shader2d's descriptor set layout,
+/// its push-constant range, the vertex layout and the blend — what the
+/// renderer draws every frame with. Shared with the offscreen test harness
+/// (`vk::plate_probe`), so it draws with exactly the live pipeline.
+pub(crate) unsafe fn create_ui_pipeline(
+    device: &ash::Device,
+    render_pass: vk::RenderPass,
+) -> (vk::DescriptorSetLayout, vk::PipelineLayout, vk::ShaderModule, vk::Pipeline) {
+    // Descriptor set layout mirroring shader.wgsl @group(0): naga maps WGSL
+    // texture/sampler/uniform bindings 1:1 onto set 0 descriptor bindings.
+    let bindings = [
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(1)
+            .descriptor_type(vk::DescriptorType::SAMPLER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(2)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(3)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::FRAGMENT),
+    ];
+    let descriptor_set_layout = device
+        .create_descriptor_set_layout(
+            &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
+            None,
+        )
+        .expect("Failed to create descriptor set layout");
+
+    let set_layouts = [descriptor_set_layout];
+    // Push constants: the per-batch rounded-rect clip plus the SDF-lit
+    // plate block (eight vec4s, matching shader2d's `RRectClip`), read by
+    // shader2d's fragment stage. See `PUSH_CONSTANT_BYTES` — the block is
+    // exactly the Vulkan-guaranteed minimum and completely full.
+    let push_ranges = [vk::PushConstantRange::default()
+        .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+        .offset(0)
+        .size(PUSH_CONSTANT_BYTES)];
+    let pipeline_layout = device
+        .create_pipeline_layout(
+            &vk::PipelineLayoutCreateInfo::default()
+                .set_layouts(&set_layouts)
+                .push_constant_ranges(&push_ranges),
+            None,
+        )
+        .expect("Failed to create pipeline layout");
+
+    // Pipeline from shader.wgsl (both entry points live in one SPIR-V module).
+    let spirv = shader2d_spirv();
+    let shader_module = device
+        .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spirv), None)
+        .expect("Failed to create shader module");
+
+    let stages = [
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(shader_module)
+            .name(c"vs_main"),
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(shader_module)
+            .name(c"fs_main"),
+    ];
+
+    // Vertex layout = cce_ui::engine::Vertex: pos vec2f, color vec4f, clip vec3f.
+    let vertex_bindings = [vk::VertexInputBindingDescription::default()
+        .binding(0)
+        .stride(std::mem::size_of::<Vertex>() as u32)
+        .input_rate(vk::VertexInputRate::VERTEX)];
+    let vertex_attributes = [
+        vk::VertexInputAttributeDescription::default()
+            .location(0)
+            .binding(0)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(0),
+        vk::VertexInputAttributeDescription::default()
+            .location(1)
+            .binding(0)
+            .format(vk::Format::R32G32B32A32_SFLOAT)
+            .offset(8),
+        vk::VertexInputAttributeDescription::default()
+            .location(2)
+            .binding(0)
+            .format(vk::Format::R32G32B32_SFLOAT)
+            .offset(24),
+    ];
+    let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_binding_descriptions(&vertex_bindings)
+        .vertex_attribute_descriptions(&vertex_attributes);
+
+    let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
+        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+        .viewport_count(1)
+        .scissor_count(1);
+    let rasterization = vk::PipelineRasterizationStateCreateInfo::default()
+        .polygon_mode(vk::PolygonMode::FILL)
+        .cull_mode(vk::CullModeFlags::NONE)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+        .line_width(1.0);
+    let multisample = vk::PipelineMultisampleStateCreateInfo::default()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+    // wgpu::BlendState::ALPHA_BLENDING.
+    let blend_attachments = [vk::PipelineColorBlendAttachmentState::default()
+        .blend_enable(true)
+        .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+        .color_blend_op(vk::BlendOp::ADD)
+        .src_alpha_blend_factor(vk::BlendFactor::ONE)
+        .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+        .alpha_blend_op(vk::BlendOp::ADD)
+        .color_write_mask(vk::ColorComponentFlags::RGBA)];
+    let color_blend =
+        vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
+    let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+    let dynamic_state =
+        vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+
+    let pipeline = device
+        .create_graphics_pipelines(
+            vk::PipelineCache::null(),
+            &[vk::GraphicsPipelineCreateInfo::default()
+                .stages(&stages)
+                .vertex_input_state(&vertex_input)
+                .input_assembly_state(&input_assembly)
+                .viewport_state(&viewport_state)
+                .rasterization_state(&rasterization)
+                .multisample_state(&multisample)
+                .color_blend_state(&color_blend)
+                .dynamic_state(&dynamic_state)
+                .layout(pipeline_layout)
+                .render_pass(render_pass)
+                .subpass(0)],
+            None,
+        )
+        .expect("Failed to create graphics pipeline")[0];
+    (descriptor_set_layout, pipeline_layout, shader_module, pipeline)
+}
+
 pub(crate) fn compile_wgsl(source: &str) -> Vec<u32> {
     let module = naga::front::wgsl::parse_str(source).expect("WGSL parse failed");
     let info = naga::valid::Validator::new(
@@ -645,144 +859,8 @@ impl VkRenderer {
             )
             .expect("Failed to create partial render pass");
 
-        // Descriptor set layout mirroring shader.wgsl @group(0): naga maps WGSL
-        // texture/sampler/uniform bindings 1:1 onto set 0 descriptor bindings.
-        let bindings = [
-            vk::DescriptorSetLayoutBinding::default()
-                .binding(0)
-                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-            vk::DescriptorSetLayoutBinding::default()
-                .binding(1)
-                .descriptor_type(vk::DescriptorType::SAMPLER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-            vk::DescriptorSetLayoutBinding::default()
-                .binding(2)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-            vk::DescriptorSetLayoutBinding::default()
-                .binding(3)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .descriptor_count(1)
-                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
-        ];
-        let descriptor_set_layout = device
-            .create_descriptor_set_layout(
-                &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
-                None,
-            )
-            .expect("Failed to create descriptor set layout");
-
-        let set_layouts = [descriptor_set_layout];
-        // Push constants: the per-batch rounded-rect clip plus the SDF-lit
-        // plate block (eight vec4s, matching shader2d's `RRectClip`), read by
-        // shader2d's fragment stage. See `PUSH_CONSTANT_BYTES` — the block is
-        // exactly the Vulkan-guaranteed minimum and completely full.
-        let push_ranges = [vk::PushConstantRange::default()
-            .stage_flags(vk::ShaderStageFlags::FRAGMENT)
-            .offset(0)
-            .size(PUSH_CONSTANT_BYTES)];
-        let pipeline_layout = device
-            .create_pipeline_layout(
-                &vk::PipelineLayoutCreateInfo::default()
-                    .set_layouts(&set_layouts)
-                    .push_constant_ranges(&push_ranges),
-                None,
-            )
-            .expect("Failed to create pipeline layout");
-
-        // Pipeline from shader.wgsl (both entry points live in one SPIR-V module).
-        let spirv = shader2d_spirv();
-        let shader_module = device
-            .create_shader_module(&vk::ShaderModuleCreateInfo::default().code(spirv), None)
-            .expect("Failed to create shader module");
-
-        let stages = [
-            vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::VERTEX)
-                .module(shader_module)
-                .name(c"vs_main"),
-            vk::PipelineShaderStageCreateInfo::default()
-                .stage(vk::ShaderStageFlags::FRAGMENT)
-                .module(shader_module)
-                .name(c"fs_main"),
-        ];
-
-        // Vertex layout = cce_ui::engine::Vertex: pos vec2f, color vec4f, clip vec3f.
-        let vertex_bindings = [vk::VertexInputBindingDescription::default()
-            .binding(0)
-            .stride(std::mem::size_of::<Vertex>() as u32)
-            .input_rate(vk::VertexInputRate::VERTEX)];
-        let vertex_attributes = [
-            vk::VertexInputAttributeDescription::default()
-                .location(0)
-                .binding(0)
-                .format(vk::Format::R32G32_SFLOAT)
-                .offset(0),
-            vk::VertexInputAttributeDescription::default()
-                .location(1)
-                .binding(0)
-                .format(vk::Format::R32G32B32A32_SFLOAT)
-                .offset(8),
-            vk::VertexInputAttributeDescription::default()
-                .location(2)
-                .binding(0)
-                .format(vk::Format::R32G32B32_SFLOAT)
-                .offset(24),
-        ];
-        let vertex_input = vk::PipelineVertexInputStateCreateInfo::default()
-            .vertex_binding_descriptions(&vertex_bindings)
-            .vertex_attribute_descriptions(&vertex_attributes);
-
-        let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-            .viewport_count(1)
-            .scissor_count(1);
-        let rasterization = vk::PipelineRasterizationStateCreateInfo::default()
-            .polygon_mode(vk::PolygonMode::FILL)
-            .cull_mode(vk::CullModeFlags::NONE)
-            .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-            .line_width(1.0);
-        let multisample = vk::PipelineMultisampleStateCreateInfo::default()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-        // wgpu::BlendState::ALPHA_BLENDING.
-        let blend_attachments = [vk::PipelineColorBlendAttachmentState::default()
-            .blend_enable(true)
-            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-            .color_blend_op(vk::BlendOp::ADD)
-            .src_alpha_blend_factor(vk::BlendFactor::ONE)
-            .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-            .alpha_blend_op(vk::BlendOp::ADD)
-            .color_write_mask(vk::ColorComponentFlags::RGBA)];
-        let color_blend =
-            vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
-        let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-        let dynamic_state =
-            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
-
-        let pipeline = device
-            .create_graphics_pipelines(
-                vk::PipelineCache::null(),
-                &[vk::GraphicsPipelineCreateInfo::default()
-                    .stages(&stages)
-                    .vertex_input_state(&vertex_input)
-                    .input_assembly_state(&input_assembly)
-                    .viewport_state(&viewport_state)
-                    .rasterization_state(&rasterization)
-                    .multisample_state(&multisample)
-                    .color_blend_state(&color_blend)
-                    .dynamic_state(&dynamic_state)
-                    .layout(pipeline_layout)
-                    .render_pass(render_pass)
-                    .subpass(0)],
-                None,
-            )
-            .expect("Failed to create graphics pipeline")[0];
+        let (descriptor_set_layout, pipeline_layout, shader_module, pipeline) =
+            create_ui_pipeline(&device, render_pass);
 
         // Full-size backdrop + depth live in the scene stage: the 3D pass renders
         // into the backdrop, and the UI pass samples it for blur-behind plates.
@@ -1047,11 +1125,7 @@ impl VkRenderer {
 
     /// The pinned relief heights in physical px, 0 = follow the width.
     fn relief_px(&self) -> (f32, f32) {
-        let s = crate::scale::scale_factor().max(0.001);
-        (
-            crate::layout::bevel_height().map_or(0.0, |h| h * s),
-            crate::layout::roll_height().map_or(0.0, |h| h * s),
-        )
+        relief_px_at(crate::scale::scale_factor())
     }
 
     fn write_window_info(&mut self) {
@@ -1059,24 +1133,8 @@ impl VkRenderer {
         // [roll profile meta vec4][8 vec4 roll slopes][relief heights vec4]
         // — must stay in lockstep with shader2d's WindowInfo. (The frost
         // recipe is per plate, in its push block, since RFC material step 3.)
-        let mut data = [0.0f32; WINDOW_INFO_BYTES as usize / 4];
-        data[0] = self.extent.width as f32;
-        data[1] = self.extent.height as f32;
-        data[2] = self.clip_corner_radius();
-        data[3] = crate::layout::corner_shape();
-        if let Some(slopes) = crate::layout::bevel_profile_slopes() {
-            data[4] = 1.0;
-            data[5] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
-            data[8..8 + slopes.len()].copy_from_slice(&slopes);
-        }
-        if let Some(slopes) = crate::layout::roll_profile_slopes() {
-            data[40] = 1.0;
-            data[41] = crate::layout::BEVEL_PROFILE_SAMPLES as f32;
-            data[44..44 + slopes.len()].copy_from_slice(&slopes);
-        }
         let relief = self.relief_px();
-        data[76] = relief.0;
-        data[77] = relief.1;
+        let data = window_info_data(self.extent, self.clip_corner_radius(), relief);
         self.relief_uploaded = relief;
         self.profile_gen = crate::layout::bevel_profile_generation();
         self.roll_profile_gen = crate::layout::roll_profile_generation();
@@ -2231,28 +2289,7 @@ impl VkRenderer {
                             // Per-batch rounded-rect clip (fragments outside
                             // discard) + the SDF-lit plate block when this
                             // batch is a plate cover quad.
-                            let rr = batch.clip_rrect.unwrap_or([0.0; 5]);
-                            let enabled = if batch.clip_rrect.is_some() { 1.0f32 } else { 0.0 };
-                            let mut pc = [0.0f32; PUSH_CONSTANT_FLOATS];
-                            pc[..5].copy_from_slice(&rr);
-                            pc[5] = enabled;
-                            pc[7] = clip_shape;
-                            if let Some(p) = &batch.plate {
-                                pc[6] = p.mode;
-                                pc[7] = p.shape;
-                                pc[8..12].copy_from_slice(&p.rect);
-                                pc[12..16].copy_from_slice(&p.radii);
-                                pc[16..20].copy_from_slice(&p.light);
-                                pc[20..24].copy_from_slice(&p.material);
-                                pc[24..28].copy_from_slice(&p.host);
-                                pc[28..32].copy_from_slice(&p.specular_tint);
-                                if p.mode == 1.0 || p.mode == 14.0 {
-                                    // Rebase the feature offset onto this
-                                    // frame's UBO slot (a plate's CSG carves,
-                                    // or a union carve's boxes).
-                                    pc[24] += (frame_index * MAX_PLATE_FEATURES) as f32;
-                                }
-                            }
+                            let pc = batch_push_constants(batch, clip_shape, frame_index * MAX_PLATE_FEATURES);
                             self.core.device.cmd_push_constants(
                                 cmd,
                                 self.pipeline_layout,

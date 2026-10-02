@@ -43,6 +43,8 @@ mod core;
 pub mod image;
 mod renderer;
 mod rt;
+#[cfg(test)]
+mod plate_probe;
 mod scene;
 mod text;
 

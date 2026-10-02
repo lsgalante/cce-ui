@@ -435,6 +435,24 @@ same recesses forced to overlay by a transparent quad): grouped and overlay colu
 5,462 px apart before, 0 after; in the designer with grouped text wells, 0 px from the
 `well_field` rendering.
 
+**And it is tested by rendering, not by reading** (`vk::plate_probe`, `cfg(test)`): an
+offscreen 2D render — a `DisplayList` through the runner's own `tessellate_display_list`
+and `dl_batches_2d`, drawn with the LIVE pipeline into an image and read back. The
+renderer's pieces it needs are shared functions, not copies, so the two cannot draw
+differently: `create_ui_pipeline` (descriptor layout, push range, vertex layout, blend),
+`batch_push_constants` (a batch's 32-float block, feature rebase included),
+`window_info_data` and `relief_px_at`. It draws plates, carves and flat geometry; it
+refuses blur-behind (the snapshot is the swapchain path's) and draws no text or images.
+`render` returns `None` with no Vulkan device and the test skips with a note; it is not
+`#[ignore]`d, since a device is the normal case here and a regression nobody runs is
+not caught. `a_grouped_carve_is_drawn_as_its_overlay_is` renders two plates, one grouped
+and one forced to overlay, asserts the grouping really happened (five features), and
+holds them equal to the pixel: against the pre-fix shader it fails at 32,504 px, worst
+channel 54. Clean under `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`. Opening the
+device adds about 2 s to the suite. A test of any other 2D look can use the same harness.
+(Across devices the live path agrees to within 5/255 on about 125 edge pixels of the
+probe — float rounding at antialiased edges, not a shading difference.)
+
 **It was never the GPU.** The report was "doubled on the NVIDIA card, single on the
 Iris Xe"; the 2D path is identical to the pixel on both, before the fix and after. Two
 things made it look GPU-specific. Grouping is decided per frame by what is painted
