@@ -60,8 +60,9 @@ pub struct SceneDraw {
     /// FILL draws only: the vertex colours already carry their lighting, so
     /// the fragment shader skips its derivative-normal flat shading and
     /// draws them as they are. A host that wants SMOOTH shading bakes it —
-    /// the light is fixed in world space (see `scene3d.wgsl`), so lighting
-    /// per vertex from interpolated normals is exact for a static light,
+    /// the light is fixed in world space (`VkRenderer::set_scene_light`,
+    /// which the host should light by), so lighting per vertex from
+    /// interpolated normals is exact for a static light,
     /// and the vertex format needs no normal. False for an ordinary draw.
     pub prelit: bool,
     /// FILL draws only: draw through the SEE-THROUGH twin of the fill
@@ -122,7 +123,14 @@ struct SceneUniforms {
     /// 1.0 on `SceneDraw::prelit` draws: the flat shading is skipped too.
     prelit: f32,
     _pad: [f32; 1],
+    /// xyz: toward the light, world space, unit length; w unused.
+    light: [f32; 4],
 }
+
+/// The direction toward the raster pass's light until a host sets one —
+/// the light this pass always had, (-0.55, 0.45, 0.7) as the shader dotted
+/// it with its INWARD derivative normal, said the right way round.
+pub(crate) const DEFAULT_SCENE_LIGHT: [f32; 3] = [0.55, -0.45, -0.7];
 
 const UNIFORM_SIZE: vk::DeviceSize = std::mem::size_of::<SceneUniforms>() as vk::DeviceSize;
 
@@ -186,6 +194,9 @@ pub(crate) struct SceneStage {
     staged: Option<StagedScene>,
     /// True once the backdrop holds rendered content worth copying to screen.
     pub(crate) backdrop_valid: bool,
+    /// Toward the flat shading's light, unit length — see
+    /// `VkRenderer::set_scene_light`.
+    pub(crate) light: [f32; 3],
 }
 
 impl SceneStage {
@@ -651,6 +662,7 @@ impl SceneStage {
                 frames,
                 staged: None,
                 backdrop_valid: false,
+                light: glam::Vec3::from_array(DEFAULT_SCENE_LIGHT).normalize().to_array(),
             };
             stage.resize(device, allocator, extent);
             stage
@@ -941,6 +953,7 @@ impl SceneStage {
         }
         let window_size = [self.extent.width as f32, self.extent.height as f32];
         let corner_shape = crate::layout::corner_shape();
+        let light = [self.light[0], self.light[1], self.light[2], 0.0];
         let mapped = frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap();
         for (i, draw) in staged.draws.iter().enumerate() {
             let uniforms = SceneUniforms {
@@ -953,6 +966,7 @@ impl SceneStage {
                 is_wire: if draw.wireframe { 1.0 } else { 0.0 },
                 prelit: if draw.prelit { 1.0 } else { 0.0 },
                 _pad: [0.0; 1],
+                light,
             };
             let offset = (self.uniform_stride as usize) * i;
             mapped[offset..offset + UNIFORM_SIZE as usize]
@@ -969,6 +983,7 @@ impl SceneStage {
                 is_wire: 0.0,
                 prelit: 1.0,
                 _pad: [0.0; 1],
+                light,
             };
             let offset = (self.uniform_stride as usize) * (staged.draws.len() + j);
             mapped[offset..offset + UNIFORM_SIZE as usize]

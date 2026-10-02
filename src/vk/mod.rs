@@ -55,7 +55,7 @@ pub use image::{
     upload_rgba_mipmapped, ImageQuad, PixelFormat,
 };
 pub use renderer::{Batch2D, Frame2D, PlatePush, VkRenderer, MAX_PLATE_FEATURES};
-pub use rt::{RtCamera, RtImage, RtImagePixels, RtMaterial, RtOffscreen, RtTriangle};
+pub use rt::{RtCamera, RtEnvironment, RtImage, RtImagePixels, RtMaterial, RtOffscreen, RtTriangle};
 pub use scene::{MeshId, SceneDraw, SceneImage, Vertex3D};
 pub use text::TextSpan;
 

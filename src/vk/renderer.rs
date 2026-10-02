@@ -19,7 +19,7 @@ use crate::engine::Vertex;
 
 use super::core::SurfaceLost;
 use super::image::{ImageQuad, ImageStage};
-use super::rt::{RtCamera, RtImage, RtImageSource, RtMaterial, RtStage, RtTriangle};
+use super::rt::{RtCamera, RtEnvironment, RtImage, RtImageSource, RtMaterial, RtStage, RtTriangle};
 use super::scene::{MeshId, SceneDraw, SceneImage, SceneStage, Vertex3D};
 use super::text::{TextSpan, TextStage};
 
@@ -399,6 +399,8 @@ pub struct VkRenderer {
     rt: Option<RtStage>,
     /// See [`VkRenderer::set_rt_background`].
     rt_background: Option<[f32; 3]>,
+    /// See [`VkRenderer::set_rt_environment`].
+    rt_environment: RtEnvironment,
 
     desired_extent: vk::Extent2D,
     corner_radius_px: f32,
@@ -1095,6 +1097,7 @@ impl VkRenderer {
             image,
             rt: None,
             rt_background: None,
+            rt_environment: RtEnvironment::default(),
             desired_extent: vk::Extent2D { width: width.max(1), height: height.max(1) },
             corner_radius_px,
             swapchain_dirty: false,
@@ -1680,6 +1683,26 @@ impl VkRenderer {
         );
     }
 
+    /// The direction TOWARD the 3D pass's light, in world space (any
+    /// length; zero is ignored). The flat shading reads it, and a host that
+    /// bakes smooth shading (`SceneDraw::prelit`) should light by the same
+    /// one. Until a host sets it the light is the one this pass always had.
+    /// A traced pane has its own, in [`RtEnvironment`]; a host that wants
+    /// the two views to agree hands both the same direction.
+    pub fn set_scene_light(&mut self, toward: [f32; 3]) {
+        let v = glam::Vec3::from_array(toward);
+        if v.length_squared() > 1e-12 {
+            self.scene.light = v.normalize().to_array();
+        }
+    }
+
+    /// The traced pane's sky and sun — see [`RtEnvironment`]. Kept here and
+    /// handed over at each `stage_rt`, like the background; a change
+    /// restarts the accumulation.
+    pub fn set_rt_environment(&mut self, environment: RtEnvironment) {
+        self.rt_environment = environment;
+    }
+
     /// What a camera ray that meets nothing shows in the traced pane: a
     /// colour in LINEAR RGB (what the raster pass's vertex colours are), or
     /// None for the sky, which is what every miss showed until 2026-10-02.
@@ -1699,6 +1722,7 @@ impl VkRenderer {
     pub fn stage_rt(&mut self, pane: (u32, u32, u32, u32), camera: RtCamera) {
         if let Some(rt) = self.rt.as_mut() {
             rt.set_background(self.rt_background);
+            rt.set_environment(self.rt_environment);
             rt.stage(
                 &self.core.device,
                 self.core.allocator.as_mut().unwrap(),

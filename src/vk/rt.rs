@@ -126,6 +126,45 @@ struct RtParams {
     img_u: [f32; 4],
     img_v: [f32; 4],
     background: [f32; 4],
+    // The environment, each xyz in a vec4 (w unused): toward the sun
+    // (unit), the sun's radiance, the sky overhead, the sky below.
+    sun_dir: [f32; 4],
+    sun_color: [f32; 4],
+    sky_zenith: [f32; 4],
+    sky_nadir: [f32; 4],
+}
+
+/// The traced scene's light: a sky that grades from `sky_nadir` straight
+/// down to `sky_zenith` straight up, and a sun — a bright lobe toward
+/// `sun_direction` of `sun_color` radiance. It is the tracer's ONLY light
+/// (nothing in a scene emits unless its material does). Colours are linear
+/// RGB and may exceed 1. [`Default`] is the studio sky the tracer always
+/// had.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RtEnvironment {
+    /// Toward the sun, world space; any length (zero is straight up).
+    pub sun_direction: [f32; 3],
+    pub sun_color: [f32; 3],
+    pub sky_zenith: [f32; 3],
+    pub sky_nadir: [f32; 3],
+}
+
+impl Default for RtEnvironment {
+    fn default() -> Self {
+        Self {
+            sun_direction: [0.45, 0.75, 0.35],
+            sun_color: [8.0, 7.6, 6.8],
+            sky_zenith: [0.72, 0.82, 0.98],
+            sky_nadir: [0.32, 0.31, 0.35],
+        }
+    }
+}
+
+impl RtEnvironment {
+    fn sun_unit(&self) -> [f32; 3] {
+        let v = glam::Vec3::from_array(self.sun_direction);
+        if v.length_squared() > 1e-12 { v.normalize().to_array() } else { [0.0, 1.0, 0.0] }
+    }
 }
 
 // --- BVH construction (binned SAH) ---
@@ -871,6 +910,12 @@ pub(crate) struct RtStage {
     /// What a camera ray that meets nothing shows, linear RGB; None is the
     /// sky. See [`RtStage::set_background`].
     background: Option<[f32; 3]>,
+    /// The sky and sun. See [`RtStage::set_environment`].
+    environment: RtEnvironment,
+}
+
+fn v4([x, y, z]: [f32; 3]) -> [f32; 4] {
+    [x, y, z, 0.0]
 }
 
 impl RtStage {
@@ -1131,6 +1176,7 @@ impl RtStage {
                 spp: 1,
                 staged: false,
                 background: None,
+                environment: RtEnvironment::default(),
             }
         }
     }
@@ -1143,6 +1189,15 @@ impl RtStage {
     pub(crate) fn set_background(&mut self, background: Option<[f32; 3]>) {
         if self.background != background {
             self.background = background;
+            self.sample_index = 0;
+        }
+    }
+
+    /// The sky and sun the scene is lit by. A change restarts the
+    /// accumulation.
+    pub(crate) fn set_environment(&mut self, environment: RtEnvironment) {
+        if self.environment != environment {
+            self.environment = environment;
             self.sample_index = 0;
         }
     }
@@ -1863,6 +1918,10 @@ impl RtStage {
                 Some([r, g, b]) => [r, g, b, 1.0],
                 None => [0.0; 4],
             },
+            sun_dir: v4(self.environment.sun_unit()),
+            sun_color: v4(self.environment.sun_color),
+            sky_zenith: v4(self.environment.sky_zenith),
+            sky_nadir: v4(self.environment.sky_nadir),
         };
         let frame = &mut self.frames[frame_index];
         frame.uniforms.allocation.as_mut().unwrap().mapped_slice_mut().unwrap()
@@ -2183,6 +2242,11 @@ impl RtOffscreen {
     /// `VkRenderer::set_rt_background`.
     pub fn set_background(&mut self, background: Option<[f32; 3]>) {
         self.stage.set_background(background);
+    }
+
+    /// The sky and sun — see [`RtEnvironment`].
+    pub fn set_environment(&mut self, environment: RtEnvironment) {
+        self.stage.set_environment(environment);
     }
 
     /// Replace the scene (same schema as `VkRenderer::set_rt_scene`).
@@ -2805,5 +2869,39 @@ mod tests {
 
         off.set_background(None);
         assert_eq!(render(&mut off).0, sky, "None is the sky");
+    }
+
+    /// The environment is the scene's light: a black one leaves a grey
+    /// triangle black, a sun in front of it lights it and the same sun
+    /// behind it does not, and the sky's colours are what a miss shows.
+    #[test]
+    #[ignore = "requires a Vulkan device"]
+    fn test_offscreen_environment_lights_the_scene() {
+        let mut off = RtOffscreen::new();
+        off.set_scene(
+            &[RtTriangle { p0: [-1.0, -1.0, 0.0], p1: [1.0, -1.0, 0.0], p2: [0.0, 1.5, 0.0], material: 0 }],
+            &[RtMaterial { albedo: [0.8, 0.8, 0.8], emission: [0.0; 3] }],
+        );
+        let proj = glam::Mat4::perspective_rh(0.9, 1.0, 0.1, 100.0);
+        let view = glam::Mat4::look_at_rh(glam::Vec3::new(0.0, 0.0, 3.0), glam::Vec3::ZERO, glam::Vec3::Y);
+        let camera = RtCamera { inv_mvp: (proj * view).inverse().to_cols_array_2d() };
+        let (w, h) = (32u32, 32u32);
+        let mut render = |env: RtEnvironment| {
+            off.set_environment(env);
+            let px = off.render(camera, w, h, 32);
+            let at = |x: u32, y: u32| {
+                let i = ((y * w + x) * 4) as usize;
+                [px[i], px[i + 1], px[i + 2]]
+            };
+            (at(1, 1), at(w / 2, h / 2))
+        };
+        let dark = RtEnvironment { sun_direction: [0.0, 0.0, 1.0], sun_color: [0.0; 3], sky_zenith: [0.0; 3], sky_nadir: [0.0; 3] };
+        assert_eq!(render(dark), ([0, 0, 0], [0, 0, 0]), "no light, nothing seen");
+        let front = render(RtEnvironment { sun_color: [40.0; 3], ..dark }).1;
+        let behind = render(RtEnvironment { sun_direction: [0.0, 0.0, -1.0], sun_color: [40.0; 3], ..dark }).1;
+        assert!(front[0] > 100, "a sun in front lights the face: {front:?}");
+        assert!(behind[0] < front[0] / 4, "a sun behind it does not: {behind:?} against {front:?}");
+        let (corner, _) = render(RtEnvironment { sky_zenith: [0.0, 1.0, 0.0], sky_nadir: [0.0, 1.0, 0.0], ..dark });
+        assert!(corner[1] > 200 && corner[0] < 10, "a miss shows the sky's colour: {corner:?}");
     }
 }

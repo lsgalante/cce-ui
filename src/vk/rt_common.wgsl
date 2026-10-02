@@ -44,6 +44,12 @@ struct Params {
     // the light, so the backdrop changes what is seen behind the scene and
     // not how the scene is lit.
     background: vec4<f32>,
+    // The environment (`RtEnvironment`), xyz each: toward the sun (unit),
+    // the sun's radiance, the sky overhead, the sky below. Linear.
+    sun_dir: vec4<f32>,
+    sun_color: vec4<f32>,
+    sky_zenith: vec4<f32>,
+    sky_nadir: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -94,13 +100,13 @@ struct HitInfo {
     tri: u32,
 }
 
-// A soft studio sky: vertical gradient plus one warm key light. This is the
-// only light source until emissive geometry shows up in scenes.
+// The environment (`RtEnvironment`): a vertical gradient plus one sun lobe.
+// The scene's only light unless a material emits. Its default is the soft
+// studio sky this was before it was a parameter.
 fn sky(rd: vec3<f32>) -> vec3<f32> {
     let t = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
-    var s = mix(vec3<f32>(0.32, 0.31, 0.35), vec3<f32>(0.72, 0.82, 0.98), t);
-    let sun = normalize(vec3<f32>(0.45, 0.75, 0.35));
-    s = s + vec3<f32>(1.0, 0.95, 0.85) * pow(max(dot(rd, sun), 0.0), 48.0) * 8.0;
+    var s = mix(params.sky_nadir.rgb, params.sky_zenith.rgb, t);
+    s = s + params.sun_color.rgb * pow(max(dot(rd, params.sun_dir.xyz), 0.0), 48.0);
     return s;
 }
 

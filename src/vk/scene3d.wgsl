@@ -19,6 +19,9 @@ struct Uniforms {
     // smooth shading from vertex normals against the same world light):
     // skip the flat shading below so it is not applied twice.
     prelit: f32,
+    // xyz: the direction TOWARD the light, in world space
+    // (`VkRenderer::set_scene_light`). Unit length.
+    light: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -106,8 +109,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         // side to a world azimuth the orbit visibly sweeps across; the wrap
         // term keeps a soft floor without |dot|'s ambiguity (the fill pass
         // culls to front faces, so the derivative normal's sign is stable).
-        let l = normalize(vec3f(-0.55, 0.45, 0.7));
-        let d = clamp(dot(n, l) * 0.5 + 0.5, 0.0, 1.0);
+        // `n` is screen-right x framebuffer-DOWN, which for a visible
+        // face points INTO the surface, so the outward normal is `-n`.
+        let d = clamp(dot(-n, uniforms.light.xyz) * 0.5 + 0.5, 0.0, 1.0);
         rgb = rgb * (0.55 + 0.45 * d);
     }
     return vec4f(rgb, cov * uniforms.opacity);
