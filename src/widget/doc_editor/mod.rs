@@ -362,7 +362,9 @@ impl DocEditor {
     }
 
     /// The position under a screen point.
-    fn pos_at(&mut self, sx: f32, sy: f32) -> Pos {
+    /// The text position under a window point (as painted last), for a
+    /// host placing something there — a drop.
+    pub fn pos_at(&mut self, sx: f32, sy: f32) -> Pos {
         let (x, y) = (sx - self.origin.0, sy - self.origin.1 + self.scroll);
         if y < 0.0 {
             return Pos::default();
