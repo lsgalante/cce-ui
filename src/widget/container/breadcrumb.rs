@@ -53,7 +53,7 @@ pub struct Breadcrumb {
     pub network_opacity: f32,
     /// Relief stance of the segment run. `false` (the default) is the
     /// dropdown's flush plate: the run's face level with the surface, its
-    /// edge a field run's (`ControlPlate::with_run_edge`), as the dropdown
+    /// edge a field run's (`PaintCtx::inset_plate`), as the dropdown
     /// trigger and the buttons wear. `true` swaps it for a boss — the same
     /// silhouette raised out of the surface, for hosts whose breadcrumb
     /// floats in front of its plate (the designer's network editor) rather
@@ -361,8 +361,7 @@ impl Paint for Breadcrumb {
                 ctx.control_plate(
                     &crate::widget::ControlPlate::control(run_rect, r, stance, face)
                         .with_depth(depth)
-                        .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint))
-                        .with_run_edge(stance == crate::widget::PlateStance::Flush),
+                        .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint)),
                 );
                 for (a, b) in self.seams(rect) {
                     ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);
@@ -612,7 +611,7 @@ mod tests {
 
     /// The flush controls that are not dropdowns or buttons wear their edge
     /// too: a breadcrumb's flush run and a font selector's field draw a
-    /// field that is all run (`ControlPlate::with_run_edge`), never a trough.
+    /// field that is all run (`PaintCtx::inset_plate`), never a trough.
     #[test]
     fn a_breadcrumb_and_a_font_selector_wear_the_runs_edge() {
         use crate::scene::paint::{PaintCtx, Prim};

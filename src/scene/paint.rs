@@ -218,7 +218,7 @@ pub enum PlateStance {
 }
 
 /// How far left of a [`Prim::Field`] its seam is put to make it all run and
-/// no well ([`PaintCtx::flush_run`]): far enough that the blend across the
+/// no well ([`PaintCtx::inset_plate`]): far enough that the blend across the
 /// seam and the seam's own wall land nowhere near the field.
 pub const FIELD_RUN_ONLY: f32 = 1.0e4;
 
@@ -249,12 +249,6 @@ pub struct ControlPlate {
     /// ring, drawn on the plate's own relief rather than as extra geometry.
     /// `None` untinted.
     pub tint: Option<[f32; 3]>,
-    /// A flush plate's edge in the profile a field's run wears
-    /// ([`PaintCtx::flush_run`]) rather than [`Prim::Trough`]'s: the outer
-    /// half a well's own fall, the inner half mirrored back up to the face.
-    /// The dropdown trigger sets it, so its edge matches the run at the end
-    /// of a text row's field beside it.
-    pub run_edge: bool,
 }
 
 impl ControlPlate {
@@ -262,14 +256,9 @@ impl ControlPlate {
     /// the DE relief width, capped at a fifth of the plate's height.
     pub fn control(rect: Rect, radius: f32, stance: PlateStance, face: Option<Material>) -> Self {
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        Self { rect, radii: (radius, radius, radius, radius), stance, face, depth, tint: None, run_edge: false }
+        Self { rect, radii: (radius, radius, radius, radius), stance, face, depth, tint: None }
     }
 
-    /// [`Self::run_edge`].
-    pub fn with_run_edge(mut self, on: bool) -> Self {
-        self.run_edge = on;
-        self
-    }
 
     /// Light the rim — the focus ring on the plate's silhouette. Pass the
     /// highlight colour while the control holds keyboard focus, `None` otherwise.
@@ -1302,10 +1291,6 @@ impl PaintCtx {
             }
             PlateStance::Flush => {
                 let (trough, radii) = crate::layout::carve_inside(plate.rect, plate.radii, plate.depth);
-                if plate.run_edge {
-                    self.flush_run(trough, radii, plate.faced(), plate.depth, plate.tint);
-                    return;
-                }
                 match plate.tint {
                     Some(t) => self.inset_plate_tinted(trough, radii, plate.faced(), plate.depth, t),
                     None => self.inset_plate(trough, radii, plate.faced(), plate.depth),
@@ -1442,21 +1427,17 @@ impl PaintCtx {
             // `Prim::RoundedRect`'s single radius cannot.
             self.border(rect, radii, face.fill(PlateRole::Nested), [0.0; 4], 0.0);
         }
-        self.trough(rect, radii, depth);
-    }
-
-    /// A flush plate whose edge is a field's RUN ([`Prim::Field`] with no
-    /// well — its seam put [`FIELD_RUN_ONLY`] px to the left of it): the
-    /// outer half of the edge a well's fall, the inner half that fall
-    /// mirrored back up to the face. [`inset_plate`](Self::inset_plate) with
-    /// that edge in place of [`Prim::Trough`]'s, whose outer half is a
-    /// compressed copy of a step — so a dropdown trigger's edge matches the
-    /// run at the end of a text row's field. `tint` lights it.
-    pub fn flush_run(&mut self, rect: Rect, radii: Radii, face: Option<&Material>, depth: f32, tint: Option<[f32; 3]>) {
-        if let Some(face) = face.filter(|m| m.tint[3] > 0.001) {
-            self.border(rect, radii, face.fill(PlateRole::Nested), [0.0; 4], 0.0);
-        }
-        self.field(rect, radii, depth, rect.x - FIELD_RUN_ONLY, tint);
+        // The edge is a field's RUN (a field with no well, its seam put
+        // [`FIELD_RUN_ONLY`] px to the left): the outer half a well's own
+        // fall, the inner half that fall mirrored back up to the face — so
+        // every flush control has the edge of the run at the end of a text
+        // row's field, and the well beside it. Until 2026-10-02 this was a
+        // [`Prim::Trough`], whose outer half is a compressed copy of a step;
+        // the dropdown, button, breadcrumb, font selector and menubar
+        // triggers had been switched to the run's edge one by one the day
+        // before, and the apps' own flush plates (the calendar's, cce-cloud's,
+        // cce-files', the system interface's) kept the trough until here.
+        self.field(rect, radii, depth, rect.x - FIELD_RUN_ONLY, None);
     }
 
     /// [`inset_plate`](Self::inset_plate) with the rim lit — the focused flush
@@ -1466,7 +1447,7 @@ impl PaintCtx {
         if let Some(face) = face.filter(|m| m.tint[3] > 0.001) {
             self.border(rect, radii, face.fill(PlateRole::Nested), [0.0; 4], 0.0);
         }
-        self.trough_tinted(rect, radii, depth, tint);
+        self.field(rect, radii, depth, rect.x - FIELD_RUN_ONLY, Some(tint));
     }
 
     /// A canvas well's floor — the opening you look into or draw in (a
@@ -1879,9 +1860,6 @@ impl crate::layout::RenderTarget for PaintCtx {
     fn inset_plate(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32) {
         PaintCtx::inset_plate(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), Material::face(color).as_ref(), depth);
     }
-    fn flush_run(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: Option<[f32; 3]>) {
-        PaintCtx::flush_run(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), Material::face(color).as_ref(), depth, tint);
-    }
     fn inset_plate_tinted(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: [f32; 3]) {
         PaintCtx::inset_plate_tinted(self, Rect { x, y, width: w, height: h }, (radius, radius, radius, radius), Material::face(color).as_ref(), depth, tint);
     }
@@ -1893,6 +1871,28 @@ impl crate::layout::RenderTarget for PaintCtx {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The one flush control plate draws a face and a field that is all
+    /// run — the edge every flush control wears — and no trough.
+    #[test]
+    fn an_inset_plate_is_a_field_that_is_all_run() {
+        let rect = Rect { x: 10.0, y: 20.0, width: 120.0, height: 24.0 };
+        let face = Material::face([0.2, 0.2, 0.25, 1.0]);
+        for tint in [None, Some([1.0, 0.5, 0.0])] {
+            let mut pc = PaintCtx::new();
+            match tint {
+                Some(t) => pc.inset_plate_tinted(rect, (4.0, 4.0, 4.0, 4.0), face.as_ref(), 4.0, t),
+                None => pc.inset_plate(rect, (4.0, 4.0, 4.0, 4.0), face.as_ref(), 4.0),
+            }
+            let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();
+            assert!(!prims.iter().any(|p| matches!(p, Prim::Trough { .. })), "{prims:?}");
+            assert!(prims.iter().any(|p| matches!(p, Prim::Border { .. })), "the face");
+            assert!(
+                prims.iter().any(|p| matches!(p, Prim::Field { rect: r, split, tint: t, .. } if *r == rect && *split <= rect.x - 100.0 && *t == tint)),
+                "{prims:?}"
+            );
+        }
+    }
     use crate::scene::material::Frost;
 
     /// RFC Phase 7b: PlateSpec role mechanics — flag derivation from window

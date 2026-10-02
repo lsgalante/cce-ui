@@ -293,14 +293,9 @@ impl Button {
         let radius = crate::layout::button_corner_radius();
         // Keyboard focus lights the plate's own rim — the ring IS the silhouette.
         let tint = self.focused.then(crate::widget::ControlPlate::focus_tint);
-        // A flush plate wears a field run's edge (`ControlPlate::with_run_edge`),
-        // as the dropdown trigger does: one edge for every flush control
-        // beside the wells and fields of a pane, where a trough's outer half
-        // read as a compressed copy of a well's.
         Some(
             crate::widget::ControlPlate::control(rect, radius, stance, crate::scene::Material::face(self.color()))
-                .with_tint(tint)
-                .with_run_edge(stance == crate::widget::PlateStance::Flush),
+                .with_tint(tint),
         )
     }
 

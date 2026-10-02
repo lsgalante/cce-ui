@@ -17,7 +17,7 @@ pub struct FontSelector {
     hovered: bool,
     child: Arc<Mutex<Option<std::process::Child>>>,
     /// Raised style, the closed Dropdown's: the field is a flush plate with a
-    /// field run's edge (`ControlPlate::with_run_edge`) and a transparent face (the plate shows through), the hover and press
+    /// field run's edge (`PaintCtx::inset_plate`) and a transparent face (the plate shows through), the hover and press
     /// states a wash inside it. Defaults to `control_relief()`; the flat style
     /// keeps the framed dark field.
     raised: Option<bool>,
@@ -172,10 +172,7 @@ impl Paint for FontSelector {
             // transparent face, the state fill rounded to sit inside it.
             ctx.control_plate(
                 &crate::widget::ControlPlate::control(rect, r, crate::widget::PlateStance::Flush, None)
-                    .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint))
-                    // The edge every flush control wears: a field run's, as
-                    // the dropdown trigger and the buttons do.
-                    .with_run_edge(true),
+                    .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint)),
             );
             let wash = if self.pressed {
                 Some(colors::button_press_color())

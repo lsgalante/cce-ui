@@ -2558,7 +2558,7 @@ pub fn tessellate_display_list(
                 }
                 let rx = split.max(rect.x);
                 let rw = (rect.x + rect.width - rx).max(0.0);
-                // All run (`PaintCtx::flush_run`): its own left corners.
+                // All run (`PaintCtx::inset_plate`'s edge): its own left corners.
                 let (l0, l3) = if *split > rect.x { (0.0, 0.0) } else { (radii.0, radii.3) };
                 let half = *depth * 0.5;
                 push_bevel_edge_vertices_banded(

@@ -4119,15 +4119,6 @@ pub trait RenderTarget {
     fn inset_plate_tinted(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, _tint: [f32; 3]) {
         self.inset_plate(color, x, y, w, h, radius, depth);
     }
-    /// A flush plate with a field run's edge
-    /// ([`crate::scene::paint::PaintCtx::flush_run`]) — the dropdown's grown
-    /// trigger. Hosts without the field prim draw the inset plate.
-    fn flush_run(&mut self, color: [f32; 4], x: f32, y: f32, w: f32, h: f32, radius: f32, depth: f32, tint: Option<[f32; 3]>) {
-        match tint {
-            Some(t) => self.inset_plate_tinted(color, x, y, w, h, radius, depth, t),
-            None => self.inset_plate(color, x, y, w, h, radius, depth),
-        }
-    }
     /// One step carve from a widget's `paint` ([`ReliefCarve`]) — offered here
     /// for the same reason as `inset_plate`: the legacy `all_quads` stream
     /// carries no relief prims, so a flat-path host never sees them.
@@ -4280,6 +4271,8 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
         use crate::scene::paint::Prim;
         let trough_for_face = match (&item.prim, &pending_face) {
             (Prim::Trough { rect, .. }, Some((face_rect, _, _))) => same_rect(*rect, *face_rect),
+            // `inset_plate`'s edge: a field that is all run.
+            (Prim::Field { rect, split, .. }, Some((face_rect, _, _))) => *split <= rect.x && same_rect(*rect, *face_rect),
             _ => false,
         };
         if !trough_for_face {
@@ -4355,7 +4348,9 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
             // `Prim::Field` replaced — the well to the seam, the run's flush
             // plate past it.
             Prim::Field { rect, radii, depth, split, tint } => {
-                // All run and no well (`PaintCtx::flush_run`): the plate alone.
+                // All run and no well (`PaintCtx::inset_plate`'s edge): the
+                // plate alone, with the face that came before it.
+                let face = if split <= rect.x { pending_face.take().map(|(_, _, fill)| fill) } else { None }.unwrap_or([0.0; 4]);
                 if split > rect.x {
                     pc.relief_carve(&ReliefCarve {
                         kind: CarveKind::Recess { tint },
@@ -4372,8 +4367,8 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                 let rx = split.max(rect.x);
                 let rw = (rect.x + rect.width - rx).max(0.0);
                 match tint {
-                    Some(t) => pc.inset_plate_tinted([0.0; 4], rx, rect.y, rw, rect.height, r, depth, t),
-                    None => pc.inset_plate([0.0; 4], rx, rect.y, rw, rect.height, r, depth),
+                    Some(t) => pc.inset_plate_tinted(face, rx, rect.y, rw, rect.height, r, depth, t),
+                    None => pc.inset_plate(face, rx, rect.y, rw, rect.height, r, depth),
                 }
             }
             Prim::Trough { rect, radii, depth, tint, .. } => {

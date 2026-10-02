@@ -354,21 +354,22 @@ short of its picker accordingly, so its text stops at the well. Never grouped in
 plate (its profile is not a monotonic step); the overlay's host-box slot carries `split`.
 The legacy banded path and flat hosts (`layout.rs`'s bridge) draw the two-box form.
 
-**A dropdown trigger wears the run's edge too** (the same day): a field that is all run,
-its seam `FIELD_RUN_ONLY` px to its left (`PaintCtx::flush_run`), in place of
-`Prim::Trough` — `ControlPlate::with_run_edge`, which the Dropdown's raised trigger sets,
-the expanded menu's plate (`RenderTarget::flush_run`, which a host without the prim
-answers with its inset plate), and the pane's dropdown rows, now in `fields` (the pane's
-`troughs()` list went: nothing in the pane draws a trough any more). **So does every
-button's flush plate** (`Button::plate` sets the run edge; the pane's button rows are
-fields too, where they had been a raised boss the button itself never drew). So every
-flush control in a parameter pane has one edge. **And so do the rest** (2026-10-02): a
-breadcrumb's flush run, the font selector's field and a menubar's dropdown-look triggers
-(`menu.rs`, `flush_run` in place of `inset_plate`). No widget draws a trough for its
-own edge now; `PaintCtx::inset_plate` and `Prim::Trough` remain for callers outside the
-toolkit's widgets and for `cce-relief`'s preview. `a_dropdown_trigger_wears_the_runs_edge`,
-`focus_lights_the_plate_rim` and `a_breadcrumb_and_a_font_selector_wear_the_runs_edge` are
-the tests.
+**Every flush control wears the run's edge** (since 2026-10-02): `PaintCtx::inset_plate`
+— the one flush control plate, which `ControlPlate`'s Flush stance, every widget and the
+apps' own plates all come through — draws a face and a field that is all run (its seam
+`FIELD_RUN_ONLY` px to its left), where it drew a `Prim::Trough`, whose outer half is a
+compressed copy of a step and read differently from a well beside it. So a dropdown
+trigger and its grown menu, a button, a breadcrumb's run, the font selector, a menubar's
+triggers, and the calendar's, cce-cloud's, cce-files' and the system interface's own
+plates have the edge of the run at the end of a text row's field. It went in a widget at
+a time the day before (`ControlPlate::with_run_edge`, `PaintCtx::flush_run`), both gone
+now that the plate itself has it. In a parameter pane the dropdown and button rows are
+fields too (`fields`; the pane's `troughs()` list went, and its button rows had been a
+raised boss the button never drew). The flat-host bridge pairs a plate's face with its
+field as it did with its trough. `Prim::Trough` / `PaintCtx::trough` stay for an
+explicit valley and `cce-relief`'s preview. `a_dropdown_trigger_wears_the_runs_edge`,
+`focus_lights_the_plate_rim`, `a_breadcrumb_and_a_font_selector_wear_the_runs_edge` and
+`an_inset_plate_is_a_field_that_is_all_run` are the tests.
 
 The pieces that feed it: `ParametersBg::fields` (the pane's list, drawn after its troughs,
 hover-tinted like them; textpick rows and spinboxes with a run are in neither `reliefs`

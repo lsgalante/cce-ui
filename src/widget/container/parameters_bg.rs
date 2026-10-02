@@ -1860,7 +1860,7 @@ impl ParametersBg {
                 }
             } else if p.2 == "button" {
                 // A button: a field that is all run, as its own flush plate
-                // (`Button::plate`, `ControlPlate::with_run_edge`) on its
+                // (`Button::plate`, `PaintCtx::inset_plate`) on its
                 // band, at the button radius.
                 if let Some(b) = &self.buttons[i] {
                     let (x, y, w, h) = b.rect();
@@ -1873,7 +1873,7 @@ impl ParametersBg {
                 }
             } else if p.2.starts_with("choice") {
                 // The dropdown trigger: a field that is all run — the
-                // widget's own raised paint (`ControlPlate::with_run_edge`)
+                // widget's own raised paint (`PaintCtx::inset_plate`)
                 // on the same band, radius and depth cap. Until 2026-10-01
                 // a trough, whose edge differed from the run's at the end of
                 // a text row's field.
