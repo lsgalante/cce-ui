@@ -52,8 +52,9 @@ pub struct Breadcrumb {
     pub right_clicked_seg: Option<usize>,
     pub network_opacity: f32,
     /// Relief stance of the segment run. `false` (the default) is the
-    /// dropdown-mirror trough: the run sits flush, sunk into the surface
-    /// behind a valley seam. `true` swaps the trough for a boss — the same
+    /// dropdown's flush plate: the run's face level with the surface, its
+    /// edge a field run's (`ControlPlate::with_run_edge`), as the dropdown
+    /// trigger and the buttons wear. `true` swaps it for a boss — the same
     /// silhouette raised out of the surface, for hosts whose breadcrumb
     /// floats in front of its plate (the designer's network editor) rather
     /// than sitting inset into a toolbar. Flat (non-relief) styling and the
@@ -360,7 +361,8 @@ impl Paint for Breadcrumb {
                 ctx.control_plate(
                     &crate::widget::ControlPlate::control(run_rect, r, stance, face)
                         .with_depth(depth)
-                        .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint)),
+                        .with_tint(self.focused.then(crate::widget::ControlPlate::focus_tint))
+                        .with_run_edge(stance == crate::widget::PlateStance::Flush),
                 );
                 for (a, b) in self.seams(rect) {
                     ctx.groove(a, b, Self::SEAM_WIDTH, depth, run_rect);
@@ -606,6 +608,32 @@ mod tests {
             .find(|s| s.logical == Some(logical))
             .expect("segment visible");
         s.x + s.w / 2.0
+    }
+
+    /// The flush controls that are not dropdowns or buttons wear their edge
+    /// too: a breadcrumb's flush run and a font selector's field draw a
+    /// field that is all run (`ControlPlate::with_run_edge`), never a trough.
+    #[test]
+    fn a_breadcrumb_and_a_font_selector_wear_the_runs_edge() {
+        use crate::scene::paint::{PaintCtx, Prim};
+        if !crate::layout::control_relief() {
+            return;
+        }
+        let all_run = |items: Vec<crate::scene::paint::PaintItem>| {
+            assert!(!items.iter().any(|i| matches!(i.prim, Prim::Trough { .. })), "no trough");
+            items.iter().any(|i| matches!(i.prim, Prim::Field { rect, split, .. } if split < rect.x - 100.0))
+        };
+        let rect = Rect { x: 10.0, y: 20.0, width: 300.0, height: 24.0 };
+        let mut b = Breadcrumb::new();
+        b.set_path(&["home".to_string(), "lsgalante".to_string()]);
+        b.set_rect(rect.x, rect.y, rect.width, rect.height);
+        let mut pc = PaintCtx::new();
+        Paint::paint(b.inner(), rect, &mut pc);
+        assert!(all_run(pc.finish().items), "a flush breadcrumb run");
+        let f = crate::widget::input::FontSelector::new("Sans".to_string());
+        let mut pc = PaintCtx::new();
+        Paint::paint(f.inner(), rect, &mut pc);
+        assert!(all_run(pc.finish().items), "a font selector");
     }
 
     #[test]

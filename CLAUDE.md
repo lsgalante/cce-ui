@@ -350,9 +350,13 @@ answers with its inset plate), and the pane's dropdown rows, now in `fields` (th
 `troughs()` list went: nothing in the pane draws a trough any more). **So does every
 button's flush plate** (`Button::plate` sets the run edge; the pane's button rows are
 fields too, where they had been a raised boss the button itself never drew). So every
-flush control in a parameter pane has one edge. Breadcrumbs, the font selector and the
-other `inset_plate` callers still wear the trough. `a_dropdown_trigger_wears_the_runs_edge`
-and `focus_lights_the_plate_rim` are the tests.
+flush control in a parameter pane has one edge. **And so do the rest** (2026-10-02): a
+breadcrumb's flush run, the font selector's field and a menubar's dropdown-look triggers
+(`menu.rs`, `flush_run` in place of `inset_plate`). No widget draws a trough for its
+own edge now; `PaintCtx::inset_plate` and `Prim::Trough` remain for callers outside the
+toolkit's widgets and for `cce-relief`'s preview. `a_dropdown_trigger_wears_the_runs_edge`,
+`focus_lights_the_plate_rim` and `a_breadcrumb_and_a_font_selector_wear_the_runs_edge` are
+the tests.
 
 The pieces that feed it: `ParametersBg::fields` (the pane's list, drawn after its troughs,
 hover-tinted like them; textpick rows and spinboxes with a run are in neither `reliefs`

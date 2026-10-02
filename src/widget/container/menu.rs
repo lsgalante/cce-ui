@@ -505,8 +505,8 @@ impl Paint for MenuBar {
 
         // Dropdown-trigger chrome shared by the context title and the menu
         // buttons on horizontal bars: the DE-wide closed-dropdown look — a
-        // flush inset trough with a transparent face (Dropdown::
-        // paint_background's raised path) carved on a band-inset rect, with
+        // flush plate with a field run's edge and a transparent face
+        // (Dropdown::paint_background's raised path) on a band-inset rect, with
         // the state fill rounded to sit inside it. The vertical and curved
         // modes keep their plain quads — their geometry is exotic and gets no
         // trough.
@@ -517,7 +517,7 @@ impl Paint for MenuBar {
             let radius = crate::layout::dropdown_corner_radius();
             let depth = crate::layout::bevel_width().min(trough_h * 0.2);
             let (trough, radii) = crate::layout::carve_inside(trough, (radius, radius, radius, radius), depth);
-            ctx.inset_plate(trough, radii, None, depth);
+            ctx.flush_run(trough, radii, None, depth, None);
             if let Some(c) = fill {
                 ctx.rounded_rect(trough, radius, (true, true, true, true), c);
             }
