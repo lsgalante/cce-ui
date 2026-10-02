@@ -343,8 +343,14 @@ well's fall mirrored back up, and whose left corners are its right corners, so t
 button has the same padding and rounding at both ends (since 2026-10-02; until then
 the lip was the outline's own inner half and the face met the seam square). Where the
 face's rounded corner leaves room by the straight outline is the valley's flat floor.
-The seam is the well's right wall's inner half: from half the step at `split` down to
-the floor, meeting the face's lip there at the same height, faded out at the outline. Never grouped into a host
+The seam is the right side mirrored: the button's valley rises out of `split` to the
+surface (its outer half, as the outline's is on the right), and the well's own right
+wall, a whole wall further left, falls from there to the floor — a ridge at the
+surface's level between them, where the surface lies outside the button's right edge.
+Both fade out at the outline, which runs straight across. (For an hour the seam was the
+well's wall's inner half running straight into the lip, which read as one doubled line
+with half the gap of the button's right side.) A textpick row's TextBox ends a wall
+short of its picker accordingly, so its text stops at the well. Never grouped into a host
 plate (its profile is not a monotonic step); the overlay's host-box slot carries `split`.
 The legacy banded path and flat hosts (`layout.rs`'s bridge) draw the two-box form.
 

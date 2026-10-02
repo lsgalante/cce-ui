@@ -913,9 +913,16 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         //   both ends: the same padding, the same rounding. Where the face's
         //   rounded corner leaves room by the straight outline, that is the
         //   valley's floor, flat.
-        // * The SEAM, the well's own right wall's inner half: from half the
-        //   step at the seam down to the floor, meeting the face's lip at
-        //   the seam where both stand at half the step.
+        // * The SEAM, the right side mirrored: the button's valley rises out
+        //   of the seam to the surface (its outer half, as the outline's is
+        //   on the right), and the well's own right wall, a whole wall's
+        //   width further left, falls from there to the floor — a ridge at
+        //   the surface's level between the two, standing where the
+        //   surface lies outside the button's right edge. Until 2026-10-02
+        //   the face's lip ran straight on down into the well, so the left
+        //   of the button read as one doubled line with half the gap of
+        //   its right. Both walls fade out at the outline, which runs
+        //   straight across them.
         //
         // A field with no well (split left of it — a dropdown trigger, a
         // button) is all run: the face inset from the outline all round,
@@ -935,9 +942,11 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
         let rtr = max(rr.y - hw, 0.0);
         let rbr = max(rr.z - hw, 0.0);
         let face_r = select(vec4f(max(rr.x - hw, 0.0), rtr, rbr, max(rr.w - hw, 0.0)), vec4f(rtr, rtr, rbr, rbr), has_well);
+        // The well's outline stands a whole wall left of the button's.
+        let well_r = split - t;
         // The outline: its outer half everywhere, its inner half over the
-        // well alone (`over_well`, antialiased across the seam's pixel).
-        let over_well = 1.0 - smoothstep(split - 0.5, split + 0.5, frag.x);
+        // well alone (`over_well`, antialiased across the well's end).
+        let over_well = 1.0 - smoothstep(well_r - 0.5, well_r + 0.5, frag.x);
         let inner = select(1.0, over_well, u > 0.5);
         slope = -cd * carve_slope(u) * inner;
         curv = rrect_clip.p_mat.w * sin(u * TAU) * inner;
@@ -949,15 +958,23 @@ fn plate_shade(frag: vec2f, vcol: vec4f) -> vec4f {
             sv_seam = gf.xy * (cd * carve_slope(1.0 - uf));
             curv_seam = rrect_clip.p_mat.w * sin((1.0 - uf) * TAU);
         }
-        // The seam: the well's right wall, its inner half, faded out at the
-        // outline (outside the field there is no well to fall into).
+        // The seam, faded out at the outline (outside the field there is
+        // no well to fall into, and across the outline's band the valley
+        // runs straight through).
         if (has_well) {
-            let us = (split - frag.x) / t + 0.5;
-            if (us >= 0.5) {
-                let usc = min(us, 1.0);
-                let fade = clamp(d / hw, 0.0, 1.0);
-                sv_seam = sv_seam + vec2f(1.0, 0.0) * (-cd * carve_slope(usc)) * fade;
-                curv_seam = curv_seam + rrect_clip.p_mat.w * sin(usc * TAU) * fade;
+            let fade = clamp(d / hw, 0.0, 1.0);
+            // The button's valley, its outer half: from the ridge down to
+            // half the step at the seam, where the face's lip takes over.
+            let ub = (frag.x - split) / t + 0.5;
+            if (ub >= 0.0 && ub <= 0.5) {
+                sv_seam = sv_seam + vec2f(-1.0, 0.0) * (-cd * carve_slope(ub)) * fade;
+                curv_seam = curv_seam + rrect_clip.p_mat.w * sin(ub * TAU) * fade;
+            }
+            // The well's right wall, whole: from the ridge to the floor.
+            let us = (well_r - frag.x) / t + 0.5;
+            if (us >= 0.0 && us <= 1.0) {
+                sv_seam = sv_seam + vec2f(1.0, 0.0) * (-cd * carve_slope(us)) * fade;
+                curv_seam = curv_seam + rrect_clip.p_mat.w * sin(us * TAU) * fade;
             }
         }
     } else if (eff == MODE_RIDGE || eff == MODE_TROUGH) {

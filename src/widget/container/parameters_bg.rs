@@ -1109,8 +1109,14 @@ impl ParametersBg {
                 // A textpick row's box ends where its picker begins.
                 let joined = self.display_params[i].2.starts_with("textpick") && self.choices[i].is_some();
                 tb.inner_mut().joined_right = joined;
-                let w = if joined { (r.2 - PICK_W).max(0.0) } else { r.2 };
-                tb.set_rect(r.0, r.1, w, r.3);
+                tb.set_rect(r.0, r.1, r.2, r.3);
+                if joined {
+                    // The box's well ends a whole wall short of the picker
+                    // (the field's seam: the well's wall, a ridge, the
+                    // picker's valley), so its text stops there too.
+                    let depth = crate::layout::bevel_width().min((r.3 - tb.label_strip()) * 0.2);
+                    tb.set_rect(r.0, r.1, (r.2 - PICK_W - depth).max(0.0), r.3);
+                }
             }
         }
         for (i, cb_opt) in self.toggles.iter_mut().enumerate() {
@@ -3869,8 +3875,11 @@ mod tests {
         let (tx, ty, tw, th) = p.texts[0].as_ref().unwrap().rect();
         let (dx, dy, dw, dh) = p.choices[0].as_ref().unwrap().rect();
         assert_eq!(dw, PICK_W);
-        assert_eq!(dx, tx + tw, "the picker begins where the box ends");
+        // The box stops a wall short of the picker: the field's seam is the
+        // well's wall, a ridge and the picker's valley.
         let label = p.texts[0].as_ref().unwrap().label_strip();
+        let depth = crate::layout::bevel_width().min((th - label) * 0.2);
+        assert!((dx - (tx + tw + depth)).abs() < 1e-3, "the picker begins a wall past the box's end: {dx} vs {}", tx + tw + depth);
         assert_eq!((dy, dy + dh), (ty + label, ty + th), "the picker spans the field's band, edge to edge");
         assert!(p.texts[0].as_ref().unwrap().inner().joined_right, "the box is square at the seam");
         assert!(!p.texts[1].as_ref().unwrap().inner().joined_right, "a plain text row is not");
@@ -3893,7 +3902,7 @@ mod tests {
         // the box width and hangs below it, not off the button sliver.
         let anchor = p.choices[0].as_ref().unwrap().popover_anchor.expect("anchor set");
         assert_eq!(anchor.x, tx);
-        assert_eq!(anchor.width, tw + dw);
+        assert!((anchor.width - (dx + dw - tx)).abs() < 1e-3, "the whole field");
         let d = p.choices[0].as_ref().unwrap();
         let (px_, py_, pw, _ph) = d.popover_geom(crate::scene::layout::Rect {
             x: dx, y: dy, width: dw, height: dh,
