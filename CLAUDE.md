@@ -317,6 +317,18 @@ cce-files does: a `PopoverCollector` keeps fills as plain rects, so the grown pl
 loses its relief and its corners (`inset_plate` degrades to a flat fill there). The
 designer's params pane went through one until the same day.
 
+### A text row's picker is the field's right end (since 2026-10-01)
+
+A `textpick` row in `ParametersBg` — a TextBox with a completion picker — is one field
+of two parts. The picker (a menu-button Dropdown, `PICK_W` wide) is a flush control
+plate over the whole band below the label, reaching the field's outer edge on the top,
+right and bottom as a dropdown trigger's plate does: square at the seam, the text box's
+radius outside (`Dropdown::set_radii`, and its ring in `troughs`). The TextBox stops at
+the seam with its well's right corners square (`TextBox::joined_right`, which `well()`
+and the pane's `reliefs` both read). Until then the picker was a button nested inside the
+box's well, its face stopping at the base of the well's wall, so it never reached the edge
+a dropdown's ▼ does. `textpick_rows_carry_a_picker` holds the layout.
+
 ### A row can open a submenu (since 2026-09-29)
 
 `context_menu::set_row_submenu(idx, SubmenuSpec { options, header_count, sliders })`,

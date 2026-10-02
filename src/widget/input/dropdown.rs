@@ -165,6 +165,11 @@ pub struct Dropdown {
     /// root plate container ancestor — the hook that keeps the adjustment after an app dissolves its
     /// root plate container (the walk finds nothing once the widget is parentless).
     corner_frame: Option<((f32, f32, f32, f32), f32, (bool, bool, bool, bool))>,
+    /// The raised trigger plate's corner radii, top-left clockwise, in place
+    /// of the configured radius on all four — a trigger that is one end of
+    /// a wider field (a parameter pane's completion picker, square where it
+    /// meets the text box, the field's own radius on the outside).
+    radii: Option<(f32, f32, f32, f32)>,
     /// Raised style: the closed control's background is an SDF-lit `Bevel`
     /// plate (fill + rolled lit edge) instead of a flat fill + border stroke.
     raised: Option<bool>,
@@ -233,6 +238,7 @@ impl Dropdown {
             label: None,
             hovered: false,
             corner_frame: None,
+            radii: None,
             raised: None,
             flat: false,
             face: None,
@@ -255,6 +261,12 @@ impl Dropdown {
     }
 
     /// Set (or clear) the app-owned concentric frame — see the `corner_frame` field docs.
+    /// [`Self::radii`]: the raised trigger plate's corners, or `None` for
+    /// the configured radius.
+    pub fn set_radii(&mut self, radii: Option<(f32, f32, f32, f32)>) {
+        self.radii = radii;
+    }
+
     pub fn set_corner_frame(&mut self, frame: Option<((f32, f32, f32, f32), f32, (bool, bool, bool, bool))>) {
         self.corner_frame = frame;
     }
@@ -622,6 +634,9 @@ impl Dropdown {
                 if pr4 && (g_left - g_bottom).abs() < 1.0 && g_left >= 0.0 {
                     r4[3] = (pr - g_left).max(0.0) * cf;
                 }
+            }
+            if let Some((a, b, c, d)) = self.radii {
+                r4 = [a, b, c, d];
             }
             // The trigger is a flush control plate (groove ring down, beveled
             // lip back up, face level with the surface; a transparent raw

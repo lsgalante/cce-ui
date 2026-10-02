@@ -58,6 +58,10 @@ pub struct TextBox {
     /// when the user's config turns multiline wrap off DE-wide.
     pub line_wrap_override: Option<bool>,
     pub draw_bg_border: bool,
+    /// The box's right end meets another control (a parameter pane's
+    /// completion picker): its well's right corners are square, so the two
+    /// read as one field with a seam between them.
+    pub joined_right: bool,
     pub text_color: Option<[u8; 3]>,
     pub font_size: f32,
     pub font_family: String,
@@ -137,6 +141,7 @@ impl TextBox {
             multiline: false,
             line_wrap_override: None,
             draw_bg_border: true,
+            joined_right: false,
             text_color: None,
             font_size: style_size,
             font_family: style_family.clone(),
@@ -1199,8 +1204,9 @@ impl TextBox {
         labels
     }
 
-    /// The well this TextBox carves, as `(rect, corner radius, depth, focus
-    /// tint)` — `None` when it draws no relief at all (square-cornered legacy
+    /// The well this TextBox carves, as `(rect, corner radii, depth, focus
+    /// tint)` — radii top-left, top-right, bottom-right, bottom-left, the
+    /// right two square when the box is [`Self::joined_right`] — `None` when it draws no relief at all (square-cornered legacy
     /// geometry, `control_relief` off, or a box that draws no background).
     ///
     /// The SINGLE source for that geometry: `paint` carves it here, and the
@@ -1208,7 +1214,7 @@ impl TextBox {
     /// through [`crate::layout::RenderTarget::recess`] for hosts that consume
     /// `all_quads` and so never see the carve. A second copy of this math in
     /// the bridge is exactly how the two would drift apart.
-    pub fn well(&self) -> Option<(Rect, f32, f32, Option<[f32; 3]>)> {
+    pub fn well(&self) -> Option<(Rect, (f32, f32, f32, f32), f32, Option<[f32; 3]>)> {
         let radius = crate::layout::textbox_corner_radius();
         if radius <= 0.0 || !self.recessed() || !self.draw_bg_border {
             return None;
@@ -1221,12 +1227,13 @@ impl TextBox {
             height: self.rect.height - top,
         };
         let depth = crate::layout::bevel_width().min(well.height * 0.2);
-        let (well, radii) = crate::layout::carve_inside(well, (radius, radius, radius, radius), depth);
+        let right = if self.joined_right { 0.0 } else { radius };
+        let (well, radii) = crate::layout::carve_inside(well, (radius, right, right, radius), depth);
         let tint = self.editing.then(|| {
             let hc = crate::color::highlight_primary_color();
             [hc[0], hc[1], hc[2]]
         });
-        Some((well, radii.0, depth, tint))
+        Some((well, radii, depth, tint))
     }
 }
 
@@ -1558,10 +1565,9 @@ impl Paint for TextBox {
                         bg_color,
                     );
                 }
-                if let Some((well, r, depth, tint)) = self.well() {
+                if let Some((well, radii, depth, tint)) = self.well() {
                     // Focus lights the well's rim in the highlight accent (with
                     // the shader's complementary shadow) — the TreeList treatment.
-                    let radii = (r, r, r, r);
                     match tint {
                         Some(t) => ctx.recess_tinted(well, radii, depth, t),
                         None => ctx.recess(well, radii, depth),

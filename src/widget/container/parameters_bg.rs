@@ -50,8 +50,9 @@ fn is_text_row(t: &str) -> bool {
     t == "text" || t.starts_with("textpick")
 }
 
-/// Width of a textpick row's picker button, nested inside the right end of
-/// the TextBox's recessed well.
+/// Width of a textpick row's picker button: the right end of the field,
+/// a flush control plate reaching the field's outer edge as a dropdown
+/// trigger's does, the text box's well ending at the seam beside it.
 const PICK_W: f32 = 24.0;
 
 pub struct ParametersBg {
@@ -1074,21 +1075,21 @@ impl ParametersBg {
             if let Some(d) = d_opt {
                 let r = rects[i];
                 if self.display_params[i].2.starts_with("textpick") {
-                    // The picker button nests INSIDE the text box's recessed
-                    // well (the box spans the full row): below the detached
-                    // label band, its face reaching exactly to the base of
-                    // the well's wall (inset = the carve depth) on the sides
-                    // it adjoins — there the WELL'S OWN BEVEL is the seam's
-                    // far side, and the trough ([`Self::troughs`]) carves
-                    // only the interior left edge. A ring encapsulated
-                    // within the bevel doubled the valley on the adjoining
-                    // sides.
+                    // The picker is the field's RIGHT END: a flush control
+                    // plate over the whole band below the detached label,
+                    // out to the field's outer edge on the top, right and
+                    // bottom as a dropdown trigger's plate is, square where
+                    // it meets the text box (whose well stops at the seam —
+                    // `TextBox::joined_right`) and the box's radius on the
+                    // outside, so the two read as one field. Until
+                    // 2026-10-01 it was a button nested INSIDE the box's
+                    // well, its face stopping at the base of the well's
+                    // wall, so it never reached the edge a dropdown's does.
                     let label_top = if inline[i] { 0.0 } else { crate::layout::control_label_strip() };
                     let band_h = r.3 - label_top;
-                    let inset = crate::layout::bevel_width().min(band_h * 0.2);
-                    let by = r.1 + label_top + inset;
-                    let bh = (band_h - 2.0 * inset).max(8.0);
-                    d.set_rect(r.0 + r.2 - PICK_W - inset, by, PICK_W, bh);
+                    let rr = crate::layout::textbox_corner_radius();
+                    d.set_rect(r.0 + r.2 - PICK_W, r.1 + label_top, PICK_W, band_h);
+                    d.inner_mut().set_radii(Some((0.0, rr, rr, 0.0)));
                     // The menu hangs off the WHOLE field, not the button
                     // sliver: anchor the popover to the box's well band.
                     d.popover_anchor = Some(Rect {
@@ -1105,7 +1106,11 @@ impl ParametersBg {
         for (i, tb_opt) in self.texts.iter_mut().enumerate() {
             if let Some(tb) = tb_opt {
                 let r = rects[i];
-                tb.set_rect(r.0, r.1, r.2, r.3);
+                // A textpick row's box ends where its picker begins.
+                let joined = self.display_params[i].2.starts_with("textpick") && self.choices[i].is_some();
+                tb.inner_mut().joined_right = joined;
+                let w = if joined { (r.2 - PICK_W).max(0.0) } else { r.2 };
+                tb.set_rect(r.0, r.1, w, r.3);
             }
         }
         for (i, cb_opt) in self.toggles.iter_mut().enumerate() {
@@ -1793,7 +1798,11 @@ impl ParametersBg {
                 // The top-label band stays outside the relief like every other host.
                 let ty = w.label_strip();
                 let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
-                out.push((x, y + ty, ww, h - ty, r4(radius), depth, raised, all));
+                // A text box joined to its picker is square at the seam,
+                // as the box's own carve is (`TextBox::well`).
+                let joined = is_text_row(&p.2) && self.texts[i].as_ref().is_some_and(|t| t.inner().joined_right);
+                let radii = if joined { (radius, 0.0, 0.0, radius) } else { r4(radius) };
+                out.push((x, y + ty, ww, h - ty, radii, depth, raised, all));
             }
         }
         out
@@ -1826,15 +1835,14 @@ impl ParametersBg {
                 continue;
             }
             if p.2.starts_with("textpick") {
-                if let (Some(d), Some(tb)) = (&self.choices[i], &self.texts[i]) {
+                if let Some(d) = &self.choices[i] {
+                    // The picker's plate is the field's right end: its ring
+                    // all round, as a dropdown trigger's, square at the seam.
                     let (bx, by, bw, bh) = d.rect();
-                    let (_, _, _, th) = tb.rect();
-                    let ty = tb.label_strip();
                     if bw > 0.0 && bh > 0.0 {
-                        let depth = crate::layout::bevel_width().min((th - ty) * 0.2);
-                        let r = (crate::layout::textbox_corner_radius() - depth).max(2.0);
-                        // Left edge only: top, right and bottom adjoin the well.
-                        out.push((bx, by, bw, bh, (r, r, r, r), depth, (false, false, false, true)));
+                        let depth = crate::layout::bevel_width().min(bh * 0.2);
+                        let r = crate::layout::textbox_corner_radius();
+                        out.push((bx, by, bw, bh, (0.0, r, r, 0.0), depth, (true, true, true, true)));
                     }
                 }
             } else if p.2.starts_with("spinbox") {
@@ -3840,13 +3848,23 @@ mod tests {
         assert!(p.choices[1].is_none(), "plain text has no picker");
         assert!(p.texts[2].is_some() && p.choices[2].is_none(), "no options, no picker");
 
-        // Layout: the box spans the full row; the picker button nests
-        // inside it (within the box's right end).
+        // Layout: the picker is the field's right end — the box stops at
+        // the seam, square there, and the picker reaches the field's outer
+        // edge on the right, top and bottom, as a dropdown trigger does.
         let (tx, ty, tw, th) = p.texts[0].as_ref().unwrap().rect();
         let (dx, dy, dw, dh) = p.choices[0].as_ref().unwrap().rect();
         assert_eq!(dw, PICK_W);
-        assert!(dx > tx && dx + dw < tx + tw, "button inside the box horizontally");
-        assert!(dy > ty && dy + dh <= ty + th, "button inside the box vertically");
+        assert_eq!(dx, tx + tw, "the picker begins where the box ends");
+        let label = p.texts[0].as_ref().unwrap().label_strip();
+        assert_eq!((dy, dy + dh), (ty + label, ty + th), "the picker spans the field's band, edge to edge");
+        assert!(p.texts[0].as_ref().unwrap().inner().joined_right, "the box is square at the seam");
+        assert!(!p.texts[1].as_ref().unwrap().inner().joined_right, "a plain text row is not");
+        let (_, radii, _, _) = p.texts[0].as_ref().unwrap().inner().well().expect("a well");
+        assert_eq!((radii.1, radii.2), (0.0, 0.0), "the well's right corners are square");
+        assert!(radii.0 > 0.0 && radii.3 > 0.0);
+        let rr = crate::layout::textbox_corner_radius();
+        let ring = p.inner().troughs().into_iter().find(|t| t.0 == dx).expect("the picker's ring");
+        assert_eq!(ring.4, (0.0, rr, rr, 0.0), "square at the seam, the field's radius outside");
 
         // Both text variants lay out at the same row height.
         assert_eq!(p.inner().row_height(0), p.inner().row_height(1));
@@ -3855,7 +3873,7 @@ mod tests {
         // the box width and hangs below it, not off the button sliver.
         let anchor = p.choices[0].as_ref().unwrap().popover_anchor.expect("anchor set");
         assert_eq!(anchor.x, tx);
-        assert_eq!(anchor.width, tw);
+        assert_eq!(anchor.width, tw + dw);
         let d = p.choices[0].as_ref().unwrap();
         let (px_, py_, pw, _ph) = d.popover_geom(crate::scene::layout::Rect {
             x: dx, y: dy, width: dw, height: dh,
