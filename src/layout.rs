@@ -4351,20 +4351,7 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                 // All run and no well (`PaintCtx::inset_plate`'s edge): the
                 // plate alone, with the face that came before it.
                 let face = if split <= rect.x { pending_face.take().map(|(_, _, fill)| fill) } else { None }.unwrap_or([0.0; 4]);
-                // All well and no run (`PaintCtx::well_field`, a text box):
-                // the plain recess, its own corners.
-                if split >= rect.x + rect.width {
-                    pc.relief_carve(&ReliefCarve {
-                        kind: CarveKind::Recess { tint },
-                        x: rect.x,
-                        y: rect.y,
-                        w: rect.width,
-                        h: rect.height,
-                        radii,
-                        depth,
-                        edges: (true, true, true, true),
-                    });
-                } else if split > rect.x {
+                if split > rect.x {
                     pc.relief_carve(&ReliefCarve {
                         kind: CarveKind::Recess { tint },
                         x: rect.x,
@@ -4376,14 +4363,12 @@ pub fn render_widget<T: WidgetHost + 'static>(pc: &mut dyn RenderTarget, w: &mut
                         edges: (true, true, true, true),
                     });
                 }
-                if split < rect.x + rect.width {
-                    let r = radii.1.max(radii.2);
-                    let rx = split.max(rect.x);
-                    let rw = (rect.x + rect.width - rx).max(0.0);
-                    match tint {
-                        Some(t) => pc.inset_plate_tinted(face, rx, rect.y, rw, rect.height, r, depth, t),
-                        None => pc.inset_plate(face, rx, rect.y, rw, rect.height, r, depth),
-                    }
+                let r = radii.1.max(radii.2);
+                let rx = split.max(rect.x);
+                let rw = (rect.x + rect.width - rx).max(0.0);
+                match tint {
+                    Some(t) => pc.inset_plate_tinted(face, rx, rect.y, rw, rect.height, r, depth, t),
+                    None => pc.inset_plate(face, rx, rect.y, rw, rect.height, r, depth),
                 }
             }
             Prim::Trough { rect, radii, depth, tint, .. } => {

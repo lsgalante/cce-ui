@@ -382,15 +382,12 @@ explicit valley and `cce-relief`'s preview. `a_dropdown_trigger_wears_the_runs_e
 `focus_lights_the_plate_rim`, `a_breadcrumb_and_a_font_selector_wear_the_runs_edge` and
 `an_inset_plate_is_a_field_that_is_all_run` are the tests.
 
-**A text box is a field that is all well** (since 2026-10-02): `PaintCtx::well_field`, a
-`Prim::Field` whose seam is `FIELD_RUN_ONLY` px past its right end (`field_well_only`),
-in `TextBox`'s own paint and in `ParametersBg::fields` for every text row without a
-picker. It was a `Prim::Recess`, which the runner GROUPS into a live host plate as a CSG
-feature, and a grouped recess drew a doubled outline where the field beside it — never
-grouped, its own overlay — drew the single edge. That was first put down to the NVIDIA
-device; it was not (see "A grouped carve shades as its overlay does" below, which fixed
-the cause the same day, so the two now agree whichever is used). Both fallbacks draw an
-all-well field as one plain recess. `a_text_box_is_a_field_that_is_all_well` is the test.
+**A plain text box is a `Prim::Recess`**, grouped into the plate under it when the
+plate's grouping window is open. For a few hours on 2026-10-02 it was a field that was
+all well (`PaintCtx::well_field`, 6634ba3), to dodge a doubled outline that grouped
+recesses drew; the cause was fixed in the plate shader the same day (see "A grouped carve
+shades as its overlay does" below) and the workaround reverted, since a grouped recess
+and an overlaid one now draw the same pixels.
 
 The pieces that feed it: `ParametersBg::fields` (the pane's list, drawn after its troughs,
 hover-tinted like them; textpick rows and spinboxes with a run are in neither `reliefs`
@@ -433,7 +430,7 @@ overlay drew one soft edge. Two causes, both in how the plate path applied the c
 Measured with `examples/grouped_recess_probe.rs` (a plate whose recesses group beside the
 same recesses forced to overlay by a transparent quad): grouped and overlay columns
 5,462 px apart before, 0 after; in the designer with grouped text wells, 0 px from the
-`well_field` rendering.
+`well_field` rendering the text boxes then had (since reverted, above).
 
 **And it is tested by rendering, not by reading** (`vk::plate_probe`, `cfg(test)`): an
 offscreen 2D render — a `DisplayList` through the runner's own `tessellate_display_list`

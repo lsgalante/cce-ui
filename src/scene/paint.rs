@@ -222,12 +222,6 @@ pub enum PlateStance {
 /// seam and the seam's own wall land nowhere near the field.
 pub const FIELD_RUN_ONLY: f32 = 1.0e4;
 
-/// The seam of a field that is all well and no run ([`PaintCtx::well_field`]):
-/// this far past the field's right end.
-pub fn field_well_only(rect: Rect) -> f32 {
-    rect.x + rect.width + FIELD_RUN_ONLY
-}
-
 /// A control plate: the thing you press, at the control rung of the plate
 /// ladder. One description for every control face — Button, Dropdown,
 /// FontSelector, Breadcrumb, a ButtonStrip's selected plateau — so their
@@ -1570,16 +1564,6 @@ impl PaintCtx {
     ) {
         let rect = self.apply_offset(rect);
         self.push(Prim::Trough { rect, radii, depth, edges, tint: Some(tint) });
-    }
-
-    /// A sunken well and nothing else: a [`Prim::Field`] that is all well,
-    /// its seam [`FIELD_RUN_ONLY`] px past its right end — the well a text
-    /// box is. It shades as a field's well does, an overlay of its own
-    /// rather than a feature grouped into the plate under it, which is the
-    /// look a textpick row's well had beside a plain text box's (since
-    /// 2026-10-02; a plain box was a `Prim::Recess`, grouped).
-    pub fn well_field(&mut self, rect: Rect, radii: Radii, depth: f32, tint: Option<[f32; 3]>) {
-        self.field(rect, radii, depth, field_well_only(rect), tint);
     }
 
     /// A sunken well ending in a flush run at `split` — see [`Prim::Field`].
