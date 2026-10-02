@@ -427,6 +427,40 @@ pub mod context_menu {
         Back,
     }
 
+    /// How long a page turn takes: the plate grows or shrinks from the size
+    /// of the one it replaces to its own, the rows it had slide out and fade
+    /// and the page's slide in from the side the turn comes from.
+    pub const TURN_MS: f32 = 180.0;
+    /// [`TURN_MS`], or `CCE_UI_TURN_MS` from the environment — a turn in
+    /// slow motion, to see one frame by frame (a shadow session's capture
+    /// takes longer than a whole turn).
+    pub fn turn_ms() -> f32 {
+        static MS: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        *MS.get_or_init(|| {
+            std::env::var("CCE_UI_TURN_MS").ok().and_then(|v| v.parse::<f32>().ok()).filter(|v| *v > 0.0).unwrap_or(TURN_MS)
+        })
+    }
+    /// How far the rows slide in a turn, logical px.
+    pub const TURN_SLIDE: f32 = 36.0;
+
+    /// A page turn in progress — see [`TURN_MS`].
+    #[derive(Debug, Clone)]
+    struct Turning {
+        /// The plate as it stood when the turn began: its size and its rows.
+        from: Box<ContextMenuState>,
+        start: std::time::Instant,
+        /// +1 forward (the page comes in from the right, where `›` points),
+        /// -1 back.
+        dir: f32,
+    }
+
+    /// The ease of a turn at `t` in 0..=1: fast out of the old plate,
+    /// settling into the new one.
+    pub fn turn_ease(t: f32) -> f32 {
+        let u = 1.0 - t.clamp(0.0, 1.0);
+        1.0 - u * u * u
+    }
+
     /// A toolkit color as the `[u8; 3]` a [`TextLabel`] carries.
     fn rgb8(c: [f32; 4]) -> [u8; 3] {
         [
@@ -468,6 +502,12 @@ pub mod context_menu {
         pub turned: bool,
         /// A turn a swipe asked for, until the host takes it.
         turn: Option<PageTurn>,
+        /// The turn being animated, from the plate this one replaced.
+        turning: Option<Turning>,
+        /// When the menu was last hidden: a page shown in the same moment
+        /// turns from it, as a host that closes one menu and shows the next
+        /// in one dispatch means it to.
+        hidden_at: Option<std::time::Instant>,
         /// The slider row a press took hold of, until the release.
         pub slider_drag: Option<usize>,
         /// A trackpad's leftover fraction of a wheel notch.
@@ -525,6 +565,8 @@ pub mod context_menu {
                 back_hovered: false,
                 turned: false,
                 turn: None,
+                turning: None,
+                hidden_at: None,
                 slider_drag: None,
                 wheel_accum: 0.0,
                 slider_change: None,
@@ -588,6 +630,7 @@ pub mod context_menu {
             self.back_hovered = false;
             self.turned = false;
             self.turn = None;
+            self.turning = None;
             self.slider_drag = None;
             self.wheel_accum = 0.0;
             self.slider_change = None;
@@ -617,9 +660,26 @@ pub mod context_menu {
         /// rows (sliders and page rows are set again after, as after
         /// [`show`](Self::show)); what changes is that a placement keeps the
         /// corner rather than opening from a pointer.
+        ///
+        /// The turn is ANIMATED from the plate that stood there — up, or
+        /// hidden in the same moment (`TURN_HANDOFF`) — forward for a page
+        /// with a back band, back for one without (a menu returned to).
         pub fn show_page(&mut self, x: f32, y: f32, back: Option<&str>, options: Vec<String>, header_count: usize, target: WidgetId) {
+            const TURN_HANDOFF: std::time::Duration = std::time::Duration::from_millis(100);
+            let from = (self.visible || self.hidden_at.is_some_and(|t| t.elapsed() < TURN_HANDOFF)).then(|| {
+                let mut from = self.clone();
+                from.turning = None;
+                from.hovered_item = None;
+                from.back_hovered = false;
+                Box::new(from)
+            });
             self.show(x, y, options, header_count, target);
             self.turned = true;
+            self.turning = from.map(|from| Turning {
+                from,
+                start: std::time::Instant::now(),
+                dir: if back.is_some() { 1.0 } else { -1.0 },
+            });
             if let Some(title) = back {
                 let label = format!("{BACK_MARK} {title}");
                 let (family, size) = label_font();
@@ -650,6 +710,51 @@ pub mod context_menu {
                 self.sliders[i] = sliders.get(i).copied().flatten();
             }
             true
+        }
+
+        /// Animate the shown menu as turning from a plate of `w` x `h` at its
+        /// corner that had no rows of its own to show going — what a host
+        /// turning back from a plate the menu does not draw (a dialog) asks
+        /// for. `forward` as for [`Self::show_page`].
+        pub fn turn_from_size(&mut self, w: f32, h: f32, forward: bool) {
+            let mut from = self.clone();
+            from.turning = None;
+            from.options.clear();
+            from.sliders.clear();
+            from.pages.clear();
+            from.back = None;
+            from.hovered_item = None;
+            from.w = w;
+            from.h = h;
+            self.turning = Some(Turning { from: Box::new(from), start: std::time::Instant::now(), dir: if forward { 1.0 } else { -1.0 } });
+        }
+
+        /// How far the turn in progress has gone, eased, 0..1; `None` when
+        /// there is none or it has finished.
+        pub fn turn_progress(&self) -> Option<f32> {
+            let t = self.turning.as_ref()?;
+            let raw = t.start.elapsed().as_secs_f32() * 1000.0 / turn_ms();
+            (raw < 1.0).then(|| turn_ease(raw))
+        }
+
+        /// The rect the plate is drawn at: its own, or on its way there from
+        /// the one it turned from.
+        pub fn drawn_rect(&self) -> crate::scene::layout::Rect {
+            let mut r = crate::scene::layout::Rect { x: self.x, y: self.y, width: self.w, height: self.h };
+            if let (Some(e), Some(t)) = (self.turn_progress(), self.turning.as_ref()) {
+                r.width = t.from.w + (self.w - t.from.w) * e;
+                r.height = t.from.h + (self.h - t.from.h) * e;
+            }
+            r
+        }
+
+        /// The size a host surface has to give the plate: its own, or while
+        /// it turns, the larger of the two it turns between.
+        pub fn surface_size(&self) -> (f32, f32) {
+            match (self.turn_progress(), self.turning.as_ref()) {
+                (Some(_), Some(t)) => (self.w.max(t.from.w), self.content_h.max(t.from.h)),
+                _ => (self.w, self.content_h),
+            }
         }
 
         /// The band's height above the rows: one row on a page that goes
@@ -927,6 +1032,8 @@ pub mod context_menu {
             self.slider_drag = None;
             self.back_hovered = false;
             self.turn = None;
+            self.turning = None;
+            self.hidden_at = Some(std::time::Instant::now());
         }
 
         pub fn hit_test(&self, px: f32, py: f32) -> bool {
@@ -1060,13 +1167,25 @@ pub mod context_menu {
             if !self.visible || self.hosted {
                 return;
             }
+            let r = crate::layout::menu_corner_radius();
+            if let (Some(e), Some(t)) = (self.turn_progress(), self.turning.as_ref()) {
+                // Turning: the plate on its way between the two sizes, the
+                // page's rows sliding in from the side the turn comes from.
+                // The rows it turned from leave as text (`paint_with_labels`).
+                let rect = self.drawn_rect();
+                let depth = crate::layout::bevel_width().min(rect.height * 0.2);
+                paint_menu_plate(ctx, rect, self.in_popup);
+                ctx.clip_rounded(rect, r, |ctx| {
+                    ctx.translate(t.dir * (1.0 - e) * TURN_SLIDE, 0.0, |ctx| self.paint_rows(ctx, rect, r, depth));
+                });
+                return;
+            }
             let rect = crate::scene::layout::Rect {
                 x: self.x,
                 y: self.y,
                 width: self.w,
                 height: self.h,
             };
-            let r = crate::layout::menu_corner_radius();
             let depth = crate::layout::bevel_width().min(self.h * 0.2);
             paint_menu_plate(ctx, rect, self.in_popup);
 
@@ -1211,6 +1330,23 @@ pub mod context_menu {
                 return;
             }
             let (family, _) = label_font();
+            if let (Some(e), Some(t)) = (self.turn_progress(), self.turning.as_ref()) {
+                // The labels of both, cut at the plate as it is drawn: the
+                // ones it turned from sliding away and fading, the page's
+                // sliding in and coming up.
+                let rect = self.drawn_rect();
+                let bounds = Some([rect.x, rect.y, rect.x + rect.width, rect.y + rect.height]);
+                let (lo, hi) = (-t.dir * e * TURN_SLIDE, t.dir * (1.0 - e) * TURN_SLIDE);
+                // Squared, so the two are seldom both legible at once: the
+                // old ones mostly gone before the new ones mostly come.
+                let (out, into) = ((1.0 - e) * (1.0 - e), e * e);
+                for (labels, dx, alpha) in [(t.from.labels(), lo, out), (self.labels(), hi, into)] {
+                    for label in labels {
+                        ctx.text_faded(label.text, label.x + dx, label.y, label.font_size, label.color, alpha, Some(family.clone()), bounds);
+                    }
+                }
+                return;
+            }
             // The menu's own rect: the engine's popover clamp exempts exactly
             // these bounds, so the labels render inside the plate instead of
             // being clipped to the page content beneath it.
@@ -1229,8 +1365,15 @@ pub mod context_menu {
         }
 
         pub fn text_labels(&self) -> Vec<TextLabel> {
+            if !self.visible || self.hosted {
+                return Vec::new();
+            }
+            self.labels()
+        }
+
+        /// The labels as the rows stand, shown or not.
+        fn labels(&self) -> Vec<TextLabel> {
             let mut labels = Vec::new();
-            if !self.visible || self.hosted { return labels; }
 
             if let Some(title) = &self.back {
                 let (_, label_size) = label_font();
@@ -1433,8 +1576,18 @@ pub mod context_menu {
     pub fn natural_geometry() -> ((f32, f32), f32, f32) {
         CONTEXT_MENU.with(|m| {
             let m = m.borrow();
-            (m.anchor, m.w, m.content_h)
+            let (w, h) = m.surface_size();
+            (m.anchor, w, h)
         })
+    }
+    /// Whether a page turn is being animated: a host drawing the menu
+    /// itself asks for frames while it is.
+    pub fn is_turning() -> bool {
+        CONTEXT_MENU.with(|m| m.borrow().turn_progress().is_some())
+    }
+    /// See [`ContextMenuState::turn_from_size`].
+    pub fn turn_from_size(w: f32, h: f32, forward: bool) {
+        CONTEXT_MENU.with(|m| m.borrow_mut().turn_from_size(w, h, forward));
     }
     /// Paint the menu with its top-left at the origin, whether or not it is
     /// [hosted](set_hosted) — the runner's popup surface draws it this way.
@@ -2014,6 +2167,35 @@ mod context_menu_page_tests {
         open();
         assert!(!swipe(80.0, x, y), "back from a menu that was opened goes nowhere");
         assert_eq!(context_menu::take_turn(), None);
+        context_menu::hide();
+    }
+
+    /// A turn is animated: the plate grows or shrinks from the size of the
+    /// one it replaced, a host surface is given room for both meanwhile, and
+    /// after `TURN_MS` it is the page's own. A plain show does not animate.
+    #[test]
+    fn a_page_turn_grows_the_plate_from_the_one_it_replaced() {
+        context_menu::show(400.0, 200.0, (0..12).map(|i| format!("Row {i}")).collect(), 0, WidgetId(1));
+        assert!(!context_menu::is_turning(), "a menu opened is not a turn");
+        let (_, w0, h0) = context_menu::natural_geometry();
+        let (mx, my) = (context_menu::x(), context_menu::y());
+        context_menu::show_page(mx, my, Some("View"), vec!["One".into()], 0, WidgetId(1));
+        assert!(context_menu::is_turning());
+        let drawn = context_menu::CONTEXT_MENU.with(|m| m.borrow().drawn_rect());
+        let own = context_menu::h();
+        assert!(own < h0 && drawn.height > own && drawn.height <= h0, "on its way down: {} between {own} and {h0}", drawn.height);
+        let (_, w, h) = context_menu::natural_geometry();
+        assert_eq!((w, h), (w0.max(context_menu::w()), h0), "room for both while it turns");
+
+        std::thread::sleep(std::time::Duration::from_millis(context_menu::TURN_MS as u64 + 40));
+        assert!(!context_menu::is_turning());
+        let (_, w, h) = context_menu::natural_geometry();
+        assert_eq!((w, h), (context_menu::w(), own), "its own size once it has landed");
+
+        // A page shown in the moment the menu was put down turns from it too.
+        context_menu::hide();
+        context_menu::show_page(mx, my, None, (0..12).map(|i| format!("Row {i}")).collect(), 0, WidgetId(1));
+        assert!(context_menu::is_turning(), "handed over from the menu just hidden");
         context_menu::hide();
     }
 

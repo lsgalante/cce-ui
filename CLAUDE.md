@@ -577,6 +577,20 @@ there:
   of a swipe and the swipe back went to nothing — found in a shadow session, where the
   first cut turned forward and then would not turn back.
 
+- **A turn is animated** (`TURN_MS`, 180 ms, eased out): the plate grows or shrinks
+  from the size of the one it replaced to its own at the shared corner (`drawn_rect`),
+  the rows it had slide away `TURN_SLIDE` px and fade, and the page's slide in from the
+  side the turn comes from and come up — forward from the right for a page with a back
+  band, back from the left for one without. The old plate is a clone taken in
+  `show_page`, from a menu that is up or was hidden in the same moment (a host that
+  closes one menu and shows the next in one dispatch); `turn_from_size(w, h, forward)`
+  is for a turn from a plate the menu does not draw (the designer's dialog). While it
+  runs `natural_geometry` is the larger of the two sizes, so the popup is repositioned
+  to hold both and again to the page's own when it lands, and the runner asks for
+  frames (`is_turning`). Only labels fade (`text_faded`); the leaving rows' geometry
+  is not drawn. `CCE_UI_TURN_MS` slows it down, to capture a turn frame by frame in a
+  shadow session. `a_page_turn_grows_the_plate_from_the_one_it_replaced` is the test.
+
 **Until this a row could open a SUBMENU** (2026-09-29 to 2026-10-02): a second
 `ContextMenuState` flying out beside the row on hover, in a child popup, with a
 hover-intent triangle. It went with the change, the `SUBMENU` thread-local, the

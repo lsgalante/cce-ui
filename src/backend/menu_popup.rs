@@ -112,6 +112,12 @@ impl<A: Application> EngineState<A> {
     /// is sized.
     pub(crate) fn sync_menu_popup(&mut self) {
         let visible = context_menu::is_visible();
+        // A page turn is animated: frames until it lands, and the popup is
+        // sized to hold both plates meanwhile (`natural_geometry`), then to
+        // the page's own once it has.
+        if visible && context_menu::is_turning() {
+            self.redraw = true;
+        }
         if !(visible && self.window.is_some() && popup_enabled()) {
             if self.menu_popup.is_some() {
                 self.close_menu_popup();
