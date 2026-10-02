@@ -150,6 +150,17 @@ impl LineEdit {
         self.text.char_indices().nth(n).map_or(self.text.len(), |(i, _)| i)
     }
 
+    /// The other direction: a byte offset into `text` (the caret, a selection
+    /// edge) as the offset into [`LineEdit::display`] where it is drawn — the
+    /// same offset unless masked, where it is that many bullets in.
+    pub fn display_index(&self, at: usize) -> usize {
+        let at = self.boundary(at);
+        if !self.masked {
+            return at;
+        }
+        self.text[..at].chars().count() * '\u{2022}'.len_utf8()
+    }
+
     /// The end of the selection the caret is not at — what a shift+click
     /// keeps — or the caret itself with nothing selected.
     fn anchor(&self) -> usize {
@@ -460,6 +471,12 @@ mod tests {
         assert_eq!(e.text_index(3 * bullet), 4);
         assert_eq!(e.text_index(99), 4);
         assert_eq!(LineEdit::with_text("abc").text_index(2), 2, "unmasked is the identity");
+        // And back: every text boundary round-trips through the bullets.
+        for at in [0, 1, 3, 4] {
+            assert_eq!(e.text_index(e.display_index(at)), at, "{at}");
+        }
+        assert_eq!(e.display_index(3), 2 * bullet);
+        assert_eq!(LineEdit::with_text("abc").display_index(2), 2);
     }
 
     /// A password must not leave through a chord the user may not have meant.
