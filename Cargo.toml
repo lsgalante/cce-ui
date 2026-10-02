@@ -17,7 +17,7 @@ markdown = ["dep:cce-vault"]
 doc_editor = []
 
 [dependencies]
-cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "97626a1c42aed82b24d0761070749ce4be4e1443", optional = true }
+cce-vault = { git = "https://github.com/lsgalante/cce-vault.git", rev = "827f72f6755871c6badc564626bc3813b0c58799", optional = true }
 raw-window-handle = "0.6"
 glam = "0.29"
 bytemuck = { version = "1", features = ["derive"] }
