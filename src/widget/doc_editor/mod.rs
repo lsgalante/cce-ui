@@ -34,7 +34,7 @@ pub use preview::Target;
 use crate::scene::layout::Rect;
 use crate::scene::paint::{Cap, PaintCtx};
 use crate::widget::shaping::ShapingMeasure;
-use crate::widget::{Bounds, Key, KeyEvent, MouseScrollDelta, NamedKey, ScrollMotion};
+use crate::widget::{Bounds, EmbedImage, Key, KeyEvent, MouseScrollDelta, NamedKey, ScrollMotion};
 use layout::{Deco, LineLayout};
 use preview::{Context, Kind, Marker, Prop};
 
@@ -84,6 +84,8 @@ pub struct DocEditor {
     origin: (f32, f32),
     viewport: Rect,
     follow_caret: bool,
+    /// The host's embedded images, by link text (see [`DocEditor::set_images`]).
+    images: Option<Box<dyn Fn(&str) -> Option<EmbedImage>>>,
 }
 
 impl DocEditor {
@@ -113,6 +115,7 @@ impl DocEditor {
             origin: (0.0, 0.0),
             viewport: Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
             follow_caret: false,
+            images: None,
         };
         e.sync();
         e.caret_to_body();
@@ -139,6 +142,18 @@ impl DocEditor {
 
     pub fn text(&self) -> String {
         self.buf.text()
+    }
+
+    /// Where embedded images come from: `images` answers an embed's link
+    /// text with the host's uploaded image, or `None` (not an image, or
+    /// not loaded yet — the line shows as text). In live preview a line
+    /// that is one embed shows as its image, and with the caret on it as
+    /// the raw text with the image below. Asked at layout for the size and
+    /// again at paint for the id; call [`DocEditor::invalidate`] when an
+    /// image arrives or changes size.
+    pub fn set_images(&mut self, images: Box<dyn Fn(&str) -> Option<EmbedImage>>) {
+        self.images = Some(images);
+        self.invalidate();
     }
 
     /// Drop every layout (fonts or the theme changed).
@@ -296,7 +311,15 @@ impl DocEditor {
             }
             _ => preview::style_line(text, self.ctx[i], active),
         };
-        let l = layout::layout_line(text, &line, active, self.width, &self.theme, &mut self.measure);
+        let mut l = layout::layout_line(text, &line, active, self.width, &self.theme, &mut self.measure);
+        if self.preview && self.ctx[i] == Context::Normal {
+            if let Some((target, want_w, want_h)) = preview::standalone_embed(text) {
+                if let Some(img) = self.images.as_ref().and_then(|f| f(&target)) {
+                    let (w, h) = img.fit(want_w, want_h, self.width);
+                    l = if active { l.with_image_below(&target, w, h) } else { LineLayout::image(&target, w, h, l.text_size) };
+                }
+            }
+        }
         if (l.height - self.heights[i]).abs() > 0.01 {
             self.heights[i] = l.height;
             self.tops_dirty = true;
@@ -881,6 +904,13 @@ impl DocEditor {
                         Deco::Text { text, x, y, size, color, font } => {
                             pc.text_with(text.clone(), ox + x, top + y, *size, srgb_u8(*color), Some(font.clone()), None)
                         }
+                        Deco::Image { target, rect: r } => {
+                            let at = Rect { x: ox + r.x, y: top + r.y, width: r.width, height: r.height };
+                            match self.images.as_ref().and_then(|f| f(target)) {
+                                Some(img) => pc.image(img.id, at, 1.0),
+                                None => pc.rounded_rect(at, 4.0, (true, true, true, true), th.code_bg),
+                            }
+                        }
                     }
                 }
                 for r in &l.runs {
@@ -939,6 +969,30 @@ mod tests {
         let mut pc = PaintCtx::new();
         e.paint(&mut pc, Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 }, true);
         e
+    }
+
+    #[test]
+    fn an_embed_line_shows_its_image_and_the_raw_text_with_the_caret() {
+        let mut e = DocEditor::new("top\n![[pic.png|200]]\nend", EditorTheme::new(14.0), false);
+        e.set_images(Box::new(|t: &str| (t == "pic.png").then_some(EmbedImage { id: 3, width: 800, height: 400 })));
+        let rect = Rect { x: 0.0, y: 0.0, width: 600.0, height: 400.0 };
+        let mut pc = PaintCtx::new();
+        e.paint(&mut pc, rect, true);
+        let l = e.layouts[1].as_ref().unwrap();
+        assert!(l.runs.is_empty(), "inactive: the image alone");
+        assert!(matches!(&l.decos[0], Deco::Image { rect, .. } if rect.width == 200.0 && rect.height == 100.0));
+        assert_eq!(l.height, 100.0 + 2.0 * layout::IMAGE_PAD);
+        // The caret on it: raw text, image below.
+        e.buf.caret = Pos::new(1, 0);
+        e.buf.anchor = None;
+        e.paint(&mut pc, rect, true);
+        let l = e.layouts[1].as_ref().unwrap();
+        assert!(!l.runs.is_empty());
+        assert!(l.decos.iter().any(|d| matches!(d, Deco::Image { .. })));
+        // Source mode: just text.
+        e.set_preview(false);
+        e.paint(&mut pc, rect, true);
+        assert!(!e.layouts[1].as_ref().unwrap().decos.iter().any(|d| matches!(d, Deco::Image { .. })));
     }
 
     #[test]

@@ -19,7 +19,8 @@
 
 use crate::scene::layout::Rect;
 use crate::scene::paint::{Cap, PaintCtx, TextAttrs};
-pub use cce_vault::markdown::{blocks, Block, Callout, ListItem, Span, SpanLink, Style};
+pub use cce_vault::markdown::{blocks, Block, Callout, EmbedSize, ListItem, Span, SpanLink, Style};
+pub use crate::widget::EmbedImage;
 
 pub use crate::widget::shaping::{Measure, ShapingMeasure};
 
@@ -74,13 +75,15 @@ pub enum Draw {
     /// A filled disc: a list bullet. Not a `Round` — at a few px the
     /// squircle corner shape draws a small radius as a square.
     Dot { cx: f32, cy: f32, r: f32, color: [f32; 4] },
+    /// An embedded image, by its link text; its id is asked for at paint.
+    Image { target: String, rect: Rect },
 }
 
 impl Draw {
     fn top_bottom(&self) -> (f32, f32) {
         match self {
             Draw::Text { y, size, .. } => (*y, y + size * 1.3),
-            Draw::Quad { rect, .. } | Draw::Round { rect, .. } => (rect.y, rect.y + rect.height),
+            Draw::Quad { rect, .. } | Draw::Round { rect, .. } | Draw::Image { rect, .. } => (rect.y, rect.y + rect.height),
             Draw::Line { y1, y2, width, .. } => (y1.min(*y2) - width, y1.max(*y2) + width),
             Draw::Check { cy, r, .. } | Draw::Dot { cy, r, .. } => (cy - r, cy + r),
         }
@@ -120,6 +123,18 @@ impl Layout {
     /// virtual desktop) and draws at another resolution. Culled to
     /// `viewport`, in the painted space.
     pub fn paint_scaled(&self, pc: &mut PaintCtx, origin: (f32, f32), k: f32, viewport: Rect) {
+        self.paint_scaled_with(pc, origin, k, viewport, &|_| None);
+    }
+
+    /// [`Layout::paint`], drawing embedded images through `image` — the
+    /// same lookup the layout was made with ([`layout_with`]).
+    pub fn paint_with(&self, pc: &mut PaintCtx, origin: (f32, f32), scroll: f32, viewport: Rect, image: &dyn Fn(&str) -> Option<EmbedImage>) {
+        self.paint_scaled_with(pc, (origin.0, origin.1 - scroll), 1.0, viewport, image);
+    }
+
+    /// [`Layout::paint_scaled`] with embedded images. An image the host no
+    /// longer has (gone since layout) leaves a faint placeholder.
+    pub fn paint_scaled_with(&self, pc: &mut PaintCtx, origin: (f32, f32), k: f32, viewport: Rect, image: &dyn Fn(&str) -> Option<EmbedImage>) {
         let (ox, oy) = origin;
         let (top, bottom) = ((viewport.y - oy) / k, (viewport.y + viewport.height - oy) / k);
         let at = |x: f32, y: f32| (ox + x * k, oy + y * k);
@@ -153,6 +168,10 @@ impl Layout {
                     let (x, y) = at(*cx, *cy);
                     pc.circle(x, y, r * k, *color)
                 }
+                Draw::Image { target, rect: r } => match image(target) {
+                    Some(img) => pc.image(img.id, rect(r), 1.0),
+                    None => pc.rounded_rect(rect(r), 4.0 * k, (true, true, true, true), CODE_BG),
+                },
             }
         }
     }
@@ -177,7 +196,23 @@ pub fn layout(
     m: &mut dyn Measure,
     resolved: &dyn Fn(&SpanLink) -> bool,
 ) -> Layout {
-    let mut l = Layouter { theme, m, resolved, out: Layout::default(), pending: Vec::new() };
+    layout_with(blocks, width, theme, m, resolved, &|_| None)
+}
+
+/// [`layout`], with `image` answering for an embed's link text: an image
+/// it has draws in place of the embed's link, sized by [`EmbedImage::fit`]
+/// (Obsidian's `|300` / `|300x200` honoured). One it does not have — not
+/// an image, or still loading — keeps the link; lay out again when it
+/// arrives.
+pub fn layout_with(
+    blocks: &[Block],
+    width: f32,
+    theme: &Theme,
+    m: &mut dyn Measure,
+    resolved: &dyn Fn(&SpanLink) -> bool,
+    image: &dyn Fn(&str) -> Option<EmbedImage>,
+) -> Layout {
+    let mut l = Layouter { theme, m, resolved, image, out: Layout::default(), pending: Vec::new() };
     let y = l.blocks(blocks, 0.0, width.max(80.0), 0.0, true);
     l.out.height = y;
     l.out
@@ -187,6 +222,7 @@ struct Layouter<'a> {
     theme: &'a Theme,
     m: &'a mut dyn Measure,
     resolved: &'a dyn Fn(&SpanLink) -> bool,
+    image: &'a dyn Fn(&str) -> Option<EmbedImage>,
     out: Layout,
     /// Runs finished on the current line, emitted when the line ends.
     pending: Vec<Run>,
@@ -239,6 +275,12 @@ impl<'a> Layouter<'a> {
                 end
             }
             Block::Paragraph { spans, .. } => self.inline(spans, x, w, y, self.plain_style()),
+            Block::Embed { target, size: want, .. } if (self.image)(target).is_some() => {
+                let img = (self.image)(target).expect("checked by the guard");
+                let (iw, ih) = img.fit(want.map(|s| s.width), want.and_then(|s| s.height), w);
+                self.out.draws.push(Draw::Image { target: target.clone(), rect: Rect { x, y, width: iw, height: ih } });
+                y + ih
+            }
             Block::Embed { target, subpath, .. } => {
                 let shown = match subpath {
                     Some(s) => format!("↳ {target}#{s}"),
@@ -819,6 +861,22 @@ mod tests {
         assert_eq!(tasks, [(2, ' '), (3, 'x')]);
         assert_eq!(l.lines.iter().map(|(l, _)| *l).collect::<Vec<_>>(), [0, 2, 3, 5]);
         assert!(l.y_of_line(5) > l.y_of_line(2));
+    }
+
+    #[test]
+    fn image_embeds_draw_sized_and_others_stay_links() {
+        let doc = blocks("![[a.png|200]]\n\n![[big.png]]\n\n![[Note]]\n");
+        let image = |t: &str| (t != "Note").then_some(EmbedImage { id: 7, width: 1000, height: 500 });
+        let l = layout_with(&doc, 400.0, &theme(), &mut Fixed, &|_| true, &image);
+        let rects: Vec<Rect> = l.draws.iter().filter_map(|d| match d {
+            Draw::Image { rect, .. } => Some(*rect),
+            _ => None,
+        }).collect();
+        assert_eq!((rects[0].width, rects[0].height), (200.0, 100.0));
+        // Wider than the column: scaled down whole.
+        assert_eq!((rects[1].width, rects[1].height), (400.0, 200.0));
+        assert_eq!(rects.len(), 2);
+        assert!(texts(&l).iter().any(|(t, _, _)| t.contains("Note")));
     }
 
     #[test]

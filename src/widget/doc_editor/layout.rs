@@ -111,6 +111,9 @@ pub enum Deco {
     Check { cx: f32, cy: f32, r: f32, checked: bool },
     /// A list number, drawn in the gutter.
     Text { text: String, x: f32, y: f32, size: f32, color: [f32; 4], font: String },
+    /// An embedded image, by its link text; the host's id is asked for at
+    /// paint.
+    Image { target: String, rect: Rect },
 }
 
 #[derive(Clone, Debug)]
@@ -432,7 +435,38 @@ fn color_for(look: &Look, th: &EditorTheme) -> [f32; 4] {
     }
 }
 
+/// Space above and below an embedded image.
+pub const IMAGE_PAD: f32 = 4.0;
+
 impl LineLayout {
+    /// A line shown as nothing but its embedded image (live preview, the
+    /// caret elsewhere): one row as tall as the image, so a click on it
+    /// lands on the line and reveals the raw text.
+    pub fn image(target: &str, w: f32, h: f32, text_size: f32) -> LineLayout {
+        let height = h + 2.0 * IMAGE_PAD;
+        LineLayout {
+            height,
+            row_h: height,
+            rows: 1,
+            runs: Vec::new(),
+            decos: vec![Deco::Image { target: target.to_string(), rect: Rect { x: 0.0, y: IMAGE_PAD, width: w, height: h } }],
+            links: Vec::new(),
+            task: None,
+            toggle: None,
+            content_x: 0.0,
+            content_start: 0,
+            text_size,
+        }
+    }
+
+    /// The raw line with its image shown below it (the caret on it).
+    pub fn with_image_below(mut self, target: &str, w: f32, h: f32) -> LineLayout {
+        let y = self.height + IMAGE_PAD;
+        self.decos.push(Deco::Image { target: target.to_string(), rect: Rect { x: 0.0, y, width: w, height: h } });
+        self.height = y + h + IMAGE_PAD;
+        self
+    }
+
     /// Where the caret before byte `col` is drawn: (x, row).
     pub fn caret_xy(&self, col: usize) -> (f32, usize) {
         let mut best: Option<(f32, usize)> = None;

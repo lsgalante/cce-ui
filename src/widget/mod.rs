@@ -593,6 +593,34 @@ pub mod layout_helper;
 pub mod shaping;
 #[cfg(feature = "markdown")]
 pub mod markdown;
+
+/// An image a host has ready for a Markdown embed (`![[pic.png]]`): its id
+/// from `vk::upload_rgba` and its size in px. `MarkdownView` and
+/// `DocEditor` ask the host for one by the embed's link text — sizing at
+/// layout, the id again at paint, so a re-upload after a reconnect needs
+/// no relayout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmbedImage {
+    pub id: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl EmbedImage {
+    /// The size it draws at in a column `max_w` wide: the requested width
+    /// (else its own), the requested height (else the aspect's), scaled
+    /// down as a whole to fit the column.
+    pub fn fit(&self, want_w: Option<u32>, want_h: Option<u32>, max_w: f32) -> (f32, f32) {
+        let (iw, ih) = (self.width.max(1) as f32, self.height.max(1) as f32);
+        let w = want_w.map_or(iw, |w| w as f32);
+        let h = want_h.map_or(w * ih / iw, |h| h as f32);
+        if w > max_w {
+            (max_w, h * max_w / w)
+        } else {
+            (w, h)
+        }
+    }
+}
 #[cfg(feature = "doc_editor")]
 pub mod doc_editor;
 pub mod model;
