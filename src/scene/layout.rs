@@ -50,6 +50,17 @@ pub struct Rect {
 
 impl Rect {
     pub const ZERO: Rect = Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
+
+    /// Whether the point `(x, y)` lies in the rect: the left and top edges
+    /// are inside, the right and bottom edges are not.
+    ///
+    /// Half-open on purpose, so rects that share an edge — a row of tabs, a
+    /// list's rows — partition the space between them: a point on the
+    /// shared edge belongs to exactly one, whichever order they are tested
+    /// in. A rect with no width or height contains nothing.
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x < self.x + self.width && y >= self.y && y < self.y + self.height
+    }
 }
 
 /// How an image maps into a bounding box — see [`fit_rect`].
@@ -664,6 +675,20 @@ fn arrange_grid(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contains_is_half_open() {
+        let r = Rect { x: 10.0, y: 20.0, width: 100.0, height: 50.0 };
+        assert!(r.contains(10.0, 20.0), "the top-left corner is inside");
+        assert!(r.contains(109.9, 69.9));
+        assert!(!r.contains(110.0, 40.0), "the right edge is outside");
+        assert!(!r.contains(50.0, 70.0), "the bottom edge is outside");
+        assert!(!r.contains(9.9, 40.0) && !r.contains(50.0, 19.9));
+        // Neighbours sharing an edge split it: the point goes to one only.
+        let next = Rect { x: 110.0, ..r };
+        assert!(!r.contains(110.0, 40.0) && next.contains(110.0, 40.0));
+        assert!(!Rect::ZERO.contains(0.0, 0.0), "an empty rect contains nothing");
+    }
 
     #[test]
     fn fit_contain_letterboxes_and_centers() {
