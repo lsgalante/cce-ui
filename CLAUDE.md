@@ -412,6 +412,7 @@ outline round both (`Prim::Field`). They differ only in where the run is:
 | flush control plate (dropdown trigger, button, breadcrumb run, …) | `run` | the whole field | none |
 | text row with its picker, spinbox with its -/+ run | `ending_in_run(split)` | the right end | left of it |
 | toggle | `sliding_run(width, t)` | half the field: the left end off, the right end on | the other half; both sides mid-glide |
+| check box | `well` unchecked, `sliding_run(width, 0.5)` checked | none, or half the field in its middle | the whole field, or either side |
 
 **`scene::paint::Field` is the object** (since the same day), and
 `PaintCtx::field(&Field)` the one way to paint one: the outline (rect and radii,
@@ -449,6 +450,18 @@ is laid out half the field and a wall wider than its face, as a picker is, so th
 face reaches the well; it glides by `slide_t` as the boss did. Focus lights the
 field's rim (`ControlPlate::focus_tint`), where it lit the boss's.
 `a_toggle_is_a_field_whose_run_glides` is the test.
+
+**The Checkbox widget is a field too** (`Checkbox::field`): a square as tall as
+the control (at most a toggle's height) at the left of its label, the largest
+square in the rect when it has none — an empty well unchecked, and checked a run
+half its width standing in its middle, the well either side. The toggle's object
+with no travel: its run is there or not. A box FILLED with its run when checked
+was tried first and dropped: at a control's size an all-run field's outline is
+an empty well's, and the two states were hard to tell apart in a render. It drew
+the ring-and-dot mark until 2026-10-02; that mark stays
+(`Checkbox::paint_round_mark`) for what draws a check inline in text, where there
+is no plate to cut a well in. In a parameter pane a `checkbox` row has always
+been a Toggle. `a_checkbox_is_a_field_with_a_run_in_it_or_not` is the test.
 
 ### A grouped carve shades as its overlay does (since 2026-10-02)
 
@@ -606,7 +619,9 @@ widget does not fit one of them, say so rather than stretching a word.
   `Separator` is the same cut made in the plate it sits on, with no segment
   to part: a groove that dies out at its own ends (flat: a hairline).
 - **Marks and bands sit outside this vocabulary on purpose.** The round
-  Checkbox mark is a mark; the Slider's swelling band is a band. Do not call
+  check mark drawn inline in text (`Checkbox::paint_round_mark`: cce-list's
+  rows, a markdown task item, the doc editor) is a mark — the `Checkbox`
+  WIDGET is a field; the Slider's swelling band is a band. Do not call
   them plates or wells.
 
 What this buys, and where the code is heading:
@@ -634,8 +649,8 @@ What this buys, and where the code is heading:
   composites in the accent instead of white and its shadow in a dark accent
   instead of black (`FOCUS_SHADOW`, both at `FOCUS_GAIN`, in
   `shader2d.wgsl`), so a focused plate still reads which edges face the lamp.
-  A Checkbox lights the ring its mark already draws; a Toggle lights the
-  rim of its field, as every field is lit.
+  A Checkbox and a Toggle light the rim of their field, as every field is
+  lit.
   Roles today: Button, Checkbox, Toggle, Dropdown, FontSelector, ButtonStrip
   (arrows move the selection between its segment plates) and Breadcrumb
   (arrows walk its visible segments, Enter navigates) are plates; TextBox,

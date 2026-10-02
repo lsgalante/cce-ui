@@ -16,6 +16,13 @@ use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Justification, Layout, MouseButton, Paint,
 };
 
+/// How much of a checked box's width its run takes, standing in the middle
+/// of the well — enough to read as a plate, little enough to leave the well
+/// showing either side of it, which is what tells it from an empty box. (All
+/// run, a box filled flush, was tried first: at a control's size its outline
+/// is the empty well's, and the two states were hard to tell apart.)
+const RUN_SHARE: f32 = 0.5;
+
 /// A rect shrunk by `g` on every side, its uniform corner radius shrunk to
 /// match so the inner silhouette stays concentric with the outer one.
 fn inset(rect: Rect, radius: f32, g: f32) -> (Rect, f32) {
@@ -38,10 +45,18 @@ fn parse_bool(val: &str) -> Option<bool> {
     }
 }
 
-/// A ring-and-dot check mark with an optional label to its right: a 14px ring in
-/// the dim text colour, filled with a dot in the toggle-on colour when checked —
-/// the mark cce-list's rows have always drawn (they call `paint_round_mark` for
-/// it). Standalone, the mark fills the rect.
+/// A check box: a square [`Field`] with an optional label to its right —
+/// an empty well unchecked ([`Field::well`]); checked, a flush run half its
+/// width standing in the middle of it, the well either side
+/// ([`Field::sliding_run`] at its midpoint). It is the toggle's object with
+/// no travel: where a toggle's run glides between the ends of its field, a
+/// check box's is there or not. Standalone, the box is the largest square in
+/// the rect, centred.
+///
+/// Until 2026-10-02 it drew the ring-and-dot MARK, which is still
+/// [`Checkbox::paint_round_mark`] for what draws a check inline in text — a
+/// list row (cce-list), a markdown task item, the doc editor — where there is
+/// no plate to cut a well in.
 pub struct Checkbox {
     checked: bool,
     just_clicked: bool,
@@ -52,8 +67,33 @@ pub struct Checkbox {
 }
 
 impl Checkbox {
-    /// The labelled mark's radius: a 14px disc.
+    /// The inline mark's radius: a 14px disc ([`Checkbox::paint_round_mark`]).
     pub const ROUND_RADIUS: f32 = 7.0;
+
+    /// The box as the [`Field`] it is: a square as tall as the control (at
+    /// most a toggle's height) at the rect's left when labelled, the largest
+    /// square in the rect, centred, when not — carved inside that square
+    /// through [`crate::layout::carve_inside`], as every field is. All well
+    /// unchecked; checked, a run in the middle; lit while focused.
+    pub fn field(&self, rect: Rect) -> Field {
+        let side = if self.label.is_some() {
+            rect.height.min(crate::layout::toggle_height())
+        } else {
+            rect.width.min(rect.height)
+        }
+        .max(1.0);
+        let x = if self.label.is_some() { rect.x } else { rect.x + (rect.width - side) * 0.5 };
+        let square = Rect { x, y: rect.y + (rect.height - side) * 0.5, width: side, height: side };
+        let r = crate::layout::toggle_corner_radius().min(side * 0.5);
+        let depth = crate::layout::bevel_width().min(side * 0.2);
+        let (outline, radii) = crate::layout::carve_inside(square, (r, r, r, r), depth);
+        let field = if self.checked {
+            Field::sliding_run(outline, radii, depth, outline.width * RUN_SHARE, 0.5)
+        } else {
+            Field::well(outline, radii, depth)
+        };
+        field.with_tint(self.focused.then(crate::scene::paint::ControlPlate::focus_tint))
+    }
 
     pub fn new() -> Adapted<Checkbox> {
         Adapted::new(Checkbox {
@@ -131,19 +171,31 @@ impl Paint for Checkbox {
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
-        // The mark leads and the label follows, a list row's reading order.
-        // Standalone, the mark fills the rect.
-        let r = if self.label.is_some() { Self::ROUND_RADIUS } else { (w.min(h) / 2.0).max(1.0) };
-        let (cx, cy) = if self.label.is_some() { (x + r, y + h / 2.0) } else { (x + w / 2.0, y + h / 2.0) };
-        // Focused: the mark's own ring lit in the highlight colour.
-        let ring = if self.focused { crate::color::highlight_primary_color() } else { colors::TEXT_DIM };
-        Self::paint_round_mark_ringed(ctx, cx, cy, r, self.checked, ring);
+        // The box leads and the label follows, a list row's reading order.
+        let field = self.field(rect);
+        if crate::layout::control_relief() {
+            ctx.field(&field);
+        } else {
+            // Relief off, as the toggle's: a well is its frame — the hairline
+            // every well falls back to, lit while focused — and a checked
+            // box's run a lit face in it.
+            let bw = crate::layout::toggle_border_width().max(1.0);
+            ctx.border(field.rect, field.radii, [0.0; 4], colors::well_frame_color(self.hovered, self.focused), bw);
+            if let Some((a, b)) = field.run_span() {
+                let run = Rect { x: a, y: field.rect.y, width: b - a, height: field.rect.height };
+                let (face, face_r) = inset(run, field.radii.0, field.depth * 0.5);
+                let lit = (0.16 * (crate::layout::bevel_depth() / 0.15)).clamp(0.0, 0.5);
+                ctx.rounded_rect(face, face_r, (true, true, true, true), [1.0, 1.0, 1.0, lit]);
+            }
+        }
         if let Some(ref label) = self.label {
             let (_, font_size) = crate::layout::control_label_font_parsed();
             let ty = crate::layout::align_text_y(y, h, font_size, 0.0);
+            // From the box's footprint, not its carved outline.
+            let box_right = field.rect.x + field.rect.width + field.depth * 0.5;
             ctx.text_with(
                 label.clone(),
-                cx + r + 8.0,
+                box_right + 8.0,
                 ty,
                 font_size,
                 colors::control_label_color_for_state(self.hovered, self.focused),
@@ -610,25 +662,47 @@ mod tests {
     /// A labelled checkbox paints its ring-and-dot mark on the left and the label after
     /// it: no quads at all, one circle through the bridge once checked.
     #[test]
-    fn checkbox_paints_ring_and_dot() {
+    fn a_checkbox_is_a_field_with_a_run_in_it_or_not() {
+        use crate::scene::paint::Prim;
         let ctx = UiContext::new();
         let mut cb = Checkbox::new().with_label("Enable");
         WidgetHost::set_rect(&mut cb, 0.0, 0.0, 200.0, 24.0);
+        let rect = Rect { x: 0.0, y: 0.0, width: 200.0, height: 24.0 };
+        let prims = |cb: &Adapted<Checkbox>| -> Vec<Prim> {
+            let mut pc = crate::scene::paint::PaintCtx::new();
+            crate::widget::Paint::paint(cb.inner(), rect, &mut pc);
+            pc.finish().items.into_iter().map(|i| i.prim).filter(|p| !matches!(p, Prim::Text { .. })).collect()
+        };
 
-        assert!(WidgetHost::extra_quads(&cb).is_empty());
-        assert!(WidgetHost::extra_circles(&cb).is_empty());
+        // A square at the left, as tall as the control, carved inside it.
+        let f = cb.inner().field(rect);
+        let side = 24.0f32.min(crate::layout::toggle_height());
+        assert!((f.rect.width - f.rect.height).abs() < 1e-4, "square");
+        assert!(f.rect.x >= 0.0 && f.rect.x + f.rect.width <= side, "at the left, inside its square");
+        assert!(f.has_well() && f.run_span().is_none(), "unchecked: all well");
 
         cb.inner_mut().set_checked(true);
-        let circles = WidgetHost::extra_circles(&cb);
-        assert_eq!(circles.len(), 1);
-        let r = Checkbox::ROUND_RADIUS;
-        assert_eq!(circles[0], (r, 12.0, r - 3.0, colors::TOGGLE_ON));
+        let f = cb.inner().field(rect);
+        let (a, b) = f.run_span().expect("checked: a run");
+        assert!(a > f.rect.x + 1.0 && b < f.rect.x + f.rect.width - 1.0, "in the middle, the well either side");
+        assert!((a - f.rect.x - (f.rect.x + f.rect.width - b)).abs() < 1e-3, "centred");
+        assert!(((b - a) - f.rect.width * RUN_SHARE).abs() < 1e-3);
+        assert!(WidgetHost::extra_circles(&cb).is_empty(), "no mark");
 
-        // Label text comes through the prim-derived text bridge, after the mark.
+        if crate::layout::control_relief() {
+            cb.inner_mut().set_checked(false);
+            assert!(matches!(prims(&cb)[..], [Prim::Recess { .. }]), "a well paints as the recess it groups as");
+            cb.inner_mut().set_checked(true);
+            assert!(matches!(prims(&cb)[..], [Prim::Field { .. }]), "a run paints as a field");
+            cb.focused = true;
+            assert!(matches!(prims(&cb)[..], [Prim::Field { tint: Some(_), .. }]), "focus lights the rim");
+        }
+
+        // The label follows the box.
         let labels = cb.own_text_labels();
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0].text, "Enable");
-        assert_eq!(labels[0].x, 2.0 * r + 8.0);
+        assert!((labels[0].x - (side + 8.0)).abs() < 1e-3, "{} vs {}", labels[0].x, side + 8.0);
 
         // Inline label => no set_rect inflation.
         assert_eq!(WidgetHost::rect(&cb), (0.0, 0.0, 200.0, 24.0));
