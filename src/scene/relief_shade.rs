@@ -265,6 +265,33 @@ mod tests {
         lit.trim().parse().expect("numeric literal")
     }
 
+    /// What these tests shade with: the toolkit's defaults, spelled out —
+    /// the default light azimuth, the default finish, the smoothstep wall and
+    /// the circular roll of a corner_shape of 2. NOT `light_vector()`,
+    /// `Finish::from_style()` or the `analytic_*` slopes, which read the
+    /// machine's `~/.config/cce`, and read it LAZILY: the style registry loads
+    /// on the first read that asks for it, so a value taken before it and one
+    /// taken after came from two different configurations.
+    /// `deeper_carve_shades_harder` compared exactly such a pair, and failed
+    /// run alone while passing in the full suite (until 2026-10-02).
+    fn pinned_light() -> [f32; 3] {
+        let (az, el) = (2.356_194_5f32, std::f32::consts::FRAC_PI_4);
+        [az.cos() * el.cos(), -az.sin() * el.cos(), el.sin()]
+    }
+
+    fn pinned_finish() -> Finish {
+        Finish { strength: 1.0, spec: 0.4, shininess: 24.0, curvature: 0.2, carve_depth: RECESS_DEPTH, roll_height: 1.0 }
+    }
+
+    fn smoothstep_slope(v: f32) -> f32 {
+        6.0 * v * (1.0 - v)
+    }
+
+    fn circular_roll_slope(f: f32) -> f32 {
+        let fc = f * ROLL_CUT;
+        fc / (1.0 - fc * fc).max(1e-4).sqrt()
+    }
+
     #[test]
     fn constants_match_the_shader() {
         assert_eq!(wgsl_const("PLATE_AMBIENT"), PLATE_AMBIENT);
@@ -297,15 +324,15 @@ mod tests {
     /// the weight, the flat crest left the far edge at or above the face.
     #[test]
     fn far_edge_shades_darker_than_the_face() {
-        let light = light_vector();
-        let mat = Finish::from_style();
+        let light = pinned_light();
+        let mat = pinned_finish();
         let base = [0.5f32; 3];
         let lxy = [light[0], light[1]];
         let m = (lxy[0] * lxy[0] + lxy[1] * lxy[1]).sqrt();
         let near = [lxy[0] / m, lxy[1] / m];
         let far = [-near[0], -near[1]];
-        let lit = plate_surface(base, 1.0, near, &analytic_roll_slope, light, &mat).unwrap();
-        let dark = plate_surface(base, 1.0, far, &analytic_roll_slope, light, &mat).unwrap();
+        let lit = plate_surface(base, 1.0, near, &circular_roll_slope, light, &mat).unwrap();
+        let dark = plate_surface(base, 1.0, far, &circular_roll_slope, light, &mat).unwrap();
         assert!(lit[0] > base[0] + 0.02, "near edge {} vs face {}", lit[0], base[0]);
         assert!(dark[0] < base[0] - 0.02, "far edge {} vs face {}", dark[0], base[0]);
     }
@@ -314,10 +341,10 @@ mod tests {
     /// plate silently recolours whatever it is filled with.
     #[test]
     fn plate_face_is_untouched() {
-        let light = light_vector();
-        let mat = Finish::from_style();
+        let light = pinned_light();
+        let mat = pinned_finish();
         let base = [0.3f32, 0.4, 0.5];
-        let out = plate_surface(base, 0.0, [-1.0, 0.0], &analytic_roll_slope, light, &mat).unwrap();
+        let out = plate_surface(base, 0.0, [-1.0, 0.0], &circular_roll_slope, light, &mat).unwrap();
         for i in 0..3 {
             assert!((out[i] - base[i]).abs() < 1e-4, "face channel {i}: {} vs {}", out[i], base[i]);
         }
@@ -328,11 +355,11 @@ mod tests {
     /// face" formulation exists to guarantee.
     #[test]
     fn flat_ground_shades_to_zero() {
-        let light = light_vector();
-        let mat = Finish::from_style();
+        let light = pinned_light();
+        let mat = pinned_finish();
         for mode in [CarveMode::Recess, CarveMode::Boss, CarveMode::Ridge, CarveMode::Trough] {
             for u in [0.0f32, 1.0] {
-                let v = carve_shade(mode, u, [-1.0, 0.0], &analytic_carve_slope, light, &mat);
+                let v = carve_shade(mode, u, [-1.0, 0.0], &smoothstep_slope, light, &mat);
                 assert!(v.abs() < 1e-4, "{mode:?} at u={u} shaded {v}, expected 0");
             }
         }
@@ -342,13 +369,13 @@ mod tests {
     /// shades harder, with nothing else changed.
     #[test]
     fn deeper_carve_shades_harder() {
-        let light = light_vector();
-        let shallow = Finish { carve_depth: 0.3, ..Finish::from_style() };
-        let deep = Finish { carve_depth: 1.2, ..Finish::from_style() };
-        let at = |m: &Finish| carve_shade(CarveMode::Recess, 0.5, [-1.0, 0.0], &analytic_carve_slope, light, m).abs();
+        let light = pinned_light();
+        let shallow = Finish { carve_depth: 0.3, ..pinned_finish() };
+        let deep = Finish { carve_depth: 1.2, ..pinned_finish() };
+        let at = |m: &Finish| carve_shade(CarveMode::Recess, 0.5, [-1.0, 0.0], &smoothstep_slope, light, m).abs();
         assert!(at(&deep) > at(&shallow) * 1.5, "deep {} vs shallow {}", at(&deep), at(&shallow));
         // And the flat plateaus still composite to nothing.
-        assert!(carve_shade(CarveMode::Recess, 0.0, [-1.0, 0.0], &analytic_carve_slope, light, &deep).abs() < 1e-4);
+        assert!(carve_shade(CarveMode::Recess, 0.0, [-1.0, 0.0], &smoothstep_slope, light, &deep).abs() < 1e-4);
     }
 
     /// Ridge and trough are the same wall with the height sign flipped, so
@@ -362,10 +389,10 @@ mod tests {
     /// faint lip lobe visible on both, not an asymmetry bug.
     #[test]
     fn ridge_and_trough_oppose_where_the_wall_is_steep() {
-        let light = light_vector();
-        let mat = Finish::from_style();
+        let light = pinned_light();
+        let mat = pinned_finish();
         let sample = |m: CarveMode, u: f32| {
-            carve_shade(m, u, [-1.0, 0.0], &analytic_carve_slope, light, &mat)
+            carve_shade(m, u, [-1.0, 0.0], &smoothstep_slope, light, &mat)
         };
         // Steepest point of the folded profile: w = 1 at u = 0.5 is the crest
         // (zero slope), so the extremes sit either side of it.
