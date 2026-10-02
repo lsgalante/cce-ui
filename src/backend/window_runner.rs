@@ -2046,7 +2046,7 @@ pub fn tessellate_display_list(
             // popover, an inset plate's face — is a zero-depth plate batch
             // (RFC material § 6.2): the same shader path as every plate, so
             // it carries its own frost recipe instead of a window-wide one,
-            // with circular corners (shape 2) and no roll, which is what the
+            // with the configured `corner_shape` and no roll, which is what the
             // tessellated fill drew. The display list is untouched, so the
             // legacy bridges that extract RoundedRects still see one.
             Prim::Quad { rect, color } if shader_plates && color[3] < 0.0 => {
@@ -2068,11 +2068,11 @@ pub fn tessellate_display_list(
             Prim::Fill { rect, radii, material } if shader_plates && material.frost.is_frosted() => {
                 // A material's flat fill: the frosted promotion above with
                 // the MATERIAL's recipe (compression, refraction, radius)
-                // instead of the DE default's. Zero depth, circular
-                // corners, no host — exactly a promoted RoundedRect.
+                // instead of the DE default's. Zero depth, the configured
+                // corner shape, no host — exactly a promoted RoundedRect.
                 let color = material.fill(PlateRole::Nested);
                 verts.extend(quad_vertices(rect.x, rect.y, rect.width, rect.height, sw, sh, color));
-                let mut p = plate_push_raised(rect, *radii, 0.0, scale, plate_light, plate_mat, false, Some(2.0));
+                let mut p = plate_push_raised(rect, *radii, 0.0, scale, plate_light, plate_mat, false, None);
                 let [fz, fw] = material.frost.pack(scale);
                 p.host[2] = fz;
                 p.host[3] = fw;
@@ -3044,8 +3044,14 @@ pub fn tessellate_display_list(
 #[allow(clippy::too_many_arguments)]
 /// The push block of a frosted flat fill promoted to a zero-depth plate: a
 /// mode-1 plate with no roll (`t` = 0.001, so the face is exactly the fill),
-/// circular corners at the nominal radii, and the fill's own frost recipe in
-/// `host.zw` (`Material::from_fill` decodes the sentinel).
+/// corners at the nominal radii in the configured `corner_shape`, and the
+/// fill's own frost recipe in `host.zw` (`Material::from_fill` decodes the
+/// sentinel).
+///
+/// The shape must be `corner_shape`, not a fixed circle: a frosted `Border`
+/// draws its stroke as `push_plate_solid_border_vertices` geometry in that
+/// shape, and the unfrosted fill fan uses it too. A circular face under a
+/// squircle stroke left the stroke cutting inside the face's corners.
 fn flat_frost_push(
     rect: &crate::scene::layout::Rect,
     radii: (f32, f32, f32, f32),
@@ -3054,7 +3060,7 @@ fn flat_frost_push(
     light: [f32; 3],
     material: [f32; 4],
 ) -> crate::vk::PlatePush {
-    let mut p = plate_push_raised(rect, radii, 0.0, scale, light, material, false, Some(2.0));
+    let mut p = plate_push_raised(rect, radii, 0.0, scale, light, material, false, None);
     let [fz, fw] = crate::scene::material::Material::from_fill(fill).frost.pack(scale);
     p.host[2] = fz;
     p.host[3] = fw;
