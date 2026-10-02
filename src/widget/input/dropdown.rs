@@ -500,6 +500,15 @@ impl Dropdown {
     /// progress (cubic-out, the status-interface module-menu curve). Rows keep
     /// their final positions and slide into view under the traveling edge; an
     /// upward popover anchors its bottom edge to the trigger instead.
+    ///
+    /// The width grows out of the TRIGGER'S OWN SPAN, both edges travelling:
+    /// a trigger nested in a wider field (a [`Self::popover_anchor`] — the
+    /// textpick picker at the right end of its text box) opens as a plate the
+    /// button's width under the button and widens out to the field. Growing
+    /// from the anchor's left edge put a button-wide sliver under the text
+    /// instead, and the union with the button spanned the whole field from
+    /// the first frame. A trigger at its menu's left edge — every unanchored
+    /// one — grows rightward exactly as it always did.
     fn popover_geom_drawn(&self, content: Rect) -> (f32, f32, f32, f32) {
         let (rx, ry, rw, rh) = self.popover_geom(content);
         let a = self.anim_snap;
@@ -509,11 +518,14 @@ impl Dropdown {
         let t = 1.0 - (1.0 - a) * (1.0 - a) * (1.0 - a);
         let base_y = content.y - self.label_top();
         let open_upward = self.open_upward.unwrap_or(base_y > 400.0);
-        let w0 = content.width.min(rw);
-        let aw = w0 + (rw - w0) * t;
+        let (r0, r1) = (rx, rx + rw);
+        let s0 = content.x.clamp(r0, r1);
+        let s1 = (content.x + content.width).clamp(s0, r1);
+        let x0 = s0 + (r0 - s0) * t;
+        let x1 = s1 + (r1 - s1) * t;
         let ah = rh * t;
         let ay = if open_upward { ry + rh - ah } else { ry };
-        (rx, ay, aw, ah)
+        (x0, ay, x1 - x0, ah)
     }
 
     /// Popover geometry against the laid-out content rect — the legacy `get_popover_geom`,
@@ -1872,5 +1884,42 @@ mod tests {
             252.0,
             "the rows end flush on the band",
         );
+    }
+
+    /// A trigger nested at the right end of a wider field (the textpick
+    /// picker, through `popover_anchor`) opens as a plate its own width,
+    /// under itself, and widens out to the field — both edges travelling. An
+    /// unanchored trigger still grows rightward from its own left edge.
+    #[test]
+    fn a_nested_trigger_grows_its_menu_out_of_its_own_span() {
+        let trigger = Rect { x: 170.0, y: 10.0, width: 30.0, height: 24.0 };
+        let field = Rect { x: 10.0, y: 10.0, width: 190.0, height: 24.0 };
+        let mut dd = Dropdown::new(vec!["A".to_string(), "B".to_string()], 0).with_open_upward(false);
+        dd.popover_anchor = Some(field);
+
+        dd.anim_snap = 0.0;
+        let (x, _, w, h) = dd.popover_geom_drawn(trigger);
+        assert_eq!((x, w, h), (170.0, 30.0, 0.0), "it begins as the button");
+        let (ux, _, uw, _) = dd.unified_geom_drawn(trigger);
+        assert_eq!((ux, uw), (170.0, 30.0), "the open surface is the button alone at first");
+
+        dd.anim_snap = 0.5;
+        let (x, _, w, _) = dd.popover_geom_drawn(trigger);
+        assert!(x > 10.0 && x < 170.0, "the left edge travels from the button toward the field's: {x}");
+        assert_eq!(x + w, 200.0, "the right edge stays where the button's is");
+
+        dd.anim_snap = 1.0;
+        let (x, _, w, _) = dd.popover_geom_drawn(trigger);
+        assert_eq!((x, w), (10.0, 190.0), "it lands spanning the field");
+
+        let plain = {
+            let mut d = Dropdown::new(vec!["A".to_string(), "B".to_string()], 0).with_open_upward(false);
+            d.anim_snap = 0.5;
+            d
+        };
+        let wide = Rect { x: 10.0, y: 10.0, width: 100.0, height: 24.0 };
+        let (x, _, w, _) = plain.popover_geom_drawn(wide);
+        assert_eq!(x, 10.0, "an unanchored menu keeps its left edge");
+        assert!(w >= 100.0, "and grows rightward out of the trigger");
     }
 }
