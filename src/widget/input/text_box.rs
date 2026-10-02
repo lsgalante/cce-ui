@@ -1204,17 +1204,20 @@ impl TextBox {
         labels
     }
 
-    /// The well this TextBox carves, as `(rect, corner radii, depth, focus
-    /// tint)` — radii top-left, top-right, bottom-right, bottom-left, the
-    /// right two square when the box is [`Self::joined_right`] — `None` when it draws no relief at all (square-cornered legacy
-    /// geometry, `control_relief` off, or a box that draws no background).
+    /// The well this TextBox carves: a [`crate::scene::paint::Field`] that is
+    /// all well, lit while editing — its radii top-left, top-right,
+    /// bottom-right, bottom-left, the right two square when the box is
+    /// [`Self::joined_right`] (its host draws the field that joins it to a
+    /// run, `ParametersBg::fields`). `None` when it draws no relief at all
+    /// (square-cornered legacy geometry, `control_relief` off, or a box that
+    /// draws no background).
     ///
     /// The SINGLE source for that geometry: `paint` carves it here, and the
     /// flat-path bridge in `layout::render_widget` re-offers the same rect
     /// through [`crate::layout::RenderTarget::recess`] for hosts that consume
     /// `all_quads` and so never see the carve. A second copy of this math in
     /// the bridge is exactly how the two would drift apart.
-    pub fn well(&self) -> Option<(Rect, (f32, f32, f32, f32), f32, Option<[f32; 3]>)> {
+    pub fn well(&self) -> Option<crate::scene::paint::Field> {
         let radius = crate::layout::textbox_corner_radius();
         if radius <= 0.0 || !self.recessed() || !self.draw_bg_border {
             return None;
@@ -1233,7 +1236,7 @@ impl TextBox {
             let hc = crate::color::highlight_primary_color();
             [hc[0], hc[1], hc[2]]
         });
-        Some((well, radii, depth, tint))
+        Some(crate::scene::paint::Field::well(well, radii, depth).with_tint(tint))
     }
 }
 
@@ -1565,13 +1568,10 @@ impl Paint for TextBox {
                         bg_color,
                     );
                 }
-                if let Some((well, radii, depth, tint)) = self.well() {
+                if let Some(field) = self.well() {
                     // Focus lights the well's rim in the highlight accent (with
                     // the shader's complementary shadow) — the TreeList treatment.
-                    match tint {
-                        Some(t) => ctx.recess_tinted(well, radii, depth, t),
-                        None => ctx.recess(well, radii, depth),
-                    }
+                    ctx.field(&field);
                 }
             }
 

@@ -406,16 +406,32 @@ A dropdown, a button, a text row with its picker, a spinbox and a toggle are ONE
 object: a well cut into a plate with a flush plate, the RUN, standing in it, one
 outline round both (`Prim::Field`). They differ only in where the run is:
 
-| form | run | well |
-| --- | --- | --- |
-| flush control plate (dropdown trigger, button, breadcrumb run, …) | the whole field | none |
-| text row with its picker, spinbox with its -/+ run | the right end | left of it |
-| toggle | half the field: the left end off, the right end on | the other half; both sides mid-glide |
-| plain text box | none (a `Prim::Recess`, for grouping — see below) | the whole field |
+| form | `Field::` constructor | run | well |
+| --- | --- | --- | --- |
+| text box | `well` | none | the whole field |
+| flush control plate (dropdown trigger, button, breadcrumb run, …) | `run` | the whole field | none |
+| text row with its picker, spinbox with its -/+ run | `ending_in_run(split)` | the right end | left of it |
+| toggle | `sliding_run(width, t)` | half the field: the left end off, the right end on | the other half; both sides mid-glide |
 
-So the run is a span, `split` to `end` (`PaintCtx::field_run`; `PaintCtx::field`
-is the run reaching the right end, `end` `FIELD_RUN_ONLY` past it). Where the run
-stops short of the right end, a well lies to its right too, and `MODE_FIELD`
+**`scene::paint::Field` is the object** (since the same day), and
+`PaintCtx::field(&Field)` the one way to paint one: the outline (rect and radii,
+the carve's boundary — a widget takes it through `carve_inside`), the wall width,
+the run's span clamped to the outline (`run_span`, `None` for a well;
+`Field::spanning(a, b)` is the general form the others are), and a rim `tint`
+(`with_tint`). What builds a field asks for it by its FORM, never by numbers that
+encode one — the old `field(rect, radii, depth, split, tint)` took a seam put
+`FIELD_RUN_ONLY` px off the field to mean "no well", and every host spelled that
+sentinel itself. Now only `Field::prim_span` does, turning a run that reaches an
+end of the field (within the shader's half pixel) into the prim's encoding. A
+field with NO run paints a `Prim::Recess`, as a plain well always has, because a
+recess groups into the plate under it and a `Prim::Field` never does — so the
+text box is a form of the object without changing what it draws. The widgets
+hand theirs out: `TextBox::well`, `Toggle::field`, and `ParametersBg::fields` is
+a `Vec<Field>` (the pane tints the hovered one); `PaintCtx::inset_plate` is a
+face and `Field::run`.
+
+`Prim::Field`'s run is a span, `split` to `end`. Where it stops short of the
+right end, a well lies to its right too, and `MODE_FIELD`
 mirrors everything it does on the left: the face is inset half a wall from that
 seam with the corners of the run's LEFT end, and the seam is that well's left
 wall's inner half. A run reaching the right end takes the same path through the
@@ -423,9 +439,9 @@ shader as before, term for term, so every field that was drawn is drawn as it wa
 The host-box slot carries both ends (`p_host.x`, `.y`); the legacy banded path and
 the flat-host bridge draw a well box either side of the run.
 
-**The Toggle is drawn so** (`Toggle::field` the outline, `Toggle::run` the span,
-`Toggle::face` what the relief-off path lights; `ParametersBg::fields` asks for
-the same, and its `reliefs` no longer carries toggles). Until this it was a recess
+**The Toggle is drawn so** (`Toggle::field`, its sliding field, lit while focused;
+`Toggle::face` what the relief-off path lights; `ParametersBg::fields` takes the
+same, and its `reliefs` no longer carries toggles). Until this it was a recess
 with a raised `Boss` on its floor: the one control whose nested plate stood ABOVE
 the surface where every other stood flush with it, and whose outline turned its
 own corner round the plate instead of running round the whole control. The run

@@ -217,12 +217,110 @@ pub enum PlateStance {
     Flat,
 }
 
-/// How far left of a [`Prim::Field`] its seam is put to make it all run and
-/// no well ([`PaintCtx::inset_plate`]): far enough that the blend across the
-/// seam and the seam's own wall land nowhere near the field. A run's `end`
-/// is put as far past the field's right edge to reach that edge
-/// ([`PaintCtx::field`]).
+/// How far past a [`Prim::Field`]'s end its run's end is put to say the run
+/// REACHES that end and there is no well on that side: far enough that the
+/// blend across the seam and the seam's own wall land nowhere near the
+/// field. An encoding of the prim's; a [`Field`] says it by its form.
 pub const FIELD_RUN_ONLY: f32 = 1.0e4;
+
+/// How near a run's end may come to the field's end and still be taken as
+/// reaching it — the shader's own tolerance (half a pixel, `MODE_FIELD`).
+const FIELD_REACH: f32 = 0.5;
+
+/// A FIELD: a well cut into a plate with a flush plate, the RUN, standing
+/// in it, one outline round both. One object in every form a control takes
+/// — they differ only in where the run is:
+///
+/// | form | constructor | run | well |
+/// | --- | --- | --- | --- |
+/// | text box | [`Field::well`] | none | the whole field |
+/// | flush control plate (dropdown, button, …) | [`Field::run`] | the whole field | none |
+/// | text row with its picker, spinbox | [`Field::ending_in_run`] | the right end | left of it |
+/// | toggle | [`Field::sliding_run`] | part of the field, anywhere | either side of it |
+///
+/// Painted by [`PaintCtx::field`], as a [`Prim::Field`] — except a field
+/// with no run, which is a [`Prim::Recess`]: that is what a plain well has
+/// always been, and a recess groups into the plate under it where a field
+/// prim never does. The rect is the field's OUTLINE (the carve's boundary;
+/// a widget takes it through [`crate::layout::carve_inside`] from its
+/// footprint), and `depth` the wall width.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Field {
+    pub rect: Rect,
+    pub radii: Radii,
+    pub depth: f32,
+    /// The run's span in x, clamped to the outline; `None` for a well.
+    run: Option<(f32, f32)>,
+    /// Lights the rim — the focus and hover treatment.
+    pub tint: Option<[f32; 3]>,
+}
+
+impl Field {
+    /// All well, no run: a text box.
+    pub fn well(rect: Rect, radii: Radii, depth: f32) -> Self {
+        Field { rect, radii, depth, run: None, tint: None }
+    }
+
+    /// All run, no well: the edge of a flush control plate — a dropdown
+    /// trigger, a button ([`PaintCtx::inset_plate`]).
+    pub fn run(rect: Rect, radii: Radii, depth: f32) -> Self {
+        Self::spanning(rect, radii, depth, rect.x, rect.x + rect.width)
+    }
+
+    /// A well ending in a run from `split` to the field's right end: a text
+    /// row with its completion picker, a spinbox with its -/+ run.
+    pub fn ending_in_run(rect: Rect, radii: Radii, depth: f32, split: f32) -> Self {
+        Self::spanning(rect, radii, depth, split, rect.x + rect.width)
+    }
+
+    /// A run `width` wide, at `t` of its travel along the field: 0 is the
+    /// left end, 1 the right, a well either side between — a toggle, whose
+    /// run glides from off to on.
+    pub fn sliding_run(rect: Rect, radii: Radii, depth: f32, width: f32, t: f32) -> Self {
+        let width = width.clamp(0.0, rect.width);
+        let x = rect.x + t.clamp(0.0, 1.0) * (rect.width - width);
+        Self::spanning(rect, radii, depth, x, x + width)
+    }
+
+    /// A run from `a` to `b`, anywhere in the field — the general form the
+    /// others are; clamped to the outline.
+    pub fn spanning(rect: Rect, radii: Radii, depth: f32, a: f32, b: f32) -> Self {
+        let (l, r) = (rect.x, rect.x + rect.width);
+        let a = a.clamp(l, r);
+        let b = b.clamp(a, r);
+        Field { rect, radii, depth, run: Some((a, b)), tint: None }
+    }
+
+    /// The rim lit in `tint` (focus, hover), or not.
+    pub fn with_tint(mut self, tint: Option<[f32; 3]>) -> Self {
+        self.tint = tint;
+        self
+    }
+
+    /// Where the run is, `(left, right)` within the outline; `None` for a
+    /// field that is all well.
+    pub fn run_span(&self) -> Option<(f32, f32)> {
+        self.run
+    }
+
+    /// Whether any of the field is well — false for a field that is all run.
+    pub fn has_well(&self) -> bool {
+        match self.run {
+            None => true,
+            Some((a, b)) => a > self.rect.x + FIELD_REACH || b < self.rect.x + self.rect.width - FIELD_REACH,
+        }
+    }
+
+    /// The run as [`Prim::Field`] encodes it, `(split, end)`: an end that
+    /// reaches the field's is put [`FIELD_RUN_ONLY`] past it.
+    fn prim_span(&self) -> Option<(f32, f32)> {
+        let (a, b) = self.run?;
+        let (l, r) = (self.rect.x, self.rect.x + self.rect.width);
+        let split = if a <= l + FIELD_REACH { l - FIELD_RUN_ONLY } else { a };
+        let end = if b >= r - FIELD_REACH { r + FIELD_RUN_ONLY } else { b };
+        Some((split, end))
+    }
+}
 
 /// A control plate: the thing you press, at the control rung of the plate
 /// ladder. One description for every control face — Button, Dropdown,
@@ -1121,7 +1219,9 @@ impl PaintCtx {
                 Some(t) => self.trough_tinted(rect, radii, depth, t),
                 None => self.trough_edges(rect, radii, depth, edges),
             },
-            Prim::Field { rect, radii, depth, split, end, tint } => self.field_run(rect, radii, depth, (split, end), tint),
+            Prim::Field { rect, radii, depth, split, end, tint } => {
+                self.field(&Field::spanning(rect, radii, depth, split, end).with_tint(tint))
+            }
             Prim::Plate { rect, radii, material, depth, shape } => {
                 self.plate_shaped(rect, radii, &material, depth, shape)
             }
@@ -1444,7 +1544,7 @@ impl PaintCtx {
         // triggers had been switched to the run's edge one by one the day
         // before, and the apps' own flush plates (the calendar's, cce-cloud's,
         // cce-files', the system interface's) kept the trough until here.
-        self.field(rect, radii, depth, rect.x - FIELD_RUN_ONLY, None);
+        self.field(&Field::run(rect, radii, depth));
     }
 
     /// [`inset_plate`](Self::inset_plate) with the rim lit — the focused flush
@@ -1454,7 +1554,7 @@ impl PaintCtx {
         if let Some(face) = face.filter(|m| m.tint[3] > 0.001) {
             self.border(rect, radii, face.fill(PlateRole::Nested), [0.0; 4], 0.0);
         }
-        self.field(rect, radii, depth, rect.x - FIELD_RUN_ONLY, Some(tint));
+        self.field(&Field::run(rect, radii, depth).with_tint(Some(tint)));
     }
 
     /// A canvas well's floor — the opening you look into or draw in (a
@@ -1573,21 +1673,22 @@ impl PaintCtx {
         self.push(Prim::Trough { rect, radii, depth, edges, tint: Some(tint) });
     }
 
-    /// A sunken well ending in a flush run at `split`, the run reaching the
-    /// field's right end — see [`Prim::Field`]. `tint` lights its rim (the
-    /// focus and hover treatment).
-    pub fn field(&mut self, rect: Rect, radii: Radii, depth: f32, split: f32, tint: Option<[f32; 3]>) {
-        let end = rect.x + rect.width + FIELD_RUN_ONLY;
-        self.field_run(rect, radii, depth, (split, end), tint);
-    }
-
-    /// A sunken well with a flush run from `run.0` to `run.1` — see
-    /// [`Prim::Field`]: the general form, a well on whichever sides of the
-    /// run the field extends past it.
-    pub fn field_run(&mut self, rect: Rect, radii: Radii, depth: f32, run: (f32, f32), tint: Option<[f32; 3]>) {
-        let (split, end) = (run.0 + self.offset.0, run.1 + self.offset.0);
-        let rect = self.apply_offset(rect);
-        self.push(Prim::Field { rect, radii, depth, split, end, tint });
+    /// Paint a [`Field`] — see it for the forms. One with a run is a
+    /// [`Prim::Field`]; one that is all well a [`Prim::Recess`], which groups
+    /// into the plate under it.
+    pub fn field(&mut self, field: &Field) {
+        let Field { rect, radii, depth, tint, .. } = *field;
+        match field.prim_span() {
+            None => match tint {
+                Some(t) => self.recess_tinted(rect, radii, depth, t),
+                None => self.recess(rect, radii, depth),
+            },
+            Some((split, end)) => {
+                let (split, end) = (split + self.offset.0, end + self.offset.0);
+                let rect = self.apply_offset(rect);
+                self.push(Prim::Field { rect, radii, depth, split, end, tint });
+            }
+        }
     }
 
     /// Raise a rim along `rect`'s boundary — see `Prim::Ridge`. `depth` is the

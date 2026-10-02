@@ -36,6 +36,7 @@ use crate::colors;
 use crate::scene::layout::Rect;
 use crate::scene::paint::PaintCtx;
 use crate::widget::display::{Float3, TextLabel};
+use crate::scene::paint::Field;
 use crate::widget::input::{Button, ColorSelector, Dropdown, Ramp, Slider, Spinbox, TextBox, Toggle};
 use crate::widget::{
     Adapted, WidgetHost, ElementState, Event, EventCtx, Input, Key, Layout, MouseButton,
@@ -1810,21 +1811,19 @@ impl ParametersBg {
         out
     }
 
-    /// The rows that are ONE field ([`crate::scene::paint::Prim::Field`]):
-    /// a sunken well holding a flush run, one outline round both —
-    /// `(x, y, w, h, radii, depth, split, end)`, the run from `split` to
-    /// `end`, drawn AFTER [`Self::reliefs`]. A textpick row is its text box's
-    /// well and its picker; a spinbox, its value's well and its -/+ run (both
-    /// runs reaching the right end, `end` [`crate::scene::paint::FIELD_RUN_ONLY`]
-    /// past it); a dropdown or button row, a field that is all run (its seam
-    /// as far to the left); a toggle, a well with its run at the end its
-    /// state says (`Toggle::field` and `Toggle::run`). So every flush control
-    /// in the pane has the same edge. They replaced
+    /// The rows that are ONE field with a run ([`Field`]: a sunken well
+    /// holding a flush run, one outline round both), drawn AFTER
+    /// [`Self::reliefs`]. A textpick row is its text box's well ending in its
+    /// picker, a spinbox its value's well ending in its -/+ run
+    /// ([`Field::ending_in_run`]); a dropdown or button row, a field that is
+    /// all run ([`Field::run`]); a toggle, its own sliding field
+    /// (`Toggle::field`). So every flush control in the pane has the same
+    /// edge. The plain wells are not here — they are [`Self::reliefs`], which
+    /// group into the pane's plate. They replaced
     /// `troughs()` on 2026-10-01. On the pane's own rule for wells and
     /// troughs: the content band as the outline, the wall straddling it.
     #[allow(clippy::type_complexity)]
-    pub fn fields(&self) -> Vec<(f32, f32, f32, f32, (f32, f32, f32, f32), f32, f32, f32)> {
-        use crate::scene::paint::FIELD_RUN_ONLY;
+    pub fn fields(&self) -> Vec<Field> {
         if !self.visible || !crate::layout::control_relief() {
             return Vec::new();
         }
@@ -1845,7 +1844,8 @@ impl ParametersBg {
                     if w > 0.0 && h - ty > 0.0 && dw > 0.0 {
                         let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
                         let r = crate::layout::textbox_corner_radius();
-                        out.push((x, y + ty, dx + dw - x, h - ty, (r, r, r, r), depth, dx, dx + dw + FIELD_RUN_ONLY));
+                        let outline = Rect { x, y: y + ty, width: dx + dw - x, height: h - ty };
+                        out.push(Field::ending_in_run(outline, (r, r, r, r), depth, dx));
                     }
                 }
             } else if p.2 == "button" {
@@ -1858,7 +1858,7 @@ impl ParametersBg {
                     if w > 0.0 && h - ty > 0.0 {
                         let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
                         let r = crate::layout::button_corner_radius();
-                        out.push((x, y + ty, w, h - ty, (r, r, r, r), depth, x - FIELD_RUN_ONLY, x + w + FIELD_RUN_ONLY));
+                        out.push(Field::run(Rect { x, y: y + ty, width: w, height: h - ty }, (r, r, r, r), depth));
                     }
                 }
             } else if p.2.starts_with("choice") {
@@ -1873,7 +1873,7 @@ impl ParametersBg {
                     if w > 0.0 && h - ty > 0.0 {
                         let depth = crate::layout::bevel_width().min((h - ty) * 0.2);
                         let r = crate::layout::dropdown_corner_radius();
-                        out.push((x, y + ty, w, h - ty, (r, r, r, r), depth, x - FIELD_RUN_ONLY, x + w + FIELD_RUN_ONLY));
+                        out.push(Field::run(Rect { x, y: y + ty, width: w, height: h - ty }, (r, r, r, r), depth));
                     }
                 }
             } else if p.2.starts_with("spinbox") {
@@ -1884,31 +1884,21 @@ impl ParametersBg {
                     if let Some(rel) = sb.inner().relief_parts(band) {
                         if let Some((split, _)) = rel.run {
                             let r = rel.radius;
-                            out.push((
-                                band.x,
-                                band.y,
-                                band.width,
-                                band.height,
-                                (r, r, r, r),
-                                rel.depth,
-                                split,
-                                band.x + band.width + FIELD_RUN_ONLY,
-                            ));
+                            out.push(Field::ending_in_run(band, (r, r, r, r), rel.depth, split));
                         }
                     }
                 }
             } else if p.2 == "toggle" || p.2 == "checkbox" {
-                // The toggle's own field (`Toggle::field`, `Toggle::run`) —
+                // The toggle's own field (`Toggle::field`) —
                 // exactly what its paint draws, on its band. It paints no
                 // fill, so this IS the control.
                 if let Some(t) = &self.toggles[i] {
                     let (x, y, w, h) = t.rect();
                     let ty = t.label_strip();
                     if w > 0.0 && h - ty > 0.0 {
+                        // The pane's hover is the tint here, as on every field.
                         let band = Rect { x, y: y + ty, width: w, height: h - ty };
-                        let (f, radii, depth) = t.inner().field(band);
-                        let (a, b) = t.inner().run(band);
-                        out.push((f.x, f.y, f.width, f.height, radii, depth, a, b));
+                        out.push(t.inner().field(band).with_tint(None));
                     }
                 }
             }
@@ -2123,10 +2113,10 @@ impl Paint for ParametersBg {
                 (false, false) => ctx.recess_edges(rect, radii, rd, edges),
             }
         }
-        for (fx, fy, fw, fh, radii, fd, split, end) in self.fields() {
-            let rect = Rect { x: fx, y: fy, width: fw, height: fh };
-            let tint = hovered(fx, fy, fw, fh).then_some(Self::HOVER_TINT);
-            ctx.field_run(rect, radii, fd, (split, end), tint);
+        for field in self.fields() {
+            let r = field.rect;
+            let tint = hovered(r.x, r.y, r.width, r.height).then_some(Self::HOVER_TINT);
+            ctx.field(&field.with_tint(tint));
         }
         for (ga, gb, gw, gd, ghost) in self.grooves() {
             ctx.groove(ga, gb, gw, gd, ghost);
@@ -3920,10 +3910,10 @@ mod tests {
         let rr = crate::layout::textbox_corner_radius();
         let fields = p.inner().fields();
         assert_eq!(fields.len(), 1, "{fields:?}");
-        let (fx, fy, fw, fh, fradii, _, split, _) = fields[0];
-        assert_eq!((fx, fy, fx + fw, fy + fh), (tx, dy, dx + dw, dy + dh), "the field spans box and picker");
-        assert_eq!(fradii, (rr, rr, rr, rr), "its own radius at all four corners");
-        assert_eq!(split, dx, "the seam is where the picker begins");
+        let f = fields[0].rect;
+        assert_eq!((f.x, f.y, f.x + f.width, f.y + f.height), (tx, dy, dx + dw, dy + dh), "the field spans box and picker");
+        assert_eq!(fields[0].radii, (rr, rr, rr, rr), "its own radius at all four corners");
+        assert_eq!(fields[0].run_span(), Some((dx, dx + dw)), "the run is the picker, to the field's end");
         assert!(p.inner().reliefs().iter().all(|r| !(r.0 == tx && r.2 == tw)), "nor the box a well of its own");
 
         // Both text variants lay out at the same row height.
@@ -3949,7 +3939,7 @@ mod tests {
     /// spinbox. Never a trough, whose outer half differed.
     #[test]
     fn a_dropdown_trigger_wears_the_runs_edge() {
-        use crate::scene::paint::{PaintCtx, Prim, FIELD_RUN_ONLY};
+        use crate::scene::paint::{PaintCtx, Prim};
         if !crate::layout::control_relief() {
             return;
         }
@@ -3959,9 +3949,8 @@ mod tests {
         let ty = d.label_strip();
         let fields = p.inner().fields();
         assert_eq!(fields.len(), 1, "{fields:?}");
-        let (fx, fy, fw, fh, _, _, split, _) = fields[0];
-        assert_eq!((fx, fy, fw, fh), (x, y + ty, w, h - ty), "on the trigger's band");
-        assert_eq!(split, x - FIELD_RUN_ONLY, "all run, no well");
+        assert_eq!(fields[0].rect, Rect { x, y: y + ty, width: w, height: h - ty }, "on the trigger's band");
+        assert!(!fields[0].has_well(), "all run, no well");
         let mut pc = PaintCtx::new();
         Paint::paint(d.inner(), Rect { x, y: y + ty, width: w, height: h - ty }, &mut pc);
         let prims: Vec<Prim> = pc.finish().items.into_iter().map(|i| i.prim).collect();

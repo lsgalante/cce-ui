@@ -402,12 +402,15 @@ impl Paint for Spinbox {
                     let cursor_y = g.y + (g.h - 14.0) / 2.0;
                     ctx.quad(Rect { x: cursor_x, y: cursor_y, width: 1.5, height: 14.0 }, [0.80, 0.80, 0.85, 1.0]);
                 }
+                // A field in its two forms: the value's well ending in the
+                // -/+ run, or (no room for the buttons) all well.
+                use crate::scene::paint::Field;
                 match rel.run {
                     Some((split, (sa, sb, sw, host))) => {
-                        ctx.field(field, radii, rel.depth, split, None);
+                        ctx.field(&Field::ending_in_run(field, radii, rel.depth, split));
                         ctx.groove(sa, sb, sw, rel.depth, host);
                     }
-                    None => ctx.recess(field, radii, rel.depth),
+                    None => ctx.field(&Field::well(field, radii, rel.depth)),
                 }
             }
         } else if rounded {

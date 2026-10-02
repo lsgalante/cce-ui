@@ -11,7 +11,7 @@
 
 use crate::colors;
 use crate::scene::layout::Rect;
-use crate::scene::paint::PaintCtx;
+use crate::scene::paint::{Field, PaintCtx};
 use crate::widget::{
     Adapted, ElementState, Event, EventCtx, Input, Justification, Layout, MouseButton, Paint,
 };
@@ -317,33 +317,27 @@ impl Toggle {
         self.toggled
     }
 
-    /// The field's outline: the toggle's whole footprint, carved one step
-    /// down. Taken through [`crate::layout::carve_inside`], so the walls stay
-    /// inside the rect and the gap beside a toggle is the gap, exactly as a
-    /// TextBox's well and a spinbox's field are taken. `(rect, per-corner
-    /// radii, wall width)`.
+    /// The toggle as the [`Field`] it is, in its sliding form: the whole
+    /// footprint carved one step down — taken through
+    /// [`crate::layout::carve_inside`], so the walls stay inside the rect and
+    /// the gap beside a toggle is the gap, exactly as a TextBox's well and a
+    /// spinbox's field are taken — holding a run half its width, placed by
+    /// the animated `slide_t`: flush with the left end off, the right end on,
+    /// a well either side between. Lit while focused.
     ///
-    /// The SINGLE source for the toggle's geometry: `paint` draws it here,
-    /// [`Toggle::run`] places the run in it, and a host that draws the relief
-    /// itself (`ParametersBg::fields`) asks for both.
-    pub fn field(&self, rect: Rect) -> (Rect, crate::scene::paint::Radii, f32) {
+    /// As a text row's picker is, the run is laid out a wall wider than the
+    /// face it carries (the field insets the face half a wall from the
+    /// outline and from the seam), so the face reaches the well.
+    ///
+    /// The SINGLE source for the toggle's geometry: `paint` draws it, the
+    /// relief-off paint lights its [`Toggle::face`], and a host that draws
+    /// the relief itself (`ParametersBg::fields`) takes it whole.
+    pub fn field(&self, rect: Rect) -> Field {
         let r = crate::layout::toggle_corner_radius();
         let depth = crate::layout::bevel_width().min(rect.height * 0.2);
-        let (field, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
-        (field, radii, depth)
-    }
-
-    /// The flush run, as the xs it spans in [`Toggle::field`]: half the field
-    /// wide, placed by the animated `slide_t` — flush with the field's left
-    /// end off, its right end on, a well on both sides between. As a text
-    /// row's picker is, the run is laid out a wall wider than the face it
-    /// carries (the field insets the face half a wall from the outline and
-    /// from the seam), so the face reaches the well.
-    pub fn run(&self, rect: Rect) -> (f32, f32) {
-        let (field, _, _) = self.field(rect);
-        let w = field.width * 0.5;
-        let x = field.x + self.slide_t * (field.width - w);
-        (x, x + w)
+        let (outline, radii) = crate::layout::carve_inside(rect, (r, r, r, r), depth);
+        let focus = self.focused.then(crate::scene::paint::ControlPlate::focus_tint);
+        Field::sliding_run(outline, radii, depth, outline.width * 0.5, self.slide_t).with_tint(focus)
     }
 
     /// The run's FACE — what stands at the surface's level inside the
@@ -351,10 +345,10 @@ impl Toggle {
     /// the field's less that. `(rect, corner radius)`. The relief-off paint
     /// lights this rect, where the field cannot be carved.
     pub fn face(&self, rect: Rect) -> (Rect, f32) {
-        let (field, radii, depth) = self.field(rect);
-        let (a, b) = self.run(rect);
-        let run = Rect { x: a, y: field.y, width: b - a, height: field.height };
-        inset(run, radii.0, depth * 0.5)
+        let f = self.field(rect);
+        let (a, b) = f.run_span().unwrap_or((f.rect.x, f.rect.x));
+        let run = Rect { x: a, y: f.rect.y, width: b - a, height: f.rect.height };
+        inset(run, f.radii.0, f.depth * 0.5)
     }
 }
 
@@ -413,7 +407,6 @@ impl Paint for Toggle {
     }
 
     fn paint(&self, rect: Rect, ctx: &mut PaintCtx) {
-        use crate::scene::paint::ControlPlate;
         let (x, y, w, h) = (rect.x, rect.y, rect.width, rect.height);
 
         // A toggle paints NO fill of its own: it is worked out of the plate it
@@ -423,16 +416,15 @@ impl Paint for Toggle {
         // convention (closed dropdowns, inset troughs). The state colors this
         // used to tint with (enabled/disabled/background) are retired with the
         // rest of the toggle's palette.
-        let (field, field_radii, depth) = self.field(rect);
+        let field = self.field(rect);
         if self.raised() {
             // ONE field — the well and the flush run in it under one outline,
             // as a text row's picker and a spinbox's -/+ run are drawn. The
             // run's position IS the read: left off, right on, animated in
             // `tick`. A host that draws the relief itself
-            // (`ParametersBg::fields`) asks for the same `field` and `run`.
-            // Focus lights the field's rim, the ring every field wears.
-            let focus = self.focused.then(ControlPlate::focus_tint);
-            ctx.field_run(field, field_radii, depth, self.run(rect), focus);
+            // (`ParametersBg::fields`) takes the same `field`. Focus lights
+            // the field's rim, the ring every field wears.
+            ctx.field(&field);
         } else {
             // Relief off: a well is its frame — the one hairline every well
             // falls back to, lit while focused, exactly `well_rim`'s flat arm —
@@ -444,7 +436,7 @@ impl Paint for Toggle {
             // reverse bridge reads only those, never a `Border`, so a
             // legacy-view host still shows which end the run is at.
             let bw = crate::layout::toggle_border_width().max(1.0);
-            ctx.border(field, field_radii, [0.0; 4], colors::well_frame_color(self.hovered, self.focused), bw);
+            ctx.border(field.rect, field.radii, [0.0; 4], colors::well_frame_color(self.hovered, self.focused), bw);
             let (face, face_r) = self.face(rect);
             let lit = (0.16 * (crate::layout::bevel_depth() / 0.15)).clamp(0.0, 0.5);
             ctx.rounded_rect(face, face_r, (true, true, true, true), [1.0, 1.0, 1.0, lit]);
@@ -658,7 +650,7 @@ mod tests {
             pc.finish().items.into_iter().map(|i| format!("{:?}", i.prim)).collect::<Vec<_>>()
         };
         let before = painted(&t);
-        let plate_x = |t: &Adapted<Toggle>| t.inner().run(rect).0;
+        let plate_x = |t: &Adapted<Toggle>| t.inner().field(rect).run_span().unwrap().0;
         let left = plate_x(&t);
 
         assert!(ctx.propagate_event(&click_at(30.0, 15.0), id), "toggle consumed the click");
@@ -688,7 +680,7 @@ mod tests {
         use crate::scene::paint::{Prim, FIELD_RUN_ONLY};
         let rect = Rect { x: 10.0, y: 4.0, width: 120.0, height: 24.0 };
         let mut t = Toggle::new().with_raised(true);
-        let (field, radii, depth) = t.inner().field(rect);
+        let Field { rect: field, radii, depth, .. } = t.inner().field(rect);
         assert!(field.x >= rect.x && field.y >= rect.y, "the field carves inside the rect");
         let (fl, fr) = (field.x, field.x + field.width);
 
@@ -701,20 +693,21 @@ mod tests {
         assert_eq!(off.len(), 1, "one prim, the field: {off:?}");
         let Prim::Field { rect: r, radii: rr, depth: d, split, end, tint } = off[0] else { panic!("{off:?}") };
         assert_eq!((r, rr, d, tint), (field, radii, depth, None));
-        assert_eq!(split, fl, "off: the run reaches the field's left end — no well there");
+        assert!(split <= fl - FIELD_RUN_ONLY + 1.0, "off: the run reaches the field's left end — no well there");
         assert!((end - (fl + field.width * 0.5)).abs() < 1e-4, "half the field, the well beyond it");
 
         t.set_toggled(true); // programmatic syncs snap, so this is the on-end geometry
         let Prim::Field { split, end, .. } = fields(&t)[0] else { panic!() };
-        assert!((split - (fl + field.width * 0.5)).abs() < 1e-4 && (end - fr).abs() < 1e-4, "on: the right half");
+        assert!((split - (fl + field.width * 0.5)).abs() < 1e-4, "on: the right half");
+        assert!(end >= fr + FIELD_RUN_ONLY - 1.0, "reaching the field's right end");
 
         t.slide_t = 0.5;
         let Prim::Field { split, end, .. } = fields(&t)[0] else { panic!() };
         assert!(split > fl + 1.0 && end < fr - 1.0, "mid-glide, a well either side of the run");
-        assert!(end < fr + FIELD_RUN_ONLY, "and the run's end is its own, not the field's");
+        assert!(end < fr, "and the run's end is its own, not the field's");
 
         let (face, face_r) = t.inner().face(rect);
-        let (a, b) = t.inner().run(rect);
+        let (a, b) = t.inner().field(rect).run_span().unwrap();
         assert!((face.x - (a + depth * 0.5)).abs() < 1e-4 && (face.x + face.width - (b - depth * 0.5)).abs() < 1e-4);
         assert!((face_r - (radii.0 - depth * 0.5).max(0.0)).abs() < 1e-4, "concentric with the field");
 
